@@ -28,6 +28,7 @@ import {
   BeatEditError,
   BeatParseError,
 } from '../dist/src/core/index.js'
+import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.js'
 
 const USAGE = `usage:
   beat inspect <file> [--json]
@@ -36,8 +37,11 @@ const USAGE = `usage:
   beat rm-note <file> <track> <note-id>
   beat diff <a.beat> <b.beat>
   beat diff --git <rev1> <rev2> <file>
+  beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
+  beat lint <file.wav> [--target <LUFS>] [--json]         deterministic mix findings (default target -14)
   beat render <file> [-o out.wav] --beatlab-dir <path>    (or BEATLAB_DIR env)
   beat daemon <file> [--port 8420]
+  beat mcp                                                MCP server over stdio (all of the above as tools)
 
 paths for set: bpm | loop_bars | selected_track | <track>.<synth param> | <track>.name |
                <track>.color | <track>.pattern.<lane>[<step>]`
@@ -90,6 +94,45 @@ function rmNoteCmd(argv) {
   writeDoc(file, before, doc)
 }
 
+function fmtDb(x, unit = '') {
+  return Number.isFinite(x) ? `${x.toFixed(1)}${unit}` : String(x)
+}
+
+function metricsCmd(argv) {
+  const json = argv.includes('--json')
+  const file = argv.find((a) => !a.startsWith('--'))
+  if (!file) throw new BeatEditError('metrics needs a wav file')
+  const { channels, sampleRate } = decodeWav(readFileSync(file))
+  const m = analyze(channels, sampleRate)
+  if (json) {
+    process.stdout.write(JSON.stringify(m, null, 2) + '\n')
+    return
+  }
+  const b = m.spectral.bandsPct
+  process.stdout.write(
+    [
+      `${file}: ${m.durationSeconds.toFixed(2)}s, ${m.channels}ch @ ${m.sampleRate} Hz`,
+      `loudness   ${fmtDb(m.integratedLufs, ' LUFS')} integrated`,
+      `peaks      sample ${fmtDb(m.samplePeakDbfs, ' dBFS')}, true ${fmtDb(m.truePeakDbtp, ' dBTP')}`,
+      `dynamics   crest ${fmtDb(m.crestDb, ' dB')} (rms ${fmtDb(m.rmsDbfs, ' dBFS')})`,
+      `spectrum   sub ${b.sub.toFixed(0)}% | bass ${b.bass.toFixed(0)}% | mids ${b.mids.toFixed(0)}% | presence ${b.presence.toFixed(0)}% | air ${b.air.toFixed(0)}%  (centroid ${m.spectral.centroidHz.toFixed(0)} Hz)`,
+      m.stereo ? `stereo     correlation ${m.stereo.correlation.toFixed(3)}, width ${fmtDb(m.stereo.widthDb, ' dB')}` : 'stereo     (mono)',
+    ].join('\n') + '\n',
+  )
+}
+
+function lintCmd(argv) {
+  const json = argv.includes('--json')
+  const targetIdx = argv.indexOf('--target')
+  const target = targetIdx !== -1 ? Number(argv[targetIdx + 1]) : undefined
+  const file = argv.find((a, i) => !a.startsWith('--') && (targetIdx === -1 || i !== targetIdx + 1))
+  if (!file) throw new BeatEditError('lint needs a wav file')
+  const { channels, sampleRate } = decodeWav(readFileSync(file))
+  const findings = lint(analyze(channels, sampleRate), target !== undefined ? { targetLufs: target } : {})
+  process.stdout.write(json ? JSON.stringify(findings, null, 2) + '\n' : formatLint(findings))
+  process.exitCode = findings.some((f) => f.level === 'warn') ? 1 : 0
+}
+
 /** `git show rev:path` needs the path relative to the repo root, wherever we're invoked from. */
 function gitShow(rev, file) {
   const abs = resolve(file)
@@ -136,6 +179,17 @@ async function main() {
     case 'diff':
       diffCmd(rest)
       break
+    case 'metrics':
+      metricsCmd(rest)
+      break
+    case 'lint':
+      lintCmd(rest)
+      break
+    case 'mcp': {
+      const { runMcpServer } = await import('../dist/src/mcp/server.js')
+      await runMcpServer()
+      return // serves stdio until stdin closes
+    }
     case 'render': {
       const { renderCommand } = await import('./render.mjs')
       await renderCommand(rest)

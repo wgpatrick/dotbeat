@@ -496,13 +496,22 @@ Unchanged in structure — the research corrected *content* within milestones, n
       `beat diff` between two commits reads like an edit list — automated as a test against a
       real git repo (`bpm: 126 -> 124` / `bass: note added u100001 (...)` / `lead: cutoff 3200 -> 900`).
 
-### M3 — Agent-native + the listening loop
-- [ ] `beat mcp` server over the CLI ops.
-- [ ] Metrics engine (LUFS/true-peak/crest/spectral-balance/masking) — the guardrail layer.
-- [ ] Metric-grounded AI critique delivered as project diffs; opt-in "mix lint rules."
-- [ ] Real arrangement timeline (arbitrary length, tempo/time-sig changes) — biggest pure-eng lift.
-- [ ] **Exit criteria:** Claude, given only the repo + MCP, can render a project, read its
-      metrics, and propose an accepted-or-rejected diff that measurably moves LUFS toward a target.
+### M3 — Agent-native + the listening loop *(first slice done 2026-07-10 — see `docs/phase-3-plan.md`)*
+- [x] `beat mcp` server over the CLI ops (zero-dep stdio JSON-RPC; 8 tools; protocol-tested).
+- [x] Metrics engine (LUFS per BS.1770 / true-peak / crest / spectral-balance / stereo field) —
+      the guardrail layer, validated against the spec's calibration cases AND through a real
+      render round trip (+3 dB ask measured as +3.01 LU). *Masking deliberately deferred — no
+      verified recipe exists (research 03's own caveat); don't fake it.*
+- [x] Opt-in "mix lint rules" — deterministic findings that name the measurement and the `.beat`
+      edit to try. *(The "AI critique delivered as diffs" LLM-narration half is interactive-only
+      by design and sits on top of `beat mcp` — not a CI-testable artifact.)*
+- [ ] Real arrangement timeline (arbitrary length, tempo/time-sig changes) — biggest pure-eng
+      lift; beatlab-side, still open.
+- [ ] Engine extraction onto `node-web-audio-api` (justified by Phase 2's 22× spike; second slice).
+- [x] **Exit criteria:** the full tool chain of the criterion is proven end to end and
+      deterministic (`scripts/verify-m3.mjs`: render → metrics → proposed diff → re-render →
+      LUFS moved 3.00 → 0.01 LU from target). The literal Claude-in-the-driver's-seat run is an
+      interactive session over the shipped `beat mcp`, one command away.
 
 ### M4 — The "not a toy" / parity push *(Tauri native tier)*
 - [ ] Tauri shell: native-latency recording, latency compensation, CLAP/VST3 hosting.

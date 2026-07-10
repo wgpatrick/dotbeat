@@ -1,0 +1,137 @@
+// The metrics engine tested against synthetic signals whose correct values are known a priori
+// (docs/phase-3-plan.md §3.2) — not against itself. The LUFS reference point (full-scale 997 Hz
+// stereo sine = -0.69 LUFS) is the ITU-R BS.1770 calibration case.
+
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { integratedLoudness } from '../src/metrics/loudness.js'
+import { analyze } from '../src/metrics/analyze.js'
+import { lint } from '../src/metrics/lint.js'
+import { decodeWav } from '../src/metrics/wav.js'
+
+const FS = 44100
+
+function sine(freq: number, seconds: number, amplitude: number): Float64Array {
+  const out = new Float64Array(Math.round(seconds * FS))
+  for (let i = 0; i < out.length; i++) out[i] = amplitude * Math.sin((2 * Math.PI * freq * i) / FS)
+  return out
+}
+
+function silence(seconds: number): Float64Array {
+  return new Float64Array(Math.round(seconds * FS))
+}
+
+test('BS.1770 reference: full-scale 997 Hz stereo sine measures 0.0 LUFS, single-channel -3.01 (±0.5)', () => {
+  // The spec's calibration case: 0 dBFS 997 Hz in ONE channel = -3.01 LKFS; in both = 0.0.
+  // (The -0.691 constant in the formula exists exactly to cancel the K-filter's gain at 997 Hz.)
+  const ch = sine(997, 3, 1.0)
+  const stereo = integratedLoudness([ch, ch.slice()], FS).integratedLufs
+  assert.ok(Math.abs(stereo - 0) < 0.5, `stereo got ${stereo}`)
+  const single = integratedLoudness([ch.slice(), silence(3)], FS).integratedLufs
+  assert.ok(Math.abs(single - -3.01) < 0.5, `single-channel got ${single}`)
+})
+
+test('LUFS tracks level linearly: -20 dBFS stereo sine measures ≈ -20.0 LUFS', () => {
+  const amp = Math.pow(10, -20 / 20)
+  const ch = sine(997, 3, amp)
+  const { integratedLufs } = integratedLoudness([ch, ch.slice()], FS)
+  assert.ok(Math.abs(integratedLufs - -20) < 0.5, `got ${integratedLufs}`)
+})
+
+test('K-weighting attenuates deep sub: 20 Hz sine reads much quieter than 997 Hz at equal level', () => {
+  // the RLB high-pass corner is ~38 Hz — 20 Hz sits well below it, 997 Hz well above
+  const a = integratedLoudness([sine(997, 3, 0.5), sine(997, 3, 0.5)], FS).integratedLufs
+  const b = integratedLoudness([sine(20, 3, 0.5), sine(20, 3, 0.5)], FS).integratedLufs
+  assert.ok(a - b > 6, `997 Hz ${a} vs 20 Hz ${b} — expected >6 LU apart`)
+})
+
+test('gating: silence returns -Infinity, and leading silence does not drag loudness down', () => {
+  assert.equal(integratedLoudness([silence(3), silence(3)], FS).integratedLufs, -Infinity)
+  const tone = sine(997, 2, 0.5)
+  const withSilence = new Float64Array(silence(2).length + tone.length)
+  withSilence.set(tone, silence(2).length)
+  const pure = integratedLoudness([tone, tone.slice()], FS).integratedLufs
+  const padded = integratedLoudness([withSilence, withSilence.slice()], FS).integratedLufs
+  assert.ok(Math.abs(pure - padded) < 0.5, `pure ${pure} vs padded ${padded} — gating should exclude the silence`)
+})
+
+test('crest factor: sine = 3.01 dB, square = 0 dB (±0.1)', () => {
+  const s = analyze([sine(997, 1, 0.5), sine(997, 1, 0.5)], FS)
+  assert.ok(Math.abs(s.crestDb - 3.01) < 0.1, `sine crest ${s.crestDb}`)
+  const sq = new Float64Array(FS)
+  for (let i = 0; i < sq.length; i++) sq[i] = Math.sign(Math.sin((2 * Math.PI * 200 * i) / FS)) * 0.5 || 0.5
+  const q = analyze([sq, sq.slice()], FS)
+  assert.ok(Math.abs(q.crestDb - 0) < 0.1, `square crest ${q.crestDb}`)
+})
+
+test('sample peak and true peak: -6 dBFS sine reads -6 dBFS (±0.05), true peak >= sample peak', () => {
+  const m = analyze([sine(997, 1, 0.5), sine(997, 1, 0.5)], FS)
+  assert.ok(Math.abs(m.samplePeakDbfs - -6.02) < 0.05, `sample peak ${m.samplePeakDbfs}`)
+  assert.ok(m.truePeakDbtp >= m.samplePeakDbfs - 0.01, `true peak ${m.truePeakDbtp} vs sample ${m.samplePeakDbfs}`)
+  assert.ok(m.truePeakDbtp < m.samplePeakDbfs + 1, 'true peak of a plain sine should not exceed sample peak by ~1 dB')
+})
+
+test('spectral bands: energy lands where the tone is', () => {
+  const low = analyze([sine(100, 2, 0.5), sine(100, 2, 0.5)], FS)
+  assert.ok(low.spectral.bandsPct.bass > 90, `100 Hz tone: bass share ${low.spectral.bandsPct.bass}`)
+  const high = analyze([sine(8000, 2, 0.5), sine(8000, 2, 0.5)], FS)
+  assert.ok(high.spectral.bandsPct.air > 90, `8 kHz tone: air share ${high.spectral.bandsPct.air}`)
+  assert.ok(Math.abs(high.spectral.centroidHz - 8000) < 400, `centroid ${high.spectral.centroidHz} for an 8 kHz tone`)
+})
+
+test('stereo: identical channels correlate ~1 and are effectively mono; inverted correlate ~-1', () => {
+  const ch = sine(997, 1, 0.5)
+  const mono = analyze([ch, ch.slice()], FS)
+  assert.ok(mono.stereo!.correlation > 0.999)
+  assert.ok(mono.stereo!.widthDb < -60, `width ${mono.stereo!.widthDb}`)
+  const inv = ch.slice()
+  for (let i = 0; i < inv.length; i++) inv[i] = -inv[i]!
+  const flipped = analyze([ch, inv], FS)
+  assert.ok(flipped.stereo!.correlation < -0.999)
+})
+
+test('lint: fires the right rules on engineered pathologies, stays quiet on a sane mix', () => {
+  // pathological: full-scale (clipping-risk), mono, square wave (crest 0)
+  const loudSquare = new Float64Array(FS * 2)
+  for (let i = 0; i < loudSquare.length; i++) loudSquare[i] = Math.sign(Math.sin((2 * Math.PI * 100 * i) / FS)) || 1
+  const bad = lint(analyze([loudSquare, loudSquare.slice()], FS))
+  const rules = bad.map((f) => f.rule)
+  assert.ok(rules.includes('true-peak-clipping'), `rules: ${rules.join(',')}`)
+  assert.ok(rules.includes('over-compressed'))
+  assert.ok(rules.includes('low-end-heavy'))
+  assert.ok(rules.includes('effectively-mono'))
+
+  // sane-ish: mid-level pulsed tones (25% duty cycle -> crest ~9 dB, like a groove, unlike a
+  // steady sine whose 3 dB crest legitimately reads as over-compressed), different L/R content
+  const pulsed = (freq: number, amp: number) => {
+    const out = sine(freq, 3, amp)
+    for (let i = 0; i < out.length; i++) if (i % FS >= FS / 4) out[i] = 0
+    return out
+  }
+  const okFindings = lint(analyze([pulsed(997, 0.3), pulsed(1400, 0.28)], FS), { targetLufs: -14 })
+  assert.ok(!okFindings.some((f) => f.rule === 'true-peak-clipping'))
+  assert.ok(!okFindings.some((f) => f.rule === 'over-compressed'))
+})
+
+test('wav decode round-trips a synthesized 16-bit PCM file', () => {
+  // build a tiny wav in-memory (same header layout the render path writes)
+  const samples = sine(440, 0.1, 0.25)
+  const ch = 2
+  const dataSize = samples.length * ch * 2
+  const buf = Buffer.alloc(44 + dataSize)
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + dataSize, 4); buf.write('WAVE', 8)
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(ch, 22)
+  buf.writeUInt32LE(FS, 24); buf.writeUInt32LE(FS * ch * 2, 28); buf.writeUInt16LE(ch * 2, 32); buf.writeUInt16LE(16, 34)
+  buf.write('data', 36); buf.writeUInt32LE(dataSize, 40)
+  let o = 44
+  for (let i = 0; i < samples.length; i++) for (let c = 0; c < ch; c++) { buf.writeInt16LE(Math.round(samples[i]! * 32767), o); o += 2 }
+
+  const decoded = decodeWav(new Uint8Array(buf))
+  assert.equal(decoded.sampleRate, FS)
+  assert.equal(decoded.channels.length, 2)
+  assert.ok(Math.abs(decoded.durationSeconds - 0.1) < 0.001)
+  // amplitude survives within quantization error
+  let peak = 0
+  for (const v of decoded.channels[0]!) peak = Math.max(peak, Math.abs(v))
+  assert.ok(Math.abs(peak - 0.25) < 0.001, `peak ${peak}`)
+})

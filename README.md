@@ -4,21 +4,26 @@
 > agent — can edit in a real GUI, render from the command line, `git diff`, and get sound-design
 > critique on.
 
-This repository holds the research/planning behind the direction, **plus working Phase 0 + 1
-code** proving the core loop end-to-end: a real `.beat` text format (parser + serializer +
-converter, drums included), a **daemon** that keeps the file and a live GUI in two-way sync
-(GUI knob-turn → one-line `git diff` in 262 ms; `vim` edit → GUI hot-reloads in 117 ms, playback
-uninterrupted), and a `beat render` CLI that renders the file to a real WAV by driving the
-actual [BeatLab](https://github.com/wgpatrick/beatlab) app (a working Tone.js + React web DAW /
+This repository holds the research/planning behind the direction, **plus the working code for
+Phases 0-3**: a real `.beat` text format (parser + serializer + converter, drums included), a
+**daemon** that keeps the file and a live GUI in two-way sync (GUI knob-turn → one-line
+`git diff` in 262 ms; `vim` edit → GUI hot-reloads in 117 ms, playback uninterrupted), an
+**agent-native CLI** (`inspect`/`set`/semantic `diff`/render/**DSP metrics**/**mix lint**) with
+an **MCP server** over all of it, and a closed render→measure→edit→re-measure loop proven to
+hit a loudness target to 0.01 LU — all driving the actual
+[BeatLab](https://github.com/wgpatrick/beatlab) app (a working Tone.js + React web DAW /
 production trainer, which this project forks in spirit).
 
 ```bash
 npm install
-npm test                          # 55 tests: format, conversion vs real project data, daemon sync, CLI
+npm test                          # 67 tests: format, conversion vs real data, daemon sync, CLI, DSP metrics, MCP
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat lead.cutoff 900   # prints "lead: cutoff 3200 -> 900"
 node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical edit list, not line noise
 node cli/beat.mjs render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
+node cli/beat.mjs metrics out.wav                                 # LUFS (BS.1770), true peak, crest, spectrum, stereo
+node cli/beat.mjs lint out.wav                                    # deterministic mix findings + .beat edits to try
+node cli/beat.mjs mcp                                             # all of the above as MCP tools for an AI agent
 node cli/beat.mjs daemon examples/real-groove.beat                # two-way sync: open beatlab with ?daw=8420
 ```
 
@@ -44,13 +49,15 @@ now fully-verified version.
 
 | Path | What |
 |---|---|
-| [`docs/phase-2-plan.md`](docs/phase-2-plan.md) | **Start here for what's built.** M2 (agent-native CLI + semantic diff + the 22× render spike), status COMPLETE. Prior slices: [`phase-1-plan.md`](docs/phase-1-plan.md) (daemon + sync, measured), [`phase-0-plan.md`](docs/phase-0-plan.md) (format + render). |
+| [`docs/phase-3-plan.md`](docs/phase-3-plan.md) | **Start here for what's built.** M3 first slice (DSP metrics engine + mix lint + MCP server + the closed loop hitting its loudness target to 0.01 LU), status COMPLETE. Prior slices: [`phase-2-plan.md`](docs/phase-2-plan.md) (CLI + semantic diff), [`phase-1-plan.md`](docs/phase-1-plan.md) (daemon + sync), [`phase-0-plan.md`](docs/phase-0-plan.md) (format + render). |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, milestones, risks. |
 | `src/core/` | The `.beat` format: types, parser, serializer, converter (synth + drum tracks), **semantic diff**, edit primitives, inspect. Pure TS, zero deps on beatlab/React/Tone.js. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over a 3-endpoint HTTP/SSE protocol, echo suppression by canonical-text comparison. |
-| `test/` | 55 tests — format round-trips, conversion fidelity against a real exported project (`test/fixtures/`), daemon sync, and subprocess-level CLI tests incl. diff-between-real-git-commits. |
-| `cli/beat.mjs` | The unified `beat` CLI: `inspect`, `set`, `add-note`, `rm-note`, `diff` (files or git revs), `render`, `daemon`. |
-| `scripts/verify-m1.mjs`, `scripts/spike-offline-render.mjs` | The M1 exit-criteria proof (sync latencies) and the M2 offline-render measurement (22× realtime). |
+| `src/metrics/` | The guardrail layer (D2): integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, stereo field — plus the deterministic mix-lint rules. Zero deps, validated against the spec's calibration cases. |
+| `src/mcp/` | `beat mcp` — zero-dep stdio MCP server exposing the whole toolchain (inspect/set/notes/diff/metrics/lint/render) to AI agents. |
+| `test/` | 67 tests — format round-trips, conversion fidelity against a real exported project, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
+| `cli/beat.mjs` | The unified `beat` CLI: `inspect`, `set`, `add-note`, `rm-note`, `diff` (files or git revs), `metrics`, `lint`, `render`, `daemon`, `mcp`. |
+| `scripts/verify-m1.mjs`, `verify-m3.mjs`, `spike-offline-render.mjs` | The measured proofs: M1 sync latencies, M3's closed loop (render→measure→edit→re-render, target hit to 0.01 LU), M2's 22×-realtime offline-render spike. |
 | `examples/real-groove.beat` | A real project, converted to `.beat` text — hand-inspectable, the file the proof runs use. |
 | [`docs/research/`](docs/research/) | Four deep-research reports (347 raw claims, 70 sources), **all fully adversarially verified**. |
 | [`docs/opendaw-notes.md`](docs/opendaw-notes.md) | Source-code archaeology — openDAW/DAWproject/automix-toolkit/node-web-audio-api read directly, not summarized secondhand. |
@@ -100,13 +107,18 @@ inline rather than silently fixed.
 
 ## Status
 
-**Phases 0-2 (ROADMAP M0/M1/M2) complete.** The core loop is real, not argued: a
+**Phases 0-3 (ROADMAP M0/M1/M2 + M3's first slice) complete.** The core loop is real, not argued: a
 hand-inspectable `.beat` file — the *whole* groove, drums included — is the source of truth for
 a live GUI session. Turn a knob in the GUI and `git diff` shows exactly one changed line
 (262 ms, measured). Edit the file in an editor and the GUI hot-reloads without stopping playback
 (117 ms, measured). And the CLI is now agent-native: `beat inspect` / `set` / `add-note` /
 `diff`, where `beat diff --git HEAD~1 HEAD song.beat` prints a *musical* edit list
 (`lead: cutoff 3200 -> 900`, `bass: note added ...`) — verified by an automated test against a
-real git repo. An offline-render spike measured real Tone.js on `node-web-audio-api` at **22×
-faster than realtime**, green-lighting the engine extraction as M3's core engineering work. See
-[`docs/phase-2-plan.md`](docs/phase-2-plan.md)'s "Result".
+real git repo. The guardrail layer is real: a zero-dep DSP metrics
+engine (integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, stereo field)
+measured a real render round trip to **0.01 LU of its target**, `beat lint` turns those numbers
+into deterministic findings that name the `.beat` edit to try, and `beat mcp` exposes the whole
+toolchain to AI agents — with every number coming from DSP, never a model (decision D2, built
+exactly as the verified research demanded). An offline-render spike measured real Tone.js on
+`node-web-audio-api` at **22× faster than realtime**, green-lighting the engine extraction as
+the next engineering push. See [`docs/phase-3-plan.md`](docs/phase-3-plan.md)'s "Result".
