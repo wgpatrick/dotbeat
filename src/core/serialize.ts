@@ -33,6 +33,13 @@ function serializeTrack(t: BeatTrack): string[] {
     const text = def.kind === 'number' ? formatNumber(value as number) : def.kind === 'trackref' ? (value === null ? 'none' : String(value)) : String(value)
     lines.push(`    ${def.key} ${text}`)
   }
+  // v0.5 lane samples: DRUM_LANES order (canonical), one line per assigned lane.
+  if (t.kind === 'drums') {
+    for (const lane of DRUM_LANES) {
+      const ls = t.laneSamples[lane]
+      if (ls) lines.push(`  lane ${lane} ${ls.sample} ${formatNumber(ls.gainDb)} ${formatNumber(ls.tune)}`)
+    }
+  }
   // v0.4 clips: source order (creation order is meaningful, like tracks); content in canonical
   // form (sorted notes / all-five-lanes patterns) one indent level deeper than live content.
   for (const clip of t.clips) {
@@ -70,6 +77,12 @@ export function serialize(doc: BeatDocument): string {
     `loop_bars ${formatNumber(doc.loopBars)}`,
     `selected_track ${doc.selectedTrack}`,
   ]
+  if (doc.media.length > 0) {
+    lines.push('', 'media')
+    for (const m of doc.media) {
+      lines.push(`  sample ${m.id} sha256:${m.sha256} ${m.path}`)
+    }
+  }
   for (const t of doc.tracks) {
     lines.push('', ...serializeTrack(t))
   }

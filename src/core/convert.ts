@@ -25,7 +25,7 @@ export interface ExternalSandboxPayload {
   arrangement?: { enabled?: boolean; mode?: string | null; timeline?: { sceneId: string; bars: number }[] }
 }
 
-const BEAT_FORMAT_VERSION = '0.4'
+const BEAT_FORMAT_VERSION = '0.5'
 
 /** SynthParams fields the format deliberately does NOT model (each needs grammar design of its
  * own — large arrays, ordered lists, or redundant pairs; see docs/phase-5-plan.md). These are
@@ -149,6 +149,7 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     color: t.color,
     kind: t.kind,
     synth: toBeatSynth(t.synth, t.id, report),
+    laneSamples: {},
     clips: (t.clips ?? []).map((c) => {
       if (c.automation && Object.keys(c.automation).length > 0) report.droppedFields.push(`${t.id}.${c.id}.automation`)
       if (c.name !== undefined && c.name !== c.id) report.droppedFields.push(`${t.id}.${c.id}.name`)
@@ -206,6 +207,7 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     bpm: payload.bpm,
     loopBars: payload.loopBars,
     selectedTrack,
+    media: [], // browser payloads carry no media yet — lane samples arrive via the file side
     tracks,
     scenes,
     song,

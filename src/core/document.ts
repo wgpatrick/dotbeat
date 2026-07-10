@@ -131,12 +131,30 @@ export interface BeatSongSection {
   bars: number
 }
 
+/** v0.5: a content-addressed reference to an audio file — the first thing a .beat document
+ * points at that cannot be text. The sha256 pins the exact bytes (integrity + dedup + honest
+ * git story: media files are immutable blobs); path is relative to the .beat file. License
+ * provenance lives in a sidecar (<path>.json), deliberately outside the music file. */
+export interface BeatMediaSample {
+  id: string // document-scoped human slug (D6)
+  sha256: string // lowercase hex, 64 chars
+  path: string // relative path, forward slashes
+}
+
+/** v0.5: one drum lane backed by a sample one-shot instead of the synthesized voice. */
+export interface BeatLaneSample {
+  sample: string // BeatMediaSample id
+  gainDb: number // static lane level, multiplies per-hit velocity
+  tune: number // semitones
+}
+
 export interface BeatTrack {
   id: string
   name: string
   color: string // lowercase hex, e.g. "#c678dd"
   kind: TrackKind
   synth: BeatSynth // drum tracks carry these too — in BeatLab they're the real drum bus/voice params
+  laneSamples: Partial<Record<DrumLane, BeatLaneSample>> // v0.5; drum tracks only, {} when none
   clips: BeatClip[] // v0.4; [] when the track has none (serialized only when present)
   notes: BeatNote[] // synth tracks only; always [] for drums
   pattern?: BeatDrumPattern // drum tracks only; absent for synth
@@ -147,6 +165,7 @@ export interface BeatDocument {
   bpm: number
   loopBars: number
   selectedTrack: string
+  media: BeatMediaSample[] // v0.5; [] when none. Canonical position: before tracks.
   tracks: BeatTrack[]
   scenes: BeatScene[] // v0.4; [] when none
   song: BeatSongSection[] | null // v0.4; null = no song block = loop mode (today's behavior)

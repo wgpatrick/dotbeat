@@ -174,6 +174,7 @@ export function addTrack(
     color,
     kind,
     synth: { ...INIT_SYNTH },
+    laneSamples: {},
     clips: [],
     notes: [],
     ...(kind === 'drums' ? { pattern: emptyBeatPattern() } : {}),
@@ -207,7 +208,7 @@ export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: 
   const loopBars = opts.loopBars ?? 2
   if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
   if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
-  const base: BeatDocument = { formatVersion: '0.4', bpm, loopBars, selectedTrack: '', tracks: [], scenes: [], song: null }
+  const base: BeatDocument = { formatVersion: '0.5', bpm, loopBars, selectedTrack: '', media: [], tracks: [], scenes: [], song: null }
   const { doc } = addTrack(base, { id: opts.trackId ?? 'lead', kind: 'synth' })
   return { ...doc, selectedTrack: doc.tracks[0]!.id }
 }

@@ -191,6 +191,31 @@ export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds
   // tracks from the file, merges the synth partials onto DEFAULT_SYNTH — file is the document).
   useStore.setState({ mode: 'sandbox', tracks: [] })
   useStore.getState().applyDawState(beatDocumentToPartialTracks(doc))
+
+  // v0.5 media: resolve each lane sample relative to the .beat file, verify content hash
+  // (fail loudly — a wrong-bytes sample is a corrupt project, not a soft warning), decode, and
+  // hand the buffer to the engine's per-lane one-shot loader.
+  if (doc.media.length > 0) {
+    const { createHash } = await import('node:crypto')
+    const { dirname: pathDirname, resolve: pathResolve } = await import('node:path')
+    const beatDir = pathDirname(pathResolve(beatPath))
+    const buffers = new Map()
+    for (const m of doc.media) {
+      const filePath = pathResolve(beatDir, m.path)
+      if (!existsSync(filePath)) throw new Error(`media sample "${m.id}": file not found: ${m.path} (relative to ${beatDir})`)
+      const bytes = readFileSync(filePath)
+      const hash = createHash('sha256').update(bytes).digest('hex')
+      if (hash !== m.sha256) throw new Error(`media sample "${m.id}": sha256 mismatch for ${m.path} (file ${hash.slice(0, 12)}..., document expects ${m.sha256.slice(0, 12)}...)`)
+      const audioBuf = await offline.rawContext.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+      buffers.set(m.id, audioBuf)
+    }
+    for (const t of doc.tracks) {
+      for (const [lane, ls] of Object.entries(t.laneSamples)) {
+        if (!ls) continue
+        engine.loadLaneOneShot(lane, buffers.get(ls.sample), ls.sample, { gainDb: ls.gainDb, tune: ls.tune })
+      }
+    }
+  }
   stamp('graph-build')
 
   await engine.play() // the engine's own transport wiring + per-16th tick — the real sequencer

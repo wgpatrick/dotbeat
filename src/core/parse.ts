@@ -1,4 +1,4 @@
-import type { BeatClip, BeatDocument, BeatDrumPattern, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import type { BeatClip, BeatDocument, BeatDrumPattern, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
 import { DRUM_LANES, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
@@ -57,6 +57,9 @@ export function parse(text: string): BeatDocument {
   const scenes: BeatScene[] = []
   const sceneIds = new Set<string>()
   let song: BeatSongSection[] | null = null
+  const media: BeatMediaSample[] = []
+  const mediaIds = new Set<string>()
+  let inMedia = false
 
   let currentTrack: BeatTrack | null = null
   let currentClip: BeatClip | null = null
@@ -146,7 +149,13 @@ export function parse(text: string): BeatDocument {
       } else if (keyword === 'selected_track') {
         if (tokens.length !== 2) throw new BeatParseError('selected_track expects exactly 1 value', lineNo)
         selectedTrack = tokens[1]!
+      } else if (keyword === 'media') {
+        if (tracks.length > 0 || scenes.length > 0 || song !== null) throw new BeatParseError('the media block must come before track/scene/song blocks (canonical order)', lineNo)
+        if (tokens.length !== 1) throw new BeatParseError('media takes no values on its own line', lineNo)
+        if (inMedia || media.length > 0) throw new BeatParseError('duplicate media block', lineNo)
+        inMedia = true
       } else if (keyword === 'track') {
+        inMedia = false
         if (scenes.length > 0 || song !== null) throw new BeatParseError('track blocks must come before scene/song blocks (canonical order)', lineNo)
         closeTrackIfOpen(lineNo)
         if (tokens.length !== 5) throw new BeatParseError('track expects exactly 4 values: <id> <name> <color> <kind>', lineNo)
@@ -163,6 +172,7 @@ export function parse(text: string): BeatDocument {
           // core 9 are placeholders until the synth block fills them (all required); the v0.3
           // optional fields start at their canonical defaults (elision contract).
           synth: { osc: 'sawtooth', volume: 0, cutoff: 0, resonance: 0, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0, ...defaultSynthFields() } as BeatSynth,
+          laneSamples: {},
           clips: [],
           notes: [],
         }
@@ -193,6 +203,18 @@ export function parse(text: string): BeatDocument {
     }
 
     if (level === 1) {
+      if (inMedia && keyword === 'sample') {
+        if (tokens.length !== 4) throw new BeatParseError('sample expects exactly 3 values: <id> sha256:<hex> <path>', lineNo)
+        const [, id, hashTok, path] = tokens as [string, string, string, string]
+        if (!SLUG_RE.test(id)) throw new BeatParseError(`sample ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
+        if (mediaIds.has(id)) throw new BeatParseError(`duplicate sample id "${id}"`, lineNo)
+        const m = hashTok.match(/^sha256:([0-9a-f]{64})$/)
+        if (!m) throw new BeatParseError(`sample hash must be sha256:<64 lowercase hex chars>, got "${hashTok}"`, lineNo)
+        if (path.startsWith('/') || path.includes('..')) throw new BeatParseError(`sample paths must be relative without "..", got "${path}"`, lineNo)
+        mediaIds.add(id)
+        media.push({ id, sha256: m[1]!, path })
+        continue
+      }
       // scene and song sub-lines
       if (currentScene && keyword === 'slot') {
         if (tokens.length !== 3) throw new BeatParseError('slot expects exactly 2 values: <track> <clip>', lineNo)
@@ -219,6 +241,19 @@ export function parse(text: string): BeatDocument {
         continue
       }
       closeSynthIfOpen(lineNo)
+      if (keyword === 'lane') {
+        closeClipIfOpen(lineNo)
+        if (currentTrack.kind !== 'drums') throw new BeatParseError(`lane lines only belong in drum tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+        if (tokens.length !== 5) throw new BeatParseError('lane expects exactly 4 values: <lane> <sample-id> <gain dB> <tune semitones>', lineNo)
+        const [, laneTok, sampleId, gainTok, tuneTok] = tokens as [string, string, string, string, string]
+        if (!isDrumLane(laneTok)) throw new BeatParseError(`unknown drum lane "${laneTok}" (expected one of ${DRUM_LANES.join('|')})`, lineNo)
+        if (currentTrack.laneSamples[laneTok]) throw new BeatParseError(`duplicate lane line for "${laneTok}"`, lineNo)
+        const gainDb = parseFloatStrict(gainTok, lineNo, 'lane gain')
+        const tune = parseFloatStrict(tuneTok, lineNo, 'lane tune')
+        if (tune < -24 || tune > 24) throw new BeatParseError(`lane tune must be -24..24 semitones, got ${tune}`, lineNo)
+        currentTrack.laneSamples[laneTok] = { sample: sampleId, gainDb, tune }
+        continue
+      }
       if (keyword === 'clip') {
         closeClipIfOpen(lineNo)
         if (tokens.length !== 2) throw new BeatParseError('clip expects exactly 1 value: <id>', lineNo)
@@ -334,11 +369,17 @@ export function parse(text: string): BeatDocument {
       if (!sceneIds.has(section.scene)) throw new BeatParseError(`song section references unknown scene "${section.scene}"`, eof)
     }
   }
+  // v0.5: every lane line must reference a declared media sample
+  for (const t of tracks) {
+    for (const [laneName, ls] of Object.entries(t.laneSamples)) {
+      if (ls && !mediaIds.has(ls.sample)) throw new BeatParseError(`track "${t.id}" lane ${laneName}: references unknown sample "${ls.sample}"`, eof)
+    }
+  }
 
   if (formatVersion === null) throw new BeatParseError('missing format_version', 1)
   if (bpm === null) throw new BeatParseError('missing bpm', 1)
   if (loopBars === null) throw new BeatParseError('missing loop_bars', 1)
   if (selectedTrack === null) throw new BeatParseError('missing selected_track', 1)
 
-  return { formatVersion, bpm, loopBars, selectedTrack, tracks, scenes, song }
+  return { formatVersion, bpm, loopBars, selectedTrack, media, tracks, scenes, song }
 }
