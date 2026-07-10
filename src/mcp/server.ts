@@ -185,19 +185,21 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_render',
     description:
-      'Render a .beat file to a WAV by driving the real BeatLab engine in headless Chromium. Slow (realtime capture + browser boot, ~20s). Needs a beatlab checkout: pass beatlab_dir or set BEATLAB_DIR in the environment.',
+      'Render a .beat file to a WAV with the real BeatLab engine. offline=true (recommended for iteration) runs it in-process on node-web-audio-api — no browser, ~10s, self-consistent for relative loudness targets but with a known constant level offset vs the browser (see beatlab-daw/docs/phase-4-plan.md). offline=false drives headless Chromium — the fidelity reference, slower (~20s), use for final absolute-loudness checks. Needs a beatlab checkout: pass beatlab_dir or set BEATLAB_DIR in the environment.',
     inputSchema: {
       type: 'object',
       properties: {
         file: { type: 'string' },
         out: { type: 'string', description: 'output .wav path' },
+        offline: { type: 'boolean', description: 'true = fast browserless render (default); false = headless-Chromium reference' },
         beatlab_dir: { type: 'string', description: 'path to a beatlab checkout (falls back to BEATLAB_DIR env)' },
       },
       required: ['file', 'out'],
     },
     handler: (args) =>
       new Promise<string>((resolve, reject) => {
-        const cliArgs = [join(repoRoot, 'cli', 'render.mjs'), str(args, 'file'), '-o', str(args, 'out')]
+        const offline = args.offline !== false
+        const cliArgs = [join(repoRoot, 'cli', offline ? 'render-offline.mjs' : 'render.mjs'), str(args, 'file'), '-o', str(args, 'out')]
         if (typeof args.beatlab_dir === 'string') cliArgs.push('--beatlab-dir', args.beatlab_dir)
         execFile(process.execPath, cliArgs, { timeout: 180000 }, (err, stdout, stderr) => {
           if (err) reject(new Error(`render failed: ${stderr || stdout || err.message}`))
