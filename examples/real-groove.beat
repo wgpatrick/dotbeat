@@ -1,0 +1,99 @@
+format_version 0.1
+bpm 126
+loop_bars 4
+selected_track bass
+
+track bass Bass #56b6c2
+  synth
+    osc sawtooth
+    volume -8
+    cutoff 700
+    resonance 0.8
+    attack 0.005
+    decay 0.25
+    sustain 0.3
+    release 0.15
+    pan 0
+  note n62 33 0 2 0.8
+  note n63 33 2 2 0.8
+  note n64 33 4 2 0.8
+  note n65 33 6 2 0.8
+  note n66 33 8 2 0.8
+  note n67 33 10 2 0.8
+  note n68 33 12 2 0.8
+  note n69 45 14 2 0.8
+  note n70 29 16 2 0.8
+  note n71 29 18 2 0.8
+  note n72 29 20 2 0.8
+  note n73 29 22 2 0.8
+  note n74 29 24 2 0.8
+  note n75 29 26 2 0.8
+  note n76 29 28 2 0.8
+  note n77 41 30 2 0.8
+  note n78 36 32 2 0.8
+  note n79 36 34 2 0.8
+  note n80 36 36 2 0.8
+  note n81 36 38 2 0.8
+  note n82 36 40 2 0.8
+  note n83 36 42 2 0.8
+  note n84 36 44 2 0.8
+  note n85 48 46 2 0.8
+  note n86 31 48 2 0.8
+  note n87 31 50 2 0.8
+  note n88 31 52 2 0.8
+  note n89 31 54 2 0.8
+  note n90 31 56 2 0.8
+  note n91 31 58 2 0.8
+  note n92 31 60 2 0.8
+  note n93 43 62 2 0.8
+
+track chords Chords #f7c948
+  synth
+    osc triangle
+    volume -14
+    cutoff 3500
+    resonance 0.8
+    attack 0.4
+    decay 0.4
+    sustain 0.6
+    release 1.2
+    pan 0
+  note n94 57 0 16 0.8
+  note n95 60 0 16 0.8
+  note n96 64 0 16 0.8
+  note n97 53 16 16 0.8
+  note n98 57 16 16 0.8
+  note n99 60 16 16 0.8
+  note n100 55 32 16 0.8
+  note n101 60 32 16 0.8
+  note n102 64 32 16 0.8
+  note n103 55 48 16 0.8
+  note n104 59 48 16 0.8
+  note n105 62 48 16 0.8
+
+track lead Lead #c678dd
+  synth
+    osc square
+    volume -14
+    cutoff 3200
+    resonance 1.4
+    attack 0.01
+    decay 0.3
+    sustain 0.2
+    release 0.4
+    pan 0
+  note n106 69 0 4 0.8
+  note n107 72 4 2 0.8
+  note n108 71 6 2 0.8
+  note n109 64 8 8 0.8
+  note u100000 72 8 2 0.8
+  note n110 65 16 4 0.8
+  note n111 69 20 4 0.8
+  note n112 72 24 8 0.8
+  note n113 72 32 4 0.8
+  note n114 71 36 4 0.8
+  note n115 67 40 8 0.8
+  note n116 74 48 4 0.8
+  note n117 71 52 4 0.8
+  note n118 67 56 4 0.8
+  note n119 69 60 4 0.8

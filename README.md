@@ -4,10 +4,17 @@
 > agent — can edit in a real GUI, render from the command line, `git diff`, and get sound-design
 > critique on.
 
-This repository is currently a **planning + research workspace**, not yet code. It captures the
-direction and the deep research behind it, forked in spirit from
-[BeatLab](https://github.com/wgpatrick/beatlab) (a working Tone.js + React web DAW / production
-trainer).
+This repository holds the research/planning behind the direction, **plus a working Phase 0
+prototype** proving the core thesis end-to-end: a real `.beat` text format (parser + serializer +
+converter), tested against a real exported BeatLab project, rendered to a real WAV by a `beat
+render` CLI that drives the actual [BeatLab](https://github.com/wgpatrick/beatlab) app (a working
+Tone.js + React web DAW / production trainer, which this project forks in spirit).
+
+```bash
+npm install
+npm test                # 21 tests: format round-trips + conversion against real project data
+npm run render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
+```
 
 ## The idea in one picture
 
@@ -31,10 +38,15 @@ now fully-verified version.
 
 | Path | What |
 |---|---|
-| [`ROADMAP.md`](ROADMAP.md) | **Start here.** Thesis, format design, architecture, milestones, risks — fully updated against verified research. |
+| [`docs/phase-0-plan.md`](docs/phase-0-plan.md) | **Start here for what's built.** The vertical-slice plan, status COMPLETE, with the actual result. |
+| [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, milestones, risks. |
+| `src/core/` | The `.beat` format: types, parser, serializer, converter. Pure TS, zero deps on beatlab/React/Tone.js. |
+| `test/` | 21 tests — format round-trips (synthetic + property-style) and conversion fidelity against a real exported project (`test/fixtures/`). |
+| `cli/render.mjs` | `beat render` — drives the real BeatLab app in headless Chromium to render a `.beat` file to a WAV. |
+| `examples/real-groove.beat` | A real project, converted to `.beat` text — hand-inspectable, the file the CLI's proof run used. |
 | [`docs/research/`](docs/research/) | Four deep-research reports (347 raw claims, 70 sources), **all fully adversarially verified**. |
 | [`docs/opendaw-notes.md`](docs/opendaw-notes.md) | Source-code archaeology — openDAW/DAWproject/automix-toolkit/node-web-audio-api read directly, not summarized secondhand. |
-| [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` text format — now grounded in real prior art (Csound, Humdrum, DAWproject), not a from-scratch sketch. |
+| [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format spec — v0 grammar frozen and implemented, grounded in real prior art (Csound, Humdrum, DAWproject). |
 | [`docs/architecture.md`](docs/architecture.md) | Component architecture (daemon, engine, CLI, MCP, web/Tauri tiers). |
 | [`docs/decisions.md`](docs/decisions.md) | Key design decisions and their rationale, corrected where research findings changed. |
 | [`docs/research-summary.html`](docs/research-summary.html) | Visual synthesis — **predates the final verification pass**; `ROADMAP.md` is the current source of truth. |
@@ -80,6 +92,8 @@ inline rather than silently fixed.
 
 ## Status
 
-Planning. No build yet. Next concrete step is **M0** in the roadmap: extract BeatLab's core and
-freeze v0 of the `.beat` format — now with a real syntax direction (Csound + Humdrum + DAWproject
-vocabulary) instead of an open question.
+**Phase 0 complete.** The core thesis is proven, not just argued: a hand-inspectable `.beat` file
+converted from a real BeatLab project renders to a real WAV via `beat render`, and changing one
+synth parameter produces a diff of exactly one line — the specific property the whole project
+bets on. See [`docs/phase-0-plan.md`](docs/phase-0-plan.md)'s "Result" section for what this
+proved and what it means for scoping M1 (the daemon + two-way file sync) next.

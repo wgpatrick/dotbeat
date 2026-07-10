@@ -1,0 +1,160 @@
+import type { BeatDocument, BeatSynth, BeatTrack, OscType } from './document.js'
+import { OSC_TYPES, SYNTH_PARAM_ORDER } from './document.js'
+
+export class BeatParseError extends Error {
+  line: number
+  constructor(message: string, line: number) {
+    super(`line ${line}: ${message}`)
+    this.name = 'BeatParseError'
+    this.line = line
+  }
+}
+
+function indentOf(raw: string): number {
+  let n = 0
+  while (raw[n] === ' ') n++
+  return n
+}
+
+function isOscType(s: string): s is OscType {
+  return (OSC_TYPES as readonly string[]).includes(s)
+}
+
+function parseFloatStrict(tok: string, lineNo: number, field: string): number {
+  const n = Number(tok)
+  if (tok.trim() === '' || !Number.isFinite(n)) throw new BeatParseError(`"${field}" expected a number, got "${tok}"`, lineNo)
+  return n
+}
+
+function parseIntStrict(tok: string, lineNo: number, field: string): number {
+  if (!/^-?\d+$/.test(tok)) throw new BeatParseError(`"${field}" expected an integer, got "${tok}"`, lineNo)
+  return Number(tok)
+}
+
+// Parses .beat v0 text into a BeatDocument. Strict on purpose (every synth param required, no
+// silently-applied defaults, unknown keywords/wrong arities are errors) — see format-spec.md for
+// why: a hand-edited or agent-edited file that's missing a field should fail loudly, not produce
+// a document that silently differs from what was written.
+export function parse(text: string): BeatDocument {
+  const rawLines = text.split('\n')
+
+  let formatVersion: string | null = null
+  let bpm: number | null = null
+  let loopBars: number | null = null
+  let selectedTrack: string | null = null
+  const tracks: BeatTrack[] = []
+  const trackIds = new Set<string>()
+
+  let currentTrack: BeatTrack | null = null
+  let inSynth = false
+  let synthSeen = new Set<keyof BeatSynth>()
+
+  function closeSynthIfOpen(lineNo: number) {
+    if (!inSynth) return
+    const missing = SYNTH_PARAM_ORDER.filter((k) => !synthSeen.has(k))
+    if (missing.length) throw new BeatParseError(`synth block is missing required param(s): ${missing.join(', ')}`, lineNo)
+    inSynth = false
+  }
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const lineNo = i + 1
+    const raw = (rawLines[i] ?? '').replace(/\r$/, '')
+    if (raw.trim().length === 0) continue
+    const trimmedStart = raw.trimStart()
+    if (trimmedStart.startsWith('#')) continue // full-line comment only — see format-spec.md
+
+    const indentChars = indentOf(raw)
+    if (indentChars % 2 !== 0) throw new BeatParseError(`indentation must be a multiple of 2 spaces, got ${indentChars}`, lineNo)
+    const level = indentChars / 2
+    const tokens = trimmedStart.trim().split(/\s+/)
+    const keyword = tokens[0]! // tokens is split from a non-empty trimmed string, so always >= 1 element
+
+    if (level === 0) {
+      closeSynthIfOpen(lineNo)
+      if (keyword === 'format_version') {
+        if (tokens.length !== 2) throw new BeatParseError('format_version expects exactly 1 value', lineNo)
+        formatVersion = tokens[1]!
+      } else if (keyword === 'bpm') {
+        if (tokens.length !== 2) throw new BeatParseError('bpm expects exactly 1 value', lineNo)
+        bpm = parseIntStrict(tokens[1]!, lineNo, 'bpm')
+      } else if (keyword === 'loop_bars') {
+        if (tokens.length !== 2) throw new BeatParseError('loop_bars expects exactly 1 value', lineNo)
+        loopBars = parseIntStrict(tokens[1]!, lineNo, 'loop_bars')
+      } else if (keyword === 'selected_track') {
+        if (tokens.length !== 2) throw new BeatParseError('selected_track expects exactly 1 value', lineNo)
+        selectedTrack = tokens[1]!
+      } else if (keyword === 'track') {
+        if (tokens.length !== 4) throw new BeatParseError('track expects exactly 3 values: <id> <name> <color>', lineNo)
+        const [, id, name, color] = tokens as [string, string, string, string]
+        if (trackIds.has(id)) throw new BeatParseError(`duplicate track id "${id}"`, lineNo)
+        if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatParseError(`track color must be a lowercase hex color like #c678dd, got "${color}"`, lineNo)
+        trackIds.add(id)
+        currentTrack = {
+          id,
+          name,
+          color,
+          synth: { osc: 'sawtooth', volume: 0, cutoff: 0, resonance: 0, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0 },
+          notes: [],
+        }
+        tracks.push(currentTrack)
+      } else {
+        throw new BeatParseError(`unexpected top-level keyword "${keyword}"`, lineNo)
+      }
+      continue
+    }
+
+    if (level === 1) {
+      if (!currentTrack) throw new BeatParseError(`"${keyword}" outside of any track`, lineNo)
+      if (keyword === 'synth') {
+        closeSynthIfOpen(lineNo)
+        if (tokens.length !== 1) throw new BeatParseError('synth takes no values on its own line', lineNo)
+        inSynth = true
+        synthSeen = new Set()
+        continue
+      }
+      closeSynthIfOpen(lineNo)
+      if (keyword === 'note') {
+        if (tokens.length !== 6) throw new BeatParseError('note expects exactly 5 values: <id> <pitch> <start> <duration> <velocity>', lineNo)
+        const [, id, pitchTok, startTok, durTok, velTok] = tokens as [string, string, string, string, string, string]
+        const pitch = parseIntStrict(pitchTok, lineNo, 'note pitch')
+        if (pitch < 0 || pitch > 127) throw new BeatParseError(`note pitch must be 0-127, got ${pitch}`, lineNo)
+        const start = parseIntStrict(startTok, lineNo, 'note start')
+        const duration = parseIntStrict(durTok, lineNo, 'note duration')
+        if (duration < 1) throw new BeatParseError(`note duration must be >= 1 step, got ${duration}`, lineNo)
+        const velocity = parseFloatStrict(velTok, lineNo, 'note velocity')
+        currentTrack.notes.push({ id, pitch, start, duration, velocity })
+      } else {
+        throw new BeatParseError(`unexpected keyword "${keyword}" inside a track`, lineNo)
+      }
+      continue
+    }
+
+    if (level === 2) {
+      if (!currentTrack || !inSynth) throw new BeatParseError(`"${keyword}" outside of a synth block`, lineNo)
+      if (tokens.length !== 2) throw new BeatParseError(`"${keyword}" expects exactly 1 value`, lineNo)
+      const value = tokens[1]!
+      if (!(SYNTH_PARAM_ORDER as string[]).includes(keyword)) throw new BeatParseError(`unknown synth param "${keyword}"`, lineNo)
+      const field = keyword as keyof BeatSynth
+      if (synthSeen.has(field)) throw new BeatParseError(`duplicate synth param "${keyword}"`, lineNo)
+      synthSeen.add(field)
+      if (field === 'osc') {
+        if (!isOscType(value)) throw new BeatParseError(`osc must be one of sine|triangle|sawtooth|square, got "${value}"`, lineNo)
+        currentTrack.synth.osc = value
+      } else {
+        currentTrack.synth[field] = parseFloatStrict(value, lineNo, keyword)
+      }
+      continue
+    }
+
+    throw new BeatParseError(`indentation too deep (level ${level})`, lineNo)
+  }
+
+  closeSynthIfOpen(rawLines.length + 1)
+
+  if (formatVersion === null) throw new BeatParseError('missing format_version', 1)
+  if (bpm === null) throw new BeatParseError('missing bpm', 1)
+  if (loopBars === null) throw new BeatParseError('missing loop_bars', 1)
+  if (selectedTrack === null) throw new BeatParseError('missing selected_track', 1)
+
+  return { formatVersion, bpm, loopBars, selectedTrack, tracks }
+}

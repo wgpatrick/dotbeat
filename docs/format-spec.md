@@ -76,7 +76,136 @@ Csound-style typed statement lines, Humdrum-style canonical field ordering, DAWp
 parameter vocabulary. Beats YAML (no comparable precedent found) and JSON (openDAW's own JSON
 path shows the trap).
 
-## Illustrative sketch (NOT final syntax)
+## v0 grammar — FROZEN, implemented in `beatlab-daw/src/core`
+
+Deliberately minimal (per `phase-0-plan.md`): synth tracks only (no drums), notes only (no
+automation, no clips/scenes), one implicit synth device per track (no device IDs, no
+multi-device chains yet). Every field maps 1:1 onto real fields in BeatLab's actual `Track`/
+`Note`/`SynthParams` types (`beatlab/src/types.ts`) — chosen so Track B.3's converter has no
+lossy or invented mapping to design, just a direct field-for-field translation.
+
+### Lines
+
+```
+format_version <semver-ish, e.g. 0.1>
+bpm <integer>
+loop_bars <integer>
+selected_track <track id>
+
+track <id> <name> <color hex, lowercase>
+  synth
+    osc <sine|triangle|sawtooth|square>
+    volume <number, dB>
+    cutoff <number, Hz>
+    resonance <number>
+    attack <number, seconds>
+    decay <number, seconds>
+    sustain <number, 0..1>
+    release <number, seconds>
+    pan <number, -1..1>
+  note <id> <pitch 0-127> <start, 16th-note steps from loop start> <duration, steps> <velocity 0..1>
+  note <id> <pitch> <start> <duration> <velocity>
+  ...
+
+track <id> <name> <color hex>
+  synth
+    ...
+  note ...
+```
+
+Indentation is exactly 2 spaces per level (`track` at column 0, `synth`/`note` at column 2,
+individual synth params at column 4) and is **structural**, not cosmetic — the parser uses it to
+know which track/synth a line belongs to. A `#` starts a line comment (ignored by the parser,
+never emitted by the serializer — comments are a hand-editing convenience, not part of the
+canonical form).
+
+### Why notes are positional but synth params are one-per-line
+
+This is the resolution of the Csound-vs-DAWproject tension the prior-art research left open:
+
+- **Notes are Csound-style positional** (`note <id> <pitch> <start> <dur> <vel>`, five
+  whitespace-separated tokens, fixed order) — notes are high-frequency and their field set is
+  small, fixed, and never grows; a "move this note" edit meaningfully changes pitch *and* start
+  together, so one line per note (rather than one line per field) is the right diff granularity.
+- **Synth params are one name-value pair per line** (DAWproject-style: each parameter is its own
+  named element) — this is what actually delivers on `docs/decisions.md` D4's hard requirement,
+  *"a single-parameter change produces a single-line diff."* If all nine synth params lived on
+  one line (the more Csound-authentic choice), changing only `cutoff` would still diff the
+  *entire* line under git's line-oriented default view. One param per line costs some
+  compactness; it's what makes "hand-edit a cutoff value, see a clean diff" — the actual thesis
+  this phase is testing — literally true.
+
+### Canonical ordering (the Humdrum discipline, applied)
+
+Serialization must be deterministic: `serialize(parse(x)) === x` for any canonical `x`, and two
+musically-identical documents always produce byte-identical text.
+
+1. Header lines always appear, always in this order: `format_version`, `bpm`, `loop_bars`,
+   `selected_track`.
+2. Tracks appear in **source order** (the order they appear in BeatLab's `tracks` array) — not
+   alphabetical, not by ID. Track order is meaningful (it's the mixer/UI order), so it's
+   preserved, not normalized away.
+3. Within a track: the `track` line, then the `synth` block with params in this **fixed
+   order** — `osc, volume, cutoff, resonance, attack, decay, sustain, release, pan`. This is
+   BeatLab's own progressive-reveal lesson order (`P_FULL` in `src/lessons/sound.ts`:
+   osc→volume→cutoff→resonance→attack/decay/sustain/release) with `pan` appended — reusing an
+   ordering convention that already exists in the real app, not inventing a new one.
+4. Then `note` lines, sorted by `(start, pitch, id)` ascending.
+5. Numbers: integers with no decimal point (`4500`, not `4500.0`); non-integers rounded to 4
+   decimal places, trailing zeros and a trailing `.` stripped (`0.8`, not `0.80` or `0.8000`).
+   This is the one place floating-point noise could break byte-identical round-trips, so it's
+   pinned down precisely rather than left to `Number.prototype.toString()`.
+6. IDs are emitted exactly as given — no re-slugging. BeatLab's real IDs (`lead`, `bass`,
+   `n106`, `u100000`) are already human-legible, which independently validates `docs/decisions.md`
+   D6's human-slug decision: the app didn't need to be redesigned to get readable IDs, it already
+   had them.
+
+### Worked example (a real, small round-trippable document)
+
+```
+format_version 0.1
+bpm 124
+loop_bars 1
+selected_track lead
+
+track lead Lead #c678dd
+  synth
+    osc square
+    volume -14
+    cutoff 4500
+    resonance 0.8
+    attack 0.01
+    decay 0.3
+    sustain 0.2
+    release 0.4
+    pan 0
+  note n100000 64 0 2 0.8
+  note n100001 67 2 2 0.8
+  note n100002 71 4 4 0.72
+```
+
+Changing that lead's cutoff from bright to dark is exactly this diff:
+
+```diff
+-    cutoff 4500
++    cutoff 900
+```
+
+That one-line diff, for exactly this kind of edit, is the whole thesis this phase is testing.
+
+### Deferred past v0 (explicitly out of scope, not forgotten)
+
+Drum tracks/patterns, automation, clips/scenes, multi-device chains (FX, sends), arrangement.
+See `phase-0-plan.md`'s "explicitly deferred" section — these come after the vertical slice
+proves itself.
+
+---
+
+## Future (post-v0, not implemented) — a fuller sketch once automation/devices/media land
+
+The sections below are earlier exploratory sketches for where the format goes *after* v0 proves
+out — automation, multi-device chains, content-addressed media. Not implemented, not frozen, kept
+here so the direction isn't lost.
 
 ```
 format_version 0.1
@@ -133,7 +262,6 @@ Automation, using DAWproject's typed-point pattern (`time, value, interpolation`
 
 - **Stable `id=` on every entity** — a rename changes one token, a reorder changes zero lines
   (match by ID, not position). This is the alsdiff lesson.
-- **One note per line, fixed column order** — moving a note = a one-line diff a human reads.
 - **Canonical sort** (by start, then pitch) and **canonical formatting** — the serializer always
   emits the same bytes for the same state, so `serialize(parse(x)) == x`.
 - **Steps as a compact string** (`x...x...`) — drum patterns diff legibly per-lane.
@@ -141,7 +269,6 @@ Automation, using DAWproject's typed-point pattern (`time, value, interpolation`
 
 ## Open questions
 
-- Beats vs 16th-steps vs ticks for time. (Beats read best; ticks are lossless for odd grids.)
 - Clip content dedup (same clip used in many places) — reference vs inline.
 - Exact automation-target addressing syntax (`dev_9f.cutoff` above is illustrative) — dotted
   human path vs something else. (openDAW targets automation at an opaque `uuid/field-key`
@@ -151,9 +278,14 @@ Automation, using DAWproject's typed-point pattern (`time, value, interpolation`
 
 ## Resolved by research (previously open)
 
+- **Time units** — resolved (for v0): 16th-note steps, as integers — exactly BeatLab's own
+  `Note.start`/`Note.duration` representation, not beats or ticks. Chosen so Track B.3's
+  converter is a direct field mapping with zero unit conversion or rounding loss against real
+  app data. Beats-vs-ticks for a *future* fuller timeline (arbitrary tempo/time-sig changes) is
+  still open.
 - **Automation curve representation** — resolved: DAWproject's typed-point pattern
   (`time, value, interpolation ∈ {hold, linear}`) is real, cross-DAW-agreed, and directly
-  text-line-friendly. Adopted above.
+  text-line-friendly. Adopted above, for when automation lands post-v0.
 - **Human-friendly IDs vs opaque UUIDs** — resolved in favor of **human-readable slugs at the
   text-serialization boundary** (`n_01`, `trk_a1`), UUID or content-hash canonical only where
   global uniqueness truly matters (e.g. `media/` sample refs). Validated by two independent
