@@ -46,3 +46,12 @@ headless-rendering code path, its undo system, and its binary project-bundle for
 rationale we could find for why it isn't text). Several of that pass's findings *corrected* the
 web-research claims about openDAW above (e.g., there is no separate "headless SDK" package — that
 claim is in the refuted list in `01` and `02`, confirmed wrong by direct source reading).
+
+## 05 — Engine architecture (added 2026-07-10)
+
+[`05-engine-architecture.md`](05-engine-architecture.md) — the twice-flagged blind spot,
+resolved: 5 angles, 21 sources fetched, 101 claims extracted, 25 verified (23 confirmed / 2
+killed), synthesized to 11 findings, every one 3-0. Ran with a concrete motivating measurement
+(Phase 4's 0.73×-realtime offline render) and came back with a verified explanation candidate
+for it (upstream graph-ordering bottleneck under topology churn) plus the M4 native-engine
+design shape (Tracktion-graph-style lock-free multi-threaded node player).

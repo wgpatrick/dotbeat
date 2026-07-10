@@ -60,7 +60,7 @@ now fully-verified version.
 | `cli/beat.mjs` | The unified `beat` CLI: `inspect`, `set`, `add-note`, `rm-note`, `diff` (files or git revs), `metrics`, `lint`, `render`, `daemon`, `mcp`. |
 | `scripts/verify-m1.mjs`, `verify-m3.mjs`, `spike-offline-render.mjs` | The measured proofs: M1 sync latencies, M3's closed loop (render→measure→edit→re-render, target hit to 0.01 LU), M2's 22×-realtime offline-render spike. |
 | `examples/real-groove.beat` | A real project, converted to `.beat` text — hand-inspectable, the file the proof runs use. |
-| [`docs/research/`](docs/research/) | Four deep-research reports (347 raw claims, 70 sources), **all fully adversarially verified**. |
+| [`docs/research/`](docs/research/) | Five deep-research reports (448+ raw claims, 90+ sources), **all fully adversarially verified** — incl. the engine-architecture pass that resolved the roadmap's flagged blind spot. |
 | [`docs/opendaw-notes.md`](docs/opendaw-notes.md) | Source-code archaeology — openDAW/DAWproject/automix-toolkit/node-web-audio-api read directly, not summarized secondhand. |
 | [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format spec — v0 grammar frozen and implemented, grounded in real prior art (Csound, Humdrum, DAWproject). |
 | [`docs/architecture.md`](docs/architecture.md) | Component architecture (daemon, engine, CLI, MCP, web/Tauri tiers). |

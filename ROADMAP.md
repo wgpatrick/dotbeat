@@ -342,13 +342,19 @@ several *specific numbers/quotes* don't.
   features still pending (confirmed generally by the archaeology pass reading its actual roadmap
   docs), just don't cite specific committed dates.
 
-⚠️ **Confirmed gap, not resolved by either research pass**: **zero surviving evidence** on engine
-architecture prior art — tracktion_engine, Ardour, Reaper's own architecture write-ups, Zrythm,
-LMMS — and **zero surviving evidence** on WASM-portable DSP library specifics (Rubber Band,
-signalsmith-stretch, EQ/compression/reverb/LUFS-metering libraries). Both were explicit original
-research questions; both came back empty after adversarial verification, twice. **This is a real,
-acknowledged blind spot**, not something quietly glossed over — a dedicated research pass on
-"open-source DAW engine architecture" would need to happen before M4 engine decisions get made.
+✅ **The engine-architecture blind spot is now RESOLVED** (2026-07-10): the dedicated follow-up
+pass ran with full adversarial verification — 21 sources, 23 confirmed claims, 11 synthesized
+findings, all 3-0 votes — see [`docs/research/05-engine-architecture.md`](docs/research/05-engine-architecture.md).
+Headlines: production engines converge on compiled topologically-ordered node lists executed by
+lock-free multi-threaded players (Tracktion's `tracktion::graph`, explicitly designed so
+"multi-threaded processing scales independently of graph complexity") + butler-style disk
+threads (Ardour); ALL Web Audio implementations inherit a single-render-thread architecture (no
+per-cycle multicore parallelism, by construction); and our own 0.73×-realtime offline
+measurement now has a verified explanation candidate — the Rust engine's maintainer profiling
+shows graph re-ordering (58% of execution time on many-node benchmarks, issue open) dominating
+under topology churn, which Tone.js's node-per-note voice model maximizes. ⚠️ Still open:
+WASM-portable DSP library specifics (Rubber Band, signalsmith-stretch, metering libraries) —
+that half of the gap remains unresearched.
 
 **Conclusion (holds):** the toy/serious line is drawn by the *backend*, not the file format. Ship
 the web tier; the Tauri tier is what makes "not a toy" true for recorded audio.
@@ -530,8 +536,10 @@ Unchanged in structure — the research corrected *content* within milestones, n
 - [ ] Learned auto-mix (Diff-MST — real DAW-integration precedent exists — or DMC for a
       gain/pan-only baseline) producing parameter suggestions.
 - [ ] Modulation system (Bitwig-style modulators), macro racks, MPE, note probability.
-- [ ] **Precondition:** run the dedicated engine-architecture research pass this roadmap flags as
-      missing (tracktion_engine, Ardour, Reaper, Zrythm) before committing to an engine design here.
+- [x] **Precondition met (2026-07-10):** the dedicated engine-architecture research pass ran and
+      is fully verified (`docs/research/05-engine-architecture.md`). The M4 engine design should
+      follow its findings: compiled topologically-ordered node list, lock-free multi-threaded
+      player, butler-style disk thread — with the WASM-DSP-library sub-question still open.
 
 ---
 
@@ -588,11 +596,12 @@ research-backed rankings.)*
    support we're building — meaning the demand is visible and could attract a competing effort.
    Our moat only holds if the format is genuinely better to edit than poking a live app, which
    makes Risk #4 doubly load-bearing.
-9. **Engine-architecture blind spot** — *med, new.* Two independent, fully-verified research
-   passes both came back with **zero surviving evidence** on tracktion_engine, Ardour, Reaper's
-   architecture, Zrythm, or LMMS — an explicit original research question, answered both times by
-   silence after adversarial verification. M4's engine decisions should not be made without a
-   dedicated follow-up pass on this specifically.
+9. **Engine-architecture blind spot** — *RESOLVED 2026-07-10.* The dedicated pass ran
+   (`docs/research/05-engine-architecture.md`, fully verified): M4's engine-design answer shape
+   is now known (Tracktion-graph-style compiled node lists + lock-free multi-threaded player +
+   butler disk thread), and the single-render-thread ceiling of anything Web-Audio-shaped is
+   confirmed as architectural, not incidental. Residual risk shifts to *execution* of that
+   design, plus the still-open WASM-DSP-library half of the original question.
 
 ---
 
@@ -605,12 +614,11 @@ research-backed rankings.)*
   not to copy code from verbatim.
 - **Relationship to BeatLab.** Hard fork, or does BeatLab become the "learn" mode inside this?
 - **Web-first vs Tauri-first.** Ship the web tier alone first, or build Tauri earlier?
-- **New, from this research round**: should we run a dedicated follow-up pass on (a) engine
-  architecture (tracktion_engine/Ardour/Reaper/Zrythm — zero coverage twice now), (b) live-coding
-  language comparison (Strudel/Tidal/Sonic Pi/Glicol — zero coverage twice now, despite being an
-  explicit original research question both times), and (c) direct demand-signal/survey evidence
-  (producers-who-code market signals, feature make-or-break data)? All three are honest,
-  acknowledged gaps, not just unwritten sections.
+- **Research follow-ups**: (a) engine architecture — ✅ **done 2026-07-10**
+  (`docs/research/05-engine-architecture.md`); (b) live-coding language comparison
+  (Strudel/Tidal/Sonic Pi/Glicol — zero coverage twice) — still open; (c) direct
+  demand-signal/survey evidence (producers-who-code market signals, feature make-or-break
+  data) — still open. (b) and (c) remain honest, acknowledged gaps.
 
 ---
 
