@@ -40,6 +40,7 @@ const USAGE = `usage:
   beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
   beat lint <file.wav> [--target <LUFS>] [--json]         deterministic mix findings (default target -14)
   beat render <file> [-o out.wav] --beatlab-dir <path>    (or BEATLAB_DIR env)
+  beat render --offline <file> [-o out.wav]               real engine, no browser (see phase-4 notes)
   beat daemon <file> [--port 8420]
   beat mcp                                                MCP server over stdio (all of the above as tools)
 
@@ -191,6 +192,15 @@ async function main() {
       return // serves stdio until stdin closes
     }
     case 'render': {
+      if (rest.includes('--offline')) {
+        // offline path runs in a separate process: its web-audio polyfill patches globalThis,
+        // which must not leak into the rest of the CLI
+        const { execFileSync } = await import('node:child_process')
+        const { fileURLToPath } = await import('node:url')
+        const offlineCli = fileURLToPath(new URL('./render-offline.mjs', import.meta.url))
+        execFileSync(process.execPath, [offlineCli, ...rest.filter((a) => a !== '--offline')], { stdio: 'inherit' })
+        process.exit(0)
+      }
       const { renderCommand } = await import('./render.mjs')
       await renderCommand(rest)
       process.exit(0) // render leaves event-loop stragglers (esbuild, pipes) — see render.mjs footer

@@ -21,8 +21,13 @@ function parseArgs(argv) {
   const args = {}
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--beatlab-dir') args.beatlabDir = argv[++i]
+    else if (argv[i] === '--offline') args.offline = true
   }
   return args
+}
+
+function run(args) {
+  return execFileSync(process.execPath, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
 }
 
 function beat(args, expectExit) {
@@ -35,7 +40,7 @@ function beat(args, expectExit) {
 }
 
 async function main() {
-  const { beatlabDir = process.env.BEATLAB_DIR } = parseArgs(process.argv.slice(2))
+  const { beatlabDir = process.env.BEATLAB_DIR, offline } = parseArgs(process.argv.slice(2))
   if (!beatlabDir) {
     console.error('need a beatlab checkout: pass --beatlab-dir <path> or set BEATLAB_DIR')
     process.exit(1)
@@ -47,9 +52,14 @@ async function main() {
   copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), song)
   copyFileSync(song, baseline)
 
+  const render = (input, output, port) =>
+    offline
+      ? run([join(repoRoot, 'cli', 'render-offline.mjs'), input, '-o', output, '--beatlab-dir', beatlabDir])
+      : beat(['render', input, '-o', output, '--beatlab-dir', beatlabDir, '--port', port])
+
   // 1. render + measure the baseline
-  console.log('render #1 (baseline)...')
-  beat(['render', song, '-o', join(dir, 'v0.wav'), '--beatlab-dir', beatlabDir, '--port', '5881'])
+  console.log(`render #1 (baseline${offline ? ', offline engine' : ''})...`)
+  render(song, join(dir, 'v0.wav'), '5881')
   const m0 = JSON.parse(beat(['metrics', join(dir, 'v0.wav'), '--json']))
   console.log(`baseline: ${m0.integratedLufs.toFixed(2)} LUFS, true peak ${m0.truePeakDbtp.toFixed(2)} dBTP`)
 
@@ -69,7 +79,7 @@ async function main() {
 
   // 3. re-render + re-measure
   console.log('render #2 (after edits)...')
-  beat(['render', song, '-o', join(dir, 'v1.wav'), '--beatlab-dir', beatlabDir, '--port', '5882'])
+  render(song, join(dir, 'v1.wav'), '5882')
   const m1 = JSON.parse(beat(['metrics', join(dir, 'v1.wav'), '--json']))
   console.log(`after: ${m1.integratedLufs.toFixed(2)} LUFS (was ${m0.integratedLufs.toFixed(2)}, target ${target.toFixed(2)})`)
 

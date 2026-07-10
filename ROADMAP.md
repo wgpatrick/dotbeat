@@ -507,7 +507,13 @@ Unchanged in structure — the research corrected *content* within milestones, n
       by design and sits on top of `beat mcp` — not a CI-testable artifact.)*
 - [ ] Real arrangement timeline (arbitrary length, tempo/time-sig changes) — biggest pure-eng
       lift; beatlab-side, still open.
-- [ ] Engine extraction onto `node-web-audio-api` (justified by Phase 2's 22× spike; second slice).
+- [x] Engine extraction onto `node-web-audio-api` (`beat render --offline`, `docs/phase-4-plan.md`):
+      the REAL engine, unmodified, bundled headless — closed loop fully offline, self-consistent
+      to 0.00 LU, no browser/vite. **Honest caveats, measured:** full-graph DSP runs 0.73×
+      realtime (the 22× spike didn't extrapolate — loop is 2-3× faster overall, not 22×), and
+      two real cross-engine divergences surfaced (PeriodicWave negative-freq FM explosion,
+      mitigated; constant 9.5 LU compressor-makeup offset, measured and reported). Chromium
+      stays the reference (D5) for exactly this reason.
 - [x] **Exit criteria:** the full tool chain of the criterion is proven end to end and
       deterministic (`scripts/verify-m3.mjs`: render → metrics → proposed diff → re-render →
       LUFS moved 3.00 → 0.01 LU from target). The literal Claude-in-the-driver's-seat run is an
@@ -562,9 +568,13 @@ research-backed rankings.)*
    parity as a direction not a milestone. Underscored by the confirmed finding that we have *zero*
    verified evidence on engine architecture or DSP library portability — parity work can't even be
    properly scoped yet.
-6. **Node/browser audio divergence** — *med, more confidently understood now.* `node-web-audio-api`
-   is confirmed to run real Tone.js code; the exact wiring pattern is documented (§5). Still keep
-   headless Chromium as the fidelity-guaranteed reference.
+6. **Node/browser audio divergence** — *med, now MEASURED (Phase 4), no longer hypothetical.*
+   Two real divergences found running the actual engine: node-web-audio-api's PeriodicWave
+   oscillators explode under negative-frequency FM (upstream bug, mitigated in our runner), and
+   the two engines' DynamicsCompressor auto-makeup formulas differ (constant 9.5 LU offset on
+   the default groove — linear, so within-path deltas stay exact). Also: full-graph DSP is 0.73×
+   realtime in the Rust engine vs the 22× a simple graph suggested. Keeping headless Chromium as
+   the fidelity-guaranteed reference (D5) is validated, not just prudent.
 7. **Learned auto-mix below pro quality** — *med.* Confirmed at "medium" — as of the (2022,
    explicitly dated) ISMIR tutorial, deep-learning automix still trails professional engineers,
    and no 2024-2026 source in this research closes that gap. Mitigation unchanged: ship as

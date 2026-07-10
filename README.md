@@ -21,6 +21,7 @@ node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat lead.cutoff 900   # prints "lead: cutoff 3200 -> 900"
 node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical edit list, not line noise
 node cli/beat.mjs render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
+node cli/beat.mjs render --offline examples/real-groove.beat -o out.wav   # the REAL engine, no browser
 node cli/beat.mjs metrics out.wav                                 # LUFS (BS.1770), true peak, crest, spectrum, stereo
 node cli/beat.mjs lint out.wav                                    # deterministic mix findings + .beat edits to try
 node cli/beat.mjs mcp                                             # all of the above as MCP tools for an AI agent
@@ -49,7 +50,7 @@ now fully-verified version.
 
 | Path | What |
 |---|---|
-| [`docs/phase-3-plan.md`](docs/phase-3-plan.md) | **Start here for what's built.** M3 first slice (DSP metrics engine + mix lint + MCP server + the closed loop hitting its loudness target to 0.01 LU), status COMPLETE. Prior slices: [`phase-2-plan.md`](docs/phase-2-plan.md) (CLI + semantic diff), [`phase-1-plan.md`](docs/phase-1-plan.md) (daemon + sync), [`phase-0-plan.md`](docs/phase-0-plan.md) (format + render). |
+| [`docs/phase-4-plan.md`](docs/phase-4-plan.md) | **Start here for what's built.** The real engine offline (`beat render --offline`, no browser; closed loop self-consistent to 0.00 LU; two cross-engine divergences found, measured, documented). Prior slices: [`phase-3-plan.md`](docs/phase-3-plan.md) (metrics/lint/MCP), [`phase-2-plan.md`](docs/phase-2-plan.md) (CLI + semantic diff), [`phase-1-plan.md`](docs/phase-1-plan.md) (daemon + sync), [`phase-0-plan.md`](docs/phase-0-plan.md) (format + render). |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, milestones, risks. |
 | `src/core/` | The `.beat` format: types, parser, serializer, converter (synth + drum tracks), **semantic diff**, edit primitives, inspect. Pure TS, zero deps on beatlab/React/Tone.js. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over a 3-endpoint HTTP/SSE protocol, echo suppression by canonical-text comparison. |
@@ -107,7 +108,7 @@ inline rather than silently fixed.
 
 ## Status
 
-**Phases 0-3 (ROADMAP M0/M1/M2 + M3's first slice) complete.** The core loop is real, not argued: a
+**Phases 0-4 (ROADMAP M0/M1/M2 + both M3 slices minus arrangement) complete.** The core loop is real, not argued: a
 hand-inspectable `.beat` file — the *whole* groove, drums included — is the source of truth for
 a live GUI session. Turn a knob in the GUI and `git diff` shows exactly one changed line
 (262 ms, measured). Edit the file in an editor and the GUI hot-reloads without stopping playback
@@ -119,6 +120,9 @@ engine (integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, s
 measured a real render round trip to **0.01 LU of its target**, `beat lint` turns those numbers
 into deterministic findings that name the `.beat` edit to try, and `beat mcp` exposes the whole
 toolchain to AI agents — with every number coming from DSP, never a model (decision D2, built
-exactly as the verified research demanded). An offline-render spike measured real Tone.js on
-`node-web-audio-api` at **22× faster than realtime**, green-lighting the engine extraction as
-the next engineering push. See [`docs/phase-3-plan.md`](docs/phase-3-plan.md)'s "Result".
+exactly as the verified research demanded). And the real engine now renders
+**offline with no browser at all** (`beat render --offline`): beatlab's unmodified engine+store
+bundled headlessly, the full closed loop self-consistent to 0.00 LU in 23 s of wall clock — with
+the honest measurements attached (full-graph DSP is 0.73× realtime, not the 22× a simple-graph
+spike suggested, and two real Chromium-vs-Rust Web Audio divergences were found, mitigated, and
+documented). See [`docs/phase-4-plan.md`](docs/phase-4-plan.md)'s "Result".
