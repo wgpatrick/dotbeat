@@ -23,6 +23,7 @@ node cli/beat.mjs set examples/real-groove.beat lead.cutoff 900   # prints "lead
 node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical edit list, not line noise
 node cli/beat.mjs render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
 node cli/beat.mjs render --offline examples/real-groove.beat -o out.wav   # the REAL engine, no browser
+bash scripts/build-patched-webaudio.sh   # one-time: builds the audio engine against upstream's fixed main
 node cli/beat.mjs metrics out.wav                                 # LUFS (BS.1770), true peak, crest, spectrum, stereo
 node cli/beat.mjs lint out.wav                                    # deterministic mix findings + .beat edits to try
 node cli/beat.mjs mcp                                             # all of the above as MCP tools for an AI agent

@@ -103,3 +103,19 @@ Next candidates, in order of leverage: the interactive Claude-over-MCP session (
 needs now exists, and renders are CI-cheap); upstream fixes/report for the two divergences;
 the ROADMAP's flagged research passes (engine architecture — now with a concrete motivating
 question: why is the Rust graph 30× slower than the spike graph); arrangement timeline.
+
+## Addendum (2026-07-10, later): upstream-independence pass — two divergences resolved, one reattributed
+
+Follow-up work took "wait for upstream" off the critical path (docs/upstream/ has the revised
+full story):
+
+- **Tier 2:** bitcrush works offline via a WaveShaper-backed stand-in (its DSP is pure
+  quantization); verified to produce real quantization harmonics, mix-0 renders unchanged.
+- **Tier 3:** deeper bisection **corrected Result item 2** — the FM explosion is in the native
+  `square`/`sawtooth` types (PeriodicWave was always fine), and it's **already fixed on the
+  crate's main branch, just unreleased**. `scripts/build-patched-webaudio.sh` builds the binding
+  against the fixed crate (pinned revs); the hat sine-carrier mitigation is deleted, and
+  verify-m4 now matches the reference's presence+air share to **0.01%**.
+- **Result item 3 reclassified:** the Rust compressor implements the *spec's* makeup formula —
+  the 9.5 LU offset is Chromium-vs-spec latitude, not an upstream bug. Calibrate (D5), don't
+  patch.
