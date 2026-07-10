@@ -79,3 +79,16 @@ CC0 subset is programmatically isolable via the APIv2 license filter, but aggreg
 have documented mislabeling (LMMS 2014). Honest coverage gap: zero claims survived on
 preset-craft technique or the pro-vs-amateur craft gap — those remain open (blog-grade sources
 only; re-research against book/curriculum-grade material).
+
+## 08 — Variation-and-taste loop prior art (added 2026-07-10)
+
+[`08-variation-loop-prior-art.md`](08-variation-loop-prior-art.md) — the owner's variation-loop
+concept researched: 5 angles, 23 sources, 113 claims extracted, 25 verified — **25 confirmed
+3-0, zero refuted**. Headlines: the loop is a documented lineage (Eno 1996 → MutaSynth 2001 →
+Evosynth 2016 → Edisyn 2019) with converged design numbers (batch 9-16, rank-3 selection, a
+few-hundred-audition hard ceiling, usable sounds in 2-12 generations); exploratory methods beat
+direct programming 7.1-7.5 vs 5.9/10 in the one controlled study (n=28); the proven fatigue
+mitigations (preference surrogate + clustering, then preferential BO) form the learning ladder
+for the scoring exhaust. Honest gaps: zero surviving claims on neural sound-matching data
+regimes, shipped-product precedent, or PBO-on-audio sample efficiency — the audio transfer of
+Sequential Gallery is unproven and would be a genuine contribution.

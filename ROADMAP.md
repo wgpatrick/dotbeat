@@ -475,9 +475,17 @@ speed, the human supplies taste — which completes D2's triangle (metrics judge
 humans judge taste, models narrate). The scoring exhaust is unusually clean preference data
 (controlled parameter grids → (params, render, score) triples), opening a ladder: in-context
 steering → classical preference model / interactive Bayesian optimization → possibly a trained
-patch generator. Tooling shape: `beat vary` + `beat score` + a git-tracked scores log. Research
-pass queued on the substantial prior art (interactive evolutionary synth-patch search,
-preference-based optimization for audio, sound-matching).
+patch generator. Tooling shape: `beat vary` + `beat score` + a git-tracked scores log.
+*Research pass complete (2026-07-10, 25/25 claims confirmed 3-0 — see
+[docs/research/08-variation-loop-prior-art.md](docs/research/08-variation-loop-prior-art.md)):*
+the loop is a documented lineage (Eno 1996 → MutaSynth → Evosynth → Edisyn) with converged
+design numbers — batch 9-16 per round, ranked pick of ≤3 (not sliders), one variation-amount
+knob, mutation scoped to one parameter group at a time through musically-nonlinear ranges, a
+hard few-hundred-audition ceiling, usable sounds in 2-12 generations, and "design for
+exploration, not target-matching" (exploratory beat direct programming 7.1-7.5 vs 5.9/10,
+n=28, p=.05). Fatigue mitigations = the learning ladder: hand-tuned operators → preference
+surrogate + clustering → preferential BO (gallery/plane-search — unproven on audio; running
+that experiment would be a genuine contribution).
 
 ### Sound-quality strategy *(added 2026-07-10 — verified research: [docs/research/07-sound-design-sources.md](docs/research/07-sound-design-sources.md))*
 
