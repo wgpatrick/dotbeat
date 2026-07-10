@@ -13,6 +13,7 @@ export interface ExternalTrack {
   notes: { id: string; pitch: number; start: number; duration: number; velocity: number }[]
   synth: Record<string, unknown>
   pattern?: Record<string, number[]>
+  clips?: { id: string; name?: string; notes: ExternalTrack['notes']; pattern?: Record<string, number[]>; automation?: Record<string, unknown> }[]
 }
 export interface ExternalSandboxPayload {
   v: number
@@ -20,9 +21,11 @@ export interface ExternalSandboxPayload {
   bpm: number
   loopBars: number
   selectedTrackId: string
+  scenes?: { id: string; name?: string; clipIds: Record<string, string> }[]
+  arrangement?: { enabled?: boolean; mode?: string | null; timeline?: { sceneId: string; bars: number }[] }
 }
 
-const BEAT_FORMAT_VERSION = '0.3'
+const BEAT_FORMAT_VERSION = '0.4'
 
 /** SynthParams fields the format deliberately does NOT model (each needs grammar design of its
  * own — large arrays, ordered lists, or redundant pairs; see docs/phase-5-plan.md). These are
@@ -52,6 +55,11 @@ export interface ConversionReport {
   /** True if selectedTrackId pointed at a track that got dropped (e.g. a drum track) — v0 falls
    * back to the first remaining synth track. */
   selectedTrackFellBack: boolean
+  /** v0.4: structural things the format deliberately doesn't carry, dropped during conversion —
+   * clip automation ("<track>.<clip>.automation"), scene display names ("scenes[].name"),
+   * non-timeline arrangement modes ("arrangement(mode=energy)"), and scene slots that pointed at
+   * nonexistent clips ("scene <id>: dangling slot <track>"). */
+  droppedFields: string[]
 }
 
 function isOscType(x: unknown): x is OscType {
@@ -133,7 +141,7 @@ function toBeatPattern(source: Record<string, number[]> | undefined, trackId: st
  * both the document and a report of exactly what got dropped, so callers (and tests) can assert
  * on the loss being *exactly* the expected, documented set — not a silent surprise. */
 export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): { doc: BeatDocument; report: ConversionReport } {
-  const report: ConversionReport = { droppedTracks: [], droppedSynthParams: {}, selectedTrackFellBack: false }
+  const report: ConversionReport = { droppedTracks: [], droppedSynthParams: {}, selectedTrackFellBack: false, droppedFields: [] }
 
   const tracks: BeatTrack[] = payload.tracks.map((t) => ({
     id: t.id,
@@ -141,6 +149,15 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     color: t.color,
     kind: t.kind,
     synth: toBeatSynth(t.synth, t.id, report),
+    clips: (t.clips ?? []).map((c) => {
+      if (c.automation && Object.keys(c.automation).length > 0) report.droppedFields.push(`${t.id}.${c.id}.automation`)
+      if (c.name !== undefined && c.name !== c.id) report.droppedFields.push(`${t.id}.${c.id}.name`)
+      return {
+        id: c.id,
+        notes: t.kind === 'synth' ? c.notes.map(toBeatNote) : [],
+        ...(t.kind === 'drums' ? { pattern: toBeatPattern(c.pattern, `${t.id} clip ${c.id}`) } : {}),
+      }
+    }),
     notes: t.kind === 'synth' ? t.notes.map(toBeatNote) : [],
     ...(t.kind === 'drums' ? { pattern: toBeatPattern(t.pattern, t.id) } : {}),
   }))
@@ -151,12 +168,47 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     selectedTrack = tracks[0]?.id ?? ''
   }
 
+  // v0.4 scenes: keep only slots that resolve to a real clip on a real track — the store keeps
+  // these consistent (deleteClip unmaps), so dangling slots are data corruption worth reporting,
+  // not worth failing an otherwise-good conversion for. Scene display names aren't modeled.
+  const trackById = new Map(tracks.map((t) => [t.id, t]))
+  const scenes = (payload.scenes ?? []).map((s) => {
+    if (s.name !== undefined && s.name !== s.id) report.droppedFields.push(`scenes[${s.id}].name`)
+    const slots: Record<string, string> = {}
+    for (const [trackId, clipId] of Object.entries(s.clipIds)) {
+      const track = trackById.get(trackId)
+      if (!track || !track.clips.some((c) => c.id === clipId)) {
+        report.droppedFields.push(`scene ${s.id}: dangling slot ${trackId}`)
+        continue
+      }
+      slots[trackId] = clipId
+    }
+    return { id: s.id, slots }
+  })
+
+  // v0.4 song: only the timeline arrangement mode converts; energy/structure are lesson-side
+  // features the format deliberately doesn't model.
+  let song: BeatDocument['song'] = null
+  const arr = payload.arrangement
+  if (arr?.enabled && arr.mode === 'timeline' && arr.timeline && arr.timeline.length > 0) {
+    const sceneIds = new Set(scenes.map((s) => s.id))
+    song = arr.timeline.map((e) => {
+      if (!sceneIds.has(e.sceneId)) throw new Error(`arrangement timeline references unknown scene "${e.sceneId}"`)
+      if (!Number.isInteger(e.bars) || e.bars < 1 || e.bars > 64) throw new Error(`arrangement timeline section bars must be an integer 1-64, got ${String(e.bars)}`)
+      return { scene: e.sceneId, bars: e.bars }
+    })
+  } else if (arr?.enabled && arr.mode && arr.mode !== 'timeline') {
+    report.droppedFields.push(`arrangement(mode=${arr.mode})`)
+  }
+
   const doc: BeatDocument = {
     formatVersion: BEAT_FORMAT_VERSION,
     bpm: payload.bpm,
     loopBars: payload.loopBars,
     selectedTrack,
     tracks,
+    scenes,
+    song,
   }
   return { doc, report }
 }
@@ -176,13 +228,21 @@ export interface PartialTrack {
   notes: BeatNote[]
   synth: Partial<Record<keyof BeatSynth, unknown>>
   pattern?: BeatDrumPattern
+  /** v0.4: clips ride the partial in beatlab's own Clip shape (name = id — the format has no
+   * separate display name; pattern always present because beatlab clips carry one). */
+  clips?: { id: string; name: string; notes: BeatNote[]; pattern: BeatDrumPattern }[]
 }
+
+const EMPTY_PATTERN = (): BeatDrumPattern =>
+  Object.fromEntries(DRUM_LANES.map((lane) => [lane, Array<number>(16).fill(0)])) as BeatDrumPattern
 
 export function beatDocumentToPartialTracks(doc: BeatDocument): {
   bpm: number
   loopBars: number
   selectedTrackId: string
   tracks: PartialTrack[]
+  scenes: { id: string; name: string; clipIds: Record<string, string> }[]
+  song: { sceneId: string; bars: number }[] | null
 } {
   return {
     bpm: doc.bpm,
@@ -196,6 +256,18 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
       notes: t.notes,
       synth: { ...t.synth },
       ...(t.pattern ? { pattern: structuredClone(t.pattern) } : {}),
+      ...(t.clips.length > 0
+        ? {
+            clips: t.clips.map((c) => ({
+              id: c.id,
+              name: c.id,
+              notes: c.notes.map((n) => ({ ...n })),
+              pattern: c.pattern ? structuredClone(c.pattern) : EMPTY_PATTERN(),
+            })),
+          }
+        : {}),
     })),
+    scenes: doc.scenes.map((s) => ({ id: s.id, name: s.id, clipIds: { ...s.slots } })),
+    song: doc.song ? doc.song.map((x) => ({ sceneId: x.scene, bars: x.bars })) : null,
   }
 }

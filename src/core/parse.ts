@@ -1,4 +1,4 @@
-import type { BeatDocument, BeatDrumPattern, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import type { BeatClip, BeatDocument, BeatDrumPattern, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
 import { DRUM_LANES, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
@@ -39,6 +39,8 @@ function parseIntStrict(tok: string, lineNo: number, field: string): number {
   return Number(tok)
 }
 
+const SLUG_RE = /^[a-zA-Z0-9_-]+$/
+
 // Parses .beat v0 text into a BeatDocument. Strict on purpose (every synth param required, no
 // silently-applied defaults, unknown keywords/wrong arities are errors) — see format-spec.md for
 // why: a hand-edited or agent-edited file that's missing a field should fail loudly, not produce
@@ -52,9 +54,15 @@ export function parse(text: string): BeatDocument {
   let selectedTrack: string | null = null
   const tracks: BeatTrack[] = []
   const trackIds = new Set<string>()
+  const scenes: BeatScene[] = []
+  const sceneIds = new Set<string>()
+  let song: BeatSongSection[] | null = null
 
   let currentTrack: BeatTrack | null = null
+  let currentClip: BeatClip | null = null
+  let currentScene: BeatScene | null = null
   let inSynth = false
+  let inSong = false
   let synthSeen = new Set<keyof BeatSynth>()
 
   function closeSynthIfOpen(lineNo: number) {
@@ -64,15 +72,51 @@ export function parse(text: string): BeatDocument {
     inSynth = false
   }
 
-  // A drum track must arrive complete: all five lanes, equal step counts. Checked when the track
-  // ends (next `track` line or EOF) — the same fail-loudly stance the synth block takes.
+  // A drum pattern (track-level or clip-level) must arrive complete: all five lanes, equal step
+  // counts — the same fail-loudly stance the synth block takes.
+  function checkDrumPattern(pattern: BeatDrumPattern | undefined, what: string, lineNo: number) {
+    const p = pattern ?? ({} as BeatDrumPattern)
+    const missing = DRUM_LANES.filter((lane) => !(lane in p))
+    if (missing.length) throw new BeatParseError(`${what} is missing pattern lane(s): ${missing.join(', ')}`, lineNo)
+    const lengths = new Set(DRUM_LANES.map((lane) => p[lane].length))
+    if (lengths.size > 1) throw new BeatParseError(`${what} has pattern lanes of unequal length`, lineNo)
+  }
+
+  function closeClipIfOpen(lineNo: number) {
+    if (!currentClip || !currentTrack) return
+    if (currentTrack.kind === 'drums') checkDrumPattern(currentClip.pattern, `clip "${currentClip.id}" in drum track "${currentTrack.id}"`, lineNo)
+    currentClip = null
+  }
+
   function closeTrackIfOpen(lineNo: number) {
+    closeClipIfOpen(lineNo)
     if (!currentTrack || currentTrack.kind !== 'drums') return
-    const pattern = currentTrack.pattern ?? ({} as BeatDrumPattern)
-    const missing = DRUM_LANES.filter((lane) => !(lane in pattern))
-    if (missing.length) throw new BeatParseError(`drum track "${currentTrack.id}" is missing pattern lane(s): ${missing.join(', ')}`, lineNo)
-    const lengths = new Set(DRUM_LANES.map((lane) => pattern[lane].length))
-    if (lengths.size > 1) throw new BeatParseError(`drum track "${currentTrack.id}" has pattern lanes of unequal length`, lineNo)
+    checkDrumPattern(currentTrack.pattern, `drum track "${currentTrack.id}"`, lineNo)
+  }
+
+  function parseNoteLine(tokens: string[], lineNo: number): BeatNote {
+    if (tokens.length !== 6) throw new BeatParseError('note expects exactly 5 values: <id> <pitch> <start> <duration> <velocity>', lineNo)
+    const [, id, pitchTok, startTok, durTok, velTok] = tokens as [string, string, string, string, string, string]
+    const pitch = parseIntStrict(pitchTok, lineNo, 'note pitch')
+    if (pitch < 0 || pitch > 127) throw new BeatParseError(`note pitch must be 0-127, got ${pitch}`, lineNo)
+    const start = parseIntStrict(startTok, lineNo, 'note start')
+    const duration = parseIntStrict(durTok, lineNo, 'note duration')
+    if (duration < 1) throw new BeatParseError(`note duration must be >= 1 step, got ${duration}`, lineNo)
+    const velocity = parseFloatStrict(velTok, lineNo, 'note velocity')
+    return { id, pitch, start, duration, velocity }
+  }
+
+  function parsePatternLine(tokens: string[], existing: BeatDrumPattern | undefined, lineNo: number): { lane: DrumLane; steps: number[] } {
+    if (tokens.length < 3) throw new BeatParseError('pattern expects a lane name and at least 1 step velocity', lineNo)
+    const lane = tokens[1]!
+    if (!isDrumLane(lane)) throw new BeatParseError(`unknown drum lane "${lane}" (expected one of ${DRUM_LANES.join('|')})`, lineNo)
+    if (existing?.[lane]) throw new BeatParseError(`duplicate pattern lane "${lane}"`, lineNo)
+    const steps = tokens.slice(2).map((tok) => {
+      const v = parseFloatStrict(tok, lineNo, `pattern ${lane} step`)
+      if (v < 0 || v > 1) throw new BeatParseError(`pattern step velocities must be 0..1, got ${v}`, lineNo)
+      return v
+    })
+    return { lane, steps }
   }
 
   for (let i = 0; i < rawLines.length; i++) {
@@ -103,6 +147,7 @@ export function parse(text: string): BeatDocument {
         if (tokens.length !== 2) throw new BeatParseError('selected_track expects exactly 1 value', lineNo)
         selectedTrack = tokens[1]!
       } else if (keyword === 'track') {
+        if (scenes.length > 0 || song !== null) throw new BeatParseError('track blocks must come before scene/song blocks (canonical order)', lineNo)
         closeTrackIfOpen(lineNo)
         if (tokens.length !== 5) throw new BeatParseError('track expects exactly 4 values: <id> <name> <color> <kind>', lineNo)
         const [, id, name, color, kind] = tokens as [string, string, string, string, string]
@@ -118,9 +163,29 @@ export function parse(text: string): BeatDocument {
           // core 9 are placeholders until the synth block fills them (all required); the v0.3
           // optional fields start at their canonical defaults (elision contract).
           synth: { osc: 'sawtooth', volume: 0, cutoff: 0, resonance: 0, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0, ...defaultSynthFields() } as BeatSynth,
+          clips: [],
           notes: [],
         }
         tracks.push(currentTrack)
+      } else if (keyword === 'scene') {
+        closeTrackIfOpen(lineNo)
+        currentTrack = null
+        if (inSong || song !== null) throw new BeatParseError('scene blocks must come before the song block (canonical order)', lineNo)
+        if (tokens.length !== 2) throw new BeatParseError('scene expects exactly 1 value: <id>', lineNo)
+        const id = tokens[1]!
+        if (!SLUG_RE.test(id)) throw new BeatParseError(`scene ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
+        if (sceneIds.has(id)) throw new BeatParseError(`duplicate scene id "${id}"`, lineNo)
+        sceneIds.add(id)
+        currentScene = { id, slots: {} }
+        scenes.push(currentScene)
+      } else if (keyword === 'song') {
+        closeTrackIfOpen(lineNo)
+        currentTrack = null
+        currentScene = null
+        if (song !== null) throw new BeatParseError('duplicate song block', lineNo)
+        if (tokens.length !== 1) throw new BeatParseError('song takes no values on its own line', lineNo)
+        song = []
+        inSong = true
       } else {
         throw new BeatParseError(`unexpected top-level keyword "${keyword}"`, lineNo)
       }
@@ -128,37 +193,49 @@ export function parse(text: string): BeatDocument {
     }
 
     if (level === 1) {
+      // scene and song sub-lines
+      if (currentScene && keyword === 'slot') {
+        if (tokens.length !== 3) throw new BeatParseError('slot expects exactly 2 values: <track> <clip>', lineNo)
+        const [, trackId, clipId] = tokens as [string, string, string]
+        if (trackId in currentScene.slots) throw new BeatParseError(`scene "${currentScene.id}" already has a slot for track "${trackId}"`, lineNo)
+        currentScene.slots[trackId] = clipId
+        continue
+      }
+      if (inSong && keyword === 'section') {
+        if (tokens.length !== 3) throw new BeatParseError('section expects exactly 2 values: <scene> <bars>', lineNo)
+        const [, sceneId, barsTok] = tokens as [string, string, string]
+        const bars = parseIntStrict(barsTok, lineNo, 'section bars')
+        if (bars < 1 || bars > 64) throw new BeatParseError(`section bars must be 1-64, got ${bars}`, lineNo)
+        song!.push({ scene: sceneId, bars })
+        continue
+      }
       if (!currentTrack) throw new BeatParseError(`"${keyword}" outside of any track`, lineNo)
       if (keyword === 'synth') {
         closeSynthIfOpen(lineNo)
+        closeClipIfOpen(lineNo)
         if (tokens.length !== 1) throw new BeatParseError('synth takes no values on its own line', lineNo)
         inSynth = true
         synthSeen = new Set()
         continue
       }
       closeSynthIfOpen(lineNo)
+      if (keyword === 'clip') {
+        closeClipIfOpen(lineNo)
+        if (tokens.length !== 2) throw new BeatParseError('clip expects exactly 1 value: <id>', lineNo)
+        const id = tokens[1]!
+        if (!SLUG_RE.test(id)) throw new BeatParseError(`clip ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
+        if (currentTrack.clips.some((c) => c.id === id)) throw new BeatParseError(`duplicate clip id "${id}" on track "${currentTrack.id}"`, lineNo)
+        currentClip = { id, notes: [] }
+        currentTrack.clips.push(currentClip)
+        continue
+      }
+      closeClipIfOpen(lineNo)
       if (keyword === 'note') {
         if (currentTrack.kind !== 'synth') throw new BeatParseError(`note lines only belong in synth tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
-        if (tokens.length !== 6) throw new BeatParseError('note expects exactly 5 values: <id> <pitch> <start> <duration> <velocity>', lineNo)
-        const [, id, pitchTok, startTok, durTok, velTok] = tokens as [string, string, string, string, string, string]
-        const pitch = parseIntStrict(pitchTok, lineNo, 'note pitch')
-        if (pitch < 0 || pitch > 127) throw new BeatParseError(`note pitch must be 0-127, got ${pitch}`, lineNo)
-        const start = parseIntStrict(startTok, lineNo, 'note start')
-        const duration = parseIntStrict(durTok, lineNo, 'note duration')
-        if (duration < 1) throw new BeatParseError(`note duration must be >= 1 step, got ${duration}`, lineNo)
-        const velocity = parseFloatStrict(velTok, lineNo, 'note velocity')
-        currentTrack.notes.push({ id, pitch, start, duration, velocity })
+        currentTrack.notes.push(parseNoteLine(tokens, lineNo))
       } else if (keyword === 'pattern') {
         if (currentTrack.kind !== 'drums') throw new BeatParseError(`pattern lines only belong in drum tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
-        if (tokens.length < 3) throw new BeatParseError('pattern expects a lane name and at least 1 step velocity', lineNo)
-        const lane = tokens[1]!
-        if (!isDrumLane(lane)) throw new BeatParseError(`unknown drum lane "${lane}" (expected one of ${DRUM_LANES.join('|')})`, lineNo)
-        if (currentTrack.pattern?.[lane]) throw new BeatParseError(`duplicate pattern lane "${lane}"`, lineNo)
-        const steps = tokens.slice(2).map((tok) => {
-          const v = parseFloatStrict(tok, lineNo, `pattern ${lane} step`)
-          if (v < 0 || v > 1) throw new BeatParseError(`pattern step velocities must be 0..1, got ${v}`, lineNo)
-          return v
-        })
+        const { lane, steps } = parsePatternLine(tokens, currentTrack.pattern, lineNo)
         currentTrack.pattern = { ...(currentTrack.pattern ?? ({} as BeatDrumPattern)), [lane]: steps }
       } else {
         throw new BeatParseError(`unexpected keyword "${keyword}" inside a track`, lineNo)
@@ -167,6 +244,22 @@ export function parse(text: string): BeatDocument {
     }
 
     if (level === 2) {
+      // clip content (notes for synth clips, pattern lanes for drum clips)
+      if (currentClip && currentTrack && !inSynth) {
+        if (keyword === 'note') {
+          if (currentTrack.kind !== 'synth') throw new BeatParseError(`note lines only belong in synth-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+          currentClip.notes.push(parseNoteLine(tokens, lineNo))
+          continue
+        }
+        if (keyword === 'pattern') {
+          if (currentTrack.kind !== 'drums') throw new BeatParseError(`pattern lines only belong in drum-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+          const { lane, steps } = parsePatternLine(tokens, currentClip.pattern, lineNo)
+          currentClip.pattern = { ...(currentClip.pattern ?? ({} as BeatDrumPattern)), [lane]: steps }
+          continue
+        }
+        throw new BeatParseError(`unexpected keyword "${keyword}" inside a clip`, lineNo)
+      }
+
       if (!currentTrack || !inSynth) throw new BeatParseError(`"${keyword}" outside of a synth block`, lineNo)
       if (tokens.length !== 2) throw new BeatParseError(`"${keyword}" expects exactly 1 value`, lineNo)
       const value = tokens[1]!
@@ -216,11 +309,29 @@ export function parse(text: string): BeatDocument {
 
   closeSynthIfOpen(rawLines.length + 1)
   closeTrackIfOpen(rawLines.length + 1)
+  const eof = rawLines.length + 1
 
   // trackref validation happens after all tracks exist (forward references are legal)
   for (const t of tracks) {
     if (t.synth.duckSource !== null && !trackIds.has(t.synth.duckSource)) {
-      throw new BeatParseError(`track "${t.id}": duckSource references unknown track "${t.synth.duckSource}"`, rawLines.length + 1)
+      throw new BeatParseError(`track "${t.id}": duckSource references unknown track "${t.synth.duckSource}"`, eof)
+    }
+  }
+
+  // v0.4 reference validation: every slot names a real track and a clip that exists on it;
+  // every song section names a real scene. Fail loudly — a dangling reference is a corrupt song.
+  const trackById = new Map(tracks.map((t) => [t.id, t]))
+  for (const scene of scenes) {
+    for (const [trackId, clipId] of Object.entries(scene.slots)) {
+      const track = trackById.get(trackId)
+      if (!track) throw new BeatParseError(`scene "${scene.id}": slot references unknown track "${trackId}"`, eof)
+      if (!track.clips.some((c) => c.id === clipId)) throw new BeatParseError(`scene "${scene.id}": slot references unknown clip "${clipId}" on track "${trackId}"`, eof)
+    }
+  }
+  if (song) {
+    if (song.length === 0) throw new BeatParseError('song block must contain at least one section', eof)
+    for (const section of song) {
+      if (!sceneIds.has(section.scene)) throw new BeatParseError(`song section references unknown scene "${section.scene}"`, eof)
     }
   }
 
@@ -229,5 +340,5 @@ export function parse(text: string): BeatDocument {
   if (loopBars === null) throw new BeatParseError('missing loop_bars', 1)
   if (selectedTrack === null) throw new BeatParseError('missing selected_track', 1)
 
-  return { formatVersion, bpm, loopBars, selectedTrack, tracks }
+  return { formatVersion, bpm, loopBars, selectedTrack, tracks, scenes, song }
 }

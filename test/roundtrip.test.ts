@@ -127,6 +127,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
         color: '#56b6c2',
         kind: 'synth',
         synth: { osc: 'sawtooth', volume: -8, cutoff: 700, resonance: 0.8, attack: 0.005, decay: 0.25, sustain: 0.3, release: 0.15, pan: 0, ...defaultSynthFields() },
+        clips: [],
         notes: [
           { id: 'u1', pitch: 33, start: 0, duration: 2, velocity: 0.8 },
           { id: 'u2', pitch: 33, start: 4, duration: 2, velocity: 0.8 },
@@ -138,6 +139,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
         color: '#e35d5d',
         kind: 'drums',
         synth: { osc: 'sawtooth', volume: -10, cutoff: 9000, resonance: 0.8, attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.3, pan: 0, ...defaultSynthFields() },
+        clips: [],
         notes: [],
         pattern: {
           kick: [0.9, 0, 0, 0],
@@ -148,6 +150,8 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
         },
       },
     ],
+    scenes: [],
+    song: null,
   }
   const round = parse(serialize(doc))
   assert.deepEqual(round, doc)
@@ -177,9 +181,12 @@ test('formatNumber stabilizes floating-point noise so round-tripping is idempote
           pan: 0,
           ...defaultSynthFields(),
         },
+        clips: [],
         notes: [],
       },
     ],
+    scenes: [],
+    song: null,
   }
   const text = serialize(doc)
   assert.match(text, /volume 0\.3\n/)

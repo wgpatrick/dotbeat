@@ -174,6 +174,7 @@ export function addTrack(
     color,
     kind,
     synth: { ...INIT_SYNTH },
+    clips: [],
     notes: [],
     ...(kind === 'drums' ? { pattern: emptyBeatPattern() } : {}),
   }
@@ -185,9 +186,19 @@ export function addTrack(
 export function removeTrack(doc: BeatDocument, trackId: string): { doc: BeatDocument; track: BeatTrack } {
   const track = findTrack(doc, trackId)
   if (doc.tracks.length === 1) throw new BeatEditError('cannot remove the last track — a document keeps at least one')
-  const tracks = doc.tracks.filter((t) => t.id !== trackId)
+  // Clean up every reference to the removed track, or the canonical output would fail its own
+  // parse: duckSource refs fall back to none, scene slots for the track are dropped.
+  const tracks = doc.tracks
+    .filter((t) => t.id !== trackId)
+    .map((t) => (t.synth.duckSource === trackId ? { ...t, synth: { ...t.synth, duckSource: null } } : t))
+  const scenes = doc.scenes.map((s) => {
+    if (!(trackId in s.slots)) return s
+    const slots = { ...s.slots }
+    delete slots[trackId]
+    return { ...s, slots }
+  })
   const selectedTrack = doc.selectedTrack === trackId ? tracks[0]!.id : doc.selectedTrack
-  return { doc: { ...doc, tracks, selectedTrack }, track }
+  return { doc: { ...doc, tracks, scenes, selectedTrack }, track }
 }
 
 /** A fresh document with one starter synth track — what `beat init` writes. */
@@ -196,7 +207,49 @@ export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: 
   const loopBars = opts.loopBars ?? 2
   if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
   if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
-  const base: BeatDocument = { formatVersion: '0.2', bpm, loopBars, selectedTrack: '', tracks: [] }
+  const base: BeatDocument = { formatVersion: '0.4', bpm, loopBars, selectedTrack: '', tracks: [], scenes: [], song: null }
   const { doc } = addTrack(base, { id: opts.trackId ?? 'lead', kind: 'synth' })
   return { ...doc, selectedTrack: doc.tracks[0]!.id }
+}
+
+/** v0.4 song primitives — the arrangement-timeline edit surface (docs/phase-6-plan.md §6.4). */
+
+/** Snapshots a track's live content into a named clip (beatlab's saveClip, format-side).
+ * Overwrites an existing clip with the same id — re-snapshotting is the common workflow. */
+export function saveClip(doc: BeatDocument, trackId: string, clipId: string): { doc: BeatDocument; created: boolean } {
+  const track = findTrack(doc, trackId)
+  if (!/^[a-zA-Z0-9_-]+$/.test(clipId)) throw new BeatEditError(`clip ids are single alphanumeric/_/- tokens, got "${clipId}"`)
+  const clip = {
+    id: clipId,
+    notes: track.notes.map((n) => ({ ...n })),
+    ...(track.kind === 'drums' && track.pattern ? { pattern: structuredClone(track.pattern) } : {}),
+  }
+  const existing = track.clips.findIndex((c) => c.id === clipId)
+  const clips = existing === -1 ? [...track.clips, clip] : track.clips.map((c, i) => (i === existing ? clip : c))
+  return { doc: replaceTrack(doc, { ...track, clips }), created: existing === -1 }
+}
+
+/** Sets (or creates) a scene's slot map. Every slot must reference an existing clip on an
+ * existing track — same fail-loudly stance as the parser. */
+export function setScene(doc: BeatDocument, sceneId: string, slots: Record<string, string>): BeatDocument {
+  if (!/^[a-zA-Z0-9_-]+$/.test(sceneId)) throw new BeatEditError(`scene ids are single alphanumeric/_/- tokens, got "${sceneId}"`)
+  for (const [trackId, clipId] of Object.entries(slots)) {
+    const track = findTrack(doc, trackId)
+    if (!track.clips.some((c) => c.id === clipId)) throw new BeatEditError(`track "${trackId}" has no clip "${clipId}" (have: ${track.clips.map((c) => c.id).join(', ') || 'none'})`)
+  }
+  const scene = { id: sceneId, slots: { ...slots } }
+  const existing = doc.scenes.findIndex((s) => s.id === sceneId)
+  const scenes = existing === -1 ? [...doc.scenes, scene] : doc.scenes.map((s, i) => (i === existing ? scene : s))
+  return { ...doc, scenes }
+}
+
+/** Replaces the song's section list (the whole timeline is one statement — sections are few and
+ * order is the data, so replace-not-patch is the honest edit shape). Empty list clears the song
+ * block (back to loop mode). */
+export function setSong(doc: BeatDocument, sections: { scene: string; bars: number }[]): BeatDocument {
+  for (const s of sections) {
+    if (!doc.scenes.some((sc) => sc.id === s.scene)) throw new BeatEditError(`no scene "${s.scene}" (have: ${doc.scenes.map((x) => x.id).join(', ') || 'none'})`)
+    if (!Number.isInteger(s.bars) || s.bars < 1 || s.bars > 64) throw new BeatEditError(`section bars must be an integer 1-64, got ${s.bars}`)
+  }
+  return { ...doc, song: sections.length === 0 ? null : sections.map((s) => ({ ...s })) }
 }

@@ -107,12 +107,37 @@ export interface BeatNote {
   velocity: number // 0..1
 }
 
+/** v0.4: a named snapshot of playable content, owned by a track. Mirrors beatlab's Clip (a
+ * value copy, not a reference — see docs/phase-6-plan.md). Synth-track clips carry notes;
+ * drum-track clips carry a full five-lane pattern. Clip automation is deliberately unmodeled
+ * (needs the automation grammar). Ids are track-scoped human slugs (D6). */
+export interface BeatClip {
+  id: string
+  notes: BeatNote[] // synth tracks only; always [] for drums
+  pattern?: BeatDrumPattern // drum tracks only; absent for synth
+}
+
+/** v0.4: a scene maps tracks to clips — one complete statement of "what plays". Mirrors
+ * beatlab's Scene.clipIds. Serialized as one `slot` line per mapping, in track order. */
+export interface BeatScene {
+  id: string
+  slots: Record<string, string> // trackId -> clipId
+}
+
+/** v0.4: one song section — play `scene` for `bars` bars (clip content loops within the
+ * section). The section list IS the arrangement timeline; order is data. */
+export interface BeatSongSection {
+  scene: string
+  bars: number
+}
+
 export interface BeatTrack {
   id: string
   name: string
   color: string // lowercase hex, e.g. "#c678dd"
   kind: TrackKind
   synth: BeatSynth // drum tracks carry these too — in BeatLab they're the real drum bus/voice params
+  clips: BeatClip[] // v0.4; [] when the track has none (serialized only when present)
   notes: BeatNote[] // synth tracks only; always [] for drums
   pattern?: BeatDrumPattern // drum tracks only; absent for synth
 }
@@ -123,6 +148,8 @@ export interface BeatDocument {
   loopBars: number
   selectedTrack: string
   tracks: BeatTrack[]
+  scenes: BeatScene[] // v0.4; [] when none
+  song: BeatSongSection[] | null // v0.4; null = no song block = loop mode (today's behavior)
 }
 
 export const OSC_TYPES: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square']

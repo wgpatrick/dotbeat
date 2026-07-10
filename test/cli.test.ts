@@ -33,7 +33,7 @@ function tempProject(): string {
 test('beat inspect prints the overview; --json prints the parsed document', () => {
   const file = tempProject()
   const text = beat(['inspect', file])
-  assert.match(text, /^format 0\.3 \| 126 bpm/)
+  assert.match(text, /^format 0\.4 \| 126 bpm/)
   assert.match(text, /^lead {2}"Lead" {2}synth/m)
   const json = JSON.parse(beat(['inspect', file, '--json'])) as { bpm: number; tracks: unknown[] }
   assert.equal(json.bpm, 126)

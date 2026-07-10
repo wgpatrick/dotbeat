@@ -26,6 +26,14 @@ export type DiffEntry =
   | { kind: 'note-changed'; trackId: string; noteId: string; changes: { field: 'pitch' | 'start' | 'duration' | 'velocity'; before: number; after: number }[] }
   | { kind: 'pattern-step'; trackId: string; lane: DrumLane; step: number; before: number; after: number }
   | { kind: 'pattern-length'; trackId: string; lane: DrumLane; before: number; after: number }
+  // v0.4 song structure
+  | { kind: 'clip-added'; trackId: string; clipId: string }
+  | { kind: 'clip-removed'; trackId: string; clipId: string }
+  | { kind: 'clip-changed'; trackId: string; clipId: string; noteDelta: number; patternDelta: number }
+  | { kind: 'scene-added'; sceneId: string }
+  | { kind: 'scene-removed'; sceneId: string }
+  | { kind: 'scene-slot'; sceneId: string; trackId: string; before: string | null; after: string | null }
+  | { kind: 'song-changed'; before: { scene: string; bars: number }[] | null; after: { scene: string; bars: number }[] | null }
 
 export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
   const out: DiffEntry[] = []
@@ -102,7 +110,60 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
         }
       }
     }
+
+    // Clips match by ID (like everything else). Content changes report as counts — a clip is a
+    // snapshot, so "what changed inside" is usually re-snapshot noise; the load-bearing musical
+    // facts are which clips exist and which scenes use them.
+    const aClips = new Map(ta.clips.map((c) => [c.id, c]))
+    const bClips = new Map(tb.clips.map((c) => [c.id, c]))
+    for (const [cid] of aClips) if (!bClips.has(cid)) out.push({ kind: 'clip-removed', trackId: id, clipId: cid })
+    for (const [cid, cb] of bClips) {
+      const ca = aClips.get(cid)
+      if (!ca) {
+        out.push({ kind: 'clip-added', trackId: id, clipId: cid })
+        continue
+      }
+      const noteKey = (n: { id: string; pitch: number; start: number; duration: number; velocity: number }) => `${n.id}|${n.pitch}|${n.start}|${n.duration}|${n.velocity}`
+      const aNoteSet = new Set(ca.notes.map(noteKey))
+      const bNoteSet = new Set(cb.notes.map(noteKey))
+      let noteDelta = 0
+      for (const k of aNoteSet) if (!bNoteSet.has(k)) noteDelta++
+      for (const k of bNoteSet) if (!aNoteSet.has(k)) noteDelta++
+      let patternDelta = 0
+      if (ca.pattern && cb.pattern) {
+        for (const lane of DRUM_LANES) {
+          const la = ca.pattern[lane]
+          const lb = cb.pattern[lane]
+          if (la.length !== lb.length) patternDelta += Math.abs(la.length - lb.length)
+          else for (let i = 0; i < la.length; i++) if (la[i] !== lb[i]) patternDelta++
+        }
+      }
+      if (noteDelta || patternDelta) out.push({ kind: 'clip-changed', trackId: id, clipId: cid, noteDelta, patternDelta })
+    }
   }
+
+  // v0.4: scenes match by ID; slots compare per track.
+  const aScenes = new Map(a.scenes.map((s) => [s.id, s]))
+  const bScenes = new Map(b.scenes.map((s) => [s.id, s]))
+  for (const [sid] of aScenes) if (!bScenes.has(sid)) out.push({ kind: 'scene-removed', sceneId: sid })
+  for (const [sid, sb] of bScenes) {
+    const sa = aScenes.get(sid)
+    if (!sa) {
+      out.push({ kind: 'scene-added', sceneId: sid })
+      continue
+    }
+    const trackIds = new Set([...Object.keys(sa.slots), ...Object.keys(sb.slots)])
+    for (const tid of trackIds) {
+      const before = sa.slots[tid] ?? null
+      const after = sb.slots[tid] ?? null
+      if (before !== after) out.push({ kind: 'scene-slot', sceneId: sid, trackId: tid, before, after })
+    }
+  }
+
+  // The song is one ordered statement — compare whole (order IS the data; per-index diffs of a
+  // reordered section list would read as noise).
+  const songKey = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}:${x.bars}`).join(',') : '')
+  if (songKey(a.song) !== songKey(b.song)) out.push({ kind: 'song-changed', before: a.song, after: b.song })
 
   return out
 }
@@ -161,6 +222,29 @@ export function formatDiff(entries: DiffEntry[]): string {
       case 'pattern-length':
         lines.push(`${e.trackId}: ${e.lane} pattern length ${e.before} -> ${e.after} steps`)
         break
+      case 'clip-added':
+        lines.push(`${e.trackId}: clip added "${e.clipId}"`)
+        break
+      case 'clip-removed':
+        lines.push(`${e.trackId}: clip removed "${e.clipId}"`)
+        break
+      case 'clip-changed':
+        lines.push(`${e.trackId}: clip "${e.clipId}" changed (${e.noteDelta} note change${e.noteDelta === 1 ? '' : 's'}, ${e.patternDelta} step change${e.patternDelta === 1 ? '' : 's'})`)
+        break
+      case 'scene-added':
+        lines.push(`scene added "${e.sceneId}"`)
+        break
+      case 'scene-removed':
+        lines.push(`scene removed "${e.sceneId}"`)
+        break
+      case 'scene-slot':
+        lines.push(`scene ${e.sceneId}: ${e.trackId} ${e.before ?? '(empty)'} -> ${e.after ?? '(empty)'}`)
+        break
+      case 'song-changed': {
+        const fmt = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}(${x.bars})`).join(' ') : '(no song)')
+        lines.push(`song: ${fmt(e.before)} -> ${fmt(e.after)}`)
+        break
+      }
     }
   }
   return lines.join('\n') + '\n'
