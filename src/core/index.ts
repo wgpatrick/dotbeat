@@ -8,4 +8,8 @@ export {
   type ExternalSandboxPayload,
   type ExternalTrack,
   type ConversionReport,
+  type PartialTrack,
 } from './convert.js'
+export { diffDocuments, formatDiff, type DiffEntry } from './diff.js'
+export { setValue, addNote, removeNote, BeatEditError } from './edit.js'
+export { describeDocument } from './inspect.js'

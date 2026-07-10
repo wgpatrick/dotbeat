@@ -486,11 +486,15 @@ Unchanged in structure — the research corrected *content* within milestones, n
       Also: format v0.2 added drum tracks, so the whole default groove round-trips — the file,
       not the app's built-in state, is now the root document.
 
-### M2 — CLI + headless render
-- [ ] `beat render` (headless Chromium first, `node-web-audio-api` for speed once validated
-      against it), `beat inspect`, `beat set`, `beat diff` (semantic/musical).
-- [ ] **Exit criteria:** render a project to WAV from the command line with no GUI open; a
-      `beat diff` between two commits reads like an edit list.
+### M2 — CLI + headless render ✅ *(done 2026-07-10 — see `docs/phase-2-plan.md`)*
+- [x] `beat render` (headless Chromium), `beat inspect`, `beat set` (+ `add-note`/`rm-note`),
+      `beat diff` (semantic/musical, ID-matched, two files or two git revs) — one `beat` entry
+      point. `node-web-audio-api` validated by a measured spike: **22× faster than realtime**
+      running real Tone.js in Node; full adoption needs the engine extraction, now justified by
+      that number and queued as M3 engineering (Chromium stays the fidelity reference, D5).
+- [x] **Exit criteria:** render a project to WAV from the command line with no GUI open; a
+      `beat diff` between two commits reads like an edit list — automated as a test against a
+      real git repo (`bpm: 126 -> 124` / `bass: note added u100001 (...)` / `lead: cutoff 3200 -> 900`).
 
 ### M3 — Agent-native + the listening loop
 - [ ] `beat mcp` server over the CLI ops.

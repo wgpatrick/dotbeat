@@ -9,6 +9,24 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D8 — DiffEntry is the one changeset representation (diff display, later undo/--dry-run)
+
+**Decision:** the semantic diff (`src/core/diff.ts`) produces a typed `DiffEntry[]` where every
+entry carries `before`/`after` — and this same shape is reserved as the future undo and
+`--dry-run` representation, rather than inventing a separate one per feature.
+
+**Why:** openDAW's undo system is an inverse-update-log, not snapshots — a captured
+`Modification{forward, inverse}` object *is* a computed diff (`docs/opendaw-notes.md` §7, read
+directly from source). Entries that carry both sides are trivially invertible, so diff display,
+undo, and preview-before-apply are one data structure with three consumers. Also applied: entity
+matching is by stable ID, never position (the `alsdiff` lesson, D4), and the output phrasing is
+musical ("note moved", "kick step 3 added"), not textual (the `musicdiff` lesson).
+
+**Revisit when:** undo lands and needs transaction grouping (multiple entries per user gesture) —
+grouping metadata may need to join the shape.
+
+---
+
 ## D7 — Format syntax resolved: Csound-style lines + Humdrum-style canonical ordering + DAWproject vocabulary
 
 **Decision:** the `.beat` format is a **bespoke line-oriented text format**: typed statement

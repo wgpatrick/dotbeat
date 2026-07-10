@@ -14,9 +14,12 @@ production trainer, which this project forks in spirit).
 
 ```bash
 npm install
-npm test                # 36 tests: format round-trips, conversion against real project data, daemon sync
-npm run render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
-node cli/daemon.mjs examples/real-groove.beat   # then open the beatlab dev server with ?daw=8420
+npm test                          # 55 tests: format, conversion vs real project data, daemon sync, CLI
+node cli/beat.mjs inspect examples/real-groove.beat
+node cli/beat.mjs set examples/real-groove.beat lead.cutoff 900   # prints "lead: cutoff 3200 -> 900"
+node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical edit list, not line noise
+node cli/beat.mjs render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
+node cli/beat.mjs daemon examples/real-groove.beat                # two-way sync: open beatlab with ?daw=8420
 ```
 
 ## The idea in one picture
@@ -41,13 +44,13 @@ now fully-verified version.
 
 | Path | What |
 |---|---|
-| [`docs/phase-1-plan.md`](docs/phase-1-plan.md) | **Start here for what's built.** M1 (daemon + two-way sync), status COMPLETE, with measured latencies. [`docs/phase-0-plan.md`](docs/phase-0-plan.md) is the prior slice (format + render). |
+| [`docs/phase-2-plan.md`](docs/phase-2-plan.md) | **Start here for what's built.** M2 (agent-native CLI + semantic diff + the 22× render spike), status COMPLETE. Prior slices: [`phase-1-plan.md`](docs/phase-1-plan.md) (daemon + sync, measured), [`phase-0-plan.md`](docs/phase-0-plan.md) (format + render). |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, milestones, risks. |
-| `src/core/` | The `.beat` format: types, parser, serializer, converter (synth + drum tracks). Pure TS, zero deps on beatlab/React/Tone.js. |
+| `src/core/` | The `.beat` format: types, parser, serializer, converter (synth + drum tracks), **semantic diff**, edit primitives, inspect. Pure TS, zero deps on beatlab/React/Tone.js. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over a 3-endpoint HTTP/SSE protocol, echo suppression by canonical-text comparison. |
-| `test/` | 36 tests — format round-trips, conversion fidelity against a real exported project (`test/fixtures/`), and daemon sync behavior. |
-| `cli/render.mjs`, `cli/daemon.mjs` | `beat render` (headless-Chromium render to WAV) and `beat daemon` (file↔GUI sync). |
-| `scripts/verify-m1.mjs` | The M1 exit-criteria proof: boots daemon + dev server + browser + git, measures both sync directions. |
+| `test/` | 55 tests — format round-trips, conversion fidelity against a real exported project (`test/fixtures/`), daemon sync, and subprocess-level CLI tests incl. diff-between-real-git-commits. |
+| `cli/beat.mjs` | The unified `beat` CLI: `inspect`, `set`, `add-note`, `rm-note`, `diff` (files or git revs), `render`, `daemon`. |
+| `scripts/verify-m1.mjs`, `scripts/spike-offline-render.mjs` | The M1 exit-criteria proof (sync latencies) and the M2 offline-render measurement (22× realtime). |
 | `examples/real-groove.beat` | A real project, converted to `.beat` text — hand-inspectable, the file the proof runs use. |
 | [`docs/research/`](docs/research/) | Four deep-research reports (347 raw claims, 70 sources), **all fully adversarially verified**. |
 | [`docs/opendaw-notes.md`](docs/opendaw-notes.md) | Source-code archaeology — openDAW/DAWproject/automix-toolkit/node-web-audio-api read directly, not summarized secondhand. |
@@ -97,11 +100,13 @@ inline rather than silently fixed.
 
 ## Status
 
-**Phase 0 and Phase 1 (ROADMAP M1) complete.** The core loop is real, not argued: a
+**Phases 0-2 (ROADMAP M0/M1/M2) complete.** The core loop is real, not argued: a
 hand-inspectable `.beat` file — the *whole* groove, drums included — is the source of truth for
 a live GUI session. Turn a knob in the GUI and `git diff` shows exactly one changed line
 (262 ms, measured). Edit the file in an editor and the GUI hot-reloads without stopping playback
-(117 ms, measured). Add a track that exists only in the file and it appears in the app, a full
-74-field synth reconstituted from a 9-field text patch. The same apply path drives `beat render`
-to a real WAV. See [`docs/phase-1-plan.md`](docs/phase-1-plan.md)'s "Result" for the numbers and
-what they mean for M2/M3 scoping.
+(117 ms, measured). And the CLI is now agent-native: `beat inspect` / `set` / `add-note` /
+`diff`, where `beat diff --git HEAD~1 HEAD song.beat` prints a *musical* edit list
+(`lead: cutoff 3200 -> 900`, `bass: note added ...`) — verified by an automated test against a
+real git repo. An offline-render spike measured real Tone.js on `node-web-audio-api` at **22×
+faster than realtime**, green-lighting the engine extraction as M3's core engineering work. See
+[`docs/phase-2-plan.md`](docs/phase-2-plan.md)'s "Result".

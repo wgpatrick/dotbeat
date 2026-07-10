@@ -12,30 +12,32 @@
 
 import { startDaemon } from '../dist/src/daemon/daemon.js'
 
-const args = process.argv.slice(2)
-let filePath
-let port = 8420
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === '--port') port = Number(args[++i])
-  else filePath = args[i]
-}
-if (!filePath) {
-  console.error('usage: node cli/daemon.mjs <project.beat> [--port 8420]')
-  process.exit(1)
+export async function daemonCommand(argv) {
+  let filePath
+  let port = 8420
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--port') port = Number(argv[++i])
+    else filePath = argv[i]
+  }
+  if (!filePath) {
+    console.error('usage: beat daemon <project.beat> [--port 8420]')
+    process.exit(1)
+  }
+  const daemon = await startDaemon({ filePath, port })
+  console.log(`beat daemon: ${daemon.filePath}`)
+  console.log(`  http://localhost:${daemon.port}  (GET /doc, GET /events, POST /state)`)
+  console.log(`  open BeatLab with ?daw=${daemon.port} to connect the GUI`)
+  const shutdown = () => {
+    daemon.close().then(() => process.exit(0))
+  }
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 }
 
-startDaemon({ filePath, port })
-  .then((daemon) => {
-    console.log(`beat daemon: ${daemon.filePath}`)
-    console.log(`  http://localhost:${daemon.port}  (GET /doc, GET /events, POST /state)`)
-    console.log(`  open BeatLab with ?daw=${daemon.port} to connect the GUI`)
-    const shutdown = () => {
-      daemon.close().then(() => process.exit(0))
-    }
-    process.on('SIGINT', shutdown)
-    process.on('SIGTERM', shutdown)
-  })
-  .catch((err) => {
+// Runs directly (node cli/daemon.mjs ...) or via the `beat` dispatcher (cli/beat.mjs).
+if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href) {
+  daemonCommand(process.argv.slice(2)).catch((err) => {
     console.error(err instanceof Error ? err.message : String(err))
     process.exit(1)
   })
+}

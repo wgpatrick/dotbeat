@@ -33,8 +33,8 @@ function parseArgs(argv) {
   return args
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2))
+export async function renderCommand(argv) {
+  const args = parseArgs(argv)
   const beatPath = args._[0]
   if (!beatPath) {
     console.error('usage: node cli/render.mjs <project.beat> -o <output.wav> --beatlab-dir <path to beatlab checkout>')
@@ -99,11 +99,15 @@ async function main() {
   }
 }
 
-main()
-  .then(() => process.exit(0)) // vite.kill()/browser.close() alone don't reliably drain the
-  // event loop (esbuild's service process, open pipes) — same fix scripts/smoke.mjs already
-  // needed for the same reason; without this the CLI hangs after printing success.
-  .catch((err) => {
-    console.error(err.stack ?? String(err))
-    process.exit(1)
-  })
+// Runs directly (node cli/render.mjs ...) or via the `beat` dispatcher (cli/beat.mjs), which
+// imports renderCommand instead.
+if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href) {
+  renderCommand(process.argv.slice(2))
+    .then(() => process.exit(0)) // vite.kill()/browser.close() alone don't reliably drain the
+    // event loop (esbuild's service process, open pipes) — same fix scripts/smoke.mjs already
+    // needed for the same reason; without this the CLI hangs after printing success.
+    .catch((err) => {
+      console.error(err.stack ?? String(err))
+      process.exit(1)
+    })
+}
