@@ -23,6 +23,16 @@ import { buildHeadlessEngine } from '../scripts/build-headless-engine.mjs'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 
+// Local builds of node-web-audio-api (scripts/build-patched-webaudio.sh) carry a build-release
+// artifact; the npm 2.0.0 package doesn't. On the npm version, hats (MetalSynth: square-carrier
+// FM through zero) explode — warn loudly rather than render garbage silently.
+if (!existsSync(join(repoRoot, 'node_modules', 'node-web-audio-api', 'node-web-audio-api.build-release.node'))) {
+  console.warn(
+    'WARNING: node-web-audio-api resolves to the npm release, whose oscillators explode under ' +
+      'FM through zero (drum hats). Run scripts/build-patched-webaudio.sh for the fixed build.',
+  )
+}
+
 // shims the bundle expects a browser to have provided
 globalThis.localStorage ??= { getItem: () => null, setItem: () => {}, removeItem: () => {} }
 globalThis.requestAnimationFrame ??= (cb) => setTimeout(() => cb(performance.now()), 16)
@@ -182,19 +192,12 @@ export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds
   stamp('graph-build')
 
   await engine.play() // the engine's own transport wiring + per-16th tick — the real sequencer
-
-  // KNOWN, DOCUMENTED DIVERGENCE (upstream bug, isolated by bisection — docs/phase-4-plan.md):
-  // node-web-audio-api 2.0.0's OscillatorNode explodes (peaks up to 1e5+) when a PeriodicWave
-  // oscillator's frequency is FM-modulated through zero into negative values; Chromium handles
-  // negative frequency per spec. Tone.MetalSynth (beatlab's hat/openhat) is exactly that: square
-  // carriers under modulationIndex 32. Mitigation: sine carriers for those two instruments only —
-  // stable under identical deep FM, still a dense inharmonic stack behind the same 4-7 kHz
-  // highpass. The hats stay present; their timbre differs slightly from the browser reference,
-  // and verify-m4.mjs quantifies exactly how much. Remove when the upstream bug is fixed.
-  for (const name of ['hat', 'openhat']) {
-    const metal = engine.drums?.[name]
-    if (metal?._oscillators) for (const osc of metal._oscillators) osc.type = 'sine'
-  }
+  // (A sine-carrier mitigation for MetalSynth used to live here: npm's node-web-audio-api 2.0.0
+  // — pinned to the web-audio-api crate 1.6.0 release — explodes when native square/sawtooth
+  // oscillators are FM-modulated through zero into negative frequency. Upstream main already
+  // fixed it ("also guard for negative nyquist freqs" et seq., unreleased); we build the binding
+  // against that — scripts/build-patched-webaudio.sh — so the hats render with their true
+  // square carriers. See docs/upstream/node-web-audio-api-findings.md for the full story.)
   stamp('engine-play')
   // render(false) = synchronous clock: no setTimeout yield between scheduling blocks — in a CLI
   // there is no main thread to keep responsive.
