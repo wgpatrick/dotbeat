@@ -18,6 +18,9 @@ import { basename, dirname, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
   parse,
+  saveClip,
+  setScene,
+  setSong,
   serialize,
   setValue,
   addNote,
@@ -52,6 +55,9 @@ const USAGE = `usage:
   beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render]
                                                           batch-generate small-diff variants of one param group
   beat vary --groups                                      list the mutation groups
+  beat clip <file> <track> <clip-id>                      snapshot the track's live content into a clip
+  beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
+  beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
   beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
   beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
   beat lint <file.wav> [--target <LUFS>] [--json]         deterministic mix findings (default target -14)
@@ -273,6 +279,40 @@ async function scoreCmd(argv) {
   process.stdout.write(`to adopt the winner: beat set ${manifest.parent} ${entry.picks[0].edits.join(' ')}\n`)
 }
 
+// ---- v0.4 song structure (docs/phase-6-plan.md §6.4) ----------------------------------------
+
+function clipCmd(argv) {
+  const [file, track, clipId] = argv
+  if (!file || !track || !clipId) throw new BeatEditError('clip needs <file> <track> <clip-id>')
+  const before = readDoc(file)
+  const { doc, created } = saveClip(before, track, clipId)
+  writeDoc(file, before, doc)
+  if (!created) process.stdout.write(`(re-snapshotted existing clip "${clipId}")\n`)
+}
+
+function sceneCmd(argv) {
+  const [file, sceneId, ...pairs] = argv
+  if (!file || !sceneId) throw new BeatEditError('scene needs <file> <scene-id> [<track>=<clip> ...]')
+  const slots = {}
+  for (const pair of pairs) {
+    const eq = pair.indexOf('=')
+    if (eq === -1) throw new BeatEditError(`slot "${pair}" must be <track>=<clip>`)
+    slots[pair.slice(0, eq)] = pair.slice(eq + 1)
+  }
+  const before = readDoc(file)
+  writeDoc(file, before, setScene(before, sceneId, slots))
+}
+
+function songCmd(argv) {
+  const [file, ...rest] = argv
+  if (!file) throw new BeatEditError('song needs <file> [<scene> <bars> ...]')
+  if (rest.length % 2 !== 0) throw new BeatEditError('song sections are <scene> <bars> pairs')
+  const sections = []
+  for (let i = 0; i < rest.length; i += 2) sections.push({ scene: rest[i], bars: Number(rest[i + 1]) })
+  const before = readDoc(file)
+  writeDoc(file, before, setSong(before, sections))
+}
+
 function fmtDb(x, unit = '') {
   return Number.isFinite(x) ? `${x.toFixed(1)}${unit}` : String(x)
 }
@@ -372,6 +412,15 @@ async function main() {
       break
     case 'vary':
       await varyCmd(rest)
+      break
+    case 'clip':
+      clipCmd(rest)
+      break
+    case 'scene':
+      sceneCmd(rest)
+      break
+    case 'song':
+      songCmd(rest)
       break
     case 'score':
       await scoreCmd(rest)

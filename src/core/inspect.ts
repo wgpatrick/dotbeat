@@ -29,6 +29,9 @@ function describeTrack(t: BeatTrack, loopSteps: number): string[] {
       lines.push(`  notes: ${n}, pitch ${Math.min(...pitches)}-${Math.max(...pitches)}, steps ${Math.min(...starts)}-${Math.max(...starts)} of ${loopSteps}`)
     }
   }
+  if (t.clips.length > 0) {
+    lines.push(`  clips: ${t.clips.map((c) => `${c.id} (${t.kind === 'drums' ? `${Object.values(c.pattern ?? {}).flat().filter((v) => v > 0).length} hits` : `${c.notes.length} note${c.notes.length === 1 ? '' : 's'}`})`).join(', ')}`)
+  }
   return lines
 }
 
@@ -41,6 +44,15 @@ export function describeDocument(doc: BeatDocument): string {
   ]
   for (const t of doc.tracks) {
     lines.push(...describeTrack(t, loopSteps), '')
+  }
+  for (const s of doc.scenes) {
+    const slots = Object.entries(s.slots).map(([tr, c]) => `${tr}=${c}`).join(' ')
+    lines.push(`scene ${s.id}: ${slots || '(empty)'}`)
+  }
+  if (doc.scenes.length > 0) lines.push('')
+  if (doc.song) {
+    const total = doc.song.reduce((sum, x) => sum + x.bars, 0)
+    lines.push(`song: ${doc.song.map((x) => `${x.scene}(${x.bars})`).join(' ')} — ${total} bars total`)
   }
   return lines.join('\n').replace(/\n+$/, '\n')
 }

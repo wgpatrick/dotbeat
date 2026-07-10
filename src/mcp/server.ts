@@ -27,6 +27,9 @@ import {
   diffDocuments,
   formatDiff,
   describeDocument,
+  saveClip,
+  setScene,
+  setSong,
   parsePresetLibrary,
   applyPreset,
   formatPresetList,
@@ -224,6 +227,47 @@ const TOOLS: ToolDef[] = [
     },
     handler: (args) =>
       formatDiff(diffDocuments(parse(readFileSync(str(args, 'file_a'), 'utf8')), parse(readFileSync(str(args, 'file_b'), 'utf8')))),
+  },
+  {
+    name: 'beat_song',
+    description:
+      'Author the v0.4 arrangement timeline of a .beat file in one call: optionally snapshot tracks\' live content into named clips (clips), define scenes as track->clip maps (scenes), and set the song as an ordered list of {scene, bars} sections (song). Pass any subset; each applies in that order and the edit list is returned. An empty song array clears back to loop mode. Song sections play their scene\'s clips for N bars (clips loop every loop_bars within a section; unmapped tracks are silent).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        clips: {
+          type: 'array',
+          items: { type: 'object', properties: { track: { type: 'string' }, clip: { type: 'string' } }, required: ['track', 'clip'] },
+          description: 'snapshot each track\'s current live notes/pattern into a named clip',
+        },
+        scenes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { id: { type: 'string' }, slots: { type: 'object', additionalProperties: { type: 'string' } } },
+            required: ['id', 'slots'],
+          },
+          description: 'each scene maps track ids to clip ids',
+        },
+        song: {
+          type: 'array',
+          items: { type: 'object', properties: { scene: { type: 'string' }, bars: { type: 'number' } }, required: ['scene', 'bars'] },
+          description: 'the ordered section list; total bars = render length',
+        },
+      },
+      required: ['file'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      let doc = before
+      for (const c of (args.clips as { track: string; clip: string }[] | undefined) ?? []) doc = saveClip(doc, c.track, c.clip).doc
+      for (const s of (args.scenes as { id: string; slots: Record<string, string> }[] | undefined) ?? []) doc = setScene(doc, s.id, s.slots)
+      if (args.song !== undefined) doc = setSong(doc, args.song as { scene: string; bars: number }[])
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
   },
   {
     name: 'beat_presets',

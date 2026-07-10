@@ -140,3 +140,31 @@ arrangement modes (lesson-side), tempo changes / time signatures (no engine supp
 6.2 format core (types/parse/serialize/diff/inspect + tests) → 6.1 beatlab timeline mode
 (types/store/engine/persistence) → 6.3 converter + bridge → 6.5 offline render → 6.4 CLI/MCP →
 exit test → docs.
+
+## Result (2026-07-10)
+
+Shipped end-to-end: 116/116 tests green across format core, grammar suite, presets, vary, CLI,
+MCP, metrics, daemon.
+
+- **The engine change was surgical**: one helper (`timelineOf`), a loop-length line in `play()`,
+  and a per-tick `contentOf(track)` resolution (bar → section → scene → clip; content loops
+  every `loopBars` bars within its section; unmapped tracks silent). No state mutation during
+  playback; session-view launch, energy mode, undo all untouched. beatlab main `8a3b166` —
+  typecheck + vite build + 14/14 smoke checks; timeline unreachable from the production UI
+  (dev-gated bridge only).
+- **Exit test, run on the real project**: `examples/night-shift-song.beat` — Night Shift
+  extended to a 20-bar arrangement (intro 4 / build 4 / drop 8 / intro 4) entirely via the new
+  CLI (4 `beat clip` snapshots, 3 `beat scene` maps, 1 `beat song` line). Offline render is
+  exactly 38.71s (20 bars), with a real energy arc: intro −21.4 dBFS, build −18.8, drop −18.4,
+  outro −21.3 (≈ intro — the reprise plays identical content). Sections switch *content*, not
+  just mute.
+- v0.2/v0.3 compatibility structural: no clips/scenes/song = today's behavior, byte-identical
+  round trips (tested).
+- The `beat_song` MCP tool authors clips+scenes+song in one call; `beat inspect` shows the
+  song structure with total bars.
+- **Deferred, honestly**: the live-GUI two-way daemon check (exit criterion 3) — the daemon
+  rides the same `applyDawState` path verified headlessly, but the browser-session round trip
+  (GUI clip edits surviving sync) hasn't been run live yet. Also per-section render metrics
+  windows in `beat metrics` (nice-to-have), and clip automation (needs the automation grammar,
+  next format phase). Render speed for a 20-bar song is 0.2× realtime (~168s) — the known
+  upstream graph-ordering bottleneck scales with song length; native-engine work (M4) owns it.

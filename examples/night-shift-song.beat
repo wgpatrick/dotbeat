@@ -1,0 +1,208 @@
+format_version 0.4
+bpm 124
+loop_bars 4
+selected_track lead
+
+track lead lead #e06c75 synth
+  synth
+    osc square
+    volume -1
+    cutoff 5200
+    resonance 1.1
+    attack 0.01
+    decay 0.25
+    sustain 0.25
+    release 0.3
+    pan 0.35
+    osc2Level 0.45
+    osc2Detune 14
+    unisonVoices 3
+    unisonWidth 0.5
+    filterEnvAmount 0.3
+    eqHigh 1.5
+    sendReverb 0.25
+    sendDelay 0.4
+  clip hook
+    note u100033 76 20 2 0.7
+    note u100034 72 24 2 0.65
+    note u100035 74 28 3 0.6
+    note u100036 69 40 2 0.6
+    note u100037 67 52 2 0.6
+    note u100038 69 56 4 0.65
+    note u100039 76 62 2 0.5
+  note u100033 76 20 2 0.7
+  note u100034 72 24 2 0.65
+  note u100035 74 28 3 0.6
+  note u100036 69 40 2 0.6
+  note u100037 67 52 2 0.6
+  note u100038 69 56 4 0.65
+  note u100039 76 62 2 0.5
+
+track drums drums #56b6c2 drums
+  synth
+    osc sawtooth
+    volume 2
+    cutoff 9000
+    resonance 0.8
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+    eqLow 1
+    eqHigh 2
+    compMix 0.5
+    distortionAmount 0.15
+    distortionMix 0.2
+    kickPunch 0.08
+    kickDecay 0.5
+    hatDecay 0.04
+    openHatDecay 0.3
+    hatTone 6500
+  clip groove
+    pattern kick 0.9 0 0 0 0.85 0 0 0 0.9 0 0 0 0.85 0 0 0
+    pattern snare 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    pattern clap 0 0 0 0 0.7 0 0 0 0 0 0 0 0.7 0 0 0
+    pattern hat 0 0 0.55 0 0 0 0.55 0 0 0 0.55 0 0 0 0.5 0
+    pattern openhat 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.4 0
+  pattern kick 0.9 0 0 0 0.85 0 0 0 0.9 0 0 0 0.85 0 0 0
+  pattern snare 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+  pattern clap 0 0 0 0 0.7 0 0 0 0 0 0 0 0.7 0 0 0
+  pattern hat 0 0 0.55 0 0 0 0.55 0 0 0 0.55 0 0 0 0.5 0
+  pattern openhat 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.4 0
+
+track bass bass #f7c948 synth
+  synth
+    osc sawtooth
+    volume 3
+    cutoff 550
+    resonance 1
+    attack 0.005
+    decay 0.22
+    sustain 0.35
+    release 0.12
+    pan 0
+    osc2Type square
+    osc2Level 0.25
+    osc2Detune 1203
+    subLevel 0.6
+    filterEnvAmount 0.35
+    filterEnvDecay 0.18
+    filterEnvSustain 0.15
+    glide 0.02
+    eqLow 1.5
+    compMix 0.5
+    distortionAmount 0.15
+    distortionMix 0.2
+    duckSource drums
+    duckAmount 0.45
+  clip groove
+    note u100001 33 0 2 0.85
+    note u100002 45 3 1 0.55
+    note u100003 33 6 2 0.8
+    note u100004 33 10 2 0.8
+    note u100005 40 14 1 0.65
+    note u100006 29 16 2 0.85
+    note u100007 41 19 1 0.55
+    note u100008 29 22 2 0.8
+    note u100009 29 26 2 0.8
+    note u100010 36 30 1 0.65
+    note u100011 36 32 2 0.85
+    note u100012 48 35 1 0.55
+    note u100013 36 38 2 0.8
+    note u100014 36 42 2 0.8
+    note u100015 43 46 1 0.65
+    note u100016 31 48 2 0.85
+    note u100017 43 51 1 0.55
+    note u100018 31 54 2 0.8
+    note u100019 31 58 2 0.8
+    note u100020 38 62 1 0.7
+  note u100001 33 0 2 0.85
+  note u100002 45 3 1 0.55
+  note u100003 33 6 2 0.8
+  note u100004 33 10 2 0.8
+  note u100005 40 14 1 0.65
+  note u100006 29 16 2 0.85
+  note u100007 41 19 1 0.55
+  note u100008 29 22 2 0.8
+  note u100009 29 26 2 0.8
+  note u100010 36 30 1 0.65
+  note u100011 36 32 2 0.85
+  note u100012 48 35 1 0.55
+  note u100013 36 38 2 0.8
+  note u100014 36 42 2 0.8
+  note u100015 43 46 1 0.65
+  note u100016 31 48 2 0.85
+  note u100017 43 51 1 0.55
+  note u100018 31 54 2 0.8
+  note u100019 31 58 2 0.8
+  note u100020 38 62 1 0.7
+
+track pad pad #c678dd synth
+  synth
+    osc sawtooth
+    volume -2
+    cutoff 2600
+    resonance 0.8
+    attack 0.4
+    decay 0.4
+    sustain 0.7
+    release 1.2
+    pan -0.35
+    osc2Level 0.5
+    osc2Detune 9
+    unisonVoices 5
+    unisonWidth 0.8
+    lfoRate 0.25
+    lfoDepth 0.2
+    lfoDest cutoff
+    eqMid -1
+    sendReverb 0.55
+    sendDelay 0.15
+    duckSource drums
+    duckAmount 0.3
+  clip groove
+    note u100021 57 0 14 0.55
+    note u100022 60 0 14 0.5
+    note u100023 64 0 14 0.5
+    note u100024 53 16 14 0.55
+    note u100025 57 16 14 0.5
+    note u100026 60 16 14 0.5
+    note u100027 55 32 14 0.55
+    note u100028 60 32 14 0.5
+    note u100029 64 32 14 0.5
+    note u100030 55 48 14 0.55
+    note u100031 59 48 14 0.5
+    note u100032 62 48 14 0.55
+  note u100021 57 0 14 0.55
+  note u100022 60 0 14 0.5
+  note u100023 64 0 14 0.5
+  note u100024 53 16 14 0.55
+  note u100025 57 16 14 0.5
+  note u100026 60 16 14 0.5
+  note u100027 55 32 14 0.55
+  note u100028 60 32 14 0.5
+  note u100029 64 32 14 0.5
+  note u100030 55 48 14 0.55
+  note u100031 59 48 14 0.5
+  note u100032 62 48 14 0.55
+
+scene intro
+  slot pad groove
+
+scene build
+  slot drums groove
+  slot bass groove
+  slot pad groove
+
+scene drop
+  slot lead hook
+  slot drums groove
+  slot bass groove
+  slot pad groove
+
+song
+  section intro 4
+  section build 4
+  section drop 8
+  section intro 4
