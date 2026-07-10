@@ -467,6 +467,18 @@ This is the BeatLab validator idea grown up: **"check my mix against a target"**
 
 ---
 
+### The variation-and-taste loop *(added 2026-07-10 — owner's concept, see [docs/variation-loop.md](docs/variation-loop.md))*
+
+Batch-generate many audible variations (a kick, a patch, a 4-bar loop) as one-line-diff
+candidates; the human scores fast; the system proposes the next round. The machine supplies
+speed, the human supplies taste — which completes D2's triangle (metrics judge correctness,
+humans judge taste, models narrate). The scoring exhaust is unusually clean preference data
+(controlled parameter grids → (params, render, score) triples), opening a ladder: in-context
+steering → classical preference model / interactive Bayesian optimization → possibly a trained
+patch generator. Tooling shape: `beat vary` + `beat score` + a git-tracked scores log. Research
+pass queued on the substantial prior art (interactive evolutionary synth-patch search,
+preference-based optimization for audio, sound-matching).
+
 ## 8. Milestones
 
 Unchanged in structure — the research corrected *content* within milestones, not the sequencing.
@@ -553,7 +565,7 @@ Unchanged in structure — the research corrected *content* within milestones, n
 | Tier | Features |
 |---|---|
 | **MVP** | Synths + sampler + FX chains (inherited); piano roll / step seq / automation; `.beat` format; daemon + 2-way sync; `render`/`inspect`/`set`/`diff` CLI |
-| **v1** | MCP server; DSP metrics engine; metric-grounded AI critique as diffs; real arrangement timeline; tempo/time-sig changes |
+| **v1** | MCP server; DSP metrics engine; metric-grounded AI critique as diffs; real arrangement timeline; tempo/time-sig changes; **`beat vary`/`beat score` variation-and-taste loop** (§7) |
 | **Parity** | Native recording + latency comp (Tauri); warping/time-stretch; comping; plugin hosting (CLAP/VST3); freeze/flatten/bounce; modulators + macro racks; MPE; note probability; browser/preset library; LUFS-normalized export |
 | **Out of scope** | In-browser VST/AU hosting; recorded-audio parity with Pro Tools; autonomous AI mix judge without metric guardrails; generator-code layer (deferred, not cancelled) |
 
