@@ -1,0 +1,15 @@
+{
+  "source": "beatlab synthesized kit, rendered offline by beatlab-daw 20299a3",
+  "license": "CC0-1.0 (self-generated)",
+  "preparedAt": "2026-07-10T23:07:49.999Z",
+  "prep": {
+    "trimThresholdDb": -60,
+    "leadInMs": 5,
+    "tailMs": 10,
+    "fadeOutMs": 5,
+    "peakNormalizeDb": -6,
+    "format": "16-bit PCM"
+  },
+  "sha256": "dc4ad5643e029365a4b112551d62f25bdd4ead148e1deb9bf52cae5ab1a88990",
+  "durationSeconds": 0.2884
+}
