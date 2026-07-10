@@ -1,14 +1,21 @@
 import type { BeatDocument, BeatTrack } from './document.js'
-import { SYNTH_PARAM_ORDER } from './document.js'
+import { DRUM_LANES, SYNTH_PARAM_ORDER } from './document.js'
 import { formatNumber } from './format.js'
 
 function serializeTrack(t: BeatTrack): string[] {
   const lines: string[] = []
-  lines.push(`track ${t.id} ${t.name} ${t.color}`)
+  lines.push(`track ${t.id} ${t.name} ${t.color} ${t.kind}`)
   lines.push(`  synth`)
   for (const key of SYNTH_PARAM_ORDER) {
     const value = t.synth[key]
     lines.push(`    ${key} ${key === 'osc' ? String(value) : formatNumber(value as number)}`)
+  }
+  if (t.kind === 'drums' && t.pattern) {
+    // Canonical: all five lanes, always, in DRUM_LANES order — a step toggle is always a
+    // one-line diff and never inserts/deletes lines. See format-spec.md.
+    for (const lane of DRUM_LANES) {
+      lines.push(`  pattern ${lane} ${t.pattern[lane].map(formatNumber).join(' ')}`)
+    }
   }
   // Canonical order: (start, pitch, id) ascending — see format-spec.md's "canonical ordering".
   const sortedNotes = [...t.notes].sort((a, b) => a.start - b.start || a.pitch - b.pitch || a.id.localeCompare(b.id))

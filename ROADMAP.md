@@ -460,20 +460,31 @@ This is the BeatLab validator idea grown up: **"check my mix against a target"**
 
 Unchanged in structure — the research corrected *content* within milestones, not the sequencing.
 
-### M0 — Extract & format *(the keystone)*
+### M0 — Extract & format *(the keystone — substantially done via Phases 0-1, resequenced)*
 - [ ] Split the BeatLab repo into `core` (document model), `engine` (Tone.js), `ui` (React).
-- [ ] Design and freeze v0 of the `.beat` format: Csound-style one-event-per-line statements +
+      *(Deliberately not done as a big-bang split: `core` was born in `beatlab-daw` instead,
+      zero-deps, and talks to unmodified BeatLab through the store's `applyDawState` boundary.
+      The full repo split is deferred until it's forced by need, not done on principle.)*
+- [x] Design and freeze v0 of the `.beat` format: Csound-style one-event-per-line statements +
       Humdrum-style canonical field ordering + DAWproject vocabulary for device/parameter names +
-      human slugs at the text boundary over raw UUIDs.
-- [ ] Property-test round-trip (serialize→parse→serialize = identity) in CI.
-- [ ] Load/save `.beat` from the existing store. **Exit criteria:** the current BeatLab sandbox
-      saves and reloads as a `.beat` file with zero state loss.
+      human slugs at the text boundary over raw UUIDs. *(v0.1 in Phase 0; v0.2 added drum tracks
+      in Phase 1 — `docs/format-spec.md`, frozen.)*
+- [x] Property-test round-trip (serialize→parse→serialize = identity) — 36 tests in `npm test`,
+      including against a real exported project.
+- [x] Load/save `.beat` from the existing store, **modified exit criteria**: the sandbox
+      round-trips through `.beat` for everything the format models (notes, patterns, 9 synth
+      params, bpm/loop/selection), with unmodeled state explicitly reported by the converter
+      rather than lost silently. *(Literal zero-state-loss needs clips/scenes/automation in the
+      format — deferred with eyes open, see `docs/phase-1-plan.md`.)*
 
-### M1 — Files on disk + daemon
-- [ ] Node daemon owns the file, serves the UI, two-way sync + hot-reload, engine/UI split as a
-      published typed-interface boundary (openDAW pattern).
-- [ ] **Exit criteria:** edit a note in the GUI → see a one-line diff; edit the file → see the
-      note move in the GUI.
+### M1 — Files on disk + daemon ✅ *(done 2026-07-10 — see `docs/phase-1-plan.md`)*
+- [x] Node daemon owns the file, two-way sync + hot-reload, browser↔daemon boundary as a small
+      typed protocol (openDAW pattern; one apply path shared by the daemon bridge and the render
+      CLI). *(Daemon doesn't serve the UI yet — it syncs with the vite dev server; deferred.)*
+- [x] **Exit criteria:** edit a knob in the GUI → a one-line `git diff` (262 ms measured); edit
+      the file → the GUI updates without reload, playback uninterrupted (117 ms measured).
+      Also: format v0.2 added drum tracks, so the whole default groove round-trips — the file,
+      not the app's built-in state, is now the root document.
 
 ### M2 — CLI + headless render
 - [ ] `beat render` (headless Chromium first, `node-web-audio-api` for speed once validated

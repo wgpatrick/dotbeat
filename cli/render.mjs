@@ -2,17 +2,13 @@
 // beat render — Phase 0 prototype of the CLI render path (docs/phase-0-plan.md, Track B.5).
 //
 // Renders a .beat file to a real WAV by driving the actual BeatLab app in headless Chromium:
-// parse the file, boot a beatlab dev server, land on the default sandbox groove (so everything
-// v0 doesn't model — swing, arrangement, the other ~65 SynthParams fields — is already a valid
-// default), overlay the .beat document's tracks/notes/9-param synth subset onto it via the
-// store's own actions (so BeatLab's own merge logic does the work, not a hand-rolled duplicate),
-// then call the exact recordWav() export path ProjectToolbar's "Export WAV" button uses, and
+// parse the file, boot a beatlab dev server, apply the document through the store's own
+// applyDawState action — the SAME apply path the daw-daemon bridge uses (one typed boundary,
+// two consumers: the openDAW lesson, see beatlab-daw/docs/phase-1-plan.md). Tracks that only
+// exist in the file are created (partial synth merged onto beatlab's live defaults), drum
+// patterns apply, tracks absent from the file are dropped: the file is the root document.
+// Then call the exact recordWav() export path ProjectToolbar's "Export WAV" button uses, and
 // write the resulting bytes to disk.
-//
-// v0 prototype limitation: track IDs in the .beat file must match tracks already present in the
-// default sandbox groove (drums/bass/chords/lead) — creating brand-new tracks isn't wired up
-// yet. Reusing/hand-editing an exported real project (see test/fixtures/real-sandbox.beatlab.json
-// and its converted .beat form) is exactly the intended v0 workflow.
 //
 // Usage:
 //   node cli/render.mjs <project.beat> -o <output.wav> --beatlab-dir /path/to/beatlab [--port 5872]
@@ -21,9 +17,9 @@
 // Requires `npm run build` to have run first (reads compiled ../dist/src/core).
 
 import { readFileSync, writeFileSync } from 'node:fs'
-import { spawn } from 'node:child_process'
 import { chromium } from 'playwright-core'
-import { parse } from '../dist/src/core/index.js'
+import { parse, beatDocumentToPartialTracks } from '../dist/src/core/index.js'
+import { spawnBeatlabDevServer, killVite } from './devserver.mjs'
 
 function parseArgs(argv) {
   const args = { _: [] }
@@ -35,39 +31,6 @@ function parseArgs(argv) {
     else args._.push(a)
   }
   return args
-}
-
-async function spawnBeatlabDevServer(beatlabDir, port) {
-  // `npx` execs through an intermediate `sh -c` before reaching the real vite process (confirmed
-  // by inspecting the process tree in this session) — plain vite.kill() only signals the `npx`
-  // wrapper and leaves the actual dev server orphaned and running. detached:true puts the whole
-  // tree in its own process group so killVite() below can take it out with one negative-PID kill.
-  const vite = spawn('npx', ['vite', '--port', String(port)], { cwd: beatlabDir, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
-  const url = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('vite did not announce a URL within 30s')), 30000)
-    let buf = ''
-    const onData = (chunk) => {
-      buf += chunk.toString()
-      const clean = buf.replace(/\x1B\[[0-9;]*m/g, '') // vite ANSI-bolds the port mid-string
-      const m = clean.match(/Local:\s+(http:\/\/localhost:\d+\/musiclearning\/)/)
-      if (m) {
-        clearTimeout(timer)
-        resolve(m[1])
-      }
-    }
-    vite.stdout.on('data', onData)
-    vite.stderr.on('data', onData)
-    vite.on('exit', (code) => reject(new Error(`vite exited early (code ${code}): ${buf.slice(-300)}`)))
-  })
-  return { vite, url }
-}
-
-function killVite(vite) {
-  try {
-    process.kill(-vite.pid, 'SIGTERM') // negative PID = whole process group, see detached:true above
-  } catch {
-    vite.kill() // group already gone, or platform doesn't support negative-PID kill — best effort
-  }
 }
 
 async function main() {
@@ -107,25 +70,10 @@ async function main() {
     await page.waitForFunction(() => window.__store && window.__engine, { timeout: 10000 })
 
     console.log('applying .beat document to the sandbox...')
-    await page.evaluate((doc) => {
+    await page.evaluate((partial) => {
       window.__store.getState().goToSandbox()
-      for (const t of doc.tracks) {
-        const s = window.__store.getState()
-        const track = s.tracks.find((x) => x.id === t.id)
-        if (!track) {
-          throw new Error(
-            `track "${t.id}" from the .beat file has no matching track in the default sandbox groove ` +
-              `(v0 prototype limitation — see beatlab-daw/docs/phase-0-plan.md)`,
-          )
-        }
-        s.setSynth(t.id, t.synth)
-        s.clearTrack(t.id)
-        for (const n of t.notes) {
-          s.recordNote(t.id, { pitch: n.pitch, start: n.start, duration: n.duration, velocity: n.velocity })
-        }
-      }
-      window.__store.setState({ bpm: doc.bpm, loopBars: doc.loopBars, selectedTrackId: doc.selectedTrack })
-    }, doc)
+      window.__store.getState().applyDawState(partial)
+    }, beatDocumentToPartialTracks(doc))
 
     if (pageErrors.length) throw new Error('page error(s) after applying the document:\n' + pageErrors.join('\n'))
 

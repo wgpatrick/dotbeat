@@ -1,0 +1,204 @@
+// The M1 daemon (docs/phase-1-plan.md §1.3): a small local Node process that owns a .beat file
+// and keeps it in two-way sync with a running BeatLab GUI.
+//
+// The browser↔daemon boundary is deliberately a tiny typed protocol over plain HTTP — never
+// shared state — following the pattern that makes openDAW's UI/engine split work and its
+// headless harness nearly free (docs/opendaw-notes.md §2):
+//
+//   GET  /doc     → the current document as partial-track JSON (what the bridge applies)
+//   GET  /events  → SSE stream; a `doc` event fires when the file changes on disk,
+//                   a `parse-error` event when a hand-edit is (momentarily) invalid
+//   POST /state   → the browser's full sandbox payload; converted, canonically serialized,
+//                   written to disk ONLY if musically different from the current document
+//
+// Canonical serialization (docs/decisions.md D4) is the entire sync mechanism: "should this
+// write?" and "is this watcher event an echo of my own write?" are both plain string
+// comparisons. No dirty flags, no timestamps, no vector clocks.
+//
+// SSE over node:http instead of WebSockets: zero new dependencies, auto-reconnecting clients,
+// and a one-directional push channel is genuinely all the file→GUI direction needs.
+
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { readFileSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
+import { basename, dirname, resolve } from 'node:path'
+import type { BeatDocument } from '../core/index.js'
+import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, type ExternalSandboxPayload } from '../core/index.js'
+
+export interface DaemonOptions {
+  filePath: string
+  port?: number
+}
+
+export interface Daemon {
+  port: number
+  filePath: string
+  close: () => Promise<void>
+  /** Test hook: the current in-memory document (what /doc serves). */
+  getDoc: () => BeatDocument
+}
+
+const CORS_HEADERS: Record<string, string> = {
+  // The daemon binds to localhost only; the GUI origin is the local vite dev server, whose port
+  // varies. Wildcard is acceptable for a loopback-only, single-user dev daemon.
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'content-type',
+}
+
+function readBody(req: IncomingMessage, maxBytes = 10 * 1024 * 1024): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > maxBytes) {
+        reject(new Error('request body too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => resolvePromise(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', reject)
+  })
+}
+
+function json(res: ServerResponse, status: number, body: unknown) {
+  res.writeHead(status, { 'content-type': 'application/json', ...CORS_HEADERS })
+  res.end(JSON.stringify(body))
+}
+
+export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
+  const filePath = resolve(opts.filePath)
+  const requestedPort = opts.port ?? 8420
+
+  // Fail loudly at startup if the file doesn't exist or doesn't parse — a daemon that boots on a
+  // broken document has nothing true to serve.
+  let lastFileText = readFileSync(filePath, 'utf8')
+  let doc = parse(lastFileText)
+  let canonicalText = serialize(doc)
+
+  const sseClients = new Set<ServerResponse>()
+
+  function broadcast(event: string, data: unknown) {
+    const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+    for (const client of sseClients) client.write(frame)
+  }
+
+  // Editors (vim included) save via atomic rename, which orphans a watcher attached to the file's
+  // inode — so watch the *directory* and filter by name (docs/phase-1-plan.md).
+  const dir = dirname(filePath)
+  const name = basename(filePath)
+  let watchTimer: ReturnType<typeof setTimeout> | null = null
+  const watcher: FSWatcher = watch(dir, (_eventType, changedName) => {
+    if (changedName !== null && changedName !== name) return
+    // Debounce: one save can emit several fs events; also gives an editor's write time to finish.
+    if (watchTimer) clearTimeout(watchTimer)
+    watchTimer = setTimeout(onFileMaybeChanged, 60)
+  })
+
+  function onFileMaybeChanged() {
+    let text: string
+    try {
+      text = readFileSync(filePath, 'utf8')
+    } catch {
+      return // transient (mid-rename); the next event will retry
+    }
+    if (text === lastFileText) return // echo of our own write, or a no-op save
+    lastFileText = text
+    let next: BeatDocument
+    try {
+      next = parse(text)
+    } catch (err) {
+      // A half-saved or momentarily-invalid hand edit is normal, not fatal. Tell the GUI and
+      // keep serving the last good document.
+      broadcast('parse-error', { message: err instanceof Error ? err.message : String(err) })
+      return
+    }
+    doc = next
+    canonicalText = serialize(doc)
+    broadcast('doc', beatDocumentToPartialTracks(doc))
+  }
+
+  const server: Server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, CORS_HEADERS)
+      res.end()
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname === '/doc') {
+      json(res, 200, beatDocumentToPartialTracks(doc))
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname === '/events') {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+        ...CORS_HEADERS,
+      })
+      res.write('retry: 500\n\n')
+      sseClients.add(res)
+      req.on('close', () => sseClients.delete(res))
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/state') {
+      readBody(req)
+        .then((body) => {
+          const payload = JSON.parse(body) as ExternalSandboxPayload
+          if (!Array.isArray(payload.tracks) || typeof payload.bpm !== 'number') {
+            json(res, 400, { error: 'body is not a sandbox payload' })
+            return
+          }
+          const { doc: nextDoc, report } = sandboxPayloadToBeatDocument(payload)
+          const nextText = serialize(nextDoc)
+          // Canonical-to-canonical comparison: identical music → identical bytes → no write.
+          // (Comparing against serialize(doc), not the raw file text, means a hand-added comment
+          // is left alone until a real musical change rewrites the file in canonical form —
+          // comments are a hand-editing convenience, not canonical, per format-spec.md.)
+          const written = nextText !== canonicalText
+          if (written) {
+            writeFileSync(filePath, nextText)
+            lastFileText = nextText
+            canonicalText = nextText
+            // Re-parse our own canonical text rather than keeping nextDoc: the payload's note
+            // order isn't canonical (serialize sorts notes), and memory must never disagree
+            // with disk — getDoc() === parse(file) is an invariant the tests assert.
+            doc = parse(nextText)
+          }
+          json(res, 200, { written, report })
+        })
+        .catch((err) => {
+          json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    json(res, 404, { error: `no such endpoint: ${req.method} ${url.pathname}` })
+  })
+
+  await new Promise<void>((resolveListen, reject) => {
+    server.on('error', reject)
+    server.listen(requestedPort, '127.0.0.1', () => resolveListen())
+  })
+  const address = server.address()
+  const port = typeof address === 'object' && address !== null ? address.port : requestedPort
+  return {
+    port,
+    filePath,
+    getDoc: () => doc,
+    close: () =>
+      new Promise<void>((done) => {
+        if (watchTimer) clearTimeout(watchTimer)
+        watcher.close()
+        for (const client of sseClients) client.end()
+        sseClients.clear()
+        server.close(() => done())
+      }),
+  }
+}

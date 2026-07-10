@@ -76,23 +76,28 @@ Csound-style typed statement lines, Humdrum-style canonical field ordering, DAWp
 parameter vocabulary. Beats YAML (no comparable precedent found) and JSON (openDAW's own JSON
 path shows the trap).
 
-## v0 grammar — FROZEN, implemented in `beatlab-daw/src/core`
+## v0.2 grammar — FROZEN, implemented in `beatlab-daw/src/core`
 
-Deliberately minimal (per `phase-0-plan.md`): synth tracks only (no drums), notes only (no
-automation, no clips/scenes), one implicit synth device per track (no device IDs, no
-multi-device chains yet). Every field maps 1:1 onto real fields in BeatLab's actual `Track`/
-`Note`/`SynthParams` types (`beatlab/src/types.ts`) — chosen so Track B.3's converter has no
-lossy or invented mapping to design, just a direct field-for-field translation.
+Deliberately minimal: notes, drum patterns, and one implicit synth device per track (no
+automation, no clips/scenes, no device IDs / multi-device chains yet). Every field maps 1:1
+onto real fields in BeatLab's actual `Track`/`Note`/`DrumPattern`/`SynthParams` types
+(`beatlab/src/types.ts`) — chosen so the converter has no lossy or invented mapping to design,
+just a direct field-for-field translation.
+
+Version history: **v0.1** (Phase 0) was synth tracks only — drum tracks were dropped by the
+converter, which meant the app's built-in default state, not the file, was still the true root
+document. **v0.2** (Phase 1, `phase-1-plan.md`) added the `kind` token and `pattern` lines so
+the whole default groove round-trips and the file becomes the actual source of truth.
 
 ### Lines
 
 ```
-format_version <semver-ish, e.g. 0.1>
+format_version <semver-ish, e.g. 0.2>
 bpm <integer>
 loop_bars <integer>
 selected_track <track id>
 
-track <id> <name> <color hex, lowercase>
+track <id> <name> <color hex, lowercase> <kind: synth|drums>
   synth
     osc <sine|triangle|sawtooth|square>
     volume <number, dB>
@@ -103,21 +108,24 @@ track <id> <name> <color hex, lowercase>
     sustain <number, 0..1>
     release <number, seconds>
     pan <number, -1..1>
-  note <id> <pitch 0-127> <start, 16th-note steps from loop start> <duration, steps> <velocity 0..1>
-  note <id> <pitch> <start> <duration> <velocity>
+  pattern <lane: kick|snare|clap|hat|openhat> <velocity 0..1, one per step>   # drum tracks only
+  note <id> <pitch 0-127> <start, 16th-note steps from loop start> <duration, steps> <velocity 0..1>   # synth tracks only
   ...
-
-track <id> <name> <color hex>
-  synth
-    ...
-  note ...
 ```
 
-Indentation is exactly 2 spaces per level (`track` at column 0, `synth`/`note` at column 2,
-individual synth params at column 4) and is **structural**, not cosmetic — the parser uses it to
-know which track/synth a line belongs to. A `#` starts a line comment (ignored by the parser,
-never emitted by the serializer — comments are a hand-editing convenience, not part of the
-canonical form).
+Drum tracks carry the same 9-param `synth` block (in BeatLab those are the real drum bus/voice
+params) plus exactly five `pattern` lines — one per lane, all five always present. A pattern is
+a fixed-length velocity cycle (16 steps = one bar in BeatLab, repeating across the loop,
+independent of `loop_bars`); `0` = off. Synth tracks carry `note` lines and no `pattern` lines;
+the parser rejects the wrong statement kind in either direction, and rejects drum tracks with
+missing lanes or unequal lane lengths. Track names are single tokens (a known, accepted v0.2
+limitation).
+
+Indentation is exactly 2 spaces per level (`track` at column 0, `synth`/`pattern`/`note` at
+column 2, individual synth params at column 4) and is **structural**, not cosmetic — the parser
+uses it to know which track/synth a line belongs to. A `#` starts a line comment (ignored by the
+parser, never emitted by the serializer — comments are a hand-editing convenience, not part of
+the canonical form).
 
 ### Why notes are positional but synth params are one-per-line
 
@@ -134,6 +142,11 @@ This is the resolution of the Csound-vs-DAWproject tension the prior-art researc
   *entire* line under git's line-oriented default view. One param per line costs some
   compactness; it's what makes "hand-edit a cutoff value, see a clean diff" — the actual thesis
   this phase is testing — literally true.
+- **Drum patterns are one lane per line, positional velocities** (v0.2) — the Humdrum grid
+  spirit at lane granularity. All five lanes are always emitted (no elision of silent lanes —
+  one canonical way to write a fact), so toggling any step is always a one-line diff and never
+  inserts or deletes lines. Per-step one-line diffs would cost 80 lines per drum track for a
+  16-step kit; lane granularity is the deliberate middle ground.
 
 ### Canonical ordering (the Humdrum discipline, applied)
 
@@ -150,12 +163,14 @@ musically-identical documents always produce byte-identical text.
    BeatLab's own progressive-reveal lesson order (`P_FULL` in `src/lessons/sound.ts`:
    osc→volume→cutoff→resonance→attack/decay/sustain/release) with `pan` appended — reusing an
    ordering convention that already exists in the real app, not inventing a new one.
-4. Then `note` lines, sorted by `(start, pitch, id)` ascending.
-5. Numbers: integers with no decimal point (`4500`, not `4500.0`); non-integers rounded to 4
+4. For drum tracks: exactly five `pattern` lines, always all lanes, always in BeatLab's own
+   `DRUM_LANES` order — `kick, snare, clap, hat, openhat`.
+5. Then `note` lines, sorted by `(start, pitch, id)` ascending.
+6. Numbers: integers with no decimal point (`4500`, not `4500.0`); non-integers rounded to 4
    decimal places, trailing zeros and a trailing `.` stripped (`0.8`, not `0.80` or `0.8000`).
    This is the one place floating-point noise could break byte-identical round-trips, so it's
    pinned down precisely rather than left to `Number.prototype.toString()`.
-6. IDs are emitted exactly as given — no re-slugging. BeatLab's real IDs (`lead`, `bass`,
+7. IDs are emitted exactly as given — no re-slugging. BeatLab's real IDs (`lead`, `bass`,
    `n106`, `u100000`) are already human-legible, which independently validates `docs/decisions.md`
    D6's human-slug decision: the app didn't need to be redesigned to get readable IDs, it already
    had them.
@@ -163,12 +178,29 @@ musically-identical documents always produce byte-identical text.
 ### Worked example (a real, small round-trippable document)
 
 ```
-format_version 0.1
+format_version 0.2
 bpm 124
 loop_bars 1
 selected_track lead
 
-track lead Lead #c678dd
+track drums Drums #e35d5d drums
+  synth
+    osc sawtooth
+    volume -10
+    cutoff 9000
+    resonance 0.8
+    attack 0.01
+    decay 0.2
+    sustain 0.7
+    release 0.3
+    pan 0
+  pattern kick 0.9 0 0 0 0.9 0 0 0 0.9 0 0 0 0.9 0 0 0
+  pattern snare 0 0 0 0 0.8 0 0 0 0 0 0 0 0.8 0 0 0
+  pattern clap 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+  pattern hat 0 0 0.6 0 0 0 0.6 0 0 0 0.6 0 0 0 0.6 0
+  pattern openhat 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0
+
+track lead Lead #c678dd synth
   synth
     osc square
     volume -14
@@ -191,13 +223,16 @@ Changing that lead's cutoff from bright to dark is exactly this diff:
 +    cutoff 900
 ```
 
-That one-line diff, for exactly this kind of edit, is the whole thesis this phase is testing.
+That one-line diff, for exactly this kind of edit, is the whole thesis — proven in Phase 0
+(tests + a real render) and again in Phase 1 (a live GUI knob-turn producing exactly that
+`git diff`, measured — see `phase-1-plan.md`). Toggling one drum step is likewise exactly one
+changed `pattern` line.
 
-### Deferred past v0 (explicitly out of scope, not forgotten)
+### Deferred past v0.2 (explicitly out of scope, not forgotten)
 
-Drum tracks/patterns, automation, clips/scenes, multi-device chains (FX, sends), arrangement.
-See `phase-0-plan.md`'s "explicitly deferred" section — these come after the vertical slice
-proves itself.
+Automation, clips/scenes, swing, arrangement, multi-device chains (FX, sends), multi-token track
+names. See `phase-1-plan.md`'s "explicitly deferred" section — these come as the milestones that
+need them land (`ROADMAP.md` §8).
 
 ---
 

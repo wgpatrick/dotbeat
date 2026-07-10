@@ -4,16 +4,19 @@
 > agent — can edit in a real GUI, render from the command line, `git diff`, and get sound-design
 > critique on.
 
-This repository holds the research/planning behind the direction, **plus a working Phase 0
-prototype** proving the core thesis end-to-end: a real `.beat` text format (parser + serializer +
-converter), tested against a real exported BeatLab project, rendered to a real WAV by a `beat
-render` CLI that drives the actual [BeatLab](https://github.com/wgpatrick/beatlab) app (a working
-Tone.js + React web DAW / production trainer, which this project forks in spirit).
+This repository holds the research/planning behind the direction, **plus working Phase 0 + 1
+code** proving the core loop end-to-end: a real `.beat` text format (parser + serializer +
+converter, drums included), a **daemon** that keeps the file and a live GUI in two-way sync
+(GUI knob-turn → one-line `git diff` in 262 ms; `vim` edit → GUI hot-reloads in 117 ms, playback
+uninterrupted), and a `beat render` CLI that renders the file to a real WAV by driving the
+actual [BeatLab](https://github.com/wgpatrick/beatlab) app (a working Tone.js + React web DAW /
+production trainer, which this project forks in spirit).
 
 ```bash
 npm install
-npm test                # 21 tests: format round-trips + conversion against real project data
+npm test                # 36 tests: format round-trips, conversion against real project data, daemon sync
 npm run render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
+node cli/daemon.mjs examples/real-groove.beat   # then open the beatlab dev server with ?daw=8420
 ```
 
 ## The idea in one picture
@@ -38,12 +41,14 @@ now fully-verified version.
 
 | Path | What |
 |---|---|
-| [`docs/phase-0-plan.md`](docs/phase-0-plan.md) | **Start here for what's built.** The vertical-slice plan, status COMPLETE, with the actual result. |
+| [`docs/phase-1-plan.md`](docs/phase-1-plan.md) | **Start here for what's built.** M1 (daemon + two-way sync), status COMPLETE, with measured latencies. [`docs/phase-0-plan.md`](docs/phase-0-plan.md) is the prior slice (format + render). |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, milestones, risks. |
-| `src/core/` | The `.beat` format: types, parser, serializer, converter. Pure TS, zero deps on beatlab/React/Tone.js. |
-| `test/` | 21 tests — format round-trips (synthetic + property-style) and conversion fidelity against a real exported project (`test/fixtures/`). |
-| `cli/render.mjs` | `beat render` — drives the real BeatLab app in headless Chromium to render a `.beat` file to a WAV. |
-| `examples/real-groove.beat` | A real project, converted to `.beat` text — hand-inspectable, the file the CLI's proof run used. |
+| `src/core/` | The `.beat` format: types, parser, serializer, converter (synth + drum tracks). Pure TS, zero deps on beatlab/React/Tone.js. |
+| `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over a 3-endpoint HTTP/SSE protocol, echo suppression by canonical-text comparison. |
+| `test/` | 36 tests — format round-trips, conversion fidelity against a real exported project (`test/fixtures/`), and daemon sync behavior. |
+| `cli/render.mjs`, `cli/daemon.mjs` | `beat render` (headless-Chromium render to WAV) and `beat daemon` (file↔GUI sync). |
+| `scripts/verify-m1.mjs` | The M1 exit-criteria proof: boots daemon + dev server + browser + git, measures both sync directions. |
+| `examples/real-groove.beat` | A real project, converted to `.beat` text — hand-inspectable, the file the proof runs use. |
 | [`docs/research/`](docs/research/) | Four deep-research reports (347 raw claims, 70 sources), **all fully adversarially verified**. |
 | [`docs/opendaw-notes.md`](docs/opendaw-notes.md) | Source-code archaeology — openDAW/DAWproject/automix-toolkit/node-web-audio-api read directly, not summarized secondhand. |
 | [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format spec — v0 grammar frozen and implemented, grounded in real prior art (Csound, Humdrum, DAWproject). |
@@ -92,8 +97,11 @@ inline rather than silently fixed.
 
 ## Status
 
-**Phase 0 complete.** The core thesis is proven, not just argued: a hand-inspectable `.beat` file
-converted from a real BeatLab project renders to a real WAV via `beat render`, and changing one
-synth parameter produces a diff of exactly one line — the specific property the whole project
-bets on. See [`docs/phase-0-plan.md`](docs/phase-0-plan.md)'s "Result" section for what this
-proved and what it means for scoping M1 (the daemon + two-way file sync) next.
+**Phase 0 and Phase 1 (ROADMAP M1) complete.** The core loop is real, not argued: a
+hand-inspectable `.beat` file — the *whole* groove, drums included — is the source of truth for
+a live GUI session. Turn a knob in the GUI and `git diff` shows exactly one changed line
+(262 ms, measured). Edit the file in an editor and the GUI hot-reloads without stopping playback
+(117 ms, measured). Add a track that exists only in the file and it appears in the app, a full
+74-field synth reconstituted from a 9-field text patch. The same apply path drives `beat render`
+to a real WAV. See [`docs/phase-1-plan.md`](docs/phase-1-plan.md)'s "Result" for the numbers and
+what they mean for M2/M3 scoping.

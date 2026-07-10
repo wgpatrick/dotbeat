@@ -1,9 +1,26 @@
-format_version 0.1
+format_version 0.2
 bpm 126
 loop_bars 4
-selected_track bass
+selected_track drums
 
-track bass Bass #56b6c2
+track drums Drums #e06c75 drums
+  synth
+    osc sawtooth
+    volume -10
+    cutoff 9000
+    resonance 0.8
+    attack 0.01
+    decay 0.2
+    sustain 0.7
+    release 0.3
+    pan 0
+  pattern kick 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0
+  pattern snare 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+  pattern clap 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0
+  pattern hat 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0
+  pattern openhat 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0
+
+track bass Bass #56b6c2 synth
   synth
     osc sawtooth
     volume -8
@@ -47,7 +64,7 @@ track bass Bass #56b6c2
   note n92 31 60 2 0.8
   note n93 43 62 2 0.8
 
-track chords Chords #f7c948
+track chords Chords #f7c948 synth
   synth
     osc triangle
     volume -14
@@ -71,7 +88,7 @@ track chords Chords #f7c948
   note n104 59 48 16 0.8
   note n105 62 48 16 0.8
 
-track lead Lead #c678dd
+track lead Lead #c678dd synth
   synth
     osc square
     volume -14

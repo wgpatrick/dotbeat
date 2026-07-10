@@ -8,37 +8,48 @@ import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTr
 // Playwright driving the actual store — see the session's gen-fixture.mjs). Proves the .beat
 // format against real app data, not just hand-built fixtures: real IDs (n106, u100000...), a
 // real 74-field SynthParams object (including wavetable-frame arrays), a drum track, and a
-// selectedTrackId that points at that (non-synth) drum track — the actual fallback edge case.
+// selectedTrackId that points at that drum track (which, pre-v0.2, exercised the fallback path —
+// since v0.2 drums convert, so it must NOT fall back anymore).
 const fixturePath = fileURLToPath(new URL('./fixtures/real-sandbox.beatlab.json', import.meta.url))
 const realPayload = JSON.parse(readFileSync(fixturePath, 'utf8')) as ExternalSandboxPayload
 
 test('fixture sanity: this is real, non-trivial project data', () => {
   assert.equal(realPayload.tracks.length, 4)
   assert.ok(realPayload.tracks.some((t) => t.kind === 'drums'))
-  assert.equal(realPayload.selectedTrackId, 'drums') // the edge case this suite exercises
+  assert.equal(realPayload.selectedTrackId, 'drums')
   const lead = realPayload.tracks.find((t) => t.id === 'lead')!
-  assert.ok(Object.keys(lead.synth).length > 50, 'real SynthParams has far more than v0\'s 9 fields')
+  assert.ok(Object.keys(lead.synth).length > 50, "real SynthParams has far more than the format's 9 fields")
 })
 
-test('converts real payload to a v0 document, dropping exactly the drum track', () => {
+test('converts the real payload with zero dropped tracks (drums convert since v0.2)', () => {
   const { doc, report } = sandboxPayloadToBeatDocument(realPayload)
-  assert.deepEqual(report.droppedTracks, ['drums'])
-  assert.equal(doc.tracks.length, 3)
-  assert.deepEqual(doc.tracks.map((t) => t.id), ['bass', 'chords', 'lead'])
+  assert.deepEqual(report.droppedTracks, [])
+  assert.equal(doc.tracks.length, 4)
+  assert.deepEqual(doc.tracks.map((t) => t.id), ['drums', 'bass', 'chords', 'lead'])
 })
 
-test('falls back selectedTrack to the first synth track when the source selected a dropped (drum) track', () => {
+test('selectedTrack pointing at the drum track survives — no fallback needed anymore', () => {
   const { doc, report } = sandboxPayloadToBeatDocument(realPayload)
-  assert.equal(report.selectedTrackFellBack, true)
-  assert.equal(doc.selectedTrack, 'bass')
+  assert.equal(report.selectedTrackFellBack, false)
+  assert.equal(doc.selectedTrack, 'drums')
 })
 
-test('reports which real SynthParams fields v0 does not model, per track', () => {
+test('the real drum pattern survives conversion exactly, lane by lane', () => {
+  const { doc } = sandboxPayloadToBeatDocument(realPayload)
+  const srcDrums = realPayload.tracks.find((t) => t.kind === 'drums')!
+  const drums = doc.tracks.find((t) => t.id === srcDrums.id)!
+  assert.equal(drums.kind, 'drums')
+  for (const lane of ['kick', 'snare', 'clap', 'hat', 'openhat'] as const) {
+    assert.deepEqual(drums.pattern![lane], srcDrums.pattern![lane], `pattern.${lane}`)
+  }
+})
+
+test('reports which real SynthParams fields the format does not model, per track', () => {
   const { report } = sandboxPayloadToBeatDocument(realPayload)
   const leadDropped = report.droppedSynthParams.lead!
-  assert.ok(leadDropped.includes('wtCustomA'), 'wavetable frame arrays are v0-out-of-scope')
-  assert.ok(leadDropped.includes('lfoRate'), 'LFO params are v0-out-of-scope')
-  assert.ok(!leadDropped.includes('cutoff'), 'cutoff IS in v0 and must not be reported as dropped')
+  assert.ok(leadDropped.includes('wtCustomA'), 'wavetable frame arrays are out of scope')
+  assert.ok(leadDropped.includes('lfoRate'), 'LFO params are out of scope')
+  assert.ok(!leadDropped.includes('cutoff'), 'cutoff IS modeled and must not be reported as dropped')
 })
 
 test('every note on every real synth track survives the conversion exactly', () => {
@@ -55,9 +66,9 @@ test('every note on every real synth track survives the conversion exactly', () 
   }
 })
 
-test('the 9 v0 synth fields survive conversion exactly, for every real synth track', () => {
+test('the 9 modeled synth fields survive conversion exactly, for every real track (drums included)', () => {
   const { doc } = sandboxPayloadToBeatDocument(realPayload)
-  for (const srcTrack of realPayload.tracks.filter((t) => t.kind === 'synth')) {
+  for (const srcTrack of realPayload.tracks) {
     const converted = doc.tracks.find((t) => t.id === srcTrack.id)!
     for (const key of ['osc', 'volume', 'cutoff', 'resonance', 'attack', 'decay', 'sustain', 'release', 'pan'] as const) {
       assert.equal(converted.synth[key], srcTrack.synth[key], `${srcTrack.id}.synth.${key}`)
@@ -82,12 +93,16 @@ test('the real lead track, hand-inspectable as .beat text, contains the exact ed
   assert.match(leadBlock, /^\s*note \S+ 72 8 \d+ [\d.]+$/m)
 })
 
-test('beatDocumentToPartialTracks round-trips the v0-modeled fields back out for re-import', () => {
+test('beatDocumentToPartialTracks round-trips the modeled fields back out for re-import', () => {
   const { doc } = sandboxPayloadToBeatDocument(realPayload)
   const partial = beatDocumentToPartialTracks(doc)
   assert.equal(partial.bpm, realPayload.bpm)
   assert.equal(partial.loopBars, realPayload.loopBars)
+  assert.equal(partial.selectedTrackId, 'drums')
   const lead = partial.tracks.find((t) => t.id === 'lead')!
   assert.equal(lead.synth.cutoff, 3200)
   assert.equal(lead.notes.length, realPayload.tracks.find((t) => t.id === 'lead')!.notes.length)
+  const drums = partial.tracks.find((t) => t.id === 'drums')!
+  assert.equal(drums.kind, 'drums')
+  assert.deepEqual(drums.pattern!.kick, realPayload.tracks.find((t) => t.id === 'drums')!.pattern!.kick)
 })
