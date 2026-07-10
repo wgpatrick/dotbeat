@@ -55,3 +55,13 @@ killed), synthesized to 11 findings, every one 3-0. Ran with a concrete motivati
 (Phase 4's 0.73×-realtime offline render) and came back with a verified explanation candidate
 for it (upstream graph-ordering bottleneck under topology churn) plus the M4 native-engine
 design shape (Tracktion-graph-style lock-free multi-threaded node player).
+
+## 06 — Demand signal & adjacent tools (added 2026-07-10)
+
+[`06-demand-and-adjacent-tools.md`](06-demand-and-adjacent-tools.md) — the last two flagged
+gaps (live-coding comparison + demand signal), combined: 11 findings (all 3-0), 4 refuted.
+Headlines: the empty quadrant survives its third audit (all surveyed live-coding tools are
+code-only, none renders headless, the round-trip trap is unsolved everywhere but one Strudel
+slider); the strongest verified demand signal is agent control of music tools (ableton-mcp
+~2.8k stars); and the broad "musicians want version control" case remains unproven after three
+passes — explicitly a bet, not a fact.

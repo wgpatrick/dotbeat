@@ -79,16 +79,21 @@ plus the render→critique loop on top. §4 now has real prior art for exactly t
 
 ### Why now
 
-- **Producers who code already exist** — TidalCycles users making pop music "for almost 10
-  years", algorave as an established practice, hybrid Tidal→Ableton MIDI workflows.
-  *(`01-landscape.md`, still single-source — this specific research angle was never queued for
-  verification in either pass. The harness's own open-questions list flags this explicitly as
-  needing a dedicated follow-up.)*
-- **Agent-native music tooling is already a category** — `ableton-mcp` (~2.8k stars),
-  `ableton-mcp-extended`, `strudel-mcp-server`, `midi-mcp-server`. **But every one of them pokes
-  an existing DAW's GUI over a socket.** If the source of truth is already text, the agent edits
-  the *file* directly — no live-app puppetry, no desync. *(Also single-source — same caveat as
-  above, flagged by the harness as an open question, not refuted.)*
+- **Agent-native music tooling is already a category — now VERIFIED, and it's the strongest
+  demand signal we have**: `ableton-mcp` at ~2.8k stars / 365 forks, actively maintained through
+  mid-2026 (`docs/research/06-demand-and-adjacent-tools.md`, 3-0). Every such tool pokes a live
+  DAW's GUI over a socket; if the source of truth is text, the agent edits the *file* directly.
+- **The round-trip trap is verified unsolved across the whole live-coding landscape** (research
+  06): every surveyed tool (Strudel, TidalCycles, Glicol; no verified evidence even surfaced for
+  Sonic Pi/FoxDot) is code-only, none renders headless to file, and the only working code↔GUI
+  round-trip anywhere is Strudel's single inline slider widget. Meanwhile users keep reinventing
+  headless-Chromium hacks (Glicol 2022, strudel.nvim's Puppeteer) for exactly the workflow our
+  daemon + offline renderer already provide.
+- **Honest asymmetry, said out loud**: demand for CLI/local workflows among live-coders is real
+  but small-n (Glicol shipped `glicol-cli` off a six-person thread); the broad "musicians want
+  version control" case remains **unproven beyond DAWproject #40 after three research passes** —
+  treat it as the bet this project is making, not an established fact. Positioning should lead
+  with agent-native + hackable workflow, where the verified demand is.
 
 ---
 
@@ -615,10 +620,11 @@ research-backed rankings.)*
 - **Relationship to BeatLab.** Hard fork, or does BeatLab become the "learn" mode inside this?
 - **Web-first vs Tauri-first.** Ship the web tier alone first, or build Tauri earlier?
 - **Research follow-ups**: (a) engine architecture — ✅ **done 2026-07-10**
-  (`docs/research/05-engine-architecture.md`); (b) live-coding language comparison
-  (Strudel/Tidal/Sonic Pi/Glicol — zero coverage twice) — still open; (c) direct
-  demand-signal/survey evidence (producers-who-code market signals, feature make-or-break
-  data) — still open. (b) and (c) remain honest, acknowledged gaps.
+  (`docs/research/05-engine-architecture.md`); (b) live-coding comparison and (c) demand
+  signal — ✅ **done 2026-07-10, combined** (`docs/research/06-demand-and-adjacent-tools.md`).
+  All three original flags are now resolved. Residual honest gaps the passes themselves named:
+  WASM-DSP-library specifics (from 05) and any direct musician-survey data (three passes, still
+  none found — the thinness is the finding).
 
 ---
 
