@@ -155,7 +155,7 @@ test('removeNote returns the removed note and rejects unknown ids', () => {
 
 test('describeDocument gives a compact, exact overview of the real project', () => {
   const text = describeDocument(realDoc())
-  assert.match(text, /^format 0\.2 \| 126 bpm \| 4 bars \(64 steps\) \| selected: drums\n/)
+  assert.match(text, /^format 0\.3 \| 126 bpm \| 4 bars \(64 steps\) \| selected: drums\n/)
   assert.match(text, /tracks: 4\n/)
   assert.match(text, /^lead {2}"Lead" {2}synth/m)
   assert.match(text, /cutoff 3200 Hz/)

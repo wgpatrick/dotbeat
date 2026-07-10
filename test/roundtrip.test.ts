@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { parse, serialize, BeatParseError, type BeatDocument } from '../src/core/index.js'
+import { parse, serialize, BeatParseError, defaultSynthFields, type BeatDocument } from '../src/core/index.js'
 
 const WORKED_EXAMPLE = `format_version 0.2
 bpm 124
@@ -71,6 +71,7 @@ test('parses the worked example from format-spec.md into the expected shape', ()
     sustain: 0.2,
     release: 0.4,
     pan: 0,
+    ...defaultSynthFields(), // v0.3: elided optional fields parse as their canonical defaults
   })
   assert.equal(lead.notes.length, 3)
   assert.deepEqual(lead.notes[0], { id: 'n100000', pitch: 64, start: 0, duration: 2, velocity: 0.8 })
@@ -125,7 +126,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
         name: 'Bass',
         color: '#56b6c2',
         kind: 'synth',
-        synth: { osc: 'sawtooth', volume: -8, cutoff: 700, resonance: 0.8, attack: 0.005, decay: 0.25, sustain: 0.3, release: 0.15, pan: 0 },
+        synth: { osc: 'sawtooth', volume: -8, cutoff: 700, resonance: 0.8, attack: 0.005, decay: 0.25, sustain: 0.3, release: 0.15, pan: 0, ...defaultSynthFields() },
         notes: [
           { id: 'u1', pitch: 33, start: 0, duration: 2, velocity: 0.8 },
           { id: 'u2', pitch: 33, start: 4, duration: 2, velocity: 0.8 },
@@ -136,7 +137,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
         name: 'Drums',
         color: '#e35d5d',
         kind: 'drums',
-        synth: { osc: 'sawtooth', volume: -10, cutoff: 9000, resonance: 0.8, attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.3, pan: 0 },
+        synth: { osc: 'sawtooth', volume: -10, cutoff: 9000, resonance: 0.8, attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.3, pan: 0, ...defaultSynthFields() },
         notes: [],
         pattern: {
           kick: [0.9, 0, 0, 0],
@@ -174,6 +175,7 @@ test('formatNumber stabilizes floating-point noise so round-tripping is idempote
           sustain: 0.5,
           release: 0.1,
           pan: 0,
+          ...defaultSynthFields(),
         },
         notes: [],
       },

@@ -545,6 +545,29 @@ Unchanged in structure — the research corrected *content* within milestones, n
       offline.) The session itself produced a format-roadmap finding: per-lane drum gain isn't a
       v0.2 lever and needs to be.
 
+### Format v0.3 — the file carries the sound *(done 2026-07-10 — see `docs/phase-5-plan.md`)*
+
+Driven directly by owner feedback on the first composed track ("sounds like sorta shitty video
+game music") and the A/B experiment proving the cause was patch poverty (9 of ~74 SynthParams
+exposed), not an engine ceiling.
+
+- [x] ~46 optional synth params (osc layers, sub, unison, filter env, LFOs, inserts, sends,
+      sidechain duck, drum-voice shaping) as one table (`SYNTH_FIELDS`) driving
+      parse/serialize/edit/diff/convert. Canonical elision: serialized iff ≠ frozen default —
+      init patch is still 9 lines, every present line is a deliberate sound decision, any param
+      change is a one-line diff.
+- [x] Presets as tooling, not grammar: `beat presets` / `beat preset` / `beat_preset` MCP tool
+      apply `presets/factory.json` voicings through the same path as `beat set`. Factory library
+      seeded from the approved Night Shift v3 patches.
+- [x] Exit test run for real (`scripts/verify-phase5.mjs`): the v3 sound reproduced from pure
+      `.beat` text (`examples/night-shift.beat`, built via 4 preset applications + 5 set edits)
+      with **exact** engine-state equivalence per track, and render metrics matching the archived
+      reference. Found + documented en route: the offline renderer is measurably nondeterministic
+      run-to-run (~±0.4 LU / ±4 band pts / ±2 dB width — event-loop-vs-render-thread scheduling),
+      which matters for tight lint thresholds and the variation loop (§7).
+- Still open from the M3 session finding: per-lane drum *gain* (the drum-voice params shape tone
+  and envelope; lane balance is still pattern velocities only).
+
 ### M4 — The "not a toy" / parity push *(Tauri native tier — design drafted, see [docs/m4-native-engine-design.md](docs/m4-native-engine-design.md))*
 - [ ] Tauri shell: native-latency recording, latency compensation, CLAP/VST3 hosting.
 - [ ] Warping / time-stretch (Rubber Band or signalsmith; WASM in web, native in Tauri).

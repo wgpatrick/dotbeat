@@ -76,7 +76,7 @@ Csound-style typed statement lines, Humdrum-style canonical field ordering, DAWp
 parameter vocabulary. Beats YAML (no comparable precedent found) and JSON (openDAW's own JSON
 path shows the trap).
 
-## v0.2 grammar — FROZEN, implemented in `beatlab-daw/src/core`
+## v0.2 grammar (+ v0.3 additions) — FROZEN, implemented in `beatlab-daw/src/core`
 
 Deliberately minimal: notes, drum patterns, and one implicit synth device per track (no
 automation, no clips/scenes, no device IDs / multi-device chains yet). Every field maps 1:1
@@ -87,7 +87,10 @@ just a direct field-for-field translation.
 Version history: **v0.1** (Phase 0) was synth tracks only — drum tracks were dropped by the
 converter, which meant the app's built-in default state, not the file, was still the true root
 document. **v0.2** (Phase 1, `phase-1-plan.md`) added the `kind` token and `pattern` lines so
-the whole default groove round-trips and the file becomes the actual source of truth.
+the whole default groove round-trips and the file becomes the actual source of truth. **v0.3**
+(Phase 5, `phase-5-plan.md`) added the optional shaped-parameter surface — see "v0.3 additions"
+below; the v0.2 grammar is a strict subset (every v0.2 file is a valid v0.3 file, and a document
+that touches no optional field serializes identically).
 
 ### Lines
 
@@ -228,11 +231,54 @@ That one-line diff, for exactly this kind of edit, is the whole thesis — prove
 `git diff`, measured — see `phase-1-plan.md`). Toggling one drum step is likewise exactly one
 changed `pattern` line.
 
-### Deferred past v0.2 (explicitly out of scope, not forgotten)
+### v0.3 additions — the optional shaped-parameter surface (Phase 5)
 
-Automation, clips/scenes, swing, arrangement, multi-device chains (FX, sends), multi-token track
-names. See `phase-1-plan.md`'s "explicitly deferred" section — these come as the milestones that
-need them land (`ROADMAP.md` §8).
+v0.2's 9-param synth block could carry a melody but not a *sound* — the A/B experiment in
+`phase-5-plan.md` showed the same notes go from "video game music" to a real mix purely through
+the ~50 store-level params the format couldn't express. v0.3 exposes them:
+
+- **~46 optional synth params** may appear after the core 9, one name-value pair per line at the
+  same indent: osc layers (`osc2Type/osc2Level/osc2Detune`, `subLevel`, `noiseLevel`, `fm*`,
+  `unisonVoices/unisonWidth`, `wtTable/wtPos`), filter (`filterType`, `filterEnv*`), motion
+  (`lfo*`, `lfo2*`, `glide`, `keytrackAmount`, `velToFilterAmount`, `macroValue`), inserts
+  (`eq*`, `comp*`, `distortion*`, `bitcrush*`), sends (`sendReverb/sendDelay/sendMod`),
+  sidechain (`duckSource` — a track id or `none` — plus `duckAmount`), and drum-voice shaping
+  (`kickTune/kickPunch/kickDecay`, `snareTone/snareDecay`, `hatTone/hatDecay/openHatDecay`,
+  audible on drum tracks). The full table, with types, enum values, and frozen defaults, is
+  `SYNTH_FIELDS` in `src/core/document.ts` — the single source of truth that drives the parser,
+  serializer, editor, differ, and converter.
+- **Canonical elision**: an optional param is serialized **iff its value differs from its frozen
+  default**, in `SYNTH_FIELDS` table order. Missing-at-parse means default. This keeps every
+  state at exactly one canonical form (the round-trip property is unchanged), keeps files
+  readable (an init patch is still 9 lines, and every line that IS there is a deliberate sound
+  decision), and makes any param change a one-line diff — add, modify, or remove.
+- **Defaults are frozen** copies of BeatLab's `DEFAULT_SYNTH` at v0.3 freeze time. If the app
+  ever changes a default, the format does NOT follow — elision semantics are part of the
+  grammar, not a live reference to any app.
+- **`duckSource` is a track reference**: it must name a track that exists in the document
+  (forward references are fine — validated after the full parse) or be `none` (= null,
+  canonical form: elided).
+- **Deliberately unmodeled** (`DELIBERATELY_UNMODELED` in `src/core/convert.ts`): wavetable
+  frame arrays (`wtCustomA/B`), step-LFO arrays (`lfoSteps`), insert ordering (`insertOrder`),
+  tempo-sync pairs (`lfoSync/lfoSyncRate`, `lfo2Sync/lfo2SyncRate`), and the arp
+  (`arpOn/arpRate/arpPattern`). Each needs grammar design of its own (arrays, ordered lists,
+  redundant either-or pairs); the converter reports exactly these as dropped and nothing else.
+- **Presets are tooling, not grammar.** There is no preset reference or include in the file — a
+  document always spells out its own sound in full. `beat preset <file> <track> <name>` (and the
+  `beat_preset` MCP tool) applies a named bag of param edits from `presets/factory.json` through
+  the same code path as `beat set`, so applying one produces a normal edit list and a normal
+  diff. Presets never carry track references — routing stays a per-project edit.
+
+Proven exit (Phase 5, `scripts/verify-phase5.mjs`): the Night Shift v3 sound design —
+originally only reachable by patching the live store — reproduced from pure v0.3 text, with
+exact store-state equivalence on every track and render metrics matching the archived reference.
+
+### Deferred past v0.3 (explicitly out of scope, not forgotten)
+
+Automation, clips/scenes, swing, arrangement, multi-device chains beyond the built-in insert
+set, multi-token track names, and the `DELIBERATELY_UNMODELED` fields above. See
+`phase-1-plan.md`'s "explicitly deferred" section — these come as the milestones that need them
+land (`ROADMAP.md` §8).
 
 ---
 

@@ -4,7 +4,7 @@
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
 import type { BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS } from './document.js'
+import { DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS } from './document.js'
 
 export class BeatEditError extends Error {
   constructor(message: string) {
@@ -78,8 +78,8 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     return replaceTrack(doc, { ...track, color: value })
   }
 
-  // synth params
-  if ((SYNTH_PARAM_ORDER as string[]).includes(rest)) {
+  // required core synth params
+  if ((SYNTH_PARAM_ORDER as readonly string[]).includes(rest)) {
     const param = rest as keyof BeatSynth
     if (param === 'osc') {
       if (!(OSC_TYPES as readonly string[]).includes(value)) throw new BeatEditError(`osc must be one of ${OSC_TYPES.join('|')}, got "${value}"`)
@@ -88,7 +88,29 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     return replaceTrack(doc, { ...track, synth: { ...track.synth, [param]: parseNum(value, rest) } })
   }
 
-  throw new BeatEditError(`unknown field "${rest}" on track "${trackId}" (synth params: ${SYNTH_PARAM_ORDER.join(', ')}; also name, color, pattern.<lane>[i])`)
+  // v0.3 optional synth fields, table-driven
+  const def = SYNTH_FIELD_BY_KEY.get(rest)
+  if (def) {
+    switch (def.kind) {
+      case 'number':
+        return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: parseNum(value, rest) } })
+      case 'enum':
+        if (!def.values!.includes(value)) throw new BeatEditError(`${rest} must be one of ${def.values!.join('|')}, got "${value}"`)
+        return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: value } })
+      case 'bool':
+        if (value !== 'true' && value !== 'false') throw new BeatEditError(`${rest} must be true or false, got "${value}"`)
+        return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: value === 'true' } })
+      case 'trackref': {
+        const ref = value === 'none' ? null : value
+        if (ref !== null && !doc.tracks.some((t) => t.id === ref)) throw new BeatEditError(`${rest} must reference an existing track or "none", got "${value}"`)
+        return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: ref } })
+      }
+    }
+  }
+
+  throw new BeatEditError(
+    `unknown field "${rest}" on track "${trackId}" (core: ${SYNTH_PARAM_ORDER.join(', ')}; shaped: ${SYNTH_FIELDS.map((f) => f.key).join(', ')}; also name, color, pattern.<lane>[i])`,
+  )
 }
 
 /** Adds a note to a synth track. If `id` is omitted, mints the next free `u<n>` id (the same

@@ -9,6 +9,34 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D9 — Canonical elision for optional params; presets are tooling, never grammar (v0.3)
+
+**Decision:** v0.3's ~46 optional synth params are serialized **iff their value differs from a
+frozen default**, in fixed table order (`SYNTH_FIELDS` in `src/core/document.ts` — the single
+table that drives parser, serializer, `beat set`, semantic diff, and converter). Defaults are
+frozen copies of beatlab's `DEFAULT_SYNTH` at freeze time and do NOT track the app. And the
+format has no preset reference: `beat preset` applies a named param bundle from
+`presets/factory.json` through the same code path as `beat set`, so a preset application is a
+readable edit list and an ordinary diff, and every document spells out its own sound in full.
+
+**Why:** always-serializing ~55 params would turn every track into a wall of default noise (the
+init patch would go from 9 lines to 55) and make "what did the human/agent actually decide?"
+unreadable — elision keeps every present line a deliberate sound decision while preserving
+exactly one canonical form per state (D4's round-trip property, unchanged: the elision rule is
+deterministic in both directions). Freezing defaults keeps elision a *grammar* property rather
+than a live reference to an app version. Preset-as-tooling protects D1 (document-only): an
+include/reference mechanism would reintroduce indirection, canonical-form ambiguity, and
+"what does this file sound like?" depending on a library version. Trackrefs (`duckSource`) are
+banned from preset libraries by construction — routing names project-specific track ids.
+
+**Proven:** Phase 5 exit test (`scripts/verify-phase5.mjs`) — a real 4-track mix reproduced
+from pure text with exact per-track engine-state equivalence vs. the hand-patched original.
+
+**Revisit when:** a field's frozen default proves musically wrong at scale (would need a format
+version bump, not a silent default change), or preset libraries need versioning/sharing.
+
+---
+
 ## D8 — DiffEntry is the one changeset representation (diff display, later undo/--dry-run)
 
 **Decision:** the semantic diff (`src/core/diff.ts`) produces a typed `DiffEntry[]` where every

@@ -28,8 +28,12 @@ import {
   diffDocuments,
   formatDiff,
   describeDocument,
+  parsePresetLibrary,
+  applyPreset,
+  formatPresetList,
   BeatEditError,
   BeatParseError,
+  BeatPresetError,
 } from '../dist/src/core/index.js'
 import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.js'
 
@@ -43,6 +47,8 @@ const USAGE = `usage:
   beat rm-note <file> <track> <note-id>
   beat diff <a.beat> <b.beat>
   beat diff --git <rev1> <rev2> <file>
+  beat presets [--json]                                   list the factory preset library
+  beat preset <file> <track> <name>                       apply a preset to a track (a bag of set edits)
   beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
   beat lint <file.wav> [--target <LUFS>] [--json]         deterministic mix findings (default target -14)
   beat render <file> [-o out.wav] --beatlab-dir <path>    (or BEATLAB_DIR env)
@@ -136,6 +142,27 @@ function rmNoteCmd(argv) {
   const before = readDoc(file)
   const { doc } = removeNote(before, track, noteId)
   writeDoc(file, before, doc)
+}
+
+// The factory library ships with the package; BEAT_PRESETS overrides for a user library.
+function loadPresets() {
+  const path = process.env.BEAT_PRESETS ?? resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets', 'factory.json')
+  return parsePresetLibrary(readFileSync(path, 'utf8'))
+}
+
+function presetsCmd(argv) {
+  const presets = loadPresets()
+  process.stdout.write(argv.includes('--json') ? JSON.stringify(presets, null, 2) + '\n' : formatPresetList(presets))
+}
+
+function presetCmd(argv) {
+  const [file, track, name] = argv
+  if (!file || !track || !name) throw new BeatEditError('preset needs <file> <track> <preset-name> (see `beat presets`)')
+  const presets = loadPresets()
+  const preset = presets.find((p) => p.name === name)
+  if (!preset) throw new BeatEditError(`no preset "${name}" (have: ${presets.map((p) => p.name).join(', ')})`)
+  const before = readDoc(file)
+  writeDoc(file, before, applyPreset(before, track, preset))
 }
 
 function fmtDb(x, unit = '') {
@@ -232,6 +259,12 @@ async function main() {
     case 'diff':
       diffCmd(rest)
       break
+    case 'presets':
+      presetsCmd(rest)
+      break
+    case 'preset':
+      presetCmd(rest)
+      break
     case 'metrics':
       metricsCmd(rest)
       break
@@ -274,7 +307,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  if (err instanceof BeatEditError || err instanceof BeatParseError) {
+  if (err instanceof BeatEditError || err instanceof BeatParseError || err instanceof BeatPresetError) {
     console.error(`error: ${err.message}`)
     process.exitCode = 2
   } else {

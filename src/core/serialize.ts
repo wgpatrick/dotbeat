@@ -1,5 +1,5 @@
 import type { BeatDocument, BeatTrack } from './document.js'
-import { DRUM_LANES, SYNTH_PARAM_ORDER } from './document.js'
+import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
 import { formatNumber } from './format.js'
 
 function serializeTrack(t: BeatTrack): string[] {
@@ -9,6 +9,16 @@ function serializeTrack(t: BeatTrack): string[] {
   for (const key of SYNTH_PARAM_ORDER) {
     const value = t.synth[key]
     lines.push(`    ${key} ${key === 'osc' ? String(value) : formatNumber(value as number)}`)
+  }
+  // v0.3 optional fields: canonical elision — emitted iff != default, in table order. One
+  // canonical form per state (the elision rule is deterministic in both directions).
+  for (const def of SYNTH_FIELDS) {
+    const value = t.synth[def.key]
+    if (value === def.default) continue
+    // number defaults compare by value; formatNumber-normalized equality guards float noise
+    if (def.kind === 'number' && formatNumber(value as number) === formatNumber(def.default as number)) continue
+    const text = def.kind === 'number' ? formatNumber(value as number) : def.kind === 'trackref' ? (value === null ? 'none' : String(value)) : String(value)
+    lines.push(`    ${def.key} ${text}`)
   }
   if (t.kind === 'drums' && t.pattern) {
     // Canonical: all five lanes, always, in DRUM_LANES order — a step toggle is always a

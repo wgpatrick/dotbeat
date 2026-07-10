@@ -1,5 +1,5 @@
 import type { BeatDocument, BeatDrumPattern, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { DRUM_LANES, OSC_TYPES, SYNTH_PARAM_ORDER, TRACK_KINDS } from './document.js'
+import { DRUM_LANES, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -115,7 +115,9 @@ export function parse(text: string): BeatDocument {
           name,
           color,
           kind,
-          synth: { osc: 'sawtooth', volume: 0, cutoff: 0, resonance: 0, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0 },
+          // core 9 are placeholders until the synth block fills them (all required); the v0.3
+          // optional fields start at their canonical defaults (elision contract).
+          synth: { osc: 'sawtooth', volume: 0, cutoff: 0, resonance: 0, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0, ...defaultSynthFields() } as BeatSynth,
           notes: [],
         }
         tracks.push(currentTrack)
@@ -168,15 +170,43 @@ export function parse(text: string): BeatDocument {
       if (!currentTrack || !inSynth) throw new BeatParseError(`"${keyword}" outside of a synth block`, lineNo)
       if (tokens.length !== 2) throw new BeatParseError(`"${keyword}" expects exactly 1 value`, lineNo)
       const value = tokens[1]!
-      if (!(SYNTH_PARAM_ORDER as string[]).includes(keyword)) throw new BeatParseError(`unknown synth param "${keyword}"`, lineNo)
       const field = keyword as keyof BeatSynth
       if (synthSeen.has(field)) throw new BeatParseError(`duplicate synth param "${keyword}"`, lineNo)
+
+      if ((SYNTH_PARAM_ORDER as readonly string[]).includes(keyword)) {
+        // required core 9
+        synthSeen.add(field)
+        if (field === 'osc') {
+          if (!isOscType(value)) throw new BeatParseError(`osc must be one of sine|triangle|sawtooth|square, got "${value}"`, lineNo)
+          currentTrack.synth.osc = value
+        } else {
+          ;(currentTrack.synth as unknown as Record<string, unknown>)[field] = parseFloatStrict(value, lineNo, keyword)
+        }
+        continue
+      }
+
+      // v0.3 optional fields, table-driven
+      const def = SYNTH_FIELD_BY_KEY.get(keyword)
+      if (!def) throw new BeatParseError(`unknown synth param "${keyword}"`, lineNo)
       synthSeen.add(field)
-      if (field === 'osc') {
-        if (!isOscType(value)) throw new BeatParseError(`osc must be one of sine|triangle|sawtooth|square, got "${value}"`, lineNo)
-        currentTrack.synth.osc = value
-      } else {
-        currentTrack.synth[field] = parseFloatStrict(value, lineNo, keyword)
+      const synth = currentTrack.synth as unknown as Record<string, unknown>
+      switch (def.kind) {
+        case 'number':
+          synth[def.key] = parseFloatStrict(value, lineNo, keyword)
+          break
+        case 'enum':
+          if (!def.values!.includes(value)) throw new BeatParseError(`${keyword} must be one of ${def.values!.join('|')}, got "${value}"`, lineNo)
+          synth[def.key] = value
+          break
+        case 'bool':
+          if (value !== 'true' && value !== 'false') throw new BeatParseError(`${keyword} must be true or false, got "${value}"`, lineNo)
+          synth[def.key] = value === 'true'
+          break
+        case 'trackref':
+          // "none" = null; other values validated against track ids after the whole document is
+          // parsed (forward references are legal — duck the drums track defined later).
+          synth[def.key] = value === 'none' ? null : value
+          break
       }
       continue
     }
@@ -186,6 +216,13 @@ export function parse(text: string): BeatDocument {
 
   closeSynthIfOpen(rawLines.length + 1)
   closeTrackIfOpen(rawLines.length + 1)
+
+  // trackref validation happens after all tracks exist (forward references are legal)
+  for (const t of tracks) {
+    if (t.synth.duckSource !== null && !trackIds.has(t.synth.duckSource)) {
+      throw new BeatParseError(`track "${t.id}": duckSource references unknown track "${t.synth.duckSource}"`, rawLines.length + 1)
+    }
+  }
 
   if (formatVersion === null) throw new BeatParseError('missing format_version', 1)
   if (bpm === null) throw new BeatParseError('missing bpm', 1)

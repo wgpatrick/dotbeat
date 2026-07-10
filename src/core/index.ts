@@ -5,6 +5,7 @@ export { serialize } from './serialize.js'
 export {
   sandboxPayloadToBeatDocument,
   beatDocumentToPartialTracks,
+  DELIBERATELY_UNMODELED,
   type ExternalSandboxPayload,
   type ExternalTrack,
   type ConversionReport,
@@ -13,3 +14,4 @@ export {
 export { diffDocuments, formatDiff, type DiffEntry } from './diff.js'
 export { setValue, addNote, removeNote, addTrack, removeTrack, initDocument, BeatEditError } from './edit.js'
 export { describeDocument } from './inspect.js'
+export { parsePresetLibrary, applyPreset, formatPresetList, BeatPresetError, type BeatPreset } from './preset.js'

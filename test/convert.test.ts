@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, type ExternalSandboxPayload } from '../src/core/index.js'
+import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, DELIBERATELY_UNMODELED, type ExternalSandboxPayload } from '../src/core/index.js'
 
 // A real, non-synthetic project export from the live BeatLab dev server (generated via
 // Playwright driving the actual store — see the session's gen-fixture.mjs). Proves the .beat
@@ -48,8 +48,15 @@ test('reports which real SynthParams fields the format does not model, per track
   const { report } = sandboxPayloadToBeatDocument(realPayload)
   const leadDropped = report.droppedSynthParams.lead!
   assert.ok(leadDropped.includes('wtCustomA'), 'wavetable frame arrays are out of scope')
-  assert.ok(leadDropped.includes('lfoRate'), 'LFO params are out of scope')
+  assert.ok(!leadDropped.includes('lfoRate'), 'LFO params ARE modeled since v0.3')
   assert.ok(!leadDropped.includes('cutoff'), 'cutoff IS modeled and must not be reported as dropped')
+  // Everything still dropped must be on the documented DELIBERATELY_UNMODELED list — no
+  // accidental loss beyond the fields the format explicitly declines to model.
+  for (const [trackId, dropped] of Object.entries(report.droppedSynthParams)) {
+    for (const key of dropped) {
+      assert.ok((DELIBERATELY_UNMODELED as readonly string[]).includes(key), `${trackId}: dropped "${key}" is not on the DELIBERATELY_UNMODELED list`)
+    }
+  }
 })
 
 test('every note on every real synth track survives the conversion exactly', () => {

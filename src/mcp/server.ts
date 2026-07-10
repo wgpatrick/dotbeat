@@ -27,6 +27,9 @@ import {
   diffDocuments,
   formatDiff,
   describeDocument,
+  parsePresetLibrary,
+  applyPreset,
+  formatPresetList,
 } from '../core/index.js'
 import { decodeWav, analyze, lint, formatLint } from '../metrics/index.js'
 
@@ -140,7 +143,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_set',
     description:
-      'Apply one or more surgical edits to a .beat file and write it back canonically. Paths use the file\'s own field names: "bpm", "loop_bars", "selected_track", "<track>.<param>" (osc, volume, cutoff, resonance, attack, decay, sustain, release, pan), "<track>.name", "<track>.color", "<track>.pattern.<lane>[<step>]" (lanes: kick, snare, clap, hat, openhat). Returns the musical edit list of what changed.',
+      'Apply one or more surgical edits to a .beat file and write it back canonically. Paths use the file\'s own field names: "bpm", "loop_bars", "selected_track", "<track>.<param>", "<track>.name", "<track>.color", "<track>.pattern.<lane>[<step>]" (lanes: kick, snare, clap, hat, openhat). Params: the core 9 (osc, volume, cutoff, resonance, attack, decay, sustain, release, pan) plus the full v0.3 shaped surface — osc2Type/osc2Level/osc2Detune, subLevel, noiseLevel, fm*, unisonVoices/unisonWidth, filterType, filterEnv*, lfo*/lfo2*, glide, eq*, comp*, distortion*, bitcrush*, sendReverb/sendDelay/sendMod, duckSource (a track id or "none") + duckAmount, and drum-voice shaping (kickTune/kickPunch/kickDecay, snareTone/snareDecay, hatTone/hatDecay/openHatDecay). Fields at their default are elided from the file. Returns the musical edit list of what changed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -221,6 +224,41 @@ const TOOLS: ToolDef[] = [
     },
     handler: (args) =>
       formatDiff(diffDocuments(parse(readFileSync(str(args, 'file_a'), 'utf8')), parse(readFileSync(str(args, 'file_b'), 'utf8')))),
+  },
+  {
+    name: 'beat_presets',
+    description:
+      'List the preset library: named, curated synth/drum voicings (a preset is a bag of param edits, not a format feature — applying one writes plain params into the file). Use before beat_preset to see what exists and what each is for.',
+    inputSchema: { type: 'object', properties: {} },
+    handler: () => {
+      const presets = parsePresetLibrary(readFileSync(join(repoRoot, 'presets', 'factory.json'), 'utf8'))
+      return formatPresetList(presets)
+    },
+  },
+  {
+    name: 'beat_preset',
+    description:
+      'Apply a named preset to a track in a .beat file — sets each of the preset\'s params exactly as beat_set would and returns the resulting edit list. Presets never carry routing (duckSource); set that separately per project.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        preset: { type: 'string', description: 'a name from beat_presets, e.g. "lush-pad"' },
+      },
+      required: ['file', 'track', 'preset'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const presets = parsePresetLibrary(readFileSync(join(repoRoot, 'presets', 'factory.json'), 'utf8'))
+      const name = str(args, 'preset')
+      const preset = presets.find((p) => p.name === name)
+      if (!preset) throw new Error(`no preset "${name}" (have: ${presets.map((p) => p.name).join(', ')})`)
+      const before = parse(readFileSync(file, 'utf8'))
+      const doc = applyPreset(before, str(args, 'track'), preset)
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
   },
   {
     name: 'beat_metrics',

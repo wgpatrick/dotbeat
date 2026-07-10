@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "presets": [
+    {
+      "name": "driving-kit",
+      "kind": "drums",
+      "description": "Punchy house kit: shaped kick, bright hats, glued with parallel compression and light drive (Night Shift v3 drums)",
+      "params": {
+        "kickPunch": 0.08,
+        "kickDecay": 0.5,
+        "hatTone": 6500,
+        "hatDecay": 0.04,
+        "openHatDecay": 0.3,
+        "compMix": 0.5,
+        "distortionAmount": 0.15,
+        "distortionMix": 0.2,
+        "eqLow": 1,
+        "eqHigh": 2
+      }
+    },
+    {
+      "name": "deep-sub-bass",
+      "kind": "synth",
+      "description": "Sub-anchored bass with a detuned square layer, plucky filter envelope, and glide; add duckSource yourself for sidechain (Night Shift v3 bass)",
+      "params": {
+        "osc": "sawtooth",
+        "cutoff": 700,
+        "subLevel": 0.6,
+        "osc2Type": "square",
+        "osc2Level": 0.25,
+        "osc2Detune": 1203,
+        "filterEnvAmount": 0.35,
+        "filterEnvDecay": 0.18,
+        "filterEnvSustain": 0.15,
+        "glide": 0.02,
+        "compMix": 0.5,
+        "distortionAmount": 0.15,
+        "distortionMix": 0.2,
+        "eqLow": 1.5
+      }
+    },
+    {
+      "name": "lush-pad",
+      "kind": "synth",
+      "description": "Wide unison saw pad: slow attack, dual detuned oscillators, LFO filter motion, deep reverb/delay sends (Night Shift v3 pad)",
+      "params": {
+        "osc": "sawtooth",
+        "attack": 0.4,
+        "release": 1.2,
+        "cutoff": 2600,
+        "unisonVoices": 5,
+        "unisonWidth": 0.8,
+        "osc2Type": "sawtooth",
+        "osc2Level": 0.5,
+        "osc2Detune": 9,
+        "lfoDest": "cutoff",
+        "lfoRate": 0.25,
+        "lfoDepth": 0.2,
+        "sendReverb": 0.55,
+        "sendDelay": 0.15,
+        "eqMid": -1
+      }
+    },
+    {
+      "name": "bright-lead",
+      "kind": "synth",
+      "description": "Cutting unison lead with a detuned second saw, plucky filter envelope, and echoing delay/reverb sends (Night Shift v3 lead)",
+      "params": {
+        "cutoff": 5200,
+        "resonance": 1.1,
+        "osc2Type": "sawtooth",
+        "osc2Level": 0.45,
+        "osc2Detune": 14,
+        "unisonVoices": 3,
+        "unisonWidth": 0.5,
+        "filterEnvAmount": 0.3,
+        "filterEnvDecay": 0.2,
+        "sendDelay": 0.4,
+        "sendReverb": 0.25,
+        "eqHigh": 1.5
+      }
+    }
+  ]
+}

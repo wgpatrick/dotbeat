@@ -5,21 +5,26 @@
 > critique on.
 
 This repository holds the research/planning behind the direction, **plus the working code for
-Phases 0-3**: a real `.beat` text format (parser + serializer + converter, drums included), a
+Phases 0-5**: a real `.beat` text format (parser + serializer + converter, drums included — and
+since **v0.3** the full sound-design surface: osc layers, unison, sub, filter envelope, LFOs,
+EQ/comp/distortion/bitcrush inserts, reverb/delay sends, sidechain duck, drum-voice shaping,
+with canonical elision so defaults never clutter the file), a
 **daemon** that keeps the file and a live GUI in two-way sync (GUI knob-turn → one-line
 `git diff` in 262 ms; `vim` edit → GUI hot-reloads in 117 ms, playback uninterrupted), an
-**agent-native CLI** (`inspect`/`set`/semantic `diff`/render/**DSP metrics**/**mix lint**) with
-an **MCP server** over all of it, and a closed render→measure→edit→re-measure loop proven to
-hit a loudness target to 0.01 LU — all driving the actual
+**agent-native CLI** (`inspect`/`set`/semantic `diff`/**presets**/render/**DSP metrics**/**mix
+lint**) with an **MCP server** over all of it, and a closed render→measure→edit→re-measure loop
+proven to hit a loudness target to 0.01 LU — all driving the actual
 [BeatLab](https://github.com/wgpatrick/beatlab) app (a working Tone.js + React web DAW /
 production trainer, which this project forks in spirit).
 
 ```bash
 npm install
-npm test                          # 72 tests: format, conversion vs real data, daemon sync, CLI, DSP metrics, MCP
+npm test                          # 97 tests: format, conversion vs real data, daemon sync, CLI, presets, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat lead.cutoff 900   # prints "lead: cutoff 3200 -> 900"
+node cli/beat.mjs presets                                         # the factory sound library
+node cli/beat.mjs preset song.beat drums driving-kit              # a preset = a readable bag of set edits
 node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical edit list, not line noise
 node cli/beat.mjs render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
 node cli/beat.mjs render --offline examples/real-groove.beat -o out.wav   # the REAL engine, no browser
@@ -52,16 +57,17 @@ now fully-verified version.
 
 | Path | What |
 |---|---|
-| [`docs/phase-4-plan.md`](docs/phase-4-plan.md) | **Start here for what's built.** The real engine offline (`beat render --offline`, no browser; closed loop self-consistent to 0.00 LU; two cross-engine divergences found, measured, documented). Prior slices: [`phase-3-plan.md`](docs/phase-3-plan.md) (metrics/lint/MCP), [`phase-2-plan.md`](docs/phase-2-plan.md) (CLI + semantic diff), [`phase-1-plan.md`](docs/phase-1-plan.md) (daemon + sync), [`phase-0-plan.md`](docs/phase-0-plan.md) (format + render). |
+| [`docs/phase-5-plan.md`](docs/phase-5-plan.md) | **Start here for what's built.** Format v0.3 — the file carries the *sound*, not just the notes (~55 params, canonical elision, presets-as-tooling; exit test: a real 4-track mix reproduced from pure text with exact engine-state equivalence). Prior slices: [`phase-4-plan.md`](docs/phase-4-plan.md) (real engine offline, no browser), [`phase-3-plan.md`](docs/phase-3-plan.md) (metrics/lint/MCP), [`phase-2-plan.md`](docs/phase-2-plan.md) (CLI + semantic diff), [`phase-1-plan.md`](docs/phase-1-plan.md) (daemon + sync), [`phase-0-plan.md`](docs/phase-0-plan.md) (format + render). |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, milestones, risks. |
 | `src/core/` | The `.beat` format: types, parser, serializer, converter (synth + drum tracks), **semantic diff**, edit primitives, inspect. Pure TS, zero deps on beatlab/React/Tone.js. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over a 3-endpoint HTTP/SSE protocol, echo suppression by canonical-text comparison. |
 | `src/metrics/` | The guardrail layer (D2): integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, stereo field — plus the deterministic mix-lint rules. Zero deps, validated against the spec's calibration cases. |
 | `src/mcp/` | `beat mcp` — zero-dep stdio MCP server exposing the whole toolchain (inspect/set/notes/diff/metrics/lint/render) to AI agents. |
-| `test/` | 72 tests — format round-trips, conversion fidelity against a real exported project, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
-| `cli/beat.mjs` | The unified `beat` CLI: `init`, `add-track`/`rm-track`, `inspect`, `set`, `add-note`/`rm-note`, `diff` (files or git revs), `metrics`, `lint`, `render` (Chromium or `--offline`), `daemon`, `mcp` — enough to compose from a blank file. |
-| `scripts/verify-m1.mjs`, `verify-m3.mjs`, `spike-offline-render.mjs` | The measured proofs: M1 sync latencies, M3's closed loop (render→measure→edit→re-render, target hit to 0.01 LU), M2's 22×-realtime offline-render spike. |
-| `examples/real-groove.beat` | A real project, converted to `.beat` text — hand-inspectable, the file the proof runs use. |
+| `test/` | 97 tests — format round-trips (v0.2 and v0.3 elision/enums/trackrefs), conversion fidelity against a real exported project, presets, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
+| `cli/beat.mjs` | The unified `beat` CLI: `init`, `add-track`/`rm-track`, `inspect`, `set`, `add-note`/`rm-note`, `diff` (files or git revs), `presets`/`preset`, `metrics`, `lint`, `render` (Chromium or `--offline`), `daemon`, `mcp` — enough to compose from a blank file. |
+| `presets/factory.json` | The factory sound library — curated voicings (seeded from a real approved mix), applied as ordinary edits, never referenced by the format itself. |
+| `scripts/verify-m1.mjs`, `verify-m3.mjs`, `verify-phase5.mjs`, `spike-offline-render.mjs` | The measured proofs: M1 sync latencies, M3's closed loop (render→measure→edit→re-render, target hit to 0.01 LU), Phase 5's sound-reproduction exit test, M2's 22×-realtime offline-render spike. |
+| `examples/real-groove.beat`, `examples/night-shift.beat` | Real projects as `.beat` text — the groove the proof runs use, and the 4-track Night Shift mix whose entire sound design lives in the file. |
 | [`docs/research/`](docs/research/) | Six deep-research reports, **all fully adversarially verified** — every research gap the roadmap ever flagged is now resolved (engine architecture, live-coding landscape, demand signal). |
 | [`docs/opendaw-notes.md`](docs/opendaw-notes.md) | Source-code archaeology — openDAW/DAWproject/automix-toolkit/node-web-audio-api read directly, not summarized secondhand. |
 | [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format spec — v0 grammar frozen and implemented, grounded in real prior art (Csound, Humdrum, DAWproject). |
@@ -110,7 +116,12 @@ inline rather than silently fixed.
 
 ## Status
 
-**Phases 0-4 (ROADMAP M0/M1/M2 + both M3 slices minus arrangement) complete.** The core loop is real, not argued: a
+**Phases 0-5 (ROADMAP M0/M1/M2 + both M3 slices minus arrangement, plus the v0.3 sound
+surface) complete.** As of Phase 5 the format carries the *sound*, not just the notes: a real
+4-track mix (drums/bass/pad/lead with sidechain ducking, unison pads, filter-env plucks, sends)
+lives entirely in `examples/night-shift.beat` — built with four preset applications plus five
+`beat set` edits, verified to produce the exact same engine state as the hand-patched original
+(`scripts/verify-phase5.mjs`). The core loop is real, not argued: a
 hand-inspectable `.beat` file — the *whole* groove, drums included — is the source of truth for
 a live GUI session. Turn a knob in the GUI and `git diff` shows exactly one changed line
 (262 ms, measured). Edit the file in an editor and the GUI hot-reloads without stopping playback

@@ -11,7 +11,7 @@
 // entry carries `before`/`after`, so inverting a diff is structurally trivial when we need it.
 
 import type { BeatDocument, BeatNote, BeatTrack, DrumLane } from './document.js'
-import { DRUM_LANES, SYNTH_PARAM_ORDER } from './document.js'
+import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
 import { formatNumber } from './format.js'
 
 export type DiffEntry =
@@ -20,7 +20,7 @@ export type DiffEntry =
   | { kind: 'track-removed'; trackId: string; track: BeatTrack }
   | { kind: 'track-meta'; trackId: string; field: 'name' | 'color'; before: string; after: string }
   | { kind: 'track-moved'; trackId: string; before: number; after: number }
-  | { kind: 'synth-param'; trackId: string; param: string; before: string | number; after: string | number }
+  | { kind: 'synth-param'; trackId: string; param: string; before: string | number | boolean | null; after: string | number | boolean | null }
   | { kind: 'note-added'; trackId: string; note: BeatNote }
   | { kind: 'note-removed'; trackId: string; note: BeatNote }
   | { kind: 'note-changed'; trackId: string; noteId: string; changes: { field: 'pitch' | 'start' | 'duration' | 'velocity'; before: number; after: number }[] }
@@ -64,7 +64,7 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
     if (ta.name !== tb.name) out.push({ kind: 'track-meta', trackId: id, field: 'name', before: ta.name, after: tb.name })
     if (ta.color !== tb.color) out.push({ kind: 'track-meta', trackId: id, field: 'color', before: ta.color, after: tb.color })
 
-    for (const param of SYNTH_PARAM_ORDER) {
+    for (const param of [...SYNTH_PARAM_ORDER, ...SYNTH_FIELDS.map((f) => f.key)]) {
       if (ta.synth[param] !== tb.synth[param]) {
         out.push({ kind: 'synth-param', trackId: id, param, before: ta.synth[param], after: tb.synth[param] })
       }
@@ -107,8 +107,9 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
   return out
 }
 
-function fmtVal(v: string | number): string {
-  return typeof v === 'number' ? formatNumber(v) : v
+function fmtVal(v: string | number | boolean | null): string {
+  if (v === null) return 'none'
+  return typeof v === 'number' ? formatNumber(v) : String(v)
 }
 
 function noteDesc(n: BeatNote): string {

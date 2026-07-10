@@ -1,5 +1,5 @@
 import type { BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, OscType, TrackKind } from './document.js'
-import { DRUM_LANES, OSC_TYPES, SYNTH_PARAM_ORDER } from './document.js'
+import { DRUM_LANES, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultSynthFields } from './document.js'
 
 // A structural (not imported) type for BeatLab's real SandboxPayload shape
 // (beatlab/src/state/sandboxPersistence.ts). Deliberately loose/local rather than a hard
@@ -22,7 +22,24 @@ export interface ExternalSandboxPayload {
   selectedTrackId: string
 }
 
-const BEAT_FORMAT_VERSION = '0.2'
+const BEAT_FORMAT_VERSION = '0.3'
+
+/** SynthParams fields the format deliberately does NOT model (each needs grammar design of its
+ * own — large arrays, ordered lists, or redundant pairs; see docs/phase-5-plan.md). These are
+ * the only fields a conversion is allowed to drop. */
+export const DELIBERATELY_UNMODELED = [
+  'wtCustomA',
+  'wtCustomB',
+  'lfoSteps',
+  'insertOrder',
+  'lfoSync',
+  'lfoSyncRate',
+  'lfo2Sync',
+  'lfo2SyncRate',
+  'arpOn',
+  'arpRate',
+  'arpPattern',
+] as const
 
 export interface ConversionReport {
   /** Track IDs present in the source payload but not carried into the .beat document. Empty
@@ -42,7 +59,7 @@ function isOscType(x: unknown): x is OscType {
 }
 
 function toBeatSynth(source: Record<string, unknown>, trackId: string, report: ConversionReport): BeatSynth {
-  const known = new Set<string>(SYNTH_PARAM_ORDER)
+  const known = new Set<string>([...SYNTH_PARAM_ORDER, ...SYNTH_FIELDS.map((f) => f.key)])
   const dropped = Object.keys(source).filter((k) => !known.has(k))
   if (dropped.length) report.droppedSynthParams[trackId] = dropped
 
@@ -53,7 +70,7 @@ function toBeatSynth(source: Record<string, unknown>, trackId: string, report: C
     if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`track "${trackId}": synth.${key} is not a finite number: ${String(v)}`)
     return v
   }
-  return {
+  const synth: Record<string, unknown> = {
     osc,
     volume: num('volume'),
     cutoff: num('cutoff'),
@@ -63,7 +80,33 @@ function toBeatSynth(source: Record<string, unknown>, trackId: string, report: C
     sustain: num('sustain'),
     release: num('release'),
     pan: num('pan'),
+    ...defaultSynthFields(),
   }
+  // v0.3 optional fields: take from source when present and type-valid; tolerate absence
+  // (older payloads) by keeping the canonical default.
+  for (const def of SYNTH_FIELDS) {
+    const v = source[def.key]
+    if (v === undefined) continue
+    switch (def.kind) {
+      case 'number':
+        if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`track "${trackId}": synth.${def.key} is not a finite number: ${String(v)}`)
+        synth[def.key] = v
+        break
+      case 'enum':
+        if (typeof v !== 'string' || !def.values!.includes(v)) throw new Error(`track "${trackId}": synth.${def.key} is not one of ${def.values!.join('|')}: ${String(v)}`)
+        synth[def.key] = v
+        break
+      case 'bool':
+        if (typeof v !== 'boolean') throw new Error(`track "${trackId}": synth.${def.key} is not a boolean: ${String(v)}`)
+        synth[def.key] = v
+        break
+      case 'trackref':
+        if (v !== null && typeof v !== 'string') throw new Error(`track "${trackId}": synth.${def.key} is not a track id or null: ${String(v)}`)
+        synth[def.key] = v
+        break
+    }
+  }
+  return synth as unknown as BeatSynth
 }
 
 function toBeatNote(n: ExternalTrack['notes'][number]): BeatNote {
