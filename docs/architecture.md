@@ -14,9 +14,20 @@ cli/      `beat` command: render/inspect/set/diff/mcp  (talks to core + engine, 
 ```
 
 The critical separation: **`core` knows nothing about audio or the DOM.** It's the document model
-+ serializer + diff. Both the UI and the CLI depend on `core`; neither depends on the other. This
-is the engine/document separation that tracktion_engine and other serious engines teach — and it's
-what makes headless operation and agent editing possible at all.
++ serializer + diff. Both the UI and the CLI depend on `core`; neither depends on the other.
+
+This pattern is validated by direct source reading of **openDAW** (`docs/opendaw-notes.md` §2) —
+its engine/UI separation is real and enforced at the *package-dependency* level, not convention:
+the engine package has zero React/DOM deps, and even inside the browser, UI (main thread) and
+engine (AudioWorklet) communicate only via a typed RPC layer over `MessagePort`, never shared
+objects. That's exactly why their headless testing is nearly free — the test harness just swaps a
+same-process `MessageChannel` for the real worklet port. We're copying that shape.
+
+> Note: an earlier draft of this document cited `tracktion_engine` here. Two independent,
+> fully-verified research passes both came back with **zero surviving evidence** on
+> tracktion_engine specifically — an explicit original research question, unanswered both times.
+> Don't cite it as a design influence until a dedicated research pass actually reads it (see
+> `ROADMAP.md` §11's open questions). openDAW is what we've actually verified.
 
 ## Data flow: a GUI knob-turn
 

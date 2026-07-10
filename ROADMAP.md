@@ -4,11 +4,14 @@
 > **One line:** a real GUI DAW whose project file is diff-friendly text, driveable from a
 > CLI, and editable by an AI agent — with sound-design critique built into the core.
 
-This roadmap is grounded in three deep-research passes archived under
-[`docs/research/`](docs/research/). Claims are tagged there as `VERIFIED` (survived adversarial
-verification) or `SINGLE-SOURCE` (quoted from a primary source but not yet triangulated, because
-the verification stage was rate-limited mid-run). Where a decision leans on an unverified claim,
-this document says so. **Re-run verification before treating any single-source claim as settled.**
+This roadmap is grounded in **four deep-research passes**, all now **fully adversarially
+verified** (search → fetch → extract → 3-vote verify, zero infrastructure errors on the final
+run), archived under [`docs/research/`](docs/research/) — plus a fifth pass of direct **source
+code archaeology** (cloning and reading openDAW/DAWproject/automix-toolkit/node-web-audio-api
+rather than web search) in [`docs/opendaw-notes.md`](docs/opendaw-notes.md). Every claim below is
+either confirmed (cite freely) or explicitly flagged as single-source/open (treat as a lead, not
+a fact). A number of claims drafted into an earlier version of this roadmap **did not survive**
+full verification — corrected inline, with the correction noted so we don't regress.
 
 ---
 
@@ -23,123 +26,189 @@ Three properties, held simultaneously, that no shipping tool currently combines 
 3. **Full CLI + agent access** — render to WAV/stems, inspect, mutate, and *musically* diff a
    project from the command line; an MCP server exposes the same operations to an AI agent.
 
-### Is the quadrant actually empty? (honest version)
+### Is the quadrant actually empty? **Yes — confirmed, not just plausible.**
 
-Mostly — but not perfectly, and the nuance is the whole strategy.
+The fully-verified landscape report's own summary: *"no existing system occupies the target
+quadrant... the evidence positively refutes the idea that this space is already filled."*
+✅ **CONFIRMED**, `docs/research/01-landscape.md`.
 
 | System | GUI | Text file at rest | Diff-friendly *by design* | CLI / headless | The gap |
 |---|---|---|---|---|---|
-| **openDAW** | ✅ | ❌ zipped bundle (jszip) | ❌ | ✅ headless SDK | Project is a binary bundle |
-| **REAPER** | ✅ | ✅ `.rpp` is text | ⚠️ text but "opaque", no semantic diff | ⚠️ scripting | People git it, but git can't meaningfully diff/merge it |
-| **Ableton `.als`** | ✅ | ⚠️ gzipped XML | ❌ needs bolt-on decompress hooks | ❌ | Text only after external tooling |
-| **DAWproject** | ❌ format only | ⚠️ XML inside a ZIP | ⚠️ | ⚠️ library | Interchange format, not a working file |
+| **openDAW** | ✅ | ❌ zipped binary bundle (`.odb`) | ❌ | ⚠️ internal test harness only, no shipped CLI/SDK | Project is opaque; "headless" isn't a public feature |
+| **REAPER** | ✅ | ✅ `.rpp` is text | ⚠️ text but not ID-stable; own practitioners say git "cannot meaningfully diff or merge" it | ⚠️ scripting | Text alone doesn't make diffs meaningful |
+| **Ableton `.als`** | ✅ | ⚠️ gzipped XML, **not confirmed cleanly human-readable even decompressed** | ❌ needs bolt-on decompress hooks (`maxdiff`, Automator scripts) | ❌ | Text only via external tooling |
+| **DAWproject** | ❌ format only | ⚠️ XML inside a ZIP | ⚠️ | ⚠️ library | Interchange format; **explicitly declares "native DAW format" a non-goal** |
 | **Strudel / TidalCycles** | ❌ code editor | ✅ | ✅ | ✅ | No GUI editing — the round-trip trap |
 | **→ this project** | ✅ | ✅ | ✅ | ✅ | *— occupies the gap —* |
 
-The sharpest competitor is **REAPER**: its `.rpp` is genuinely text, and there's a real
-community versioning it in git (one cited source: 376-star `git`-with-Reaper tooling, plus
-practitioner write-ups). But even those practitioners "treat DAW project files as opaque to
-version control" and say "git cannot meaningfully diff or merge them." So the differentiator is
-**not** "we have a text file" — REAPER has that. It's:
+**Corrections from the fully-verified pass** (an earlier draft of this table overstated a few
+things):
 
-- a format **engineered for clean diffs** (stable IDs, one-musical-event-per-line, canonical
-  ordering) so a knob-turn is a one-line diff, and
-- a **first-class musical diff + the render→listen→critique loop** on top.
+- ~~".als is gzipped XML, human-readable once decompressed"~~ — **REFUTED** on reverification.
+  Don't repeat this; `.als` is not confirmed to be cleanly text-native even decompressed.
+- ~~openDAW "ships a headless SDK"~~ — **REFUTED**, and independently corrected by direct source
+  reading (§ code archaeology below): there is no separate `opendaw-headless` package. Headless
+  capability exists as an internal test/perf harness (`packages/app/wasm/test/`,
+  `offline-render.ts`), not a published SDK.
+- **NEW, confirmed, high-value evidence**: DAWproject has an **open GitHub issue (#40, filed
+  January 2023, still unresolved)** explicitly requesting version-control/diff support — a
+  direct, citable demand signal from DAWproject's own community for exactly the gap we're
+  targeting. ✅ CONFIRMED, `01-landscape.md`.
+- **Confirmed in detail**: musical-diff tooling for DAW projects exists today only as *external
+  workarounds bolted onto binary/gzip formats after the fact* — `alsdiff` (OCaml, parses gzip-XML
+  `.als`, matches tracks/clips/devices by internal ID, wires into git via `.gitattributes` + a
+  `prepare-commit-msg` hook), Ableton's own official `maxdiff`/`textconv` scripts, and
+  Automator-based decompression workflows. **None of it is native to a DAW that saves text by
+  default.** ✅ CONFIRMED, `01-landscape.md`. (A narrower claim that alsdiff's ID-matching
+  specifically *prevents false diffs on rename/reorder* did not survive verification as stated —
+  the *mechanism* of ID-based matching is confirmed to exist; the specific causal guarantee is
+  not independently confirmed. Treat "match by ID, not position" as the right instinct, backed by
+  real precedent, without over-claiming what it guarantees.)
+- `musicdiff` (the tool referenced as prior art for "musical diff") is **not DAW-specific** — it
+  diffs *notation* (via music21/converter21: MusicXML, Humdrum `**kern`, MEI), explicitly
+  detecting *notational* differences (e.g. tied-eighths vs a quarter note count as different, even
+  though acoustically identical) rather than only audible ones. Useful design lesson: "diff" for
+  music can mean *structural/notational* diff, not just literal text diff. ✅ CONFIRMED,
+  `01-landscape.md`.
 
-*(REAPER-as-text and the git-with-Reaper demand signal: `docs/research/01-landscape.md`,
-claims ~89–92, SINGLE-SOURCE.)*
+The sharpest competitor remains **REAPER**: genuinely text, genuinely git-versioned by real
+practitioners — but even they say git "cannot meaningfully diff or merge" `.rpp`, because it
+lacks stable IDs and canonical ordering. So the differentiator was never "we have a text file" —
+it's a format **engineered for clean diffs** (stable IDs, canonical ordering, one event per line)
+plus the render→critique loop on top. §4 now has real prior art for exactly this engineering.
 
 ### Why now
 
-Two demand signals, both stronger than expected in the research:
-
-- **Producers who code already exist.** TidalCycles users making pop music "for almost 10
-  years", algorave as an established practice, people routing Tidal→Ableton over MIDI for a
-  hybrid code+GUI workflow. *(`01-landscape.md`, SINGLE-SOURCE.)*
-- **Agent-native music tooling is already a category.** `ableton-mcp` (~2.8k stars),
-  `ableton-mcp-extended`, `strudel-mcp-server`, `midi-mcp-server`, and "at least a dozen
-  derivative" Ableton MCP servers exist as of 2025–26. **But every one of them pokes an existing
-  DAW's GUI over a socket.** Our bet: if the DAW's source of truth is already text, the agent
-  edits the *file* directly and renders it — no live-app puppetry, no desync. That's a
-  structurally better substrate for AI production, and nobody occupies it.
-  *(`01-landscape.md`, SINGLE-SOURCE.)*
+- **Producers who code already exist** — TidalCycles users making pop music "for almost 10
+  years", algorave as an established practice, hybrid Tidal→Ableton MIDI workflows.
+  *(`01-landscape.md`, still single-source — this specific research angle was never queued for
+  verification in either pass. The harness's own open-questions list flags this explicitly as
+  needing a dedicated follow-up.)*
+- **Agent-native music tooling is already a category** — `ableton-mcp` (~2.8k stars),
+  `ableton-mcp-extended`, `strudel-mcp-server`, `midi-mcp-server`. **But every one of them pokes
+  an existing DAW's GUI over a socket.** If the source of truth is already text, the agent edits
+  the *file* directly — no live-app puppetry, no desync. *(Also single-source — same caveat as
+  above, flagged by the harness as an open question, not refuted.)*
 
 ---
 
 ## 2. What we inherit from BeatLab
 
-The fork starts from a working, deployed, ~4,800-line React + TypeScript + Tone.js DAW-like app
-(`wgpatrick/beatlab`). It already provides:
+Unchanged from the original draft — this section rests on our own repo, not third-party research,
+so nothing here was affected by verification.
 
 - **A serializable project model** — tracks, notes, patterns, patches, automation, arrangement
-  live as a plain JS object in a Zustand store. This is 90% of a text file format, minus the
-  file on disk. **This is the crown jewel** — the hard part of "projects as code" already works.
+  live as a plain JS object in a Zustand store. **The crown jewel** — the hard part of "projects
+  as code" already works.
 - **A synth + FX engine** — subtractive + FM + wavetable oscillators, per-track filter/ADSR,
   3-band EQ, compressor, distortion/bitcrush (reorderable chain), sidechain, reverb/delay sends,
-  a master limiter + level meter.
+  master limiter + level meter.
 - **Editing surfaces** — piano roll, step sequencer, automation lanes, device panel with knobs,
-  now mobile-responsive.
-- **A headless harness** — the `scripts/smoke.mjs` suite already boots the real app in headless
-  Chromium and drives the audio engine end-to-end. **This is the prototype of the CLI renderer.**
-- **A validator framework** — lesson checkers that inspect project state and return pass/fail
-  with specific feedback. **This is the prototype of the mix-critique "lint" engine.**
-
-Everything below is about growing these seeds into a real tool.
+  mobile-responsive.
+- **A headless harness** — `scripts/smoke.mjs` already boots the real app in headless Chromium and
+  drives the audio engine end-to-end. **The prototype of the CLI renderer**, and now confirmed to
+  be the *right* proven pattern (§5).
+- **A validator framework** — lesson checkers that inspect project state and return pass/fail with
+  specific feedback. **The prototype of the mix-critique "lint" engine.**
 
 ---
 
 ## 3. Positioning & non-goals
 
-**What this is:** a git-native, agent-native groovebox/production environment for people who
-code and produce with AI. The whole product is "your song is a text file you (and Claude) can
-edit, render, diff, and critique."
+**What this is:** a git-native, agent-native groovebox/production environment for people who code
+and produce with AI.
 
 **What this is not** (say no on purpose):
 
-- **A Pro Tools / recorded-audio replacement.** Winning DAW-parity on recorded-audio workflows
-  is a decade of work for a team, and the web stack has hard walls there (§6). Compete on the
-  niche, not the feature checklist.
-- **An in-browser VST/AU host.** Structurally impossible in a browser; that's the Tauri tier's
-  job (§5). Web plugins = WAM2 only.
-- **A tool that trusts an AI as the autonomous mix judge.** The research forbids it (§7). Metrics
-  stay in the loop.
-- **A generator-code layer (for now).** We chose *document-only* for v1 — the file is literal
-  data, the GUI edits it losslessly, no code-that-generates-clips. The two-layer model
-  (see [`docs/decisions.md`](docs/decisions.md)) stays on the shelf until the document format is
-  proven.
+- **A Pro Tools / recorded-audio replacement.** The web stack has hard, confirmed walls there
+  (§6). Compete on the niche, not the feature checklist.
+- **An in-browser VST/AU host.** Structurally impossible; that's the Tauri tier's job. Web
+  plugins = WAM2 only (confirmed real standard, §6).
+- **A tool that trusts an AI as the autonomous mix judge.** Confirmed unsafe (§7). Metrics stay in
+  the loop.
+- **A generator-code layer (for now).** Document-only for v1 (`docs/decisions.md` D1).
 
 ---
 
 ## 4. The document format (`.beat`)
 
-The keystone. Everything else hangs off getting this right.
+The keystone — and the section most changed by the new research pass. We now have **real,
+decades-old prior art** for a diff-friendly musical text format, not just a from-scratch design.
 
-### Design principles (each traceable to research)
+### The prior art (new: `docs/research/04-format-prior-art.md`, fully verified)
 
-- **Literal data, not code.** Every note, every knob value stated. No loops, no functions. The
-  GUI reads and writes this losslessly, so every GUI edit has an obvious place to land.
-- **Diff-friendly by construction:**
-  - **Stable IDs on every entity** (track / clip / note / device). Match by ID, never by
-    position — the single most important lesson from `alsdiff`, so a rename or reorder doesn't
-    explode the diff. *(`01-landscape.md`, alsdiff, SINGLE-SOURCE.)*
-  - **One musical event per line**, canonical field order, canonical sort — so a moved note is a
-    one-line diff a human can read.
-  - **Deterministic serialization** — serialize→parse→serialize must be the identity function
-    (enforced by property tests in CI from day one).
-- **Content-addressed audio.** Samples referenced by hash, stored in a sidecar `media/`
-  directory (git-LFS-friendly), never inline. Keeps the text file text and makes projects
-  portable. *(Pattern drawn from git-with-Reaper LFS practice + DAWproject's ZIP-of-refs model.)*
-- **Versioned schema from commit one.** A format that's clean at MVP will calcify against
-  timelines, warping, and automation curves later (Risk #3). Borrow vocabulary from **DAWproject**
-  (Bitwig, MIT-licensed XML schema, shipping in Studio One / Cubase / Bitwig) and tracktion's
-  `.tracktionedit` rather than inventing from scratch. *(`01/02`, SINGLE-SOURCE.)*
+- **Csound `.sco`** ✅ CONFIRMED as the closest existing analog to "one musical event per line,
+  literal p-field data, diff-friendly": a line begins with a type character (`i` for
+  instrument/note events), followed by space/tab-separated parameter fields — `p1`/`p2`/`p3`
+  hardwired to instrument/start-time/duration, `p4+` free-form. Decades-stable, real production
+  use. **Validates the line-format instinct directly.**
+- **Humdrum `**kern`** ✅ CONFIRMED — and this is the standout finding. It's a pure-ASCII,
+  tab-delimited grid: time flows down as rows, **simultaneous parts are tab-separated columns
+  (spines)** — directly reusable for representing chords/stacked notes/multi-track alignment as
+  diffable text. More importantly: **Humdrum's own spec explicitly names the diff problem** —
+  differing-but-musically-equivalent orderings of signifiers within a token cause `diff`/`cmp` to
+  falsely report identical files as different — and **prescribes a canonical, fixed signifier
+  ordering specifically to prevent this.** This is the only format surveyed whose own
+  documentation reasons about text-diff tooling. It's the strongest available precedent for our
+  own "deterministic canonical serialization" requirement (`docs/decisions.md` D4) — we're not
+  inventing that requirement, Humdrum already discovered and solved the same problem.
+- **LilyPond & ABC notation** ✅ CONFIRMED as genuinely git-versioned *at scale in the real
+  world*, not just theoretically diffable: the Mutopia Project is 93.6% `.ly` by byte count with
+  4,174 real commits (note corrections, version migrations, merged PRs) over time; TheSession-data
+  mirrors thesession.org's ABC tune database with ~weekly commits over roughly a decade.
+- **SuperCollider Score** ⚠️ CONFIRMED but with an important caution: a Score is *logically* a
+  literal timestamped event list (`[[time,[oscCmd]], ...]`) expressible as text, but its **actual
+  on-disk format for the synthesis server is binary** (raw OSC + byte-size-prefixed). Undercuts
+  its value as text prior art — a cautionary tale: don't let "logically text-shaped in memory"
+  substitute for "actually persisted as text." Whether Scores are typically hand-authored vs.
+  programmatically generated was **inconclusive** (a claim for the latter was refuted 0-3).
+- **ORCA** ✅ CONFIRMED as proof of the extreme end of the design space: a grid of plain ASCII
+  characters that *is itself* the running sequencer program, no separate compile/interpret layer.
+  Proves the paradigm works. (Refuted: that it does synthesis/production directly — confirmed it
+  outputs MIDI/OSC/UDP to *external* tools, i.e. it's sequencing/trigger logic, not a synthesis
+  format.)
+- **The confirmed gap**: no prior art was found marrying notation-style event representation
+  (pitch/rhythm/dynamics) with synthesis/production parameters (filter cutoff, envelope, effects
+  automation) in one diff-friendly document. This combination is **genuinely novel ground** — not
+  something to copy from elsewhere, something to design carefully.
+- No verified evidence either way on tracker-format plain-text serialization or MML — open
+  questions, not resolved either direction.
 
-### Format choice — open question
+### From code archaeology (`docs/opendaw-notes.md`) — internal model, not the wire format
 
-TOML-ish / a restricted YAML / a bespoke line format? Leaning **bespoke line-oriented text**
-(maximally diff-legible) with a strict serializer, over YAML (foot-guns) or JSON (noisy diffs,
-no comments). To be decided in M0 — see [`docs/format-spec.md`](docs/format-spec.md) for the
-current sketch.
+- Adopt a **graph-of-typed-nodes-with-pointer-fields** mental model internally (openDAW's `Box`/
+  `BoxGraph` pattern) — stable UUID per entity, typed/validated references, cascade-delete via
+  dependency graph — even though our *serialized* form stays flat readable text.
+- **Borrow DAWproject's parameter vocabulary wholesale** (MIT-licensed, safe to copy verbatim):
+  `Threshold/Ratio/Attack/Release/Knee/InputGain/OutputGain` for compressor,
+  `Band/Freq/Gain/Q/type` for EQ, `time/duration/contentTimeUnit/playStart/loopStart/loopEnd` for
+  clips. No reason to invent our own names when a cross-DAW-agreed set already exists.
+- **Human-readable slugs over raw UUIDs at the text boundary** — validated *twice independently*:
+  DAWproject uses `xs:ID`/`xs:IDREF` human-assignable string IDs; openDAW's own `AddressIdEncoder`
+  converts internal UUIDs into short sequential IDs purely for its (secondary) XML export. Keep
+  UUIDs canonical internally; mint short, diff-legible identifiers at the serialization boundary.
+- **Content-addressed audio, SHA-256-derived** — independently confirmed as openDAW's own approach
+  for deduping identical sample files. Validates our existing plan (`docs/format-spec.md`).
+- **openDAW's undo system (inverse-update-log, not snapshots)** is a strong candidate to
+  reuse conceptually — a captured `Modification{forward, inverse}` object is *already* a computed
+  diff, a natural basis for our own `beat diff`/`--dry-run`.
+- **openDAW deliberately chose an opaque binary bundle for a reason that doesn't apply to us**: a
+  code comment confirms the binary `project.od` format exists so a Rust engine and a TypeScript
+  engine can byte-checksum each other — a cross-language-parity requirement, not a rejection of
+  diff-friendliness. **No design doc anywhere argues against text.** This is the strongest single
+  piece of evidence that nobody has actually tried our approach, not that it doesn't work.
+
+### Format choice — **resolved, not open anymore**
+
+Previously listed as an M0-blocking open question (bespoke line-format vs restricted YAML vs
+TOML). **Resolved by the prior-art research**: go with a **bespoke, line-oriented text format**
+in the spirit of Csound `.sco` (one event per line, typed statements) combined with Humdrum's
+**canonical-ordering discipline** (fixed field order, deterministic serialization, explicitly
+designed to defeat the diff-false-positive problem) and **DAWproject's parameter vocabulary**
+(borrow field names, don't invent). This beats YAML (foot-guns, no real precedent for musical
+diffability) and JSON (noisy diffs, no comments, and openDAW's own `toJSON()` escape hatch proves
+the "just use JSON" instinct is a trap unless field names — not numeric keys — are canonical).
+See the refined sketch in [`docs/format-spec.md`](docs/format-spec.md).
 
 ---
 
@@ -167,92 +236,181 @@ current sketch.
 
 ### The daemon
 
-A browser tab can't own files on disk, so a small local Node daemon does: it owns the `.beat`
-file, serves the UI, applies GUI edits to the file, and watches for external edits. Result:
-`vim song.beat` hot-reloads the open GUI, and a GUI knob-turn shows up in `git diff`. This is the
-mechanism that makes "GUI and text file are the same thing" true rather than aspirational.
+A browser tab can't own files on disk, so a small local Node daemon does: owns the `.beat` file,
+serves the UI, applies GUI edits to the file, watches for external edits. `vim song.beat`
+hot-reloads the open GUI; a GUI knob-turn shows up in `git diff`.
 
-### The render path — **already de-risked** ✅
+### Engine/UI separation — now backed by a proven real-world pattern
 
-Two independent working paths, both confirmed in research:
+`docs/opendaw-notes.md` confirms (by reading the actual source, not describing it) that openDAW's
+engine/UI separation is **real and enforced at the package-dependency level**, not just
+convention: the engine package has zero React/DOM dependencies, and even *inside the browser* the
+UI (main thread) and the audio engine (AudioWorklet) communicate only via a typed RPC layer over
+`MessagePort` — never shared objects. **This is exactly why their headless testing is nearly
+free** — the test harness just swaps a same-process `MessageChannel` for the real worklet port.
+**Adopt this pattern**: make `core`/`engine` a published, typed-interface boundary from day one,
+not a "the engine happens not to import React" convention.
+
+### The render path — **de-risked, and now with an exact code recipe**
+
+Two independent working paths:
 
 - **Headless Chromium** (start here) — boots the real app, renders bit-identically to what users
   hear. Already proven by BeatLab's smoke suite.
-- **`node-web-audio-api`** (IRCAM) — Rust Web Audio impl with a Node polyfill that runs Tone.js
-  headlessly; ships a working `examples/tone.js` and implements `OfflineAudioContext` for
-  faster-than-real-time render. Migrate hot paths here for speed once it matters.
-  *(`01-landscape.md`, SINGLE-SOURCE. Caveat: `standardized-audio-context`, a Tone dependency,
-  doesn't run in plain Node — hence the polyfill/Chromium route.)*
+- **`node-web-audio-api`** (IRCAM) ✅ CONFIRMED, high confidence — Rust Web Audio implementation
+  with a Node polyfill running real Tone.js code outside a browser; implements
+  `OfflineAudioContext` for faster-than-real-time render. The exact incantation, confirmed by
+  reading the actual example file (`examples/tone.js`) during archaeology:
+  ```js
+  import '#node-web-audio-api-polyfill';   // must be first — patches globalThis
+  import * as Tone from 'tone';
+  const audioContext = new window.AudioContext();  // from the polyfilled global
+  Tone.setContext(audioContext);                    // before creating any Tone nodes
+  // ...build the graph, drive Tone.getTransport()...
+  process.exit(0);   // Tone.js has no clean Node teardown — plan for this explicitly
+  ```
+  Note the last line isn't optional color — Tone.js's own maintainers say (per the archaeology
+  read) they "don't understand how to properly stop tone.js," so the CLI needs an explicit
+  exit/timeout, not a graceful-shutdown expectation.
+- ✅ CONFIRMED (high confidence): Tone.js has first-class offline rendering
+  (`OfflineContext`/`Tone.Offline()`, wrapping the standard `OfflineAudioContext`,
+  `.render()` returns a `Promise<ToneAudioBuffer>`) — not single-source anymore, this is now
+  solid.
+- Caveat, still standing: `standardized-audio-context` (a Tone.js dependency) doesn't run in
+  plain Node — hence the polyfill/Chromium route is required, not incidental.
 
 `beat render project.beat -o mix.wav --stems` is a weeks-not-months task.
 
 ### The web-vs-native decision
 
-The audio backend is **swappable behind the same file + CLI**. Ship pure-web for the MIDI/synth
-DAW; plan a **Tauri shell as the "pro audio" tier** for native-latency recording, real plugin
-hosting, and native time-stretch. The document format and CLI are the constant. See §6 for why
-this split is forced by the web platform's ceiling.
+Audio backend swappable behind the same file + CLI. Ship pure-web for MIDI/synth; plan a Tauri
+shell as the "pro audio" tier. See §6.
 
 ### MCP server
 
-`beat mcp` exposes the CLI operations to an AI agent. Because the source of truth is text, the
-agent edits the file and renders — a structurally cleaner integration than the existing
-"puppet the live DAW over a socket" MCP servers (ableton-mcp et al.).
+`beat mcp` exposes CLI operations to an AI agent — the agent edits the file and renders, a
+structurally cleaner integration than "puppet the live DAW over a socket" (ableton-mcp et al.).
 
 ---
 
 ## 6. The web-stack ceiling (why there's a Tauri tier)
 
-The "not a toy" question. The evidence draws a clean line: **the browser is fine for a
-MIDI-and-synth DAW, and hits real walls on recorded-audio production.**
+Evidence draws a clean line: **the browser is fine for MIDI/synth, hits real walls on recorded
+audio.** Several specific claims here were corrected on full verification — the *direction* holds,
+several *specific numbers/quotes* don't.
 
 | Subsystem | Pure web (AudioWorklet + WASM) | Fallback |
 |---|---|---|
-| Synth / MIDI / sequencing | ✅ ships today (openDAW: 27 devices, no WASM core yet) | — |
-| Stock FX (EQ/comp/reverb) | ✅ WASM DSP via Emscripten (C/C++/Faust) | — |
-| Third-party plugins | ⚠️ WAM2 only | Tauri → native CLAP/VST3 |
-| Audio recording latency | ❌ ~30 ms floor | native audio (~10 ms) needs Tauri |
-| Latency compensation | ❌ APIs don't expose pipeline latency | native driver reports true latency |
+| Synth / MIDI / sequencing | ✅ ships today (openDAW: 27 devices; per archaeology it does have an experimental parallel Rust/WASM engine with parity tests, just not the *default* shipped one) | — |
+| Stock FX (EQ/comp/reverb) | ✅ WASM DSP via Emscripten (C/C++/Faust) — CONFIRMED, high confidence | — |
+| Third-party plugins | ⚠️ WAM2 only — CONFIRMED real, MIT-licensed, peer-reviewed standard | Tauri → native CLAP/VST3 |
+| Audio recording latency | ❌ ~30 ms floor (CONFIRMED, high confidence) vs ~10 ms target | native audio needs Tauri |
+| Latency compensation | ⚠️ magnitude of the gap confirmed; the *specific mechanism* (which API fails to expose what) is **not** independently confirmed — treat as "still a real gap, cause not fully pinned down" | native driver reports true latency |
 | Warping / time-stretch | ⚠️ WASM libs, unproven at quality | Rubber Band / signalsmith (WASM or native) |
-| Multicore audio | ⚠️ multi-graph + SharedArrayBuffer ring buffers | native threads |
+| Multicore audio | ⚠️ multi-graph + SharedArrayBuffer ring buffers (medium confidence — Adenot's recommendation) | native threads |
 
-Load-bearing evidence *(all `02-web-stack-feasibility.md`, SINGLE-SOURCE — W3C workshop + ACM
-papers + openDAW roadmap)*:
+✅ **Confirmed, high confidence** (`02-web-stack-feasibility.md`):
 
-- Browser DAWs floor around **~30 ms round-trip** where native needs **~10 ms**.
-- Recording-latency compensation is **structurally blocked** — `MediaStreamSourceNode` latency
-  "is not exposed anywhere."
-- The **WAM-studio** authors (who shipped a full browser DAW) name the sandbox and latency
-  compensation as their hardest problems — explicitly *not* raw DSP power.
-- **openDAW's own roadmap** is the tell: it shipped a 27-device multitrack DAW, but audio fades,
-  tempo-map automation, and pitch/stretch are all still 2026 roadmap items — precisely the
-  recorded-audio features, and they're last for a reason.
+- Browser DAWs floor around **~30 ms round-trip** vs a **~10 ms** native target (Soundtrap/W3C
+  workshop data, 2021 — flagged by the report itself as now 5 years old; whether it's narrowed by
+  2026 is an open question, not confirmed either way).
+- **AudioWorklet is the sole real-time-thread entrypoint** in browsers — the mandatory foundation
+  for any professional-grade web DAW engine.
+- **WAM2** (Web Audio Modules 2.0) is a real, MIT-licensed, peer-reviewed plugin/host standard —
+  C/C++/FAUST/Csound DSP compiles to WASM and hosts as instruments/effects/MIDI processors.
+  Deliberately bypasses the native `AudioParam` automation API (too heavy for hundreds of
+  WASM-resident parameters) in favor of its own `WamParameter` API.
+- **Emscripten's Wasm Audio Worklets** let compiled C/C++/Rust DSP run directly on the real-time
+  audio thread, with glue code engineered to generate **zero JS garbage** (no GC-pause risk from
+  that layer).
+- **Two independent working proofs-of-concept** confirm a professional-adjacent web DAW is
+  buildable on standardized browser APIs today: WAM Studio (2023, peer-reviewed, explicitly framed
+  by its own authors as a "technology demonstrator," not production software) and openDAW.
 
-**Conclusion:** the toy/serious line is drawn by the *backend*, not the file format. Ship the
-web tier; the Tauri tier is what makes "not a toy" true for recorded audio.
+**Corrections — these specific claims did NOT survive verification, don't repeat them:**
+
+- ~~"Live 12.3 added Bounce Track in Place... pre-mixer/post-FX signal-path semantics"~~ —
+  **REFUTED.** Drop the specific bounce/freeze semantics claim; Live 12's actual bounce behavior
+  needs separate sourcing if we want to cite it.
+- ~~"MediaStreamSourceNode adds latency that is 'not exposed anywhere'"~~ — **REFUTED** as the
+  *specific mechanism*. The ~30ms-vs-10ms *magnitude* is still solid; the *why* is not.
+- ~~"The WAM-studio authors name the sandbox and latency compensation as their hardest
+  problems"~~ — **REFUTED** as a direct quote/attribution. Don't cite this specific claim.
+- ~~openDAW's specific 2026-quarter roadmap dates (fades Q1, tempo-automation Q1-Q2, warping Q4,
+  1.0 in Q3)~~ — **REFUTED**, and independently the "headless SDK" framing this sat alongside was
+  also wrong per direct source reading. openDAW *does* have several recorded-audio-adjacent
+  features still pending (confirmed generally by the archaeology pass reading its actual roadmap
+  docs), just don't cite specific committed dates.
+
+⚠️ **Confirmed gap, not resolved by either research pass**: **zero surviving evidence** on engine
+architecture prior art — tracktion_engine, Ardour, Reaper's own architecture write-ups, Zrythm,
+LMMS — and **zero surviving evidence** on WASM-portable DSP library specifics (Rubber Band,
+signalsmith-stretch, EQ/compression/reverb/LUFS-metering libraries). Both were explicit original
+research questions; both came back empty after adversarial verification, twice. **This is a real,
+acknowledged blind spot**, not something quietly glossed over — a dedicated research pass on
+"open-source DAW engine architecture" would need to happen before M4 engine decisions get made.
+
+**Conclusion (holds):** the toy/serious line is drawn by the *backend*, not the file format. Ship
+the web tier; the Tauri tier is what makes "not a toy" true for recorded audio.
 
 ---
 
 ## 7. The AI-listening subsystem
 
-The differentiating feature you asked for — and the research changes how it must be built.
+The differentiating feature you asked for. Research **strongly confirms the core architectural
+conclusion** (metrics-first, LLM narrates) but several of the *specific statistics* originally
+cited to justify it were refuted on full verification. The conclusion survives on what's actually
+confirmed — which is still plenty.
 
-### The reality check (unusually consistent, unusually sobering)
+### The reality check — confirmed at high confidence, with corrected specifics
 
-Today's audio-LLMs are **bad ears**. *(All `03-ai-listening.md`, SINGLE-SOURCE ×5, but the
-findings converge across five independent papers.)*
+✅ **Confirmed, high confidence** (`03-ai-listening.md`):
 
-- Best models score **~52%** on expert audio understanding (MMAU) vs **82%** human; **music is
-  their single weakest domain**, below speech and environmental sound.
-- The dominant error is **perceptual, not reasoning** — 55–64% of errors are the model
-  *mis-hearing* the audio.
-- Several open models (MU-LLaMA, SALMONN) **barely change their answer when the audio is replaced
-  with noise** — they answer from text priors, not by listening.
-- Fine-grained, time-localized judgments — exactly *"the lead's attack is masking the kick"* —
-  are the **worst-performing** category.
+- Standardized benchmarks now exist (MuChoMusic: 1,187 human-validated questions; CMI-Bench: 11
+  open audio-LLMs across 14 MIR tasks; MMAU: 10,000-clip multi-task benchmark) and **all
+  consistently find open audio-LLMs fall significantly short of task-specific supervised MIR
+  systems.**
+- **Text-prior bias is real and severe**: when audio is replaced with noise or the wrong track,
+  most evaluated models (MU-LLaMA, MusiLingo, M2UGen, some SALMONN tests) show **little to no
+  performance degradation** — meaning they're answering from language priors, not actually
+  listening. (Only SALMONN and Qwen-Audio showed a significant drop in the specific test that
+  measured this.)
+- **Errors are dominated by mis-hearing, not mis-reasoning**: MMAU's error analysis attributes
+  **55% of Qwen2-Audio-Instruct's errors and 64% of Gemini Pro v1.5's errors to perception**
+  (vs. only 18%/11% to reasoning). Consistent with this: layering symbolic reasoning on top of
+  audio-LLM perception (LogicLM-style pipelines) **collapses when the audio front-end mis-hears**
+  — reasoning cannot compensate for bad ears.
+- **Audio-LLMs cannot produce calibrated numeric judgments**: on arousal/valence emotion
+  regression, every one of 11 evaluated models scored worse than or barely at the level of
+  predicting the dataset mean (R² from −1.17 to 0.08) — **a direct concern for any design that
+  expects an LLM to output numeric mix scores.**
+- Among tested models, **Qwen-Audio** was consistently strongest (80% GTZAN genre accuracy, best
+  captioning ROUGE), but a survey of 8 such models found they're "mostly lightly fine-tuned
+  general LLMs lacking professional musical knowledge," and — importantly — **none were evaluated
+  on mixing, mastering, loudness, EQ, or any production-quality task.**
 
-So a naive "render → let an audio-LLM critique → apply" loop, trusted blindly, would confidently
-hallucinate problems that aren't there. **Do not build that.**
+⚠️ **The single most important epistemic caveat, straight from the verified report**: *"No claim
+in this evidence set directly benchmarks any audio-LLM on actual mix-critique tasks (masking
+detection, frequency-conflict identification, loudness/dynamics judgment, stereo-field
+assessment) — every finding here is inferred from adjacent evidence."* The "audio-LLMs are bad
+ears for mix critique" conclusion is a **reasonable, well-evidenced inference** from general
+music-understanding failures — not a direct test of the specific task we care about. That
+inference is strong enough to justify the metrics-first architecture below, but it's an
+inference, and we should say so if anyone asks.
+
+**Corrections — these specific numbers were refuted, do not reuse them:**
+
+- ~~"Best models score ~52% on MMAU vs 82% human; music is their single weakest domain"~~ —
+  **REFUTED.** The general finding that audio-LLMs underperform on music specifically may still be
+  true, but this specific headline stat did not survive reverification.
+- ~~"Chord-ID accuracy drops to 6-53% from audio vs 97-100% from MIDI; syncopation counting
+  25-65% vs 95-100%"~~ — **REFUTED.**
+- ~~"Beat/downbeat tracking F-measures near zero; melody extraction below 1%; lyrics WER
+  96-2311"~~ — **REFUTED.**
+- ~~"Gemini models score 95-100% on MIDI/symbolic input, drop 30-70+ points on raw audio"~~ —
+  **REFUTED.**
+- Treat the *direction* of all four (fine-grained/time-localized listening is weak; symbolic vs.
+  audio input shows a real gap) as plausible but not established by this evidence set.
 
 ### The architecture that works: measure first, model second
 
@@ -264,45 +422,62 @@ hallucinate problems that aren't there. **Do not build that.**
 ```
 
 1. **Guardrail layer — deterministic DSP (source of truth).** LUFS / true-peak / crest factor
-   (EBU R128), per-band spectral balance vs a reference track, cross-stem masking metric, stereo
-   width. Cheap, exact, no hallucination. This layer alone powers commercial assistants
-   (iZotope, Sonible).
-2. **Action layer — learned but *interpretable*.** Prefer systems that predict effect
-   **parameters, not black-box audio**. **Diff-MST** (ISMIR 2024) and the Apache-2.0
-   **automix-toolkit**'s Differentiable Mixing Console infer a mix from a reference and output
-   human-adjustable EQ/comp/gain — which map straight onto `.beat` fields.
-   *(`03-ai-listening.md`, SINGLE-SOURCE.)*
+   (EBU R128), per-band spectral balance vs a reference, cross-stem masking, stereo width. Cheap,
+   exact, no hallucination.
+2. **Action layer — learned but interpretable.** ✅ CONFIRMED, high confidence: automatic-mixing
+   research splits into direct audio-to-audio (black box) vs. **parameter-estimation systems**
+   that predict settings for a differentiable console of standard effects — the latter produces
+   human-interpretable, `.beat`-mappable output, which is exactly the shape we need.
+   - **Diff-MST** (ISMIR 2024) ✅ CONFIRMED — a working, peer-reviewed mixing-style-transfer
+     system: given a reference song, it predicts control parameters (per-track gain/EQ/comp/pan
+     **plus master-bus EQ/DRC**) via a transformer controller trained with an audio-production
+     style loss. **New, notable detail**: it has already been integrated as an adjustable-parameter
+     plugin inside a real DAW (Cubase, via a follow-up "Diff-MSTC" prototype) — real precedent for
+     shipping this class of tool inside an actual DAW, not just as a research demo.
+   - **automix-toolkit** (Apache-2.0) implements both architectures with pretrained checkpoints
+     usable for inference today. **Scope correction from direct code reading**
+     (`docs/opendaw-notes.md`): its actual Differentiable Mixing Console model
+     (`automix/models/dmc.py`) predicts **only 2 parameters per stem — gain and pan** (proper
+     equal-power panning, not linear) — not a rich EQ/comp vector. Don't over-scope our own
+     mix-critique ambitions around "DMC already does EQ-aware critique" — the honest baseline
+     from the reference implementation is loudness balance + stereo placement. Diff-MST (above)
+     is the more ambitious system if we want EQ/comp in scope.
 3. **Language layer — the LLM narrates, never judges alone.** Turns metric deltas into readable
-   suggestions and a concrete diff ("bass is +4 dB in 200–400 Hz vs the reference → cut here").
-   The number is real; the model explains it and proposes the edit.
+   suggestions and a concrete diff. The number is real; the model explains and proposes.
+
+**New, relevant to local-first/WASM goals**: ✅ CONFIRMED, medium confidence — **TinyMU** (229M
+params, ICASSP 2026) reaches 82% of a much larger SOTA model's performance on MuChoMusic while
+being 35x smaller, well ahead of older dedicated music-LLMs. Small audio-language models capable
+of on-device deployment are becoming real — relevant if we ever want a local narration layer
+rather than an API call, though still short of frontier performance.
 
 This is the BeatLab validator idea grown up: **"check my mix against a target"** instead of
-**"check my work against a lesson."** Every suggestion lands as a reviewable diff — which the
-text-native format makes uniquely natural.
+**"check my work against a lesson."**
 
 ---
 
 ## 8. Milestones
 
-Sequenced so each milestone ships something whole, and the two hard commitments (native audio,
-learned auto-mix) come *after* the format and CLI have proven themselves.
+Unchanged in structure — the research corrected *content* within milestones, not the sequencing.
 
 ### M0 — Extract & format *(the keystone)*
 - [ ] Split the BeatLab repo into `core` (document model), `engine` (Tone.js), `ui` (React).
-- [ ] Design and freeze v0 of the `.beat` format (IDs, canonical serialization, media refs).
+- [ ] Design and freeze v0 of the `.beat` format: Csound-style one-event-per-line statements +
+      Humdrum-style canonical field ordering + DAWproject vocabulary for device/parameter names +
+      human slugs at the text boundary over raw UUIDs.
 - [ ] Property-test round-trip (serialize→parse→serialize = identity) in CI.
 - [ ] Load/save `.beat` from the existing store. **Exit criteria:** the current BeatLab sandbox
       saves and reloads as a `.beat` file with zero state loss.
 
 ### M1 — Files on disk + daemon
-- [ ] Node daemon owns the file, serves the UI, two-way sync + hot-reload.
-- [ ] `git diff` shows readable musical changes from GUI edits; `vim` edits hot-reload the GUI.
+- [ ] Node daemon owns the file, serves the UI, two-way sync + hot-reload, engine/UI split as a
+      published typed-interface boundary (openDAW pattern).
 - [ ] **Exit criteria:** edit a note in the GUI → see a one-line diff; edit the file → see the
       note move in the GUI.
 
 ### M2 — CLI + headless render
-- [ ] `beat render` (headless Chromium → WAV/stems), `beat inspect`, `beat set`, `beat diff`
-      (semantic/musical).
+- [ ] `beat render` (headless Chromium first, `node-web-audio-api` for speed once validated
+      against it), `beat inspect`, `beat set`, `beat diff` (semantic/musical).
 - [ ] **Exit criteria:** render a project to WAV from the command line with no GUI open; a
       `beat diff` between two commits reads like an edit list.
 
@@ -317,15 +492,17 @@ learned auto-mix) come *after* the format and CLI have proven themselves.
 ### M4 — The "not a toy" / parity push *(Tauri native tier)*
 - [ ] Tauri shell: native-latency recording, latency compensation, CLAP/VST3 hosting.
 - [ ] Warping / time-stretch (Rubber Band or signalsmith; WASM in web, native in Tauri).
-- [ ] Comping, audio-region editing, freeze/flatten/bounce with defined signal-path semantics.
-- [ ] Learned auto-mix (Diff-MST / DMC) producing parameter suggestions.
+- [ ] Comping, audio-region editing, freeze/flatten/bounce with defined signal-path semantics
+      (needs fresh sourcing — the Live 12.3 bounce-semantics claim we'd have copied was refuted).
+- [ ] Learned auto-mix (Diff-MST — real DAW-integration precedent exists — or DMC for a
+      gain/pan-only baseline) producing parameter suggestions.
 - [ ] Modulation system (Bitwig-style modulators), macro racks, MPE, note probability.
+- [ ] **Precondition:** run the dedicated engine-architecture research pass this roadmap flags as
+      missing (tracktion_engine, Ardour, Reaper, Zrythm) before committing to an engine design here.
 
 ---
 
 ## 9. Feature inventory (tiered)
-
-Condensed from the Ableton/Bitwig/Reaper feature-surface research (`02-web-stack-feasibility.md`).
 
 | Tier | Features |
 |---|---|
@@ -334,69 +511,100 @@ Condensed from the Ableton/Bitwig/Reaper feature-surface research (`02-web-stack
 | **Parity** | Native recording + latency comp (Tauri); warping/time-stretch; comping; plugin hosting (CLAP/VST3); freeze/flatten/bounce; modulators + macro racks; MPE; note probability; browser/preset library; LUFS-normalized export |
 | **Out of scope** | In-browser VST/AU hosting; recorded-audio parity with Pro Tools; autonomous AI mix judge without metric guardrails; generator-code layer (deferred, not cancelled) |
 
+*(This section still rests on thin, largely single-vendor evidence — the tech-spec research found
+zero surviving claims on Bitwig/FL Studio/Reaper/Logic feature specifics or forum/survey evidence
+on which features are make-or-break. Treat the tier assignments as reasonable defaults, not
+research-backed rankings.)*
+
 ---
 
 ## 10. Top risks (ranked)
 
-1. **Audio-LLM hallucination on mix judgments** — *high.* Best-evidenced risk in the whole
-   report. Mitigation is architectural: DSP metrics are ground truth, the model narrates. Never
-   the sole judge. (§7)
-2. **Recording latency & compensation on the web** — *high.* Structurally unsolved in-browser.
-   Only mitigation is the Tauri native tier — so "serious recording" is gated behind a second
-   runtime from day one of planning. (§6)
-3. **Format churn as features deepen** — *high.* A format beautiful at MVP can calcify against
-   timelines/warping/automation. Mitigation: version the schema from commit one; study
-   DAWproject/tracktionedit *before* locking v1. (§4)
-4. **GUI↔file round-trip fidelity** — *med.* Every GUI edit must serialize losslessly and every
-   hand-edit must load, or trust collapses. Mitigation: property-based round-trip tests in CI
-   from the start.
-5. **Scope: "Ableton parity" is a decade for a team** — *med.* Mitigation is the positioning
-   itself — win the niche, treat parity as a direction not a milestone.
-6. **Node/browser audio divergence** — *med.* `node-web-audio-api` may not render bit-identically
-   to the browser. Mitigation: keep headless Chromium as the fidelity-guaranteed path; treat Node
-   bindings as a speed optimization validated against it.
-7. **Learned auto-mix below pro quality** — *med.* Even the best deep-learning mixers trail human
-   engineers. Mitigation: ship as accept/reject suggestions (diffs), never silent auto-apply.
-8. **Competitive: the MCP-DAW category is already forming** — *med, new.* A dozen Ableton MCP
-   servers exist. They puppet existing DAWs; our moat is the text-native source of truth. That
-   moat only holds if the format genuinely is better to edit than poking a live app — which
-   makes Risk #4 (fidelity) doubly load-bearing.
+1. **Audio-LLM hallucination on mix judgments** — *high.* Confirmed at high confidence (text-prior
+   bias, perception-dominated errors, no calibrated numeric output) even after several specific
+   supporting statistics were refuted — the underlying risk is real and well-evidenced on its own
+   surviving merits. Mitigation: DSP metrics are ground truth, model narrates, never sole judge.
+   Remember also: **no benchmark has directly tested mix-critique tasks** — treat our own
+   architecture as a precaution against a well-evidenced adjacent risk, not a response to a
+   directly proven one. (§7)
+2. **Recording latency & compensation on the web** — *high.* Magnitude confirmed (~30ms vs
+   ~10ms); the specific mechanism is not, so treat the underlying *cause* as still somewhat open.
+   Mitigation unchanged: Tauri native tier. (§6)
+3. **Format churn as features deepen** — *high.* Now better mitigated than before: we have real
+   prior art (Humdrum's canonical-ordering discipline, DAWproject's vocabulary) rather than a
+   from-scratch guess. Still version the schema from commit one. (§4)
+4. **GUI↔file round-trip fidelity** — *med.* Property-based round-trip tests in CI from the start.
+5. **Scope: "Ableton parity" is a decade for a team** — *med.* Mitigation: win the niche, treat
+   parity as a direction not a milestone. Underscored by the confirmed finding that we have *zero*
+   verified evidence on engine architecture or DSP library portability — parity work can't even be
+   properly scoped yet.
+6. **Node/browser audio divergence** — *med, more confidently understood now.* `node-web-audio-api`
+   is confirmed to run real Tone.js code; the exact wiring pattern is documented (§5). Still keep
+   headless Chromium as the fidelity-guaranteed reference.
+7. **Learned auto-mix below pro quality** — *med.* Confirmed at "medium" — as of the (2022,
+   explicitly dated) ISMIR tutorial, deep-learning automix still trails professional engineers,
+   and no 2024-2026 source in this research closes that gap. Mitigation unchanged: ship as
+   accept/reject diffs, never silent auto-apply.
+8. **Competitive: the MCP-DAW category is already forming** — *med.* A dozen Ableton MCP servers
+   exist, puppeting live DAWs. **New evidence sharpens the timing risk**: DAWproject's own
+   community has an *open, unresolved* GitHub issue (#40) asking for exactly the diff/version-control
+   support we're building — meaning the demand is visible and could attract a competing effort.
+   Our moat only holds if the format is genuinely better to edit than poking a live app, which
+   makes Risk #4 doubly load-bearing.
+9. **Engine-architecture blind spot** — *med, new.* Two independent, fully-verified research
+   passes both came back with **zero surviving evidence** on tracktion_engine, Ardour, Reaper's
+   architecture, Zrythm, or LMMS — an explicit original research question, answered both times by
+   silence after adversarial verification. M4's engine decisions should not be made without a
+   dedicated follow-up pass on this specifically.
 
 ---
 
 ## 11. Open questions (need a decision)
 
-- **Name.** `beatlab-daw` is a placeholder. (Product identity, not urgent, but bake-in cost grows.)
-- **Format syntax.** Bespoke line-format vs restricted YAML vs TOML. (M0 blocker.)
-- **License.** BeatLab's license + which permissive license for the new project (MIT, like
-  DAWproject/automix-toolkit, keeps the door open to reusing their schemas/code).
+- **Name.** `beatlab-daw` is a placeholder.
+- ~~Format syntax~~ — **resolved**, see §4: bespoke line-oriented, Csound/Humdrum/DAWproject-informed.
+- **License.** MIT keeps the door open to reusing DAWproject's/automix-toolkit's schemas/code
+  (both permissively licensed). Reminder: openDAW itself is **AGPL v3/LGPL** — fine to learn from,
+  not to copy code from verbatim.
 - **Relationship to BeatLab.** Hard fork, or does BeatLab become the "learn" mode inside this?
-  (The lesson framework → mix-lint reuse suggests they could share a core.)
-- **Web-first vs Tauri-first.** Ship the web tier alone first, or build the Tauri shell earlier
-  to make "not a toy" true sooner? (Trades reach for depth.)
+- **Web-first vs Tauri-first.** Ship the web tier alone first, or build Tauri earlier?
+- **New, from this research round**: should we run a dedicated follow-up pass on (a) engine
+  architecture (tracktion_engine/Ardour/Reaper/Zrythm — zero coverage twice now), (b) live-coding
+  language comparison (Strudel/Tidal/Sonic Pi/Glicol — zero coverage twice now, despite being an
+  explicit original research question both times), and (c) direct demand-signal/survey evidence
+  (producers-who-code market signals, feature make-or-break data)? All three are honest,
+  acknowledged gaps, not just unwritten sections.
 
 ---
 
 ## Naming
 
-`beatlab-daw` is a working directory name only. Candidate directions once chosen: something that
-signals *text/plain* + *sound*. Decide before M0 ships publicly.
+`beatlab-daw` is a working directory name only. Decide before M0 ships publicly.
 
 ---
 
 ## References
 
-- [`docs/research/01-landscape.md`](docs/research/01-landscape.md) — prior art, empty quadrant,
-  demand signals, MCP tools (113 claims, 23 sources)
+- [`docs/research/01-landscape.md`](docs/research/01-landscape.md) — prior art, empty quadrant
+  (21 confirmed, 4 refuted, 23 sources)
 - [`docs/research/02-web-stack-feasibility.md`](docs/research/02-web-stack-feasibility.md) —
-  feature surface + web feasibility ceiling (115 claims, 23 sources)
-- [`docs/research/03-ai-listening.md`](docs/research/03-ai-listening.md) — AI listening,
-  auto-mix, the critique loop (119 claims, 24 sources)
-- [`docs/research-summary.html`](docs/research-summary.html) — visual one-page synthesis
+  feature surface + web feasibility ceiling (17 confirmed, 8 refuted, 23 sources)
+- [`docs/research/03-ai-listening.md`](docs/research/03-ai-listening.md) — AI listening, auto-mix,
+  the critique loop (19 confirmed, 6 refuted, 24 sources)
+- [`docs/research/04-format-prior-art.md`](docs/research/04-format-prior-art.md) — text-based
+  music format prior art for `.beat` (22 confirmed, 3 refuted, 24 sources)
+- [`docs/opendaw-notes.md`](docs/opendaw-notes.md) — source-code archaeology (openDAW, DAWproject,
+  automix-toolkit, node-web-audio-api) — direct reading, not web search
+- [`docs/research-summary.html`](docs/research-summary.html) — visual synthesis (**predates this
+  update** — reflects the pre-verification single-source draft; treat this roadmap as current)
 - [`docs/decisions.md`](docs/decisions.md) — key design decisions & rationale
-- [`docs/format-spec.md`](docs/format-spec.md) — `.beat` format sketch
+- [`docs/format-spec.md`](docs/format-spec.md) — `.beat` format sketch, updated with Csound/Humdrum
+  lessons
 - [`docs/architecture.md`](docs/architecture.md) — component architecture detail
 
-> **Verification caveat:** most research claims are single-source (the adversarial verification
-> stage was rate-limited mid-run). Re-run verification on the load-bearing claims — especially the
-> web-latency numbers (§6) and the audio-LLM benchmarks (§7) — before committing engineering to them.
+> **Verification status**: all four deep-research passes are now fully adversarially verified
+> (zero infrastructure errors on the final run; every queued claim resolved to confirmed or
+> refuted). Three specific areas remain genuinely under-researched even after two full attempts —
+> engine architecture, live-coding-language comparison, and demand-signal/survey data — flagged
+> throughout rather than papered over. This roadmap is safe to treat as a real spec for the areas
+> it does cover; the three gaps above need a dedicated follow-up before being treated as settled.
