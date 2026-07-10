@@ -13,7 +13,7 @@
 // diff exit codes follow diff(1) convention: 0 = no musical changes, 1 = changes, 2 = error.
 // Requires `npm run build` (reads compiled ../dist/src/core).
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
@@ -22,6 +22,9 @@ import {
   setValue,
   addNote,
   removeNote,
+  addTrack,
+  removeTrack,
+  initDocument,
   diffDocuments,
   formatDiff,
   describeDocument,
@@ -31,6 +34,9 @@ import {
 import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.js'
 
 const USAGE = `usage:
+  beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track
+  beat add-track <file> <id> <synth|drums> [--name N] [--color #hex]
+  beat rm-track <file> <id>
   beat inspect <file> [--json]
   beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
   beat add-note <file> <track> <pitch> <start> <duration> <velocity>
@@ -56,6 +62,43 @@ function writeDoc(path, before, after) {
   const text = serialize(after)
   writeFileSync(path, text)
   process.stdout.write(formatDiff(diffDocuments(before, after)))
+}
+
+function initCmd(argv) {
+  const file = argv.find((a) => !a.startsWith('--'))
+  if (!file) throw new BeatEditError('init needs a file path')
+  if (existsSync(file)) throw new BeatEditError(`${file} already exists — refusing to overwrite`)
+  const bpmIdx = argv.indexOf('--bpm')
+  const barsIdx = argv.indexOf('--bars')
+  const doc = initDocument({
+    ...(bpmIdx !== -1 ? { bpm: Number(argv[bpmIdx + 1]) } : {}),
+    ...(barsIdx !== -1 ? { loopBars: Number(argv[barsIdx + 1]) } : {}),
+  })
+  writeFileSync(file, serialize(doc))
+  process.stdout.write(`created ${file}: ${doc.bpm} bpm, ${doc.loopBars} bar(s), starter track "${doc.tracks[0].id}"\n`)
+}
+
+function addTrackCmd(argv) {
+  const [file, id, kind, ...rest] = argv
+  if (!file || !id || !kind) throw new BeatEditError('add-track needs <file> <id> <synth|drums>')
+  const nameIdx = rest.indexOf('--name')
+  const colorIdx = rest.indexOf('--color')
+  const before = readDoc(file)
+  const { doc } = addTrack(before, {
+    id,
+    kind,
+    ...(nameIdx !== -1 ? { name: rest[nameIdx + 1] } : {}),
+    ...(colorIdx !== -1 ? { color: rest[colorIdx + 1] } : {}),
+  })
+  writeDoc(file, before, doc)
+}
+
+function rmTrackCmd(argv) {
+  const [file, id] = argv
+  if (!file || !id) throw new BeatEditError('rm-track needs <file> <id>')
+  const before = readDoc(file)
+  const { doc } = removeTrack(before, id)
+  writeDoc(file, before, doc)
 }
 
 function inspectCmd(argv) {
@@ -165,6 +208,15 @@ function diffCmd(argv) {
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2)
   switch (cmd) {
+    case 'init':
+      initCmd(rest)
+      break
+    case 'add-track':
+      addTrackCmd(rest)
+      break
+    case 'rm-track':
+      rmTrackCmd(rest)
+      break
     case 'inspect':
       inspectCmd(rest)
       break

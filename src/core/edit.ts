@@ -3,8 +3,8 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatDocument, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType } from './document.js'
-import { DRUM_LANES, OSC_TYPES, SYNTH_PARAM_ORDER } from './document.js'
+import type { BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import { DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS } from './document.js'
 
 export class BeatEditError extends Error {
   constructor(message: string) {
@@ -123,4 +123,58 @@ export function removeNote(doc: BeatDocument, trackId: string, noteId: string): 
   const note = track.notes.find((n) => n.id === noteId)
   if (!note) throw new BeatEditError(`no note "${noteId}" on track "${trackId}"`)
   return { doc: replaceTrack(doc, { ...track, notes: track.notes.filter((n) => n.id !== noteId) }), note }
+}
+
+function validateTrackIdentity(id: string, name: string, color: string) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new BeatEditError(`track ids are single alphanumeric/_/- tokens, got "${id}"`)
+  if (/\s/.test(name)) throw new BeatEditError('track names are single tokens in v0.2 (no whitespace)')
+  if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatEditError(`color must be a lowercase hex color like #c678dd, got "${color}"`)
+}
+
+const emptyBeatPattern = (): BeatDrumPattern =>
+  Object.fromEntries(DRUM_LANES.map((lane) => [lane, Array<number>(16).fill(0)])) as BeatDrumPattern
+
+/** Adds a new track with the format's init patch (INIT_SYNTH; empty 16-step pattern for drums).
+ * Color defaults cycle TRACK_COLORS by track index; name defaults to the id. */
+export function addTrack(
+  doc: BeatDocument,
+  opts: { id: string; kind: TrackKind; name?: string; color?: string },
+): { doc: BeatDocument; track: BeatTrack } {
+  const { id, kind } = opts
+  if (!(TRACK_KINDS as readonly string[]).includes(kind)) throw new BeatEditError(`track kind must be one of ${TRACK_KINDS.join('|')}, got "${kind}"`)
+  if (doc.tracks.some((t) => t.id === id)) throw new BeatEditError(`track id "${id}" already exists`)
+  const name = opts.name ?? id
+  const color = opts.color ?? TRACK_COLORS[doc.tracks.length % TRACK_COLORS.length]!
+  validateTrackIdentity(id, name, color)
+  const track: BeatTrack = {
+    id,
+    name,
+    color,
+    kind,
+    synth: { ...INIT_SYNTH },
+    notes: [],
+    ...(kind === 'drums' ? { pattern: emptyBeatPattern() } : {}),
+  }
+  return { doc: { ...doc, tracks: [...doc.tracks, track] }, track }
+}
+
+/** Removes a track. A document keeps at least one track (the grammar's selected_track needs a
+ * referent); if the removed track was selected, selection falls back to the first remaining. */
+export function removeTrack(doc: BeatDocument, trackId: string): { doc: BeatDocument; track: BeatTrack } {
+  const track = findTrack(doc, trackId)
+  if (doc.tracks.length === 1) throw new BeatEditError('cannot remove the last track — a document keeps at least one')
+  const tracks = doc.tracks.filter((t) => t.id !== trackId)
+  const selectedTrack = doc.selectedTrack === trackId ? tracks[0]!.id : doc.selectedTrack
+  return { doc: { ...doc, tracks, selectedTrack }, track }
+}
+
+/** A fresh document with one starter synth track — what `beat init` writes. */
+export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: string } = {}): BeatDocument {
+  const bpm = opts.bpm ?? 120
+  const loopBars = opts.loopBars ?? 2
+  if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
+  if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
+  const base: BeatDocument = { formatVersion: '0.2', bpm, loopBars, selectedTrack: '', tracks: [] }
+  const { doc } = addTrack(base, { id: opts.trackId ?? 'lead', kind: 'synth' })
+  return { ...doc, selectedTrack: doc.tracks[0]!.id }
 }

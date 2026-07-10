@@ -11,7 +11,7 @@
 // Chromium, passed via env or arguments) — everything else runs in-process on core/metrics.
 
 import { createInterface } from 'node:readline'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +21,9 @@ import {
   setValue,
   addNote,
   removeNote,
+  addTrack,
+  removeTrack,
+  initDocument,
   diffDocuments,
   formatDiff,
   describeDocument,
@@ -57,6 +60,72 @@ const num = (args: Record<string, unknown>, key: string): number => {
 }
 
 const TOOLS: ToolDef[] = [
+  {
+    name: 'beat_init',
+    description: 'Create a fresh .beat project file with one starter synth track. Refuses to overwrite an existing file. Compose from there with beat_add_track / beat_add_note / beat_set.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        bpm: { type: 'number', description: 'integer 20-999, default 120' },
+        loop_bars: { type: 'number', description: 'integer 1-64, default 2' },
+      },
+      required: ['file'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      if (existsSync(file)) throw new Error(`${file} already exists — refusing to overwrite`)
+      const doc = initDocument({
+        ...(typeof args.bpm === 'number' ? { bpm: args.bpm } : {}),
+        ...(typeof args.loop_bars === 'number' ? { loopBars: args.loop_bars } : {}),
+      })
+      writeFileSync(file, serialize(doc))
+      return `created ${file}: ${doc.bpm} bpm, ${doc.loopBars} bar(s), starter track "${doc.tracks[0]!.id}"\n`
+    },
+  },
+  {
+    name: 'beat_add_track',
+    description: 'Add a new track (synth or drums) to a .beat file with the format init patch — the way an agent builds a project up from beat_init. Returns the edit list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        id: { type: 'string', description: 'single alphanumeric token, e.g. "bass"' },
+        kind: { type: 'string', enum: ['synth', 'drums'] },
+        name: { type: 'string', description: 'single token; defaults to id' },
+        color: { type: 'string', description: 'lowercase #rrggbb; defaults to a palette cycle' },
+      },
+      required: ['file', 'id', 'kind'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = addTrack(before, {
+        id: str(args, 'id'),
+        kind: str(args, 'kind') as 'synth' | 'drums',
+        ...(typeof args.name === 'string' ? { name: args.name } : {}),
+        ...(typeof args.color === 'string' ? { color: args.color } : {}),
+      })
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_rm_track',
+    description: 'Remove a track from a .beat file (a document keeps at least one track).',
+    inputSchema: {
+      type: 'object',
+      properties: { file: { type: 'string' }, id: { type: 'string' } },
+      required: ['file', 'id'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = removeTrack(before, str(args, 'id'))
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
   {
     name: 'beat_inspect',
     description:

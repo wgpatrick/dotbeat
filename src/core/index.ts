@@ -11,5 +11,5 @@ export {
   type PartialTrack,
 } from './convert.js'
 export { diffDocuments, formatDiff, type DiffEntry } from './diff.js'
-export { setValue, addNote, removeNote, BeatEditError } from './edit.js'
+export { setValue, addNote, removeNote, addTrack, removeTrack, initDocument, BeatEditError } from './edit.js'
 export { describeDocument } from './inspect.js'

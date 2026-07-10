@@ -16,7 +16,8 @@ production trainer, which this project forks in spirit).
 
 ```bash
 npm install
-npm test                          # 67 tests: format, conversion vs real data, daemon sync, CLI, DSP metrics, MCP
+npm test                          # 72 tests: format, conversion vs real data, daemon sync, CLI, DSP metrics, MCP
+node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat lead.cutoff 900   # prints "lead: cutoff 3200 -> 900"
 node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical edit list, not line noise
@@ -56,8 +57,8 @@ now fully-verified version.
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over a 3-endpoint HTTP/SSE protocol, echo suppression by canonical-text comparison. |
 | `src/metrics/` | The guardrail layer (D2): integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, stereo field — plus the deterministic mix-lint rules. Zero deps, validated against the spec's calibration cases. |
 | `src/mcp/` | `beat mcp` — zero-dep stdio MCP server exposing the whole toolchain (inspect/set/notes/diff/metrics/lint/render) to AI agents. |
-| `test/` | 67 tests — format round-trips, conversion fidelity against a real exported project, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
-| `cli/beat.mjs` | The unified `beat` CLI: `inspect`, `set`, `add-note`, `rm-note`, `diff` (files or git revs), `metrics`, `lint`, `render`, `daemon`, `mcp`. |
+| `test/` | 72 tests — format round-trips, conversion fidelity against a real exported project, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
+| `cli/beat.mjs` | The unified `beat` CLI: `init`, `add-track`/`rm-track`, `inspect`, `set`, `add-note`/`rm-note`, `diff` (files or git revs), `metrics`, `lint`, `render` (Chromium or `--offline`), `daemon`, `mcp` — enough to compose from a blank file. |
 | `scripts/verify-m1.mjs`, `verify-m3.mjs`, `spike-offline-render.mjs` | The measured proofs: M1 sync latencies, M3's closed loop (render→measure→edit→re-render, target hit to 0.01 LU), M2's 22×-realtime offline-render spike. |
 | `examples/real-groove.beat` | A real project, converted to `.beat` text — hand-inspectable, the file the proof runs use. |
 | [`docs/research/`](docs/research/) | Five deep-research reports (448+ raw claims, 90+ sources), **all fully adversarially verified** — incl. the engine-architecture pass that resolved the roadmap's flagged blind spot. |

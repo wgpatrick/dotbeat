@@ -75,3 +75,21 @@ export const SYNTH_PARAM_ORDER: (keyof BeatSynth)[] = [
 export const OSC_TYPES: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square']
 
 export const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums']
+
+/** The format's standard init patch for a newly-created track (`beat init` / `beat add-track`).
+ * A format-level default, not a copy of any host app's: a mellow filtered saw that sounds
+ * reasonable for bass, chords, or lead until edited. */
+export const INIT_SYNTH: BeatSynth = {
+  osc: 'sawtooth',
+  volume: -10,
+  cutoff: 2000,
+  resonance: 0.8,
+  attack: 0.01,
+  decay: 0.2,
+  sustain: 0.6,
+  release: 0.3,
+  pan: 0,
+}
+
+/** Default track colors cycled by `beat add-track` when none is given — beatlab's own palette. */
+export const TRACK_COLORS = ['#e06c75', '#56b6c2', '#f7c948', '#c678dd', '#98c379', '#61afef'] as const
