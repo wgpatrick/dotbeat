@@ -160,7 +160,9 @@ Tone.Context.prototype.createAudioWorkletNode = function (name, _options) {
 
 export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds = 0 }) {
   const doc = parse(readFileSync(beatPath, 'utf8'))
-  const loopSeconds = (doc.loopBars * 16 * 60) / doc.bpm / 4 // same math as beatlab's exportSandboxWav
+  // v0.4: a song block sets the render length (sum of section bars); otherwise one loop pass.
+  const renderBars = doc.song ? doc.song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
+  const loopSeconds = (renderBars * 16 * 60) / doc.bpm / 4 // same math as beatlab's exportSandboxWav
   const seconds = loopSeconds + tailSeconds
 
   // (re)build the engine bundle when missing or older than the beatlab sources' newest edit
