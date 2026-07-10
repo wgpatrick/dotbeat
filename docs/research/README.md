@@ -65,3 +65,17 @@ code-only, none renders headless, the round-trip trap is unsolved everywhere but
 slider); the strongest verified demand signal is agent control of music tools (ableton-mcp
 ~2.8k stars); and the broad "musicians want version control" case remains unproven after three
 passes — explicitly a bet, not a fact.
+
+## 07 — Sound-design sources: engines, presets, samples, licensing (added 2026-07-10)
+
+[`07-sound-design-sources.md`](07-sound-design-sources.md) — owner-directed pass ("develop
+preset synths, import other synths, get audio samples — do some deep research here"): 5 angles,
+24 sources, 116 claims extracted, 25 verified (24 confirmed / 1 refuted, all 3-0). Headlines:
+engine license ≠ content license (Vital's GPL engine ships NON-redistributable presets AND
+wavetables); rendered audio from GPL engines is unencumbered per the FSF unless it copies GPL'd
+bundled content; the best permissive imports are Dexed's msfa FM core (Apache-2.0, loads DX7
+.syx, proven in-browser) and spessasynth_lib (Apache-2.0 SF2/DLS in pure TS, no WASM); Freesound's
+CC0 subset is programmatically isolable via the APIv2 license filter, but aggregated "CC0" packs
+have documented mislabeling (LMMS 2014). Honest coverage gap: zero claims survived on
+preset-craft technique or the pro-vs-amateur craft gap — those remain open (blog-grade sources
+only; re-research against book/curriculum-grade material).

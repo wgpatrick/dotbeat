@@ -209,7 +209,10 @@ first-party sourced.)*
 - **Name** — `beatlab-daw` is a placeholder.
 - **License** — MIT keeps DAWproject/automix-toolkit schema/code reuse open. Note: openDAW itself
   is **AGPL v3/LGPL** — safe to learn architectural patterns from (facts/ideas aren't
-  copyrightable), not safe to port literal code from into an MIT project.
+  copyrightable), not safe to port literal code from into an MIT project. *Raised stakes
+  (research 07, verified):* this choice now also gates the sound-quality strategy's Tier 4 —
+  Surge XT / Vital engines are GPLv3 and only importable if the project accepts GPL; the
+  permissive path (spessasynth_lib, Dexed's msfa core — both Apache-2.0) stays open under MIT.
 - **BeatLab relationship** — hard fork vs BeatLab becomes the "learn" mode sharing a core.
 - **Web-first vs Tauri-earlier** — reach vs depth.
 - **Three confirmed research blind spots**, both surfaced by the fully-verified passes finding

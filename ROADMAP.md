@@ -479,6 +479,29 @@ patch generator. Tooling shape: `beat vary` + `beat score` + a git-tracked score
 pass queued on the substantial prior art (interactive evolutionary synth-patch search,
 preference-based optimization for audio, sound-matching).
 
+### Sound-quality strategy *(added 2026-07-10 — verified research: [docs/research/07-sound-design-sources.md](docs/research/07-sound-design-sources.md))*
+
+Tiered by effort/impact, licensing adversarially verified (24 claims confirmed 3-0):
+
+1. **Tier 1 — own-engine presets + full param surface: DONE** (Phase 5 / format v0.3 +
+   `presets/factory.json`). Zero licensing risk.
+2. **Tier 2 — sample-based instruments**: spessasynth_lib (Apache-2.0, pure-TS SF2/SF3/DLS in
+   browser, no WASM) + a Freesound-APIv2 CC0 ingestion pipeline with per-file provenance
+   metadata. Real drum transients are the biggest single "video game music" tell left.
+3. **Tier 3 — second synth engine**: Dexed's msfa DX7 FM core is Apache-2.0 (the GPLv3 is only
+   the plugin wrapper), loads standard `.syx` banks, already proven in-browser (webDX7). Forces
+   the format's multi-device story.
+4. **Tier 4 — GPL engines (Surge XT / Vital), conditional**: gated on the project license
+   decision. Hard verified constraint: **Vital's factory presets AND wavetables are separately
+   licensed and non-redistributable** even though its engine is GPLv3; FSF confirms rendered
+   audio is unencumbered unless it copies GPL'd bundled content.
+
+Known poisoned wells (verified): aggregated "CC0" sample packs mislabel files (LMMS 2014
+incident); community DX7 bank "public domain" labels rest on "was downloadable", not rights
+clearance. Grow `presets/factory.json` via the variation loop + curation, not by importing
+third-party preset content. **Coverage gap, flagged honestly:** zero claims survived on
+preset-craft technique / the pro-vs-amateur craft gap — re-research against book-grade sources.
+
 ## 8. Milestones
 
 Unchanged in structure — the research corrected *content* within milestones, not the sequencing.
