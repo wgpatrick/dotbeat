@@ -514,10 +514,13 @@ Unchanged in structure — the research corrected *content* within milestones, n
       two real cross-engine divergences surfaced (PeriodicWave negative-freq FM explosion,
       mitigated; constant 9.5 LU compressor-makeup offset, measured and reported). Chromium
       stays the reference (D5) for exactly this reason.
-- [x] **Exit criteria:** the full tool chain of the criterion is proven end to end and
-      deterministic (`scripts/verify-m3.mjs`: render → metrics → proposed diff → re-render →
-      LUFS moved 3.00 → 0.01 LU from target). The literal Claude-in-the-driver's-seat run is an
-      interactive session over the shipped `beat mcp`, one command away.
+- [x] **Exit criteria: MET LITERALLY** — Claude drove `beat mcp` over the real JSON-RPC
+      protocol: rendered, read metrics/lint, proposed edits, re-measured, accepted with residuals
+      honestly noted. Distance to loudness target 4.03 → 0.72 LU in two rounds; the accepted
+      diff is 8 musical edits. Full transcript: `docs/sessions/2026-07-10-claude-over-mcp.md`.
+      (The deterministic skeleton also runs in CI: `scripts/verify-m3.mjs`, 3.00 → 0.00 LU
+      offline.) The session itself produced a format-roadmap finding: per-lane drum gain isn't a
+      v0.2 lever and needs to be.
 
 ### M4 — The "not a toy" / parity push *(Tauri native tier)*
 - [ ] Tauri shell: native-latency recording, latency compensation, CLAP/VST3 hosting.
