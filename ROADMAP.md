@@ -533,7 +533,7 @@ Unchanged in structure — the research corrected *content* within milestones, n
       offline.) The session itself produced a format-roadmap finding: per-lane drum gain isn't a
       v0.2 lever and needs to be.
 
-### M4 — The "not a toy" / parity push *(Tauri native tier)*
+### M4 — The "not a toy" / parity push *(Tauri native tier — design drafted, see [docs/m4-native-engine-design.md](docs/m4-native-engine-design.md))*
 - [ ] Tauri shell: native-latency recording, latency compensation, CLAP/VST3 hosting.
 - [ ] Warping / time-stretch (Rubber Band or signalsmith; WASM in web, native in Tauri).
 - [ ] Comping, audio-region editing, freeze/flatten/bounce with defined signal-path semantics
