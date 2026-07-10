@@ -86,15 +86,67 @@ patchWaveShaperReassignment(PolyAudioContext)
 patchWaveShaperReassignment(PolyOfflineAudioContext)
 
 // AudioWorklets: the polyfill supports them natively, but standardized-audio-context (Tone's
-// wrapper layer) doesn't wire that support up in Node, so Tone.BitCrusher's worklet can never
-// come up. Instead of faking a worklet node, park the module load forever (ToneAudioWorklet
-// then never constructs its node — no crash, wet branch stays silent) and let render() proceed.
-// KNOWN, DOCUMENTED LIMITATION: bitcrush's WET path is silent offline. Tone effects crossfade
-// wet/dry, and beatlab drives wet from bitcrushMix (default 0) — so any project not using
-// bitcrush renders exactly; one using it loses that one effect in --offline mode.
-// (docs/phase-4-plan.md; the D5 metric comparison quantifies this on real projects.)
-Tone.Context.prototype.addAudioWorkletModule = () => new Promise(() => {})
+// wrapper layer) doesn't wire that support up in Node, so Tone's worklet nodes can never come
+// up through the normal path. Tone's only worklet beatlab uses is BitCrusher, whose DSP is pure
+// memoryless quantization (BitCrusher.worklet.js: step = 0.5^(bits-1); out = step*floor(in/step
+// + 0.5)) — exactly expressible as a WaveShaper curve. So: resolve the module load, and hand
+// ToneAudioWorklet a WaveShaper-backed stand-in whose "bits" parameter is a real, connectable
+// AudioParam (Tone's Param.setParam does input.connect(param), so a plain fake object won't do —
+// we lend it a spare ConstantSource's offset param and hook its setters to regenerate the curve).
+// Fidelity note: a 32769-point curve resolves the quantization staircase exactly for bits <= ~14
+// (beatlab's range is 1-16, typical 4-12); WaveShaper lerp between curve points softens step
+// edges microscopically beyond that. Unknown worklet names degrade to a unity gain (none are
+// used by beatlab's engine). Delete all of this if standardized-audio-context ever wires Node
+// worklet support (docs/upstream/node-web-audio-api-findings.md §4).
+Tone.Context.prototype.addAudioWorkletModule = async () => {}
 Tone.Context.prototype.workletsAreReady = async () => {}
+
+function bitCrusherCurve(bits) {
+  const N = 32769
+  const curve = new Float32Array(N)
+  const step = Math.pow(0.5, bits - 1) // Tone's own formula, verbatim
+  for (let i = 0; i < N; i++) {
+    const x = -1 + (2 * i) / (N - 1)
+    curve[i] = step * Math.floor(x / step + 0.5)
+  }
+  return curve
+}
+
+Tone.Context.prototype.createAudioWorkletNode = function (name, _options) {
+  if (name !== 'bit-crusher') {
+    // no other worklets exist in beatlab's graph; unity-gain passthrough keeps the chain alive
+    const g = this.rawContext.createGain()
+    g.parameters = new Map()
+    g.port = { postMessage: () => {} }
+    return g
+  }
+  const shaper = this.rawContext.createWaveShaper() // stdized wrapper -> connectable in Tone graphs
+  shaper.curve = bitCrusherCurve(12) // Tone's BitCrusherWorklet default until setParam applies
+  shaper.port = { postMessage: () => {} }
+  // the connect target Tone.Param requires, with instance-level hooks to observe value changes
+  const paramDonor = this.rawContext.createConstantSource()
+  const bitsParam = paramDonor.offset
+  const applyBits = (v) => {
+    if (Number.isFinite(v) && v >= 1 && v <= 16) shaper.curve = bitCrusherCurve(v)
+  }
+  for (const method of ['setValueAtTime', 'setTargetAtTime', 'linearRampToValueAtTime', 'exponentialRampToValueAtTime']) {
+    const orig = bitsParam[method].bind(bitsParam)
+    bitsParam[method] = (v, ...rest) => {
+      applyBits(v)
+      return orig(v, ...rest)
+    }
+  }
+  const valueDesc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(bitsParam), 'value')
+  Object.defineProperty(bitsParam, 'value', {
+    get: () => valueDesc.get.call(bitsParam),
+    set: (v) => {
+      applyBits(v)
+      valueDesc.set.call(bitsParam, v)
+    },
+  })
+  shaper.parameters = new Map([['bits', bitsParam]])
+  return shaper
+}
 
 export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds = 0 }) {
   const doc = parse(readFileSync(beatPath, 'utf8'))
