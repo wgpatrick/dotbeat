@@ -49,6 +49,10 @@ const USAGE = `usage:
   beat diff --git <rev1> <rev2> <file>
   beat presets [--json]                                   list the factory preset library
   beat preset <file> <track> <name>                       apply a preset to a track (a bag of set edits)
+  beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render]
+                                                          batch-generate small-diff variants of one param group
+  beat vary --groups                                      list the mutation groups
+  beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
   beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
   beat lint <file.wav> [--target <LUFS>] [--json]         deterministic mix findings (default target -14)
   beat render <file> [-o out.wav] --beatlab-dir <path>    (or BEATLAB_DIR env)
@@ -165,6 +169,110 @@ function presetCmd(argv) {
   writeDoc(file, before, applyPreset(before, track, preset))
 }
 
+// ---- variation-and-taste loop (rung 1) — docs/research/08-variation-loop-prior-art.md ------
+
+function flagValue(argv, flag) {
+  const i = argv.indexOf(flag)
+  return i !== -1 ? argv[i + 1] : undefined
+}
+
+async function varyCmd(argv) {
+  const { VARY_GROUPS, varyTrack, BeatVaryError } = await import('../dist/src/vary/vary.js')
+  if (argv.includes('--groups') || argv.length === 0) {
+    for (const [name, defs] of Object.entries(VARY_GROUPS)) {
+      process.stdout.write(`${name.padEnd(10)} ${defs.map((d) => d.key).join(', ')}\n`)
+    }
+    return
+  }
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !['--count', '--amount', '--seed', '--out-dir'].includes(argv[i - 1]))
+  const [file, track, group] = positional
+  if (!file || !track || !group) throw new BeatEditError('vary needs <file> <track> <group> (see beat vary --groups)')
+  const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
+  const amount = flagValue(argv, '--amount') ? Number(flagValue(argv, '--amount')) : 0.25
+  const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
+  const outDir = flagValue(argv, '--out-dir') ?? `vary-${group}-${seed}`
+
+  const text = readFileSync(file, 'utf8')
+  const doc = parse(text)
+  let variants
+  try {
+    variants = varyTrack(doc, track, group, { count, amount, seed })
+  } catch (err) {
+    if (err instanceof BeatVaryError) throw new BeatEditError(err.message)
+    throw err
+  }
+
+  const { mkdirSync } = await import('node:fs')
+  const { createHash } = await import('node:crypto')
+  mkdirSync(outDir, { recursive: true })
+  const manifest = {
+    parent: file,
+    parentSha256: createHash('sha256').update(text).digest('hex'),
+    track,
+    group,
+    count,
+    amount,
+    seed,
+    createdAt: new Date().toISOString(),
+    // Renders are nondeterministic run-to-run (see docs/phase-5-plan.md Result) — only compare
+    // renders from the same batch, never across sessions.
+    variants: variants.map((v, i) => ({
+      file: `v${i + 1}.beat`,
+      edits: v.edits.map((e) => `${e.path} ${e.value}`),
+    })),
+  }
+  for (let i = 0; i < variants.length; i++) {
+    writeFileSync(resolve(outDir, `v${i + 1}.beat`), serialize(variants[i].doc))
+  }
+  writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
+  process.stdout.write(`${outDir}/: ${variants.length} variants of ${track}.${group} (amount ${amount}, seed ${seed})\n`)
+  for (let i = 0; i < variants.length; i++) {
+    process.stdout.write(`  v${i + 1}: ${manifest.variants[i].edits.join(', ')}\n`)
+  }
+
+  if (argv.includes('--render')) {
+    const { execFileSync } = await import('node:child_process')
+    const { fileURLToPath } = await import('node:url')
+    const offlineCli = fileURLToPath(new URL('./render-offline.mjs', import.meta.url))
+    for (let i = 0; i < variants.length; i++) {
+      const beatFile = resolve(outDir, `v${i + 1}.beat`)
+      process.stdout.write(`rendering v${i + 1}/${variants.length}...\n`)
+      execFileSync(process.execPath, [offlineCli, beatFile, '-o', resolve(outDir, `v${i + 1}.wav`)], { stdio: ['ignore', 'ignore', 'inherit'] })
+    }
+    process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
+  }
+}
+
+async function scoreCmd(argv) {
+  const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--log')
+  const [dir, ...picks] = positional
+  if (!dir || picks.length === 0) throw new BeatEditError('score needs <batch-dir> and 1-3 ranked picks (variant numbers, best first)')
+  if (picks.length > 3) throw new BeatEditError('at most 3 ranked picks (Edisyn (3,16) pattern — ranking more adds fatigue, not signal)')
+  const manifest = JSON.parse(readFileSync(resolve(dir, 'manifest.json'), 'utf8'))
+  const ranks = picks.map((p) => {
+    const n = Number(p)
+    if (!Number.isInteger(n) || n < 1 || n > manifest.variants.length) throw new BeatEditError(`pick "${p}" is not a variant number 1-${manifest.variants.length}`)
+    return n
+  })
+  if (new Set(ranks).size !== ranks.length) throw new BeatEditError('picks must be distinct')
+  const logPath = flagValue(argv, '--log') ?? 'beat-scores.jsonl'
+  const entry = {
+    t: new Date().toISOString(),
+    batch: dir,
+    track: manifest.track,
+    group: manifest.group,
+    amount: manifest.amount,
+    seed: manifest.seed,
+    parentSha256: manifest.parentSha256,
+    picks: ranks.map((n, i) => ({ rank: i + 1, variant: `v${n}.beat`, edits: manifest.variants[n - 1].edits })),
+    rejected: manifest.variants.map((_, i) => i + 1).filter((n) => !ranks.includes(n)).map((n) => `v${n}.beat`),
+  }
+  const { appendFileSync } = await import('node:fs')
+  appendFileSync(logPath, JSON.stringify(entry) + '\n')
+  process.stdout.write(`scored ${dir}: ${ranks.map((n) => `v${n}`).join(' > ')} -> ${logPath}\n`)
+  process.stdout.write(`to adopt the winner: beat set ${manifest.parent} ${entry.picks[0].edits.join(' ')}\n`)
+}
+
 function fmtDb(x, unit = '') {
   return Number.isFinite(x) ? `${x.toFixed(1)}${unit}` : String(x)
 }
@@ -261,6 +369,12 @@ async function main() {
       break
     case 'presets':
       presetsCmd(rest)
+      break
+    case 'vary':
+      await varyCmd(rest)
+      break
+    case 'score':
+      await scoreCmd(rest)
       break
     case 'preset':
       presetCmd(rest)

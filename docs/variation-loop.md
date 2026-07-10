@@ -43,16 +43,35 @@
   matters more than uniform parameter spacing.
 - Every audition ships with provenance: the one-line diff that produced it.
 
-## Proposed tooling shape (not yet built)
+## Tooling (rung 1 — BUILT 2026-07-10)
 
-`beat vary <file> <track> --param kickTune=28..45 --param kickDecay=0.25..0.7 -n 8` → renders
-n candidates + a manifest; `beat score <manifest> 3,1,4,...` → appends to a scores log
-(`.beat-scores.jsonl`, git-tracked); the agent (or the taste prior) proposes the next round.
+Design follows the verified prior art
+([docs/research/08-variation-loop-prior-art.md](research/08-variation-loop-prior-art.md)) —
+batch 9 (MutaSynth's population), one strength knob, mutation scoped to one parameter group at
+a time through musically-nonlinear ranges, ranked pick of ≤3 (Edisyn's (3,16) pattern):
+
+```bash
+beat vary song.beat drums kick --seed 42          # 9 small-diff variants + manifest.json
+beat vary song.beat drums kick --render           # ...and render each for auditioning
+beat vary --groups                                # kick, snare, hats, filter, env, filterenv,
+                                                  # osc, motion, fx, sends, mix
+beat score batch1 3 7 1                           # ranked pick, best first -> beat-scores.jsonl
+```
+
+Every variant is a replayable `beat set` edit list; the scores log is append-only JSONL carrying
+(parent hash, group, amount, seed, ranked picks with their exact diffs, rejected set) — the
+scoring exhaust for rungs 2-3. `beat score` prints the one-liner that adopts the winner.
+Implementation: `src/vary/vary.ts` (pure, seeded, deterministic), `cli/beat.mjs`. Caveat noted
+in every manifest: offline renders are nondeterministic run-to-run (phase-5 finding), so only
+compare renders within a batch.
 
 ## Status
 
 - Concept filed; ROADMAP §7 and feature inventory updated.
 - First live demo run the same day: 6 kick variations rendered and scored-by-owner over chat.
-- Deep-research pass queued (interactive/evolutionary synth-patch search, preference-based
-  Bayesian optimization for audio, human-in-the-loop scoring UX, sound-matching literature) —
-  will be `docs/research/08-*` when it lands (07 = sound-design/presets pass, in flight).
+- Deep-research pass complete — `docs/research/08-variation-loop-prior-art.md`, 25/25 claims
+  confirmed 3-0. The loop is a documented lineage (Eno → MutaSynth → Evosynth → Edisyn);
+  design numbers above are its verified convergence points.
+- Rung 1 (`beat vary` / `beat score`) built and tested the same day (105-test suite).
+- Next rungs, gated on accumulated exhaust: preference surrogate + clustering (peer-reviewed
+  precedent), then preferential BO / plane-search — unproven on audio, a genuine experiment.

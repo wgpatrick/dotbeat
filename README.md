@@ -19,12 +19,14 @@ production trainer, which this project forks in spirit).
 
 ```bash
 npm install
-npm test                          # 97 tests: format, conversion vs real data, daemon sync, CLI, presets, DSP metrics, MCP
+npm test                          # 105 tests: format, conversion vs real data, daemon sync, CLI, presets, vary, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat lead.cutoff 900   # prints "lead: cutoff 3200 -> 900"
 node cli/beat.mjs presets                                         # the factory sound library
 node cli/beat.mjs preset song.beat drums driving-kit              # a preset = a readable bag of set edits
+node cli/beat.mjs vary song.beat drums kick --render              # 9 small-diff variants to audition...
+node cli/beat.mjs score vary-kick-42 3 7 1                        # ...ranked picks -> git-tracked taste log
 node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical edit list, not line noise
 node cli/beat.mjs render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
 node cli/beat.mjs render --offline examples/real-groove.beat -o out.wav   # the REAL engine, no browser
@@ -63,12 +65,12 @@ now fully-verified version.
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over a 3-endpoint HTTP/SSE protocol, echo suppression by canonical-text comparison. |
 | `src/metrics/` | The guardrail layer (D2): integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, stereo field — plus the deterministic mix-lint rules. Zero deps, validated against the spec's calibration cases. |
 | `src/mcp/` | `beat mcp` — zero-dep stdio MCP server exposing the whole toolchain (inspect/set/notes/diff/metrics/lint/render) to AI agents. |
-| `test/` | 97 tests — format round-trips (v0.2 and v0.3 elision/enums/trackrefs), conversion fidelity against a real exported project, presets, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
-| `cli/beat.mjs` | The unified `beat` CLI: `init`, `add-track`/`rm-track`, `inspect`, `set`, `add-note`/`rm-note`, `diff` (files or git revs), `presets`/`preset`, `metrics`, `lint`, `render` (Chromium or `--offline`), `daemon`, `mcp` — enough to compose from a blank file. |
+| `test/` | 105 tests — format round-trips (v0.2 and v0.3 elision/enums/trackrefs), conversion fidelity against a real exported project, presets, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
+| `cli/beat.mjs` | The unified `beat` CLI: `init`, `add-track`/`rm-track`, `inspect`, `set`, `add-note`/`rm-note`, `diff` (files or git revs), `presets`/`preset`, `vary`/`score` (the variation-and-taste loop), `metrics`, `lint`, `render` (Chromium or `--offline`), `daemon`, `mcp` — enough to compose from a blank file. |
 | `presets/factory.json` | The factory sound library — curated voicings (seeded from a real approved mix), applied as ordinary edits, never referenced by the format itself. |
 | `scripts/verify-m1.mjs`, `verify-m3.mjs`, `verify-phase5.mjs`, `spike-offline-render.mjs` | The measured proofs: M1 sync latencies, M3's closed loop (render→measure→edit→re-render, target hit to 0.01 LU), Phase 5's sound-reproduction exit test, M2's 22×-realtime offline-render spike. |
 | `examples/real-groove.beat`, `examples/night-shift.beat` | Real projects as `.beat` text — the groove the proof runs use, and the 4-track Night Shift mix whose entire sound design lives in the file. |
-| [`docs/research/`](docs/research/) | Six deep-research reports, **all fully adversarially verified** — every research gap the roadmap ever flagged is now resolved (engine architecture, live-coding landscape, demand signal). |
+| [`docs/research/`](docs/research/) | Eight deep-research reports, **all fully adversarially verified** — every research gap the roadmap ever flagged is now resolved (engine architecture, live-coding landscape, demand signal). |
 | [`docs/opendaw-notes.md`](docs/opendaw-notes.md) | Source-code archaeology — openDAW/DAWproject/automix-toolkit/node-web-audio-api read directly, not summarized secondhand. |
 | [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format spec — v0 grammar frozen and implemented, grounded in real prior art (Csound, Humdrum, DAWproject). |
 | [`docs/architecture.md`](docs/architecture.md) | Component architecture (daemon, engine, CLI, MCP, web/Tauri tiers). |
