@@ -599,6 +599,12 @@ exposed), not an engine ceiling.
 - Still open from the M3 session finding: per-lane drum *gain* (the drum-voice params shape tone
   and envelope; lane balance is still pattern velocities only).
 
+### Desktop track (D1–D5) — *added 2026-07-11, owner-directed; see [docs/product-spec-desktop.md](docs/product-spec-desktop.md)*
+Runs ahead of / alongside M4's engine work: **D1** Tauri shell (daemon in-process, local
+folders); **D2** selection-as-shared-context protocol (highlight section/track/lanes → agent
+acts on "this", agent spotlight back); **D3** auto-checkpoint versioning with semantic history
+labels + restore; **D4** full-song arrangement view; **D5** chat surface per research 10.
+
 ### M4 — The "not a toy" / parity push *(Tauri native tier — design drafted, see [docs/m4-native-engine-design.md](docs/m4-native-engine-design.md))*
 - [ ] Tauri shell: native-latency recording, latency compensation, CLAP/VST3 hosting.
 - [ ] Warping / time-stretch (Rubber Band or signalsmith; WASM in web, native in Tauri).

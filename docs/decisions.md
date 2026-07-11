@@ -222,6 +222,10 @@ first-party sourced.)*
   msfa DX7 core are Apache-2.0, MIT-compatible); openDAW (AGPL/LGPL) remains
   learn-from-patterns-only, never port-literal-code. LICENSE file added, package.json updated.
 - **BeatLab relationship** — hard fork vs BeatLab becomes the "learn" mode sharing a core.
+- **Agent placement in the desktop app** — external agent driving via CLI/MCP while the GUI
+  live-updates, vs an embedded chat panel, vs a hybrid (embedded panel fronting an external
+  agent runtime). Owner deferred to research (2026-07-11); see
+  `docs/product-spec-desktop.md` §3 and research 10 when it lands.
 - ~~**Web-first vs Tauri-earlier**~~ — **DECIDED 2026-07-11 (owner): desktop-first.** The
   primary form factor is a desktop app connected to local files (Tauri shell around the
   existing web GUI, daemon logic in-process). The browser remains a dev/demo surface, not the
