@@ -771,6 +771,30 @@ body {
   text-transform: uppercase;
   color: var(--text-dim);
 }
+.mixer-strip-fx {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+  min-height: 14px;
+}
+.mixer-fx-badge {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--accent);
+}
+.mixer-fx-none {
+  color: var(--text-dim);
+  border-color: transparent;
+  background: transparent;
+  font-weight: 400;
+}
 .mixer-strip-fader {
   display: flex;
   flex-direction: column;

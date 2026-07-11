@@ -109,6 +109,51 @@ function TrackMeter({ trackId }: { trackId: string }) {
   return <canvas ref={canvasRef} width={METER_W} height={METER_H} className="mixer-meter" title="live level (post-fader, post-mute)" />
 }
 
+// ---- FX-chain indicator (Phase 16 Stream K) ------------------------------------------------
+// A compact "what's actually processing this track" readout, reading the SAME synth-block fields
+// SynthPanel/synthParams.ts already render in full (src/core/document.ts SYNTH_FIELDS) — no new
+// per-track state, just a glance-able summary of live data. Only synth/drums tracks carry an
+// insert chain the engine actually applies (buildSynthChain/getDrumBus's EQ3 -> comp -> distortion
+// -> bitcrush, see engine.ts); instrument tracks DO carry a synth block on disk (BeatTrack.synth is
+// non-optional) but the engine never reads it for instrument playback (Phase 14 Stream F — level/
+// pan only), so showing insert badges there would be decorative, not real per-track data. Each
+// badge's "active" heuristic mirrors what the engine treats as audible: EQ if any band is off 0 dB,
+// Comp/Distortion/Bitcrush by their *Mix (wet) fraction — the same field the engine wires to the
+// insert's `.wet`/dry-wet blend, so mix=0 is genuinely a bypassed (inaudible) insert regardless of
+// the insert's other params (e.g. distortionAmount with distortionMix 0 does nothing audible).
+const FX_BADGES: { key: string; label: string; active: (p: Record<string, unknown>) => boolean }[] = [
+  { key: 'eq', label: 'EQ', active: (p) => num(p.eqLow) !== 0 || num(p.eqMid) !== 0 || num(p.eqHigh) !== 0 },
+  { key: 'comp', label: 'Comp', active: (p) => num(p.compMix) > 0 },
+  { key: 'dist', label: 'Dist', active: (p) => num(p.distortionMix) > 0 },
+  { key: 'crush', label: 'Crush', active: (p) => num(p.bitcrushMix) > 0 },
+]
+
+function num(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+
+function FxBadges({ track }: { track: BeatTrack }) {
+  // Instrument tracks: no insert chain the engine applies (see the block comment above) — nothing
+  // honest to show, so render an empty row (keeps every strip's layout aligned) rather than a row
+  // of always-inactive/misleading badges.
+  if (track.kind === 'instrument') return <div className="mixer-strip-fx" />
+  const active = FX_BADGES.filter((b) => b.active(track.synth))
+  return (
+    <div className="mixer-strip-fx" title="active insert-chain processing (EQ / comp / distortion / bitcrush)">
+      {active.length === 0 ? (
+        <span className="mixer-fx-badge mixer-fx-none">—</span>
+      ) : (
+        active.map((b) => (
+          <span key={b.key} className={`mixer-fx-badge mixer-fx-${b.key}`}>
+            {b.label}
+          </span>
+        ))
+      )}
+    </div>
+  )
+}
+
 function ChannelStrip({ track }: { track: BeatTrack }) {
   const muted = useStore((s) => !!s.mutes[track.id])
   const soloed = useStore((s) => !!s.solos[track.id])
@@ -128,6 +173,8 @@ function ChannelStrip({ track }: { track: BeatTrack }) {
         </span>
         <span className={`mixer-strip-kind kind-${track.kind}`}>{track.kind}</span>
       </div>
+
+      <FxBadges track={track} />
 
       <Knob label="Pan" value={pan} min={-1} max={1} format={fmtPan} onChange={(v) => postEdit(`${track.id}.pan`, String(v))} />
 
@@ -158,7 +205,10 @@ export function MixerView() {
     <div className="mixer">
       <div className="editor-toolbar">
         <span className="editor-title">mixer</span>
-        <span className="toolbar-tip">level + pan write to the .beat (one-line diff) · mute/solo are session-only but now gate audio · live per-track meters</span>
+        <span className="toolbar-tip">
+          level + pan write to the .beat (one-line diff) · mute/solo are session-only but now gate audio (incl. instrument tracks) · live per-track
+          meters (incl. instrument tracks) · badges show each strip's active insert chain
+        </span>
       </div>
       <div className="mixer-strips">
         {doc.tracks.map((t) => (

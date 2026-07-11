@@ -33,11 +33,15 @@
 // same tick loop and mixed into the shared master bus with the track's own volume/pan. See
 // syncInstruments()/tick()'s instrument branch and docs/phase-14-instrument-tracks.md.
 //
+// Phase 16 Stream K CLOSED that stream's two deferred items: instrument voices now carry their own
+// muteGain (gated by applyMuteGates() exactly like synth chains/the drum bus) and levelTap (read by
+// getTrackLevel() for the mixer meter) — see InstrumentVoice, buildInstrument(), applyMuteGates().
+//
 // Deliberately NOT ported (out of Stream A scope — see the parity doc): wavetable oscillators
 // (dotbeat's osc is only sine/tri/saw/square), tempo-synced LFO rates + drawn LFO shapes,
 // reorderable insert order, the arpeggiator, sample-slicing / per-lane one-shots (v0.5 media),
-// and live-MIDI monitoring. Instrument tracks get level/pan into the master bus but NOT the synth
-// FX chain (EQ/comp/sends/sidechain) — full instrument FX parity is a later stream (Stream F doc).
+// and live-MIDI monitoring. Instrument tracks get level/pan/mute into the master bus but NOT the
+// synth FX chain (EQ/comp/sends/sidechain) — full instrument FX parity remains a later stream.
 
 import * as Tone from 'tone'
 import { WorkletSynthesizer } from 'spessasynth_lib'
@@ -301,14 +305,21 @@ interface Content {
 }
 
 /** One live instrument (SoundFont) track. `synth` is a spessasynth_lib WorkletSynthesizer running
- * on Tone's raw AudioContext; its output feeds `entry` (a native passthrough) → `vol` → `pan` →
- * master. `sample`/`program` are the currently-loaded values, so syncInstruments() can tell a
- * cheap programChange from a full soundbank reload. */
+ * on Tone's raw AudioContext; its output feeds `entry` (a native passthrough) → `muteGain` → `vol`
+ * → `pan` → master. `sample`/`program` are the currently-loaded values, so syncInstruments() can
+ * tell a cheap programChange from a full soundbank reload.
+ * `muteGain` gates mute/solo (Phase 16 Stream K), same dedicated-gate discipline as
+ * SynthChain.muteGain/DrumBus.muteGain — a separate node so it never fights the volume value.
+ * `levelTap` is the post-fader side-tap (off `pan`, the last node before master) that
+ * getTrackLevel() reads for this track's mixer meter, mirroring SynthChain.levelTap/
+ * DrumBus.levelTap exactly (a waveform Analyser read as true RMS, not a decaying Tone.Meter). */
 interface InstrumentVoice {
   synth: WorkletSynthesizer
   entry: GainNode
+  muteGain: Tone.Gain
   vol: Tone.Volume
   pan: Tone.Panner
+  levelTap: Tone.Analyser
   sample: string
   program: number
 }
@@ -720,9 +731,12 @@ class Engine {
   }
 
   /** Gate each track's output to 0 or 1 from the store's effective mute/solo state (mute wins; if
-   * anything is soloed only soloed tracks pass). Gated at muteGain (upstream of the panner fan-out)
-   * so the dry path AND the reverb/delay/mod sends are silenced together. Idempotent + cheap; safe
-   * to call every tick. */
+   * anything is soloed only soloed tracks pass). Gated at muteGain (upstream of the panner fan-out
+   * for synth/drum chains) so the dry path AND the reverb/delay/mod sends are silenced together.
+   * Instrument voices (Phase 16 Stream K) have no sends to worry about, but get the same dedicated
+   * muteGain node for consistency and because a ready voice may not exist yet (a track still
+   * loading its soundfont is simply skipped — nothing to gate). Idempotent + cheap; safe to call
+   * every tick. */
   private applyMuteGates(): void {
     const state = useStore.getState()
     for (const [id, chain] of this.chains) {
@@ -730,6 +744,9 @@ class Engine {
     }
     if (this.drumBus && this.drumTrackId) {
       this.drumBus.muteGain.gain.value = isEffectivelyMuted(state, this.drumTrackId) ? 0 : 1
+    }
+    for (const [id, voice] of this.instruments) {
+      voice.muteGain.gain.value = isEffectivelyMuted(state, id) ? 0 : 1
     }
   }
 
@@ -744,13 +761,16 @@ class Engine {
 
   /** Live post-fader loudness (dB) of one track's own channel, for its mixer meter — read per-frame
    * off the shared rAF driver, never through Zustand state. Computed as true RMS of the track's
-   * post-mute/post-fader tap, so a muted track reads -Infinity immediately. null for tracks with no
-   * meter tap wired up yet (instrument/SoundFont tracks got live playback in Phase 14 Stream F but
-   * not yet a meter tap — wiring it up is free once needed, see that stream's doc). */
+   * post-mute/post-fader tap, so a muted track reads -Infinity immediately. Instrument (SoundFont)
+   * tracks got a level tap in Phase 16 Stream K (closing Phase 14 Stream F's deferred item); null
+   * only for a track with no live voice at all yet (e.g. an instrument track whose soundfont is
+   * still loading — nothing to meter until buildInstrument() lands a ready voice). */
   getTrackLevel(trackId: string): number | null {
     const chain = this.chains.get(trackId)
     if (chain) return Engine.rmsDb(chain.levelTap.getValue() as Float32Array)
     if (this.drumBus && trackId === this.drumTrackId) return Engine.rmsDb(this.drumBus.levelTap.getValue() as Float32Array)
+    const voice = this.instruments.get(trackId)
+    if (voice) return Engine.rmsDb(voice.levelTap.getValue() as Float32Array)
     return null
   }
 
@@ -799,12 +819,15 @@ class Engine {
       }
       const entry = ctx.createGain()
       synth.connect(entry)
+      const muteGain = new Tone.Gain(1)
       const vol = new Tone.Volume(inst.volume)
       const pan = new Tone.Panner(inst.pan)
-      Tone.connect(entry, vol)
-      vol.chain(pan, this.getMaster())
+      const levelTap = new Tone.Analyser('waveform', 256)
+      Tone.connect(entry, muteGain)
+      muteGain.chain(vol, pan, this.getMaster())
+      pan.connect(levelTap) // post-fader side-tap (not in the audible path), see InstrumentVoice doc
       synth.programChange(0, inst.program)
-      this.instruments.set(trackId, { synth, entry, vol, pan, sample: inst.sample, program: inst.program })
+      this.instruments.set(trackId, { synth, entry, muteGain, vol, pan, levelTap, sample: inst.sample, program: inst.program })
     } catch (err) {
       console.warn(`[engine] instrument "${trackId}" failed to load:`, err)
     } finally {
@@ -821,8 +844,10 @@ class Engine {
       // best-effort teardown
     }
     voice.entry.disconnect()
+    voice.muteGain.dispose()
     voice.vol.dispose()
     voice.pan.dispose()
+    voice.levelTap.dispose()
   }
 
   /** Reconcile live instrument voices with the document: dispose vanished tracks, (re)build new or
