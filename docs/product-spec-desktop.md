@@ -200,6 +200,12 @@ a tapped performance records *as played*. What remains is the capture UX, which 
   an amount knob (0.5 = halfway — tighten without flattening), scoped to note ids (the
   selection protocol's `--scope selection` plugs straight in). Also exposed as `beat_quantize`
   over MCP, so the agent can do it conversationally.
+- **Humanize generates the feel** (built 2026-07-11): `beat humanize` / `beat_humanize` walks a
+  stiff on-grid part *away* from the grid — seeded timing/velocity jitter, constant
+  behind-the-beat drag (`--push-late`, the Dilla move), offbeat swing — scoped by lane or note/
+  hit id (i.e. by selection). Deterministic under a seed, so a good feel is reproducible, and
+  every nudge is a one-line diff. This is the generative half of the loop: the agent produces
+  the human feel, quantize can undo it, and the checkpoint system makes trying feels free.
 - **Drum lanes**: tapping a drum lane needs off-grid drum hits, which the pattern grid can't
   express — per-lane swing or note-style hit lines is a follow-up format decision (spec'd as
   an open question in format-spec v0.7 notes).

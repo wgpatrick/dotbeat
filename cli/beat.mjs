@@ -29,6 +29,7 @@ import {
   removeNote,
   addHit,
   removeHit,
+  humanize,
   quantizeNotes,
   addTrack,
   removeTrack,
@@ -60,6 +61,9 @@ const USAGE = `usage:
   beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes id,id]
                                                           snap notes toward the grid (grid in 16th steps:
                                                           1=16ths 2=8ths 4=quarters 0.5=32nds; amount<1 = partial)
+  beat humanize <file> <track> [--timing 0.15] [--velocity 0.06] [--push-late 0] [--swing 0] [--seed N] [--lanes hat,oh | --ids a,b]
+                                                          make a stiff part feel played: seeded timing/velocity
+                                                          jitter, behind-the-beat drag, offbeat swing; scope by lane/id
   beat diff <a.beat> <b.beat>
   beat diff --git <rev1> <rev2> <file>
   beat presets [--json]                                   list the factory preset library
@@ -189,6 +193,39 @@ function rmHitCmd(argv) {
   const before = readDoc(file)
   const { doc } = removeHit(before, track, hitId)
   writeDoc(file, before, doc)
+}
+
+function humanizeCmd(argv) {
+  const valued = ['--timing', '--velocity', '--push-late', '--swing', '--seed', '--ids', '--lanes']
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const [file, track] = positional
+  if (!file || !track) throw new BeatEditError('humanize needs <file> <track> [--timing 0.15] [--velocity 0.06] [--push-late 0] [--swing 0] [--seed N] [--lanes hat,openhat | --ids a,b]')
+  const flagValue = (flag) => {
+    const i = argv.indexOf(flag)
+    return i === -1 ? undefined : argv[i + 1]
+  }
+  const before = readDoc(file)
+  // scope: explicit --ids, or --lanes (resolve to the drum-hit ids on those lanes)
+  let ids
+  if (flagValue('--ids') !== undefined) ids = flagValue('--ids').split(',').filter(Boolean)
+  else if (flagValue('--lanes') !== undefined) {
+    const lanes = new Set(flagValue('--lanes').split(',').filter(Boolean))
+    const t = before.tracks.find((x) => x.id === track)
+    if (!t) throw new BeatEditError(`no track "${track}"`)
+    ids = (t.hits ?? []).filter((h) => lanes.has(h.lane)).map((h) => h.id)
+    if (ids.length === 0) throw new BeatEditError(`no hits on lane(s) ${[...lanes].join(', ')} in track "${track}"`)
+  }
+  const seed = flagValue('--seed') !== undefined ? Number(flagValue('--seed')) : (readFileSync(file, 'utf8').length % 2147483647)
+  const { doc, changed } = humanize(before, track, {
+    ...(flagValue('--timing') !== undefined ? { timing: Number(flagValue('--timing')) } : {}),
+    ...(flagValue('--velocity') !== undefined ? { velocity: Number(flagValue('--velocity')) } : {}),
+    ...(flagValue('--push-late') !== undefined ? { pushLate: Number(flagValue('--push-late')) } : {}),
+    ...(flagValue('--swing') !== undefined ? { swing: Number(flagValue('--swing')) } : {}),
+    seed,
+    ...(ids !== undefined ? { ids } : {}),
+  })
+  writeDoc(file, before, doc)
+  process.stdout.write(`humanized ${changed} event(s) with seed ${seed}\n`)
 }
 
 function quantizeCmd(argv) {
@@ -556,6 +593,9 @@ async function main() {
       break
     case 'rm-hit':
       rmHitCmd(rest)
+      break
+    case 'humanize':
+      humanizeCmd(rest)
       break
     case 'quantize':
       quantizeCmd(rest)
