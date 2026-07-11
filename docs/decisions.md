@@ -9,6 +9,31 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D11 — New binary media/preset content goes through git-lfs (2026-07-11)
+
+**Decision:** `*.sf2`/`*.sf3`/`*.wav`/`*.h2drumkit` are tracked via `.gitattributes` + git-lfs
+from this point forward. Existing large blobs already committed (the three `.sf2` files from
+Phase 7/Phase 10 Stream B, ~78MB raw) are left as plain git objects — migrating them into LFS
+needs a history rewrite (`git lfs migrate`), which changes every downstream commit hash and is a
+call for the owner to make deliberately, not something to do unprompted mid-session.
+
+**Why:** flagged as an explicitly open question in research 11 ("media/binary versioning at
+scale... revisit before D3 ships") and it stopped being hypothetical the moment Phase 10 Stream B
+committed two real soundfonts (26MB + 43MB) straight into `.git` — the repo's `.git` directory
+is already 47MB and every future sample-content stream (more GM banks, more drum kits, the
+still-deferred MuldjordKit per-lane breakdown) adds more binary weight that a plain git history
+never sheds. LFS keeps a normal `git clone`/`git log` cheap regardless of how much preset content
+accumulates; media is already content-addressed by sha256 at the format layer (D-log, Phase 7),
+so nothing about the `.beat` file format itself changes — this is purely a git-storage decision.
+`git-lfs` is installed and working on this machine (verified: `git lfs version` → 3.6.1).
+
+**Revisit when:** the owner wants the existing pre-LFS blobs migrated too (needs `git lfs
+migrate import`, a history rewrite, done deliberately with the owner's sign-off), or if the repo
+gets pushed somewhere with LFS storage/bandwidth limits worth knowing about ahead of time (e.g. a
+free-tier GitHub LFS quota).
+
+---
+
 ## D10 — Named pins are git tags, not a sidecar file (2026-07-11)
 
 **Decision:** a "pin" (spec §4's named version, e.g. "rough mix v1") is a plain, annotated git
