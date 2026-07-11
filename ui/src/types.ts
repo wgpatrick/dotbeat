@@ -57,6 +57,27 @@ export interface BeatInstrument {
   pan: number
 }
 
+// v0.4 arrangement shapes (mirrors src/core/document.ts). The arrangement/song view reads these:
+// a clip is a named bag of notes (synth) or hits (drums); a scene maps trackId -> clipId; the
+// song is an ordered list of sections, each "play `scene` for `bars` bars". Automation lanes ride
+// through untyped — the arrangement view doesn't render them yet.
+export interface BeatClip {
+  id: string
+  notes: BeatNote[]
+  hits: BeatDrumHit[]
+  automation: unknown[]
+}
+
+export interface BeatScene {
+  id: string
+  slots: Record<string, string> // trackId -> clipId
+}
+
+export interface BeatSongSection {
+  scene: string
+  bars: number
+}
+
 export interface BeatTrack {
   id: string
   name: string
@@ -66,7 +87,7 @@ export interface BeatTrack {
   instrument?: BeatInstrument
   notes: BeatNote[]
   hits: BeatDrumHit[]
-  clips: unknown[]
+  clips: BeatClip[]
   laneSamples: Record<string, unknown>
 }
 
@@ -77,9 +98,30 @@ export interface BeatDocument {
   selectedTrack: string
   media: unknown[]
   tracks: BeatTrack[]
-  scenes: unknown[]
-  song: unknown[] | null
+  scenes: BeatScene[]
+  song: BeatSongSection[] | null
 }
+
+// The D2 pointing protocol value (src/core/selection.ts). Every axis is an independent, optional
+// filter; an absent axis is unfiltered ("all"). The arrangement view posts the `tracks` and `bars`
+// axes; it reads back the whole value (an agent may set lanes/notes too).
+export interface SelectionLane {
+  track: string
+  lane: string
+}
+export interface SelectionNote {
+  track: string
+  note: string
+}
+export interface BeatSelection {
+  tracks?: string[]
+  lanes?: SelectionLane[]
+  bars?: { start: number; end: number }
+  notes?: SelectionNote[]
+}
+
+/** Which of the top-level app screens is showing. */
+export type AppView = 'editor' | 'arrangement' | 'mixer'
 
 /** The nine core params, in the format's canonical order, with UI ranges + display formatting.
  * `osc` is an enum handled separately by the panel; the other eight are knobs. */

@@ -17,10 +17,10 @@
 // external edits reconcile via the SSE re-pull.
 
 import { useStore } from '../state/store'
-import type { BeatDocument, BeatDrumHit, DrumLane } from '../types'
+import type { BeatDocument, BeatDrumHit, BeatSelection, DrumLane } from '../types'
 import { DRUM_LANES } from '../types'
 
-function daemonBase(): string {
+export function daemonBase(): string {
   const port = new URLSearchParams(window.location.search).get('daw') ?? '8420'
   return `http://localhost:${port}`
 }
@@ -56,7 +56,15 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
     return { ...doc, tracks }
   }
 
-  // core synth param (osc is a string; the rest numeric) — the panel only edits these.
+  // Instrument tracks keep volume/pan on their own block, not the synth block (setValue routes on
+  // track.kind — src/core/edit.ts). Mirror the mixer's `<id>.volume`/`<id>.pan` edits there.
+  if (track.kind === 'instrument' && track.instrument && (rest === 'volume' || rest === 'pan')) {
+    const inst = { ...track.instrument, [rest]: canon(Number(value)) }
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, instrument: inst } : t))
+    return { ...doc, tracks }
+  }
+
+  // core synth param (osc is a string; the rest numeric) — the panel + mixer edit these.
   const isOsc = rest === 'osc'
   const nextVal = isOsc ? value : canon(Number(value))
   const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, synth: { ...t.synth, [rest]: nextVal } } : t))
@@ -107,16 +115,54 @@ async function pullDocument(base: string): Promise<void> {
   }
 }
 
+async function pullSelection(base: string): Promise<void> {
+  try {
+    const res = await fetch(`${base}/selection`)
+    if (!res.ok) throw new Error(`GET /selection: HTTP ${res.status}`)
+    useStore.getState().setSelection((await res.json()) as BeatSelection)
+  } catch (err) {
+    console.warn('[daw] could not load selection from daemon:', err)
+  }
+}
+
+/** Push a pointing selection to the daemon (the D2 channel `beat vary --scope selection` reads).
+ * Mirrors it locally immediately; the daemon broadcasts a `selection` SSE event that reconciles
+ * any agent-set value back. A 400 means the selection didn't resolve against the current document. */
+export function postSelection(sel: BeatSelection): void {
+  useStore.getState().setSelection(sel)
+  const base = daemonBase()
+  fetch(`${base}/selection`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(sel),
+  })
+    .then(async (res) => {
+      if (!res.ok) console.warn(`[daw] POST /selection: HTTP ${res.status}`, await res.text().catch(() => ''))
+    })
+    .catch((err) => console.warn('[daw] could not POST selection:', err))
+}
+
 /** Connect to the daemon: initial pull + live SSE hot-reload. Idempotent-ish; call once at boot. */
 export function initBridge(): void {
   const base = daemonBase()
   console.log(`[daw] bridging to beat daemon at ${base}`)
 
   const events = new EventSource(`${base}/events`)
-  events.addEventListener('open', () => void pullDocument(base))
+  events.addEventListener('open', () => {
+    void pullDocument(base)
+    void pullSelection(base)
+  })
   events.addEventListener('doc', () => {
     // The event payload is the /doc projection; the raw model lives at /document, so re-pull it.
     void pullDocument(base)
+  })
+  events.addEventListener('selection', (e) => {
+    // The daemon broadcasts the full selection value on every change (ours or an agent's).
+    try {
+      useStore.getState().setSelection(JSON.parse((e as MessageEvent).data) as BeatSelection)
+    } catch (err) {
+      console.warn('[daw] bad selection event payload:', err)
+    }
   })
   events.addEventListener('parse-error', (e) => {
     const msg = (JSON.parse((e as MessageEvent).data) as { message: string }).message
@@ -127,6 +173,7 @@ export function initBridge(): void {
 
   // Cover the case where the SSE `open` is slow or the browser buffers it: pull once eagerly too.
   void pullDocument(base)
+  void pullSelection(base)
 }
 
 export { DRUM_LANES }

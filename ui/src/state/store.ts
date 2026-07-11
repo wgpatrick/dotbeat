@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { BeatDocument } from '../types'
+import type { AppView, BeatDocument, BeatSelection } from '../types'
 
 // Discrete, note-grid-granularity state only (docs/research/15 §2): the document, the transport
 // flags, the selection, and the grid-quantized playhead step + per-step master level. Continuous
@@ -17,11 +17,28 @@ interface DawState {
   currentStep: number // -1 when stopped
   masterLevel: number | undefined // dB, from the master meter; undefined before first tick
 
+  /** Which top-level screen is showing (editor / arrangement / mixer). */
+  view: AppView
+  /** The daemon's current pointing selection (the D2 channel), mirrored locally. {} = unset. It is
+   * ephemeral and never in the .beat file — the daemon owns it; we read it via SSE + GET /selection
+   * and write it via POST /selection (see bridge.ts). */
+  selection: BeatSelection
+  /** Mixer mute/solo — GUI-only transport state, keyed by track id. NOT persisted to the .beat file
+   * (the format carries no mute/solo field, and real DAWs treat these as session state). Audio
+   * gating from these is deferred until the engine exposes a per-track mute hook (Stream A owns the
+   * engine); today they drive the mixer's visual state and the effective-mute logic below. */
+  mutes: Record<string, boolean>
+  solos: Record<string, boolean>
+
   setDoc: (doc: BeatDocument) => void
   setConnected: (c: boolean) => void
   setParseError: (m: string | null) => void
   setSelectedTrack: (id: string) => void
   setPlaying: (p: boolean) => void
+  setView: (v: AppView) => void
+  setSelection: (s: BeatSelection) => void
+  toggleMute: (id: string) => void
+  toggleSolo: (id: string) => void
 }
 
 export const useStore = create<DawState>((set) => ({
@@ -32,6 +49,10 @@ export const useStore = create<DawState>((set) => ({
   playing: false,
   currentStep: -1,
   masterLevel: undefined,
+  view: 'editor',
+  selection: {},
+  mutes: {},
+  solos: {},
 
   setDoc: (doc) =>
     set((s) => ({
@@ -44,7 +65,19 @@ export const useStore = create<DawState>((set) => ({
   setParseError: (parseError) => set({ parseError }),
   setSelectedTrack: (selectedTrackId) => set({ selectedTrackId }),
   setPlaying: (playing) => set({ playing }),
+  setView: (view) => set({ view }),
+  setSelection: (selection) => set({ selection }),
+  toggleMute: (id) => set((s) => ({ mutes: { ...s.mutes, [id]: !s.mutes[id] } })),
+  toggleSolo: (id) => set((s) => ({ solos: { ...s.solos, [id]: !s.solos[id] } })),
 }))
+
+/** A track is effectively silenced iff it is explicitly muted, OR any track is soloed and this one
+ * is not among them (standard mixer solo semantics). GUI-only for now — see the store note. */
+export function isEffectivelyMuted(s: DawState, id: string): boolean {
+  if (s.mutes[id]) return true
+  const anySolo = Object.values(s.solos).some(Boolean)
+  return anySolo && !s.solos[id]
+}
 
 /** The currently-selected track id: local override, else the document's own selection, else the
  * first track. */
