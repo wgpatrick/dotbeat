@@ -161,6 +161,41 @@ beat repeat, ping-pong delay, and similar standard DAW effects, to be added incr
 round** — same reasoning as Stream O. This is the research and design pass that makes Phase 18's
 actual FX-adding stream fast and well-scoped, not the implementation itself.
 
+## Result (2026-07-11)
+
+All five streams shipped and are merged into `main`. Final suite: **290 tests, 287 passing, 0
+failing, 3 skipped** (the 3 skips are the pre-existing `node-web-audio-api` environment
+limitation, unrelated to any of this round's work — down from 6 because Stream L deleted
+`test/master-bus.test.ts` along with the retired offline-render path it tested).
+
+- **Stream L (D15)**: `cli/render.mjs` now drives dotbeat's own engine exclusively — no BeatLab
+  checkout involved at all, proven by physically moving one aside mid-render and getting
+  byte-identical output. `cli/render-offline.mjs`, `scripts/build-headless-engine.mjs`, and
+  `cli/devserver.mjs` are gone. **Honest tradeoff accepted**: `beat vary --render`'s batch path is
+  now real-time per variant (was faster via the offline path) — a fast batch renderer for
+  dotbeat's own engine is real future work, not done here.
+- **Stream M**: Ableton-standard multi-note editing (marquee, multi-select, group move, uniform-
+  delta resize — correctly *not* proportional, verified against Ableton's own documented
+  behavior) landed in `NoteView.tsx`. Deliberately did not extend this to `StepSequencer.tsx` —
+  well-reasoned: Ableton has no marquee/multi-select analog on a fixed toggle grid.
+- **Stream N**: a real, live-verified Claude Code skill at `.claude/skills/dotbeat/` — covers the
+  full CLI/MCP surface, the selection protocol, the render-critique loop, checkpointing, and 8
+  documented "don't do this" mistakes, cross-checked against actual command output rather than
+  written from memory.
+- **Stream O**: closed the long-open Rubber Band vs. signalsmith-stretch question (signalsmith
+  wins — MIT vs. GPL) and found the real M4 blocker isn't engine tier, it's that the format has no
+  audio-region-clip concept yet — most of the owner's audio-clip-editing ask turns out to be
+  buildable sooner than expected, once that format gap closes.
+- **Stream P**: a prioritized FX build list — Ping Pong Delay (near-free, direct Tone.js
+  drop-in), Beat Repeat (cheaper than Ableton's own implementation since dotbeat's sequencer
+  already knows every hit ahead of time), finishing the already-running-but-unexposed Chorus/
+  Phaser bus, then Saturator.
+- **Live product-design conversation, same session**: the owner walked through several real
+  Ableton Arrangement View screenshots (unified screen vs. dotbeat's current three-tab split,
+  inline per-track mixer strips, inline automation-parameter picker per track, the docked
+  clip/note editor, full drum-kit-as-lanes-even-when-empty) — this is now the reference brief for
+  Phase 18's layout redesign, not yet started.
+
 ## Explicitly out of scope this round
 
 Per owner direction: **no further work on humanize/feel/algorithmic content-generation** (`src/
