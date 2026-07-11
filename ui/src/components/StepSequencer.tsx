@@ -1,6 +1,6 @@
 import { DRUM_LABELS, DRUM_LANES, type BeatTrack, type DrumLane } from '../types'
 import { engine } from '../audio/engine'
-import { postEdit } from '../daemon/bridge'
+import { postEdit, postSelection } from '../daemon/bridge'
 import { useStore } from '../state/store'
 
 // Adapted from BeatLab's src/components/StepSequencer.tsx (docs/research/15 §4). Changes:
@@ -37,7 +37,7 @@ export function StepSequencer({ track }: { track: BeatTrack }) {
           {track.name}
         </span>
         <span className="toolbar-tip">
-          {loopBars} bar{loopBars === 1 ? '' : 's'} · 16 steps/bar · click a step to toggle · click a lane label to preview
+          {loopBars} bar{loopBars === 1 ? '' : 's'} · 16 steps/bar · click a step to toggle · click a lane label to select + preview (scopes vary to that lane)
         </span>
       </div>
       <div className="seq-scroll">
@@ -54,7 +54,20 @@ export function StepSequencer({ track }: { track: BeatTrack }) {
             const row = laneSteps(track, lane, totalSteps)
             return (
               <div key={lane} className="seq-row" style={{ gridTemplateColumns: `var(--lane-w) repeat(${totalSteps}, 1fr)` }}>
-                <button className="seq-label" onClick={() => void engine.previewDrum(lane)} title="Click to preview">
+                <button
+                  className="seq-label"
+                  data-lane-select={lane}
+                  onClick={() => {
+                    // Lane-granular selection (Phase 16 Stream J / Phase 15 Stream I's deferred item):
+                    // clicking a lane label posts a lane-scoped selection so the vary affordance's
+                    // group inference (daemon's resolveVaryTarget) picks the lane's own param group
+                    // (hat/openhat -> hats, kick -> kick, snare/clap -> snare) instead of the track's
+                    // default. Preview still fires so the click stays a useful "audition this lane" too.
+                    postSelection({ tracks: [track.id], lanes: [{ track: track.id, lane }] })
+                    void engine.previewDrum(lane)
+                  }}
+                  title="Click to select this lane (scopes vary) + preview"
+                >
                   {DRUM_LABELS[lane]}
                 </button>
                 {row.map((v, i) => (

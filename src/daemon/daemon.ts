@@ -39,7 +39,7 @@ import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTr
 // history`/`beat restore`/`beat pin` expose. A restore/pin writes the .beat file on disk, which the
 // daemon's own directory watcher picks up and broadcasts as a `doc` SSE event, so the GUI hot-reloads
 // through the exact same external-edit path a hand edit or `beat set` uses — no special echo needed.
-import { history, restore, pin, unpin, HistoryError } from '../history/index.js'
+import { history, collapsedHistory, restore, pin, unpin, HistoryError } from '../history/index.js'
 // D2/D5 vary-and-audition surface over HTTP (Phase 15 Stream I): the GUI's inline "vary" affordance
 // POSTs /vary, which resolves the daemon's live pointing selection into a (track, param-group) and
 // runs core's `varyTrack` — the exact same rung-1 param-variation `beat vary <file> <track> <group>`
@@ -425,6 +425,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     // D3 versioning: the checkpoint list for this file, newest first, each with its semantic
     // one-liner label and (if pinned) its pin name — the same data `beat history` prints. Read-only;
     // reuses history() wholesale. `?limit=N` caps the list (the panel asks for a bounded window).
+    // `?collapsed=true` (Phase 16 Stream J, additive) switches to collapsedHistory() — the same
+    // "fold unnamed runs between pins" view `beat history --collapsed` / `beat_history{collapsed:true}`
+    // already expose — returning `{ rows }` (HistoryRow[]: checkpoint rows plus `{kind:'collapsed',
+    // count}` summary rows) instead of `{ entries }`, so the history panel can offer a skimmable view
+    // on a long timeline per product-spec-desktop.md §4.
     if (req.method === 'GET' && url.pathname === '/history') {
       try {
         const limitParam = url.searchParams.get('limit')
@@ -433,8 +438,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           json(res, 400, { error: `bad ?limit=${limitParam}` })
           return
         }
-        const entries = history(filePath, limit !== undefined ? { limit } : {})
-        json(res, 200, { entries })
+        const opts = limit !== undefined ? { limit } : {}
+        if (url.searchParams.get('collapsed') === 'true') {
+          json(res, 200, { rows: collapsedHistory(filePath, opts) })
+        } else {
+          json(res, 200, { entries: history(filePath, opts) })
+        }
       } catch (err) {
         json(res, 500, { error: err instanceof Error ? err.message : String(err) })
       }
