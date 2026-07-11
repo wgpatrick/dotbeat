@@ -9,13 +9,17 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
-## D12 — dotbeat gets its own UI; hard fork from BeatLab, not a wrapped GUI (2026-07-11)
+## D12 — dotbeat gets its own UI and product design; BeatLab code is fair game to lift (2026-07-11)
 
-**Decision:** dotbeat's GUI is dotbeat's own — a new frontend built and owned in this repo,
-talking to dotbeat's own daemon/format directly. It does **not** reuse BeatLab's React
-components, and the Tauri desktop shell (`desktop/`) stops wrapping BeatLab's web app as its
-webview content. This resolves `ROADMAP.md` §11's long-open "Relationship to BeatLab" question:
-**hard fork**, not "BeatLab becomes the learn mode inside this."
+**Decision:** dotbeat's GUI is dotbeat's own *product* — its own design, its own information
+architecture, not a wrapped BeatLab app, and the Tauri desktop shell (`desktop/`) stops wrapping
+BeatLab's web app as its webview content wholesale. This resolves `ROADMAP.md` §11's long-open
+"Relationship to BeatLab" question: **hard fork at the product level**, not "BeatLab becomes the
+learn mode inside this." **Refined same day (owner)**: this is a product/design fork, not a
+license to reimplement everything from scratch — copying/lifting BeatLab's actual code (React
+components, engine logic, whatever fits) into dotbeat's new frontend is explicitly encouraged
+wherever it's a good fit. "Own product design" was never about code purity; it was about not
+being BeatLab-with-git bolted on. Don't reinvent working code for the sake of it.
 
 **Why (owner's own words, 2026-07-11):** "dotbeat should have its own UI and its own product
 design. It's serving an entirely different purpose (real production) rather than learning
@@ -29,11 +33,15 @@ owner is explicitly rejecting.
 
 **What's unaffected**: `src/core` (the format/document model), `src/daemon`, `src/mcp`,
 `src/history`, `src/vary`, `src/metrics`, `cli/` — all of this was already dotbeat's own, was
-never BeatLab code, and is exactly what a new frontend renders/drives. The engine (Tone.js-based
-audio graph) also needs its own dotbeat-owned implementation rather than importing BeatLab's
-`engine.ts` — the two are allowed to converge in *approach* (BeatLab's engine has real lessons
-worth reusing, e.g. Phase 10 Stream D's clip-automation fixes) without being the same file in the
-same repo.
+never BeatLab code, and is exactly what a new frontend renders/drives. The audio engine
+(Tone.js-based) is the clearest lift candidate: BeatLab's `engine.ts` is hundreds of lines of
+real, working drum-voice synthesis / sidechain / automation logic (including Phase 10 Stream D's
+clip-automation fixes) — porting it into dotbeat's own tree (adapted to dotbeat's own document
+shape, MIT-licensed same as this repo so no licensing friction) beats rebuilding it from zero.
+Same goes for GUI components: a step-sequencer grid, a knob widget, a transport bar — if BeatLab
+already has a working one, port and adapt it rather than starting blank. The line that still
+matters is *product design and information architecture* (what screens exist, what the app is
+*for*, the teaching-specific chrome) — not "did this line of code originate in the other repo."
 
 **Consequence for in-flight work**: two Phase 11 streams (D4 song view, D5 vary-affordance) were
 mid-flight building directly inside BeatLab's React tree when this decision landed; both were
