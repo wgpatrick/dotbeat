@@ -43,8 +43,10 @@ export {
   serializeSelection,
   validateSelection,
   selectionToNoteIds,
+  selectionToVaryScope,
   BeatSelectionError,
   type BeatSelection,
   type SelectionLane,
   type SelectionNote,
+  type VaryScope,
 } from './selection.js'

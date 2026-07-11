@@ -14,6 +14,7 @@ import {
   serializeSelection,
   validateSelection,
   selectionToNoteIds,
+  selectionToVaryScope,
   BeatSelectionError,
   type BeatSelection,
 } from '../src/core/index.js'
@@ -121,6 +122,14 @@ test('validateSelection fails on an unknown note id', () => {
   assert.throws(() => validateSelection({ notes: [{ track: 'lead', note: 'u9' }] }, doc), /unknown note "u9" on track "lead"/)
 })
 
+test('validateSelection accepts a `notes` axis entry naming a drum HIT id (drum tracks have hits, not notes)', () => {
+  assert.doesNotThrow(() => validateSelection({ notes: [{ track: 'drums', note: 'kick0' }] }, doc))
+})
+
+test('validateSelection fails on an unknown hit id on a drum track', () => {
+  assert.throws(() => validateSelection({ notes: [{ track: 'drums', note: 'kick999' }] }, doc), /unknown note "kick999" on track "drums"/)
+})
+
 test('validateSelection rejects bars with start >= end and negatives', () => {
   assert.throws(() => validateSelection({ bars: { start: 4, end: 4 } }, doc), /start must be less than end/)
   assert.throws(() => validateSelection({ bars: { start: 8, end: 4 } }, doc), /start must be less than end/)
@@ -143,6 +152,73 @@ test('selectionToNoteIds intersects the axes (tracks AND bars AND notes list)', 
   const sel: BeatSelection = { tracks: ['lead'], bars: { start: 0, end: 1 }, notes: [{ track: 'lead', note: 'u1' }, { track: 'lead', note: 'u3' }] }
   // u1 passes all three; u2 fails the notes list; u3 fails the bars window.
   assert.deepEqual(selectionToNoteIds(sel, doc), [{ track: 'lead', notes: ['u1'] }])
+})
+
+// ---- selectionToVaryScope: the resolution behind `beat vary --scope selection` ------------
+
+test('selectionToVaryScope: a fully empty selection resolves to no scope (whole track) for any track', () => {
+  assert.deepEqual(selectionToVaryScope({}, doc, 'lead'), {})
+  assert.deepEqual(selectionToVaryScope({}, doc, 'drums'), {})
+})
+
+test('selectionToVaryScope: a tracks-only selection naming the target resolves to no scope (whole track)', () => {
+  assert.deepEqual(selectionToVaryScope({ tracks: ['lead'] }, doc, 'lead'), {})
+  assert.deepEqual(selectionToVaryScope({ tracks: ['drums', 'lead'] }, doc, 'drums'), {})
+})
+
+test('selectionToVaryScope: tracks/lanes/notes axes name the tracks the selection is "about" — excluding the target throws', () => {
+  assert.throws(() => selectionToVaryScope({ tracks: ['lead'] }, doc, 'drums'), /does not cover track "drums"/)
+  assert.throws(() => selectionToVaryScope({ notes: [{ track: 'lead', note: 'u1' }] }, doc, 'drums'), /does not cover track "drums"/)
+  assert.throws(() => selectionToVaryScope({ lanes: [{ track: 'drums', lane: 'hat' }] }, doc, 'lead'), /does not cover track "lead"/)
+})
+
+test('selectionToVaryScope: a bars-only selection has no tracks/lanes/notes axis, so it applies to any track (unfiltered on tracks)', () => {
+  // lead: u1@0 and fractional u2@3.5 fall in steps [0,16); u3@67 does not.
+  assert.deepEqual(selectionToVaryScope({ bars: { start: 0, end: 1 } }, doc, 'lead'), { ids: ['u1', 'u2'] })
+  // drums: every hit in steps [0,16) across all lanes, in track order (kick, then hat, then openhat).
+  assert.deepEqual(selectionToVaryScope({ bars: { start: 0, end: 1 } }, doc, 'drums'), {
+    ids: ['kick0', 'kick4', 'kick8', 'kick12', 'hat2', 'hat6', 'hat10', 'hat14', 'openhat14'],
+  })
+})
+
+test('selectionToVaryScope: a pure lanes selection on a drum track passes straight through as {lanes}', () => {
+  assert.deepEqual(selectionToVaryScope({ lanes: [{ track: 'drums', lane: 'hat' }, { track: 'drums', lane: 'openhat' }] }, doc, 'drums'), {
+    lanes: ['hat', 'openhat'],
+  })
+})
+
+test('selectionToVaryScope: lanes narrowed further by bars resolves to concrete hit ids, not {lanes}', () => {
+  const sel: BeatSelection = { lanes: [{ track: 'drums', lane: 'hat' }], bars: { start: 0, end: 1 } }
+  assert.deepEqual(selectionToVaryScope(sel, doc, 'drums'), { ids: ['hat2', 'hat6', 'hat10', 'hat14'] })
+})
+
+test('selectionToVaryScope: a notes-axis selection maps to --ids — hit ids on a drum track, note ids on a synth track', () => {
+  assert.deepEqual(selectionToVaryScope({ notes: [{ track: 'drums', note: 'kick0' }, { track: 'drums', note: 'hat2' }] }, doc, 'drums'), {
+    ids: ['kick0', 'hat2'],
+  })
+  assert.deepEqual(selectionToVaryScope({ notes: [{ track: 'lead', note: 'u1' }, { track: 'lead', note: 'u3' }] }, doc, 'lead'), {
+    ids: ['u1', 'u3'],
+  })
+})
+
+test('selectionToVaryScope: intersects tracks AND bars AND notes, same rule as selectionToNoteIds', () => {
+  const sel: BeatSelection = { tracks: ['lead'], bars: { start: 0, end: 1 }, notes: [{ track: 'lead', note: 'u1' }, { track: 'lead', note: 'u3' }] }
+  // u1 passes all three; u3 fails the bars window (u2 isn't in the notes list at all).
+  assert.deepEqual(selectionToVaryScope(sel, doc, 'lead'), { ids: ['u1'] })
+})
+
+test('selectionToVaryScope throws when the selection is non-empty but covers zero events on this track', () => {
+  // bars window with nothing in it for lead.
+  assert.throws(() => selectionToVaryScope({ bars: { start: 100, end: 101 } }, doc, 'lead'), /nothing on track "lead" to vary/)
+  // notes axis names this track but lists none of its actual ids after the tracks-axis gate passes.
+  assert.throws(
+    () => selectionToVaryScope({ tracks: ['lead', 'drums'], notes: [{ track: 'drums', note: 'kick0' }] }, doc, 'lead'),
+    /nothing on track "lead" to vary/,
+  )
+})
+
+test('selectionToVaryScope throws for an unknown track', () => {
+  assert.throws(() => selectionToVaryScope({}, doc, 'ghost'), /no track "ghost"/)
 })
 
 // ---- daemon /selection channel ------------------------------------------------------------
