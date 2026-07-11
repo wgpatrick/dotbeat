@@ -39,6 +39,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/dotbeat-daemon"]
+    "externalBin": ["binaries/dotbeat-daemon"],
+    "resources": {
+      "resources/night-shift.beat": "night-shift.beat"
+    }
   }
 }

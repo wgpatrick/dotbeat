@@ -151,6 +151,70 @@ test('removeNote returns the removed note and rejects unknown ids', () => {
   assert.throws(() => removeNote(a, 'lead', 'ghost'), BeatEditError)
 })
 
+// ---- setValue note grammar (Phase 13 Stream B's `<track>.note` piano-roll primitive) ---------
+// GUI note-add/move/resize/delete all round-trip through setValue's note grammar rather than a
+// separate route; these mirror the equivalent addNote/removeNote-based assertions above but drive
+// them through the string {path,value} surface the daemon's /edit route actually exposes.
+
+test('setValue note-add grammar mints the same note addNote would, byte-for-byte', () => {
+  const a = realDoc()
+  const viaGrammar = setValue(a, 'lead.note', '76 12 2 0.9')
+  const viaAddNote = addNote(a, 'lead', { pitch: 76, start: 12, duration: 2, velocity: 0.9 }).doc
+  assert.deepEqual(viaGrammar, viaAddNote)
+  const added = viaGrammar.tracks.find((t) => t.id === 'lead')!.notes.find((n) => !a.tracks.find((t) => t.id === 'lead')!.notes.some((orig) => orig.id === n.id))!
+  assert.match(added.id, /^u\d+$/)
+  assert.deepEqual(added, { id: added.id, pitch: 76, start: 12, duration: 2, velocity: 0.9 })
+})
+
+test('setValue note.<id>.<field> moves/resizes exactly one field, leaving the rest untouched', () => {
+  const a = realDoc()
+  const added = setValue(a, 'lead.note', '76 12 2 0.9')
+  const before = added.tracks.find((t) => t.id === 'lead')!.notes.find((n) => n.pitch === 76 && n.start === 12)!
+
+  const moved = setValue(added, `lead.note.${before.id}.start`, '20')
+  const afterStart = moved.tracks.find((t) => t.id === 'lead')!.notes.find((n) => n.id === before.id)!
+  assert.deepEqual(afterStart, { ...before, start: 20 })
+
+  const resized = setValue(moved, `lead.note.${before.id}.duration`, '4')
+  const afterDuration = resized.tracks.find((t) => t.id === 'lead')!.notes.find((n) => n.id === before.id)!
+  assert.deepEqual(afterDuration, { ...before, start: 20, duration: 4 })
+
+  const transposed = setValue(resized, `lead.note.${before.id}.pitch`, '81')
+  const afterPitch = transposed.tracks.find((t) => t.id === 'lead')!.notes.find((n) => n.id === before.id)!
+  assert.deepEqual(afterPitch, { ...before, start: 20, duration: 4, pitch: 81 })
+
+  const revelocitized = setValue(transposed, `lead.note.${before.id}.velocity`, '0.4')
+  const afterVelocity = revelocitized.tracks.find((t) => t.id === 'lead')!.notes.find((n) => n.id === before.id)!
+  assert.deepEqual(afterVelocity, { ...before, start: 20, duration: 4, pitch: 81, velocity: 0.4 })
+})
+
+test('setValue note.<id> with an empty value deletes the note', () => {
+  const a = realDoc()
+  const lead = a.tracks.find((t) => t.id === 'lead')!
+  const targetId = lead.notes[0]!.id
+  const deleted = setValue(a, `lead.note.${targetId}`, '')
+  const leadAfter = deleted.tracks.find((t) => t.id === 'lead')!
+  assert.equal(leadAfter.notes.length, lead.notes.length - 1)
+  assert.ok(!leadAfter.notes.some((n) => n.id === targetId))
+})
+
+test('setValue note grammar rejects malformed adds, unknown note ids, and non-empty deletes', () => {
+  const a = realDoc()
+  const lead = a.tracks.find((t) => t.id === 'lead')!
+  const realId = lead.notes[0]!.id
+  // malformed add: wrong arity and non-numeric fields
+  assert.throws(() => setValue(a, 'lead.note', '76 12 2'), BeatEditError)
+  assert.throws(() => setValue(a, 'lead.note', '76 12 2 loud'), BeatEditError)
+  assert.throws(() => setValue(a, 'lead.note', 'not a valid note at all'), BeatEditError)
+  // unknown note id, both for a field edit and for delete
+  assert.throws(() => setValue(a, 'lead.note.ghost.start', '4'), BeatEditError)
+  assert.throws(() => setValue(a, 'lead.note.ghost', ''), BeatEditError)
+  // delete requires an empty value
+  assert.throws(() => setValue(a, `lead.note.${realId}`, '3'), BeatEditError)
+  // notes only belong on synth/instrument tracks, not drums
+  assert.throws(() => setValue(a, 'drums.note', '60 0 1 0.5'), BeatEditError)
+})
+
 // ---- inspect ---------------------------------------------------------------------------------
 
 test('describeDocument gives a compact, exact overview of the real project', () => {

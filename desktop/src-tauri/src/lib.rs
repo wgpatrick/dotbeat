@@ -111,13 +111,34 @@ fn write_last_project_folder(app: &tauri::AppHandle, folder: &Path) {
     }
 }
 
+// A small starter/demo project (`examples/night-shift.beat` — a real 4-bar, 4-track song: synth
+// lead, drums, bass, pad) shipped inside the app bundle itself (`bundle.resources` in
+// tauri.conf.json, source at `desktop/src-tauri/resources/night-shift.beat`, embedded by
+// `tauri-build`'s build.rs at compile time — this works for `cargo run`/`tauri dev` too, not just
+// `tauri build`, since resource embedding happens in the build script). This is what closes the
+// "downloaded/repo-less .app won't find a bundled example project" gap Phase 13 Stream D flagged:
+// `app.path().resource_dir()` resolves to a real on-disk location in every build mode, unlike
+// `repo_root()` below (which requires a dotbeat git checkout to be reachable on disk).
+fn bundled_example_target(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    let candidate = resource_dir.join("night-shift.beat");
+    if candidate.exists() {
+        Some(candidate)
+    } else {
+        log_line(&format!(
+            "bundled example not found at {} (resource_dir resolved but the file is missing)",
+            candidate.display()
+        ));
+        None
+    }
+}
+
 // The project target (a `.beat` file or a folder — `resolveProjectFile` on the daemon side
 // accepts either) to open at app startup: an explicit env var wins (dev-mode override), then
 // whatever folder was last opened via the picker (persists across restarts, see
-// `write_last_project_folder`), then the bundled example as a last resort. The bundled-example
-// fallback assumes a repo checkout is reachable (see repo_root()'s doc comment) — fine for this
-// stream's actual target (launching on the owner's own dev machine), not yet a general
-// "works from a downloaded, repo-less .app" story; see the plan doc's "still missing" section.
+// `write_last_project_folder`), then the bundled example project (works in every build mode, repo
+// checkout or not — see `bundled_example_target` above), then finally a repo-relative examples
+// fallback for the unusual case where the bundled resource itself failed to resolve.
 fn initial_project_target(app: &tauri::AppHandle) -> PathBuf {
     if let Ok(p) = std::env::var("DOTBEAT_PROJECT_FILE") {
         return PathBuf::from(p);
@@ -129,7 +150,15 @@ fn initial_project_target(app: &tauri::AppHandle) -> PathBuf {
         ));
         return folder;
     }
-    repo_root().join("examples/real-groove.beat")
+    if let Some(bundled) = bundled_example_target(app) {
+        log_line(&format!(
+            "no folder chosen yet — opening the bundled starter project: {}",
+            bundled.display()
+        ));
+        return bundled;
+    }
+    log_line("bundled starter project unavailable, falling back to the repo-relative example (dev-only path)");
+    repo_root().join("examples/night-shift.beat")
 }
 
 fn log_line(line: &str) {
@@ -172,6 +201,39 @@ fn kill_sidecars(handle: &tauri::AppHandle) {
     let mut guard = state.lock().unwrap();
     if let Some(child) = guard.daemon.take() {
         let _ = child.kill();
+    }
+}
+
+// docs/phase-9-tauri-spike-plan.md's Phase 13 Stream D section documented (and reproduced, via
+// `kill -9`) that the daemon sidecar survives a force-quit of the app: `kill_sidecars` above only
+// ever runs from *graceful* shutdown paths (a window-close event, or — after the fix below — a
+// caught termination signal). A real force-quit sends SIGKILL, which by OS design cannot be
+// caught, blocked, or handled by the receiving process — there is no hook, Tauri or otherwise,
+// that runs any code inside a process after it has been sent SIGKILL. `tauri::RunEvent::Exit`
+// fires for graceful exits only (all windows closed, Cmd+Q, `AppHandle::exit`, a caught signal
+// triggering process exit) — it does NOT fire for SIGKILL either, since the whole point of
+// SIGKILL is that the target process never runs another instruction.
+//
+// The only mechanism that can still act once this process is gone is a *separate* process
+// watching it from outside. This spawns exactly that: a tiny detached shell loop that polls this
+// app's own PID and the daemon child's PID once a second (`kill -0 <pid>` is the standard POSIX
+// liveness check — sends signal 0, which does nothing but still fails with ESRCH if the pid is
+// gone) and force-kills the daemon the moment either process disappears. It self-terminates
+// within ~1s of either side going away, so a graceful shutdown (already handled by
+// `kill_sidecars`) or a folder switch (which spawns a fresh watchdog per daemon child) doesn't
+// accumulate stale watchdog processes. Plain `sh -c` rather than a new Rust dependency or a
+// second compiled binary — three lines of POSIX shell, portable to macOS and Linux (Windows would
+// need a separate job-object-based mechanism, not implemented here — see the hygiene doc).
+fn spawn_watchdog(daemon_pid: u32) {
+    let app_pid = std::process::id();
+    let script = format!(
+        "while kill -0 {app_pid} 2>/dev/null && kill -0 {daemon_pid} 2>/dev/null; do sleep 1; done; kill -9 {daemon_pid} 2>/dev/null; exit 0"
+    );
+    match std::process::Command::new("sh").arg("-c").arg(&script).spawn() {
+        Ok(_child) => log_line(&format!(
+            "cleanup watchdog started: will force-kill daemon pid {daemon_pid} if app pid {app_pid} disappears for any reason, including SIGKILL/force-quit"
+        )),
+        Err(err) => log_line(&format!("WARN: failed to spawn cleanup watchdog for daemon pid {daemon_pid}: {err}")),
     }
 }
 
@@ -239,6 +301,7 @@ fn spawn_project(handle: &tauri::AppHandle, project_target: PathBuf, reload_afte
         child
     };
     log_line("daemon sidecar spawned");
+    spawn_watchdog(daemon_child.pid());
 
     {
         let state = handle.state::<Mutex<Sidecars>>();
@@ -380,6 +443,20 @@ pub fn run() {
                 kill_sidecars(window.app_handle());
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // `.run` with a callback (rather than the shorthand `.run(context)`) so this also sees
+        // `RunEvent::Exit` — a second, broader graceful-shutdown net alongside the
+        // `on_window_event` handler above: it fires once for the whole app's exit no matter which
+        // path triggered it (all windows closed, the Quit menu item / Cmd+Q, or `AppHandle::exit`
+        // called from anywhere), so it also catches graceful-exit routes that don't happen to fire
+        // a per-window `CloseRequested` first. `kill_sidecars` is idempotent (state's daemon slot
+        // is already `None` after the first call), so both handlers firing for the same shutdown
+        // is harmless. Neither this nor `on_window_event` reaches a real SIGKILL/force-quit — see
+        // `spawn_watchdog`'s doc comment above for why that needs a separate watching process.
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                kill_sidecars(app_handle);
+            }
+        });
 }
