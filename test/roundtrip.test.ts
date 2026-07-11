@@ -295,7 +295,7 @@ track d D #ffffff drums
 ${SYNTH_BLOCK}
   note n1 60 0 1 0.5
 `
-  assert.throws(() => parse(bad), /note lines only belong in synth tracks/)
+  assert.throws(() => parse(bad), /note lines only belong in synth\/instrument tracks/)
 })
 
 test('rejects a pattern line inside a synth track', () => {

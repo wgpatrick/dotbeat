@@ -253,7 +253,9 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
     bpm: doc.bpm,
     loopBars: doc.loopBars,
     selectedTrackId: doc.selectedTrack,
-    tracks: doc.tracks.map((t) => ({
+    // v0.6: instrument tracks are excluded — beatlab has no instrument kind yet (they render
+    // via the spessasynth path headless; the daemon re-adds them on GUI pushes, like media).
+    tracks: doc.tracks.filter((t) => t.kind !== 'instrument').map((t) => ({
       id: t.id,
       name: t.name,
       color: t.color,

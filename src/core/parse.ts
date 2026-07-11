@@ -1,5 +1,5 @@
-import type { BeatClip, BeatDocument, BeatDrumPattern, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { DRUM_LANES, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultSynthFields } from './document.js'
+import type { BeatClip, BeatDocument, BeatDrumPattern, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import { DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -93,8 +93,11 @@ export function parse(text: string): BeatDocument {
 
   function closeTrackIfOpen(lineNo: number) {
     closeClipIfOpen(lineNo)
-    if (!currentTrack || currentTrack.kind !== 'drums') return
-    checkDrumPattern(currentTrack.pattern, `drum track "${currentTrack.id}"`, lineNo)
+    if (!currentTrack) return
+    if (currentTrack.kind === 'drums') checkDrumPattern(currentTrack.pattern, `drum track "${currentTrack.id}"`, lineNo)
+    if (currentTrack.kind === 'instrument' && !currentTrack.instrument) {
+      throw new BeatParseError(`instrument track "${currentTrack.id}" is missing its soundfont line`, lineNo)
+    }
   }
 
   function parseNoteLine(tokens: string[], lineNo: number): BeatNote {
@@ -170,8 +173,12 @@ export function parse(text: string): BeatDocument {
           color,
           kind,
           // core 9 are placeholders until the synth block fills them (all required); the v0.3
-          // optional fields start at their canonical defaults (elision contract).
-          synth: { osc: 'sawtooth', volume: 0, cutoff: 0, resonance: 0, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0, ...defaultSynthFields() } as BeatSynth,
+          // optional fields start at their canonical defaults (elision contract). Instrument
+          // tracks never serialize a synth block — they carry the canonical INIT copy so
+          // parse(serialize(x)) deep-equals documents built via addTrack.
+          synth: kind === 'instrument'
+            ? { ...INIT_SYNTH }
+            : ({ osc: 'sawtooth', volume: 0, cutoff: 0, resonance: 0, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0, ...defaultSynthFields() } as BeatSynth),
           laneSamples: {},
           clips: [],
           notes: [],
@@ -233,11 +240,29 @@ export function parse(text: string): BeatDocument {
       }
       if (!currentTrack) throw new BeatParseError(`"${keyword}" outside of any track`, lineNo)
       if (keyword === 'synth') {
+        if (currentTrack.kind === 'instrument') throw new BeatParseError(`instrument tracks have no synth block; "${currentTrack.id}" uses a soundfont line`, lineNo)
         closeSynthIfOpen(lineNo)
         closeClipIfOpen(lineNo)
         if (tokens.length !== 1) throw new BeatParseError('synth takes no values on its own line', lineNo)
         inSynth = true
         synthSeen = new Set()
+        continue
+      }
+      if (keyword === 'soundfont') {
+        if (currentTrack.kind !== 'instrument') throw new BeatParseError(`soundfont lines only belong in instrument tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+        if (currentTrack.instrument) throw new BeatParseError('duplicate soundfont line', lineNo)
+        if (tokens.length !== 3) throw new BeatParseError('soundfont expects exactly 2 values: <sample-id> <program>', lineNo)
+        const program = parseIntStrict(tokens[2]!, lineNo, 'soundfont program')
+        if (program < 0 || program > 127) throw new BeatParseError(`soundfont program must be 0-127, got ${program}`, lineNo)
+        currentTrack.instrument = { sample: tokens[1]!, program, volume: -10, pan: 0 }
+        continue
+      }
+      if (currentTrack.kind === 'instrument' && (keyword === 'volume' || keyword === 'pan')) {
+        if (!currentTrack.instrument) throw new BeatParseError(`"${keyword}" must come after the soundfont line`, lineNo)
+        if (tokens.length !== 2) throw new BeatParseError(`"${keyword}" expects exactly 1 value`, lineNo)
+        const v = parseFloatStrict(tokens[1]!, lineNo, keyword)
+        if (keyword === 'pan' && (v < -1 || v > 1)) throw new BeatParseError(`pan must be -1..1, got ${v}`, lineNo)
+        currentTrack.instrument[keyword] = v
         continue
       }
       closeSynthIfOpen(lineNo)
@@ -255,6 +280,7 @@ export function parse(text: string): BeatDocument {
         continue
       }
       if (keyword === 'clip') {
+        if (currentTrack.kind === 'instrument') throw new BeatParseError(`instrument tracks do not carry clips in v0.6 (timeline participation is a later phase); "${currentTrack.id}"`, lineNo)
         closeClipIfOpen(lineNo)
         if (tokens.length !== 2) throw new BeatParseError('clip expects exactly 1 value: <id>', lineNo)
         const id = tokens[1]!
@@ -266,7 +292,7 @@ export function parse(text: string): BeatDocument {
       }
       closeClipIfOpen(lineNo)
       if (keyword === 'note') {
-        if (currentTrack.kind !== 'synth') throw new BeatParseError(`note lines only belong in synth tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+        if (currentTrack.kind === 'drums') throw new BeatParseError(`note lines only belong in synth/instrument tracks; "${currentTrack.id}" is a drums track`, lineNo)
         currentTrack.notes.push(parseNoteLine(tokens, lineNo))
       } else if (keyword === 'pattern') {
         if (currentTrack.kind !== 'drums') throw new BeatParseError(`pattern lines only belong in drum tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
@@ -367,6 +393,12 @@ export function parse(text: string): BeatDocument {
     if (song.length === 0) throw new BeatParseError('song block must contain at least one section', eof)
     for (const section of song) {
       if (!sceneIds.has(section.scene)) throw new BeatParseError(`song section references unknown scene "${section.scene}"`, eof)
+    }
+  }
+  // v0.6: every instrument soundfont must reference a declared media sample
+  for (const t of tracks) {
+    if (t.kind === 'instrument' && t.instrument && !mediaIds.has(t.instrument.sample)) {
+      throw new BeatParseError(`track "${t.id}": soundfont references unknown sample "${t.instrument.sample}"`, eof)
     }
   }
   // v0.5: every lane line must reference a declared media sample

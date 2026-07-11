@@ -10,7 +10,11 @@ function describeTrack(t: BeatTrack, loopSteps: number): string[] {
   const lines: string[] = []
   const s = t.synth
   lines.push(`${t.id}  "${t.name}"  ${t.kind}  ${t.color}`)
-  lines.push(`  synth: ${s.osc}, ${formatNumber(s.volume)} dB, cutoff ${formatNumber(s.cutoff)} Hz, res ${formatNumber(s.resonance)}, ADSR ${formatNumber(s.attack)}/${formatNumber(s.decay)}/${formatNumber(s.sustain)}/${formatNumber(s.release)}, pan ${formatNumber(s.pan)}`)
+  if (t.kind === 'instrument' && t.instrument) {
+    lines.push(`  soundfont: ${t.instrument.sample} program ${formatNumber(t.instrument.program)}, ${formatNumber(t.instrument.volume)} dB, pan ${formatNumber(t.instrument.pan)}`)
+  } else {
+    lines.push(`  synth: ${s.osc}, ${formatNumber(s.volume)} dB, cutoff ${formatNumber(s.cutoff)} Hz, res ${formatNumber(s.resonance)}, ADSR ${formatNumber(s.attack)}/${formatNumber(s.decay)}/${formatNumber(s.sustain)}/${formatNumber(s.release)}, pan ${formatNumber(s.pan)}`)
+  }
   if (t.kind === 'drums' && t.pattern) {
     for (const lane of DRUM_LANES) {
       const steps = t.pattern[lane]

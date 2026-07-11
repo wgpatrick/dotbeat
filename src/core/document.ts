@@ -5,7 +5,7 @@
 
 export type OscType = 'sine' | 'triangle' | 'sawtooth' | 'square'
 
-export type TrackKind = 'synth' | 'drums'
+export type TrackKind = 'synth' | 'drums' | 'instrument'
 
 // BeatLab's own lane set and order (DRUM_LANES in beatlab/src/types.ts). Order is canonical for
 // serialization: all five lanes are always emitted, in this order, so toggling any drum step is
@@ -148,12 +148,23 @@ export interface BeatLaneSample {
   tune: number // semitones
 }
 
+/** v0.6: an instrument track's voice — a media-referenced SoundFont preset. Deliberately NOT a
+ * synth block: the 55 synth params mostly don't apply to sampled instruments, and fail-loudly
+ * beats half-meaningful knobs. volume/pan are the small bus subset that does apply. */
+export interface BeatInstrument {
+  sample: string // BeatMediaSample id of an .sf2/.sf3
+  program: number // SoundFont program number within the bank (0-127)
+  volume: number // dB
+  pan: number // -1..1
+}
+
 export interface BeatTrack {
   id: string
   name: string
   color: string // lowercase hex, e.g. "#c678dd"
   kind: TrackKind
   synth: BeatSynth // drum tracks carry these too — in BeatLab they're the real drum bus/voice params
+  instrument?: BeatInstrument // v0.6; present iff kind === 'instrument' (synth block absent)
   laneSamples: Partial<Record<DrumLane, BeatLaneSample>> // v0.5; drum tracks only, {} when none
   clips: BeatClip[] // v0.4; [] when the track has none (serialized only when present)
   notes: BeatNote[] // synth tracks only; always [] for drums
@@ -261,7 +272,7 @@ export function defaultSynthFields(): Omit<BeatSynth, (typeof SYNTH_PARAM_ORDER)
   return out as Omit<BeatSynth, (typeof SYNTH_PARAM_ORDER)[number]>
 }
 
-export const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums']
+export const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument']
 
 /** The format's standard init patch for a newly-created track (`beat init` / `beat add-track`).
  * A format-level default, not a copy of any host app's: a mellow filtered saw that sounds
