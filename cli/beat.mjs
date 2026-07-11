@@ -44,7 +44,7 @@ import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.
 
 const USAGE = `usage:
   beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track
-  beat add-track <file> <id> <synth|drums> [--name N] [--color #hex]
+  beat add-track <file> <id> <synth|drums|instrument> [--name N] [--color #hex] [--soundfont <sample-id> --program N]
   beat rm-track <file> <id>
   beat inspect <file> [--json]
   beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
@@ -100,15 +100,18 @@ function initCmd(argv) {
 
 function addTrackCmd(argv) {
   const [file, id, kind, ...rest] = argv
-  if (!file || !id || !kind) throw new BeatEditError('add-track needs <file> <id> <synth|drums>')
+  if (!file || !id || !kind) throw new BeatEditError('add-track needs <file> <id> <synth|drums|instrument>')
   const nameIdx = rest.indexOf('--name')
   const colorIdx = rest.indexOf('--color')
+  const sfIdx = rest.indexOf('--soundfont')
+  const progIdx = rest.indexOf('--program')
   const before = readDoc(file)
   const { doc } = addTrack(before, {
     id,
     kind,
     ...(nameIdx !== -1 ? { name: rest[nameIdx + 1] } : {}),
     ...(colorIdx !== -1 ? { color: rest[colorIdx + 1] } : {}),
+    ...(sfIdx !== -1 ? { soundfont: { sample: rest[sfIdx + 1], program: progIdx !== -1 ? Number(rest[progIdx + 1]) : 0 } } : {}),
   })
   writeDoc(file, before, doc)
 }

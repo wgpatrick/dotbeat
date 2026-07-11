@@ -18,6 +18,16 @@ function patternLines(pattern: BeatDrumPattern, indent: string): string[] {
 function serializeTrack(t: BeatTrack): string[] {
   const lines: string[] = []
   lines.push(`track ${t.id} ${t.name} ${t.color} ${t.kind}`)
+  // v0.6 instrument tracks: a soundfont voice line instead of a synth block; volume/pan elided
+  // at their defaults (-10 dB, center) like every optional field.
+  if (t.kind === 'instrument') {
+    const inst = t.instrument!
+    lines.push(`  soundfont ${inst.sample} ${formatNumber(inst.program)}`)
+    if (formatNumber(inst.volume) !== '-10') lines.push(`  volume ${formatNumber(inst.volume)}`)
+    if (formatNumber(inst.pan) !== '0') lines.push(`  pan ${formatNumber(inst.pan)}`)
+    lines.push(...sortedNoteLines(t.notes, '  '))
+    return lines
+  }
   lines.push(`  synth`)
   for (const key of SYNTH_PARAM_ORDER) {
     const value = t.synth[key]

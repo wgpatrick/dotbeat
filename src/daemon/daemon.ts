@@ -182,13 +182,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           // erase them — carry the CURRENT document's media table and per-track lane
           // assignments over (for tracks that still exist; a lane's sample id must still
           // resolve, which it does because media is carried wholesale).
+          const carried = converted.tracks.map((t) => {
+            const prev = doc.tracks.find((p) => p.id === t.id)
+            return prev && Object.keys(prev.laneSamples).length > 0 ? { ...t, laneSamples: prev.laneSamples } : t
+          })
+          // v0.6: instrument tracks never reach the GUI, so they never come back in a GUI push —
+          // reinsert them at their original positions (same never-erase rule as media).
+          for (const [i, t] of doc.tracks.entries()) {
+            if (t.kind === 'instrument') carried.splice(Math.min(i, carried.length), 0, t)
+          }
           const nextDoc = {
             ...converted,
             media: doc.media,
-            tracks: converted.tracks.map((t) => {
-              const prev = doc.tracks.find((p) => p.id === t.id)
-              return prev && Object.keys(prev.laneSamples).length > 0 ? { ...t, laneSamples: prev.laneSamples } : t
-            }),
+            tracks: carried,
           }
           const nextText = serialize(nextDoc)
           // Canonical-to-canonical comparison: identical music → identical bytes → no write.

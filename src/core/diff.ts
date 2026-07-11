@@ -39,6 +39,8 @@ export type DiffEntry =
   | { kind: 'media-removed'; sampleId: string; path: string }
   | { kind: 'media-changed'; sampleId: string; field: 'sha256' | 'path'; before: string; after: string }
   | { kind: 'lane-sample'; trackId: string; lane: DrumLane; before: string | null; after: string | null }
+  // v0.6 instrument tracks
+  | { kind: 'instrument-param'; trackId: string; param: 'soundfont' | 'program' | 'volume' | 'pan'; before: string | number; after: string | number }
 
 export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
   const out: DiffEntry[] = []
@@ -77,9 +79,17 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
     if (ta.name !== tb.name) out.push({ kind: 'track-meta', trackId: id, field: 'name', before: ta.name, after: tb.name })
     if (ta.color !== tb.color) out.push({ kind: 'track-meta', trackId: id, field: 'color', before: ta.color, after: tb.color })
 
-    for (const param of [...SYNTH_PARAM_ORDER, ...SYNTH_FIELDS.map((f) => f.key)]) {
-      if (ta.synth[param] !== tb.synth[param]) {
-        out.push({ kind: 'synth-param', trackId: id, param, before: ta.synth[param], after: tb.synth[param] })
+    if (ta.kind === 'instrument' && tb.kind === 'instrument' && ta.instrument && tb.instrument) {
+      if (ta.instrument.sample !== tb.instrument.sample) out.push({ kind: 'instrument-param', trackId: id, param: 'soundfont', before: ta.instrument.sample, after: tb.instrument.sample })
+      if (ta.instrument.program !== tb.instrument.program) out.push({ kind: 'instrument-param', trackId: id, param: 'program', before: ta.instrument.program, after: tb.instrument.program })
+      if (ta.instrument.volume !== tb.instrument.volume) out.push({ kind: 'instrument-param', trackId: id, param: 'volume', before: ta.instrument.volume, after: tb.instrument.volume })
+      if (ta.instrument.pan !== tb.instrument.pan) out.push({ kind: 'instrument-param', trackId: id, param: 'pan', before: ta.instrument.pan, after: tb.instrument.pan })
+    }
+    if (ta.kind !== 'instrument') {
+      for (const param of [...SYNTH_PARAM_ORDER, ...SYNTH_FIELDS.map((f) => f.key)]) {
+        if (ta.synth[param] !== tb.synth[param]) {
+          out.push({ kind: 'synth-param', trackId: id, param, before: ta.synth[param], after: tb.synth[param] })
+        }
       }
     }
 
@@ -221,7 +231,7 @@ export function formatDiff(entries: DiffEntry[]): string {
       case 'track-added':
         lines.push(
           `${e.trackId}: track added (${e.track.kind} "${e.track.name}", ${
-            e.track.kind === 'synth' ? `${e.track.notes.length} note${e.track.notes.length === 1 ? '' : 's'}` : 'drum pattern'
+            e.track.kind === 'drums' ? 'drum pattern' : `${e.track.notes.length} note${e.track.notes.length === 1 ? '' : 's'}`
           })`,
         )
         break
@@ -283,6 +293,9 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'lane-sample':
         lines.push(`${e.trackId}: ${e.lane} lane ${e.before ?? 'synth voice'} -> ${e.after ?? 'synth voice'}`)
+        break
+      case 'instrument-param':
+        lines.push(`${e.trackId}: ${e.param} ${fmtVal(e.before)} -> ${fmtVal(e.after)}`)
         break
       case 'song-changed': {
         const fmt = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}(${x.bars})`).join(' ') : '(no song)')

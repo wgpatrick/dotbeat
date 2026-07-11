@@ -199,20 +199,103 @@ export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds
     const { createHash } = await import('node:crypto')
     const { dirname: pathDirname, resolve: pathResolve } = await import('node:path')
     const beatDir = pathDirname(pathResolve(beatPath))
+    // which media ids are audio one-shots (decode) vs soundfonts (raw bytes for spessasynth)?
+    const laneIds = new Set()
+    const sfIds = new Set()
+    for (const t of doc.tracks) {
+      for (const ls of Object.values(t.laneSamples)) if (ls) laneIds.add(ls.sample)
+      if (t.kind === 'instrument' && t.instrument) sfIds.add(t.instrument.sample)
+    }
     const buffers = new Map()
+    const rawMedia = new Map()
     for (const m of doc.media) {
       const filePath = pathResolve(beatDir, m.path)
       if (!existsSync(filePath)) throw new Error(`media sample "${m.id}": file not found: ${m.path} (relative to ${beatDir})`)
       const bytes = readFileSync(filePath)
       const hash = createHash('sha256').update(bytes).digest('hex')
       if (hash !== m.sha256) throw new Error(`media sample "${m.id}": sha256 mismatch for ${m.path} (file ${hash.slice(0, 12)}..., document expects ${m.sha256.slice(0, 12)}...)`)
-      const audioBuf = await offline.rawContext.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
-      buffers.set(m.id, audioBuf)
+      if (sfIds.has(m.id)) rawMedia.set(m.id, bytes)
+      if (laneIds.has(m.id)) {
+        const audioBuf = await offline.rawContext.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+        buffers.set(m.id, audioBuf)
+      }
     }
     for (const t of doc.tracks) {
       for (const [lane, ls] of Object.entries(t.laneSamples)) {
         if (!ls) continue
         engine.loadLaneOneShot(lane, buffers.get(ls.sample), ls.sample, { gainDb: ls.gainDb, tune: ls.tune })
+      }
+    }
+
+    // v0.6 instrument tracks: rendered by spessasynth_core OUTSIDE the Tone graph (29x realtime
+    // vs 0.2-0.7x through it — docs/phase-8-plan.md), sequenced here by sample position, then
+    // injected into the offline mix as a plain buffer source. Notes loop every loopBars across
+    // the render length, same as synth tracks. Volume/pan baked in (constant-power pan). Known
+    // limitation: bypasses the master limiter; instrument tracks join the master bus in the
+    // browser-leg slice.
+    const instrumentTracks = doc.tracks.filter((t) => t.kind === 'instrument')
+    if (instrumentTracks.length > 0) {
+      // the web-audio polyfill defines `window`, which flips spessasynth's embedded WASM loader
+      // into browser mode where it probes document.currentScript — a bare stub satisfies it
+      globalThis.document ??= { currentScript: undefined }
+      const { SpessaSynthProcessor, SoundBankLoader } = await import('spessasynth_core')
+      const rate = 44100
+      const totalSamples = Math.floor(seconds * rate)
+      const stepSeconds = 60 / doc.bpm / 4
+      const loopSteps = doc.loopBars * 16
+      const renderSteps = Math.ceil(seconds / stepSeconds)
+      for (const t of instrumentTracks) {
+        const bytes = rawMedia.get(t.instrument.sample)
+        const proc = new SpessaSynthProcessor(rate)
+        await proc.processorInitialized
+        proc.soundBankManager.addSoundBank(SoundBankLoader.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)), 'main')
+        proc.createMIDIChannel()
+        proc.programChange(0, t.instrument.program)
+        // event list: sample-indexed noteOn/noteOff, notes looping every loopBars
+        const events = []
+        for (let base = 0; base < renderSteps; base += loopSteps) {
+          for (const n of t.notes) {
+            const on = Math.floor((base + n.start) * stepSeconds * rate)
+            const off = Math.floor((base + n.start + n.duration) * stepSeconds * rate)
+            if (on < totalSamples) {
+              events.push({ at: on, on: true, pitch: n.pitch, vel: Math.round(n.velocity * 127) })
+              events.push({ at: Math.min(off, totalSamples - 1), on: false, pitch: n.pitch })
+            }
+          }
+        }
+        events.sort((a, b) => a.at - b.at)
+        const L = new Float32Array(totalSamples)
+        const R = new Float32Array(totalSamples)
+        let cursor = 0
+        let ev = 0
+        const BLOCK = 128
+        while (cursor < totalSamples) {
+          while (ev < events.length && events[ev].at <= cursor) {
+            const e = events[ev++]
+            if (e.on) proc.noteOn(0, e.pitch, e.vel)
+            else proc.noteOff(0, e.pitch)
+          }
+          const n = Math.min(BLOCK, totalSamples - cursor, ev < events.length ? events[ev].at - cursor : Infinity)
+          proc.process(L.subarray(cursor, cursor + n), R.subarray(cursor, cursor + n))
+          cursor += n
+        }
+        // bake volume + constant-power pan, inject into the offline mix
+        const gain = Math.pow(10, t.instrument.volume / 20)
+        const theta = ((t.instrument.pan + 1) / 2) * (Math.PI / 2)
+        const gl = gain * Math.cos(theta) * Math.SQRT2 * 0.5 * 2
+        const gr = gain * Math.sin(theta) * Math.SQRT2 * 0.5 * 2
+        const buf = offline.rawContext.createBuffer(2, totalSamples, rate)
+        const outL = buf.getChannelData(0)
+        const outR = buf.getChannelData(1)
+        for (let i = 0; i < totalSamples; i++) {
+          outL[i] = L[i] * gl
+          outR[i] = R[i] * gr
+        }
+        const src = offline.rawContext.createBufferSource()
+        src.buffer = buf
+        src.connect(offline.rawContext.destination)
+        src.start(0)
+        console.log(`instrument "${t.id}": ${t.notes.length} notes via soundfont "${t.instrument.sample}" program ${t.instrument.program}`)
       }
     }
   }

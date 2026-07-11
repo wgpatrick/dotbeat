@@ -78,6 +78,27 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     return replaceTrack(doc, { ...track, color: value })
   }
 
+  // v0.6 instrument tracks: their small field set, validated in place
+  if (track.kind === 'instrument') {
+    const inst = track.instrument!
+    if (rest === 'volume') return replaceTrack(doc, { ...track, instrument: { ...inst, volume: parseNum(value, 'volume') } })
+    if (rest === 'pan') {
+      const p = parseNum(value, 'pan')
+      if (p < -1 || p > 1) throw new BeatEditError(`pan must be -1..1, got ${p}`)
+      return replaceTrack(doc, { ...track, instrument: { ...inst, pan: p } })
+    }
+    if (rest === 'program') {
+      const prog = parseNum(value, 'program')
+      if (!Number.isInteger(prog) || prog < 0 || prog > 127) throw new BeatEditError(`program must be an integer 0-127, got ${value}`)
+      return replaceTrack(doc, { ...track, instrument: { ...inst, program: prog } })
+    }
+    if (rest === 'soundfont') {
+      if (!doc.media.some((m) => m.id === value)) throw new BeatEditError(`no sample "${value}" in the media block — register it with beat sample first`)
+      return replaceTrack(doc, { ...track, instrument: { ...inst, sample: value } })
+    }
+    throw new BeatEditError(`unknown field "${rest}" on instrument track "${trackId}" (have: soundfont, program, volume, pan, name, color)`)
+  }
+
   // required core synth params
   if ((SYNTH_PARAM_ORDER as readonly string[]).includes(rest)) {
     const param = rest as keyof BeatSynth
@@ -117,7 +138,7 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
  * prefix BeatLab's own recordNote uses, chosen above the current max so it can't collide). */
 export function addNote(doc: BeatDocument, trackId: string, note: { pitch: number; start: number; duration: number; velocity: number; id?: string }): { doc: BeatDocument; note: BeatNote } {
   const track = findTrack(doc, trackId)
-  if (track.kind !== 'synth') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — notes only belong on synth tracks`)
+  if (track.kind === 'drums') throw new BeatEditError(`track "${trackId}" is a drums track — notes only belong on synth/instrument tracks`)
   if (note.pitch < 0 || note.pitch > 127 || !Number.isInteger(note.pitch)) throw new BeatEditError(`pitch must be an integer 0-127, got ${note.pitch}`)
   if (!Number.isInteger(note.start) || note.start < 0) throw new BeatEditError(`start must be a non-negative integer step, got ${note.start}`)
   if (!Number.isInteger(note.duration) || note.duration < 1) throw new BeatEditError(`duration must be an integer >= 1 step, got ${note.duration}`)
@@ -160,11 +181,16 @@ const emptyBeatPattern = (): BeatDrumPattern =>
  * Color defaults cycle TRACK_COLORS by track index; name defaults to the id. */
 export function addTrack(
   doc: BeatDocument,
-  opts: { id: string; kind: TrackKind; name?: string; color?: string },
+  opts: { id: string; kind: TrackKind; name?: string; color?: string; soundfont?: { sample: string; program: number } },
 ): { doc: BeatDocument; track: BeatTrack } {
   const { id, kind } = opts
   if (!(TRACK_KINDS as readonly string[]).includes(kind)) throw new BeatEditError(`track kind must be one of ${TRACK_KINDS.join('|')}, got "${kind}"`)
   if (doc.tracks.some((t) => t.id === id)) throw new BeatEditError(`track id "${id}" already exists`)
+  if (kind === 'instrument') {
+    if (!opts.soundfont) throw new BeatEditError('instrument tracks need a soundfont: pass --soundfont <sample-id> [--program N] (register the .sf2 with beat sample first)')
+    if (!doc.media.some((m) => m.id === opts.soundfont!.sample)) throw new BeatEditError(`no sample "${opts.soundfont.sample}" in the media block — register it with beat sample first`)
+    if (!Number.isInteger(opts.soundfont.program) || opts.soundfont.program < 0 || opts.soundfont.program > 127) throw new BeatEditError(`program must be an integer 0-127, got ${opts.soundfont.program}`)
+  }
   const name = opts.name ?? id
   const color = opts.color ?? TRACK_COLORS[doc.tracks.length % TRACK_COLORS.length]!
   validateTrackIdentity(id, name, color)
@@ -174,6 +200,7 @@ export function addTrack(
     color,
     kind,
     synth: { ...INIT_SYNTH },
+    ...(kind === 'instrument' ? { instrument: { sample: opts.soundfont!.sample, program: opts.soundfont!.program, volume: -10, pan: 0 } } : {}),
     laneSamples: {},
     clips: [],
     notes: [],
