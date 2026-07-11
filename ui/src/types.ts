@@ -121,7 +121,18 @@ export interface BeatSelection {
 }
 
 /** Which of the top-level app screens is showing. */
-export type AppView = 'editor' | 'arrangement' | 'mixer'
+export type AppView = 'editor' | 'arrangement' | 'mixer' | 'history'
+
+/** One checkpoint row from the daemon's GET /history (mirrors src/history/history.ts's
+ * HistoryEntry — the daemon's JSON is the contract). `ref` is the short sha handle `restore` takes;
+ * `label` is the semantic one-line diff; `pin`/`intent` are present only when set. */
+export interface HistoryEntry {
+  ref: string
+  when: string // ISO date
+  label: string
+  intent?: string
+  pin?: string
+}
 
 /** The nine core params, in the format's canonical order, with UI ranges + display formatting.
  * `osc` is an enum handled separately by the panel; the other eight are knobs. */

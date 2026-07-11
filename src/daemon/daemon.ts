@@ -33,6 +33,13 @@ import { createHash } from 'node:crypto'
 import { basename, dirname, resolve } from 'node:path'
 import type { BeatDocument, BeatSelection } from '../core/index.js'
 import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, setValue, validateSelection, type ExternalSandboxPayload } from '../core/index.js'
+// D3/D10 versioning surface over HTTP: the GUI's history panel (Phase 15 Stream H) reads the
+// checkpoint list and issues "go back" through these. All of it reuses src/history's real git-backed
+// functions — the daemon adds no versioning logic, just an HTTP face on the same verbs `beat
+// history`/`beat restore`/`beat pin` expose. A restore/pin writes the .beat file on disk, which the
+// daemon's own directory watcher picks up and broadcasts as a `doc` SSE event, so the GUI hot-reloads
+// through the exact same external-edit path a hand edit or `beat set` uses — no special echo needed.
+import { history, restore, pin, unpin, HistoryError } from '../history/index.js'
 
 export interface DaemonOptions {
   filePath: string
@@ -350,6 +357,86 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // D3 versioning: the checkpoint list for this file, newest first, each with its semantic
+    // one-liner label and (if pinned) its pin name — the same data `beat history` prints. Read-only;
+    // reuses history() wholesale. `?limit=N` caps the list (the panel asks for a bounded window).
+    if (req.method === 'GET' && url.pathname === '/history') {
+      try {
+        const limitParam = url.searchParams.get('limit')
+        const limit = limitParam !== null ? Number(limitParam) : undefined
+        if (limit !== undefined && (!Number.isFinite(limit) || limit < 0)) {
+          json(res, 400, { error: `bad ?limit=${limitParam}` })
+          return
+        }
+        const entries = history(filePath, limit !== undefined ? { limit } : {})
+        json(res, 200, { entries })
+      } catch (err) {
+        json(res, 500, { error: err instanceof Error ? err.message : String(err) })
+      }
+      return
+    }
+
+    // D3 "go back": restore an earlier checkpoint by its ref. Append-only (src/history/restore) —
+    // it writes the old bytes and takes a FRESH checkpoint, never rewinding the timeline, so the
+    // pre-restore state stays recoverable. The write lands on disk; our directory watcher then
+    // broadcasts `doc` and the GUI hot-reloads. Returns the new checkpoint (or {skipped:true} when
+    // that version was already current). An unknown/invalid ref is a HistoryError → 400.
+    if (req.method === 'POST' && url.pathname === '/restore') {
+      readBody(req)
+        .then((body) => {
+          const { ref } = JSON.parse(body) as { ref?: unknown }
+          if (typeof ref !== 'string' || ref.trim() === '') {
+            json(res, 400, { error: 'body must be {ref: string}' })
+            return
+          }
+          json(res, 200, restore(filePath, ref))
+        })
+        .catch((err) => {
+          const status = err instanceof HistoryError ? 400 : err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // D10 "pin": name a checkpoint (<=25 chars) — a plain annotated git tag in the same repo. Nice-
+    // to-have alongside restore; reuses pin() unchanged. Bad name / unknown ref / duplicate name all
+    // surface as HistoryError → 400.
+    if (req.method === 'POST' && url.pathname === '/pin') {
+      readBody(req)
+        .then((body) => {
+          const { ref, name } = JSON.parse(body) as { ref?: unknown; name?: unknown }
+          if (typeof ref !== 'string' || typeof name !== 'string') {
+            json(res, 400, { error: 'body must be {ref: string, name: string}' })
+            return
+          }
+          json(res, 200, pin(filePath, ref, name))
+        })
+        .catch((err) => {
+          const status = err instanceof HistoryError ? 400 : err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // D10 "unpin": remove a pin by name. Reuses unpin() unchanged.
+    if (req.method === 'POST' && url.pathname === '/unpin') {
+      readBody(req)
+        .then((body) => {
+          const { name } = JSON.parse(body) as { name?: unknown }
+          if (typeof name !== 'string') {
+            json(res, 400, { error: 'body must be {name: string}' })
+            return
+          }
+          unpin(filePath, name)
+          json(res, 200, { ok: true })
+        })
+        .catch((err) => {
+          const status = err instanceof HistoryError ? 400 : err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return
     }

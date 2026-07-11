@@ -10,12 +10,14 @@ import { NoteView } from './components/NoteView'
 import { Scope } from './components/Scope'
 import { ArrangementView } from './components/ArrangementView'
 import { MixerView } from './components/MixerView'
+import { HistoryPanel } from './components/HistoryPanel'
 import type { AppView } from './types'
 
 const VIEW_TABS: { id: AppView; label: string }[] = [
   { id: 'editor', label: 'Editor' },
   { id: 'arrangement', label: 'Arrangement' },
   { id: 'mixer', label: 'Mixer' },
+  { id: 'history', label: 'History' },
 ]
 
 /** The per-track editor: track list sidebar + the focused track's step grid / synth panel. This is
@@ -91,6 +93,7 @@ export function App() {
       {view === 'editor' && <EditorView />}
       {view === 'arrangement' && <ArrangementView />}
       {view === 'mixer' && <MixerView />}
+      {view === 'history' && <HistoryPanel />}
     </div>
   )
 }
