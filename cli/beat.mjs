@@ -21,6 +21,8 @@ import {
   saveClip,
   setScene,
   setSong,
+  setMediaSample,
+  setLaneSample,
   serialize,
   setValue,
   addNote,
@@ -58,6 +60,8 @@ const USAGE = `usage:
   beat clip <file> <track> <clip-id>                      snapshot the track's live content into a clip
   beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
   beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
+  beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)
+  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample
   beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
   beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
   beat lint <file.wav> [--target <LUFS>] [--json]         deterministic mix findings (default target -14)
@@ -313,6 +317,27 @@ function songCmd(argv) {
   writeDoc(file, before, setSong(before, sections))
 }
 
+async function sampleCmd(argv) {
+  const [file, id, samplePath] = argv
+  if (!file || !id || !samplePath) throw new BeatEditError('sample needs <file> <sample-id> <wav-path> (path relative to the .beat file)')
+  const { createHash } = await import('node:crypto')
+  const beatDir = dirname(resolve(file))
+  const abs = resolve(beatDir, samplePath)
+  if (!existsSync(abs)) throw new BeatEditError(`no file at ${samplePath} (relative to ${beatDir}) — put the audio next to the project first`)
+  const sha256 = createHash('sha256').update(readFileSync(abs)).digest('hex')
+  const before = readDoc(file)
+  writeDoc(file, before, setMediaSample(before, id, sha256, samplePath.replace(/\\/g, '/')))
+  process.stdout.write(`registered ${id}: sha256:${sha256.slice(0, 12)}... ${samplePath}\n`)
+}
+
+function laneCmd(argv) {
+  const [file, track, lane, sampleId, gain, tune] = argv
+  if (!file || !track || !lane || !sampleId) throw new BeatEditError('lane needs <file> <track> <lane> <sample-id|none> [gain dB] [tune semitones]')
+  const before = readDoc(file)
+  const ref = sampleId === 'none' ? null : { sample: sampleId, gainDb: gain !== undefined ? Number(gain) : 0, tune: tune !== undefined ? Number(tune) : 0 }
+  writeDoc(file, before, setLaneSample(before, track, lane, ref))
+}
+
 function fmtDb(x, unit = '') {
   return Number.isFinite(x) ? `${x.toFixed(1)}${unit}` : String(x)
 }
@@ -421,6 +446,12 @@ async function main() {
       break
     case 'song':
       songCmd(rest)
+      break
+    case 'sample':
+      await sampleCmd(rest)
+      break
+    case 'lane':
+      laneCmd(rest)
       break
     case 'score':
       await scoreCmd(rest)

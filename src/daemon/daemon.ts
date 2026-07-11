@@ -134,6 +134,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       return
     }
 
+    // v0.5 media: serve the document's referenced sample files to the browser bridge. Only
+    // paths DECLARED in the media block are servable — this is a project-file server, not a
+    // directory listing; the declared-paths check also makes traversal structurally impossible
+    // (declared paths are validated relative-only at parse time).
+    if (req.method === 'GET' && url.pathname.startsWith('/media/')) {
+      const wanted = decodeURIComponent(url.pathname.slice('/media/'.length))
+      const entry = doc.media.find((m) => m.path === `media/${wanted}` || m.path === wanted)
+      if (!entry) {
+        json(res, 404, { error: `no media entry with path "${wanted}" in the document` })
+        return
+      }
+      const abs = resolve(dirname(resolve(filePath)), entry.path)
+      try {
+        const bytes = readFileSync(abs)
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length, ...CORS_HEADERS })
+        res.end(bytes)
+      } catch {
+        json(res, 404, { error: `media file missing on disk: ${entry.path}` })
+      }
+      return
+    }
+
     if (req.method === 'GET' && url.pathname === '/events') {
       res.writeHead(200, {
         'content-type': 'text/event-stream',
@@ -155,7 +177,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             json(res, 400, { error: 'body is not a sandbox payload' })
             return
           }
-          const { doc: nextDoc, report } = sandboxPayloadToBeatDocument(payload)
+          const { doc: converted, report } = sandboxPayloadToBeatDocument(payload)
+          // v0.5: the GUI has no media/lane-sample editing surface, so a GUI push must never
+          // erase them — carry the CURRENT document's media table and per-track lane
+          // assignments over (for tracks that still exist; a lane's sample id must still
+          // resolve, which it does because media is carried wholesale).
+          const nextDoc = {
+            ...converted,
+            media: doc.media,
+            tracks: converted.tracks.map((t) => {
+              const prev = doc.tracks.find((p) => p.id === t.id)
+              return prev && Object.keys(prev.laneSamples).length > 0 ? { ...t, laneSamples: prev.laneSamples } : t
+            }),
+          }
           const nextText = serialize(nextDoc)
           // Canonical-to-canonical comparison: identical music → identical bytes → no write.
           // (Comparing against serialize(doc), not the raw file text, means a hand-added comment

@@ -233,6 +233,8 @@ export interface PartialTrack {
   /** v0.4: clips ride the partial in beatlab's own Clip shape (name = id — the format has no
    * separate display name; pattern always present because beatlab clips carry one). */
   clips?: { id: string; name: string; notes: BeatNote[]; pattern: BeatDrumPattern }[]
+  /** v0.5: per-lane one-shot assignments (sample = media id; resolve via the media table). */
+  laneSamples?: Record<string, { sample: string; gainDb: number; tune: number }>
 }
 
 const EMPTY_PATTERN = (): BeatDrumPattern =>
@@ -245,6 +247,7 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
   tracks: PartialTrack[]
   scenes: { id: string; name: string; clipIds: Record<string, string> }[]
   song: { sceneId: string; bars: number }[] | null
+  media: { id: string; sha256: string; path: string }[]
 } {
   return {
     bpm: doc.bpm,
@@ -258,6 +261,7 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
       notes: t.notes,
       synth: { ...t.synth },
       ...(t.pattern ? { pattern: structuredClone(t.pattern) } : {}),
+      ...(Object.keys(t.laneSamples).length > 0 ? { laneSamples: structuredClone(t.laneSamples) as Record<string, { sample: string; gainDb: number; tune: number }> } : {}),
       ...(t.clips.length > 0
         ? {
             clips: t.clips.map((c) => ({
@@ -271,5 +275,6 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
     })),
     scenes: doc.scenes.map((s) => ({ id: s.id, name: s.id, clipIds: { ...s.slots } })),
     song: doc.song ? doc.song.map((x) => ({ sceneId: x.scene, bars: x.bars })) : null,
+    media: doc.media.map((m) => ({ ...m })),
   }
 }

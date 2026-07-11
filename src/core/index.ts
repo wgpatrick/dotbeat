@@ -12,6 +12,6 @@ export {
   type PartialTrack,
 } from './convert.js'
 export { diffDocuments, formatDiff, type DiffEntry } from './diff.js'
-export { setValue, addNote, removeNote, addTrack, removeTrack, initDocument, saveClip, setScene, setSong, BeatEditError } from './edit.js'
+export { setValue, addNote, removeNote, addTrack, removeTrack, initDocument, saveClip, setScene, setSong, setMediaSample, setLaneSample, BeatEditError } from './edit.js'
 export { describeDocument } from './inspect.js'
 export { parsePresetLibrary, applyPreset, formatPresetList, BeatPresetError, type BeatPreset } from './preset.js'

@@ -34,6 +34,11 @@ export type DiffEntry =
   | { kind: 'scene-removed'; sceneId: string }
   | { kind: 'scene-slot'; sceneId: string; trackId: string; before: string | null; after: string | null }
   | { kind: 'song-changed'; before: { scene: string; bars: number }[] | null; after: { scene: string; bars: number }[] | null }
+  // v0.5 media + lane samples
+  | { kind: 'media-added'; sampleId: string; path: string }
+  | { kind: 'media-removed'; sampleId: string; path: string }
+  | { kind: 'media-changed'; sampleId: string; field: 'sha256' | 'path'; before: string; after: string }
+  | { kind: 'lane-sample'; trackId: string; lane: DrumLane; before: string | null; after: string | null }
 
 export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
   const out: DiffEntry[] = []
@@ -160,6 +165,33 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
     }
   }
 
+  // v0.5 media: match by id; report re-pins (hash/path changes) per field.
+  const aMedia = new Map(a.media.map((m) => [m.id, m]))
+  const bMedia = new Map(b.media.map((m) => [m.id, m]))
+  for (const [mid, m] of aMedia) if (!bMedia.has(mid)) out.push({ kind: 'media-removed', sampleId: mid, path: m.path })
+  for (const [mid, mb] of bMedia) {
+    const ma = aMedia.get(mid)
+    if (!ma) {
+      out.push({ kind: 'media-added', sampleId: mid, path: mb.path })
+      continue
+    }
+    if (ma.sha256 !== mb.sha256) out.push({ kind: 'media-changed', sampleId: mid, field: 'sha256', before: ma.sha256, after: mb.sha256 })
+    if (ma.path !== mb.path) out.push({ kind: 'media-changed', sampleId: mid, field: 'path', before: ma.path, after: mb.path })
+  }
+
+  // v0.5 lane samples: per common track, per lane; described as "sample(gain,tune)" strings.
+  const laneDesc = (ls: { sample: string; gainDb: number; tune: number } | undefined) =>
+    ls ? `${ls.sample} (${formatNumber(ls.gainDb)} dB, ${formatNumber(ls.tune)} st)` : null
+  for (const id of commonIds) {
+    const ta = aTracks.get(id)!.t
+    const tb = bTracks.get(id)!.t
+    for (const lane of DRUM_LANES) {
+      const before = laneDesc(ta.laneSamples[lane])
+      const after = laneDesc(tb.laneSamples[lane])
+      if (before !== after) out.push({ kind: 'lane-sample', trackId: id, lane, before, after })
+    }
+  }
+
   // The song is one ordered statement — compare whole (order IS the data; per-index diffs of a
   // reordered section list would read as noise).
   const songKey = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}:${x.bars}`).join(',') : '')
@@ -239,6 +271,18 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'scene-slot':
         lines.push(`scene ${e.sceneId}: ${e.trackId} ${e.before ?? '(empty)'} -> ${e.after ?? '(empty)'}`)
+        break
+      case 'media-added':
+        lines.push(`media: sample added "${e.sampleId}" (${e.path})`)
+        break
+      case 'media-removed':
+        lines.push(`media: sample removed "${e.sampleId}" (${e.path})`)
+        break
+      case 'media-changed':
+        lines.push(`media: ${e.sampleId} ${e.field} ${e.field === 'sha256' ? `${e.before.slice(0, 12)}... -> ${e.after.slice(0, 12)}...` : `${e.before} -> ${e.after}`}`)
+        break
+      case 'lane-sample':
+        lines.push(`${e.trackId}: ${e.lane} lane ${e.before ?? 'synth voice'} -> ${e.after ?? 'synth voice'}`)
         break
       case 'song-changed': {
         const fmt = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}(${x.bars})`).join(' ') : '(no song)')

@@ -202,6 +202,39 @@ export function removeTrack(doc: BeatDocument, trackId: string): { doc: BeatDocu
   return { doc: { ...doc, tracks, scenes, selectedTrack }, track }
 }
 
+/** v0.5 media primitives. Registers (or re-pins) a content-addressed sample. Hash computation
+ * is the CALLER's job (core stays fs-free); the CLI computes sha256 from the real file. */
+export function setMediaSample(doc: BeatDocument, id: string, sha256: string, path: string): BeatDocument {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new BeatEditError(`sample ids are single alphanumeric/_/- tokens, got "${id}"`)
+  if (!/^[0-9a-f]{64}$/.test(sha256)) throw new BeatEditError('sha256 must be 64 lowercase hex chars')
+  if (path.startsWith('/') || path.includes('..')) throw new BeatEditError(`sample paths must be relative without "..", got "${path}"`)
+  const entry = { id, sha256, path }
+  const existing = doc.media.findIndex((m) => m.id === id)
+  const media = existing === -1 ? [...doc.media, entry] : doc.media.map((m, i) => (i === existing ? entry : m))
+  return { ...doc, media }
+}
+
+/** v0.5: assigns (or clears, with ref = null) a drum lane's one-shot sample. */
+export function setLaneSample(
+  doc: BeatDocument,
+  trackId: string,
+  lane: DrumLane,
+  ref: { sample: string; gainDb: number; tune: number } | null,
+): BeatDocument {
+  const track = findTrack(doc, trackId)
+  if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — lane samples only belong on drum tracks`)
+  if (!(DRUM_LANES as readonly string[]).includes(lane)) throw new BeatEditError(`unknown drum lane "${lane}" (expected one of ${DRUM_LANES.join('|')})`)
+  const laneSamples = { ...track.laneSamples }
+  if (ref === null) {
+    delete laneSamples[lane]
+  } else {
+    if (!doc.media.some((m) => m.id === ref.sample)) throw new BeatEditError(`no sample "${ref.sample}" in the media block (have: ${doc.media.map((m) => m.id).join(', ') || 'none'}) — register it with beat sample first`)
+    if (ref.tune < -24 || ref.tune > 24) throw new BeatEditError(`lane tune must be -24..24 semitones, got ${ref.tune}`)
+    laneSamples[lane] = { ...ref }
+  }
+  return replaceTrack(doc, { ...track, laneSamples })
+}
+
 /** A fresh document with one starter synth track — what `beat init` writes. */
 export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: string } = {}): BeatDocument {
   const bpm = opts.bpm ?? 120
