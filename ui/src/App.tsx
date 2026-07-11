@@ -5,6 +5,7 @@ import { TransportBar } from './components/TransportBar'
 import { TrackList } from './components/TrackList'
 import { StepSequencer } from './components/StepSequencer'
 import { SynthPanel } from './components/SynthPanel'
+import { InstrumentPanel } from './components/InstrumentPanel'
 import { NoteView } from './components/NoteView'
 import { Scope } from './components/Scope'
 import { ArrangementView } from './components/ArrangementView'
@@ -44,15 +45,10 @@ function EditorView() {
           </>
         )}
         {track && track.kind === 'instrument' && (
-          <div className="instrument-note">
-            <div className="editor-toolbar">
-              <span className="editor-title" style={{ color: track.color }}>
-                {track.name}
-              </span>
-              <span className="toolbar-tip">instrument (SoundFont) track — editing surface is a later stream</span>
-            </div>
+          <>
+            <InstrumentPanel track={track} />
             <NoteView track={track} />
-          </div>
+          </>
         )}
       </main>
     </div>

@@ -27,15 +27,27 @@
 //   - master bus -> limiter -> destination with side-tapped meter + waveform/fft analysers
 //     (carried forward from Stream 1)
 //
+// Phase 14 Stream F ADDED instrument/SoundFont-track playback: a per-instrument-track
+// spessasynth_lib WorkletSynthesizer (the browser/real-time variant of the spessasynth_core
+// SpessaSynthProcessor cli/render-offline.mjs uses offline), scheduled sample-accurately from the
+// same tick loop and mixed into the shared master bus with the track's own volume/pan. See
+// syncInstruments()/tick()'s instrument branch and docs/phase-14-instrument-tracks.md.
+//
 // Deliberately NOT ported (out of Stream A scope — see the parity doc): wavetable oscillators
 // (dotbeat's osc is only sine/tri/saw/square), tempo-synced LFO rates + drawn LFO shapes,
 // reorderable insert order, the arpeggiator, sample-slicing / per-lane one-shots (v0.5 media),
-// instrument/SoundFont tracks (spessasynth — a separate, larger lift), and live-MIDI monitoring.
+// and live-MIDI monitoring. Instrument tracks get level/pan into the master bus but NOT the synth
+// FX chain (EQ/comp/sends/sidechain) — full instrument FX parity is a later stream (Stream F doc).
 
 import * as Tone from 'tone'
+import { WorkletSynthesizer } from 'spessasynth_lib'
+// The AudioWorklet processor is a static asset Vite serves at a hashed URL; addModule() needs a
+// real URL, so import it via ?url rather than bundling it as code.
+import spessaWorkletUrl from 'spessasynth_lib/dist/spessasynth_processor.min.js?url'
 import { useStore, isEffectivelyMuted } from '../state/store'
+import { daemonBase } from '../daemon/bridge'
 import { audioBufferToWav } from './wavEncode'
-import type { BeatDocument, BeatDrumHit, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType } from '../types'
+import type { BeatDocument, BeatDrumHit, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType } from '../types'
 
 type LfoDest = 'off' | 'pitch' | 'cutoff' | 'amp' | 'wtPos'
 type Lfo2Dest = 'off' | 'pan' | 'sendReverb' | 'sendDelay' | 'sendMod' | 'eqLow' | 'eqMid' | 'eqHigh' | 'distortionMix'
@@ -288,6 +300,19 @@ interface Content {
   contentStep: number
 }
 
+/** One live instrument (SoundFont) track. `synth` is a spessasynth_lib WorkletSynthesizer running
+ * on Tone's raw AudioContext; its output feeds `entry` (a native passthrough) → `vol` → `pan` →
+ * master. `sample`/`program` are the currently-loaded values, so syncInstruments() can tell a
+ * cheap programChange from a full soundbank reload. */
+interface InstrumentVoice {
+  synth: WorkletSynthesizer
+  entry: GainNode
+  vol: Tone.Volume
+  pan: Tone.Panner
+  sample: string
+  program: number
+}
+
 class Engine {
   private chains = new Map<string, SynthChain>()
   private drums: DrumKit | null = null
@@ -296,6 +321,30 @@ class Engine {
   private repeatId: number | null = null
   private started = false
   private lastLaneTriggerTime: Partial<Record<DrumLane, number>> = {}
+
+  // Instrument (SoundFont) tracks. `instruments` holds READY voices; `instrumentPending` guards
+  // the async build (fetch soundfont + addSoundBank + isReady) so sync() — called every tick —
+  // never kicks off a second load for the same track while the first is in flight.
+  private instruments = new Map<string, InstrumentVoice>()
+  private instrumentPending = new Set<string>()
+  private workletModulePromise: Promise<void> | null = null
+  // spessasynth_lib's WorkletSynthesizer constructs a native AudioWorkletNode, which requires a
+  // real (native) BaseAudioContext. Tone 15 wraps its context in standardized-audio-context, whose
+  // rawContext is NOT a native BaseAudioContext — so we run Tone itself on a native AudioContext
+  // that both engines share. Set once, before any Tone node is created (see ensureNativeContext).
+  private nativeCtx: AudioContext | null = null
+
+  /** Pin Tone (and thus every node the engine builds) to a native AudioContext, so the shared
+   * master bus, the recorder tap, AND the spessasynth worklet all live on the same native context.
+   * Idempotent; must run before the first Tone node is created (called at the top of getMaster and
+   * ensureStarted, the only entry points that build nodes). */
+  private ensureNativeContext(): AudioContext {
+    if (!this.nativeCtx) {
+      this.nativeCtx = new AudioContext()
+      Tone.setContext(this.nativeCtx)
+    }
+    return this.nativeCtx
+  }
 
   private reverbBus: Tone.Reverb | null = null
   private delayBus: Tone.FeedbackDelay | null = null
@@ -312,6 +361,7 @@ class Engine {
 
   private getMaster(): Tone.Gain {
     if (!this.masterBus) {
+      this.ensureNativeContext() // must precede the first node creation
       this.masterBus = new Tone.Gain(1)
       this.masterLimiter = new Tone.Limiter(-1)
       this.masterMeter = new Tone.Meter({ smoothing: 0.8 })
@@ -491,6 +541,7 @@ class Engine {
 
   async ensureStarted(): Promise<void> {
     if (this.started) return
+    this.ensureNativeContext() // pin Tone to a native context before Tone.start()/node creation
     await Tone.start()
     this.buildDrums()
     // Re-apply the drums track's params in case they were adjusted before this first start.
@@ -665,6 +716,7 @@ class Engine {
     // Per-tick read of the mixer's mute/solo state -> real audio gating. sync() already runs every
     // 16th tick, so a mute toggled mid-playback takes effect on the next step (well under a beat).
     this.applyMuteGates()
+    this.syncInstruments(doc)
   }
 
   /** Gate each track's output to 0 or 1 from the store's effective mute/solo state (mute wins; if
@@ -693,7 +745,8 @@ class Engine {
   /** Live post-fader loudness (dB) of one track's own channel, for its mixer meter — read per-frame
    * off the shared rAF driver, never through Zustand state. Computed as true RMS of the track's
    * post-mute/post-fader tap, so a muted track reads -Infinity immediately. null for tracks with no
-   * live voice (e.g. instrument tracks, whose live playback is a separate stream). */
+   * meter tap wired up yet (instrument/SoundFont tracks got live playback in Phase 14 Stream F but
+   * not yet a meter tap — wiring it up is free once needed, see that stream's doc). */
   getTrackLevel(trackId: string): number | null {
     const chain = this.chains.get(trackId)
     if (chain) return Engine.rmsDb(chain.levelTap.getValue() as Float32Array)
@@ -706,6 +759,110 @@ class Engine {
   getMasterRms(): number | null {
     const data = this.getWaveformData()
     return data ? Engine.rmsDb(data) : null
+  }
+
+  // ---- instrument (SoundFont) tracks -------------------------------------------------------
+  // The AudioWorklet processor module only needs registering once per AudioContext; cache the
+  // promise so every voice awaits the same registration.
+  private ensureWorkletModule(): Promise<void> {
+    if (!this.workletModulePromise) {
+      const ctx = this.ensureNativeContext()
+      this.workletModulePromise = ctx.audioWorklet.addModule(spessaWorkletUrl).catch((err) => {
+        // Reset so a later sync() can retry (e.g. transient asset 404 during dev reload).
+        this.workletModulePromise = null
+        throw err
+      })
+    }
+    return this.workletModulePromise
+  }
+
+  /** Build a WorkletSynthesizer for one instrument track: register the worklet, fetch the
+   * soundfont bytes from the daemon (the same `/media/<path>` route the drum one-shots use),
+   * load the bank, and wire output → volume → pan → master. Fire-and-forget from sync(); on
+   * completion the ready voice lands in `this.instruments` and the tick starts scheduling it. */
+  private async buildInstrument(trackId: string, inst: BeatInstrument, mediaPath: string): Promise<void> {
+    try {
+      await this.ensureWorkletModule()
+      const res = await fetch(`${daemonBase()}/media/${mediaPath}`)
+      if (!res.ok) throw new Error(`fetch soundfont "${mediaPath}": HTTP ${res.status}`)
+      const bytes = await res.arrayBuffer()
+      const ctx = this.ensureNativeContext()
+      const synth = new WorkletSynthesizer(ctx)
+      await synth.soundBankManager.addSoundBank(bytes, 'main')
+      await synth.isReady
+      // If the track vanished or its sample changed while we loaded, drop this build silently —
+      // the next sync() reconciles the current state.
+      const current = useStore.getState().doc?.tracks.find((t) => t.id === trackId)
+      if (!current || current.kind !== 'instrument' || current.instrument?.sample !== inst.sample) {
+        synth.destroy()
+        return
+      }
+      const entry = ctx.createGain()
+      synth.connect(entry)
+      const vol = new Tone.Volume(inst.volume)
+      const pan = new Tone.Panner(inst.pan)
+      Tone.connect(entry, vol)
+      vol.chain(pan, this.getMaster())
+      synth.programChange(0, inst.program)
+      this.instruments.set(trackId, { synth, entry, vol, pan, sample: inst.sample, program: inst.program })
+    } catch (err) {
+      console.warn(`[engine] instrument "${trackId}" failed to load:`, err)
+    } finally {
+      this.instrumentPending.delete(trackId)
+    }
+  }
+
+  private disposeInstrument(voice: InstrumentVoice): void {
+    try {
+      voice.synth.stopAll(true)
+      voice.synth.disconnect()
+      voice.synth.destroy()
+    } catch {
+      // best-effort teardown
+    }
+    voice.entry.disconnect()
+    voice.vol.dispose()
+    voice.pan.dispose()
+  }
+
+  /** Reconcile live instrument voices with the document: dispose vanished tracks, (re)build new or
+   * sample-changed ones, apply program/volume/pan on existing ones. Cheap program changes and
+   * level/pan updates are synchronous; a new track or a changed soundfont triggers an async
+   * (re)build. */
+  private syncInstruments(doc: BeatDocument): void {
+    const wanted = new Set(doc.tracks.filter((t) => t.kind === 'instrument' && t.instrument).map((t) => t.id))
+    for (const [id, voice] of [...this.instruments]) {
+      if (!wanted.has(id)) {
+        this.disposeInstrument(voice)
+        this.instruments.delete(id)
+      }
+    }
+    for (const track of doc.tracks) {
+      if (track.kind !== 'instrument' || !track.instrument) continue
+      const inst = track.instrument
+      // doc.media is typed permissively (unknown[]) in the UI model; the engine reads the narrow
+      // { id, path } view it needs, same inline-cast pattern used for song/scenes above.
+      const media = (doc.media as { id: string; path: string }[]).find((m) => m.id === inst.sample)
+      if (!media) continue // sample not registered — nothing to load (reported elsewhere)
+      const voice = this.instruments.get(track.id)
+      if (!voice || voice.sample !== inst.sample) {
+        if (voice) {
+          this.disposeInstrument(voice)
+          this.instruments.delete(track.id)
+        }
+        if (!this.instrumentPending.has(track.id)) {
+          this.instrumentPending.add(track.id)
+          void this.buildInstrument(track.id, inst, media.path)
+        }
+        continue
+      }
+      if (voice.program !== inst.program) {
+        voice.synth.programChange(0, inst.program)
+        voice.program = inst.program
+      }
+      voice.vol.volume.value = inst.volume
+      voice.pan.pan.value = inst.pan
+    }
   }
 
   triggerDrum(lane: DrumLane, time: number, velocity = 1): void {
@@ -767,6 +924,13 @@ class Engine {
       this.repeatId = null
     }
     this.lastLaneTriggerTime = {}
+    for (const voice of this.instruments.values()) {
+      try {
+        voice.synth.stopAll(true)
+      } catch {
+        // best-effort: a not-yet-ready voice may reject stopAll
+      }
+    }
     useStore.getState().setPlaying(false)
     useStore.setState({ currentStep: -1 })
   }
@@ -856,7 +1020,25 @@ class Engine {
         continue
       }
 
-      if (track.kind !== 'synth') continue // instrument tracks: playback deferred (see header)
+      if (track.kind === 'instrument') {
+        // Instrument tracks: schedule this step's notes on the track's WorkletSynthesizer (channel
+        // 0), sample-accurately via spessasynth's `{ time }` option (absolute AudioContext seconds,
+        // the same clock `time` is in). No LFO/automation/filter env — those are synth-chain only.
+        const voice = this.instruments.get(track.id)
+        if (!voice) continue // still loading, or sample unresolved
+        for (const n of content.notes) {
+          if (Math.floor(n.start) !== content.contentStep) continue
+          const noteTime = time + (n.start - content.contentStep) * stepSeconds
+          const dur = Math.max(n.duration * stepSeconds * 0.9, 0.05)
+          const midi = Math.round(n.pitch)
+          const vel = Math.max(1, Math.min(127, Math.round(n.velocity * 127)))
+          voice.synth.noteOn(0, midi, vel, { time: noteTime })
+          voice.synth.noteOff(0, midi, { time: noteTime + dur })
+        }
+        continue
+      }
+
+      if (track.kind !== 'synth') continue // any other kind: nothing to schedule
       const chain = this.chains.get(track.id)
       if (!chain) continue
       const p = coerce(track.synth)
