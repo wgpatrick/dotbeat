@@ -132,7 +132,7 @@ sign-off still wanted before D5 commits to this.
 Decision criteria: implementation cost now, UX for non-terminal users, agent quality/upgrade
 path, key management, offline behavior.
 
-## 4. Versioning: checkpoints, not git UI `[research pending]`
+## 4. Versioning: checkpoints, not git UI `[research in — see research 11]`
 
 Ground truth: the project is already a git-friendly text file — versioning is a UX problem, not
 a storage problem. Direction:
@@ -149,8 +149,34 @@ a storage problem. Direction:
 - Media files ride in-repo while small; revisit (LFS or content-store) if projects get heavy —
   media is already content-addressed by sha256, which is most of the work.
 
-`[research pending: what Ableton/Figma/Photoshop history UX gets right; whether any git-backed
-creative tool has made non-programmers succeed with this, and what tripped them up.]`
+**Research 11 verdict (23 claims verified 3-0): the direction above is the shipped consensus,
+with four refinements now adopted:**
+
+- **Append-only restore is the norm** — Figma's restore creates *two* new checkpoints (the
+  pre-restore state stays recoverable); a claim that restore is destructive was refuted 0-3.
+  Also: auto-checkpoint before *and* after risky operations (vary-batch apply), Figma's
+  bracketing pattern.
+- **Index history by intent, not time**: Cursor/Claude Code list checkpoints by the *prompt*
+  that caused them, not timestamps. Ours get three layers: the automatic semantic diff
+  one-liner, the agent prompt when applicable, and optional user pins (Figma named versions,
+  ≤25-char titles). Unnamed checkpoints collapse between named ones so the timeline skims.
+- **Strip ALL git vocabulary** (Figma: "Commits felt like extra work. Branches of branches
+  felt complex" — no commit step, one branch level, no revert verb). Variations are "takes",
+  restore is "go back", named versions are "pins".
+- **The Ableton pain is confirmed** (Live discards undo history on every save — reports span
+  2010→Live 12.1), and the community's git-on-.als tools prove save-as-commit works but leave
+  history unlabeled — the exact gap our semantic diffs fill.
+
+**And the Splice Studio lesson (launched 2014, shut down 2023, verified via the CEO letter):**
+"GitHub for music" validated save-as-commit + per-revision comments with zero git vocabulary —
+then died because free unlimited *cloud* storage of every save was an unmonetized cost center,
+and its shutdown took users' version history with it. dotbeat inverts the failure mode by
+construction: history is a plain local git repo in the project folder — no cloud bill, no
+shutdown risk, the user owns it, and a git remote is optional off-site backup.
+
+Still open (tracked in research 11): media/binary versioning at scale (LFS vs content-store —
+our media is already sha256-addressed), and what tripped users of git-hiding tools like
+Abstract — revisit before D3 ships.
 
 ## 5. The full-song view
 
