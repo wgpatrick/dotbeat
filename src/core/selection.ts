@@ -8,6 +8,25 @@
 // narrows. selectionToNoteIds intersects the axes into the concrete note ids they cover — the
 // resolution that makes `beat vary --scope selection` possible.
 //
+// AXIS SEMANTICS — DECIDED (was docs/product-spec-desktop.md §7 open question "does bars 8 16
+// with no tracks mean all tracks?"; answer is yes, and it generalizes to every axis, not just
+// tracks). Resolved 2026-07-11 in docs/phase-9-selection-vary-plan.md; this is now settled
+// product behavior, not a live question — don't re-litigate it as open in future spec edits.
+//
+//   - Each of {tracks, lanes, bars, notes} is independently optional.
+//   - An ABSENT axis matches everything on that axis (unfiltered) — it is not "nothing".
+//     `{ bars: { start: 8, end: 16 } }` with no `tracks` key = bars 8-16 across every track.
+//   - A PRESENT axis narrows to exactly its listed entries (or window, for bars).
+//   - Multiple present axes AND together (intersection), not OR: `{ tracks: ['lead'], bars: ... }`
+//     means lead's notes AND within that bar window, not lead's notes OR that bar window.
+//   - The wholly-empty selection `{}` therefore means "everything, unfiltered on every axis" —
+//     which in practice reads the same as "no selection is scoping this operation", i.e. an
+//     operation falls back to its own default (whole document / whole track). This is why the
+//     daemon and CLI display `{}` as "no selection": not a different code path, just the
+//     degenerate case of "every axis absent".
+//   - `lanes` and `notes` are themselves scoped to a `track` per entry (`SelectionLane`/
+//     `SelectionNote`), so they narrow per-track even when the `tracks` axis is absent.
+//
 // Canonical form (one form per value, like the rest of the format — see format-spec.md):
 //
 //   selection
@@ -30,13 +49,14 @@ export interface SelectionLane {
   lane: string
 }
 
-/** A note reference: a note id scoped to a specific track. */
+/** A note reference: a note (or, for a drum track, a hit) id scoped to a specific track. */
 export interface SelectionNote {
   track: string
   note: string
 }
 
-/** An ephemeral pointing value. Every axis optional; an absent axis is an unfiltered "all". */
+/** An ephemeral pointing value. Every axis optional; an absent axis is an unfiltered "all" — see
+ * the AXIS SEMANTICS note at the top of this file for the full (now-decided) resolution rules. */
 export interface BeatSelection {
   tracks?: string[]
   lanes?: SelectionLane[]
@@ -172,7 +192,11 @@ export function validateSelection(sel: BeatSelection, doc: BeatDocument): void {
     for (const n of sel.notes) {
       const track = trackById.get(n.track)
       if (!track) throw new BeatSelectionError(`unknown track "${n.track}" in note ref`)
-      if (!track.notes.some((note) => note.id === n.note)) {
+      // Drum tracks carry hits, not notes (BeatTrack.notes is always [] for kind 'drums') — the
+      // `notes` axis is the one place the grammar names individual events, so on a drum track it
+      // addresses hit ids instead. Same axis, same wire form (`track.id`), track-kind-dependent pool.
+      const pool = track.kind === 'drums' ? track.hits : track.notes
+      if (!pool.some((e) => e.id === n.note)) {
         throw new BeatSelectionError(`unknown note "${n.note}" on track "${n.track}"`)
       }
     }
@@ -205,4 +229,100 @@ export function selectionToNoteIds(sel: BeatSelection, doc: BeatDocument): { tra
     if (covered.length > 0) out.push({ track: track.id, notes: covered })
   }
   return out
+}
+
+/** What `beat vary --scope selection` resolves down to: exactly the shapes vary/humanize already
+ * accept (`FeelVaryOptions.lanes` / `.ids` in src/vary/vary.ts) — no vary/humanize code needed to
+ * change for the wiring, only the CLI glue that calls this and passes the result straight through. */
+export interface VaryScope {
+  lanes?: string[]
+  ids?: string[]
+}
+
+/**
+ * Resolve a selection into a vary/humanize scope for ONE target track — the pure resolution
+ * behind `beat vary --scope selection` (docs/phase-9-selection-vary-plan.md). Uses the axis
+ * semantics above: an absent axis is unfiltered, present axes intersect.
+ *
+ *   - `tracks`, `lanes`, and `notes` each name a track per entry (`lanes`/`notes` entries carry
+ *     their own `track` field). If ANY of the three is present, their track names are unioned
+ *     into "the tracks this selection is about" — if that union is non-empty and excludes
+ *     `trackId`, this throws: the selection points at a different track/region entirely (the
+ *     guard `beat vary --scope selection` needs so it never silently varies the wrong track).
+ *     A selection with none of the three present (only `bars`, or fully empty) is about every
+ *     track equally, per the axis semantics above.
+ *   - once `trackId` clears that gate: if `lanes` has entries for `trackId` (drum tracks only)
+ *     and nothing else narrows further (no `bars`, no `notes`) -> passed straight through as
+ *     `{ lanes }`, vary's own `--lanes`.
+ *   - otherwise, if anything narrows this track's events (a `bars` window, an explicit `notes`
+ *     list, or `lanes` combined with `bars`/`notes`) -> resolved to concrete event ids (hits for
+ *     drum tracks, notes for synth/instrument tracks), intersecting whichever of {lanes, bars,
+ *     notes} are present — generalizes selectionToNoteIds's intersection rule to hits and lanes.
+ *   - nothing at all narrows this track beyond the gate above (e.g. `{}`, or `{ tracks: [id] }`
+ *     naming it with nothing more specific) -> `{}`, i.e. no scope, the whole track — vary's own
+ *     default when no scope is given.
+ *   - the selection IS non-empty but resolves to zero ids/lanes on this track (a bars window with
+ *     no events in it, or a `notes` list that names `trackId` but lists none of its actual events)
+ *     -> throws.
+ */
+export function selectionToVaryScope(sel: BeatSelection, doc: BeatDocument, trackId: string): VaryScope {
+  const track = doc.tracks.find((t) => t.id === trackId)
+  if (!track) throw new BeatSelectionError(`no track "${trackId}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
+
+  const hasTracks = sel.tracks !== undefined
+  const hasLanes = sel.lanes !== undefined
+  const hasNotes = sel.notes !== undefined
+  const hasBars = sel.bars !== undefined
+
+  if (hasTracks || hasLanes || hasNotes) {
+    const involved = new Set<string>()
+    if (hasTracks) for (const t of sel.tracks!) involved.add(t)
+    if (hasLanes) for (const l of sel.lanes!) involved.add(l.track)
+    if (hasNotes) for (const n of sel.notes!) involved.add(n.track)
+    if (!involved.has(trackId)) {
+      throw new BeatSelectionError(`selection does not cover track "${trackId}" (selection covers: ${[...involved].join(', ')})`)
+    }
+  }
+
+  const lanesForTrack = hasLanes ? sel.lanes!.filter((l) => l.track === trackId).map((l) => l.lane) : []
+
+  // Nothing narrows this track any further than the tracks-axis gate above -> whole track.
+  if (!hasBars && !hasNotes && lanesForTrack.length === 0) return {}
+
+  // Pure lane scope: nothing else narrows it further, so it passes straight through.
+  if (lanesForTrack.length > 0 && !hasBars && !hasNotes) {
+    if (track.kind !== 'drums') throw new BeatSelectionError(`lane scope targets a ${track.kind} track "${trackId}" — lanes exist only on drum tracks`)
+    return { lanes: lanesForTrack }
+  }
+
+  const isDrums = track.kind === 'drums'
+  const laneFilter = lanesForTrack.length > 0 ? new Set(lanesForTrack) : null
+  // Can't happen for a selection that passed validateSelection (lane refs are rejected against
+  // non-drum tracks there) — guarded here too since this function doesn't re-run validation.
+  if (laneFilter && !isDrums) throw new BeatSelectionError(`lane scope targets a ${track.kind} track "${trackId}" — lanes exist only on drum tracks`)
+
+  const noteFilter = hasNotes ? new Set(sel.notes!.filter((n) => n.track === trackId).map((n) => n.note)) : null
+  const lo = hasBars ? sel.bars!.start * 16 : null
+  const hi = hasBars ? sel.bars!.end * 16 : null
+
+  const ids: string[] = []
+  if (isDrums) {
+    for (const h of track.hits) {
+      if (laneFilter && !laneFilter.has(h.lane)) continue
+      if (lo !== null && (h.start < lo || h.start >= hi!)) continue
+      if (noteFilter && !noteFilter.has(h.id)) continue
+      ids.push(h.id)
+    }
+  } else {
+    for (const n of track.notes) {
+      if (lo !== null && (n.start < lo || n.start >= hi!)) continue
+      if (noteFilter && !noteFilter.has(n.id)) continue
+      ids.push(n.id)
+    }
+  }
+
+  if (ids.length === 0) {
+    throw new BeatSelectionError(`selection has nothing on track "${trackId}" to vary (no ${isDrums ? 'hits' : 'notes'} in the selected lanes/bars/ids)`)
+  }
+  return { ids }
 }

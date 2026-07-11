@@ -42,6 +42,8 @@ import {
   formatPresetList,
   parseSelection,
   serializeSelection,
+  selectionToVaryScope,
+  BeatSelectionError,
   BeatEditError,
   BeatParseError,
   BeatPresetError,
@@ -70,8 +72,11 @@ const USAGE = `usage:
   beat preset <file> <track> <name>                       apply a preset to a track (a bag of set edits)
   beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render]
                                                           batch-generate small-diff variants of one param group
-  beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,oh] [--render]
+  beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,oh | --ids a,b] [--render]
                                                           batch humanized FEEL variants (content variation) to audition + score
+  beat vary <file> <track> feel --scope selection --port <p> [...same feel flags, minus --lanes/--ids]
+                                                          scope to the GUI selection held by a running daemon instead of
+                                                          typing --lanes/--ids by hand (lanes -> --lanes, bars/notes -> --ids)
   beat vary --groups                                      list the mutation groups
   beat clip <file> <track> <clip-id>                      snapshot the track's live content into a clip
   beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
@@ -286,7 +291,7 @@ async function varyCmd(argv) {
     }
     return
   }
-  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids']
+  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids', '--scope', '--port']
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const [file, track, group] = positional
   if (!file || !track || !group) throw new BeatEditError('vary needs <file> <track> <group> (see beat vary --groups; "feel" batches humanized variants)')
@@ -295,6 +300,11 @@ async function varyCmd(argv) {
   if (group === 'feel') {
     await varyFeelCmd(argv, file, track)
     return
+  }
+  if (flagValue(argv, '--scope') !== undefined) {
+    // Param-group variants (rung 1) mutate whole-track synth params — there's no per-note/lane
+    // concept to scope by, so --scope selection only makes sense for "feel" (rung 2).
+    throw new BeatEditError('vary --scope selection only applies to "feel" (param groups mutate whole-track synth params, not per-note/lane content)')
   }
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
   const amount = flagValue(argv, '--amount') ? Number(flagValue(argv, '--amount')) : 0.25
@@ -352,11 +362,38 @@ async function varyCmd(argv) {
   }
 }
 
+/**
+ * `--scope selection` glue: fetch the live selection off a running daemon and resolve it against
+ * `doc`/`track` into the same {lanes|ids} shape `--lanes`/`--ids` accept by hand. Kept separate
+ * from varyFeelCmd's flag parsing so the only untestable-without-a-daemon part is this one fetch
+ * — the actual resolution (selectionToVaryScope) is a pure function tested without any daemon.
+ */
+async function fetchSelectionScope(port, doc, track) {
+  const base = `http://127.0.0.1:${Number(port)}`
+  const res = await fetch(`${base}/selection`)
+  if (!res.ok) {
+    const msg = await res.json().then((b) => b.error).catch(() => res.statusText)
+    throw new BeatEditError(`could not read selection from daemon on port ${port}: ${msg}`)
+  }
+  const sel = await res.json()
+  try {
+    return selectionToVaryScope(sel, doc, track)
+  } catch (err) {
+    if (err instanceof BeatSelectionError) throw new BeatEditError(err.message)
+    throw err
+  }
+}
+
 async function varyFeelCmd(argv, file, track) {
   const { varyFeel, BeatVaryError } = await import('../dist/src/vary/vary.js')
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
   const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
   const outDir = flagValue(argv, '--out-dir') ?? `vary-feel-${seed}`
+  const scope = flagValue(argv, '--scope')
+  if (scope !== undefined && scope !== 'selection') throw new BeatEditError(`vary --scope only supports "selection", got "${scope}"`)
+  if (scope === 'selection' && (flagValue(argv, '--lanes') !== undefined || flagValue(argv, '--ids') !== undefined)) {
+    throw new BeatEditError('vary --scope selection cannot be combined with --lanes/--ids — pick one way to scope')
+  }
   const opts = {
     count,
     seed,
@@ -364,11 +401,28 @@ async function varyFeelCmd(argv, file, track) {
     ...(flagValue(argv, '--velocity') !== undefined ? { velocity: Number(flagValue(argv, '--velocity')) } : {}),
     ...(flagValue(argv, '--push-late') !== undefined ? { pushLate: Number(flagValue(argv, '--push-late')) } : {}),
     ...(flagValue(argv, '--swing') !== undefined ? { swing: Number(flagValue(argv, '--swing')) } : {}),
-    ...(flagValue(argv, '--lanes') !== undefined ? { lanes: flagValue(argv, '--lanes').split(',').filter(Boolean) } : {}),
-    ...(flagValue(argv, '--ids') !== undefined ? { ids: flagValue(argv, '--ids').split(',').filter(Boolean) } : {}),
+    ...(scope !== 'selection' && flagValue(argv, '--lanes') !== undefined ? { lanes: flagValue(argv, '--lanes').split(',').filter(Boolean) } : {}),
+    ...(scope !== 'selection' && flagValue(argv, '--ids') !== undefined ? { ids: flagValue(argv, '--ids').split(',').filter(Boolean) } : {}),
   }
   const text = readFileSync(file, 'utf8')
   const doc = parse(text)
+
+  if (scope === 'selection') {
+    const portIdx = argv.indexOf('--port')
+    if (portIdx === -1 || argv[portIdx + 1] === undefined) {
+      throw new BeatEditError('vary --scope selection needs --port <port> (the running daemon — same convention as `beat selection`)')
+    }
+    const resolved = await fetchSelectionScope(argv[portIdx + 1], doc, track)
+    Object.assign(opts, resolved)
+    process.stdout.write(
+      resolved.lanes
+        ? `scope: selection -> lanes ${resolved.lanes.join(', ')}\n`
+        : resolved.ids
+          ? `scope: selection -> ${resolved.ids.length} id(s): ${resolved.ids.join(', ')}\n`
+          : 'scope: selection -> whole track (selection had nothing narrowing it)\n',
+    )
+  }
+
   let variants
   try {
     variants = varyFeel(doc, track, opts)
