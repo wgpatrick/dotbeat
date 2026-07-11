@@ -7,10 +7,41 @@ merged back into `main` as each lands. Scope was chosen from the backlog already
 `docs/product-spec-desktop.md`'s open questions — nothing invented from scratch, just picking up
 threads already dropped.*
 
-**Explicitly not attempted tonight**: the Tauri shell (D1). It needs the separate `beatlab` repo
-checked out locally (not present on this machine) and a real display to verify WKWebView/Web Audio
-behavior — not something that can be honestly verified headless overnight. Left for a session
-where that checkout exists.
+**Update**: originally deferred the Tauri shell (D1) on the assumption this machine had no
+`beatlab` checkout, no network access, and no way to verify a GUI headlessly. All three
+assumptions were wrong — Xcode Command Line Tools are installed, GitHub is reachable, and this
+*is* the owner's real Mac with a real display attached, so a launched window can actually be
+screenshotted (`screencapture` + reading the image) for honest visual verification, even though
+nothing here can literally listen to audio. Added as Stream F below, owner-directed.
+
+## Stream F — D1: Tauri shell spike + scaffold
+
+`docs/product-spec-desktop.md` §6 names D1 first in the desktop milestone sequence ("cheap, makes
+everything after it feel real") and research 13 (`docs/research/13-tauri-shell.md`) flags one
+concrete risk to de-risk before committing to the milestone: **macOS WKWebView's Web Audio
+support** — untested, with Electron as the named fallback if it fails. Do the spike for real
+before building the full shell.
+
+Scope, in order:
+1. **The spike**: a minimal Tauri app (new `desktop/` dir in this repo) that loads a tiny Tone.js
+   test page in its WKWebView and confirms audio actually initializes and plays (AudioContext
+   reaches `running`, a scheduled tone actually fires — verify via injected JS logging to a file
+   the agent can read back, since nobody here can literally listen). Report the result honestly:
+   pass/fail, and if fail, note Electron as the documented fallback rather than fighting it.
+2. **If the spike passes**: clone `https://github.com/wgpatrick/beatlab` locally (outside this
+   repo's git tree — a sibling/scratch directory, gitignored, not committed) and wrap its existing
+   web GUI in the Tauri shell: daemon (`cli/daemon.mjs`) spawned as a sidecar process, WKWebView
+   pointed at what the daemon serves, open-a-folder + native file dialogs per the D1 spec.
+3. Launch the real app at least once and take a screenshot (`screencapture`) to visually confirm
+   it renders (read the screenshot back) — this is real verification, not a guess, since this
+   session runs on the owner's actual machine with a real display. Close/quit the app when done
+   rather than leaving stray windows open.
+
+Own: new `desktop/` directory (Tauri project: `src-tauri/`, `tauri.conf.json`, minimal frontend),
+its own `docs/phase-9-tauri-spike-plan.md` result doc (problem, what was spiked, pass/fail with
+evidence, what shipped vs honestly deferred — full shell polish, native file dialogs edge cases,
+etc. are NOT expected to land in one night, the spike verdict is the deliverable that matters
+most). Low collision risk — entirely new files, no overlap with streams A-E.
 
 ## Stream A — Format v0.9: clip automation grammar
 
