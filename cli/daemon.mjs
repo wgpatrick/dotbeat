@@ -3,7 +3,10 @@
 // See src/daemon/daemon.ts for the protocol and docs/phase-1-plan.md for the design.
 //
 // Usage:
-//   node cli/daemon.mjs <project.beat> [--port 8420]
+//   node cli/daemon.mjs <project.beat | project-folder> [--port 8420]
+//
+// Point it at a .beat file, or at a project *folder* (the desktop-shell "open a folder" flow):
+// a folder with one .beat opens it; an empty folder gets a starter project.beat created for it.
 //
 // Then open the BeatLab dev server with ?daw=<port> appended, e.g.
 //   http://localhost:5173/musiclearning/?daw=8420
@@ -11,16 +14,26 @@
 // Requires `npm run build` to have run first (reads compiled ../dist/src).
 
 import { startDaemon } from '../dist/src/daemon/daemon.js'
+import { resolveProjectFile, ProjectError } from '../dist/src/daemon/project.js'
 
 export async function daemonCommand(argv) {
-  let filePath
+  let target
   let port = 8420
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port') port = Number(argv[++i])
-    else filePath = argv[i]
+    else target = argv[i]
   }
-  if (!filePath) {
-    console.error('usage: beat daemon <project.beat> [--port 8420]')
+  if (!target) {
+    console.error('usage: beat daemon <project.beat | project-folder> [--port 8420]')
+    process.exit(1)
+  }
+  let filePath
+  try {
+    const resolved = resolveProjectFile(target)
+    filePath = resolved.filePath
+    if (resolved.created) console.log(`created starter project ${filePath}`)
+  } catch (err) {
+    console.error(err instanceof ProjectError ? err.message : String(err))
     process.exit(1)
   }
   const daemon = await startDaemon({ filePath, port })
