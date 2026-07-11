@@ -21,11 +21,13 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 async function loadWebAudio(): Promise<{ OfflineAudioContext: any } | null> {
   try {
-    // @ts-expect-error node-web-audio-api's .d.ts isn't a proper module shape (TS2306) — this
-    // devDependency points at a local patched native build that may not be present in every
-    // checkout anyway (see cli/render-offline.mjs's npm-fallback warning); we only need it at
-    // runtime, feature-detected below.
+    // node-web-audio-api points at a local patched native build (file:../upstream/...) that isn't
+    // present in every checkout (see cli/render-offline.mjs's npm-fallback warning) — on a
+    // checkout without it, the symlink npm creates is dangling and TS can't find a module to
+    // resolve at all (TS2307), so both dynamic imports need their own suppression.
+    // @ts-expect-error TS2307 — see above
     await import('node-web-audio-api/polyfill.js')
+    // @ts-expect-error TS2307 — see above
     const mod = await import('node-web-audio-api')
     return { OfflineAudioContext: (mod as any).OfflineAudioContext }
   } catch {
