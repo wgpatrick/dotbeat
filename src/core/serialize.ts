@@ -6,7 +6,7 @@ import { formatNumber } from './format.js'
 function sortedNoteLines(notes: BeatNote[], indent: string): string[] {
   return [...notes]
     .sort((a, b) => a.start - b.start || a.pitch - b.pitch || a.id.localeCompare(b.id))
-    .map((n) => `${indent}note ${n.id} ${n.pitch} ${n.start} ${n.duration} ${formatNumber(n.velocity)}`)
+    .map((n) => `${indent}note ${n.id} ${n.pitch} ${formatNumber(n.start)} ${formatNumber(n.duration)} ${formatNumber(n.velocity)}`)
 }
 
 // Canonical: all five lanes, always, in DRUM_LANES order — a step toggle is always a one-line

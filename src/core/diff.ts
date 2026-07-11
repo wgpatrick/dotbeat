@@ -216,7 +216,7 @@ function fmtVal(v: string | number | boolean | null): string {
 }
 
 function noteDesc(n: BeatNote): string {
-  return `${n.id} (pitch ${n.pitch}, start ${n.start}, dur ${n.duration}, vel ${formatNumber(n.velocity)})`
+  return `${n.id} (pitch ${n.pitch}, start ${formatNumber(n.start)}, dur ${formatNumber(n.duration)}, vel ${formatNumber(n.velocity)})`
 }
 
 /** One musical edit per line, track-scoped — reads like an edit list, not like line noise. */

@@ -5,6 +5,11 @@
 
 import type { BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
 import { DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS } from './document.js'
+import { formatNumber } from './format.js'
+
+/** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
+ * in a document survive a serialize→parse round-trip deep-equal. */
+const canon = (n: number): number => Number(formatNumber(n))
 
 export class BeatEditError extends Error {
   constructor(message: string) {
@@ -140,8 +145,11 @@ export function addNote(doc: BeatDocument, trackId: string, note: { pitch: numbe
   const track = findTrack(doc, trackId)
   if (track.kind === 'drums') throw new BeatEditError(`track "${trackId}" is a drums track — notes only belong on synth/instrument tracks`)
   if (note.pitch < 0 || note.pitch > 127 || !Number.isInteger(note.pitch)) throw new BeatEditError(`pitch must be an integer 0-127, got ${note.pitch}`)
-  if (!Number.isInteger(note.start) || note.start < 0) throw new BeatEditError(`start must be a non-negative integer step, got ${note.start}`)
-  if (!Number.isInteger(note.duration) || note.duration < 1) throw new BeatEditError(`duration must be an integer >= 1 step, got ${note.duration}`)
+  // v0.7: fractional steps are legal — live/tapped input lands between grid lines. Values are
+  // snapped to the canonical 4-decimal precision on the way in (see format.ts) so a stored doc
+  // always deep-equals parse(serialize(doc)).
+  if (!Number.isFinite(note.start) || note.start < 0) throw new BeatEditError(`start must be a step position >= 0, got ${note.start}`)
+  if (!Number.isFinite(note.duration) || note.duration <= 0) throw new BeatEditError(`duration must be > 0 steps, got ${note.duration}`)
   if (note.velocity < 0 || note.velocity > 1) throw new BeatEditError(`velocity must be 0..1, got ${note.velocity}`)
 
   let id = note.id
@@ -156,7 +164,9 @@ export function addNote(doc: BeatDocument, trackId: string, note: { pitch: numbe
     throw new BeatEditError(`note id "${id}" already exists`)
   }
 
-  const added: BeatNote = { id, pitch: note.pitch, start: note.start, duration: note.duration, velocity: note.velocity }
+  const duration = canon(note.duration)
+  if (duration <= 0) throw new BeatEditError(`duration must be > 0 steps at canonical precision (4 decimals), got ${note.duration}`)
+  const added: BeatNote = { id, pitch: note.pitch, start: canon(note.start), duration, velocity: canon(note.velocity) }
   return { doc: replaceTrack(doc, { ...track, notes: [...track.notes, added] }), note: added }
 }
 
@@ -268,7 +278,7 @@ export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: 
   const loopBars = opts.loopBars ?? 2
   if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
   if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
-  const base: BeatDocument = { formatVersion: '0.5', bpm, loopBars, selectedTrack: '', media: [], tracks: [], scenes: [], song: null }
+  const base: BeatDocument = { formatVersion: '0.7', bpm, loopBars, selectedTrack: '', media: [], tracks: [], scenes: [], song: null }
   const { doc } = addTrack(base, { id: opts.trackId ?? 'lead', kind: 'synth' })
   return { ...doc, selectedTrack: doc.tracks[0]!.id }
 }

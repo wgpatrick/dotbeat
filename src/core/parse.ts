@@ -105,9 +105,13 @@ export function parse(text: string): BeatDocument {
     const [, id, pitchTok, startTok, durTok, velTok] = tokens as [string, string, string, string, string, string]
     const pitch = parseIntStrict(pitchTok, lineNo, 'note pitch')
     if (pitch < 0 || pitch > 127) throw new BeatParseError(`note pitch must be 0-127, got ${pitch}`, lineNo)
-    const start = parseIntStrict(startTok, lineNo, 'note start')
-    const duration = parseIntStrict(durTok, lineNo, 'note duration')
-    if (duration < 1) throw new BeatParseError(`note duration must be >= 1 step, got ${duration}`, lineNo)
+    // v0.7: start/duration accept decimals (fractional steps) — live/tapped input lands
+    // between grid lines. Non-canonical spellings ("0.50") parse fine and re-serialize
+    // canonically ("0.5"); see format.ts.
+    const start = parseFloatStrict(startTok, lineNo, 'note start')
+    if (start < 0) throw new BeatParseError(`note start must be >= 0, got ${start}`, lineNo)
+    const duration = parseFloatStrict(durTok, lineNo, 'note duration')
+    if (duration <= 0) throw new BeatParseError(`note duration must be > 0 steps, got ${duration}`, lineNo)
     const velocity = parseFloatStrict(velTok, lineNo, 'note velocity')
     return { id, pitch, start, duration, velocity }
   }

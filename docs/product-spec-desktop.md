@@ -24,6 +24,8 @@ source:
    this whole interface/interaction question rather than a snap decision.
 5. **Versioning.** "We make changes — we want to store the previous version so you can go
    back."
+6. **Live input.** "We will want to be able to input notes at arbitrary times… like tapping
+   on keys to create rhythm." Play it in, don't program it in.
 
 ## 1. What the product is
 
@@ -157,6 +159,22 @@ columns, notes visible across the whole song (density-rendered when zoomed out),
 boundaries labeled. This is also where selection lives — drag across bars, click a track
 header, click a lane. The current beatlab GUI has the per-pattern grid; the song-length view is
 new GUI work and is the desktop app's centerpiece screen.
+
+## 5.5 Live capture (tap-to-record)
+
+The format side landed as **v0.7 (2026-07-11): fractional note timing** — notes store at
+arbitrary step positions (4-decimal canonical precision, engine verified sample-accurate), so
+a tapped performance records *as played*. What remains is the capture UX, which is GUI work:
+
+- **Tap recording**: during looped playback, computer-keyboard (later MIDI) taps become notes
+  timestamped against the transport, written to the file on loop end (one checkpoint per
+  take — versioning makes bad takes free).
+- **Quantize is an edit, not a default**: captured timing is kept raw; quantize/humanize are
+  explicit operations (and `beat vary` knobs) on a selection. This also gives the agent
+  something musical to work with — real human timing feel it can analyze or amplify.
+- **Drum lanes**: tapping a drum lane needs off-grid drum hits, which the pattern grid can't
+  express — per-lane swing or note-style hit lines is a follow-up format decision (spec'd as
+  an open question in format-spec v0.7 notes).
 
 ## 6. Milestones (proposed — replaces "M4 someday" sequencing for the GUI track)
 
