@@ -20,6 +20,20 @@ This reframes the work: dotbeat already has every component this needs (`Arrange
 Phase 18 is substantially a **re-parenting** job, recomposing what exists into the right shape,
 not a rebuild.
 
+## Addendum, same day: drum voices are getting reconsidered separately
+
+The owner pushed back on this doc's assumption (inherited from research 18's "skip Racks" call)
+that the current 5-lane drum model (kick/snare/hat/openhat/clap) is a fine permanent shape — it's
+explicitly a BeatLab holdover, not a deliberate constraint, and he wants real drum racks with many
+more named voices (808s etc.), each hit addressable like a piano-roll note but for a specific
+drum. **This is a distinct question from Racks-the-nested-chain-machinery** (still probably right
+to skip) — it's about lane *cardinality*, a format/engine question. A dedicated research pass is
+running now (see task "Research: expanding drum voices beyond the 5-lane BeatLab holdover"); its
+recommendation supersedes this doc's 5-lane assumption wherever they conflict. Stream Q below can
+proceed as planned regardless — the layout-composition work doesn't depend on the exact lane
+count — but `StepSequencer.tsx`'s specific lane-rendering approach should be treated as likely to
+change again once that research lands, not as settled.
+
 ## Stream Q — core layout unification (runs alone this round)
 
 Read `docs/research/18-ableton-ui-architecture.md` in full before starting — it has the precise
