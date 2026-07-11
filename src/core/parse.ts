@@ -374,7 +374,6 @@ export function parse(text: string): BeatDocument {
         continue
       }
       if (keyword === 'clip') {
-        if (currentTrack.kind === 'instrument') throw new BeatParseError(`instrument tracks do not carry clips in v0.6 (timeline participation is a later phase); "${currentTrack.id}"`, lineNo)
         closeClipIfOpen(lineNo)
         if (tokens.length !== 2) throw new BeatParseError('clip expects exactly 1 value: <id>', lineNo)
         const id = tokens[1]!
@@ -405,13 +404,13 @@ export function parse(text: string): BeatDocument {
     }
 
     if (level === 2) {
-      // clip content (notes for synth clips, pattern lanes for drum clips, v0.9 automation lanes)
+      // clip content (notes for synth/instrument clips, pattern lanes for drum clips, v0.9 automation lanes)
       if (currentClip && currentTrack && !inSynth) {
         // Any level-2 line here ends a previously-open automation lane (its `point` children are
         // level 3) — close-and-validate it before handling this line, whatever it is.
         closeAutoLaneIfOpen(lineNo)
         if (keyword === 'note') {
-          if (currentTrack.kind !== 'synth') throw new BeatParseError(`note lines only belong in synth-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+          if (currentTrack.kind === 'drums') throw new BeatParseError(`note lines only belong in synth/instrument-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
           currentClip.notes.push(parseNoteLine(tokens, lineNo))
           continue
         }

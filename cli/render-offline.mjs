@@ -158,6 +158,87 @@ Tone.Context.prototype.createAudioWorkletNode = function (name, _options) {
   return shaper
 }
 
+// v0.6+ master-bus fix (docs/phase-8-plan.md's "Remaining": instrument audio "currently bypasses
+// the limiter"). Root cause: instrument tracks render OUTSIDE the Tone graph entirely (see the
+// instrument block below) and connect their buffer straight to `offline.rawContext.destination`
+// — beatlab's own master bus/limiter (engine.ts: `masterBus.chain(masterLimiter,
+// Tone.getDestination())`, docs/phase-0-plan.md) is a construct PRIVATE to the bundled engine
+// module we build from beatlab source (headless-entry only re-exports `useStore`/`engine`/
+// `DEFAULT_SYNTH`/`audioBufferToWav` — see scripts/build-headless-engine.mjs), so there is no
+// handle to that exact node to route instrument audio through. Rather than widen beatlab's own
+// export surface (out of reach here — no beatlab checkout in this environment), we fix it at the
+// one seam this file already owns: the raw context's `destination`. `destination` is a
+// configurable getter (verified: overriding it on the instance shadows the prototype getter), and
+// Tone's own Destination singleton reads `context.rawContext.destination` exactly once, at
+// construction, to wire its final connection (node_modules/tone Destination.js:37) — which
+// happens when `Tone.setContext()` runs the context-init hooks, AFTER this function is called.
+// So: install a real limiter (Tone.Limiter's own defaults: ratio 20, attack 3ms, release 10ms,
+// -12dB threshold) between a shared summing bus and the TRUE destination node, then make
+// `rawContext.destination` resolve to that shared bus's input from here on. Every consumer —
+// Tone's Destination (and therefore every synth/drum track's bus, which all `.toDestination()`
+// into it) AND the instrument buffer sources below (unchanged call site: `offline.rawContext.
+// destination`) — now sums into the same node before the same limiter, before the same true
+// destination. The OfflineAudioContext's actual rendered-audio graph is still rooted at the one
+// real native destination node (captured once, connected to); only the JS-level property that
+// callers use to reach it is redirected.
+export function attachSharedMasterBus(rawContext, { threshold = -12, ratio = 20, attack = 0.003, release = 0.01 } = {}) {
+  const trueDestination = rawContext.destination
+  const masterBusInput = rawContext.createGain()
+  const limiter = rawContext.createDynamicsCompressor()
+  limiter.threshold.value = threshold
+  limiter.knee.value = 0
+  limiter.ratio.value = ratio
+  limiter.attack.value = attack
+  limiter.release.value = release
+  masterBusInput.connect(limiter)
+  limiter.connect(trueDestination)
+  Object.defineProperty(rawContext, 'destination', { value: masterBusInput, configurable: true })
+  return { masterBusInput, limiter, trueDestination }
+}
+
+// v0.8+ instrument scene/song resolution (docs/phase-6-plan.md semantics, extended to instrument
+// tracks): builds the sample-indexed noteOn/noteOff event list for one instrument track. Pure and
+// engine-free (no spessasynth/Tone/beatlab dependency) so the scene->clip resolution logic is
+// unit-testable on its own — see test/instrument-clips.test.ts. `doc.song` present = timeline
+// mode: walk sections in order, resolve (scene -> this track's slot -> clip), and tile that
+// clip's notes every loopSteps within the section (unmapped tracks are silent for that section —
+// a scene is a complete statement of what plays, same rule the beatlab engine tick uses for
+// synth/drum tracks). No song block = loop mode: the live top-level notes tile across the whole
+// render, exactly as before this feature existed.
+export function instrumentNoteEvents(track, doc, { stepSeconds, rate, totalSamples, renderSteps }) {
+  const loopSteps = doc.loopBars * 16
+  const events = []
+  const pushNotesInRange = (notes, rangeStartSteps, rangeEndSteps) => {
+    for (let base = rangeStartSteps; base < rangeEndSteps; base += loopSteps) {
+      for (const n of notes) {
+        const noteStartSteps = base + n.start
+        if (noteStartSteps >= rangeEndSteps) continue
+        const on = Math.floor(noteStartSteps * stepSeconds * rate)
+        const off = Math.floor((noteStartSteps + n.duration) * stepSeconds * rate)
+        if (on < totalSamples) {
+          events.push({ at: on, on: true, pitch: n.pitch, vel: Math.round(n.velocity * 127) })
+          events.push({ at: Math.min(off, totalSamples - 1), on: false, pitch: n.pitch })
+        }
+      }
+    }
+  }
+  if (doc.song) {
+    let cursorSteps = 0
+    for (const section of doc.song) {
+      const sectionSteps = section.bars * 16
+      const scene = doc.scenes.find((s) => s.id === section.scene)
+      const clipId = scene?.slots[track.id]
+      const clip = clipId ? track.clips.find((c) => c.id === clipId) : undefined
+      if (clip) pushNotesInRange(clip.notes, cursorSteps, cursorSteps + sectionSteps)
+      cursorSteps += sectionSteps
+    }
+  } else {
+    pushNotesInRange(track.notes, 0, renderSteps)
+  }
+  events.sort((a, b) => a.at - b.at)
+  return events
+}
+
 export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds = 0 }) {
   const doc = parse(readFileSync(beatPath, 'utf8'))
   // v0.4: a song block sets the render length (sum of section bars); otherwise one loop pass.
@@ -181,6 +262,9 @@ export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds
   }
   const t0 = performance.now()
   const offline = new Tone.OfflineContext(2, seconds, 44100)
+  // must run before setContext: Tone's Destination singleton reads rawContext.destination once,
+  // at context-init time, to wire its own final connection (see attachSharedMasterBus above).
+  attachSharedMasterBus(offline.rawContext)
   Tone.setContext(offline)
   stamp('context')
 
@@ -258,10 +342,13 @@ export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds
 
     // v0.6 instrument tracks: rendered by spessasynth_core OUTSIDE the Tone graph (29x realtime
     // vs 0.2-0.7x through it — docs/phase-8-plan.md), sequenced here by sample position, then
-    // injected into the offline mix as a plain buffer source. Notes loop every loopBars across
-    // the render length, same as synth tracks. Volume/pan baked in (constant-power pan). Known
-    // limitation: bypasses the master limiter; instrument tracks join the master bus in the
-    // browser-leg slice.
+    // injected into the offline mix as a plain buffer source through the shared master bus
+    // (attachSharedMasterBus, above — no longer bypasses the limiter). Volume/pan baked in
+    // (constant-power pan). v0.8+: instrument tracks participate in scenes/song exactly like
+    // synth tracks (docs/phase-6-plan.md semantics) — in song mode, each section resolves
+    // (scene -> this track's slot -> clip) and that clip's notes loop every loopBars within the
+    // section; a track unmapped in a scene is silent for that section. In loop mode (no song
+    // block) the live top-level notes loop across the whole render, as before.
     const instrumentTracks = doc.tracks.filter((t) => t.kind === 'instrument')
     if (instrumentTracks.length > 0) {
       // the web-audio polyfill defines `window`, which flips spessasynth's embedded WASM loader
@@ -271,7 +358,6 @@ export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds
       const rate = 44100
       const totalSamples = Math.floor(seconds * rate)
       const stepSeconds = 60 / doc.bpm / 4
-      const loopSteps = doc.loopBars * 16
       const renderSteps = Math.ceil(seconds / stepSeconds)
       for (const t of instrumentTracks) {
         const bytes = rawMedia.get(t.instrument.sample)
@@ -280,19 +366,7 @@ export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds
         proc.soundBankManager.addSoundBank(SoundBankLoader.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)), 'main')
         proc.createMIDIChannel()
         proc.programChange(0, t.instrument.program)
-        // event list: sample-indexed noteOn/noteOff, notes looping every loopBars
-        const events = []
-        for (let base = 0; base < renderSteps; base += loopSteps) {
-          for (const n of t.notes) {
-            const on = Math.floor((base + n.start) * stepSeconds * rate)
-            const off = Math.floor((base + n.start + n.duration) * stepSeconds * rate)
-            if (on < totalSamples) {
-              events.push({ at: on, on: true, pitch: n.pitch, vel: Math.round(n.velocity * 127) })
-              events.push({ at: Math.min(off, totalSamples - 1), on: false, pitch: n.pitch })
-            }
-          }
-        }
-        events.sort((a, b) => a.at - b.at)
+        const events = instrumentNoteEvents(t, doc, { stepSeconds, rate, totalSamples, renderSteps })
         const L = new Float32Array(totalSamples)
         const R = new Float32Array(totalSamples)
         let cursor = 0

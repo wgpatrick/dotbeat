@@ -160,12 +160,85 @@ function rmTrackCmd(argv) {
   writeDoc(file, before, doc)
 }
 
-function inspectCmd(argv) {
+// v0.8+ multi-preset listing (docs/phase-8-plan.md's "Remaining": "beat inspect should list a
+// bank's presets" — a loaded SF2 can carry many programs; the file only pins the one selected).
+// Reads the actual .sf2 bytes (relative to the .beat file, sha256-verified like every other
+// media consumer) and enumerates via spessasynth_core's SoundBankLoader — a pure binary-format
+// parse, no audio context / DSP / browser shim required (verified: no window/document stub
+// needed, unlike SpessaSynthProcessor's WASM path in render-offline.mjs). Best-effort: a missing
+// file, unregistered sample, or hash mismatch is reported per-track rather than failing the
+// whole inspect (inspect is a read-only overview that should stay usable even when media isn't
+// checked out locally), matching the spirit of `beat inspect`'s always-available design.
+async function instrumentPresetInfo(file, doc) {
+  const info = new Map()
+  const instrumentTracks = doc.tracks.filter((t) => t.kind === 'instrument' && t.instrument)
+  if (instrumentTracks.length === 0) return info
+  const { createHash } = await import('node:crypto')
+  const { dirname: pathDirname, resolve: pathResolve } = await import('node:path')
+  const beatDir = pathDirname(pathResolve(file))
+  let SoundBankLoader
+  for (const t of instrumentTracks) {
+    const sample = doc.media.find((m) => m.id === t.instrument.sample)
+    if (!sample) {
+      info.set(t.id, { error: `sample "${t.instrument.sample}" is not in the media block` })
+      continue
+    }
+    const filePath = pathResolve(beatDir, sample.path)
+    if (!existsSync(filePath)) {
+      info.set(t.id, { error: `file not found: ${sample.path} (relative to ${beatDir})` })
+      continue
+    }
+    try {
+      const bytes = readFileSync(filePath)
+      const hash = createHash('sha256').update(bytes).digest('hex')
+      if (hash !== sample.sha256) {
+        info.set(t.id, { error: `sha256 mismatch for ${sample.path} (file ${hash.slice(0, 12)}..., document expects ${sample.sha256.slice(0, 12)}...)` })
+        continue
+      }
+      SoundBankLoader ??= (await import('spessasynth_core')).SoundBankLoader
+      const bank = SoundBankLoader.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+      const presets = bank.presets
+        .map((p) => ({ program: p.program, bankMSB: p.bankMSB, bankLSB: p.bankLSB, name: p.name }))
+        .sort((a, b) => a.bankMSB - b.bankMSB || a.bankLSB - b.bankLSB || a.program - b.program)
+      info.set(t.id, { presets })
+    } catch (e) {
+      info.set(t.id, { error: e.message })
+    }
+  }
+  return info
+}
+
+function formatInstrumentPresets(doc, info) {
+  if (info.size === 0) return ''
+  const lines = ['', 'soundfont presets:']
+  for (const t of doc.tracks) {
+    const result = info.get(t.id)
+    if (!result) continue
+    if (result.error) {
+      lines.push(`  ${t.id}: ${result.error}`)
+      continue
+    }
+    lines.push(`  ${t.id}: ${result.presets.length} preset${result.presets.length === 1 ? '' : 's'}`)
+    for (const p of result.presets) {
+      const selected = p.program === t.instrument.program ? ' [selected]' : ''
+      lines.push(`    program ${p.program} (bank ${p.bankMSB}/${p.bankLSB}): "${p.name}"${selected}`)
+    }
+  }
+  return lines.join('\n') + '\n'
+}
+
+async function inspectCmd(argv) {
   const json = argv.includes('--json')
   const file = argv.find((a) => a !== '--json')
   if (!file) throw new BeatEditError('inspect needs a file')
   const doc = readDoc(file)
-  process.stdout.write(json ? JSON.stringify(doc, null, 2) + '\n' : describeDocument(doc))
+  const presetInfo = await instrumentPresetInfo(file, doc)
+  if (json) {
+    const instrumentPresets = presetInfo.size > 0 ? Object.fromEntries(presetInfo) : undefined
+    process.stdout.write(JSON.stringify(instrumentPresets ? { ...doc, instrumentPresets } : doc, null, 2) + '\n')
+  } else {
+    process.stdout.write(describeDocument(doc) + formatInstrumentPresets(doc, presetInfo))
+  }
 }
 
 function setCmd(argv) {
@@ -800,7 +873,7 @@ async function main() {
       rmTrackCmd(rest)
       break
     case 'inspect':
-      inspectCmd(rest)
+      await inspectCmd(rest)
       break
     case 'set':
       setCmd(rest)
