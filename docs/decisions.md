@@ -166,6 +166,15 @@ ships 27 working devices today. *(`research/02-web-stack-feasibility.md`, fully 
 **Revisit when:** browser audio APIs expose pipeline latency / lower the round-trip floor, or WAM2
 plugin ecosystem matures enough to matter.
 
+**Update 2026-07-11 (owner steer):** the product's primary form factor is a **desktop app
+connected to local files** — that's what the owner wants to ship, not a hosted web app. This
+doesn't change the architecture (the GUI stays web tech; Tauri wraps it), it changes the
+*sequencing*: the Tauri shell moves up from "M4, someday" to "as soon as the GUI is worth
+wrapping." Everything built so far already assumes local files (the daemon watches a real
+directory on disk; media paths are relative to the project folder), so the shell is mostly
+packaging plus moving the daemon in-process. The deep M4 work — native audio engine, plugin
+hosting, latency — stays M4; the shell doesn't need to wait for it.
+
 ---
 
 ## D4 — Diff-friendliness is a format *requirement*, not a nice-to-have
@@ -213,7 +222,10 @@ first-party sourced.)*
   msfa DX7 core are Apache-2.0, MIT-compatible); openDAW (AGPL/LGPL) remains
   learn-from-patterns-only, never port-literal-code. LICENSE file added, package.json updated.
 - **BeatLab relationship** — hard fork vs BeatLab becomes the "learn" mode sharing a core.
-- **Web-first vs Tauri-earlier** — reach vs depth.
+- ~~**Web-first vs Tauri-earlier**~~ — **DECIDED 2026-07-11 (owner): desktop-first.** The
+  primary form factor is a desktop app connected to local files (Tauri shell around the
+  existing web GUI, daemon logic in-process). The browser remains a dev/demo surface, not the
+  product. See D3 update.
 - **Three confirmed research blind spots**, both surfaced by the fully-verified passes finding
   *zero* surviving evidence despite being explicit original research questions — worth a
   dedicated follow-up before treating adjacent decisions (especially M4 engine choices) as settled:

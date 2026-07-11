@@ -684,7 +684,10 @@ research-backed rankings.)*
   (both permissively licensed). Reminder: openDAW itself is **AGPL v3/LGPL** — fine to learn from,
   not to copy code from verbatim.
 - **Relationship to BeatLab.** Hard fork, or does BeatLab become the "learn" mode inside this?
-- **Web-first vs Tauri-first.** Ship the web tier alone first, or build Tauri earlier?
+- ~~**Web-first vs Tauri-first**~~ — **resolved 2026-07-11 (owner): desktop-first.** The primary
+  form factor is a desktop app connected to local files: a Tauri shell around the existing web
+  GUI with the daemon logic in-process, pulled forward ahead of the deep M4 native-engine work.
+  See `docs/decisions.md` D3 update.
 - **Research follow-ups**: (a) engine architecture — ✅ **done 2026-07-10**
   (`docs/research/05-engine-architecture.md`); (b) live-coding comparison and (c) demand
   signal — ✅ **done 2026-07-10, combined** (`docs/research/06-demand-and-adjacent-tools.md`).
