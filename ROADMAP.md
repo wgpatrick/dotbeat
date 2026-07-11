@@ -559,8 +559,10 @@ Unchanged in structure — the research corrected *content* within milestones, n
 - [x] Opt-in "mix lint rules" — deterministic findings that name the measurement and the `.beat`
       edit to try. *(The "AI critique delivered as diffs" LLM-narration half is interactive-only
       by design and sits on top of `beat mcp` — not a CI-testable artifact.)*
-- [ ] Real arrangement timeline (arbitrary length, tempo/time-sig changes) — biggest pure-eng
-      lift; beatlab-side, still open.
+- [x] Real arrangement timeline (arbitrary length, tempo/time-sig changes) — **done 2026-07-11**,
+      built in dotbeat's own frontend (`ui/`, not BeatLab's — see D12) as part of the Desktop
+      track's D4. Canvas-rendered, density-LOD at zoom, live playhead, selection wired in. See
+      `docs/phase-13-views.md`.
 - [x] Engine extraction onto `node-web-audio-api` (`beat render --offline`, `docs/phase-4-plan.md`):
       the REAL engine, unmodified, bundled headless — closed loop fully offline, self-consistent
       to 0.00 LU, no browser/vite. **Honest caveats, measured:** full-graph DSP runs 0.73×
@@ -600,12 +602,33 @@ exposed), not an engine ceiling.
   and envelope; lane balance is still pattern velocities only).
 
 ### Desktop track (D1–D5) — *added 2026-07-11, owner-directed; see [docs/product-spec-desktop.md](docs/product-spec-desktop.md)*
-Runs ahead of / alongside M4's engine work: **D1** Tauri shell (daemon in-process, local
-folders); **D2** selection-as-shared-context protocol (highlight section/track/lanes → agent
-acts on "this", agent spotlight back); **D3** auto-checkpoint versioning with semantic history
-labels + restore; **D4** full-song arrangement view; **D5** chat surface per research 10.
+Runs ahead of / alongside M4's engine work. **All five shipped or resolved as of 2026-07-11**,
+across Phases 9-16 (see each phase's own plan/result doc for detail):
+
+- [x] **D1 — Tauri shell.** Daemon as a compiled sidecar (not a spawned Node process), local
+      folders, folder re-pointing, persisted scope, a bundled starter project, force-quit-safe
+      cleanup. Pointed at dotbeat's own frontend (D12), not BeatLab. Distribution scope is
+      **deliberately local-machine-only** (D13) — no notarization/signing, no Windows/Linux build.
+- [x] **D2 — selection-as-shared-context.** Highlight section/track/lanes → the daemon's
+      `/selection` channel → agent acts on "this" (`beat vary --scope selection`); wired into the
+      arrangement view and the vary-and-audition affordance.
+- [x] **D3 — versioning.** Auto-checkpoint, named pins, collapsed history — now with a real GUI
+      panel (restore verified append-only), not CLI-only.
+- [x] **D4 — full-song arrangement view.** Canvas + density-LOD, live playhead, built in dotbeat's
+      own frontend.
+- [x] **D5 — agent surface, resolved as BYO-Claude-Code (D14).** Not an embedded chat panel for
+      now — an external agent (Claude Code) drives the app over `beat mcp`, with `beat mcp-init`
+      giving it a zero-setup path in. The inline "vary this" affordance (research 10's other half
+      of the two-tier hybrid) shipped as part of D2/D5 together.
 
 ### M4 — The "not a toy" / parity push *(Tauri native tier — design drafted, see [docs/m4-native-engine-design.md](docs/m4-native-engine-design.md))*
+
+**Status as of 2026-07-11: not started, deliberately.** The Desktop track (D1-D5) and dotbeat's
+own frontend absorbed this session's engineering effort instead — the right call, since a real GUI
+existing at all was a bigger unlock than deepening the audio engine further. M4 becomes the live
+priority once there's been real usage of what's already built (see the 2026-07-11 project review's
+suggested path forward).
+
 - [ ] Tauri shell: native-latency recording, latency compensation, CLAP/VST3 hosting.
 - [ ] Warping / time-stretch (Rubber Band or signalsmith; WASM in web, native in Tauri).
 - [ ] Comping, audio-region editing, freeze/flatten/bounce with defined signal-path semantics
@@ -616,7 +639,8 @@ labels + restore; **D4** full-song arrangement view; **D5** chat surface per res
 - [x] **Precondition met (2026-07-10):** the dedicated engine-architecture research pass ran and
       is fully verified (`docs/research/05-engine-architecture.md`). The M4 engine design should
       follow its findings: compiled topologically-ordered node list, lock-free multi-threaded
-      player, butler-style disk thread — with the WASM-DSP-library sub-question still open.
+      player, butler-style disk thread — with the WASM-DSP-library sub-question still open (still
+      the case as of 2026-07-11 — flagged again in this session's project review as research to do).
 
 ---
 
@@ -684,19 +708,25 @@ research-backed rankings.)*
 
 ## 11. Open questions (need a decision)
 
-- **Name.** `dotbeat` is a placeholder.
+- ~~**Name.**~~ — **DECIDED 2026-07-11 (owner): `dotbeat`.** No longer a placeholder.
 - ~~Format syntax~~ — **resolved**, see §4: bespoke line-oriented, Csound/Humdrum/DAWproject-informed.
-- **License.** MIT keeps the door open to reusing DAWproject's/automix-toolkit's schemas/code
-  (both permissively licensed). Reminder: openDAW itself is **AGPL v3/LGPL** — fine to learn from,
-  not to copy code from verbatim.
+- ~~**License.**~~ — **DECIDED 2026-07-10 (owner): MIT.** Keeps the door open to reusing
+  DAWproject's/automix-toolkit's schemas/code (both permissively licensed). Reminder: openDAW
+  itself is **AGPL v3/LGPL** — fine to learn from, not to copy code from verbatim.
 - ~~**Relationship to BeatLab.**~~ — **DECIDED 2026-07-11 (owner): hard fork.** dotbeat builds
   its own GUI, independent of BeatLab's React tree — the two tools serve different purposes
   (production vs. teaching) and share only the lower layers that were always dotbeat's own
-  (`src/core`, `src/daemon`, `src/mcp`, `cli/`). See `docs/decisions.md` D12.
+  (`src/core`, `src/daemon`, `src/mcp`, `cli/`). Refined same day: the fork is about product
+  design/identity, not code purity — porting BeatLab's engine/components is fair game. See
+  `docs/decisions.md` D12.
 - ~~**Web-first vs Tauri-first**~~ — **resolved 2026-07-11 (owner): desktop-first.** The primary
-  form factor is a desktop app connected to local files: a Tauri shell around the existing web
-  GUI with the daemon logic in-process, pulled forward ahead of the deep M4 native-engine work.
-  See `docs/decisions.md` D3 update.
+  form factor is a desktop app connected to local files: a Tauri shell around dotbeat's own GUI
+  (D12) with the daemon logic in-process. See `docs/decisions.md` D3 update.
+- ~~**Agent placement.**~~ — **DECIDED 2026-07-11 (owner): BYO-Claude-Code (D14).** Not an
+  embedded chat panel for now — an external agent drives the app over `beat mcp`. See
+  `docs/decisions.md` D14.
+- ~~**Distribution scope.**~~ — **DECIDED 2026-07-11 (owner): local-machine-only (D13).** No
+  notarization/signing work until there's a reason to put the app in front of someone else.
 - **Research follow-ups**: (a) engine architecture — ✅ **done 2026-07-10**
   (`docs/research/05-engine-architecture.md`); (b) live-coding comparison and (c) demand
   signal — ✅ **done 2026-07-10, combined** (`docs/research/06-demand-and-adjacent-tools.md`).

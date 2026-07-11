@@ -9,6 +9,45 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D14 — BYO-Claude-Code is the agent surface for now, not an embedded chat panel (2026-07-11)
+
+**Decision:** the "agent placement" question `docs/product-spec-desktop.md` §3 left open (owner
+sign-off explicitly pending after research 10) is resolved as **option A**: an external agent
+(Claude Code today) runs beside the app and drives it over `beat mcp`. No embedded chat panel is
+being built right now. Concretely, this means investing in *making the external-agent path
+excellent* — starting with a Claude Code **skill** that teaches it dotbeat's CLI/MCP surface well
+(project layout, the edit-primitive vocabulary, `beat vary`/`--scope selection`, how to read a
+`beat diff`) — rather than building UI-embedded agent chrome.
+
+**Why:** matches research 10's own "option A is the correct interim" verdict, and the owner's
+explicit steer this session: "we'll operate in Claude Code to interface with the CLI/MCP." The
+two-tier hybrid (inline affordance + full embedded panel, research 10 §3) remains the
+research-backed long-run answer, but building it now would mean owning prompt/agent-loop/keys/
+billing before the BYO path has even been given a real skill/tooling investment to prove out.
+
+**Revisit when:** the BYO-Claude-Code + skill path has real usage behind it and a concrete gap
+only an embedded panel can close shows up — not before.
+
+---
+
+## D13 — distribution stays local-machine-only; no notarization/signing work for now (2026-07-11)
+
+**Decision:** the Mac app targets *this machine, this owner* for the foreseeable near-term. No
+Apple Developer Program enrollment, no notarization, no code-signing beyond the default ad-hoc/
+linker-signed debug build, no Windows/Linux builds.
+
+**Why:** owner's explicit call this session. Phase 13 Stream D already scoped the packaged app
+this way pragmatically (`docs/phase-9-tauri-spike-plan.md`'s dated addendum); this makes it
+official rather than an implicit default that a future session might second-guess or "fix"
+unprompted.
+
+**Revisit when:** the owner decides to put the app in front of anyone other than himself — at
+which point research area 2 in the 2026-07-11 project review (real notarization requirements
+without a pre-existing paid Developer Program commitment) becomes live work, not background
+reading.
+
+---
+
 ## D12 — dotbeat gets its own UI and product design; BeatLab code is fair game to lift (2026-07-11)
 
 **Decision:** dotbeat's GUI is dotbeat's own *product* — its own design, its own information
@@ -84,6 +123,21 @@ never sheds. LFS keeps a normal `git clone`/`git log` cheap regardless of how mu
 accumulates; media is already content-addressed by sha256 at the format layer (D-log, Phase 7),
 so nothing about the `.beat` file format itself changes — this is purely a git-storage decision.
 `git-lfs` is installed and working on this machine (verified: `git lfs version` → 3.6.1).
+
+**Second update (2026-07-11, at push time)**: the `git lfs migrate import --everything` above
+rewrote **every commit hash in local `main`'s history**, not just the ones touching binary
+files — `migrate` rewrites the whole chain because each commit's parent pointer changes once any
+ancestor's content changes. This wasn't consequential while everything stayed local, but it meant
+local `main` and `origin/main` no longer shared a common ancestor by the time this session pushed.
+Pushed by squashing local `main`'s current tree onto a fresh commit built directly on the real,
+unrewritten `origin/main` (`git read-tree --reset -u main` on a branch checked out from
+`origin/main`, then one commit, then a clean fast-forward push) — origin's own pre-existing
+history was never touched or force-rewritten. The detailed, phase-by-phase local history stays
+intact on `main` and on `backup-pre-push-2026-07-11`; only `origin/main` sees a single squash
+commit for tonight's work. **Practical consequence for future sessions**: local `main` and
+`origin/main` will look like they've "diverged" by commit count — they haven't in content, this is
+expected, and the same squash technique is the safe way to push again next time (or a deliberate,
+owner-approved force-push if full commit-level parity with origin is ever wanted instead).
 
 **Revisit when:** the owner wants the existing pre-LFS blobs migrated too (needs `git lfs
 migrate import`, a history rewrite, done deliberately with the owner's sign-off), or if the repo
@@ -331,15 +385,15 @@ first-party sourced.)*
   ported in; the permissive sound-quality path stays fully open (spessasynth_lib and Dexed's
   msfa DX7 core are Apache-2.0, MIT-compatible); openDAW (AGPL/LGPL) remains
   learn-from-patterns-only, never port-literal-code. LICENSE file added, package.json updated.
-- **BeatLab relationship** — hard fork vs BeatLab becomes the "learn" mode sharing a core.
-- **Agent placement in the desktop app** — external agent driving via CLI/MCP while the GUI
-  live-updates, vs an embedded chat panel, vs a hybrid (embedded panel fronting an external
-  agent runtime). Owner deferred to research (2026-07-11); see
-  `docs/product-spec-desktop.md` §3 and research 10 when it lands.
+- ~~**BeatLab relationship**~~ — **DECIDED 2026-07-11 (owner): hard fork** at the product-design
+  level; code-lifting stays fair game. See D12.
+- ~~**Agent placement in the desktop app**~~ — **DECIDED 2026-07-11 (owner): BYO-Claude-Code
+  (external agent over `beat mcp`), not an embedded chat panel, for now.** See D14.
 - ~~**Web-first vs Tauri-earlier**~~ — **DECIDED 2026-07-11 (owner): desktop-first.** The
-  primary form factor is a desktop app connected to local files (Tauri shell around the
-  existing web GUI, daemon logic in-process). The browser remains a dev/demo surface, not the
+  primary form factor is a desktop app connected to local files (Tauri shell around dotbeat's
+  own GUI, daemon logic in-process). The browser remains a dev/demo surface, not the
   product. See D3 update.
+- ~~**Distribution scope**~~ — **DECIDED 2026-07-11 (owner): local-machine-only.** See D13.
 - **Three confirmed research blind spots**, both surfaced by the fully-verified passes finding
   *zero* surviving evidence despite being explicit original research questions — worth a
   dedicated follow-up before treating adjacent decisions (especially M4 engine choices) as settled:
