@@ -24,7 +24,7 @@ Code recon (reading `store.ts`/`engine.ts` directly) surfaced two things that re
 
 `ROADMAP-ARTIST.md`'s Phase L (sandbox persistence, WAV export, project file save/load) is,
 almost exactly, the "prove the state model round-trips to a file" step Phase 0 needs — and it's
-currently unclaimed. Rather than build a parallel, redundant JSON serializer in `beatlab-daw`, we
+currently unclaimed. Rather than build a parallel, redundant JSON serializer in `dotbeat`, we
 implement Phase L for real in `beatlab` (Track A — ships immediate value to the live app), then
 build the `.beat` text format as a layer on top of that *proven, real* JSON shape (Track B) rather
 than a speculative one.
@@ -42,9 +42,9 @@ independent but needed before Track B.4).
 | A.4 ✅ | Verified end-to-end (Playwright: groove → reload → still there, zero ID collisions; save/load round-trips a real file incl. the invalid-file error path; exported WAV contains real non-silent audio at the right duration), engine smoke suite 14/14, mobile layout checked, pushed to `beatlab` `main` (`04a3c64`, `b377cfa`) | — |
 
 **Exit criteria:** a sandbox groove survives a reload, can be saved/loaded as a JSON file, and can
-be exported as a real WAV — all live in production, independent of anything in `beatlab-daw`.
+be exported as a real WAV — all live in production, independent of anything in `dotbeat`.
 
-## Track B — beatlab-daw (the `.beat` text format proof)
+## Track B — dotbeat (the `.beat` text format proof)
 
 Builds on Track A's real, working JSON shape rather than inventing test fixtures.
 

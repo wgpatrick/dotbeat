@@ -34,7 +34,7 @@ rendering). This phase connects them — with the real engine, because a re-impl
 
 | # | What | Where |
 |---|---|---|
-| 4.1 ✅ | `scripts/build-headless-engine.mjs`: esbuild-bundle a tiny entry (`useStore` + `engine` + `DEFAULT_SYNTH` + `audioBufferToWav`, straight from beatlab source) into `dist-headless/engine.mjs` — `tone` kept external (must be the same module instance the runner polyfills), `import.meta.env.DEV=false`, everything else bundled | beatlab-daw (reads beatlab sources, writes nothing into beatlab) |
+| 4.1 ✅ | `scripts/build-headless-engine.mjs`: esbuild-bundle a tiny entry (`useStore` + `engine` + `DEFAULT_SYNTH` + `audioBufferToWav`, straight from beatlab source) into `dist-headless/engine.mjs` — `tone` kept external (must be the same module instance the runner polyfills), `import.meta.env.DEV=false`, everything else bundled | dotbeat (reads beatlab sources, writes nothing into beatlab) |
 | 4.2 ✅ | `cli/render-offline.mjs`: polyfill → shims → `Tone.OfflineContext` → import bundle → seed the store (`mode: 'sandbox'`, then the same `applyDawState` every other consumer uses) → `engine.play()` → `render()` → WAV. Auto-(re)builds the bundle when missing/stale | cli |
 | 4.3 ✅ | `beat render --offline` flag; Chromium path unchanged and still the default reference | `cli/beat.mjs`, `cli/render.mjs` |
 | 4.4 ✅ | Fidelity + speed verification: render the same real `.beat` both ways, compare metrics within tolerances (duration ±0.05 s; LUFS ±1 LU; peak ±1.5 dB — the opus transcode on the reference path is the loosest link), and record the measured speedup | `scripts/verify-m4.mjs` |

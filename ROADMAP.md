@@ -1,6 +1,6 @@
 # Roadmap — a git-native DAW
 
-> **Working name:** `beatlab-daw` (placeholder — see [Naming](#naming)).
+> **Name:** `dotbeat` — decided by the owner 2026-07-11 (the format IS the product: `.beat`).
 > **One line:** a real GUI DAW whose project file is diff-friendly text, driveable from a
 > CLI, and editable by an AI agent — with sound-design critique built into the core.
 
@@ -516,7 +516,7 @@ Unchanged in structure — the research corrected *content* within milestones, n
 
 ### M0 — Extract & format *(the keystone — substantially done via Phases 0-1, resequenced)*
 - [ ] Split the BeatLab repo into `core` (document model), `engine` (Tone.js), `ui` (React).
-      *(Deliberately not done as a big-bang split: `core` was born in `beatlab-daw` instead,
+      *(Deliberately not done as a big-bang split: `core` was born in `dotbeat` instead,
       zero-deps, and talks to unmodified BeatLab through the store's `applyDawState` boundary.
       The full repo split is deferred until it's forced by need, not done on principle.)*
 - [x] Design and freeze v0 of the `.beat` format: Csound-style one-event-per-line statements +
@@ -678,7 +678,7 @@ research-backed rankings.)*
 
 ## 11. Open questions (need a decision)
 
-- **Name.** `beatlab-daw` is a placeholder.
+- **Name.** `dotbeat` is a placeholder.
 - ~~Format syntax~~ — **resolved**, see §4: bespoke line-oriented, Csound/Humdrum/DAWproject-informed.
 - **License.** MIT keeps the door open to reusing DAWproject's/automix-toolkit's schemas/code
   (both permissively licensed). Reminder: openDAW itself is **AGPL v3/LGPL** — fine to learn from,
@@ -696,7 +696,7 @@ research-backed rankings.)*
 
 ## Naming
 
-`beatlab-daw` is a working directory name only. Decide before M0 ships publicly.
+`dotbeat` is a working directory name only. Decide before M0 ships publicly.
 
 ---
 

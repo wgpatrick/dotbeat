@@ -76,7 +76,7 @@ Csound-style typed statement lines, Humdrum-style canonical field ordering, DAWp
 parameter vocabulary. Beats YAML (no comparable precedent found) and JSON (openDAW's own JSON
 path shows the trap).
 
-## v0.2 grammar (+ v0.3 additions) — FROZEN, implemented in `beatlab-daw/src/core`
+## v0.2 grammar (+ v0.3 additions) — FROZEN, implemented in `dotbeat/src/core`
 
 Deliberately minimal: notes, drum patterns, and one implicit synth device per track (no
 automation, no clips/scenes, no device IDs / multi-device chains yet). Every field maps 1:1

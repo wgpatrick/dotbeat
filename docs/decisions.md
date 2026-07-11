@@ -206,7 +206,7 @@ first-party sourced.)*
 
 ## Open decisions (not yet made)
 
-- **Name** — `beatlab-daw` is a placeholder.
+- ~~**Name**~~ — **DECIDED 2026-07-11 (owner): `dotbeat`.** Named for the format itself (`.beat`) — the file is the product. Local directory and git branch keep their old names until the repo is promoted to its own `dotbeat` repository (still open).
 - ~~**License**~~ — **DECIDED 2026-07-10 (owner): MIT.** Consequences, all per verified
   research 07: the GPL engine tier (Surge XT / Vital engines) is CLOSED — no GPL code may be
   ported in; the permissive sound-quality path stays fully open (spessasynth_lib and Dexed's

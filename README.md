@@ -1,4 +1,4 @@
-# beatlab-daw *(working name)*
+# dotbeat
 
 > A git-native, agent-native DAW. Your song is a **diff-friendly text file** you — and an AI
 > agent — can edit in a real GUI, render from the command line, `git diff`, and get sound-design

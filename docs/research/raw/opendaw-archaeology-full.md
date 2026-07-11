@@ -1,4 +1,4 @@
-# openDAW (and prior-art) source archaeology — findings for beatlab-daw
+# openDAW (and prior-art) source archaeology — findings for dotbeat
 
 Sources read directly (shallow clones, read-only):
 - `/tmp/research-clones/openDAW` — https://github.com/andremichelle/openDAW (main branch, current as of clone date)
