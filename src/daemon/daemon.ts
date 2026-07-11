@@ -28,7 +28,8 @@
 // and a one-directional push channel is genuinely all the file→GUI direction needs.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { readFileSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
+import { readFileSync, writeFileSync, watch, existsSync, type FSWatcher } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { basename, dirname, resolve } from 'node:path'
 import type { BeatDocument, BeatSelection } from '../core/index.js'
 import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, setValue, validateSelection, type ExternalSandboxPayload } from '../core/index.js'
@@ -201,6 +202,46 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       } catch {
         json(res, 404, { error: `media file missing on disk: ${entry.path}` })
       }
+      return
+    }
+
+    // v0.6 instrument tracks: enumerate every program (preset) in a registered SoundFont bank so
+    // the GUI's instrument panel can offer program selection. Mirrors `beat inspect`'s multi-preset
+    // listing (cli/beat.mjs / src/mcp/server.ts): reads the actual .sf2 bytes (sha256-verified
+    // against the media block) and parses them with spessasynth_core's SoundBankLoader — a pure
+    // binary parse, no audio context. Additive and read-only.
+    if (req.method === 'GET' && url.pathname === '/soundfont-presets') {
+      const sampleId = url.searchParams.get('sample')
+      if (!sampleId) {
+        json(res, 400, { error: 'missing ?sample=<mediaId>' })
+        return
+      }
+      const entry = doc.media.find((m) => m.id === sampleId)
+      if (!entry) {
+        json(res, 404, { error: `no media entry with id "${sampleId}" in the document` })
+        return
+      }
+      const abs = resolve(dirname(resolve(filePath)), entry.path)
+      ;(async () => {
+        if (!existsSync(abs)) {
+          json(res, 404, { error: `soundfont file missing on disk: ${entry.path}` })
+          return
+        }
+        const bytes = readFileSync(abs)
+        const hash = createHash('sha256').update(bytes).digest('hex')
+        if (hash !== entry.sha256) {
+          json(res, 409, { error: `sha256 mismatch for ${entry.path} (file ${hash.slice(0, 12)}..., document expects ${entry.sha256.slice(0, 12)}...)` })
+          return
+        }
+        const { SoundBankLoader } = (await import('spessasynth_core')) as unknown as {
+          SoundBankLoader: { fromArrayBuffer: (b: ArrayBuffer) => { presets: { program: number; bankMSB: number; bankLSB: number; name: string }[] } }
+        }
+        const bank = SoundBankLoader.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+        const presets = bank.presets
+          .map((p) => ({ program: p.program, bankMSB: p.bankMSB, bankLSB: p.bankLSB, name: p.name }))
+          .sort((a, b) => a.bankMSB - b.bankMSB || a.bankLSB - b.bankLSB || a.program - b.program)
+        json(res, 200, { presets })
+      })().catch((err) => json(res, 500, { error: err instanceof Error ? err.message : String(err) }))
       return
     }
 

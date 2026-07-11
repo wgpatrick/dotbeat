@@ -56,10 +56,13 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
     return { ...doc, tracks }
   }
 
-  // Instrument tracks keep volume/pan on their own block, not the synth block (setValue routes on
-  // track.kind — src/core/edit.ts). Mirror the mixer's `<id>.volume`/`<id>.pan` edits there.
-  if (track.kind === 'instrument' && track.instrument && (rest === 'volume' || rest === 'pan')) {
-    const inst = { ...track.instrument, [rest]: canon(Number(value)) }
+  // Instrument tracks keep volume/pan/program on their own block, not the synth block (setValue
+  // routes on track.kind — src/core/edit.ts). Mirror those edits there so the live engine hears a
+  // program/level/pan change immediately (the daemon doesn't echo its own writes). `program` is an
+  // integer 0-127; volume/pan are canonical numbers.
+  if (track.kind === 'instrument' && track.instrument && (rest === 'volume' || rest === 'pan' || rest === 'program')) {
+    const next = rest === 'program' ? Math.round(Number(value)) : canon(Number(value))
+    const inst = { ...track.instrument, [rest]: next }
     const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, instrument: inst } : t))
     return { ...doc, tracks }
   }
