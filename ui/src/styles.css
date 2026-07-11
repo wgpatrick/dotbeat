@@ -136,6 +136,81 @@ body {
   border-bottom: 1px solid #4a2a2a;
 }
 
+/* ---- vary-and-audition affordance (Phase 15 Stream I) ---- */
+.vary-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 14px;
+  font-size: 12px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+.vary-bar.auditioning {
+  background: #24211a;
+  border-bottom-color: var(--accent);
+}
+.vary-scope-hint {
+  color: var(--text-dim);
+}
+.vary-scope {
+  color: var(--accent);
+  font-weight: 600;
+}
+.vary-count {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.vary-label {
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.vary-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.vary-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.vary-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.vary-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.vary-btn.trigger {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.vary-btn.keep {
+  background: var(--accent);
+  color: #16171b;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.vary-btn.undo {
+  color: #e8a0a0;
+}
+.vary-kept {
+  color: #9bd08a;
+}
+.vary-error {
+  color: #e8a0a0;
+}
+
 /* ---- body layout ---- */
 .body {
   display: flex;

@@ -139,6 +139,64 @@ export function postEdit(path: string, value: string): void {
   )
 }
 
+// ─── vary-and-audition (Phase 15 Stream I) ──────────────────────────────────────────────────────
+// The daemon's POST /vary returns a batch of param-variants, each a list of {path,value} edits in
+// the SAME grammar postEdit already commits. Auditioning a variant = applying its edits to a base
+// document snapshot in memory (heard live off the engine, which re-reads the store doc every tick)
+// WITHOUT posting anything; "keep" replays those same edits through postEdit (one canonical line
+// each on disk); "undo" just restores the snapshot. Nothing touches disk until keep — the revertible
+// audition the product spec (§3) asks for.
+
+export interface VaryEdit {
+  path: string
+  value: string
+}
+export interface VaryVariant {
+  index: number
+  edits: VaryEdit[]
+  label: string
+}
+export interface VaryBatch {
+  track: string
+  group: string
+  count: number
+  amount: number
+  seed: number
+  variants: VaryVariant[]
+}
+
+/** Apply a list of {path,value} edits to a document IN MEMORY, reusing the exact optimistic mirror
+ * postEdit uses (applyLocalEdit) so an auditioned variant matches what committing it would produce.
+ * Pure — returns a new document; never posts. */
+export function applyEdits(doc: BeatDocument, edits: VaryEdit[]): BeatDocument {
+  let d = doc
+  for (const e of edits) {
+    const next = applyLocalEdit(d, e.path, e.value)
+    if (next) d = next
+  }
+  return d
+}
+
+/** Ask the daemon to generate a vary batch scoped by the live selection. The daemon reads its own
+ * in-memory selection; `body` may override the track/group/count/amount/seed. Throws with the
+ * daemon's error message on a 4xx (e.g. a selection that points at a different track). */
+export async function requestVary(body: { track?: string; group?: string; count?: number; amount?: number; seed?: number } = {}): Promise<VaryBatch> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/vary`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const msg = await res
+      .json()
+      .then((b) => (b as { error?: string }).error)
+      .catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  return (await res.json()) as VaryBatch
+}
+
 async function pullDocument(base: string): Promise<void> {
   try {
     const res = await fetch(`${base}/document`)

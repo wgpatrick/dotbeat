@@ -40,6 +40,67 @@ import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTr
 // daemon's own directory watcher picks up and broadcasts as a `doc` SSE event, so the GUI hot-reloads
 // through the exact same external-edit path a hand edit or `beat set` uses — no special echo needed.
 import { history, restore, pin, unpin, HistoryError } from '../history/index.js'
+// D2/D5 vary-and-audition surface over HTTP (Phase 15 Stream I): the GUI's inline "vary" affordance
+// POSTs /vary, which resolves the daemon's live pointing selection into a (track, param-group) and
+// runs core's `varyTrack` — the exact same rung-1 param-variation `beat vary <file> <track> <group>`
+// produces, over HTTP instead of shelling to the CLI. It is READ-ONLY: it returns the batch (each
+// variant IS a list of `beat set`-shaped {path,value} edits), the GUI auditions a variant by
+// applying its edits provisionally in-memory (heard live off the running engine, never written), and
+// "keep" commits the chosen variant's edits through the ordinary POST /edit path — so audition is
+// revertible by construction (nothing touches disk until Keep). See docs/phase-15-vary-affordance.md.
+import { varyTrack, VARY_GROUPS, BeatVaryError } from '../vary/vary.js'
+
+/** Drum lane -> the param group that shapes that lane's sound, so "highlight the hats, vary" mutates
+ * the hats' own synth params (hatTone/hatDecay/openHatDecay) with no typing. clap rides the snare
+ * group (both are the drums' snare/clap voice params in VARY_GROUPS). */
+const DRUM_LANE_GROUP: Readonly<Record<string, string>> = { kick: 'kick', snare: 'snare', clap: 'snare', hat: 'hats', openhat: 'hats' }
+
+export interface VaryRequestBody {
+  track?: string
+  group?: string
+  count?: number
+  amount?: number
+  seed?: number
+}
+
+/** Resolve the daemon's live selection (plus any explicit request overrides) into the one (track,
+ * group) a rung-1 param-vary round needs. Pure; exported for direct unit testing (test/vary-route).
+ *
+ *   - the target track comes from the request body if given, else the single track the selection is
+ *     "about" (its tracks/lanes/notes axes union to one), else the doc's selected/first track.
+ *   - ENFORCED SCOPE (spec §2): if the selection names specific tracks and the resolved target is not
+ *     among them, this throws — a param-vary can't be aimed outside what's highlighted.
+ *   - the group comes from the request body if given, else is inferred from a selected drum lane on
+ *     the target (hats/kick/snare), else defaults by track kind (drums->hats, synth/instrument->
+ *     filter). Param groups mutate whole-track synth params, so bars/note narrowing doesn't refine
+ *     them — the selection's role here is "which track, and (nicely) which group". */
+export function resolveVaryTarget(sel: BeatSelection, doc: BeatDocument, body: VaryRequestBody = {}): { track: string; group: string } {
+  const involved = new Set<string>()
+  if (sel.tracks) for (const t of sel.tracks) involved.add(t)
+  if (sel.lanes) for (const l of sel.lanes) involved.add(l.track)
+  if (sel.notes) for (const n of sel.notes) involved.add(n.track)
+
+  let track = body.track
+  if (track === undefined) {
+    if (involved.size === 1) track = [...involved][0]
+    else if (involved.size > 1) throw new BeatVaryError(`selection spans ${involved.size} tracks (${[...involved].join(', ')}) — specify which one to vary`)
+    else track = doc.selectedTrack || doc.tracks[0]?.id
+  }
+  if (!track) throw new BeatVaryError('no track to vary (empty document?)')
+  const t = doc.tracks.find((x) => x.id === track)
+  if (!t) throw new BeatVaryError(`no track "${track}" (have: ${doc.tracks.map((x) => x.id).join(', ')})`)
+  if (involved.size > 0 && !involved.has(track)) {
+    throw new BeatVaryError(`selection covers ${[...involved].join(', ')}, not "${track}" — refusing to vary outside the selection`)
+  }
+
+  let group = body.group
+  if (group === undefined) {
+    const lane = sel.lanes?.find((l) => l.track === track)?.lane
+    group = (lane ? DRUM_LANE_GROUP[lane] : undefined) ?? (t.kind === 'drums' ? 'hats' : 'filter')
+  }
+  if (!VARY_GROUPS[group]) throw new BeatVaryError(`unknown group "${group}" (have: ${Object.keys(VARY_GROUPS).join(', ')})`)
+  return { track, group }
+}
 
 export interface DaemonOptions {
   filePath: string
@@ -436,6 +497,40 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof HistoryError ? 400 : err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // POST /vary: generate a rung-1 param-variation batch scoped by the live selection. Read-only —
+    // returns each variant as its `beat set`-shaped edits (+ a human label); the GUI auditions by
+    // applying edits in-memory and commits a kept variant back through POST /edit. Never writes here.
+    if (req.method === 'POST' && url.pathname === '/vary') {
+      readBody(req)
+        .then((body) => {
+          const b = (body.trim() ? JSON.parse(body) : {}) as VaryRequestBody
+          const { track, group } = resolveVaryTarget(selection, doc, b)
+          const count = b.count ?? 9
+          const amount = b.amount ?? 0.25
+          const seed = b.seed ?? (Date.now() % 2147483647 || 1)
+          const variants = varyTrack(doc, track, group, { count, amount, seed })
+          json(res, 200, {
+            track,
+            group,
+            count: variants.length,
+            amount,
+            seed,
+            // Each variant is a small diff in the file's own vocabulary; `label` drops the redundant
+            // `<track>.` prefix so the GUI can show "hatTone 8123, hatDecay 0.05" tersely.
+            variants: variants.map((v, i) => ({
+              index: i,
+              edits: v.edits,
+              label: v.edits.map((e) => `${e.path.slice(e.path.indexOf('.') + 1)} ${e.value}`).join(', '),
+            })),
+          })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatVaryError || err instanceof SyntaxError ? 400 : 500
           json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return

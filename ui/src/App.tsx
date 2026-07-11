@@ -11,6 +11,7 @@ import { Scope } from './components/Scope'
 import { ArrangementView } from './components/ArrangementView'
 import { MixerView } from './components/MixerView'
 import { HistoryPanel } from './components/HistoryPanel'
+import { VaryAffordance } from './components/VaryAffordance'
 import type { AppView } from './types'
 
 const VIEW_TABS: { id: AppView; label: string }[] = [
@@ -90,6 +91,10 @@ export function App() {
         <TransportBar />
       </header>
       {parseError && <div className="parse-error">file did not parse: {parseError} (still playing last good version)</div>}
+      {/* The inline vary-and-audition affordance (Phase 15 Stream I): a contextual bar that appears
+          whenever there's a selection, in any view — the Photoshop Contextual Task Bar pattern the
+          spec cites, rather than pixel-anchoring onto a canvas-rendered timeline. */}
+      <VaryAffordance />
       {view === 'editor' && <EditorView />}
       {view === 'arrangement' && <ArrangementView />}
       {view === 'mixer' && <MixerView />}
