@@ -77,6 +77,44 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     return replaceTrack(doc, { ...track, hits: nextHits })
   }
 
+  // note grammar (synth/instrument tracks) — the piano-roll edit primitive, the note-side analog
+  // of `pattern.<lane>[<step>]` for drums. Added so dotbeat's GUI can compose notes through the
+  // same `beat set`/`POST /edit` {path,value} channel (one edit -> one canonical line), rather
+  // than a separate route:
+  //   <track>.note  "<pitch> <start> <duration> <velocity>"  -> add (mints the next u-id)
+  //   <track>.note.<id>.pitch|start|duration|velocity  <n>   -> move/resize/transpose one field
+  //   <track>.note.<id>  ""                                  -> delete (empty value removes)
+  if (rest === 'note') {
+    const parts = value.trim().split(/\s+/)
+    if (parts.length !== 4) throw new BeatEditError(`note add expects "<pitch> <start> <duration> <velocity>", got "${value}"`)
+    const [pitch, start, duration, velocity] = parts.map((p, i) => parseNum(p, ['pitch', 'start', 'duration', 'velocity'][i]!))
+    return addNote(doc, trackId, { pitch: pitch!, start: start!, duration: duration!, velocity: velocity! }).doc
+  }
+  const noteFieldMatch = rest.match(/^note\.([A-Za-z0-9_-]+)\.(pitch|start|duration|velocity)$/)
+  if (noteFieldMatch) {
+    const noteId = noteFieldMatch[1]!
+    const field = noteFieldMatch[2]! as 'pitch' | 'start' | 'duration' | 'velocity'
+    const existing = track.notes.find((n) => n.id === noteId)
+    if (!existing) throw new BeatEditError(`no note "${noteId}" on track "${trackId}"`)
+    const n = parseNum(value, `note.${noteId}.${field}`)
+    // Round-trip through remove+add so addNote's own range/precision invariants apply and the id
+    // is preserved (canonical serialization re-sorts either way, so a moved note reads as a moved
+    // line — the same diff `beat set` would produce).
+    const removed = removeNote(doc, trackId, noteId).doc
+    return addNote(removed, trackId, {
+      id: noteId,
+      pitch: field === 'pitch' ? n : existing.pitch,
+      start: field === 'start' ? n : existing.start,
+      duration: field === 'duration' ? n : existing.duration,
+      velocity: field === 'velocity' ? n : existing.velocity,
+    }).doc
+  }
+  const noteDeleteMatch = rest.match(/^note\.([A-Za-z0-9_-]+)$/)
+  if (noteDeleteMatch) {
+    if (value.trim() !== '') throw new BeatEditError(`note delete takes an empty value (got "${value}"); to edit a field use ${trackId}.note.${noteDeleteMatch[1]}.<pitch|start|duration|velocity>`)
+    return removeNote(doc, trackId, noteDeleteMatch[1]!).doc
+  }
+
   // track metadata
   if (rest === 'name') {
     if (/\s/.test(value)) throw new BeatEditError('track names are single tokens in v0.2 (no whitespace)')

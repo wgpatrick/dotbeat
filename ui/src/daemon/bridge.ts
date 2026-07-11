@@ -64,9 +64,41 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
     return { ...doc, tracks }
   }
 
-  // core synth param (osc is a string; the rest numeric) — the panel + mixer edit these.
-  const isOsc = rest === 'osc'
-  const nextVal = isOsc ? value : canon(Number(value))
+  // note grammar (piano-roll edits) — mirrors core setValue's note paths (src/core/edit.ts).
+  if (rest === 'note') {
+    // ADD "<pitch> <start> <duration> <velocity>" — replicate addNote's u-id minting exactly so
+    // the optimistic note carries the same id the daemon will write.
+    const [pitch, start, duration, velocity] = value.trim().split(/\s+/).map(Number)
+    let max = 100000
+    for (const t of doc.tracks) for (const n of t.notes) {
+      const m = n.id.match(/^u(\d+)$/)
+      if (m) max = Math.max(max, Number(m[1]))
+    }
+    const note = { id: `u${max + 1}`, pitch: pitch!, start: canon(start!), duration: canon(duration!), velocity: canon(velocity!) }
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, notes: [...t.notes, note] } : t))
+    return { ...doc, tracks }
+  }
+  const noteFieldMatch = rest.match(/^note\.([A-Za-z0-9_-]+)\.(pitch|start|duration|velocity)$/)
+  if (noteFieldMatch) {
+    const [, noteId, field] = noteFieldMatch
+    const n = field === 'pitch' ? Number(value) : canon(Number(value))
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, notes: t.notes.map((no) => (no.id === noteId ? { ...no, [field!]: n } : no)) } : t))
+    return { ...doc, tracks }
+  }
+  const noteDeleteMatch = rest.match(/^note\.([A-Za-z0-9_-]+)$/)
+  if (noteDeleteMatch) {
+    const noteId = noteDeleteMatch[1]
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, notes: t.notes.filter((no) => no.id !== noteId) } : t))
+    return { ...doc, tracks }
+  }
+
+  // synth param. String-valued fields (osc + the enums, and duckSource's 'none'->null) stay
+  // strings; everything else is a canonical number. A non-numeric value means a string field.
+  const num = Number(value)
+  let nextVal: number | string | null
+  if (rest === 'duckSource') nextVal = value === 'none' ? null : value
+  else if (value.trim() === '' || Number.isNaN(num)) nextVal = value
+  else nextVal = canon(num)
   const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, synth: { ...t.synth, [rest]: nextVal } } : t))
   return { ...doc, tracks }
 }
