@@ -19,6 +19,126 @@
       }
     },
     {
+      "name": "808-trap-kit",
+      "kind": "drums",
+      "description": "808/trap kit: deep, slow-glide kick with a long boomy tail, tight hat-roll-ready closed hat, saturated low end (research: TR-808 lineage, hip-hop/trap)",
+      "params": {
+        "kickTune": 34,
+        "kickPunch": 0.2,
+        "kickDecay": 1.1,
+        "snareTone": 0.3,
+        "snareDecay": 0.15,
+        "hatDecay": 0.025,
+        "openHatDecay": 0.4,
+        "hatTone": 7500,
+        "cutoff": 11000,
+        "distortionAmount": 0.25,
+        "distortionMix": 0.3,
+        "bitcrushBits": 10,
+        "bitcrushMix": 0.12,
+        "eqLow": 3,
+        "compMix": 0.4,
+        "compThreshold": -20,
+        "compRatio": 6
+      }
+    },
+    {
+      "name": "techno-kit",
+      "kind": "drums",
+      "description": "Techno kit: tight snapping 909-style kick, mechanical scooped-mid snare, driving bright 16th-note hats, heavily glued (research: TR-909 lineage, dark/mechanical techno character)",
+      "params": {
+        "kickTune": 50,
+        "kickPunch": 0.015,
+        "kickDecay": 0.22,
+        "snareTone": 0.12,
+        "snareDecay": 0.1,
+        "hatDecay": 0.035,
+        "openHatDecay": 0.22,
+        "hatTone": 9000,
+        "cutoff": 13000,
+        "distortionAmount": 0.2,
+        "distortionMix": 0.25,
+        "compMix": 0.6,
+        "compRatio": 8,
+        "compThreshold": -18,
+        "eqHigh": 2.5,
+        "eqMid": -1.5
+      }
+    },
+    {
+      "name": "boom-bap-kit",
+      "kind": "drums",
+      "description": "Boom-bap kit: crunchy dirty kick, fat tonal snare with real body, dampened 'vinyl' top end, sampled-and-worn character (research: 90s hip-hop convention, midrange weight over sub/air)",
+      "params": {
+        "kickTune": 45,
+        "kickPunch": 0.05,
+        "kickDecay": 0.35,
+        "snareTone": 0.55,
+        "snareDecay": 0.2,
+        "hatDecay": 0.07,
+        "openHatDecay": 0.4,
+        "hatTone": 3500,
+        "cutoff": 7000,
+        "distortionAmount": 0.3,
+        "distortionMix": 0.35,
+        "bitcrushBits": 9,
+        "bitcrushMix": 0.1,
+        "eqHigh": -2,
+        "eqLow": 2,
+        "compMix": 0.45,
+        "compThreshold": -18,
+        "compRatio": 5
+      }
+    },
+    {
+      "name": "lofi-kit",
+      "kind": "drums",
+      "description": "Lo-fi kit: soft muted kick, muffled dark hats, heavy bitcrush grit under a hard lowpass, gentle room send (research: lo-fi hip-hop convention — bitcrush + aggressive high-cut over sharp transients)",
+      "params": {
+        "kickTune": 40,
+        "kickPunch": 0.06,
+        "kickDecay": 0.4,
+        "snareTone": 0.4,
+        "snareDecay": 0.15,
+        "hatDecay": 0.05,
+        "openHatDecay": 0.3,
+        "hatTone": 2200,
+        "cutoff": 3500,
+        "bitcrushBits": 6,
+        "bitcrushMix": 0.4,
+        "eqHigh": -4,
+        "distortionAmount": 0.1,
+        "distortionMix": 0.15,
+        "sendReverb": 0.2,
+        "compMix": 0.3
+      }
+    },
+    {
+      "name": "acoustic-rock-kit",
+      "kind": "drums",
+      "description": "Acoustic/rock kit: higher-pitched natural kick with a tight beater click, a real snare shell's tonal ring, bright open hats, clean and unfiltered with light room ambience — the least processed kit in the library",
+      "params": {
+        "kickTune": 58,
+        "kickPunch": 0.03,
+        "kickDecay": 0.3,
+        "snareTone": 0.7,
+        "snareDecay": 0.22,
+        "hatDecay": 0.08,
+        "openHatDecay": 0.5,
+        "hatTone": 5000,
+        "cutoff": 12000,
+        "distortionAmount": 0,
+        "distortionMix": 0,
+        "bitcrushMix": 0,
+        "eqHigh": 1,
+        "eqLow": 1,
+        "compMix": 0.35,
+        "compRatio": 3,
+        "compThreshold": -22,
+        "sendReverb": 0.3
+      }
+    },
+    {
       "name": "deep-sub-bass",
       "kind": "synth",
       "description": "Sub-anchored bass with a detuned square layer, plucky filter envelope, and glide; add duckSource yourself for sidechain (Night Shift v3 bass)",
@@ -37,6 +157,202 @@
         "distortionAmount": 0.15,
         "distortionMix": 0.2,
         "eqLow": 1.5
+      }
+    },
+    {
+      "name": "sub-sine-bass",
+      "kind": "synth",
+      "description": "Bass — clean, flat sustained sine sub with almost no harmonic content and no filter movement; the opposite design of deep-sub-bass's plucky moving saw/square hybrid, for parts that need pure low-end weight",
+      "params": {
+        "osc": "sine",
+        "cutoff": 220,
+        "resonance": 0.5,
+        "subLevel": 0.7,
+        "attack": 0.005,
+        "decay": 0.15,
+        "sustain": 0.95,
+        "release": 0.15,
+        "filterEnvAmount": 0,
+        "eqLow": 2
+      }
+    },
+    {
+      "name": "reese-bass",
+      "kind": "synth",
+      "description": "Bass — thick detuned dual-saw Reese with wide unison and a slow breathing filter LFO; the beating/chorusing interaction between layers is the point (research: detuned saws, Kevin Saunderson lineage, D&B/dubstep)",
+      "params": {
+        "osc": "sawtooth",
+        "osc2Type": "sawtooth",
+        "osc2Level": 0.7,
+        "osc2Detune": 25,
+        "unisonVoices": 3,
+        "unisonWidth": 0.6,
+        "cutoff": 900,
+        "resonance": 1.5,
+        "filterEnvAmount": 0.2,
+        "lfoDest": "cutoff",
+        "lfoRate": 0.6,
+        "lfoDepth": 0.15,
+        "eqLow": 2,
+        "compMix": 0.4,
+        "distortionAmount": 0.1,
+        "distortionMix": 0.15
+      }
+    },
+    {
+      "name": "wobble-bass",
+      "kind": "synth",
+      "description": "Bass — dubstep wobble: fast deep filter-cutoff LFO over a resonant square, an FM growl layer underneath, digital grit on top (research: rhythmic LFO-on-cutoff is the defining wobble mechanism)",
+      "params": {
+        "osc": "square",
+        "cutoff": 500,
+        "resonance": 3,
+        "filterEnvAmount": 0.1,
+        "lfoDest": "cutoff",
+        "lfoRate": 4,
+        "lfoDepth": 0.7,
+        "fmLevel": 0.2,
+        "fmHarmonicity": 2,
+        "fmModIndex": 8,
+        "distortionAmount": 0.35,
+        "distortionMix": 0.4,
+        "bitcrushBits": 7,
+        "bitcrushMix": 0.15,
+        "eqLow": 2
+      }
+    },
+    {
+      "name": "acid-bass",
+      "kind": "synth",
+      "description": "Bass — TB-303-style acid: very high filter resonance driven hard by the filter envelope, short glide between notes for slides, the 'squelch' comes entirely from envelope-into-resonance",
+      "params": {
+        "osc": "sawtooth",
+        "cutoff": 400,
+        "resonance": 9,
+        "decay": 0.3,
+        "sustain": 0.4,
+        "filterEnvAmount": 0.6,
+        "filterEnvAttack": 0.001,
+        "filterEnvDecay": 0.25,
+        "filterEnvSustain": 0.05,
+        "filterEnvRelease": 0.1,
+        "glide": 0.06,
+        "distortionAmount": 0.15,
+        "distortionMix": 0.2,
+        "eqLow": 1
+      }
+    },
+    {
+      "name": "fm-bass",
+      "kind": "synth",
+      "description": "Bass — DX-style FM bass: the tone comes from a hard FM modulator (not the filter, which stays open), giving a bite that cuts through a dense mix without eating headroom",
+      "params": {
+        "osc": "sine",
+        "fmLevel": 0.8,
+        "fmHarmonicity": 1,
+        "fmModIndex": 12,
+        "cutoff": 1200,
+        "resonance": 0.3,
+        "attack": 0.002,
+        "decay": 0.25,
+        "sustain": 0.5,
+        "release": 0.2,
+        "eqLow": 1.5,
+        "eqMid": 1
+      }
+    },
+    {
+      "name": "bright-lead",
+      "kind": "synth",
+      "description": "Cutting unison lead with a detuned second saw, plucky filter envelope, and echoing delay/reverb sends (Night Shift v3 lead)",
+      "params": {
+        "cutoff": 5200,
+        "resonance": 1.1,
+        "osc2Type": "sawtooth",
+        "osc2Level": 0.45,
+        "osc2Detune": 14,
+        "unisonVoices": 3,
+        "unisonWidth": 0.5,
+        "filterEnvAmount": 0.3,
+        "filterEnvDecay": 0.2,
+        "sendDelay": 0.4,
+        "sendReverb": 0.25,
+        "eqHigh": 1.5
+      }
+    },
+    {
+      "name": "supersaw-lead",
+      "kind": "synth",
+      "description": "Lead — huge 7-voice unison supersaw stack, wide, sustained; anthemic trance/EDM lead character rather than bright-lead's tighter 3-voice pluck-envelope stab",
+      "params": {
+        "osc": "sawtooth",
+        "unisonVoices": 7,
+        "unisonWidth": 1,
+        "osc2Type": "sawtooth",
+        "osc2Level": 0.6,
+        "osc2Detune": 18,
+        "cutoff": 6500,
+        "resonance": 0.6,
+        "attack": 0.02,
+        "release": 0.4,
+        "sendReverb": 0.3,
+        "sendDelay": 0.25,
+        "eqHigh": 1
+      }
+    },
+    {
+      "name": "pluck-lead",
+      "kind": "synth",
+      "description": "Lead — staccato plucky lead for riffs: short amp envelope, fast filter-envelope snap opening into a low sustain, distinguishing a percussive lead from a sustained one",
+      "params": {
+        "attack": 0.002,
+        "decay": 0.12,
+        "sustain": 0.2,
+        "release": 0.08,
+        "cutoff": 3500,
+        "filterEnvAmount": 0.45,
+        "filterEnvAttack": 0.001,
+        "filterEnvDecay": 0.15,
+        "filterEnvSustain": 0.1,
+        "osc2Type": "square",
+        "osc2Level": 0.3,
+        "osc2Detune": 7,
+        "sendDelay": 0.35
+      }
+    },
+    {
+      "name": "square-chip-lead",
+      "kind": "synth",
+      "description": "Lead — thin retro chiptune/8-bit lead: plain square wave, no unison, no filtering to speak of, heavy bitcrush for the digital low-bit-depth character",
+      "params": {
+        "osc": "square",
+        "cutoff": 8000,
+        "resonance": 0.3,
+        "attack": 0.001,
+        "decay": 0.05,
+        "sustain": 0.8,
+        "release": 0.05,
+        "bitcrushBits": 5,
+        "bitcrushMix": 0.5,
+        "eqHigh": 2
+      }
+    },
+    {
+      "name": "fm-bell-lead",
+      "kind": "synth",
+      "description": "Lead — bell-like FM lead: a non-integer FM ratio (3.5) makes the overtones inharmonic, the signature 'bell' timbre distinct from subtractive leads built from filtered saws/squares",
+      "params": {
+        "osc": "triangle",
+        "fmLevel": 0.6,
+        "fmHarmonicity": 3.5,
+        "fmModIndex": 9,
+        "attack": 0.003,
+        "decay": 0.6,
+        "sustain": 0.3,
+        "release": 0.5,
+        "cutoff": 7000,
+        "sendReverb": 0.4,
+        "sendDelay": 0.2
       }
     },
     {
@@ -62,22 +378,354 @@
       }
     },
     {
-      "name": "bright-lead",
+      "name": "warm-pad",
       "kind": "synth",
-      "description": "Cutting unison lead with a detuned second saw, plucky filter envelope, and echoing delay/reverb sends (Night Shift v3 lead)",
+      "description": "Pad — mellow, dark analog pad: triangle-based instead of lush-pad's saw stack, lower cutoff, subtler detune and LFO depth for a rounder, less bright texture",
       "params": {
-        "cutoff": 5200,
-        "resonance": 1.1,
-        "osc2Type": "sawtooth",
-        "osc2Level": 0.45,
-        "osc2Detune": 14,
-        "unisonVoices": 3,
+        "osc": "triangle",
+        "cutoff": 1400,
+        "attack": 0.6,
+        "release": 1.8,
+        "sustain": 0.85,
+        "osc2Type": "triangle",
+        "osc2Level": 0.4,
+        "osc2Detune": 7,
+        "lfoDest": "cutoff",
+        "lfoRate": 0.15,
+        "lfoDepth": 0.12,
+        "sendReverb": 0.4,
+        "eqLow": 1,
+        "eqHigh": -1.5
+      }
+    },
+    {
+      "name": "string-pad",
+      "kind": "synth",
+      "description": "Pad — bowed-strings emulation: a slower bow-like attack than lush-pad, 4-voice ensemble detune for a section-of-strings beating, brighter and more mid-forward than warm-pad",
+      "params": {
+        "osc": "sawtooth",
+        "attack": 0.5,
+        "release": 1,
+        "sustain": 0.8,
+        "unisonVoices": 4,
         "unisonWidth": 0.5,
-        "filterEnvAmount": 0.3,
+        "cutoff": 3200,
+        "resonance": 0.5,
+        "osc2Type": "sawtooth",
+        "osc2Level": 0.3,
+        "osc2Detune": 5,
+        "sendReverb": 0.45,
+        "eqMid": 0.5,
+        "eqHigh": 0.5
+      }
+    },
+    {
+      "name": "glass-pad",
+      "kind": "synth",
+      "description": "Pad — bright shimmering FM pad: FM (not filtered subtractive) provides the tone, a slow tremolo LFO on amplitude gives the 'shimmer', long reverb/delay tail",
+      "params": {
+        "osc": "sine",
+        "fmLevel": 0.4,
+        "fmHarmonicity": 4,
+        "fmModIndex": 6,
+        "attack": 0.3,
+        "release": 1.5,
+        "sustain": 0.6,
+        "cutoff": 9000,
+        "lfoDest": "amp",
+        "lfoRate": 3,
+        "lfoDepth": 0.1,
+        "sendReverb": 0.6,
+        "sendDelay": 0.3,
+        "eqHigh": 2
+      }
+    },
+    {
+      "name": "dark-pad",
+      "kind": "synth",
+      "description": "Pad — moody, filtered ambient pad: low cutoff with a slow filter-envelope opening (not an LFO sweep) so the pad gradually brightens over the course of a held note, high resonance for tension",
+      "params": {
+        "osc": "sawtooth",
+        "cutoff": 900,
+        "attack": 0.7,
+        "release": 2,
+        "sustain": 0.7,
+        "resonance": 1.2,
+        "filterEnvAmount": 0.15,
+        "filterEnvAttack": 0.5,
+        "filterEnvDecay": 1,
+        "lfoDest": "cutoff",
+        "lfoRate": 0.1,
+        "lfoDepth": 0.2,
+        "sendReverb": 0.6,
+        "eqLow": 0.5,
+        "eqHigh": -3
+      }
+    },
+    {
+      "name": "crystal-pluck",
+      "kind": "synth",
+      "description": "Pluck — bright plucky bell tone: near-zero amp attack/sustain (research: pluck = short attack + short decay + low sustain) with a fast filter-envelope snap that opens bright then retreats dark",
+      "params": {
+        "osc": "triangle",
+        "attack": 0.001,
+        "decay": 0.18,
+        "sustain": 0.05,
+        "release": 0.1,
+        "cutoff": 5000,
+        "resonance": 0.9,
+        "filterEnvAmount": 0.5,
+        "filterEnvAttack": 0.001,
         "filterEnvDecay": 0.2,
+        "filterEnvSustain": 0.15,
+        "filterEnvRelease": 0.12,
+        "sendDelay": 0.25,
+        "sendReverb": 0.2,
+        "eqHigh": 1
+      }
+    },
+    {
+      "name": "warm-pluck",
+      "kind": "synth",
+      "description": "Pluck — softer, rounder pluck than crystal-pluck: darker starting cutoff, gentler filter-envelope amount, a sub sine layer for body instead of brightness",
+      "params": {
+        "osc": "triangle",
+        "attack": 0.002,
+        "decay": 0.25,
+        "sustain": 0.1,
+        "release": 0.15,
+        "cutoff": 2200,
+        "filterEnvAmount": 0.35,
+        "filterEnvDecay": 0.3,
+        "filterEnvSustain": 0.2,
+        "osc2Type": "sine",
+        "osc2Level": 0.25,
+        "osc2Detune": 12,
+        "sendReverb": 0.25
+      }
+    },
+    {
+      "name": "fm-pluck",
+      "kind": "synth",
+      "description": "Pluck — metallic electric-piano-ish pluck built entirely from FM rather than a filter envelope; the shared amp envelope's fast decay is what gives it a plucked shape",
+      "params": {
+        "osc": "sine",
+        "fmLevel": 0.55,
+        "fmHarmonicity": 2,
+        "fmModIndex": 7,
+        "attack": 0.001,
+        "decay": 0.22,
+        "sustain": 0.05,
+        "release": 0.1,
+        "cutoff": 6000,
+        "sendDelay": 0.3
+      }
+    },
+    {
+      "name": "marimba-pluck",
+      "kind": "synth",
+      "description": "Pluck — woody mallet-percussion character: sine fundamental plus a detuned triangle partial for a slightly inharmonic 'wooden bar' ring, faster decay and lower sustain than the other plucks",
+      "params": {
+        "osc": "sine",
+        "attack": 0.001,
+        "decay": 0.3,
+        "sustain": 0.02,
+        "release": 0.08,
+        "cutoff": 1800,
+        "resonance": 1,
+        "filterEnvAmount": 0.25,
+        "filterEnvDecay": 0.25,
+        "osc2Type": "triangle",
+        "osc2Level": 0.2,
+        "osc2Detune": 19,
+        "eqMid": 1
+      }
+    },
+    {
+      "name": "e-piano",
+      "kind": "synth",
+      "description": "Keys — FM electric piano: a moderate FM modulation index gives the classic 'tine' bell-attack-into-warm-body EP timbre, light chorus send",
+      "params": {
+        "osc": "sine",
+        "fmLevel": 0.5,
+        "fmHarmonicity": 1,
+        "fmModIndex": 3,
+        "attack": 0.002,
+        "decay": 1,
+        "sustain": 0.3,
+        "release": 0.4,
+        "cutoff": 4500,
+        "sendMod": 0.3,
+        "eqMid": 0.5
+      }
+    },
+    {
+      "name": "bell-keys",
+      "kind": "synth",
+      "description": "Keys — bright FM bell keys: higher FM modulation index and a non-integer ratio (3.5, same inharmonic-overtone technique as fm-bell-lead) than e-piano, longer decay, more reverb",
+      "params": {
+        "osc": "sine",
+        "fmLevel": 0.6,
+        "fmHarmonicity": 3.5,
+        "fmModIndex": 8,
+        "attack": 0.001,
+        "decay": 1.5,
+        "sustain": 0.15,
+        "release": 0.8,
+        "cutoff": 8000,
+        "sendReverb": 0.35
+      }
+    },
+    {
+      "name": "organ-keys",
+      "kind": "synth",
+      "description": "Keys — drawbar-style organ: a near-instant on/off amp envelope (no decay, full sustain — organs don't decay while held) and an octave+fifth second-oscillator layer standing in for drawbar harmonics, chorus send for a Leslie-ish width",
+      "params": {
+        "osc": "sine",
+        "attack": 0.005,
+        "decay": 0.05,
+        "sustain": 1,
+        "release": 0.05,
+        "osc2Type": "sine",
+        "osc2Level": 0.35,
+        "osc2Detune": 1907,
+        "cutoff": 6000,
+        "sendMod": 0.4
+      }
+    },
+    {
+      "name": "warm-keys",
+      "kind": "synth",
+      "description": "Keys — subtractive (non-FM) warm electric keys: filtered triangle with a gentle filter-envelope swell instead of e-piano's FM bite, for a mellower Wurlitzer-ish character",
+      "params": {
+        "osc": "triangle",
+        "cutoff": 2600,
+        "attack": 0.005,
+        "decay": 0.8,
+        "sustain": 0.4,
+        "release": 0.3,
+        "filterEnvAmount": 0.2,
+        "filterEnvDecay": 0.4,
+        "osc2Type": "sine",
+        "osc2Level": 0.3,
+        "osc2Detune": 12,
+        "sendReverb": 0.15,
+        "eqLow": 0.5
+      }
+    },
+    {
+      "name": "arp-pluck",
+      "kind": "synth",
+      "description": "Arp — short percussive voicing for fast note runs: tighter decay than any Pluck-category preset, heavy delay send so a fast arpeggiated pattern builds its own rhythmic echo trail",
+      "params": {
+        "osc": "sawtooth",
+        "attack": 0.001,
+        "decay": 0.1,
+        "sustain": 0.05,
+        "release": 0.05,
+        "cutoff": 4200,
+        "resonance": 1,
+        "filterEnvAmount": 0.4,
+        "filterEnvDecay": 0.12,
+        "sendDelay": 0.45,
+        "sendReverb": 0.15
+      }
+    },
+    {
+      "name": "arp-bell",
+      "kind": "synth",
+      "description": "Arp — FM bell voicing for melodic trance/EDM-style arps: short-medium decay so a 16th-note run stays articulate, delay-forward for the classic 'gated bell arp' effect",
+      "params": {
+        "osc": "sine",
+        "fmLevel": 0.45,
+        "fmHarmonicity": 2,
+        "fmModIndex": 6,
+        "attack": 0.001,
+        "decay": 0.35,
+        "sustain": 0.1,
+        "release": 0.15,
+        "cutoff": 7000,
         "sendDelay": 0.4,
-        "sendReverb": 0.25,
-        "eqHigh": 1.5
+        "sendReverb": 0.25
+      }
+    },
+    {
+      "name": "arp-sequence",
+      "kind": "synth",
+      "description": "Arp — retro sequencer voicing: resonant square wave with a fast cutoff LFO so a repeating note pattern gets subtle per-cycle timbral movement rather than sounding static",
+      "params": {
+        "osc": "square",
+        "attack": 0.001,
+        "decay": 0.2,
+        "sustain": 0.15,
+        "release": 0.08,
+        "cutoff": 3000,
+        "resonance": 1.5,
+        "lfoDest": "cutoff",
+        "lfoRate": 6,
+        "lfoDepth": 0.2,
+        "sendDelay": 0.35
+      }
+    },
+    {
+      "name": "riser-sweep",
+      "kind": "synth",
+      "description": "FX — noise riser for transition builds: dominant noise oscillator layer under a long (2s) filter-envelope attack sweeping the cutoff up, long amp envelope to match",
+      "params": {
+        "noiseLevel": 0.8,
+        "cutoff": 300,
+        "resonance": 3,
+        "attack": 1.8,
+        "decay": 0.3,
+        "sustain": 0.9,
+        "release": 1.2,
+        "filterEnvAmount": 0.9,
+        "filterEnvAttack": 2,
+        "filterEnvDecay": 0.5,
+        "filterEnvSustain": 0.8,
+        "filterEnvRelease": 1,
+        "sendReverb": 0.5,
+        "sendDelay": 0.2
+      }
+    },
+    {
+      "name": "noise-impact",
+      "kind": "synth",
+      "description": "FX — broadband noise impact/hit: full-level noise oscillator, short decay, distorted for extra weight, big reverb return so it reads as a one-shot boom rather than a sustained texture",
+      "params": {
+        "noiseLevel": 1,
+        "attack": 0.001,
+        "decay": 0.4,
+        "sustain": 0.05,
+        "release": 0.3,
+        "cutoff": 8000,
+        "resonance": 0.3,
+        "distortionAmount": 0.3,
+        "distortionMix": 0.3,
+        "sendReverb": 0.4
+      }
+    },
+    {
+      "name": "drone-texture",
+      "kind": "synth",
+      "description": "FX — evolving ambient drone: wide 5-voice unison saw, two independent slow LFOs (one on cutoff, one on amplitude) so the texture never quite repeats, very long attack/release",
+      "params": {
+        "osc": "sawtooth",
+        "unisonVoices": 5,
+        "unisonWidth": 0.9,
+        "cutoff": 1500,
+        "attack": 1.5,
+        "sustain": 0.9,
+        "release": 3,
+        "lfoDest": "cutoff",
+        "lfoRate": 0.08,
+        "lfoDepth": 0.4,
+        "lfo2Dest": "amp",
+        "lfo2Rate": 0.05,
+        "lfo2Depth": 0.15,
+        "sendReverb": 0.7,
+        "sendDelay": 0.3,
+        "eqHigh": -2
       }
     }
   ]
