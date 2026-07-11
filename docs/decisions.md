@@ -11,11 +11,21 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ## D11 — New binary media/preset content goes through git-lfs (2026-07-11)
 
-**Decision:** `*.sf2`/`*.sf3`/`*.wav`/`*.h2drumkit` are tracked via `.gitattributes` + git-lfs
-from this point forward. Existing large blobs already committed (the three `.sf2` files from
-Phase 7/Phase 10 Stream B, ~78MB raw) are left as plain git objects — migrating them into LFS
-needs a history rewrite (`git lfs migrate`), which changes every downstream commit hash and is a
-call for the owner to make deliberately, not something to do unprompted mid-session.
+**Decision:** `*.sf2`/`*.sf3`/`*.wav`/`*.h2drumkit` are tracked via `.gitattributes` + git-lfs.
+**Update, same day**: the existing pre-LFS blobs *were* migrated after all (`git lfs migrate
+import --include="*.sf2,*.wav,*.h2drumkit" --everything`), reversing this entry's original "leave
+them as plain objects, that's the owner's call" position. Reason for the reversal: leaving the
+repo half-configured (new files LFS-tracked, old files still plain git objects, but a shared
+`.gitattributes` rule covering both) turned out to be actively dangerous, not just imperfect — a
+concurrent Phase 11 worktree touching those same paths had them silently corrupted down to
+133-byte LFS-pointer stubs mid-session (the working-tree file got smudge-converted while the real
+object was never migrated into LFS storage to smudge back *from*). Caught immediately via a
+sha256 check against each file's own provenance sidecar (`presets/sf2/*.sf2.json`) before it could
+propagate anywhere; `main` itself was never touched, verified via `git rev-list --left-right
+origin/main...main` (0 behind, migration is purely local — nothing had been pushed yet, so
+rewriting commit hashes carried no shared-history risk). Post-migration, every file's sha256 was
+re-verified byte-identical to its provenance record and `npm test` stayed at 286/280/0/6.
+Delegated per the owner's own "make the small calls yourself" instruction rather than paused on.
 
 **Why:** flagged as an explicitly open question in research 11 ("media/binary versioning at
 scale... revisit before D3 ships") and it stopped being hypothetical the moment Phase 10 Stream B
