@@ -313,6 +313,28 @@ Real sampled instruments enter as a third track kind:
   instrument tracks are excluded from GUI sync partials and preserved by the daemon on pushes.
 - Content: `presets/sf2/upright-piano-kw-small.sf2` (FreePats, CC0, provenance sidecar).
 
+### v0.7 additions — fractional note timing (owner requirement: live/tapped input)
+
+Notes come off the grid: **`start` and `duration` on `note` lines accept decimals** (still in
+16th-step units — `3.5` is halfway between steps 3 and 4). This is the format foundation for
+live capture ("tapping on keys to create rhythm"): a tapped performance records at the time it
+was played, not snapped to the nearest 16th; quantize becomes an optional edit, never a
+storage limitation.
+
+- Canonical form: numbers use the shared `formatNumber` rule (max 4 decimals, trailing zeros
+  stripped — `3.5`, never `3.50`). Non-canonical spellings parse and re-serialize canonically.
+  Precision floor: 0.0001 step = 12.5 µs at 120 bpm — far below perceptual timing thresholds.
+- Validation: `start >= 0`, `duration > 0` (the old integer `>= 1` floor is gone). Pitch stays
+  an integer 0-127. `addNote` snaps incoming values to canonical precision so a stored
+  document always deep-equals its own serialize→parse round-trip.
+- Engine: verified sample-accurate end-to-end — two notes 1.5 steps apart (on-grid step 2,
+  off-grid 3.5) rendered through the real beatlab graph measure a 187.6 ms inter-onset gap vs
+  187.5 ms expected (0.07 ms error). The spessasynth instrument path already floors fractional
+  steps to sample positions.
+- Drum patterns remain grid-quantized 16-step lanes in v0.7 — off-grid drums need either a
+  per-lane swing parameter or note-style hit lines (deliberately deferred; the pattern grid's
+  one-line-per-lane diffability is worth keeping for the common case).
+
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
 Automation, clips/scenes, swing, arrangement, multi-device chains beyond the built-in insert

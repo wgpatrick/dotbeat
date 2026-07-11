@@ -25,7 +25,7 @@ export interface ExternalSandboxPayload {
   arrangement?: { enabled?: boolean; mode?: string | null; timeline?: { sceneId: string; bars: number }[] }
 }
 
-const BEAT_FORMAT_VERSION = '0.5'
+const BEAT_FORMAT_VERSION = '0.7'
 
 /** SynthParams fields the format deliberately does NOT model (each needs grammar design of its
  * own — large arrays, ordered lists, or redundant pairs; see docs/phase-5-plan.md). These are
