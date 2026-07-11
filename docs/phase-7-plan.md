@@ -91,3 +91,27 @@ per-lane render) before any third-party content enters. The CC0 Freesound pipeli
 
 7.1 engine per-lane API → 7.4 starter kit render → 7.2 format v0.5 grammar → 7.3 renderer
 plumbing → exit test → daemon/browser leg → docs.
+
+## Result (2026-07-11)
+
+Shipped: 123/123 tests green; both repos pushed.
+
+- **Format v0.5**: media block (content-addressed, sha256-pinned, relative-paths-only) + `lane`
+  assignments; canonical elision preserved (v0.2-v0.4 files byte-identical); semantic diff
+  covers media re-pins and lane swaps ("drums: kick lane synth voice -> ap-kick (-1.5 dB, -2 st)").
+- **Engine (beatlab main)**: per-lane one-shots in separate player maps (whole-kit slicer
+  untouched), lane level × velocity separation, tune via playbackRate. Dev-bridge loads media
+  from the daemon with (id, sha256)-keyed caching. 14/14 smoke checks.
+- **Exit test met**: a sample-backed kick renders measurably differently from the synth kick
+  (sub 48% vs 41%, centroid shift from tune) while unassigned hat lanes stay synthesized
+  (97% air); hash mismatch exits 1 with a precise error; GUI push never erases media/lanes
+  (carried over in the daemon).
+- **Content**: kit-init (self-rendered CC0) + kit-audiophob (CC0, Debian-vetted, Freesound IDs
+  in provenance) bundled; Freesound CC0 pipeline live at both audition (previews) and original
+  (OAuth2) quality — full search→verify-license→download→prep→provenance in one command.
+- **Deferred, honestly**: live-browser verification of the bridge lane-loading (implemented +
+  typechecked; the daemon endpoint and the engine loader are each verified independently —
+  extending verify-m1's Playwright harness to assert lane audio is a follow-up), MuldjordKit
+  (blocked on GitHub-release proxy access), spessasynth SF2 tier (next), and the drum-craft
+  prep conventions (research 09 struck out on book-grade sources — prep-oneshot defaults remain
+  self-derived).

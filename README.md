@@ -19,7 +19,7 @@ production trainer, which this project forks in spirit).
 
 ```bash
 npm install
-npm test                          # 105 tests: format, conversion vs real data, daemon sync, CLI, presets, vary, DSP metrics, MCP
+npm test                          # 123 tests: format, conversion vs real data, daemon sync, CLI, presets, vary, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat lead.cutoff 900   # prints "lead: cutoff 3200 -> 900"
@@ -27,6 +27,8 @@ node cli/beat.mjs presets                                         # the factory 
 node cli/beat.mjs preset song.beat drums driving-kit              # a preset = a readable bag of set edits
 node cli/beat.mjs vary song.beat drums kick --render              # 9 small-diff variants to audition...
 node cli/beat.mjs score vary-kick-42 3 7 1                        # ...ranked picks -> git-tracked taste log
+node cli/beat.mjs sample song.beat kick-x media/kick.wav          # register real audio (sha256-pinned)
+node cli/beat.mjs lane song.beat drums kick kick-x -2 0           # that lane now plays the sample
 node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical edit list, not line noise
 node cli/beat.mjs render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
 node cli/beat.mjs render --offline examples/real-groove.beat -o out.wav   # the REAL engine, no browser
@@ -65,7 +67,7 @@ now fully-verified version.
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over a 3-endpoint HTTP/SSE protocol, echo suppression by canonical-text comparison. |
 | `src/metrics/` | The guardrail layer (D2): integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, stereo field — plus the deterministic mix-lint rules. Zero deps, validated against the spec's calibration cases. |
 | `src/mcp/` | `beat mcp` — zero-dep stdio MCP server exposing the whole toolchain (inspect/set/notes/diff/metrics/lint/render) to AI agents. |
-| `test/` | 105 tests — format round-trips (v0.2 and v0.3 elision/enums/trackrefs), conversion fidelity against a real exported project, presets, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
+| `test/` | 123 tests — format round-trips (v0.2 and v0.3 elision/enums/trackrefs), conversion fidelity against a real exported project, presets, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
 | `cli/beat.mjs` | The unified `beat` CLI: `init`, `add-track`/`rm-track`, `inspect`, `set`, `add-note`/`rm-note`, `diff` (files or git revs), `presets`/`preset`, `vary`/`score` (the variation-and-taste loop), `metrics`, `lint`, `render` (Chromium or `--offline`), `daemon`, `mcp` — enough to compose from a blank file. |
 | `presets/factory.json` | The factory sound library — curated voicings (seeded from a real approved mix), applied as ordinary edits, never referenced by the format itself. |
 | `scripts/verify-m1.mjs`, `verify-m3.mjs`, `verify-phase5.mjs`, `spike-offline-render.mjs` | The measured proofs: M1 sync latencies, M3's closed loop (render→measure→edit→re-render, target hit to 0.01 LU), Phase 5's sound-reproduction exit test, M2's 22×-realtime offline-render spike. |

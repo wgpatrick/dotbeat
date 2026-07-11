@@ -273,6 +273,30 @@ Proven exit (Phase 5, `scripts/verify-phase5.mjs`): the Night Shift v3 sound des
 originally only reachable by patching the live store — reproduced from pure v0.3 text, with
 exact store-state equivalence on every track and render metrics matching the archived reference.
 
+### v0.5 additions — media block + sample-backed drum lanes (Phase 7)
+
+The first thing a `.beat` file references that cannot be text — real audio — enters
+content-addressed and provenance-tracked:
+
+- **`media` block** (top level, canonically BEFORE tracks): `sample <id> sha256:<64-hex> <path>`
+  per line. The hash pins the exact bytes (integrity, dedup, honest git story: media files are
+  immutable blobs); paths are relative to the `.beat` file, forward slashes, no `..` (validated
+  at parse). Hash/existence are checked at LOAD time (renderer/daemon), not parse time — parse
+  stays pure text. License provenance lives in a `<path>.json` sidecar (source, license, credit
+  lines, prep settings, sha256), deliberately outside the music file.
+- **`lane` lines** in drum tracks: `lane <lane> <sample-id> <gain dB> <tune semitones>` — that
+  lane plays the sample one-shot instead of the synthesized voice (static gain multiplies
+  per-hit velocity; tune ±24 st). Unassigned lanes stay synthesized — mixed kits are the normal
+  case. Canonical order: DRUM_LANES order, after synth params, before clips. One line per
+  assigned lane = swap-the-kick is a one-line diff.
+- Tooling: `beat sample` registers media (computes the sha256 for you), `beat lane`
+  assigns/clears; the daemon serves declared media to the browser bridge (only declared paths —
+  never a directory listing); the offline renderer verifies hashes and fails loudly on mismatch
+  or missing files.
+- Content: `presets/kit-init/` (self-rendered, CC0) and `presets/kit-audiophob/` (CC0,
+  Debian-vetted — research 09) ship in-repo; the Freesound CC0 pipeline
+  (`scripts/freesound-cc0.mjs`, audition previews + OAuth2 originals) sources more.
+
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
 Automation, clips/scenes, swing, arrangement, multi-device chains beyond the built-in insert
