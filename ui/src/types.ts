@@ -59,13 +59,26 @@ export interface BeatInstrument {
 
 // v0.4 arrangement shapes (mirrors src/core/document.ts). The arrangement/song view reads these:
 // a clip is a named bag of notes (synth) or hits (drums); a scene maps trackId -> clipId; the
-// song is an ordered list of sections, each "play `scene` for `bars` bars". Automation lanes ride
-// through untyped — the arrangement view doesn't render them yet.
+// song is an ordered list of sections, each "play `scene` for `bars` bars".
+//
+// v0.9 clip automation (Phase 20 Stream Z): a lane is every (time,value) breakpoint recorded for
+// one automatable synth param within one clip; `time` is in 16th steps from the clip's start
+// (same unit as note/hit start), `value` is the param's raw unit. Mirrors src/core/document.ts's
+// BeatAutomationLane/BeatAutomationPoint (ui/ hand-mirrors core shapes — see this file's siblings).
+export interface BeatAutomationPoint {
+  id: string
+  time: number
+  value: number
+}
+export interface BeatAutomationLane {
+  param: string
+  points: BeatAutomationPoint[]
+}
 export interface BeatClip {
   id: string
   notes: BeatNote[]
   hits: BeatDrumHit[]
-  automation: unknown[]
+  automation: BeatAutomationLane[]
 }
 
 export interface BeatScene {

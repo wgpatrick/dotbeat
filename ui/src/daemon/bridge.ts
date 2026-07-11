@@ -17,7 +17,7 @@
 // external edits reconcile via the SSE re-pull.
 
 import { useStore } from '../state/store'
-import type { BeatDocument, BeatDrumHit, BeatSelection, DrumLane } from '../types'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatDocument, BeatDrumHit, BeatSelection, DrumLane } from '../types'
 import { DRUM_LANES } from '../types'
 
 export function daemonBase(): string {
@@ -136,6 +136,106 @@ export function postEdit(path: string, value: string): void {
           .catch((err) => console.warn('[daw] could not POST edit:', err)),
       )
     }, 60),
+  )
+}
+
+// ─── clip automation (Phase 20 Stream Z) ─────────────────────────────────────────────────────────
+// Automation curve edits can't use postEdit's {path,value} grammar (they carry a (clip, param,
+// point) tuple), so they go to the daemon's additive POST /automate — wrapping the SAME core
+// primitives `beat automate` uses (setAutomationPoint / removeAutomationPoint). Like postEdit, the
+// UI mirrors the edit optimistically so the drawn curve updates instantly, then reconciles on the
+// SSE re-pull. The optimistic id-mint below matches core's exactly (`p<n>`, max+1 within the lane)
+// so a freshly-drawn point keeps the same id the daemon writes — no flicker on reconcile.
+
+export interface AutomationEdit {
+  op: 'set' | 'remove'
+  track: string
+  clip: string
+  param: string
+  time?: number
+  value?: number
+  id?: string
+}
+
+const canonV = (n: number) => Number(n.toFixed(4))
+
+/** A faithful local mirror of core's setAutomationPoint / removeAutomationPoint for one clip lane,
+ * so the automation overlay reflects a drag instantly. Returns a new document, or null when the
+ * target track/clip can't be found (then we just wait for the authoritative SSE re-pull). */
+function applyLocalAutomation(doc: BeatDocument, e: AutomationEdit): BeatDocument | null {
+  const ti = doc.tracks.findIndex((t) => t.id === e.track)
+  if (ti === -1) return null
+  const track = doc.tracks[ti]!
+  const ci = track.clips.findIndex((c) => c.id === e.clip)
+  if (ci === -1) return null
+  const clip = track.clips[ci]!
+  const lane = clip.automation.find((l) => l.param === e.param)
+
+  let nextLanes: BeatAutomationLane[]
+  if (e.op === 'remove') {
+    if (!lane || e.id === undefined) return doc
+    const remaining = lane.points.filter((p) => p.id !== e.id)
+    nextLanes =
+      remaining.length === 0
+        ? clip.automation.filter((l) => l.param !== e.param)
+        : clip.automation.map((l) => (l.param === e.param ? { ...l, points: remaining } : l))
+  } else {
+    if (e.time === undefined || e.value === undefined) return doc
+    const time = canonV(e.time)
+    const value = canonV(e.value)
+    const existing = e.id !== undefined && lane ? lane.points.find((p) => p.id === e.id) : undefined
+    if (existing) {
+      nextLanes = clip.automation.map((l) =>
+        l.param === e.param ? { ...l, points: l.points.map((p) => (p.id === e.id ? { id: p.id, time, value } : p)) } : l,
+      )
+    } else {
+      const points = lane ? lane.points : []
+      let id = e.id
+      if (id === undefined) {
+        let max = 0
+        for (const p of points) {
+          const m = p.id.match(/^p(\d+)$/)
+          if (m) max = Math.max(max, Number(m[1]))
+        }
+        id = `p${max + 1}`
+      }
+      const added: BeatAutomationPoint = { id, time, value }
+      nextLanes = lane
+        ? clip.automation.map((l) => (l.param === e.param ? { ...l, points: [...l.points, added] } : l))
+        : [...clip.automation, { param: e.param, points: [added] }]
+    }
+  }
+
+  const nextClip = { ...clip, automation: nextLanes }
+  const clips = track.clips.map((c, i) => (i === ci ? nextClip : c))
+  const tracks = doc.tracks.map((t, i) => (i === ti ? { ...t, clips } : t))
+  return { ...doc, tracks }
+}
+
+/** Issue one automation edit. Mirrors it optimistically, then POSTs /automate (fire-and-forget;
+ * the SSE re-pull reconciles). Curve drags call this only on pointer-up — the live drag redraws
+ * the canvas imperatively (research 15 §2: no React state / no network per pointer move). */
+export function postAutomation(e: AutomationEdit): void {
+  const state = useStore.getState()
+  if (state.doc) {
+    const next = applyLocalAutomation(state.doc, e)
+    if (next) state.setDoc(next)
+  }
+  const base = daemonBase()
+  const body: Record<string, unknown> = { op: e.op, track: e.track, clip: e.clip, param: e.param }
+  if (e.time !== undefined) body.time = e.time
+  if (e.value !== undefined) body.value = e.value
+  if (e.id !== undefined) body.id = e.id
+  sendQueue = sendQueue.then(() =>
+    fetch(`${base}/automate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(async (res) => {
+        if (!res.ok) console.warn(`[daw] /automate ${e.op} ${e.track}.${e.clip}.${e.param}: HTTP ${res.status}`, await res.text().catch(() => ''))
+      })
+      .catch((err) => console.warn('[daw] could not POST automation:', err)),
   )
 }
 

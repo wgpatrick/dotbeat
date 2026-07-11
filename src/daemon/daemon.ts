@@ -32,7 +32,7 @@ import { readFileSync, writeFileSync, watch, existsSync, type FSWatcher } from '
 import { createHash } from 'node:crypto'
 import { basename, dirname, resolve } from 'node:path'
 import type { BeatDocument, BeatSelection } from '../core/index.js'
-import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, setValue, validateSelection, saveClip, setScene, setSong, BeatEditError, type ExternalSandboxPayload } from '../core/index.js'
+import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, setValue, setAutomationPoint, removeAutomationPoint, validateSelection, saveClip, setScene, setSong, BeatEditError, type ExternalSandboxPayload } from '../core/index.js'
 // D3/D10 versioning surface over HTTP: the GUI's history panel (Phase 15 Stream H) reads the
 // checkpoint list and issues "go back" through these. All of it reuses src/history's real git-backed
 // functions — the daemon adds no versioning logic, just an HTTP face on the same verbs `beat
@@ -509,6 +509,59 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
           json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // v0.9 clip-automation edit channel (Phase 20 Stream Z, GUI automation lanes). The /edit
+    // {path,value} grammar (core's setValue) cannot express a (track, clip, param, point) tuple, so
+    // this additive route wraps the SAME core primitives `beat automate` / `beat_automate` use
+    // (setAutomationPoint / removeAutomationPoint — src/core/edit.ts), one call per curve edit:
+    //   { op:'set',    track, clip, param, time, value, id? }  -> add-or-move a breakpoint
+    //   { op:'remove', track, clip, param, id }                -> delete one breakpoint (drops the
+    //                                                             lane when it was the last point)
+    // Writes through writeIfChanged like /edit, so a curve drag is a clean per-point line diff and
+    // the directory watcher hot-reloads the GUI through the ordinary external-edit path.
+    if (req.method === 'POST' && url.pathname === '/automate') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as {
+            op?: unknown
+            track?: unknown
+            clip?: unknown
+            param?: unknown
+            time?: unknown
+            value?: unknown
+            id?: unknown
+          }
+          if (typeof b.track !== 'string' || typeof b.clip !== 'string' || typeof b.param !== 'string') {
+            json(res, 400, { error: 'body must include string track, clip, param' })
+            return
+          }
+          if (b.op === 'remove') {
+            if (typeof b.id !== 'string') {
+              json(res, 400, { error: "op 'remove' needs a string id" })
+              return
+            }
+            const written = writeIfChanged(removeAutomationPoint(doc, b.track, b.clip, b.param, b.id).doc)
+            json(res, 200, { written })
+            return
+          }
+          if (b.op === 'set') {
+            if (typeof b.time !== 'number' || typeof b.value !== 'number') {
+              json(res, 400, { error: "op 'set' needs numeric time and value" })
+              return
+            }
+            const point = { time: b.time, value: b.value, ...(typeof b.id === 'string' ? { id: b.id } : {}) }
+            const out = setAutomationPoint(doc, b.track, b.clip, b.param, point)
+            const written = writeIfChanged(out.doc)
+            json(res, 200, { written, id: out.point.id, created: out.created })
+            return
+          }
+          json(res, 400, { error: "op must be 'set' or 'remove'" })
+        })
+        .catch((err) => {
+          json(res, 400, { error: err instanceof Error ? err.message : String(err) })
         })
       return
     }

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
-import { postEdit, postSelection, daemonBase } from '../daemon/bridge'
-import { DRUM_LANES, type BeatDocument, type BeatTrack, type DrumLane } from '../types'
+import { postEdit, postSelection, postAutomation, daemonBase } from '../daemon/bridge'
+import { DRUM_LANES, type BeatAutomationPoint, type BeatDocument, type BeatTrack, type DrumLane, type TrackKind } from '../types'
+import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 
 // ── Arrangement length (Phase 19 Stream V) ───────────────────────────────────────────────────────
 // Two length surfaces, matching the two document modes. Loop mode (doc.song === null) is a single
@@ -149,6 +151,78 @@ function InlineStrip({ track }: { track: BeatTrack }) {
   )
 }
 
+// ── Automation lanes (Phase 20 Stream Z) ─────────────────────────────────────────────────────────
+// Per-track parameter picker + inline draggable breakpoint curve, over dotbeat's v0.9 clip
+// automation (BeatAutomationLane). Automation is CLIP-SCOPED and only plays in song mode (the engine
+// returns an empty automation map in loop mode — ui/src/audio/engine.ts contentFor), so the picker
+// is only offered when a track's clip actually plays in a scene. Each shown param renders as its own
+// dedicated sub-lane below the track row — research 18 §7's "move an envelope into its own dedicated
+// lane below the clip … a track can show many parameter lanes stacked at once", the multi-lane
+// presentation that fits the +/- picker (the same-row red-line overlay is the single-lane alternate,
+// deferred). Curve drags redraw the canvas imperatively and POST only on pointer-up (research 15 §2:
+// no React state / no network per pointer move); the write goes through the daemon's /automate route
+// wrapping the SAME core setAutomationPoint/removeAutomationPoint `beat automate` uses.
+const AUTO_H = 46 // height of one automation sub-lane
+const AUTO_PAD = 6 // vertical inset for the curve inside a sub-lane
+const PICKER_H = 30 // height of the expanded add-a-lane strip
+const MARKER_HIT = 8 // px radius to grab a breakpoint
+
+/** Every knob param, keyed — the value ranges (min/max) that map a raw automation value to the
+ * sub-lane's y-axis. Reuses synthParams.ts's declarative table (the same one SynthPanel renders),
+ * so a param's automation y-range always matches its knob range. Knob params are exactly the
+ * numeric fields, i.e. the automatable set (AUTOMATABLE_SYNTH_PARAMS excludes only enums/bools). */
+const SPEC_BY_KEY: Map<string, ParamSpec> = new Map()
+for (const g of PARAM_GROUPS) for (const p of g.params) if (p.kind === 'knob') SPEC_BY_KEY.set(p.key, p)
+
+/** The automatable params offered for a track kind, in synthParams group order. */
+const AUTO_OPTIONS_BY_KIND: Record<TrackKind, { key: string; label: string }[]> = {
+  synth: [],
+  drums: [],
+  instrument: [],
+}
+for (const g of PARAM_GROUPS) {
+  for (const kind of g.kinds) {
+    for (const p of g.params) {
+      if (p.kind === 'knob' && !AUTO_OPTIONS_BY_KIND[kind].some((o) => o.key === p.key)) {
+        AUTO_OPTIONS_BY_KIND[kind].push({ key: p.key, label: p.label })
+      }
+    }
+  }
+}
+
+function specFor(param: string): ParamSpec {
+  return SPEC_BY_KEY.get(param) ?? { key: param, label: param, kind: 'knob', min: 0, max: 1, format: (v: number) => v.toFixed(2) }
+}
+function laneLabel(track: BeatTrack, param: string): string {
+  const spec = specFor(param)
+  if (param === 'volume') return 'Track Vol'
+  if (param === 'pan') return 'Track Pan'
+  return `${track.name} / ${spec.label}`
+}
+
+/** Where a track's automatable clip actually plays, in song-time. One entry per section that maps
+ * this track to a clip that exists; [] in loop mode (no clip-scoped playback). The picker targets
+ * the FIRST occurrence's clip (v1: one editable clip per track — multi-clip automation deferred). */
+interface ClipOccurrence {
+  clipId: string
+  startBar: number
+  bars: number
+}
+function trackOccurrences(track: BeatTrack, sections: Section[], doc: BeatDocument): ClipOccurrence[] {
+  if (!doc.song) return []
+  const out: ClipOccurrence[] = []
+  for (const s of sections) {
+    const scene = doc.scenes.find((sc) => sc.id === s.scene)
+    const clipId = scene?.slots[track.id]
+    if (!clipId) continue
+    if (!track.clips.find((c) => c.id === clipId)) continue
+    out.push({ clipId, startBar: s.startBar, bars: s.bars })
+  }
+  return out
+}
+
+const NO_POINTS: BeatAutomationPoint[] = []
+
 type FlatNote = { start: number; duration: number; pitch: number } // start/duration in 16th steps, absolute over the song
 type FlatHit = { start: number; lane: DrumLane }
 interface TrackFlat {
@@ -250,6 +324,7 @@ function TrackRow({
   selected,
   onHeaderClick,
   onRowPointerDown,
+  headerExtra,
 }: {
   flat: TrackFlat
   totalBars: number
@@ -260,6 +335,7 @@ function TrackRow({
   selected: boolean
   onHeaderClick: () => void
   onRowPointerDown: (e: React.PointerEvent) => void
+  headerExtra?: ReactNode
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { track } = flat
@@ -371,9 +447,265 @@ function TrackRow({
           <span className={`arr-track-kind kind-${track.kind}`}>{track.kind[0]}</span>
         </button>
         <InlineStrip track={track} />
+        {headerExtra}
       </div>
       <div className="arr-lane" data-track={track.id} onPointerDown={onRowPointerDown} style={{ touchAction: 'none' }}>
         <canvas ref={canvasRef} className="arr-canvas" />
+      </div>
+    </div>
+  )
+}
+
+/** One automation sub-lane: the draggable breakpoint curve for (track, clipId, param), drawn across
+ * every section occurrence that plays that clip (tiled every loopSteps, matching engine playback).
+ * Canvas-rendered; a drag redraws imperatively and commits once on pointer-up (research 15 §2). */
+function AutomationLane({
+  track,
+  clipId,
+  param,
+  occurrences,
+  totalBars,
+  pxPerBar,
+  loopSteps,
+  onRemoveLane,
+}: {
+  track: BeatTrack
+  clipId: string
+  param: string
+  occurrences: ClipOccurrence[]
+  totalBars: number
+  pxPerBar: number
+  loopSteps: number
+  onRemoveLane: () => void
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const spec = specFor(param)
+  const min = spec.min ?? 0
+  const max = spec.max ?? 1
+  // Subscribe to just this lane's points. `find` returns the store's own array reference (stable
+  // across unrelated state changes), so Object.is equality keeps this from re-rendering per tick.
+  const points = useStore(
+    useCallback(
+      (s) => s.doc?.tracks.find((t) => t.id === track.id)?.clips.find((c) => c.id === clipId)?.automation.find((l) => l.param === param)?.points ?? NO_POINTS,
+      [track.id, clipId, param],
+    ),
+  )
+  const markersRef = useRef<{ x: number; y: number; id: string }[]>([])
+  const dragRef = useRef<{ mode: 'move' | 'new'; id?: string; time: number; value: number } | null>(null)
+
+  const valueToY = useCallback((v: number) => {
+    const norm = Math.max(0, Math.min(1, (v - min) / (max - min || 1)))
+    return AUTO_PAD + (1 - norm) * (AUTO_H - 2 * AUTO_PAD)
+  }, [min, max])
+  const yToValue = useCallback((y: number) => {
+    const norm = Math.max(0, Math.min(1, 1 - (y - AUTO_PAD) / (AUTO_H - 2 * AUTO_PAD)))
+    return min + norm * (max - min)
+  }, [min, max])
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const dpr = window.devicePixelRatio || 1
+    const wCss = Math.max(1, totalBars * pxPerBar)
+    canvas.width = Math.round(wCss * dpr)
+    canvas.height = Math.round(AUTO_H * dpr)
+    canvas.style.width = `${wCss}px`
+    canvas.style.height = `${AUTO_H}px`
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, wCss, AUTO_H)
+    ctx.fillStyle = 'rgba(255,255,255,0.02)'
+    ctx.fillRect(0, 0, wCss, AUTO_H)
+    // top / bottom rails
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)'
+    ctx.lineWidth = 1
+    for (const yy of [AUTO_PAD, AUTO_H - AUTO_PAD]) {
+      ctx.beginPath()
+      ctx.moveTo(0, yy + 0.5)
+      ctx.lineTo(wCss, yy + 0.5)
+      ctx.stroke()
+    }
+
+    // Effective points = committed points with the active drag applied (move overrides one id; new
+    // adds a provisional point). Sorted by time — the canonical curve order.
+    const drag = dragRef.current
+    let eff = points.map((p) => ({ ...p }))
+    if (drag?.mode === 'move' && drag.id) eff = eff.map((p) => (p.id === drag.id ? { ...p, time: drag.time, value: drag.value } : p))
+    if (drag?.mode === 'new') eff = [...eff, { id: '__draft__', time: drag.time, value: drag.value }]
+    eff.sort((a, b) => a.time - b.time)
+
+    const markers: { x: number; y: number; id: string }[] = []
+    ctx.strokeStyle = track.color
+    ctx.lineWidth = 1.5
+    for (const occ of occurrences) {
+      for (let off = 0; off < occ.bars * 16; off += loopSteps) {
+        const tileStartStep = occ.startBar * 16 + off
+        const tileEndStep = Math.min(occ.startBar * 16 + occ.bars * 16, tileStartStep + loopSteps)
+        const xAt = (localStep: number) => ((tileStartStep + localStep) / 16) * pxPerBar
+        if (eff.length === 0) continue
+        ctx.beginPath()
+        // hold the first value from the tile start
+        ctx.moveTo((tileStartStep / 16) * pxPerBar, valueToY(eff[0]!.value))
+        for (const p of eff) ctx.lineTo(xAt(p.time), valueToY(p.value))
+        // hold the last value to the tile end
+        ctx.lineTo((tileEndStep / 16) * pxPerBar, valueToY(eff[eff.length - 1]!.value))
+        ctx.stroke()
+        // markers (skip the provisional draft — it isn't grabbable until committed)
+        for (const p of eff) {
+          const x = xAt(p.time)
+          const y = valueToY(p.value)
+          ctx.beginPath()
+          ctx.arc(x, y, 3.2, 0, Math.PI * 2)
+          ctx.fillStyle = p.id === drag?.id ? '#fff' : track.color
+          ctx.fill()
+          ctx.lineWidth = 1
+          ctx.strokeStyle = 'rgba(0,0,0,0.6)'
+          ctx.stroke()
+          ctx.strokeStyle = track.color
+          ctx.lineWidth = 1.5
+          if (p.id !== '__draft__') markers.push({ x, y, id: p.id })
+        }
+      }
+    }
+    markersRef.current = markers
+  }, [points, totalBars, pxPerBar, occurrences, loopSteps, track.color, valueToY])
+
+  useEffect(() => {
+    draw()
+  }, [draw])
+
+  // Map a canvas-local x to the clip-local time of the occurrence it falls in (points are stored in
+  // clip-local 16th steps; the tile the pointer is over sets the reference frame). Returns null when
+  // x is outside every occurrence.
+  const clipTimeFromX = useCallback(
+    (localX: number): { time: number; occ: ClipOccurrence } | null => {
+      const absStep = (localX / pxPerBar) * 16
+      let occ = occurrences.find((o) => absStep >= o.startBar * 16 && absStep < (o.startBar + o.bars) * 16)
+      if (!occ) occ = occurrences[0]
+      if (!occ) return null
+      let t = ((absStep - occ.startBar * 16) % loopSteps + loopSteps) % loopSteps
+      t = Math.max(0, Math.min(loopSteps, Number(t.toFixed(2))))
+      return { time: t, occ }
+    },
+    [occurrences, pxPerBar, loopSteps],
+  )
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const rect = canvas.getBoundingClientRect()
+      const localX = e.clientX - rect.left
+      const localY = e.clientY - rect.top
+      // hit-test existing markers
+      let hit: string | null = null
+      let best = MARKER_HIT * MARKER_HIT
+      for (const m of markersRef.current) {
+        const d = (m.x - localX) ** 2 + (m.y - localY) ** 2
+        if (d <= best) {
+          best = d
+          hit = m.id
+        }
+      }
+      // alt-click (or the row's remove) deletes a breakpoint
+      if (hit && (e.altKey || e.button === 2)) {
+        postAutomation({ op: 'remove', track: track.id, clip: clipId, param, id: hit })
+        return
+      }
+      e.preventDefault()
+      if (hit) {
+        const p = points.find((pt) => pt.id === hit)!
+        dragRef.current = { mode: 'move', id: hit, time: p.time, value: p.value }
+      } else {
+        const t = clipTimeFromX(localX)
+        if (!t) return
+        dragRef.current = { mode: 'new', time: t.time, value: yToValue(localY) }
+      }
+      draw()
+
+      const onMove = (ev: PointerEvent) => {
+        const drag = dragRef.current
+        if (!drag) return
+        const lx = ev.clientX - rect.left
+        const ly = ev.clientY - rect.top
+        const t = clipTimeFromX(lx)
+        if (t) drag.time = t.time
+        drag.value = Number(yToValue(ly).toFixed(4))
+        draw()
+      }
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        const drag = dragRef.current
+        dragRef.current = null
+        if (!drag) {
+          draw()
+          return
+        }
+        if (drag.mode === 'move' && drag.id) {
+          postAutomation({ op: 'set', track: track.id, clip: clipId, param, id: drag.id, time: drag.time, value: drag.value })
+        } else if (drag.mode === 'new') {
+          postAutomation({ op: 'set', track: track.id, clip: clipId, param, time: drag.time, value: drag.value })
+        }
+        // leave the imperative draft on screen; the optimistic store update (postAutomation) triggers
+        // the effect redraw from the real points on the next render.
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [points, clipTimeFromX, yToValue, draw, track.id, clipId, param],
+  )
+
+  const fmt = spec.format ?? ((v: number) => v.toFixed(2))
+  return (
+    <div className="arr-auto-row" style={{ height: AUTO_H }}>
+      <div className="arr-auto-head" style={{ width: HEADER_W }}>
+        <span className="arr-auto-label" title={laneLabel(track, param)}>
+          {laneLabel(track, param)}
+        </span>
+        <span className="arr-auto-range" title={`${fmt(min)} … ${fmt(max)}`}>
+          {fmt(max)}
+        </span>
+        <button className="arr-auto-remove" title="remove this automation lane" data-auto-remove={`${track.id}.${param}`} onClick={onRemoveLane}>
+          ×
+        </button>
+      </div>
+      <div
+        className="arr-auto-lane"
+        data-auto-track={track.id}
+        data-auto-param={param}
+        onPointerDown={onPointerDown}
+        onContextMenu={(e) => e.preventDefault()}
+        style={{ touchAction: 'none' }}
+      >
+        <canvas ref={canvasRef} className="arr-auto-canvas" />
+      </div>
+    </div>
+  )
+}
+
+/** The expandable "add an automation lane" strip that drops below a track row when its automation
+ * picker is open — a param <select> + add button, spanning the timeline width. */
+function AutomationPicker({ track, available, onAdd }: { track: BeatTrack; available: { key: string; label: string }[]; onAdd: (param: string) => void }) {
+  const [pick, setPick] = useState(available[0]?.key ?? '')
+  const chosen = available.some((a) => a.key === pick) ? pick : available[0]?.key ?? ''
+  return (
+    <div className="arr-auto-picker" style={{ height: PICKER_H }}>
+      <div className="arr-auto-picker-head" style={{ width: HEADER_W }}>
+        automation
+      </div>
+      <div className="arr-auto-picker-body">
+        <select className="arr-auto-select" value={chosen} data-auto-select={track.id} onChange={(e) => setPick(e.target.value)}>
+          {available.map((a) => (
+            <option key={a.key} value={a.key}>
+              {laneLabel(track, a.key)}
+            </option>
+          ))}
+        </select>
+        <button className="arr-auto-add" data-auto-add={track.id} onClick={() => chosen && onAdd(chosen)} disabled={!chosen}>
+          + add lane
+        </button>
       </div>
     </div>
   )
@@ -399,6 +731,11 @@ export function ArrangementView() {
   // previewed length; it commits on pointer-up (loop_bars for loop mode, POST /song for song mode).
   const [resize, setResize] = useState<{ index: number; startBar: number; startBars: number; startX: number; bars: number } | null>(null)
   const resizePxPerBar = useRef(1)
+  // Automation UI state (Phase 20 Stream Z): which track headers have the add-a-lane picker open,
+  // and which params the user has explicitly added (a lane can be shown before it has any points).
+  // Lanes that already carry points always show regardless — see visibleParamsFor.
+  const [autoOpen, setAutoOpen] = useState<Record<string, boolean>>({})
+  const [addedLanes, setAddedLanes] = useState<Record<string, string[]>>({})
 
   // Track the width available to the timeline lanes (total minus the fixed header column).
   useLayoutEffect(() => {
@@ -434,6 +771,62 @@ export function ArrangementView() {
     if (!doc) return []
     return doc.tracks.map((t) => flattenTrack(t, sections, doc))
   }, [doc, sections])
+
+  // Automation: where each track's clip plays (song-time occurrences), and the clip loop length the
+  // engine uses to tile automation (loopBars*16 — ui/src/audio/engine.ts contentFor).
+  const occurrencesByTrack = useMemo(() => {
+    const m = new Map<string, ClipOccurrence[]>()
+    if (doc) for (const t of doc.tracks) m.set(t.id, trackOccurrences(t, sections, doc))
+    return m
+  }, [doc, sections])
+  const loopSteps = (doc?.loopBars ?? 4) * 16
+
+  // The params to show as sub-lanes for a track: params that already have automation points on the
+  // track's primary (first-playing) clip, plus any the user explicitly added, filtered to the offered
+  // set for the track kind. Existing automation is therefore always visible without opening a picker.
+  const visibleParamsFor = useCallback(
+    (track: BeatTrack): string[] => {
+      const occ = occurrencesByTrack.get(track.id) ?? []
+      const primary = occ[0]?.clipId
+      const clip = primary ? track.clips.find((c) => c.id === primary) : undefined
+      const existing = clip ? clip.automation.map((l) => l.param) : []
+      const offered = new Set(AUTO_OPTIONS_BY_KIND[track.kind].map((o) => o.key))
+      const out: string[] = []
+      for (const p of [...existing, ...(addedLanes[track.id] ?? [])]) {
+        if (offered.has(p) && !out.includes(p)) out.push(p)
+      }
+      return out
+    },
+    [occurrencesByTrack, addedLanes],
+  )
+
+  const addLane = useCallback((trackId: string, param: string) => {
+    setAddedLanes((prev) => {
+      const cur = prev[trackId] ?? []
+      if (cur.includes(param)) return prev
+      return { ...prev, [trackId]: [...cur, param] }
+    })
+  }, [])
+
+  // Removing a lane clears its stored points (one /automate remove per breakpoint — an empty lane has
+  // no canonical serialized form, so the last removal drops the `auto` block) and forgets it locally.
+  const removeLane = useCallback(
+    (track: BeatTrack, param: string) => {
+      const occ = occurrencesByTrack.get(track.id) ?? []
+      const primary = occ[0]?.clipId
+      const clip = primary ? track.clips.find((c) => c.id === primary) : undefined
+      const lane = clip?.automation.find((l) => l.param === param)
+      for (const p of lane?.points ?? []) {
+        postAutomation({ op: 'remove', track: track.id, clip: primary!, param, id: p.id })
+      }
+      setAddedLanes((prev) => {
+        const cur = prev[track.id] ?? []
+        if (!cur.includes(param)) return prev
+        return { ...prev, [track.id]: cur.filter((p) => p !== param) }
+      })
+    },
+    [occurrencesByTrack],
+  )
 
   const barFromClientX = useCallback(
     (clientX: number) => {
@@ -551,6 +944,15 @@ export function ArrangementView() {
   const totalSteps = totalBars * 16
   const showPlayhead = currentStep >= 0 && currentStep < totalSteps && pxPerBar > 0
   const playheadLeft = HEADER_W + (currentStep / 16) * pxPerBar
+
+  // Extra vertical space the automation sub-lanes + open pickers add below the plain track rows, so
+  // the playhead spans the whole (taller) stack.
+  const autoExtra = doc.tracks.reduce((sum, t) => {
+    const lanes = visibleParamsFor(t).length
+    const occ = occurrencesByTrack.get(t.id) ?? []
+    const pickerOpen = autoOpen[t.id] && occ.length > 0 && AUTO_OPTIONS_BY_KIND[t.kind].length > 0
+    return sum + lanes * AUTO_H + (pickerOpen ? PICKER_H : 0)
+  }, 0)
 
   return (
     <div className="arrangement">
@@ -693,25 +1095,65 @@ export function ArrangementView() {
           </div>
         </div>
 
-        {flats.map((flat) => (
-          <TrackRow
-            key={flat.track.id}
-            flat={flat}
-            totalBars={totalBars}
-            pxPerBar={pxPerBar}
-            detail={detail}
-            sections={sections}
-            band={bandForTrack(flat.track.id)}
-            selected={!!selTracks && selTracks.includes(flat.track.id)}
-            onHeaderClick={() => clickHeader(flat.track)}
-            onRowPointerDown={(e) => beginDrag(flat.track.id, e)}
-          />
-        ))}
+        {flats.map((flat) => {
+          const occ = occurrencesByTrack.get(flat.track.id) ?? []
+          const canAutomate = occ.length > 0 && AUTO_OPTIONS_BY_KIND[flat.track.kind].length > 0
+          const visible = visibleParamsFor(flat.track)
+          const primaryClip = occ[0]?.clipId
+          const open = !!autoOpen[flat.track.id]
+          return (
+            <div key={flat.track.id}>
+              <TrackRow
+                flat={flat}
+                totalBars={totalBars}
+                pxPerBar={pxPerBar}
+                detail={detail}
+                sections={sections}
+                band={bandForTrack(flat.track.id)}
+                selected={!!selTracks && selTracks.includes(flat.track.id)}
+                onHeaderClick={() => clickHeader(flat.track)}
+                onRowPointerDown={(e) => beginDrag(flat.track.id, e)}
+                headerExtra={
+                  <button
+                    className={`arr-auto-toggle ${open ? 'on' : ''}`}
+                    data-auto-toggle={flat.track.id}
+                    disabled={!canAutomate}
+                    title={canAutomate ? 'automation lanes' : 'add this track to a scene to automate its clip'}
+                    onClick={() => setAutoOpen((p) => ({ ...p, [flat.track.id]: !p[flat.track.id] }))}
+                  >
+                    A
+                  </button>
+                }
+              />
+              {open && canAutomate && (
+                <AutomationPicker
+                  track={flat.track}
+                  available={AUTO_OPTIONS_BY_KIND[flat.track.kind].filter((o) => !visible.includes(o.key))}
+                  onAdd={(param) => addLane(flat.track.id, param)}
+                />
+              )}
+              {primaryClip &&
+                visible.map((param) => (
+                  <AutomationLane
+                    key={param}
+                    track={flat.track}
+                    clipId={primaryClip}
+                    param={param}
+                    occurrences={occ.filter((o) => o.clipId === primaryClip)}
+                    totalBars={totalBars}
+                    pxPerBar={pxPerBar}
+                    loopSteps={loopSteps}
+                    onRemoveLane={() => removeLane(flat.track, param)}
+                  />
+                ))}
+            </div>
+          )
+        })}
 
         {showPlayhead && (
           <div
             className="arr-playhead"
-            style={{ left: playheadLeft, top: RULER_H, height: flats.length * ROW_H }}
+            style={{ left: playheadLeft, top: RULER_H, height: flats.length * ROW_H + autoExtra }}
           />
         )}
       </div>

@@ -1034,6 +1034,158 @@ body {
   display: block;
 }
 
+/* ---- automation lanes (Phase 20 Stream Z) ---- */
+/* the track header now wraps a clickable select area + the automation toggle */
+.arr-track-select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.arr-track-select:hover .arr-track-name {
+  color: var(--accent);
+}
+.arr-auto-toggle {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+.arr-auto-toggle.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1a1a;
+}
+.arr-auto-toggle:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.arr-auto-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.12);
+}
+.arr-auto-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  overflow: hidden;
+}
+.arr-auto-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.arr-auto-range {
+  flex: 0 0 auto;
+  font-size: 8px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.arr-auto-remove {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.arr-auto-remove:hover {
+  color: #fff;
+  background: #c0503c;
+  border-color: #c0503c;
+}
+.arr-auto-lane {
+  flex: 0 0 auto;
+  cursor: crosshair;
+}
+.arr-auto-canvas {
+  display: block;
+}
+.arr-auto-picker {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.arr-auto-picker-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.arr-auto-picker-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+.arr-auto-select {
+  font: inherit;
+  font-size: 11px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+.arr-auto-add {
+  font: inherit;
+  font-size: 11px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.arr-auto-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.arr-auto-add:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ---- mixer ---- */
 .mixer {
   display: flex;
