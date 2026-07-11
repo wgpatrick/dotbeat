@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Intermediate esbuild bundle from desktop/sidecar/build.mjs (removed after each run anyway,
+# ignored defensively in case a run is interrupted).
+sidecar/.build
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
