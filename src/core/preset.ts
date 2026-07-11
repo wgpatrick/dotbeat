@@ -8,12 +8,26 @@ import type { BeatDocument } from './document.js'
 import { SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER } from './document.js'
 import { setValue } from './edit.js'
 
+// Content taxonomy — docs/research/18-ableton-ui-architecture.md's "borrow Ableton's
+// categorization logic" recommendation, refined against the researched taxonomy
+// docs/phase-12-presets.md's 36 presets were originally built against (Bass/Lead/Pad/Pluck/
+// Keys/Arp/FX for synths; genre-named kits for drums). Two disjoint category classes because
+// a preset's `kind` already determines which class applies — no preset should mix them.
+export const SYNTH_PRESET_CATEGORIES = ['bass', 'lead', 'pad', 'pluck', 'keys', 'arp', 'fx'] as const
+export const DRUM_PRESET_CATEGORIES = ['house', '808-trap', 'techno', 'boom-bap', 'lofi', 'acoustic-rock'] as const
+export const PRESET_CATEGORIES = [...SYNTH_PRESET_CATEGORIES, ...DRUM_PRESET_CATEGORIES] as const
+export type PresetCategory = (typeof PRESET_CATEGORIES)[number]
+
 export interface BeatPreset {
   /** Human slug, e.g. "lush-pad" — the name agents and humans use to refer to it. */
   name: string
   /** Which track kind this voicing is designed for; 'any' fits both. Applying a preset to the
    * wrong kind is an error (fail loudly), not a warning. */
   kind: 'synth' | 'drums' | 'any'
+  /** Browsable content category, drawn from `PRESET_CATEGORIES` (research 18's content-taxonomy
+   * recommendation) — what a future browser sidebar groups by, and what `beat presets
+   * --category` / `beat_presets({ category })` filter on today. */
+  category: PresetCategory
   description: string
   /** Param name -> value. Keys must be core-9 or SYNTH_FIELDS names; values are validated by
    * the same table-driven rules as `beat set`. Trackrefs (duckSource) are deliberately not
@@ -52,6 +66,15 @@ export function parsePresetLibrary(json: string): BeatPreset[] {
     if (seen.has(p.name)) throw new BeatPresetError(`duplicate preset name "${p.name}"`)
     seen.add(p.name)
     if (p.kind !== 'synth' && p.kind !== 'drums' && p.kind !== 'any') throw new BeatPresetError(`preset "${p.name}": kind must be synth|drums|any`)
+    if (typeof p.category !== 'string' || !(PRESET_CATEGORIES as readonly string[]).includes(p.category)) {
+      throw new BeatPresetError(`preset "${p.name}": category must be one of ${PRESET_CATEGORIES.join(', ')}, got ${JSON.stringify(p.category)}`)
+    }
+    if (p.kind === 'drums' && !(DRUM_PRESET_CATEGORIES as readonly string[]).includes(p.category)) {
+      throw new BeatPresetError(`preset "${p.name}": a drums preset's category must be one of ${DRUM_PRESET_CATEGORIES.join(', ')}, got "${p.category}"`)
+    }
+    if (p.kind === 'synth' && !(SYNTH_PRESET_CATEGORIES as readonly string[]).includes(p.category)) {
+      throw new BeatPresetError(`preset "${p.name}": a synth preset's category must be one of ${SYNTH_PRESET_CATEGORIES.join(', ')}, got "${p.category}"`)
+    }
     if (typeof p.description !== 'string') throw new BeatPresetError(`preset "${p.name}": missing description`)
     if (typeof p.params !== 'object' || p.params === null || Array.isArray(p.params)) throw new BeatPresetError(`preset "${p.name}": params must be an object`)
     for (const [key, value] of Object.entries(p.params)) {
@@ -62,7 +85,7 @@ export function parsePresetLibrary(json: string): BeatPreset[] {
       const t = typeof value
       if (t !== 'number' && t !== 'string' && t !== 'boolean') throw new BeatPresetError(`preset "${p.name}": param "${key}" has unsupported value type ${t}`)
     }
-    out.push({ name: p.name, kind: p.kind, description: p.description, params: { ...p.params } as BeatPreset['params'] })
+    out.push({ name: p.name, kind: p.kind, category: p.category, description: p.description, params: { ...p.params } as BeatPreset['params'] })
   }
   return out
 }
@@ -91,14 +114,29 @@ export function applyPreset(doc: BeatDocument, trackId: string, preset: BeatPres
   return next
 }
 
-/** One line per preset — what `beat presets` prints. */
+/** One line per preset — what `beat presets` prints. Includes the category column so a listing
+ * is self-describing without cross-referencing `--category` separately. */
 export function formatPresetList(presets: BeatPreset[]): string {
   if (presets.length === 0) return 'no presets\n'
   const nameWidth = Math.max(...presets.map((p) => p.name.length))
   const kindWidth = Math.max(...presets.map((p) => p.kind.length))
+  const categoryWidth = Math.max(...presets.map((p) => p.category.length))
   return (
     presets
-      .map((p) => `${p.name.padEnd(nameWidth)}  ${p.kind.padEnd(kindWidth)}  ${Object.keys(p.params).length} params  ${p.description}`)
+      .map(
+        (p) =>
+          `${p.name.padEnd(nameWidth)}  ${p.kind.padEnd(kindWidth)}  ${p.category.padEnd(categoryWidth)}  ${Object.keys(p.params).length} params  ${p.description}`,
+      )
       .join('\n') + '\n'
   )
+}
+
+/** Filters a preset library to one category — the shared implementation behind `beat presets
+ * --category` and `beat_presets({ category })`, kept in core so both surfaces agree on the exact
+ * same taxonomy validation and error message. */
+export function filterPresetsByCategory(presets: BeatPreset[], category: string): BeatPreset[] {
+  if (!(PRESET_CATEGORIES as readonly string[]).includes(category)) {
+    throw new BeatPresetError(`unknown category "${category}" — must be one of ${PRESET_CATEGORIES.join(', ')}`)
+  }
+  return presets.filter((p) => p.category === category)
 }

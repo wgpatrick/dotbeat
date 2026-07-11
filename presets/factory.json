@@ -4,6 +4,7 @@
     {
       "name": "driving-kit",
       "kind": "drums",
+      "category": "house",
       "description": "Punchy house kit: shaped kick, bright hats, glued with parallel compression and light drive (Night Shift v3 drums)",
       "params": {
         "kickPunch": 0.08,
@@ -21,6 +22,7 @@
     {
       "name": "808-trap-kit",
       "kind": "drums",
+      "category": "808-trap",
       "description": "808/trap kit: deep, slow-glide kick with a long boomy tail, tight hat-roll-ready closed hat, saturated low end (research: TR-808 lineage, hip-hop/trap)",
       "params": {
         "kickTune": 34,
@@ -45,6 +47,7 @@
     {
       "name": "techno-kit",
       "kind": "drums",
+      "category": "techno",
       "description": "Techno kit: tight snapping 909-style kick, mechanical scooped-mid snare, driving bright 16th-note hats, heavily glued (research: TR-909 lineage, dark/mechanical techno character)",
       "params": {
         "kickTune": 50,
@@ -68,6 +71,7 @@
     {
       "name": "boom-bap-kit",
       "kind": "drums",
+      "category": "boom-bap",
       "description": "Boom-bap kit: crunchy dirty kick, fat tonal snare with real body, dampened 'vinyl' top end, sampled-and-worn character (research: 90s hip-hop convention, midrange weight over sub/air)",
       "params": {
         "kickTune": 45,
@@ -93,6 +97,7 @@
     {
       "name": "lofi-kit",
       "kind": "drums",
+      "category": "lofi",
       "description": "Lo-fi kit: soft muted kick, muffled dark hats, heavy bitcrush grit under a hard lowpass, gentle room send (research: lo-fi hip-hop convention — bitcrush + aggressive high-cut over sharp transients)",
       "params": {
         "kickTune": 40,
@@ -116,6 +121,7 @@
     {
       "name": "acoustic-rock-kit",
       "kind": "drums",
+      "category": "acoustic-rock",
       "description": "Acoustic/rock kit: higher-pitched natural kick with a tight beater click, a real snare shell's tonal ring, bright open hats, clean and unfiltered with light room ambience — the least processed kit in the library",
       "params": {
         "kickTune": 58,
@@ -141,6 +147,7 @@
     {
       "name": "deep-sub-bass",
       "kind": "synth",
+      "category": "bass",
       "description": "Sub-anchored bass with a detuned square layer, plucky filter envelope, and glide; add duckSource yourself for sidechain (Night Shift v3 bass)",
       "params": {
         "osc": "sawtooth",
@@ -162,6 +169,7 @@
     {
       "name": "sub-sine-bass",
       "kind": "synth",
+      "category": "bass",
       "description": "Bass — clean, flat sustained sine sub with almost no harmonic content and no filter movement; the opposite design of deep-sub-bass's plucky moving saw/square hybrid, for parts that need pure low-end weight",
       "params": {
         "osc": "sine",
@@ -179,6 +187,7 @@
     {
       "name": "reese-bass",
       "kind": "synth",
+      "category": "bass",
       "description": "Bass — thick detuned dual-saw Reese with wide unison and a slow breathing filter LFO; the beating/chorusing interaction between layers is the point (research: detuned saws, Kevin Saunderson lineage, D&B/dubstep)",
       "params": {
         "osc": "sawtooth",
@@ -202,6 +211,7 @@
     {
       "name": "wobble-bass",
       "kind": "synth",
+      "category": "bass",
       "description": "Bass — dubstep wobble: fast deep filter-cutoff LFO over a resonant square, an FM growl layer underneath, digital grit on top (research: rhythmic LFO-on-cutoff is the defining wobble mechanism)",
       "params": {
         "osc": "square",
@@ -224,6 +234,7 @@
     {
       "name": "acid-bass",
       "kind": "synth",
+      "category": "bass",
       "description": "Bass — TB-303-style acid: very high filter resonance driven hard by the filter envelope, short glide between notes for slides, the 'squelch' comes entirely from envelope-into-resonance",
       "params": {
         "osc": "sawtooth",
@@ -245,6 +256,7 @@
     {
       "name": "fm-bass",
       "kind": "synth",
+      "category": "bass",
       "description": "Bass — DX-style FM bass: the tone comes from a hard FM modulator (not the filter, which stays open), giving a bite that cuts through a dense mix without eating headroom",
       "params": {
         "osc": "sine",
@@ -264,6 +276,7 @@
     {
       "name": "bright-lead",
       "kind": "synth",
+      "category": "lead",
       "description": "Cutting unison lead with a detuned second saw, plucky filter envelope, and echoing delay/reverb sends (Night Shift v3 lead)",
       "params": {
         "cutoff": 5200,
@@ -283,6 +296,7 @@
     {
       "name": "supersaw-lead",
       "kind": "synth",
+      "category": "lead",
       "description": "Lead — huge 7-voice unison supersaw stack, wide, sustained; anthemic trance/EDM lead character rather than bright-lead's tighter 3-voice pluck-envelope stab",
       "params": {
         "osc": "sawtooth",
@@ -303,6 +317,7 @@
     {
       "name": "pluck-lead",
       "kind": "synth",
+      "category": "lead",
       "description": "Lead — staccato plucky lead for riffs: short amp envelope, fast filter-envelope snap opening into a low sustain, distinguishing a percussive lead from a sustained one",
       "params": {
         "attack": 0.002,
@@ -323,6 +338,7 @@
     {
       "name": "square-chip-lead",
       "kind": "synth",
+      "category": "lead",
       "description": "Lead — thin retro chiptune/8-bit lead: plain square wave, no unison, no filtering to speak of, heavy bitcrush for the digital low-bit-depth character",
       "params": {
         "osc": "square",
@@ -340,6 +356,7 @@
     {
       "name": "fm-bell-lead",
       "kind": "synth",
+      "category": "lead",
       "description": "Lead — bell-like FM lead: a non-integer FM ratio (3.5) makes the overtones inharmonic, the signature 'bell' timbre distinct from subtractive leads built from filtered saws/squares",
       "params": {
         "osc": "triangle",
@@ -358,6 +375,7 @@
     {
       "name": "lush-pad",
       "kind": "synth",
+      "category": "pad",
       "description": "Wide unison saw pad: slow attack, dual detuned oscillators, LFO filter motion, deep reverb/delay sends (Night Shift v3 pad)",
       "params": {
         "osc": "sawtooth",
@@ -380,6 +398,7 @@
     {
       "name": "warm-pad",
       "kind": "synth",
+      "category": "pad",
       "description": "Pad — mellow, dark analog pad: triangle-based instead of lush-pad's saw stack, lower cutoff, subtler detune and LFO depth for a rounder, less bright texture",
       "params": {
         "osc": "triangle",
@@ -401,6 +420,7 @@
     {
       "name": "string-pad",
       "kind": "synth",
+      "category": "pad",
       "description": "Pad — bowed-strings emulation: a slower bow-like attack than lush-pad, 4-voice ensemble detune for a section-of-strings beating, brighter and more mid-forward than warm-pad",
       "params": {
         "osc": "sawtooth",
@@ -422,6 +442,7 @@
     {
       "name": "glass-pad",
       "kind": "synth",
+      "category": "pad",
       "description": "Pad — bright shimmering FM pad: FM (not filtered subtractive) provides the tone, a slow tremolo LFO on amplitude gives the 'shimmer', long reverb/delay tail",
       "params": {
         "osc": "sine",
@@ -443,6 +464,7 @@
     {
       "name": "dark-pad",
       "kind": "synth",
+      "category": "pad",
       "description": "Pad — moody, filtered ambient pad: low cutoff with a slow filter-envelope opening (not an LFO sweep) so the pad gradually brightens over the course of a held note, high resonance for tension",
       "params": {
         "osc": "sawtooth",
@@ -465,6 +487,7 @@
     {
       "name": "crystal-pluck",
       "kind": "synth",
+      "category": "pluck",
       "description": "Pluck — bright plucky bell tone: near-zero amp attack/sustain (research: pluck = short attack + short decay + low sustain) with a fast filter-envelope snap that opens bright then retreats dark",
       "params": {
         "osc": "triangle",
@@ -487,6 +510,7 @@
     {
       "name": "warm-pluck",
       "kind": "synth",
+      "category": "pluck",
       "description": "Pluck — softer, rounder pluck than crystal-pluck: darker starting cutoff, gentler filter-envelope amount, a sub sine layer for body instead of brightness",
       "params": {
         "osc": "triangle",
@@ -507,6 +531,7 @@
     {
       "name": "fm-pluck",
       "kind": "synth",
+      "category": "pluck",
       "description": "Pluck — metallic electric-piano-ish pluck built entirely from FM rather than a filter envelope; the shared amp envelope's fast decay is what gives it a plucked shape",
       "params": {
         "osc": "sine",
@@ -524,6 +549,7 @@
     {
       "name": "marimba-pluck",
       "kind": "synth",
+      "category": "pluck",
       "description": "Pluck — woody mallet-percussion character: sine fundamental plus a detuned triangle partial for a slightly inharmonic 'wooden bar' ring, faster decay and lower sustain than the other plucks",
       "params": {
         "osc": "sine",
@@ -544,6 +570,7 @@
     {
       "name": "e-piano",
       "kind": "synth",
+      "category": "keys",
       "description": "Keys — FM electric piano: a moderate FM modulation index gives the classic 'tine' bell-attack-into-warm-body EP timbre, light chorus send",
       "params": {
         "osc": "sine",
@@ -562,6 +589,7 @@
     {
       "name": "bell-keys",
       "kind": "synth",
+      "category": "keys",
       "description": "Keys — bright FM bell keys: higher FM modulation index and a non-integer ratio (3.5, same inharmonic-overtone technique as fm-bell-lead) than e-piano, longer decay, more reverb",
       "params": {
         "osc": "sine",
@@ -579,6 +607,7 @@
     {
       "name": "organ-keys",
       "kind": "synth",
+      "category": "keys",
       "description": "Keys — drawbar-style organ: a near-instant on/off amp envelope (no decay, full sustain — organs don't decay while held) and an octave+fifth second-oscillator layer standing in for drawbar harmonics, chorus send for a Leslie-ish width",
       "params": {
         "osc": "sine",
@@ -596,6 +625,7 @@
     {
       "name": "warm-keys",
       "kind": "synth",
+      "category": "keys",
       "description": "Keys — subtractive (non-FM) warm electric keys: filtered triangle with a gentle filter-envelope swell instead of e-piano's FM bite, for a mellower Wurlitzer-ish character",
       "params": {
         "osc": "triangle",
@@ -616,6 +646,7 @@
     {
       "name": "arp-pluck",
       "kind": "synth",
+      "category": "arp",
       "description": "Arp — short percussive voicing for fast note runs: tighter decay than any Pluck-category preset, heavy delay send so a fast arpeggiated pattern builds its own rhythmic echo trail",
       "params": {
         "osc": "sawtooth",
@@ -634,6 +665,7 @@
     {
       "name": "arp-bell",
       "kind": "synth",
+      "category": "arp",
       "description": "Arp — FM bell voicing for melodic trance/EDM-style arps: short-medium decay so a 16th-note run stays articulate, delay-forward for the classic 'gated bell arp' effect",
       "params": {
         "osc": "sine",
@@ -652,6 +684,7 @@
     {
       "name": "arp-sequence",
       "kind": "synth",
+      "category": "arp",
       "description": "Arp — retro sequencer voicing: resonant square wave with a fast cutoff LFO so a repeating note pattern gets subtle per-cycle timbral movement rather than sounding static",
       "params": {
         "osc": "square",
@@ -670,6 +703,7 @@
     {
       "name": "riser-sweep",
       "kind": "synth",
+      "category": "fx",
       "description": "FX — noise riser for transition builds: dominant noise oscillator layer under a long (2s) filter-envelope attack sweeping the cutoff up, long amp envelope to match",
       "params": {
         "noiseLevel": 0.8,
@@ -691,6 +725,7 @@
     {
       "name": "noise-impact",
       "kind": "synth",
+      "category": "fx",
       "description": "FX — broadband noise impact/hit: full-level noise oscillator, short decay, distorted for extra weight, big reverb return so it reads as a one-shot boom rather than a sustained texture",
       "params": {
         "noiseLevel": 1,
@@ -708,6 +743,7 @@
     {
       "name": "drone-texture",
       "kind": "synth",
+      "category": "fx",
       "description": "FX — evolving ambient drone: wide 5-voice unison saw, two independent slow LFOs (one on cutoff, one on amplitude) so the texture never quite repeats, very long attack/release",
       "params": {
         "osc": "sawtooth",

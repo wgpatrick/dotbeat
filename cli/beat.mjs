@@ -41,6 +41,8 @@ import {
   parsePresetLibrary,
   applyPreset,
   formatPresetList,
+  filterPresetsByCategory,
+  PRESET_CATEGORIES,
   parseSelection,
   serializeSelection,
   selectionToVaryScope,
@@ -69,7 +71,10 @@ const USAGE = `usage:
                                                           jitter, behind-the-beat drag, offbeat swing; scope by lane/id
   beat diff <a.beat> <b.beat>
   beat diff --git <rev1> <rev2> <file>
-  beat presets [--json]                                   list the factory preset library
+  beat presets [--json] [--category <cat>]                list the factory preset library (optionally
+                                                          filtered to one taxonomy category — see
+                                                          --list-categories for the enumerated set)
+  beat presets --list-categories                          list the valid --category values
   beat preset <file> <track> <name>                       apply a preset to a track (a bag of set edits)
   beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render]
                                                           batch-generate small-diff variants of one param group
@@ -348,7 +353,17 @@ function loadPresets() {
 }
 
 function presetsCmd(argv) {
-  const presets = loadPresets()
+  if (argv.includes('--list-categories')) {
+    process.stdout.write(PRESET_CATEGORIES.join('\n') + '\n')
+    return
+  }
+  let presets = loadPresets()
+  const categoryIdx = argv.indexOf('--category')
+  if (categoryIdx !== -1) {
+    const category = argv[categoryIdx + 1]
+    if (!category) throw new BeatEditError('--category needs a value (see `beat presets --list-categories`)')
+    presets = filterPresetsByCategory(presets, category)
+  }
   process.stdout.write(argv.includes('--json') ? JSON.stringify(presets, null, 2) + '\n' : formatPresetList(presets))
 }
 

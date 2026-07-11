@@ -39,6 +39,8 @@ import {
   parsePresetLibrary,
   applyPreset,
   formatPresetList,
+  filterPresetsByCategory,
+  PRESET_CATEGORIES,
   parseSelection,
   serializeSelection,
   type BeatDocument,
@@ -490,17 +492,23 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_presets',
     description:
-      'List the preset library: named, curated synth/drum voicings (a preset is a bag of param edits, not a format feature — applying one writes plain params into the file). Use before beat_preset to see what exists and what each is for.',
-    inputSchema: { type: 'object', properties: {} },
-    handler: () => {
-      const presets = parsePresetLibrary(readFileSync(join(repoRoot, 'presets', 'factory.json'), 'utf8'))
+      `List the preset library: named, curated synth/drum voicings (a preset is a bag of param edits, not a format feature — applying one writes plain params into the file). Each preset carries a taxonomy \`category\` (research 18's content-taxonomy recommendation) shown in the listing; pass \`category\` to filter to one, e.g. { category: "bass" }. Valid categories: ${PRESET_CATEGORIES.join(', ')}. Use before beat_preset to see what exists and what each is for.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', description: `filter to one category — one of: ${PRESET_CATEGORIES.join(', ')}` },
+      },
+    },
+    handler: (args) => {
+      let presets = parsePresetLibrary(readFileSync(join(repoRoot, 'presets', 'factory.json'), 'utf8'))
+      if (args.category !== undefined) presets = filterPresetsByCategory(presets, str(args, 'category'))
       return formatPresetList(presets)
     },
   },
   {
     name: 'beat_preset',
     description:
-      'Apply a named preset to a track in a .beat file — sets each of the preset\'s params exactly as beat_set would and returns the resulting edit list. Presets never carry routing (duckSource); set that separately per project.',
+      'Apply a named preset to a track in a .beat file — sets each of the preset\'s params exactly as beat_set would and returns the resulting edit list. Presets never carry routing (duckSource); set that separately per project. Use beat_presets (optionally with a `category` filter, e.g. "bass"/"lead"/"pad") to find a name first.',
     inputSchema: {
       type: 'object',
       properties: {

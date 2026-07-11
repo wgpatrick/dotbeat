@@ -37,7 +37,18 @@ export {
 } from './edit.js'
 export { humanize, BeatHumanizeError, type HumanizeOptions } from './humanize.js'
 export { describeDocument } from './inspect.js'
-export { parsePresetLibrary, applyPreset, formatPresetList, BeatPresetError, type BeatPreset } from './preset.js'
+export {
+  parsePresetLibrary,
+  applyPreset,
+  formatPresetList,
+  filterPresetsByCategory,
+  BeatPresetError,
+  type BeatPreset,
+  type PresetCategory,
+  PRESET_CATEGORIES,
+  SYNTH_PRESET_CATEGORIES,
+  DRUM_PRESET_CATEGORIES,
+} from './preset.js'
 export {
   parseSelection,
   serializeSelection,
