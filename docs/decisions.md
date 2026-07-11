@@ -9,6 +9,46 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D12 — dotbeat gets its own UI; hard fork from BeatLab, not a wrapped GUI (2026-07-11)
+
+**Decision:** dotbeat's GUI is dotbeat's own — a new frontend built and owned in this repo,
+talking to dotbeat's own daemon/format directly. It does **not** reuse BeatLab's React
+components, and the Tauri desktop shell (`desktop/`) stops wrapping BeatLab's web app as its
+webview content. This resolves `ROADMAP.md` §11's long-open "Relationship to BeatLab" question:
+**hard fork**, not "BeatLab becomes the learn mode inside this."
+
+**Why (owner's own words, 2026-07-11):** "dotbeat should have its own UI and its own product
+design. It's serving an entirely different purpose (real production) rather than learning
+(BeatLab)." The two tools have diverged goals — BeatLab is a curriculum-driven teaching sandbox
+(lesson validators, a units sidebar, guided exercises); dotbeat is a git-native production tool
+for people who code. Sharing a GUI meant every dotbeat-side interaction (D2 selection, D4 song
+view, D5's vary-audition loop, all built or attempted across Phases 9-11) had to be retrofitted
+into a codebase designed around teaching UX, and PR'd into a repo whose own priorities aren't
+dotbeat's. It also quietly implied dotbeat's product identity *was* BeatLab-plus-git, which the
+owner is explicitly rejecting.
+
+**What's unaffected**: `src/core` (the format/document model), `src/daemon`, `src/mcp`,
+`src/history`, `src/vary`, `src/metrics`, `cli/` — all of this was already dotbeat's own, was
+never BeatLab code, and is exactly what a new frontend renders/drives. The engine (Tone.js-based
+audio graph) also needs its own dotbeat-owned implementation rather than importing BeatLab's
+`engine.ts` — the two are allowed to converge in *approach* (BeatLab's engine has real lessons
+worth reusing, e.g. Phase 10 Stream D's clip-automation fixes) without being the same file in the
+same repo.
+
+**Consequence for in-flight work**: two Phase 11 streams (D4 song view, D5 vary-affordance) were
+mid-flight building directly inside BeatLab's React tree when this decision landed; both were
+stopped and their beatlab-side output discarded (their PRs, `wgpatrick/beatlab#6` and an
+unopened third, are not part of dotbeat's product going forward — they may still be useful to
+BeatLab on its own terms, that's the owner's call on that repo). The already-landed clip-automation
+engine fix (`wgpatrick/beatlab#5`) stays as-is; it's a bug fix to BeatLab's own correctness,
+independent of this decision.
+
+**Revisit when:** never, barring a change of product direction — this is a clean split, not a
+temporary one. `docs/product-spec-desktop.md` is being updated to describe dotbeat's own GUI
+build rather than a BeatLab wrap.
+
+---
+
 ## D11 — New binary media/preset content goes through git-lfs (2026-07-11)
 
 **Decision:** `*.sf2`/`*.sf3`/`*.wav`/`*.h2drumkit` are tracked via `.gitattributes` + git-lfs.

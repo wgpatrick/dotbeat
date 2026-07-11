@@ -195,8 +195,9 @@ v1]`); `beat history --collapsed` folds runs of unnamed checkpoints between pins
 The arrangement timeline (format v0.4 scenes/song) is the spine: tracks as rows, bars as
 columns, notes visible across the whole song (density-rendered when zoomed out), section
 boundaries labeled. This is also where selection lives — drag across bars, click a track
-header, click a lane. The current beatlab GUI has the per-pattern grid; the song-length view is
-new GUI work and is the desktop app's centerpiece screen.
+header, click a lane. Per-pattern editing (step sequencer / piano roll) is one screen; the
+song-length arrangement view is another, and together they're dotbeat's own frontend's
+centerpiece work (D12: built independently, not inherited from BeatLab).
 
 ## 5.5 Live capture (tap-to-record)
 
@@ -224,10 +225,19 @@ a tapped performance records *as played*. What remains is the capture UX, which 
 
 ## 6. Milestones (proposed — replaces "M4 someday" sequencing for the GUI track)
 
-- **D1 — Shell**: Tauri wrap of the existing GUI, daemon as a bundled sidecar, open-a-folder,
-  native file dialogs. No new musical features; ships the form factor. *(research 13: feasible;
-  daemon-sidecar + fs plugins well-supported. Highest risk = macOS WKWebView Web Audio — de-risk
-  with a one-day spike before committing D1's timeline; Electron is the fallback.)*
+**Update 2026-07-11 (owner, D12 in `decisions.md`): dotbeat builds its own GUI, not a Tauri wrap
+of BeatLab.** The milestones below are renumbered against that: D1 (shell) shipped as a spike
+against BeatLab's GUI to de-risk WKWebView Web Audio — that risk answer stands (Web Audio works
+in WKWebView, confirmed) even though the shell's actual webview content is being rebuilt to point
+at dotbeat's own frontend instead. D2/D3 (selection protocol, checkpoint/history) are backend
+work in `src/daemon`/`src/history` that was never BeatLab-coupled and is unaffected. D4/D5 are
+now scoped as dotbeat-owned frontend builds from the start, not BeatLab retrofits.
+
+- **D1 — Shell**: Tauri shell, daemon as a bundled sidecar, open-a-folder, native file dialogs,
+  pointed at dotbeat's own frontend (once it exists) instead of a BeatLab dev/production build.
+  *(research 13: feasible; daemon-sidecar + fs plugins well-supported. Highest risk = macOS
+  WKWebView Web Audio — de-risked via a one-day spike, confirmed working regardless of which
+  frontend the webview loads.)*
 - **D2 — Pointing**: selection protocol end-to-end (GUI ⇄ daemon ⇄ CLI/MCP), `beat vary
   --scope selection`, agent spotlight. This is the demo: highlight the hats, say "change this
   up," watch them change.

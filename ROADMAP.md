@@ -689,7 +689,10 @@ research-backed rankings.)*
 - **License.** MIT keeps the door open to reusing DAWproject's/automix-toolkit's schemas/code
   (both permissively licensed). Reminder: openDAW itself is **AGPL v3/LGPL** — fine to learn from,
   not to copy code from verbatim.
-- **Relationship to BeatLab.** Hard fork, or does BeatLab become the "learn" mode inside this?
+- ~~**Relationship to BeatLab.**~~ — **DECIDED 2026-07-11 (owner): hard fork.** dotbeat builds
+  its own GUI, independent of BeatLab's React tree — the two tools serve different purposes
+  (production vs. teaching) and share only the lower layers that were always dotbeat's own
+  (`src/core`, `src/daemon`, `src/mcp`, `cli/`). See `docs/decisions.md` D12.
 - ~~**Web-first vs Tauri-first**~~ — **resolved 2026-07-11 (owner): desktop-first.** The primary
   form factor is a desktop app connected to local files: a Tauri shell around the existing web
   GUI with the daemon logic in-process, pulled forward ahead of the deep M4 native-engine work.
