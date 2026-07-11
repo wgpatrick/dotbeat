@@ -79,6 +79,8 @@ const USAGE = `usage:
   beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)
   beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample
   beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
+  beat suggest <file> <track> [--target <lane-or-id>] [--log f]
+                                                          read the scores log and propose the next beat-vary round
   beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
   beat lint <file.wav> [--target <LUFS>] [--json]         deterministic mix findings (default target -14)
   beat render <file> [-o out.wav] --beatlab-dir <path>    (or BEATLAB_DIR env)
@@ -448,6 +450,20 @@ async function scoreCmd(argv) {
   else process.stdout.write(`to adopt the winner: beat set ${manifest.parent} ${entry.picks[0].edits.join(' ')}\n`)
 }
 
+async function suggestCmd(argv) {
+  const { suggestNext, parseScoresLog } = await import('../dist/src/vary/suggest.js')
+  const valued = ['--target', '--log']
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const [file, track] = positional
+  if (!file || !track) throw new BeatEditError('suggest needs <file> <track> (see beat vary --groups for group names)')
+  const logPath = flagValue(argv, '--log') ?? 'beat-scores.jsonl'
+  const target = flagValue(argv, '--target')
+  const text = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
+  const entries = parseScoresLog(text)
+  const suggestion = suggestNext(entries, track, { file, ...(target ? { target } : {}) })
+  process.stdout.write(suggestion.reasoning.join('\n') + '\n')
+}
+
 // ---- v0.4 song structure (docs/phase-6-plan.md §6.4) ----------------------------------------
 
 function clipCmd(argv) {
@@ -710,6 +726,9 @@ async function main() {
       break
     case 'score':
       await scoreCmd(rest)
+      break
+    case 'suggest':
+      await suggestCmd(rest)
       break
     case 'preset':
       presetCmd(rest)
