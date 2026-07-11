@@ -21,8 +21,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { readFileSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
-import type { BeatDocument } from '../core/index.js'
-import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, type ExternalSandboxPayload } from '../core/index.js'
+import type { BeatDocument, BeatSelection } from '../core/index.js'
+import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, validateSelection, type ExternalSandboxPayload } from '../core/index.js'
 
 export interface DaemonOptions {
   filePath: string
@@ -35,6 +35,8 @@ export interface Daemon {
   close: () => Promise<void>
   /** Test hook: the current in-memory document (what /doc serves). */
   getDoc: () => BeatDocument
+  /** Test hook: the current in-memory selection (what /selection serves; {} when unset). */
+  getSelection: () => BeatSelection
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -80,6 +82,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
 
   const sseClients = new Set<ServerResponse>()
 
+  // The D2 pointing protocol: ephemeral "what the human is highlighted in the GUI right now",
+  // held in memory ONLY — never serialized into the .beat file. {} = no selection.
+  let selection: BeatSelection = {}
+
   function broadcast(event: string, data: unknown) {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
     for (const client of sseClients) client.write(frame)
@@ -118,6 +124,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     doc = next
     canonicalText = serialize(doc)
     broadcast('doc', beatDocumentToPartialTracks(doc))
+    revalidateSelection()
+  }
+
+  // A selection points at ids in the document; a hand edit that removes a selected track/note/lane
+  // invalidates it. Rather than serve a stale pointer, drop to empty and tell the GUI.
+  function revalidateSelection() {
+    if (Object.keys(selection).length === 0) return
+    try {
+      validateSelection(selection, doc)
+    } catch {
+      selection = {}
+      broadcast('selection', selection)
+    }
   }
 
   const server: Server = createServer((req, res) => {
@@ -153,6 +172,30 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       } catch {
         json(res, 404, { error: `media file missing on disk: ${entry.path}` })
       }
+      return
+    }
+
+    // D2 pointing protocol: the selection is a channel parallel to /doc — ephemeral, in-memory,
+    // never touching disk. GET returns {} when unset.
+    if (req.method === 'GET' && url.pathname === '/selection') {
+      json(res, 200, selection)
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/selection') {
+      readBody(req)
+        .then((body) => {
+          const next = JSON.parse(body) as BeatSelection
+          // Validate against the CURRENT document; a selection that doesn't resolve is a client
+          // bug worth surfacing loudly (400), not silently storing.
+          validateSelection(next, doc)
+          selection = next
+          broadcast('selection', selection)
+          json(res, 200, selection)
+        })
+        .catch((err) => {
+          json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        })
       return
     }
 
@@ -232,6 +275,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     port,
     filePath,
     getDoc: () => doc,
+    getSelection: () => selection,
     close: () =>
       new Promise<void>((done) => {
         if (watchTimer) clearTimeout(watchTimer)
