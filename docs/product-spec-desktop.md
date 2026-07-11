@@ -206,16 +206,21 @@ a tapped performance records *as played*. What remains is the capture UX, which 
 
 ## 6. Milestones (proposed — replaces "M4 someday" sequencing for the GUI track)
 
-- **D1 — Shell**: Tauri wrap of the existing GUI, daemon logic in-process, open-a-folder,
-  native file dialogs. No new musical features; ships the form factor.
+- **D1 — Shell**: Tauri wrap of the existing GUI, daemon as a bundled sidecar, open-a-folder,
+  native file dialogs. No new musical features; ships the form factor. *(research 13: feasible;
+  daemon-sidecar + fs plugins well-supported. Highest risk = macOS WKWebView Web Audio — de-risk
+  with a one-day spike before committing D1's timeline; Electron is the fallback.)*
 - **D2 — Pointing**: selection protocol end-to-end (GUI ⇄ daemon ⇄ CLI/MCP), `beat vary
   --scope selection`, agent spotlight. This is the demo: highlight the hats, say "change this
   up," watch them change.
 - **D3 — History**: auto-checkpoints, history panel with semantic labels, restore, named
   versions.
 - **D4 — Song view**: full-arrangement editor with selection across it.
-- **D5 — Chat surface**: whatever §3's research decides (external-only + docs, or embedded
-  hybrid panel).
+- **D5 — Chat surface**: the two-tier hybrid (§3), now research-backed (research 14: the Claude
+  Agent SDK gives streaming, tool-visibility, interrupt, permission-gating, resumable/forkable
+  sessions, and the app-is-an-MCP-server pattern). Ship the BYO-Claude-Code fallback first (our
+  MCP server + any client — near-zero new work); the embedded SDK panel is gated on the open
+  auth/terms question, not on engineering.
 
 Ordering rationale: D1 is cheap and makes everything after it feel real; D2 is the
 differentiator and unblocks the owner's exact "highlight the hi-hats" scenario; D3 makes agent
