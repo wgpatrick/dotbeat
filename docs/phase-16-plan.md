@@ -63,3 +63,30 @@ evidence bar Phase 14 Stream E set).
 Same worktree pattern. Stream J and K touch disjoint files except both may lightly touch
 `ui/src/state/store.ts` if new state is needed (additive, low risk). `npm test` must stay green
 (293+/287+/0/6) throughout — neither stream should need to touch anything the root suite covers.
+
+## Result (2026-07-11)
+
+Both streams shipped and are merged into `main` — Stream K fast-forward, Stream J with one
+trivial auto-resolved CSS conflict. Final suite unchanged: **293 tests, 287 passing, 0 failing, 6
+skipped**; `ui/` typechecks clean.
+
+- **Stream J**: lane-granular vary selection (verified by inspecting the actual `/vary` batch's
+  edit paths — a kick-lane selection touches only `kickTune`/`kickPunch`/`kickDecay`, confirmed
+  nothing hat/snare-related leaks in), collapsed history view (`GET /history?collapsed=true`,
+  matches `beat history --collapsed`'s own output exactly — 8 real checkpoints/2 pins collapsed to
+  5 rows), and velocity-drag note editing (a dedicated velocity lane, bidirectional, one-line
+  diffs). Found and fixed a real Playwright test-harness bug along the way (drag coordinates
+  needed `scrollIntoView` first).
+- **Stream K**: instrument-track meters and mute/solo gating (measured -120dB true silence on
+  mute, matching Phase 14 Stream E's evidence bar for synth/drum tracks), mixer FX-chain
+  visibility (compact EQ/Comp/Dist/Crush badges reading real per-track `SYNTH_FIELDS` data).
+  **Correctly declined** insert-chain reordering after checking the format: `SYNTH_FIELDS` has no
+  order field, so a reordering UI would either silently discard the edit or revert on the next
+  sync — right call to document the gap rather than ship a decorative control.
+- **This closes essentially every item on the "honestly deferred" lists** accumulated across
+  Phases 12 through 15. What legitimately remains open now is smaller/more speculative: zoom
+  controls for the arrangement view, keyboard shortcuts, `feel` (rung-2) variation wired into the
+  audition affordance, unpin-from-GUI, a numeric velocity readout, Windows/Linux builds, and the
+  larger, deliberately-deferred M4 native-engine work (warping, plugin hosting, native recording
+  latency) — none of these block a genuinely usable end-to-end system the way the Phase 13/14/15
+  gaps did.
