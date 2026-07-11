@@ -364,12 +364,82 @@ not the storage model.
   live in the file and the daemon carries them over on GUI pushes, so they are never lost. Song
   mode still routes drums through the on-grid tick (off-grid drums in songs are a later slice).
 
+### v0.9 additions — clip automation (docs/phase-9-automation-plan.md)
+
+Phase 6 shipped clips/scenes/song (v0.4) but explicitly deferred clip automation, "needs the
+automation grammar — next format phase" (`phase-6-plan.md`'s exclusions list). This is that
+phase: a named synth param, inside one clip, gets a lane of (time, value) points.
+
+```
+  clip verse-a                 # level-1 block inside a track; human slug id (D6)
+    note n1 57 0 4 0.8
+    auto lead.cutoff            # automation lane for one param, scoped to this clip
+      point p1 0 900             # point <id> <time> <value> — stable id, fractional time (v0.7 rules)
+      point p2 2 3200
+```
+
+- **Clip-scoped only, deliberately** — automation lives on a `BeatClip`, never on a live/non-clip
+  track. beatlab's own clip model already carries automation as engine state (per
+  `phase-6-plan.md`'s survey: "Clips ... named, self-contained snapshots of a track's
+  notes/pattern/automation"); there's no equivalent live-track automation concept to mirror, and
+  adding one would be a second, unrelated grammar decision. If live/timeline automation is wanted
+  later, it's a new addition, not a gap in this one.
+- **`auto <track>.<param>`** opens a lane, one per param per clip (duplicate lanes for the same
+  param on one clip are a parse error). The target repeats the enclosing track's own id — the
+  same `<track>.<param>` addressing `beat set` already uses — rather than a bare param name, so
+  a lane header is self-describing on its own line and a copy-pasted block that's dropped into
+  the wrong track fails loudly (`auto target track "X" must match the enclosing track "Y"`)
+  instead of silently automating the wrong track's param.
+- **`param` must be a numeric synth field**: the core 9 minus `osc` (an enum, no numeric curve),
+  plus every v0.3 field of kind `number` — `AUTOMATABLE_SYNTH_PARAMS` in `src/core/document.ts`,
+  derived from the existing `SYNTH_PARAM_ORDER`/`SYNTH_FIELDS` tables rather than a
+  hand-maintained parallel list (the format's "one table, many consumers" house style). Enum/
+  bool/trackref fields (`osc`, `wtTable`, `filterType`, `osc2Type`, `lfoDest`/`lfo2Dest`,
+  `lfoShape`, `duckSource`) are rejected at parse/edit time — they don't have a meaningful
+  interpolated curve.
+- **`point <id> <time> <value>`**: stable id (D6), `time` fractional 16th steps from the CLIP's
+  own start (v0.7 number rules — same unit and precision as note/hit `start`, just a different
+  origin), `value` in the automated param's own raw units (Hz, dB, 0..1, etc. — whatever that
+  param's `set`/`synth` line already uses). No interpolation-curve field (DAWproject's `hold` vs
+  `linear`, sketched in this doc's "Future" section below) — v0.9 ships points only; curve shape
+  between points is deferred (see phase-9-automation-plan.md's Result section).
+- **Canonical elision**: a lane exists only while it has >= 1 point — there is no serialized form
+  for an empty lane (parse rejects an `auto` header with zero `point` children), the same
+  discipline as v0.3's synth-field elision (one canonical form per state). A clip with no
+  automation emits zero `auto` lines; every v0.8 file (no automation grammar at all) parses
+  unchanged.
+- **Canonical ordering**: lanes serialize in first-seen (creation) order within a clip, like
+  clips themselves — order of creation is meaningful, not alphabetized. Points within a lane
+  serialize sorted by `(time, id)` ascending, the same discipline as notes `(start, pitch, id)`
+  and hits `(start, lane, id)`.
+- **Diff**: unlike clip notes/hits (reported as a delta count on re-snapshot — clips are
+  snapshots, so "what changed inside" is usually re-snapshot noise), automation points are
+  itemized per-point, matched by `(param, id)`: `lead: clip "verse-a" cutoff automation point
+  added p3 (step 3, value 100)`, `... point p2 value 900 -> 3200`, `... point p2 time 2 -> 3`,
+  `... point removed p2 (step 2, value 3200)`. A knob move mid-clip is a specific musical fact
+  worth naming, not noise.
+- **Edit primitives** (`src/core/edit.ts`): `addAutomationPoint` / `moveAutomationPoint` /
+  `removeAutomationPoint` (removing the last point in a lane drops the lane — no empty-lane
+  state to represent) / `setAutomationPoint` (add-or-move in one call, by id). `saveClip`
+  (re-snapshotting a track's live content into an existing clip) preserves that clip's existing
+  automation rather than wiping it — there's no live-track automation to snapshot from, so
+  automation is the one thing a re-snapshot doesn't touch.
+- **CLI/MCP**: `beat automate <file> <track> <clip> <param> <time> <value> [--id p1]` / MCP tool
+  `beat_automate` — adds a point, or moves it if `--id`/`id` names an existing point in that lane.
+- **Converter** (`src/core/convert.ts`): beatlab's clip automation now converts (was reported
+  dropped as `<track>.<clip>.automation` through v0.8); a param the format has no automatable
+  field for still reports as dropped, as `<track>.<clip>.automation.<param>`. The exact shape of
+  beatlab's live clip-automation engine state was NOT verified against real beatlab source (no
+  local checkout available this phase) — see phase-9-automation-plan.md's Result section for
+  what's assumed vs. confirmed.
+
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
-Automation, clips/scenes, swing, arrangement, multi-device chains beyond the built-in insert
-set, multi-token track names, and the `DELIBERATELY_UNMODELED` fields above. See
+Clips/scenes (shipped v0.4), swing, arrangement (shipped v0.4), multi-device chains beyond the
+built-in insert set, multi-token track names, and the `DELIBERATELY_UNMODELED` fields above. See
 `phase-1-plan.md`'s "explicitly deferred" section — these come as the milestones that need them
-land (`ROADMAP.md` §8).
+land (`ROADMAP.md` §8). Clip automation shipped v0.9 (above); automation *curve shape* (linear vs
+hold between points) and live/non-clip automation remain deferred.
 
 ---
 
@@ -429,6 +499,10 @@ Automation, using DAWproject's typed-point pattern (`time, value, interpolation`
     point 2.0  2400   linear
     point 2.5  2400   hold
 ```
+
+*(v0.9 shipped clip-scoped automation — see above — but without the `interpolation` column: a
+point is just `id, time, value`. Curve shape between points, and non-clip/live-track automation,
+remain the deferred parts of this older, fuller sketch.)*
 
 ### Why each choice serves diffs
 

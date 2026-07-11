@@ -23,6 +23,7 @@ import {
   removeNote,
   addHit,
   removeHit,
+  setAutomationPoint,
   humanize,
   quantizeNotes,
   addTrack,
@@ -258,6 +259,35 @@ const TOOLS: ToolDef[] = [
       const file = str(args, 'file')
       const before = parse(readFileSync(file, 'utf8'))
       const { doc } = removeHit(before, str(args, 'track'), str(args, 'hit_id'))
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_automate',
+    description:
+      'Add or move a clip automation point (format v0.9): a (time, value) point on a named synth param\'s automation lane within one clip. time is in fractional 16th steps from the CLIP\'s own start (v0.7 number rules); value is in the param\'s own units (Hz for cutoff, dB for volume, 0..1 for resonance-like params, etc.). param is any numeric synth field (the core 9 minus osc, plus the v0.3 shaped surface — see beat_set\'s description for the full list). Pass id to move an existing point (matched by id) instead of adding a new one; omit it to add a new point with a minted id. Returns the musical edit list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        clip: { type: 'string' },
+        param: { type: 'string' },
+        time: { type: 'number' },
+        value: { type: 'number' },
+        id: { type: 'string', description: 'an existing point id to move; omit to add a new point' },
+      },
+      required: ['file', 'track', 'clip', 'param', 'time', 'value'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = setAutomationPoint(before, str(args, 'track'), str(args, 'clip'), str(args, 'param'), {
+        time: num(args, 'time'),
+        value: num(args, 'value'),
+        ...(typeof args.id === 'string' ? { id: args.id } : {}),
+      })
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
     },

@@ -3,8 +3,8 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatDrumHit, BeatDocument, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS } from './document.js'
+import type { BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -392,7 +392,7 @@ export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: 
   const loopBars = opts.loopBars ?? 2
   if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
   if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
-  const base: BeatDocument = { formatVersion: '0.8', bpm, loopBars, selectedTrack: '', media: [], tracks: [], scenes: [], song: null }
+  const base: BeatDocument = { formatVersion: '0.9', bpm, loopBars, selectedTrack: '', media: [], tracks: [], scenes: [], song: null }
   const { doc } = addTrack(base, { id: opts.trackId ?? 'lead', kind: 'synth' })
   return { ...doc, selectedTrack: doc.tracks[0]!.id }
 }
@@ -400,16 +400,20 @@ export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: 
 /** v0.4 song primitives — the arrangement-timeline edit surface (docs/phase-6-plan.md §6.4). */
 
 /** Snapshots a track's live content into a named clip (beatlab's saveClip, format-side).
- * Overwrites an existing clip with the same id — re-snapshotting is the common workflow. */
+ * Overwrites an existing clip with the same id — re-snapshotting is the common workflow. Notes/
+ * hits come from the track's live content (there's no live-track automation to snapshot from —
+ * v0.9 automation is clip-scoped only), so a re-snapshot preserves the clip's existing
+ * automation lanes rather than wiping them; a brand-new clip starts with none. */
 export function saveClip(doc: BeatDocument, trackId: string, clipId: string): { doc: BeatDocument; created: boolean } {
   const track = findTrack(doc, trackId)
   if (!/^[a-zA-Z0-9_-]+$/.test(clipId)) throw new BeatEditError(`clip ids are single alphanumeric/_/- tokens, got "${clipId}"`)
-  const clip = {
+  const existing = track.clips.findIndex((c) => c.id === clipId)
+  const clip: BeatClip = {
     id: clipId,
     notes: track.notes.map((n) => ({ ...n })),
     hits: track.kind === 'drums' ? track.hits.map((h) => ({ ...h })) : [],
+    automation: existing === -1 ? [] : track.clips[existing]!.automation.map((l) => ({ ...l, points: l.points.map((p) => ({ ...p })) })),
   }
-  const existing = track.clips.findIndex((c) => c.id === clipId)
   const clips = existing === -1 ? [...track.clips, clip] : track.clips.map((c, i) => (i === existing ? clip : c))
   return { doc: replaceTrack(doc, { ...track, clips }), created: existing === -1 }
 }
@@ -437,4 +441,121 @@ export function setSong(doc: BeatDocument, sections: { scene: string; bars: numb
     if (!Number.isInteger(s.bars) || s.bars < 1 || s.bars > 64) throw new BeatEditError(`section bars must be an integer 1-64, got ${s.bars}`)
   }
   return { ...doc, song: sections.length === 0 ? null : sections.map((s) => ({ ...s })) }
+}
+
+/** v0.9 clip automation primitives (docs/phase-9-automation-plan.md). Automation is clip-scoped
+ * only (no live/non-clip automation — see format-spec.md's v0.9 section for why); every function
+ * here targets `<track>.<clip>` and one automatable synth param. */
+
+function findClip(track: BeatTrack, clipId: string): BeatClip {
+  const c = track.clips.find((x) => x.id === clipId)
+  if (!c) throw new BeatEditError(`no clip "${clipId}" on track "${track.id}" (have: ${track.clips.map((x) => x.id).join(', ') || 'none'})`)
+  return c
+}
+
+function replaceClip(doc: BeatDocument, trackId: string, next: BeatClip): BeatDocument {
+  const track = findTrack(doc, trackId)
+  return replaceTrack(doc, { ...track, clips: track.clips.map((c) => (c.id === next.id ? next : c)) })
+}
+
+function checkAutomatableParam(param: string) {
+  if (!(AUTOMATABLE_SYNTH_PARAMS as readonly string[]).includes(param)) {
+    throw new BeatEditError(`"${param}" is not an automatable synth param (have: ${AUTOMATABLE_SYNTH_PARAMS.join(', ')})`)
+  }
+}
+
+/** Adds a new automation point to a clip's `param` lane (creating the lane if this is its first
+ * point). Mints the next free `p<n>` id scoped to that lane if `id` is omitted; errors if a
+ * given id already exists in the lane (use moveAutomationPoint to edit an existing point). */
+export function addAutomationPoint(
+  doc: BeatDocument,
+  trackId: string,
+  clipId: string,
+  param: string,
+  point: { time: number; value: number; id?: string },
+): { doc: BeatDocument; point: BeatAutomationPoint } {
+  const track = findTrack(doc, trackId)
+  checkAutomatableParam(param)
+  const clip = findClip(track, clipId)
+  if (!Number.isFinite(point.time) || point.time < 0) throw new BeatEditError(`automation point time must be >= 0, got ${point.time}`)
+  if (!Number.isFinite(point.value)) throw new BeatEditError(`automation point value must be a finite number, got ${point.value}`)
+
+  const lane = clip.automation.find((l) => l.param === param)
+  const points = lane ? lane.points : []
+  let id = point.id
+  if (id === undefined) {
+    let max = 0
+    for (const p of points) {
+      const m = p.id.match(/^p(\d+)$/)
+      if (m) max = Math.max(max, Number(m[1]))
+    }
+    id = `p${max + 1}`
+  } else if (points.some((p) => p.id === id)) {
+    throw new BeatEditError(`automation point id "${id}" already exists in the "${param}" lane on clip "${clipId}"`)
+  }
+  const added: BeatAutomationPoint = { id, time: canon(point.time), value: canon(point.value) }
+  const nextLanes = lane
+    ? clip.automation.map((l) => (l.param === param ? { ...l, points: [...l.points, added] } : l))
+    : [...clip.automation, { param, points: [added] }]
+  return { doc: replaceClip(doc, trackId, { ...clip, automation: nextLanes }), point: added }
+}
+
+/** Moves an existing automation point: updates its time and/or value (whichever is passed). */
+export function moveAutomationPoint(
+  doc: BeatDocument,
+  trackId: string,
+  clipId: string,
+  param: string,
+  pointId: string,
+  changes: { time?: number; value?: number },
+): { doc: BeatDocument; point: BeatAutomationPoint } {
+  const track = findTrack(doc, trackId)
+  const clip = findClip(track, clipId)
+  const lane = clip.automation.find((l) => l.param === param)
+  const existing = lane?.points.find((p) => p.id === pointId)
+  if (!lane || !existing) throw new BeatEditError(`no automation point "${pointId}" in the "${param}" lane on clip "${clipId}"`)
+  const time = changes.time ?? existing.time
+  const value = changes.value ?? existing.value
+  if (!Number.isFinite(time) || time < 0) throw new BeatEditError(`automation point time must be >= 0, got ${time}`)
+  if (!Number.isFinite(value)) throw new BeatEditError(`automation point value must be a finite number, got ${value}`)
+  const updated: BeatAutomationPoint = { id: pointId, time: canon(time), value: canon(value) }
+  const nextLanes = clip.automation.map((l) => (l.param === param ? { ...l, points: l.points.map((p) => (p.id === pointId ? updated : p)) } : l))
+  return { doc: replaceClip(doc, trackId, { ...clip, automation: nextLanes }), point: updated }
+}
+
+/** Add-or-move in one call: if `point.id` already names a point in the lane, moves it; otherwise
+ * adds a new point (minting an id if none was given). This is what `beat automate` / `beat_
+ * automate` call — the CLI/MCP surface doesn't ask the caller to know in advance which case
+ * they're in. */
+export function setAutomationPoint(
+  doc: BeatDocument,
+  trackId: string,
+  clipId: string,
+  param: string,
+  point: { time: number; value: number; id?: string },
+): { doc: BeatDocument; point: BeatAutomationPoint; created: boolean } {
+  const track = findTrack(doc, trackId)
+  checkAutomatableParam(param)
+  const clip = findClip(track, clipId)
+  const lane = clip.automation.find((l) => l.param === param)
+  const existing = point.id !== undefined ? lane?.points.find((p) => p.id === point.id) : undefined
+  if (existing) {
+    const moved = moveAutomationPoint(doc, trackId, clipId, param, point.id!, { time: point.time, value: point.value })
+    return { doc: moved.doc, point: moved.point, created: false }
+  }
+  const added = addAutomationPoint(doc, trackId, clipId, param, point)
+  return { doc: added.doc, point: added.point, created: true }
+}
+
+/** Removes an automation point; drops the whole lane if it was the last point (an empty lane
+ * has no canonical serialized form — see BeatAutomationLane in document.ts). */
+export function removeAutomationPoint(doc: BeatDocument, trackId: string, clipId: string, param: string, pointId: string): { doc: BeatDocument; point: BeatAutomationPoint } {
+  const track = findTrack(doc, trackId)
+  const clip = findClip(track, clipId)
+  const lane = clip.automation.find((l) => l.param === param)
+  const existing = lane?.points.find((p) => p.id === pointId)
+  if (!lane || !existing) throw new BeatEditError(`no automation point "${pointId}" in the "${param}" lane on clip "${clipId}"`)
+  const remaining = lane.points.filter((p) => p.id !== pointId)
+  const nextLanes = remaining.length === 0 ? clip.automation.filter((l) => l.param !== param) : clip.automation.map((l) => (l.param === param ? { ...l, points: remaining } : l))
+  return { doc: replaceClip(doc, trackId, { ...clip, automation: nextLanes }), point: existing }
 }

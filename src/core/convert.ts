@@ -1,5 +1,37 @@
-import type { BeatDrumHit, BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { DRUM_LANES, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultSynthFields } from './document.js'
+import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultSynthFields } from './document.js'
+
+/** v0.9: the assumed shape of beatlab's per-clip automation engine state — a param name mapped
+ * to its list of (time, value) points, UNORDERED and WITHOUT stable ids (beatlab's live clip
+ * storage has no reason to id automation points the way the format's D6 discipline requires).
+ * This is inferred from ExternalTrack's previous `automation?: Record<string, unknown>` typing
+ * and phase-6-plan's note that "clip automation exists in beatlab but is not modeled by the
+ * format yet" — it has NOT been verified against real beatlab source (no local checkout in this
+ * worktree; test/fixtures/real-sandbox.beatlab.json's clips are all empty, so the fixture can't
+ * confirm it either). See docs/phase-9-automation-plan.md's "Result" section for this caveat
+ * spelled out as a documented gap rather than a verified fact. */
+export type ExternalClipAutomation = Record<string, { time: number; value: number }[]>
+
+/** v0.9: converts one clip's (assumed-shape) automation into BeatAutomationLane[], minting
+ * stable point ids (`p1, p2, ...` in ascending time order) since the format requires them (D6)
+ * even though the inferred source shape doesn't carry any. Params the format doesn't know how
+ * to automate (not in AUTOMATABLE_SYNTH_PARAMS) are reported as dropped, same discipline as
+ * unmodeled synth fields — real, deliberate loss, never silent. */
+function toBeatClipAutomation(automation: ExternalClipAutomation | undefined, trackId: string, clipId: string, report: ConversionReport): BeatAutomationLane[] {
+  if (!automation) return []
+  const known = new Set<string>(AUTOMATABLE_SYNTH_PARAMS)
+  const lanes: BeatAutomationLane[] = []
+  for (const [param, points] of Object.entries(automation)) {
+    if (!Array.isArray(points) || points.length === 0) continue
+    if (!known.has(param)) {
+      report.droppedFields.push(`${trackId}.${clipId}.automation.${param}`)
+      continue
+    }
+    const sorted = [...points].sort((a, b) => a.time - b.time)
+    lanes.push({ param, points: sorted.map((p, i) => ({ id: `p${i + 1}`, time: p.time, value: p.value })) })
+  }
+  return lanes
+}
 
 /** v0.8: expand a per-bar step pattern (beatlab's shape) into absolute hits, tiled across
  * `totalSteps`. The inverse of hitsToPattern. Used when importing a beatlab payload. */
@@ -43,7 +75,7 @@ export interface ExternalTrack {
   notes: { id: string; pitch: number; start: number; duration: number; velocity: number }[]
   synth: Record<string, unknown>
   pattern?: Record<string, number[]>
-  clips?: { id: string; name?: string; notes: ExternalTrack['notes']; pattern?: Record<string, number[]>; automation?: Record<string, unknown> }[]
+  clips?: { id: string; name?: string; notes: ExternalTrack['notes']; pattern?: Record<string, number[]>; automation?: ExternalClipAutomation }[]
 }
 export interface ExternalSandboxPayload {
   v: number
@@ -55,7 +87,7 @@ export interface ExternalSandboxPayload {
   arrangement?: { enabled?: boolean; mode?: string | null; timeline?: { sceneId: string; bars: number }[] }
 }
 
-const BEAT_FORMAT_VERSION = '0.8'
+const BEAT_FORMAT_VERSION = '0.9'
 
 /** SynthParams fields the format deliberately does NOT model (each needs grammar design of its
  * own — large arrays, ordered lists, or redundant pairs; see docs/phase-5-plan.md). These are
@@ -86,9 +118,11 @@ export interface ConversionReport {
    * back to the first remaining synth track. */
   selectedTrackFellBack: boolean
   /** v0.4: structural things the format deliberately doesn't carry, dropped during conversion —
-   * clip automation ("<track>.<clip>.automation"), scene display names ("scenes[].name"),
-   * non-timeline arrangement modes ("arrangement(mode=energy)"), and scene slots that pointed at
-   * nonexistent clips ("scene <id>: dangling slot <track>"). */
+   * scene display names ("scenes[].name"), non-timeline arrangement modes
+   * ("arrangement(mode=energy)"), and scene slots that pointed at nonexistent clips ("scene <id>:
+   * dangling slot <track>"). v0.9: clip automation on a known numeric synth param now CONVERTS
+   * (see toBeatClipAutomation) rather than dropping; only automation for a param the format has
+   * no automatable field for is still reported here, as "<track>.<clip>.automation.<param>". */
   droppedFields: string[]
 }
 
@@ -184,12 +218,13 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     synth: toBeatSynth(t.synth, t.id, report),
     laneSamples: {},
     clips: (t.clips ?? []).map((c) => {
-      if (c.automation && Object.keys(c.automation).length > 0) report.droppedFields.push(`${t.id}.${c.id}.automation`)
       if (c.name !== undefined && c.name !== c.id) report.droppedFields.push(`${t.id}.${c.id}.name`)
       return {
         id: c.id,
         notes: t.kind === 'synth' ? c.notes.map(toBeatNote) : [],
         hits: t.kind === 'drums' ? patternToHits(toBeatPattern(c.pattern, `${t.id} clip ${c.id}`), 16) : [],
+        // v0.9: converts (was reported as dropped through v0.8) — see toBeatClipAutomation.
+        automation: toBeatClipAutomation(c.automation, t.id, c.id, report),
       }
     }),
     notes: t.kind === 'synth' ? t.notes.map(toBeatNote) : [],
@@ -264,8 +299,12 @@ export interface PartialTrack {
   synth: Partial<Record<keyof BeatSynth, unknown>>
   pattern?: BeatDrumPattern
   /** v0.4: clips ride the partial in beatlab's own Clip shape (name = id — the format has no
-   * separate display name; pattern always present because beatlab clips carry one). */
-  clips?: { id: string; name: string; notes: BeatNote[]; pattern: BeatDrumPattern }[]
+   * separate display name; pattern always present because beatlab clips carry one). v0.9:
+   * `automation` rides alongside in the ExternalClipAutomation shape (ids stripped — see
+   * toBeatClipAutomation; this is the direction beatlab's own engine wiring for reading this
+   * back is the documented gap, per docs/phase-9-automation-plan.md), omitted entirely when a
+   * clip has none. */
+  clips?: { id: string; name: string; notes: BeatNote[]; pattern: BeatDrumPattern; automation?: ExternalClipAutomation }[]
   /** v0.5: per-lane one-shot assignments (sample = media id; resolve via the media table). */
   laneSamples?: Record<string, { sample: string; gainDb: number; tune: number }>
 }
@@ -321,6 +360,11 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
               name: c.id,
               notes: c.notes.map((n) => ({ ...n })),
               pattern: t.kind === 'drums' ? hitsToPattern(c.hits) : EMPTY_PATTERN(),
+              // v0.9: strip stable ids back off (the assumed engine-side shape doesn't use them,
+              // per toBeatClipAutomation's caveat) — omitted entirely when the clip has none.
+              ...(c.automation.length > 0
+                ? { automation: Object.fromEntries(c.automation.map((l) => [l.param, l.points.map((p) => ({ time: p.time, value: p.value }))])) as ExternalClipAutomation }
+                : {}),
             })),
           }
         : {}),
