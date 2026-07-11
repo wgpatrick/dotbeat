@@ -37,6 +37,8 @@ import {
   parsePresetLibrary,
   applyPreset,
   formatPresetList,
+  parseSelection,
+  serializeSelection,
   BeatEditError,
   BeatParseError,
   BeatPresetError,
@@ -72,6 +74,7 @@ const USAGE = `usage:
   beat render <file> [-o out.wav] --beatlab-dir <path>    (or BEATLAB_DIR env)
   beat render --offline <file> [-o out.wav]               real engine, no browser (see phase-4 notes)
   beat daemon <file> [--port 8420]
+  beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon
   beat mcp                                                MCP server over stdio (all of the above as tools)
 
 paths for set: bpm | loop_bars | selected_track | <track>.<synth param> | <track>.name |
@@ -432,6 +435,37 @@ function diffCmd(argv) {
   process.exitCode = entries.length === 0 ? 0 : 1 // diff(1) convention
 }
 
+// D2 pointing protocol: the selection lives in a running daemon's memory, so this command is a
+// thin HTTP client over it (parse/serialize the grammar client-side; POST/GET JSON).
+async function selectionCmd(argv) {
+  const portIdx = argv.indexOf('--port')
+  if (portIdx === -1 || argv[portIdx + 1] === undefined) throw new BeatEditError('selection needs --port <port> (the running daemon)')
+  const base = `http://127.0.0.1:${Number(argv[portIdx + 1])}`
+  const fail = async (res) => {
+    const msg = await res.json().then((b) => b.error).catch(() => res.statusText)
+    throw new BeatEditError(`daemon rejected the selection: ${msg}`)
+  }
+  if (argv.includes('--clear')) {
+    const res = await fetch(`${base}/selection`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+    if (!res.ok) await fail(res)
+    process.stdout.write('selection cleared\n')
+    return
+  }
+  const setIdx = argv.indexOf('--set')
+  if (setIdx !== -1) {
+    if (argv[setIdx + 1] === undefined) throw new BeatEditError('selection --set needs a grammar string')
+    const sel = parseSelection(argv[setIdx + 1])
+    const res = await fetch(`${base}/selection`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(sel) })
+    if (!res.ok) await fail(res)
+    process.stdout.write(serializeSelection(sel))
+    return
+  }
+  const res = await fetch(`${base}/selection`)
+  if (!res.ok) await fail(res)
+  const sel = await res.json()
+  process.stdout.write(Object.keys(sel).length === 0 ? 'no selection\n' : serializeSelection(sel))
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2)
   switch (cmd) {
@@ -519,6 +553,9 @@ async function main() {
       await daemonCommand(rest)
       return // daemon keeps running until signaled
     }
+    case 'selection':
+      await selectionCmd(rest)
+      break
     case 'help':
     case '--help':
     case undefined:

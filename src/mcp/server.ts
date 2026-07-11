@@ -34,6 +34,8 @@ import {
   parsePresetLibrary,
   applyPreset,
   formatPresetList,
+  parseSelection,
+  serializeSelection,
 } from '../core/index.js'
 import { decodeWav, analyze, lint, formatLint } from '../metrics/index.js'
 
@@ -364,6 +366,45 @@ const TOOLS: ToolDef[] = [
       const { channels, sampleRate } = decodeWav(readFileSync(str(args, 'file')))
       const findings = lint(analyze(channels, sampleRate), typeof args.target_lufs === 'number' ? { targetLufs: args.target_lufs } : {})
       return formatLint(findings)
+    },
+  },
+  {
+    name: 'beat_selection',
+    description:
+      "Read or set the DAW selection: what the user has highlighted in the GUI right now — treat it as the referent of \"this\" in their request (\"change this up\", \"vary the selected section\"). The selection is ephemeral, held in the running daemon's memory, and NEVER written to the .beat file. With neither set nor clear, returns the current selection in the .beat selection grammar (or \"no selection\"). The daemon must be running (beat daemon <file>); pass its port. Axes are filters (tracks / lanes / bars / notes); an absent axis means unfiltered.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        port: { type: 'number', description: 'the running daemon\'s port' },
+        set: {
+          type: 'string',
+          description: 'a selection grammar block to store, e.g. "selection\\n  tracks drums\\n  bars 8 16\\n" (validated against the current document)',
+        },
+        clear: { type: 'boolean', description: 'clear the selection back to empty' },
+      },
+      required: ['port'],
+    },
+    handler: async (args) => {
+      const base = `http://127.0.0.1:${num(args, 'port')}`
+      const fail = async (res: Response) => {
+        const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+        throw new Error(`daemon rejected the selection: ${msg}`)
+      }
+      if (args.clear === true) {
+        const res = await fetch(`${base}/selection`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+        if (!res.ok) await fail(res)
+        return 'selection cleared\n'
+      }
+      if (typeof args.set === 'string') {
+        const sel = parseSelection(args.set)
+        const res = await fetch(`${base}/selection`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(sel) })
+        if (!res.ok) await fail(res)
+        return serializeSelection(sel)
+      }
+      const res = await fetch(`${base}/selection`)
+      if (!res.ok) await fail(res)
+      const sel = (await res.json()) as Record<string, unknown>
+      return Object.keys(sel).length === 0 ? 'no selection\n' : serializeSelection(sel)
     },
   },
   {
