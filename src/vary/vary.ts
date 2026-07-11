@@ -12,6 +12,7 @@
 
 import type { BeatDocument, BeatSynth } from '../core/document.js'
 import { setValue } from '../core/edit.js'
+import { humanize } from '../core/humanize.js'
 import { formatNumber } from '../core/format.js'
 
 export type VaryScale = 'linear' | 'log'
@@ -180,6 +181,62 @@ export function varyTrack(doc: BeatDocument, trackId: string, group: string, opt
     let next = doc
     for (const e of edits) next = setValue(next, e.path, e.value)
     variants.push({ doc: next, edits })
+  }
+  return variants
+}
+
+export interface FeelVaryOptions {
+  count?: number // default 9
+  seed?: number // base seed; variant i uses seed+i so a batch is reproducible
+  timing?: number // humanize knobs (see HumanizeOptions)
+  velocity?: number
+  pushLate?: number
+  swing?: number
+  lanes?: string[] // drum tracks: scope to these lanes
+  ids?: string[] // or explicit note/hit ids
+}
+
+export interface FeelVariant {
+  doc: BeatDocument
+  /** A one-line recipe describing how to reproduce this variant's feel. */
+  recipe: string
+}
+
+/** Rung 2 of the variation loop: batch `count` humanized *feels* of one track (or a selection),
+ * each from a distinct seed. Content variation, not param variation — the generative half the
+ * owner asked for ("auto-generate many variations; human picks by taste"). Reproducible: the
+ * same (parent, track, options, base seed) yields byte-identical variants. Renders + `beat
+ * score` work exactly as for param variation. */
+export function varyFeel(doc: BeatDocument, trackId: string, opts: FeelVaryOptions = {}): FeelVariant[] {
+  const track = doc.tracks.find((t) => t.id === trackId)
+  if (!track) throw new BeatVaryError(`no track "${trackId}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
+  const count = opts.count ?? 9
+  if (count < 1 || count > 32) throw new BeatVaryError(`count must be 1-32, got ${count}`)
+  const base = opts.seed ?? 1
+  const timing = opts.timing ?? 0.15
+  const velocity = opts.velocity ?? 0.06
+  const pushLate = opts.pushLate ?? 0
+  const swing = opts.swing ?? 0
+
+  // resolve a lane scope to concrete drum-hit ids
+  let ids = opts.ids
+  if (ids === undefined && opts.lanes && opts.lanes.length) {
+    if (track.kind !== 'drums') throw new BeatVaryError(`--lanes only applies to drum tracks; "${trackId}" is a ${track.kind} track`)
+    const lanes = new Set(opts.lanes)
+    ids = track.hits.filter((h) => lanes.has(h.lane)).map((h) => h.id)
+    if (ids.length === 0) throw new BeatVaryError(`no hits on lane(s) ${opts.lanes.join(', ')} in track "${trackId}"`)
+  }
+
+  const variants: FeelVariant[] = []
+  for (let i = 0; i < count; i++) {
+    const seed = base + i
+    const { doc: next } = humanize(doc, trackId, { timing, velocity, pushLate, swing, seed, ...(ids ? { ids } : {}) })
+    const parts = [`seed=${seed}`, `timing=${formatNumber(timing)}`]
+    if (velocity) parts.push(`velocity=${formatNumber(velocity)}`)
+    if (pushLate) parts.push(`push-late=${formatNumber(pushLate)}`)
+    if (swing) parts.push(`swing=${formatNumber(swing)}`)
+    if (opts.lanes && opts.lanes.length) parts.push(`lanes=${opts.lanes.join('+')}`)
+    variants.push({ doc: next, recipe: `humanize ${parts.join(' ')}` })
   }
   return variants
 }

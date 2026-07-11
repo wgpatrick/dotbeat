@@ -70,6 +70,8 @@ const USAGE = `usage:
   beat preset <file> <track> <name>                       apply a preset to a track (a bag of set edits)
   beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render]
                                                           batch-generate small-diff variants of one param group
+  beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,oh] [--render]
+                                                          batch humanized FEEL variants (content variation) to audition + score
   beat vary --groups                                      list the mutation groups
   beat clip <file> <track> <clip-id>                      snapshot the track's live content into a clip
   beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
@@ -284,9 +286,16 @@ async function varyCmd(argv) {
     }
     return
   }
-  const positional = argv.filter((a, i) => !a.startsWith('--') && !['--count', '--amount', '--seed', '--out-dir'].includes(argv[i - 1]))
+  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids']
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const [file, track, group] = positional
-  if (!file || !track || !group) throw new BeatEditError('vary needs <file> <track> <group> (see beat vary --groups)')
+  if (!file || !track || !group) throw new BeatEditError('vary needs <file> <track> <group> (see beat vary --groups; "feel" batches humanized variants)')
+
+  // "feel" is content variation (rung 2): batch humanized variants for auditioning + scoring.
+  if (group === 'feel') {
+    await varyFeelCmd(argv, file, track)
+    return
+  }
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
   const amount = flagValue(argv, '--amount') ? Number(flagValue(argv, '--amount')) : 0.25
   const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
@@ -343,6 +352,68 @@ async function varyCmd(argv) {
   }
 }
 
+async function varyFeelCmd(argv, file, track) {
+  const { varyFeel, BeatVaryError } = await import('../dist/src/vary/vary.js')
+  const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
+  const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
+  const outDir = flagValue(argv, '--out-dir') ?? `vary-feel-${seed}`
+  const opts = {
+    count,
+    seed,
+    ...(flagValue(argv, '--timing') !== undefined ? { timing: Number(flagValue(argv, '--timing')) } : {}),
+    ...(flagValue(argv, '--velocity') !== undefined ? { velocity: Number(flagValue(argv, '--velocity')) } : {}),
+    ...(flagValue(argv, '--push-late') !== undefined ? { pushLate: Number(flagValue(argv, '--push-late')) } : {}),
+    ...(flagValue(argv, '--swing') !== undefined ? { swing: Number(flagValue(argv, '--swing')) } : {}),
+    ...(flagValue(argv, '--lanes') !== undefined ? { lanes: flagValue(argv, '--lanes').split(',').filter(Boolean) } : {}),
+    ...(flagValue(argv, '--ids') !== undefined ? { ids: flagValue(argv, '--ids').split(',').filter(Boolean) } : {}),
+  }
+  const text = readFileSync(file, 'utf8')
+  const doc = parse(text)
+  let variants
+  try {
+    variants = varyFeel(doc, track, opts)
+  } catch (err) {
+    if (err instanceof BeatVaryError) throw new BeatEditError(err.message)
+    throw err
+  }
+  const { mkdirSync } = await import('node:fs')
+  const { createHash } = await import('node:crypto')
+  mkdirSync(outDir, { recursive: true })
+  const manifest = {
+    parent: file,
+    parentSha256: createHash('sha256').update(text).digest('hex'),
+    track,
+    group: 'feel',
+    count,
+    seed,
+    createdAt: new Date().toISOString(),
+    variants: variants.map((v, i) => ({ file: `v${i + 1}.beat`, recipe: v.recipe })),
+  }
+  for (let i = 0; i < variants.length; i++) writeFileSync(resolve(outDir, `v${i + 1}.beat`), serialize(variants[i].doc))
+  writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
+  process.stdout.write(`${outDir}/: ${variants.length} feel variants of ${track} (seed ${seed})\n`)
+  for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
+
+  if (argv.includes('--render')) {
+    const { execFileSync } = await import('node:child_process')
+    const { fileURLToPath } = await import('node:url')
+    const { existsSync, symlinkSync } = await import('node:fs')
+    // variant .beat files reference media relative to themselves; the parent's media/ dir sits
+    // next to the parent, so link it into the batch dir before rendering.
+    const parentMedia = resolve(dirname(resolve(file)), 'media')
+    const batchMedia = resolve(outDir, 'media')
+    if (existsSync(parentMedia) && !existsSync(batchMedia)) {
+      try { symlinkSync(parentMedia, batchMedia, 'dir') } catch { /* best-effort; render will report a missing sample */ }
+    }
+    const offlineCli = fileURLToPath(new URL('./render-offline.mjs', import.meta.url))
+    for (let i = 0; i < variants.length; i++) {
+      process.stdout.write(`rendering v${i + 1}/${variants.length}...\n`)
+      execFileSync(process.execPath, [offlineCli, resolve(outDir, `v${i + 1}.beat`), '-o', resolve(outDir, `v${i + 1}.wav`)], { stdio: ['ignore', 'ignore', 'inherit'] })
+    }
+    process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
+  }
+}
+
 async function scoreCmd(argv) {
   const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--log')
   const [dir, ...picks] = positional
@@ -356,6 +427,9 @@ async function scoreCmd(argv) {
   })
   if (new Set(ranks).size !== ranks.length) throw new BeatEditError('picks must be distinct')
   const logPath = flagValue(argv, '--log') ?? 'beat-scores.jsonl'
+  // param batches carry replayable `edits`; feel batches carry a `recipe` (the whole variant
+  // file IS the result, since humanize isn't a set-replayable edit).
+  const isFeel = manifest.group === 'feel'
   const entry = {
     t: new Date().toISOString(),
     batch: dir,
@@ -364,13 +438,14 @@ async function scoreCmd(argv) {
     amount: manifest.amount,
     seed: manifest.seed,
     parentSha256: manifest.parentSha256,
-    picks: ranks.map((n, i) => ({ rank: i + 1, variant: `v${n}.beat`, edits: manifest.variants[n - 1].edits })),
+    picks: ranks.map((n, i) => ({ rank: i + 1, variant: `v${n}.beat`, ...(isFeel ? { recipe: manifest.variants[n - 1].recipe } : { edits: manifest.variants[n - 1].edits }) })),
     rejected: manifest.variants.map((_, i) => i + 1).filter((n) => !ranks.includes(n)).map((n) => `v${n}.beat`),
   }
   const { appendFileSync } = await import('node:fs')
   appendFileSync(logPath, JSON.stringify(entry) + '\n')
   process.stdout.write(`scored ${dir}: ${ranks.map((n) => `v${n}`).join(' > ')} -> ${logPath}\n`)
-  process.stdout.write(`to adopt the winner: beat set ${manifest.parent} ${entry.picks[0].edits.join(' ')}\n`)
+  if (isFeel) process.stdout.write(`to adopt the winner (${entry.picks[0].recipe}): cp ${resolve(dir, `v${ranks[0]}.beat`)} ${manifest.parent}\n`)
+  else process.stdout.write(`to adopt the winner: beat set ${manifest.parent} ${entry.picks[0].edits.join(' ')}\n`)
 }
 
 // ---- v0.4 song structure (docs/phase-6-plan.md §6.4) ----------------------------------------
