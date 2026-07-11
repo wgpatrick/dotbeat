@@ -119,9 +119,52 @@ unless the bug turns out to be there too — check).
 
 Result in `docs/phase-20-osc2-fix.md`.
 
+## Stream Z — automation-lane UI (Tier 2, unblocked now that Stream Q's layout is merged)
+
+Deliberately deferred at the end of Phase 18 specifically because it needed the new
+`ArrangementView` track-row shape to exist first — it now does (Stream Q, merged). Research 18
+already speced this in real detail from direct observation of Ableton screenshots — read its
+automation-lane section again before starting, this is not a fresh design problem.
+
+1. **Per-track parameter picker**: an expandable control in each track's header row showing
+   "<Device/Track> / <Parameter>" (e.g. "808 Drifter / Filter Cutoff", or "Track Volume" for a
+   built-in mixer param), with +/- to add/remove a shown automation lane. The format already has
+   real per-clip automation data (v0.9, `BeatAutomationLane`) — you're building the picker/display,
+   not new automation storage.
+2. **Inline draggable curve**: rendered directly in the track's arrangement row (overlaid on/behind
+   the clip content, per the Ableton reference — canvas-based, following research 15's rendering
+   discipline for continuously-interactive elements), with draggable point markers to add/move/
+   remove automation points. Writes through the existing automation edit primitives (`beat
+   automate`'s underlying `src/core/edit.ts` functions — check the exact function name, reuse it,
+   don't reimplement) via the daemon's `/edit` path or a small additive route if the existing
+   primitive doesn't fit cleanly.
+3. Support both built-in mixer params (volume, pan — already have `/edit` paths) and device/synth
+   params (any automatable `SYNTH_FIELDS` entry — check `AUTOMATABLE_SYNTH_PARAMS` or wherever
+   that enumeration lives, likely the same list Stream R touched for LFO destinations).
+
+**Expect real, predicted conflicts with Streams V and W on `ArrangementView.tsx`** — three streams
+touching the same file this round (length controls, track-management controls, and now automation
+lanes), each in a different part of the track-row rendering. This is the same class of overlap
+every multi-stream phase this session has hit and resolved at merge time — don't avoid the work
+because of it, just keep your changes as localized/additive as possible to keep the eventual merge
+clean.
+
+Verify live: add an automation lane to a track, pick a parameter, drag a curve point, confirm the
+resulting `.beat` file has the correct automation point data (clean diff). Confirm playback
+actually reflects the automated curve (reuse Phase 13 Stream A's clip-automation verification
+approach).
+
+Owns: `ui/src/components/ArrangementView.tsx` (real, expected overlap with V and W — resolved at
+merge), possibly one small additive daemon route. Do not touch `NoteView.tsx`, `SynthPanel.tsx`,
+`ui/src/audio/engine.ts` (automation playback already works, per Phase 13 — you're building the
+edit UI, not touching playback).
+
+Result in `docs/phase-20-automation-lanes.md`.
+
 ## Process
 
 Streams U (Phase 19, `NoteView.tsx`) and V (Phase 19, `ArrangementView.tsx`) are already running.
-W expects a small, predicted conflict with V on `ArrangementView.tsx` — resolved at merge, same
-spirit as every prior phase's file-overlap calls. X and Y are disjoint from everything else. `npm
-test` must stay green (295+/292+/0/3) for any stream touching `src/core`/`src/daemon`.
+W and Z both expect predicted conflicts with V (and with each other) on `ArrangementView.tsx` —
+resolved at merge, same spirit as every prior phase's file-overlap calls. X and Y are disjoint
+from everything else. `npm test` must stay green (295+/292+/0/3) for any stream touching
+`src/core`/`src/daemon`.
