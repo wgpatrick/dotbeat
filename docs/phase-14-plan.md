@@ -111,3 +111,36 @@ from Streams E/F, which are `ui/`-only plus at most one shared daemon route). Ru
 Same worktree-per-stream pattern. E and F both touch `ui/src/audio/engine.ts` — real, acceptable
 collision risk (different functions: mute/solo gating vs. instrument-track synthesis), handled at
 merge time same as every prior phase. G is fully disjoint. `npm test` must stay green throughout.
+
+## Result (2026-07-11)
+
+All three streams shipped and are merged into `main`. Final suite: **293 tests, 287 passing, 0
+failing, 6 skipped** (Stream G's 4 new note-grammar tests, no regressions).
+
+- **Stream E**: mute/solo now genuinely gates audio — a dedicated `muteGain` node upstream of the
+  panner fan-out (so dry path and sends are silenced together), read per-tick from the store's
+  `isEffectivelyMuted`. Measured: muting drives a track's own level tap to **-120 dB (true
+  silence)**; soloing drops master RMS by a clean, measurable delta the limiter can't mask. Added
+  real per-track mixer meters (shared rAF driver, `Scope.tsx`'s established discipline, RMS not
+  `Tone.Meter` specifically because peak-hold decay would have made the silence test lie) and a
+  verified arrangement-view playhead reusing the existing `currentStep` tracking.
+- **Stream F**: instrument/SoundFont tracks now actually play — wired the previously-unused
+  `spessasynth_lib` dependency into the live engine (a real, non-trivial integration: pinned Tone
+  to a native `AudioContext` to resolve a conflict between spessasynth's native `AudioWorkletNode`
+  and Tone 15's standardized-audio-context wrapper). Verified with real audio: FluidR3 GM program
+  73 (Flute) produces real signal (−22.2 dBFS peak, not the silent-failure mode the offline render
+  path has), and switching to program 56 (Trumpet) shifts spectral centroid by a measured 78.9%
+  (693 Hz → 1596 Hz) — the selected instrument audibly changes the sound, not just in principle.
+  Added a `GET /soundfont-presets` daemon route and a real instrument-track param panel replacing
+  the placeholder. **Merge required manual conflict resolution** against Stream E (both touched
+  `ui/src/audio/engine.ts`'s `sync()` tail) — resolved by hand (both `applyMuteGates()` and
+  `syncInstruments()` now run each tick), re-typechecked clean.
+- **Stream G**: added the note-grammar unit tests Phase 13 Stream B's addition to `src/core/
+  edit.ts` shipped without; bundled `night-shift.beat` into the packaged Tauri app as a first-open
+  default (no more "blank app, no obvious next step"); fixed the sidecar-orphan-on-force-quit gap
+  with a detached watchdog process, verified with a real `kill -9` + PID check (daemon confirmed
+  gone within the watchdog's ~1s poll window, no leftover watchdog process either).
+- **Honestly still open**: instrument tracks have level/pan but no FX chain, no meter tap, and no
+  mute/solo gating yet (format has no FX fields for instruments; the meter/mute gap is a small,
+  clearly-scoped follow-up per Stream F's own doc); meter ballistics are plain per-frame RMS with
+  no peak-hold; only macOS arm64 has been built/verified for the Tauri shell.
