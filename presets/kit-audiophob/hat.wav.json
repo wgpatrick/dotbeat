@@ -1,0 +1,15 @@
+{
+  "source": "Audiophob Hydrogen drum kit (author: soundcloud.com/audiophobdubstep), CC0 per kit drumkit.xml and the Debian hydrogen-drumkits DEP-5 copyright audit; obtained via deb.debian.org hydrogen-drumkits_2017.09.19~dfsg.orig.tar.gz; original Freesound sample ID in source filename: 116973__cbeeching__hat-light.wav",
+  "license": "CC0-1.0",
+  "preparedAt": "2026-07-11T00:05:55.166Z",
+  "prep": {
+    "trimThresholdDb": -60,
+    "leadInMs": 5,
+    "tailMs": 10,
+    "fadeOutMs": 5,
+    "peakNormalizeDb": -6,
+    "format": "16-bit PCM"
+  },
+  "sha256": "47357cb39ae1ebd1d0567f9785c060f3b184cc4eaea4f4d4df5c37c36b89a3ba",
+  "durationSeconds": 0.2042
+}

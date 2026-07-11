@@ -1,0 +1,15 @@
+{
+  "source": "Audiophob Hydrogen drum kit (author: soundcloud.com/audiophobdubstep), CC0 per kit drumkit.xml and the Debian hydrogen-drumkits DEP-5 copyright audit; obtained via deb.debian.org hydrogen-drumkits_2017.09.19~dfsg.orig.tar.gz; original Freesound sample ID in source filename: 25671__walter-odington__garage-city-snare-snappy.wav (AIFF source)",
+  "license": "CC0-1.0",
+  "preparedAt": "2026-07-11T00:05:54.711Z",
+  "prep": {
+    "trimThresholdDb": -60,
+    "leadInMs": 5,
+    "tailMs": 10,
+    "fadeOutMs": 5,
+    "peakNormalizeDb": -6,
+    "format": "16-bit PCM"
+  },
+  "sha256": "fafc5e5420693938243a2141bd6b1466b6898b9de39fa635f3778e85874f1333",
+  "durationSeconds": 0.094
+}

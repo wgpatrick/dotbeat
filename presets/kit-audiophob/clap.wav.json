@@ -1,0 +1,15 @@
+{
+  "source": "Audiophob Hydrogen drum kit (author: soundcloud.com/audiophobdubstep), CC0 per kit drumkit.xml and the Debian hydrogen-drumkits DEP-5 copyright audit; obtained via deb.debian.org hydrogen-drumkits_2017.09.19~dfsg.orig.tar.gz; original Freesound sample ID in source filename: 29800__stomachache__3.wav",
+  "license": "CC0-1.0",
+  "preparedAt": "2026-07-11T00:05:54.937Z",
+  "prep": {
+    "trimThresholdDb": -60,
+    "leadInMs": 5,
+    "tailMs": 10,
+    "fadeOutMs": 5,
+    "peakNormalizeDb": -6,
+    "format": "16-bit PCM"
+  },
+  "sha256": "12a69fcb10db5773fb740f8b1aba7a57e75bf55f777faacf4805f4243b85e948",
+  "durationSeconds": 0.2184
+}

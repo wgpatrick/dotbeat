@@ -8,7 +8,6 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { decodeWav } from '../dist/src/metrics/index.js'
 
 const [inPath, outPath, ...rest] = process.argv.slice(2)
 if (!inPath || !outPath) {
@@ -23,7 +22,15 @@ const peakDb = Number(flag('--peak-db', '-6'))
 const license = flag('--license', 'UNKNOWN')
 const source = flag('--source', 'UNKNOWN')
 
-const { channels, sampleRate } = decodeWav(readFileSync(inPath))
+// Decode with the SAME decoder the offline renderer uses (node-web-audio-api / symphonia) —
+// handles WAV bit depths, AIFF, FLAC, and resamples to 44.1k, and guarantees that anything we
+// bundle is decodable by our own render pipeline.
+const { OfflineAudioContext } = await import('node-web-audio-api')
+const ctx = new OfflineAudioContext(2, 44100, 44100)
+const bytes = readFileSync(inPath)
+const decoded = await ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+const sampleRate = decoded.sampleRate
+const channels = Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i))
 
 // trim: first sample anywhere above -60 dBFS to last sample above -60 dBFS, plus 5ms lead-in
 const THRESH = Math.pow(10, -60 / 20)

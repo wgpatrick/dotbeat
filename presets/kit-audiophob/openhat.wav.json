@@ -1,0 +1,15 @@
+{
+  "source": "Audiophob Hydrogen drum kit (author: soundcloud.com/audiophobdubstep), CC0 per kit drumkit.xml and the Debian hydrogen-drumkits DEP-5 copyright audit; obtained via deb.debian.org hydrogen-drumkits_2017.09.19~dfsg.orig.tar.gz; original Freesound sample ID in source filename: 104227__minorr__hhat-paiste-302-14-open-p.wav",
+  "license": "CC0-1.0",
+  "preparedAt": "2026-07-11T00:05:55.414Z",
+  "prep": {
+    "trimThresholdDb": -60,
+    "leadInMs": 5,
+    "tailMs": 10,
+    "fadeOutMs": 5,
+    "peakNormalizeDb": -6,
+    "format": "16-bit PCM"
+  },
+  "sha256": "0eb493f0c064cd74a4ffc032e62105dde505eae50fdfaa2881dc70d3bbe69df5",
+  "durationSeconds": 1.7352
+}
