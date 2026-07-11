@@ -11,6 +11,7 @@ import { ArrangementView } from './components/ArrangementView'
 import { MixerView } from './components/MixerView'
 import { HistoryPanel } from './components/HistoryPanel'
 import { VaryAffordance } from './components/VaryAffordance'
+import { ExportButton } from './components/ExportButton'
 
 // Phase 18 — the Ableton-shaped recomposition (docs/phase-18-layout.md, driven by
 // docs/research/18-ableton-ui-architecture.md). The old four-tab switcher (Editor / Arrangement /
@@ -139,6 +140,7 @@ export function App() {
           <Scope />
         </div>
         <div className="topbar-actions">
+          <ExportButton />
           <button
             className={`topbar-btn ${mixerOpen ? 'active' : ''}`}
             data-action="toggle-mixer"

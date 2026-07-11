@@ -638,6 +638,39 @@ body {
   font-weight: 600;
 }
 
+/* ---- Phase 20 Stream X: export/render button (topbar) ---- */
+.export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.export-btn.rendering {
+  cursor: wait;
+  opacity: 0.85;
+}
+.export-btn.done {
+  border-color: #6ec97c;
+  color: #6ec97c;
+}
+.export-btn.error {
+  border-color: #e05a5a;
+  color: #e05a5a;
+}
+.export-spinner {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  display: inline-block;
+  animation: export-spin 0.7s linear infinite;
+}
+@keyframes export-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ---- Phase 18 workspace: arrangement (main) + selection-following bottom detail pane ---- */
 .workspace {
   flex: 1;
