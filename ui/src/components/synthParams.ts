@@ -4,11 +4,12 @@
 // verbatim port of BeatLab's synth-specific field list. Anything ParamStatus/grading-related from
 // BeatLab is intentionally absent (docs/research/15 §4).
 //
-// Every core-9 param plus all ~54 optional SYNTH_FIELDS is covered exactly once, organized into
+// Every core-9 param plus all ~58 optional SYNTH_FIELDS is covered exactly once, organized into
 // musical groups (osc / filter+env / LFO / amp / inserts / sends / sidechain / drum-voice) so the
-// panel is grouped controls, not one flat wall of 54 knobs. Each spec carries only display/UI
+// panel is grouped controls, not one flat wall of knobs. Each spec carries only display/UI
 // metadata; the actual edit path is `<track>.<key>` via POST /edit (core's setValue), so adding a
-// param here needs no other change.
+// param here needs no other change. (Phase 18 Stream R added the 'bool' kind for lfoSync/
+// lfo2Sync — a plain checkbox alongside the existing knob/enum/trackref controls.)
 
 // ---- formatters (the hz/ms/pct/db family DevicePanel uses; compact for the 10px knob readout) --
 export const fmt = {
@@ -24,7 +25,7 @@ export const fmt = {
   pan: (v: number) => (Math.abs(v) < 0.02 ? 'C' : v < 0 ? `L${Math.round(-v * 100)}` : `R${Math.round(v * 100)}`),
 }
 
-export type ParamKind = 'knob' | 'enum' | 'trackref'
+export type ParamKind = 'knob' | 'enum' | 'trackref' | 'bool'
 export type TrackKind = 'synth' | 'drums' | 'instrument'
 
 export interface ParamSpec {
@@ -51,7 +52,30 @@ export interface ParamGroup {
 }
 
 const OSC_TYPES = ['sine', 'triangle', 'sawtooth', 'square'] as const
-const LFO_DESTS = ['off', 'pitch', 'cutoff', 'amp', 'wtPos'] as const
+// Phase 18 Stream R: widened from {off,pitch,cutoff,amp,wtPos} — mirrors src/core/document.ts's
+// LFO_DESTS exactly (ui/ hand-mirrors core constants; see synthParams.ts's own file-header note
+// and engine.ts's identical LFO_DESTS). Shared by both lfoDest and lfo2Dest — same shared-enum
+// fix documented there (LFO2's pan/sends/EQ/distortionMix used to be unreachable dead code).
+const LFO_DESTS = [
+  'off',
+  'pitch',
+  'cutoff',
+  'resonance',
+  'amp',
+  'pan',
+  'wtPos',
+  'sendReverb',
+  'sendDelay',
+  'sendMod',
+  'eqLow',
+  'eqMid',
+  'eqHigh',
+  'compMix',
+  'distortionMix',
+  'bitcrushMix',
+] as const
+// Tempo-sync note divisions (lfoSyncRate/lfo2SyncRate) — mirrors document.ts's LFO_SYNC_RATES.
+const LFO_SYNC_RATES = ['1/1', '1/2', '1/4', '1/8', '1/16', '1/32', '1/4t', '1/8t', '1/16t', '1/4d', '1/8d', '1/16d'] as const
 
 const k = (key: string, label: string, min: number, max: number, format: (v: number) => string, log = false): ParamSpec => ({
   key,
@@ -63,6 +87,7 @@ const k = (key: string, label: string, min: number, max: number, format: (v: num
   format,
 })
 const e = (key: string, label: string, values: readonly string[]): ParamSpec => ({ key, label, kind: 'enum', values })
+const b = (key: string, label: string, hint: string): ParamSpec => ({ key, label, kind: 'bool', hint })
 
 export const PARAM_GROUPS: ParamGroup[] = [
   {
@@ -118,10 +143,14 @@ export const PARAM_GROUPS: ParamGroup[] = [
       k('lfoRate', 'LFO1', 0.01, 20, fmt.hz, true),
       k('lfoDepth', 'Depth1', 0, 1, fmt.pct),
       e('lfoDest', 'Dest1', LFO_DESTS),
+      b('lfoSync', 'Sync1', 'tempo-sync LFO1 to a note division (Rate1) instead of free Hz'),
+      e('lfoSyncRate', 'Rate1', LFO_SYNC_RATES),
       e('lfoShape', 'Shape1', ['sine', 'custom']),
       k('lfo2Rate', 'LFO2', 0.01, 20, fmt.hz, true),
       k('lfo2Depth', 'Depth2', 0, 1, fmt.pct),
       e('lfo2Dest', 'Dest2', LFO_DESTS),
+      b('lfo2Sync', 'Sync2', 'tempo-sync LFO2 to a note division (Rate2) instead of free Hz'),
+      e('lfo2SyncRate', 'Rate2', LFO_SYNC_RATES),
     ],
   },
   {

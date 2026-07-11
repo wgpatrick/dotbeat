@@ -38,10 +38,18 @@
 // getTrackLevel() for the mixer meter) — see InstrumentVoice, buildInstrument(), applyMuteGates().
 //
 // Deliberately NOT ported (out of Stream A scope — see the parity doc): wavetable oscillators
-// (dotbeat's osc is only sine/tri/saw/square), tempo-synced LFO rates + drawn LFO shapes,
+// (dotbeat's osc is only sine/tri/saw/square), drawn LFO shapes (lfoShape stays sine-only),
 // reorderable insert order, the arpeggiator, sample-slicing / per-lane one-shots (v0.5 media),
 // and live-MIDI monitoring. Instrument tracks get level/pan/mute into the master bus but NOT the
 // synth FX chain (EQ/comp/sends/sidechain) — full instrument FX parity remains a later stream.
+//
+// Phase 18 Stream R ADDED tempo-synced LFO rates (lfoSync/lfoSyncRate, lfo2Sync/lfo2SyncRate — a
+// note division instead of free Hz, resolved against the live doc.bpm every tick) and widened
+// lfoDest/lfo2Dest onto one shared, larger enumerated destination set (resonance/pan/sends/EQ/
+// compMix/distortionMix/bitcrushMix newly or now-actually reachable by both LFOs — see LFO_DESTS's
+// comment for a pre-existing dead-code bug this also fixes). Kept the flat-enum model, no
+// free-routing matrix — see docs/research/18-ableton-ui-architecture.md's LFO-depth section and
+// docs/phase-18-lfo-depth.md.
 
 import * as Tone from 'tone'
 import { WorkletSynthesizer } from 'spessasynth_lib'
@@ -53,8 +61,76 @@ import { daemonBase } from '../daemon/bridge'
 import { audioBufferToWav } from './wavEncode'
 import type { BeatDocument, BeatDrumHit, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType } from '../types'
 
-type LfoDest = 'off' | 'pitch' | 'cutoff' | 'amp' | 'wtPos'
-type Lfo2Dest = 'off' | 'pan' | 'sendReverb' | 'sendDelay' | 'sendMod' | 'eqLow' | 'eqMid' | 'eqHigh' | 'distortionMix'
+// Phase 18 Stream R: ONE shared, widened destination set for both LFO1 and LFO2 — mirrors
+// src/core/document.ts's LFO_DESTS/LfoDestination exactly (ui/ is a standalone Vite app with no
+// build-time dependency on src/core — see the file-header comment — so this is a hand-kept
+// mirror, same convention as OSC_SET below). Widened from the original {off,pitch,cutoff,amp,
+// wtPos}; this ALSO fixes a real bug: LFO2 used to switch on 'pan'/sends/EQ/'distortionMix' but
+// the document schema only allowed the original 5 values for lfo2Dest, so those destinations were
+// unreachable dead code (no document could legally set lfo2Dest to 'pan'). Now both LFOs share one
+// enum and both branches below are live for both LFOs — see docs/research/18-ableton-ui-
+// architecture.md's LFO-depth section for why this stays a flat enum, not a free-routing matrix.
+type LfoDest =
+  | 'off'
+  | 'pitch'
+  | 'cutoff'
+  | 'resonance'
+  | 'amp'
+  | 'pan'
+  | 'wtPos'
+  | 'sendReverb'
+  | 'sendDelay'
+  | 'sendMod'
+  | 'eqLow'
+  | 'eqMid'
+  | 'eqHigh'
+  | 'compMix'
+  | 'distortionMix'
+  | 'bitcrushMix'
+const LFO_DESTS: readonly LfoDest[] = [
+  'off',
+  'pitch',
+  'cutoff',
+  'resonance',
+  'amp',
+  'pan',
+  'wtPos',
+  'sendReverb',
+  'sendDelay',
+  'sendMod',
+  'eqLow',
+  'eqMid',
+  'eqHigh',
+  'compMix',
+  'distortionMix',
+  'bitcrushMix',
+]
+
+// Tempo-sync (Phase 18 Stream R): mirrors src/core/document.ts's LfoSyncRate/LFO_SYNC_RATES/
+// lfoSyncRateHz exactly (same hand-kept-mirror convention as LFO_DESTS above).
+type LfoSyncRate = '1/1' | '1/2' | '1/4' | '1/8' | '1/16' | '1/32' | '1/4t' | '1/8t' | '1/16t' | '1/4d' | '1/8d' | '1/16d'
+const LFO_SYNC_RATES: readonly LfoSyncRate[] = ['1/1', '1/2', '1/4', '1/8', '1/16', '1/32', '1/4t', '1/8t', '1/16t', '1/4d', '1/8d', '1/16d']
+
+/** Seconds-per-cycle of a tempo-synced LFO division at a given bpm ("1/4" = one quarter note =
+ * 60/bpm seconds; 't' = triplet, 2/3 length; 'd' = dotted, 1.5x length). */
+function lfoSyncDivisionSeconds(bpm: number, division: LfoSyncRate): number {
+  const m = /^1\/(\d+)([td]?)$/.exec(division)
+  const denom = m ? Number(m[1]) : 4
+  const mod = m?.[2]
+  let seconds = ((60 / bpm) * 4) / denom
+  if (mod === 't') seconds *= 2 / 3
+  else if (mod === 'd') seconds *= 1.5
+  return seconds
+}
+
+/** The synced rate in Hz — what lfoValueAt's sine wants. Real tempo-tracking: this is recomputed
+ * from doc.bpm every tick() call (see below), so a BPM edit changes the LFO's actual period on
+ * the very next scheduled step, not just at note-on. */
+function lfoSyncRateHz(bpm: number, division: LfoSyncRate): number {
+  const seconds = lfoSyncDivisionSeconds(bpm, division)
+  return seconds > 0 ? 1 / seconds : 1
+}
+
 type FilterType = 'lowpass' | 'bandpass' | 'highpass'
 
 // The permissive BeatSynth from the daemon types every non-core field as `number | string |
@@ -91,9 +167,13 @@ interface EngineSynth {
   lfoRate: number
   lfoDepth: number
   lfoDest: LfoDest
+  lfoSync: boolean
+  lfoSyncRate: LfoSyncRate
   lfo2Rate: number
   lfo2Depth: number
-  lfo2Dest: Lfo2Dest
+  lfo2Dest: LfoDest
+  lfo2Sync: boolean
+  lfo2SyncRate: LfoSyncRate
   glide: number
   keytrackAmount: number
   velToFilterAmount: number
@@ -132,6 +212,8 @@ function coerce(p: BeatSynth): EngineSynth {
     return Number.isFinite(n) ? n : d
   }
   const osc = (v: unknown, d: OscType): OscType => (typeof v === 'string' && OSC_SET.includes(v as OscType) ? (v as OscType) : d)
+  const bool = (v: unknown, d: boolean): boolean => (typeof v === 'boolean' ? v : d)
+  const syncRate = (v: unknown, d: LfoSyncRate): LfoSyncRate => (typeof v === 'string' && LFO_SYNC_RATES.includes(v as LfoSyncRate) ? (v as LfoSyncRate) : d)
   return {
     osc: osc(p.osc, 'sawtooth'),
     volume: num(p.volume, -10),
@@ -160,10 +242,14 @@ function coerce(p: BeatSynth): EngineSynth {
     filterEnvRelease: num(p.filterEnvRelease, 0.2),
     lfoRate: num(p.lfoRate, 4),
     lfoDepth: num(p.lfoDepth, 0),
-    lfoDest: (['off', 'pitch', 'cutoff', 'amp', 'wtPos'].includes(String(p.lfoDest)) ? p.lfoDest : 'off') as LfoDest,
+    lfoDest: (LFO_DESTS.includes(p.lfoDest as LfoDest) ? p.lfoDest : 'off') as LfoDest,
+    lfoSync: bool(p.lfoSync, false),
+    lfoSyncRate: syncRate(p.lfoSyncRate, '1/4'),
     lfo2Rate: num(p.lfo2Rate, 3),
     lfo2Depth: num(p.lfo2Depth, 0),
-    lfo2Dest: (['off', 'pan', 'sendReverb', 'sendDelay', 'sendMod', 'eqLow', 'eqMid', 'eqHigh', 'distortionMix'].includes(String(p.lfo2Dest)) ? p.lfo2Dest : 'off') as Lfo2Dest,
+    lfo2Dest: (LFO_DESTS.includes(p.lfo2Dest as LfoDest) ? p.lfo2Dest : 'off') as LfoDest,
+    lfo2Sync: bool(p.lfo2Sync, false),
+    lfo2SyncRate: syncRate(p.lfo2SyncRate, '1/8'),
     glide: num(p.glide, 0),
     keytrackAmount: num(p.keytrackAmount, 0),
     velToFilterAmount: num(p.velToFilterAmount, 0),
@@ -195,8 +281,12 @@ function coerce(p: BeatSynth): EngineSynth {
   }
 }
 
-// Bipolar -1..1 LFO value at time t. dotbeat has no drawn-LFO step data or tempo sync, so this is
-// a plain sine (BeatLab's lfoWaveValue minus the custom-shape / synced-rate branches).
+// Bipolar -1..1 LFO value at time t, at a plain sine (BeatLab's lfoWaveValue minus the
+// custom-shape branch — still not ported, see the file-header "deliberately not ported" list).
+// Phase 18 Stream R added real tempo-sync: `rateHz` is resolved by the caller (tick(), below) as
+// either the free-Hz field or lfoSyncRateHz(doc.bpm, ...syncRate) when *Sync is on, so a BPM edit
+// changes this function's actual period on the very next tick — this function itself just needs a
+// rate, it doesn't care where it came from.
 function lfoValueAt(rateHz: number, t: number): number {
   return Math.sin(2 * Math.PI * rateHz * t)
 }
@@ -1026,9 +1116,12 @@ class Engine {
       if (track.kind === 'drums') {
         const p = coerce(track.synth)
         // Filter-sweep / amp LFO on the drum bus (the one continuously-moving value; static bus
-        // params are applied reactively in sync()).
+        // params are applied reactively in sync()). Phase 18 Stream R: real tempo-sync — when
+        // lfoSync is on, the rate is resolved from the CURRENT doc.bpm every tick, so a BPM edit
+        // changes the drum bus LFO's period on the very next 16th-note step.
         if ((p.lfoDest === 'cutoff' || p.lfoDest === 'amp') && p.lfoDepth > 0) {
-          const lfo = lfoValueAt(p.lfoRate, time)
+          const rateHz = p.lfoSync ? lfoSyncRateHz(doc.bpm, p.lfoSyncRate) : p.lfoRate
+          const lfo = lfoValueAt(rateHz, time)
           const bus = this.getDrumBus()
           if (p.lfoDest === 'cutoff') {
             bus.filter.frequency.linearRampToValueAtTime(p.cutoff * Math.pow(2, p.lfoDepth * lfo), time + stepSeconds)
@@ -1069,20 +1162,40 @@ class Engine {
       const p = coerce(track.synth)
       const rampTime = time + stepSeconds
 
+      // Phase 18 Stream R: real tempo-sync — each LFO's rate is resolved from the CURRENT
+      // doc.bpm every tick when its *Sync flag is on, so a BPM edit changes that LFO's actual
+      // period on the very next scheduled 16th-note step (see lfoSyncRateHz above).
+      const lfoRateHz = p.lfoSync ? lfoSyncRateHz(doc.bpm, p.lfoSyncRate) : p.lfoRate
+      const lfo2RateHz = p.lfo2Sync ? lfoSyncRateHz(doc.bpm, p.lfo2SyncRate) : p.lfo2Rate
       const lfoOn = p.lfoDest !== 'off' && p.lfoDepth > 0
-      const lfo = lfoOn ? lfoValueAt(p.lfoRate, time) : 0
+      const lfo = lfoOn ? lfoValueAt(lfoRateHz, time) : 0
+      const lfo2On = p.lfo2Dest !== 'off' && p.lfo2Depth > 0
+      const lfo2 = lfo2On ? lfoValueAt(lfo2RateHz, time) : 0
 
-      // Cutoff: automation (log interp) forms the base, LFO modulates around it.
+      // Cutoff: automation (log interp) forms the base; either LFO can modulate around it now
+      // (Phase 18 Stream R widened lfoDest/lfo2Dest to one shared enum — previously only LFO1
+      // could reach cutoff). Last-applied wins if both target it, same documented step-resolution
+      // tradeoff as clip automation vs. LFO below.
       const cutoffAuto = content.automation.get('cutoff')
       let baseCutoff = p.cutoff
       if (cutoffAuto && cutoffAuto.length) baseCutoff = interpolateAutomation(cutoffAuto, content.contentStep, true)
+      let cutoffLfoApplied = false
       if (p.lfoDest === 'cutoff' && lfoOn) {
         chain.filter.frequency.linearRampToValueAtTime(Math.max(baseCutoff * Math.pow(2, p.lfoDepth * lfo), 20), rampTime)
-      } else if (cutoffAuto && cutoffAuto.length) {
+        cutoffLfoApplied = true
+      }
+      if (p.lfo2Dest === 'cutoff' && lfo2On) {
+        chain.filter.frequency.linearRampToValueAtTime(Math.max(baseCutoff * Math.pow(2, p.lfo2Depth * lfo2), 20), rampTime)
+        cutoffLfoApplied = true
+      }
+      if (!cutoffLfoApplied && cutoffAuto && cutoffAuto.length) {
         chain.filter.frequency.linearRampToValueAtTime(baseCutoff, rampTime)
       }
       if (p.lfoDest === 'amp' && lfoOn) {
         chain.vol.volume.linearRampToValueAtTime(p.volume + p.lfoDepth * lfo * 12, rampTime)
+      }
+      if (p.lfo2Dest === 'amp' && lfo2On) {
+        chain.vol.volume.linearRampToValueAtTime(p.volume + p.lfo2Depth * lfo2 * 12, rampTime)
       }
 
       // Generic clip automation for the remaining live-rampable params (cutoff handled above,
@@ -1110,12 +1223,19 @@ class Engine {
         }
       }
 
-      // LFO 2 — independent route to a disjoint destination set, additive on the static value.
-      if (p.lfo2Dest !== 'off' && p.lfo2Depth > 0) {
-        const lfo2 = Math.sin(2 * Math.PI * p.lfo2Rate * time)
-        const d = p.lfo2Depth * lfo2
+      // LFO additive destinations — Phase 18 Stream R widened coverage: resonance/compMix/
+      // bitcrushMix are NEW LFO targets (previously only reachable via clip automation, above);
+      // pan/sends/EQ/distortionMix used to be LFO2-only (and were actually unreachable through the
+      // document schema at all — see LFO_DESTS's comment) — now both LFOs share one destination
+      // enum and both can reach the full set. One function, called once per LFO with its own
+      // dest/depth/value, so there's exactly one place that knows how each destination maps onto
+      // the live audio graph. ('off'/'pitch'/'cutoff'/'amp' are handled above/below; 'wtPos' is a
+      // deliberate no-op — wavetable oscillators aren't ported, see the file-header scope note.)
+      const applyLfoAdditive = (dest: LfoDest, depth: number, lfoVal: number): void => {
+        const d = depth * lfoVal
         const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
-        switch (p.lfo2Dest) {
+        switch (dest) {
+          case 'resonance': chain.filter.Q.linearRampToValueAtTime(Math.max(0, p.resonance + d * 8), rampTime); break
           case 'pan': chain.panner.pan.linearRampToValueAtTime(Math.max(-1, Math.min(1, p.pan + d)), rampTime); break
           case 'sendReverb': chain.reverbSend.gain.linearRampToValueAtTime(clamp01(p.sendReverb + d * 0.5), rampTime); break
           case 'sendDelay': chain.delaySend.gain.linearRampToValueAtTime(clamp01(p.sendDelay + d * 0.5), rampTime); break
@@ -1123,9 +1243,18 @@ class Engine {
           case 'eqLow': chain.eq3.low.linearRampToValueAtTime(p.eqLow + d * 12, rampTime); break
           case 'eqMid': chain.eq3.mid.linearRampToValueAtTime(p.eqMid + d * 12, rampTime); break
           case 'eqHigh': chain.eq3.high.linearRampToValueAtTime(p.eqHigh + d * 12, rampTime); break
+          case 'compMix': {
+            const v = clamp01(p.compMix + d * 0.5)
+            chain.compDry.gain.linearRampToValueAtTime(1 - v, rampTime)
+            chain.compWet.gain.linearRampToValueAtTime(v, rampTime)
+            break
+          }
           case 'distortionMix': chain.distortion.wet.linearRampToValueAtTime(clamp01(p.distortionMix + d * 0.5), rampTime); break
+          case 'bitcrushMix': chain.bitcrush.wet.linearRampToValueAtTime(clamp01(p.bitcrushMix + d * 0.5), rampTime); break
         }
       }
+      if (lfoOn) applyLfoAdditive(p.lfoDest, p.lfoDepth, lfo)
+      if (lfo2On) applyLfoAdditive(p.lfo2Dest, p.lfo2Depth, lfo2)
 
       // Scheduled sidechain duck: not an audio-analysis sidechain — it dips this track's volume
       // whenever duckSource's kick lane has a hit at this step. Adapted to dotbeat's free-timed
@@ -1156,6 +1285,7 @@ class Engine {
         const dur = Math.max(n.duration * stepSeconds * 0.9, 0.05)
         let freq = Tone.Frequency(n.pitch, 'midi').toFrequency()
         if (p.lfoDest === 'pitch' && lfoOn) freq *= Math.pow(2, (p.lfoDepth * lfo * 100) / 1200)
+        if (p.lfo2Dest === 'pitch' && lfo2On) freq *= Math.pow(2, (p.lfo2Depth * lfo2 * 100) / 1200)
         chain.synth.triggerAttackRelease(freq, dur, noteTime, n.velocity)
         if (p.osc2Level > 0) chain.osc2.triggerAttackRelease(freq * Math.pow(2, p.osc2Detune / 1200), dur, noteTime, n.velocity)
         if (p.unisonVoices >= 3 && p.osc2Level > 0) chain.osc3.triggerAttackRelease(freq * Math.pow(2, -p.osc2Detune / 1200), dur, noteTime, n.velocity)
