@@ -60,3 +60,18 @@ Key API (spike-verified): `new SpessaSynthProcessor(sampleRate)` / `processorIni
 
 Spike complete (this doc). Next: 8.1 grammar + core, then headless integration, then content,
 then browser leg.
+
+## Status update (2026-07-11, second slice)
+
+**v0.6 shipped headless-first**: grammar (soundfont voice line, volume/pan elision, notes,
+fail-loudly exclusions), spessasynth_core renderer integration (sample-position sequencing
+outside the Tone graph, media loader split raw-vs-decoded, document.currentScript stub under
+the polyfill's window), CLI (`add-track --soundfont/--program`, `set keys.volume/pan/program/
+soundfont`), instrument-param diffs, inspect, beatlab-partials exclusion + daemon reinsertion.
+130/130 tests. Live demo: piano chords + Audiophob kick/hat from one v0.6 file, 2.7x realtime.
+
+**Remaining**: the browser leg (spessasynth_lib worklet inside beatlab's engine + an instrument
+track kind app-side, or a bridge-side headless-worklet hybrid — decide next slice), master-bus
+routing for instrument audio offline (currently bypasses the limiter, documented), clips/
+timeline participation, GM percussion/FluidR3 for the multi-preset story, beat_song-style MCP
+surface for instruments.

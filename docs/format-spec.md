@@ -297,6 +297,22 @@ content-addressed and provenance-tracked:
   Debian-vetted — research 09) ship in-repo; the Freesound CC0 pipeline
   (`scripts/freesound-cc0.mjs`, audition previews + OAuth2 originals) sources more.
 
+### v0.6 additions — instrument tracks (Phase 8)
+
+Real sampled instruments enter as a third track kind:
+
+- **`track <id> <name> <color> instrument`** carries a `soundfont <sample-id> <program>` voice
+  line (the sample id references an `.sf2`/`.sf3` in the v0.5 `media` block — no new media
+  machinery), optional `volume <dB>` / `pan <-1..1>` (elided at -10/center), and `note` lines
+  exactly as synth tracks. Deliberately NO synth block (the 55 synth params don't apply to
+  sampled instruments — fail loudly beats half-meaningful knobs) and NO clips yet (timeline
+  participation is a later slice).
+- Rendering: headless goes through spessasynth_core (Apache-2.0, pure DSP — 29x realtime,
+  measured) outside the Tone graph; notes loop every `loop_bars` like synth tracks. The
+  browser leg (spessasynth_lib worklet in beatlab) is the next Phase 8 slice — until it lands,
+  instrument tracks are excluded from GUI sync partials and preserved by the daemon on pushes.
+- Content: `presets/sf2/upright-piano-kw-small.sf2` (FreePats, CC0, provenance sidecar).
+
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
 Automation, clips/scenes, swing, arrangement, multi-device chains beyond the built-in insert
