@@ -195,9 +195,11 @@ a tapped performance records *as played*. What remains is the capture UX, which 
 - **Tap recording**: during looped playback, computer-keyboard (later MIDI) taps become notes
   timestamped against the transport, written to the file on loop end (one checkpoint per
   take — versioning makes bad takes free).
-- **Quantize is an edit, not a default**: captured timing is kept raw; quantize/humanize are
-  explicit operations (and `beat vary` knobs) on a selection. This also gives the agent
-  something musical to work with — real human timing feel it can analyze or amplify.
+- **Quantize is an edit, not a default** (built 2026-07-11, owner-directed Ableton model):
+  captured timing is kept raw; `beat quantize` snaps starts and/or ends to a chosen grid with
+  an amount knob (0.5 = halfway — tighten without flattening), scoped to note ids (the
+  selection protocol's `--scope selection` plugs straight in). Also exposed as `beat_quantize`
+  over MCP, so the agent can do it conversationally.
 - **Drum lanes**: tapping a drum lane needs off-grid drum hits, which the pattern grid can't
   express — per-lane swing or note-style hit lines is a follow-up format decision (spec'd as
   an open question in format-spec v0.7 notes).

@@ -27,6 +27,7 @@ import {
   setValue,
   addNote,
   removeNote,
+  quantizeNotes,
   addTrack,
   removeTrack,
   initDocument,
@@ -50,6 +51,9 @@ const USAGE = `usage:
   beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
   beat add-note <file> <track> <pitch> <start> <duration> <velocity>
   beat rm-note <file> <track> <note-id>
+  beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes id,id]
+                                                          snap notes toward the grid (grid in 16th steps:
+                                                          1=16ths 2=8ths 4=quarters 0.5=32nds; amount<1 = partial)
   beat diff <a.beat> <b.beat>
   beat diff --git <rev1> <rev2> <file>
   beat presets [--json]                                   list the factory preset library
@@ -159,6 +163,26 @@ function rmNoteCmd(argv) {
   const before = readDoc(file)
   const { doc } = removeNote(before, track, noteId)
   writeDoc(file, before, doc)
+}
+
+function quantizeCmd(argv) {
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !['--grid', '--amount', '--notes'].includes(argv[i - 1]))
+  const [file, track] = positional
+  if (!file || !track) throw new BeatEditError('quantize needs <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes id,id]')
+  const flagValue = (flag) => {
+    const i = argv.indexOf(flag)
+    return i === -1 ? undefined : argv[i + 1]
+  }
+  const before = readDoc(file)
+  const { doc, changed } = quantizeNotes(before, track, {
+    ...(flagValue('--grid') !== undefined ? { grid: Number(flagValue('--grid')) } : {}),
+    ...(flagValue('--amount') !== undefined ? { amount: Number(flagValue('--amount')) } : {}),
+    ...(argv.includes('--no-starts') ? { starts: false } : {}),
+    ...(argv.includes('--ends') ? { ends: true } : {}),
+    ...(flagValue('--notes') !== undefined ? { noteIds: flagValue('--notes').split(',').filter(Boolean) } : {}),
+  })
+  writeDoc(file, before, doc)
+  if (changed === 0) process.stdout.write('already on the grid — no notes moved\n')
 }
 
 // The factory library ships with the package; BEAT_PRESETS overrides for a user library.
@@ -431,6 +455,9 @@ async function main() {
       break
     case 'rm-note':
       rmNoteCmd(rest)
+      break
+    case 'quantize':
+      quantizeCmd(rest)
       break
     case 'diff':
       diffCmd(rest)

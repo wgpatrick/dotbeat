@@ -170,6 +170,62 @@ export function addNote(doc: BeatDocument, trackId: string, note: { pitch: numbe
   return { doc: replaceTrack(doc, { ...track, notes: [...track.notes, added] }), note: added }
 }
 
+export interface QuantizeOptions {
+  /** Grid size in 16th steps (1 = 16ths, 2 = 8ths, 4 = quarters, 0.5 = 32nds). Default 1. */
+  grid?: number
+  /** How far each note moves toward the grid, 0..1 (Ableton's Amount). 1 = full snap. Default 1. */
+  amount?: number
+  /** Snap note starts. Default true (Ableton's default quantizes starts). */
+  starts?: boolean
+  /** Also snap note ends (adjusts duration so the end lands on the grid). Default false. */
+  ends?: boolean
+  /** Restrict to these note ids (a selection). Omitted = every note on the track. */
+  noteIds?: string[]
+}
+
+/** Quantizes notes toward a grid, Ableton-style: start and/or end snap independently, and
+ * `amount` moves notes only part of the way (so tapped-in timing can be tightened without
+ * flattening the feel — quantize is an edit here, never a storage default; see format-spec
+ * v0.7). Ends never snap onto (or past) the note's own start: a note keeps a minimum length
+ * of one grid cell after end-quantize, matching Ableton's behavior. */
+export function quantizeNotes(doc: BeatDocument, trackId: string, opts: QuantizeOptions = {}): { doc: BeatDocument; changed: number } {
+  const track = findTrack(doc, trackId)
+  if (track.kind === 'drums') throw new BeatEditError(`track "${trackId}" is a drums track — its pattern is already grid-quantized (off-grid drums are a future format rev)`)
+  const grid = opts.grid ?? 1
+  const amount = opts.amount ?? 1
+  const starts = opts.starts ?? true
+  const ends = opts.ends ?? false
+  if (!Number.isFinite(grid) || grid <= 0) throw new BeatEditError(`grid must be > 0 steps, got ${grid}`)
+  if (!Number.isFinite(amount) || amount < 0 || amount > 1) throw new BeatEditError(`amount must be 0..1, got ${amount}`)
+  if (!starts && !ends) throw new BeatEditError('nothing to quantize: enable starts and/or ends')
+  if (opts.noteIds) {
+    const have = new Set(track.notes.map((n) => n.id))
+    const missing = opts.noteIds.filter((id) => !have.has(id))
+    if (missing.length) throw new BeatEditError(`no note(s) ${missing.map((m) => `"${m}"`).join(', ')} on track "${trackId}"`)
+  }
+  const wanted = opts.noteIds ? new Set(opts.noteIds) : null
+  const toward = (value: number, target: number) => canon(value + amount * (target - value))
+
+  let changed = 0
+  const notes = track.notes.map((n) => {
+    if (wanted && !wanted.has(n.id)) return n
+    let start = n.start
+    let end = n.start + n.duration
+    if (starts) start = toward(n.start, Math.round(n.start / grid) * grid)
+    if (ends) {
+      end = toward(n.start + n.duration, Math.round((n.start + n.duration) / grid) * grid)
+    } else {
+      end = start + n.duration // start-only quantize slides the note, preserving its length
+    }
+    let duration = canon(end - start)
+    if (duration <= 0) duration = canon(grid) // end snapped onto/behind start: keep one grid cell
+    if (start === n.start && duration === n.duration) return n
+    changed++
+    return { ...n, start, duration }
+  })
+  return { doc: replaceTrack(doc, { ...track, notes }), changed }
+}
+
 /** Removes a note by id from a track. */
 export function removeNote(doc: BeatDocument, trackId: string, noteId: string): { doc: BeatDocument; note: BeatNote } {
   const track = findTrack(doc, trackId)

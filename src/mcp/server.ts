@@ -21,6 +21,7 @@ import {
   setValue,
   addNote,
   removeNote,
+  quantizeNotes,
   addTrack,
   removeTrack,
   initDocument,
@@ -215,6 +216,38 @@ const TOOLS: ToolDef[] = [
       const { doc } = removeNote(before, str(args, 'track'), str(args, 'note_id'))
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_quantize',
+    description:
+      'Quantize notes on a synth/instrument track toward the grid, Ableton-style (format v0.7 stores arbitrary fractional timing; quantize is an explicit edit, never a storage default). grid is in 16th steps (1=16ths, 2=8ths, 4=quarters, 0.5=32nds; default 1). amount 0..1 moves notes only part of the way (default 1 = full snap) — use e.g. 0.5 to tighten tapped timing while keeping feel. By default note starts snap (length preserved); set ends=true to also snap note ends, starts=false to snap ends only. note_ids restricts to a selection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        grid: { type: 'number' },
+        amount: { type: 'number' },
+        starts: { type: 'boolean' },
+        ends: { type: 'boolean' },
+        note_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = quantizeNotes(before, str(args, 'track'), {
+        ...(args.grid !== undefined ? { grid: num(args, 'grid') } : {}),
+        ...(args.amount !== undefined ? { amount: num(args, 'amount') } : {}),
+        ...(args.starts !== undefined ? { starts: Boolean(args.starts) } : {}),
+        ...(args.ends !== undefined ? { ends: Boolean(args.ends) } : {}),
+        ...(Array.isArray(args.note_ids) ? { noteIds: (args.note_ids as unknown[]).map(String) } : {}),
+      })
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'already on the grid — no notes moved\n' : diff
     },
   },
   {

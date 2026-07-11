@@ -334,6 +334,11 @@ storage limitation.
 - Drum patterns remain grid-quantized 16-step lanes in v0.7 — off-grid drums need either a
   per-lane swing parameter or note-style hit lines (deliberately deferred; the pattern grid's
   one-line-per-lane diffability is worth keeping for the common case).
+- Quantize is an *operation*, not part of the grammar (the Ableton model, owner-directed):
+  `beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes ...]`
+  (also `beat_quantize` over MCP). Starts and ends snap independently; `--amount 0.5` moves
+  notes halfway to the grid (tighten without flattening); an end that would collapse onto its
+  start keeps one grid cell of length. Idempotent at amount 1.
 
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
