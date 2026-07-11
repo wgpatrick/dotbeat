@@ -5,11 +5,20 @@
 // shared state — following the pattern that makes openDAW's UI/engine split work and its
 // headless harness nearly free (docs/opendaw-notes.md §2):
 //
-//   GET  /doc     → the current document as partial-track JSON (what the bridge applies)
-//   GET  /events  → SSE stream; a `doc` event fires when the file changes on disk,
-//                   a `parse-error` event when a hand-edit is (momentarily) invalid
-//   POST /state   → the browser's full sandbox payload; converted, canonically serialized,
-//                   written to disk ONLY if musically different from the current document
+//   GET  /doc      → the current document as partial-track JSON (BeatLab-bridge shape: the drum
+//                    grid is a 16-step projection of the free-timed hits)
+//   GET  /document → the current document as the RAW BeatDocument (dotbeat's own frontend reads
+//                    this — it needs the absolute hits/notes the /doc projection collapses)
+//   GET  /events   → SSE stream; a `doc` event fires when the file changes on disk,
+//                    a `parse-error` event when a hand-edit is (momentarily) invalid
+//   POST /state    → the browser's full sandbox payload; converted, canonically serialized,
+//                    written to disk ONLY if musically different from the current document
+//   POST /edit     → a single {path,value} edit primitive (the same vocabulary `beat set` uses,
+//                    via core's setValue); one edit → one canonical line → a one-line git diff.
+//                    dotbeat's own frontend uses this instead of the whole-document /state push:
+//                    the format stores drums as free-timed hits absolute across loop_bars, so a
+//                    16-step-pattern round-trip would tile a single step-toggle across every bar
+//                    (N lines, not one). A path-scoped edit lands on exactly the one hit.
 //
 // Canonical serialization (docs/decisions.md D4) is the entire sync mechanism: "should this
 // write?" and "is this watcher event an echo of my own write?" are both plain string
@@ -22,7 +31,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { readFileSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import type { BeatDocument, BeatSelection } from '../core/index.js'
-import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, validateSelection, type ExternalSandboxPayload } from '../core/index.js'
+import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, setValue, validateSelection, type ExternalSandboxPayload } from '../core/index.js'
 
 export interface DaemonOptions {
   filePath: string
@@ -139,6 +148,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
   }
 
+  // Shared write path for a document-producing edit: canonical-to-canonical comparison decides
+  // whether anything is written (same discipline as POST /state — identical music, identical
+  // bytes, no write, no watcher echo). Re-parses our own canonical text so in-memory === disk.
+  function writeIfChanged(nextDoc: BeatDocument): boolean {
+    const nextText = serialize(nextDoc)
+    if (nextText === canonicalText) return false
+    writeFileSync(filePath, nextText)
+    lastFileText = nextText
+    canonicalText = nextText
+    doc = parse(nextText)
+    return true
+  }
+
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
 
@@ -150,6 +172,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
 
     if (req.method === 'GET' && url.pathname === '/doc') {
       json(res, 200, beatDocumentToPartialTracks(doc))
+      return
+    }
+
+    // dotbeat's own frontend reads the RAW document (absolute hits/notes, full synth), not the
+    // 16-step-collapsed /doc projection — it renders the free-timed event model directly.
+    if (req.method === 'GET' && url.pathname === '/document') {
+      json(res, 200, doc)
       return
     }
 
@@ -255,6 +284,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             doc = parse(nextText)
           }
           json(res, 200, { written, report })
+        })
+        .catch((err) => {
+          json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // dotbeat's own frontend edit channel: one {path,value} primitive per call (bpm, loop_bars,
+    // selected_track, <track>.<param>, <track>.pattern.<lane>[<step>] — exactly `beat set`'s
+    // grammar, via core's setValue). Finer-grained than /state on purpose (see header): a step
+    // toggle or knob turn round-trips as a single canonical line.
+    if (req.method === 'POST' && url.pathname === '/edit') {
+      readBody(req)
+        .then((body) => {
+          const { path, value } = JSON.parse(body) as { path?: unknown; value?: unknown }
+          if (typeof path !== 'string' || typeof value !== 'string') {
+            json(res, 400, { error: 'body must be {path: string, value: string}' })
+            return
+          }
+          const written = writeIfChanged(setValue(doc, path, value))
+          revalidateSelection()
+          json(res, 200, { written })
         })
         .catch((err) => {
           json(res, 400, { error: err instanceof Error ? err.message : String(err) })
