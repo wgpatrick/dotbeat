@@ -7,8 +7,8 @@
 //   beat rm-note <file> <track> <note-id>
 //   beat diff <a.beat> <b.beat>                      semantic diff: reads like an edit list
 //   beat diff --git <rev1> <rev2> <file>             same, between two git revisions
-//   beat render <file> -o out.wav --beatlab-dir <p>  render to WAV (headless Chromium)
-//   beat daemon <file> [--port 8420]                 two-way sync with a running BeatLab GUI
+//   beat render <file> -o out.wav                   render to WAV (dotbeat's own engine, headless Chromium)
+//   beat daemon <file> [--port 8420]                 two-way sync with a running dotbeat GUI
 //
 // diff exit codes follow diff(1) convention: 0 = no musical changes, 1 = changes, 2 = error.
 // Requires `npm run build` (reads compiled ../dist/src/core).
@@ -93,8 +93,8 @@ const USAGE = `usage:
                                                           read the scores log and propose the next beat-vary round
   beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
   beat lint <file.wav> [--target <LUFS>] [--json]         deterministic mix findings (default target -14)
-  beat render <file> [-o out.wav] --beatlab-dir <path>    (or BEATLAB_DIR env)
-  beat render --offline <file> [-o out.wav]               real engine, no browser (see phase-4 notes)
+  beat render <file> [-o out.wav] [--tail <sec>]          render to WAV through dotbeat's own engine
+                                                          (headless Chromium driving ui/; no BeatLab needed)
   beat daemon <file> [--port 8420]
   beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)
   beat history <file> [--limit N] [--collapsed]           list checkpoints, newest first (--collapsed folds
@@ -438,11 +438,15 @@ async function varyCmd(argv) {
   if (argv.includes('--render')) {
     const { execFileSync } = await import('node:child_process')
     const { fileURLToPath } = await import('node:url')
-    const offlineCli = fileURLToPath(new URL('./render-offline.mjs', import.meta.url))
+    // D15: the one render path is dotbeat's own engine driven headless (cli/render.mjs). It's a
+    // real-time capture per variant, so a batch of N takes ~N * loop-length plus browser startup —
+    // slower than the retired faster-than-realtime offline path. Correct output, honest cost; a
+    // dedicated fast batch renderer for dotbeat's own engine is future work (see D15 / phase-17 doc).
+    const renderCli = fileURLToPath(new URL('./render.mjs', import.meta.url))
     for (let i = 0; i < variants.length; i++) {
       const beatFile = resolve(outDir, `v${i + 1}.beat`)
       process.stdout.write(`rendering v${i + 1}/${variants.length}...\n`)
-      execFileSync(process.execPath, [offlineCli, beatFile, '-o', resolve(outDir, `v${i + 1}.wav`)], { stdio: ['ignore', 'ignore', 'inherit'] })
+      execFileSync(process.execPath, [renderCli, beatFile, '-o', resolve(outDir, `v${i + 1}.wav`)], { stdio: ['ignore', 'ignore', 'inherit'] })
     }
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
   }
@@ -545,10 +549,12 @@ async function varyFeelCmd(argv, file, track) {
     if (existsSync(parentMedia) && !existsSync(batchMedia)) {
       try { symlinkSync(parentMedia, batchMedia, 'dir') } catch { /* best-effort; render will report a missing sample */ }
     }
-    const offlineCli = fileURLToPath(new URL('./render-offline.mjs', import.meta.url))
+    // D15: render through dotbeat's own engine (cli/render.mjs) — real-time per variant (see the
+    // matching note in varyCmd above; a fast batch renderer for the canonical engine is future work).
+    const renderCli = fileURLToPath(new URL('./render.mjs', import.meta.url))
     for (let i = 0; i < variants.length; i++) {
       process.stdout.write(`rendering v${i + 1}/${variants.length}...\n`)
-      execFileSync(process.execPath, [offlineCli, resolve(outDir, `v${i + 1}.beat`), '-o', resolve(outDir, `v${i + 1}.wav`)], { stdio: ['ignore', 'ignore', 'inherit'] })
+      execFileSync(process.execPath, [renderCli, resolve(outDir, `v${i + 1}.beat`), '-o', resolve(outDir, `v${i + 1}.wav`)], { stdio: ['ignore', 'ignore', 'inherit'] })
     }
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
   }
@@ -990,18 +996,12 @@ async function main() {
       mcpInitCmd(rest)
       break
     case 'render': {
-      if (rest.includes('--offline')) {
-        // offline path runs in a separate process: its web-audio polyfill patches globalThis,
-        // which must not leak into the rest of the CLI
-        const { execFileSync } = await import('node:child_process')
-        const { fileURLToPath } = await import('node:url')
-        const offlineCli = fileURLToPath(new URL('./render-offline.mjs', import.meta.url))
-        execFileSync(process.execPath, [offlineCli, ...rest.filter((a) => a !== '--offline')], { stdio: 'inherit' })
-        process.exit(0)
-      }
+      // One render path now (D15): dotbeat's own engine (ui/src/audio/engine.ts) driven headless.
+      // The retired `--offline` flag (BeatLab-dependent, broken in this environment) is accepted
+      // and ignored so old invocations don't hard-error — the real engine is dotbeat's own either way.
       const { renderCommand } = await import('./render.mjs')
-      await renderCommand(rest)
-      process.exit(0) // render leaves event-loop stragglers (esbuild, pipes) — see render.mjs footer
+      await renderCommand(rest.filter((a) => a !== '--offline'))
+      process.exit(0) // render leaves event-loop stragglers (chromium pipes, vite) — see render.mjs footer
     }
     case 'daemon': {
       const { daemonCommand } = await import('./daemon.mjs')

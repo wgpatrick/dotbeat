@@ -30,13 +30,11 @@ node cli/beat.mjs score vary-kick-42 3 7 1                        # ...ranked pi
 node cli/beat.mjs sample song.beat kick-x media/kick.wav          # register real audio (sha256-pinned)
 node cli/beat.mjs lane song.beat drums kick kick-x -2 0           # that lane now plays the sample
 node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical edit list, not line noise
-node cli/beat.mjs render examples/real-groove.beat -o out.wav --beatlab-dir /path/to/beatlab
-node cli/beat.mjs render --offline examples/real-groove.beat -o out.wav   # the REAL engine, no browser
-bash scripts/build-patched-webaudio.sh   # one-time: builds the audio engine against upstream's fixed main
+node cli/beat.mjs render examples/real-groove.beat -o out.wav     # dotbeat's own engine, headless — no BeatLab checkout
 node cli/beat.mjs metrics out.wav                                 # LUFS (BS.1770), true peak, crest, spectrum, stereo
 node cli/beat.mjs lint out.wav                                    # deterministic mix findings + .beat edits to try
 node cli/beat.mjs mcp                                             # all of the above as MCP tools for an AI agent
-node cli/beat.mjs daemon examples/real-groove.beat                # two-way sync: open beatlab with ?daw=8420
+node cli/beat.mjs daemon examples/real-groove.beat                # two-way sync: open the dotbeat GUI with ?daw=8420
 ```
 
 ## The idea in one picture
@@ -68,9 +66,9 @@ now fully-verified version.
 | `src/metrics/` | The guardrail layer (D2): integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, stereo field — plus the deterministic mix-lint rules. Zero deps, validated against the spec's calibration cases. |
 | `src/mcp/` | `beat mcp` — zero-dep stdio MCP server exposing the whole toolchain (inspect/set/notes/diff/metrics/lint/render) to AI agents. |
 | `test/` | 123 tests — format round-trips (v0.2 and v0.3 elision/enums/trackrefs), conversion fidelity against a real exported project, presets, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
-| `cli/beat.mjs` | The unified `beat` CLI: `init`, `add-track`/`rm-track`, `inspect`, `set`, `add-note`/`rm-note`, `diff` (files or git revs), `presets`/`preset`, `vary`/`score` (the variation-and-taste loop), `metrics`, `lint`, `render` (Chromium or `--offline`), `daemon`, `mcp` — enough to compose from a blank file. |
+| `cli/beat.mjs` | The unified `beat` CLI: `init`, `add-track`/`rm-track`, `inspect`, `set`, `add-note`/`rm-note`, `diff` (files or git revs), `presets`/`preset`, `vary`/`score` (the variation-and-taste loop), `metrics`, `lint`, `render` (dotbeat's own engine, headless Chromium), `daemon`, `mcp` — enough to compose from a blank file. |
 | `presets/factory.json` | The factory sound library — curated voicings (seeded from a real approved mix), applied as ordinary edits, never referenced by the format itself. |
-| `scripts/verify-m1.mjs`, `verify-m3.mjs`, `verify-phase5.mjs`, `spike-offline-render.mjs` | The measured proofs: M1 sync latencies, M3's closed loop (render→measure→edit→re-render, target hit to 0.01 LU), Phase 5's sound-reproduction exit test, M2's 22×-realtime offline-render spike. |
+| `ui/verify*.mjs` | The measured proofs, run against dotbeat's own frontend + engine: end-to-end GUI editing (`verify.mjs`), engine parity / sidechain / drum-voice measurement off real captured audio (`verify-engine-parity.mjs`). (The earlier BeatLab-dependent `scripts/verify-m*/phase*.mjs` proofs were retired with the BeatLab render paths in Phase 17 / D15.) |
 | `examples/real-groove.beat`, `examples/night-shift.beat` | Real projects as `.beat` text — the groove the proof runs use, and the 4-track Night Shift mix whose entire sound design lives in the file. |
 | [`docs/research/`](docs/research/) | Eight deep-research reports, **all fully adversarially verified** — every research gap the roadmap ever flagged is now resolved (engine architecture, live-coding landscape, demand signal). |
 | [`docs/opendaw-notes.md`](docs/opendaw-notes.md) | Source-code archaeology — openDAW/DAWproject/automix-toolkit/node-web-audio-api read directly, not summarized secondhand. |
@@ -137,9 +135,9 @@ engine (integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, s
 measured a real render round trip to **0.01 LU of its target**, `beat lint` turns those numbers
 into deterministic findings that name the `.beat` edit to try, and `beat mcp` exposes the whole
 toolchain to AI agents — with every number coming from DSP, never a model (decision D2, built
-exactly as the verified research demanded). And the real engine now renders
-**offline with no browser at all** (`beat render --offline`): beatlab's unmodified engine+store
-bundled headlessly, the full closed loop self-consistent to 0.00 LU in 23 s of wall clock — with
-the honest measurements attached (full-graph DSP is 0.73× realtime, not the 22× a simple-graph
-spike suggested, and two real Chromium-vs-Rust Web Audio divergences were found, mitigated, and
-documented). See [`docs/phase-4-plan.md`](docs/phase-4-plan.md)'s "Result".
+exactly as the verified research demanded). Rendering goes through **dotbeat's own audio engine**
+(`ui/src/audio/engine.ts`, the same one the live GUI plays): `beat render` boots the daemon on the
+file, serves `ui/` headlessly in Chromium, and captures the live master output to WAV — no BeatLab
+checkout anywhere on the machine (decision D15; the two earlier BeatLab-dependent render paths were
+consolidated onto this one engine in Phase 17). See
+[`docs/phase-17-engine-consolidation.md`](docs/phase-17-engine-consolidation.md).

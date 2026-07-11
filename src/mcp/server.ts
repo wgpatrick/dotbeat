@@ -7,8 +7,8 @@
 // tools/list, tools/call) is tiny, and the project's zero-runtime-deps stance has paid for
 // itself twice already (daemon, metrics).
 //
-// Render note: beat_render shells out to cli/render.mjs (it needs a beatlab checkout and
-// Chromium, passed via env or arguments) — everything else runs in-process on core/metrics.
+// Render note: beat_render shells out to cli/render.mjs (it needs Chromium to drive dotbeat's own
+// engine headless — no BeatLab checkout) — everything else runs in-process on core/metrics.
 
 import { createInterface } from 'node:readline'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
@@ -593,23 +593,21 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_render',
     description:
-      'Render a .beat file to a WAV with the real BeatLab engine. offline=true (recommended for iteration) runs it in-process on node-web-audio-api — no browser, ~10s, self-consistent for relative loudness targets but with a known constant level offset vs the browser (see beatlab-daw/docs/phase-4-plan.md). offline=false drives headless Chromium — the fidelity reference, slower (~20s), use for final absolute-loudness checks. Needs a beatlab checkout: pass beatlab_dir or set BEATLAB_DIR in the environment.',
+      "Render a .beat file to a WAV through dotbeat's own audio engine (ui/src/audio/engine.ts, the same engine the live GUI plays) driven in headless Chromium — no BeatLab checkout required. Real-time capture: takes about as long as the audio is long, plus a few seconds of browser/daemon startup. Pass tail_seconds to capture a reverb/delay tail past the loop end.",
     inputSchema: {
       type: 'object',
       properties: {
         file: { type: 'string' },
         out: { type: 'string', description: 'output .wav path' },
-        offline: { type: 'boolean', description: 'true = fast browserless render (default); false = headless-Chromium reference' },
-        beatlab_dir: { type: 'string', description: 'path to a beatlab checkout (falls back to BEATLAB_DIR env)' },
+        tail_seconds: { type: 'number', description: 'extra seconds captured past the loop/song end (for reverb/delay tails)' },
       },
       required: ['file', 'out'],
     },
     handler: (args) =>
       new Promise<string>((resolve, reject) => {
-        const offline = args.offline !== false
-        const cliArgs = [join(repoRoot, 'cli', offline ? 'render-offline.mjs' : 'render.mjs'), str(args, 'file'), '-o', str(args, 'out')]
-        if (typeof args.beatlab_dir === 'string') cliArgs.push('--beatlab-dir', args.beatlab_dir)
-        execFile(process.execPath, cliArgs, { timeout: 180000 }, (err, stdout, stderr) => {
+        const cliArgs = [join(repoRoot, 'cli', 'render.mjs'), str(args, 'file'), '-o', str(args, 'out')]
+        if (typeof args.tail_seconds === 'number') cliArgs.push('--tail', String(args.tail_seconds))
+        execFile(process.execPath, cliArgs, { timeout: 600000 }, (err, stdout, stderr) => {
           if (err) reject(new Error(`render failed: ${stderr || stdout || err.message}`))
           else resolve(stdout)
         })
