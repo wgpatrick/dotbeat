@@ -1,0 +1,10 @@
+{
+  "source": "FluidR3 GM (Frank Wen, 2000-2013) — Debian package fluid-soundfont-gm 3.1-5.3 (http://ftp.debian.org/debian/pool/main/f/fluid-soundfont/), itself downloaded from http://www.musescore.org/download/fluid-soundfont.tar.gz per the package copyright file; upstream author Frank Wen <getfrank@gmail.com>; trimmed to a small preset subset here — full-quality full-bank .sf2 available upstream",
+  "license": "MIT",
+  "retrievedAt": "2026-07-11",
+  "sha256": "a5918622ca321caebd5b4df0c05f14b74b30e67980b9e66c0dd3ebbda32b6791",
+  "bytes": 26165810,
+  "credit": "Frank Wen (FluidR3 GM), packaged for Debian by Toby Smithe",
+  "verifiedAudit": "docs/research/09-sample-source-licenses.md, bundle-today shortlist item 4 — MIT, self-attested chain accepted by Debian/Fedora/MuseScore legal review",
+  "notes": "Trimmed from the full 148MB FluidR3_GM.sf2 to 8 presets (program 0 \"Yamaha Grand Piano\", program 24 \"Nylon String Guitar\", program 32 \"Acoustic Bass\", program 40 \"Violin\", program 56 \"Trumpet\", program 73 \"Flute\", program 118 \"Synth Drum\", program 0 [drum] \"Standard\") via spessasynth_core BasicSoundBank.trim()/writeSF2() — full key/velocity range preserved per kept preset, only unused presets/instruments/samples dropped. Full-quality full-bank .sf2 available upstream (see \"source\")."
+}

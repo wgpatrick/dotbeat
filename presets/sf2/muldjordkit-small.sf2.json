@@ -1,0 +1,10 @@
+{
+  "source": "FreePats MuldjordKit, SF2 release (https://freepats.zenvoid.org/Percussion/acoustic-drum-kit.html#MuldjordKit), downloaded from https://github.com/freepats/muldjordkit/releases/download/2020-10-18/MuldjordKit-SF2-20201018.7z; original kit by Lars Muldjord for DrumGizmo (www.muldjord.com, www.drumgizmo.org), assembled into this SF2/FreePats form by roberto@zenvoid.org for the FreePats project",
+  "license": "CC-BY-4.0",
+  "retrievedAt": "2026-07-11",
+  "sha256": "18005edfd7022e12e96b4c65215cabb20002e8f9ef3b261dbd6a48d422b237aa",
+  "bytes": 43158876,
+  "credit": "Lars Muldjord (original MuldjordKit for DrumGizmo, 2010/2018, www.muldjord.com) — assembled for FreePats by roberto@zenvoid.org (https://freepats.zenvoid.org/Percussion/acoustic-drum-kit.html#MuldjordKit); upstream DrumGizmo project asks that reuses also credit \"Drum samples provided by DrumGizmo.org\"",
+  "verifiedAudit": "docs/research/09-sample-source-licenses.md, bundle-today shortlist item 2 — CC-BY 4.0, fully documented chain",
+  "notes": "Trimmed from the full ~209MB MuldjordKit 20201018.sf2 (1 preset, 480 samples across 13 kit pieces, multi-mic, multiple velocity layers + round-robin) to 76 samples (2 velocity layers per key: 64, 110) via spessasynth_core BasicSoundBank.trim()/writeSF2(). Bundled as a single playable SF2 preset (loads via the same instrument-track + SoundBankLoader path as fluidr3-gm-small.sf2/upright-piano-kw-small.sf2) — NOT yet broken out into per-lane one-shots (presets/kit-init/kit-audiophob convention); that mapping (13 kit pieces -> 5 dotbeat drum lanes) is a follow-up curation pass, not a fetch step. Full-quality full-kit .sf2 and the original 16-channel DrumGizmo/.h2drumkit release available upstream (see \"source\")."
+}
