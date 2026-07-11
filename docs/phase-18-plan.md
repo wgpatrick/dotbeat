@@ -171,3 +171,37 @@ disjoint from Q and from each other (`src/core`+`ui/src/audio/engine.ts`+`SynthP
 vs. `presets/`+CLI/MCP preset commands) — real parallel-safe work, dispatch together. `npm test`
 must stay green (290+/287+/0/3) throughout for R and S; Q is UI-only and won't be covered by the
 root suite, verify it via `ui/`'s own typecheck + the live headless-Chromium evidence bar instead.
+
+## Result (2026-07-11)
+
+All three streams shipped and are merged into `main` (Q and R via clean 3-way merges, S likewise)
+— zero conflicts across the whole round despite real file overlap risk on paper. Final suite:
+**295 tests, 292 passing, 0 failing, 3 skipped** (the 3 are the pre-existing environment-only
+`node-web-audio-api` limitation). `ui/` typechecks clean.
+
+- **Stream Q**: dotbeat's GUI is now the real Ableton one-window shape — arrangement is the
+  permanent main view with inline per-track channel strips (verified with real audio: muting via
+  the new header strip measured true -120dB silence, not a cosmetic toggle), a bottom pane that
+  follows the current selection and toggles Clip View / Device View via Shift+Tab, `MixerView`
+  kept as an on-demand full-strips overlay (per research 18's specific finding, not deleted), and
+  `HistoryPanel` as a slide-out drawer. The four-tab switcher is gone.
+- **Stream R**: LFO destinations widened 5→16 and real tempo-sync added (measured: a synced LFO's
+  actual frequency scaled ~2.5× for a 2× BPM change, confirmed off recorded audio, not assumed).
+  **Found and fixed a real pre-existing bug along the way**: the engine already had working code
+  for `lfo2Dest: pan`/sends/EQ/distortion, but the document schema never allowed those values, so
+  no `.beat` file could legally reach that code — dead branches nobody could have hit. Also caught
+  and fixed a real bug in its *own* verification methodology (engine state persisting across
+  `setDoc()` calls skewed a before/after comparison) before trusting the result.
+- **Stream S**: the preset library is now taxonomy-aware — every one of 36 presets has an explicit
+  `category`, `beat presets --category bass` (etc.) works end to end, verified against real
+  command output and the live MCP tool description.
+- **Research 19** (dispatched mid-round on live owner feedback): a concrete, well-precedented plan
+  to replace the 5-lane drum model — a 12-lane GM-aligned default kit, synthesized voices for the
+  808/909 electronic canon paired with SoundFont-backed voices for realistic/long-tail percussion
+  (mirroring the TR-909's own hybrid hardware architecture), and a format change from a closed enum
+  to an open per-track declared lane list. Not yet built — this is the plan the next round executes.
+- **Deliberately still deferred** (unchanged from the original scope): automation-lane UI (the
+  inline "<Track>/<Parameter>" picker + draggable curve), the browser sidebar (now well-scoped by
+  Stream S's taxonomy, just needs a dock in Q's new layout), and macros (research 18's
+  tooling-not-grammar recommendation is ready to execute). All three, plus the drum-voice expansion
+  from research 19, are the natural shape of the next round.
