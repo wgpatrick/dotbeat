@@ -95,3 +95,45 @@ Same as Phase 9: worktree per stream, `npm test` green before calling it done (m
 history.test.js flake is already fixed, so no more excuses there), sequential merge to `main`
 with a full suite run after each. Streams A/B/C touch entirely disjoint files from each other —
 expect zero merge conflicts this round. Stream D touches nothing in this repo but its own new doc.
+
+## Result (2026-07-11)
+
+All four streams shipped and are merged into `main`. Final suite: **286 tests, 280 passing, 0
+failing, 6 skipped** (up from Phase 9's 280/274/0/6 — 6 net new real tests, no regressions).
+Every merge was a clean fast-forward or auto-merge; zero conflicts, exactly as predicted (A/B/C
+own disjoint files, D touches only its own new doc).
+
+- **Stream A**: Tauri D1 folder re-pointing and persisted `tauri-plugin-fs` scope both built and
+  live-verified (built binary, real sidecar restart observed via `ps`/`curl`, a full process
+  restart correctly reopened the last-picked folder from persisted state alone). Found and fixed
+  a real bug along the way: the tracked `npx vite` child only killed the `npx` wrapper on
+  restart, orphaning the real vite process on the old port — fixed by invoking vite's entry
+  script directly. Sidecar packaging, beatlab bundling, and code signing remain explicitly
+  out of scope, as planned. Detail in a new dated section of `docs/phase-9-tauri-spike-plan.md`.
+- **Stream B**: FluidR3 GM (MIT) and FreePats MuldjordKit (CC-BY 4.0) both fetched, license-
+  verified against research 09's audit, and trimmed into `presets/sf2/`. MuldjordKit's GitHub
+  release fetch — deferred in Phase 7 as blocked — confirmed genuinely unblocked, exactly as
+  Stream F predicted last night. `beat inspect` now lists real, named GM program content for the
+  first time (previously only exercised against the single bundled piano `.sf2`). Also flagged
+  (not fixed, out of scope): `formatInstrumentPresets` marks `[selected]` by program number alone,
+  not full `(bankMSB, bankLSB, program)`, so bank-0 presets sharing program 0 both show selected.
+- **Stream C**: `beat mcp-init <file>` ships a working zero-setup path to a real MCP round-trip —
+  verified end to end over actual JSON-RPC stdio (`initialize` → `tools/list` → `tools/call
+  beat_inspect`), response byte-identical to the CLI's own `beat inspect` output. New
+  `docs/agent-setup.md`.
+- **Stream D**: the most consequential finding of the night. Verified beatlab's clip-automation
+  engine wiring by sampling a live `AudioParam` during real playback (not just reading source),
+  and found it was wrong in two independent ways: (1) a unit mismatch — `.beat`'s automation
+  `time` is fractional 16th-steps from clip start, beatlab's own `AutomationPoint.time` is a
+  0..1 loop fraction, and `src/core/convert.ts` passed the raw value through unconverted; (2) song
+  mode never applied a clip's automation at all, always reading the live track's automation
+  instead of the currently-playing section's. Both fixed and re-verified (matching curves,
+  clean `tsc`/smoke suite) **in the scratch beatlab checkout only** — deliberately not committed
+  or pushed there, since that's a separate repo on a separate remote (`wgpatrick/beatlab`) and
+  landing a fix there is the owner's call, not this session's. Full diff and findings:
+  `docs/phase-10-clip-automation-verification.md`.
+- **Honestly still open**: the beatlab clip-automation fix needs the owner's review before it
+  lands on the beatlab repo; Tauri sidecar packaging/signing/beatlab-bundling; MuldjordKit hasn't
+  been broken into per-lane one-shots (13 kit pieces → 5 dotbeat lanes is a curatorial call);
+  the native-window-screenshot verification gap from Phase 9 reproduced identically tonight,
+  same environmental cause (multi-display/session mismatch, not an app defect).
