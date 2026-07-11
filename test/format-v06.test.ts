@@ -1,7 +1,9 @@
 // v0.6 grammar tests — instrument tracks (docs/phase-8-plan.md). Under test: the soundfont
 // voice line (media-referenced SF2 + program), volume/pan elision at defaults, notes-on-
-// instruments, the deliberate exclusions (no synth block, no clips), and the beatlab-partials
-// exclusion (beatlab has no instrument kind yet — they render via the spessasynth path).
+// instruments, the deliberate exclusion of the synth block, and the beatlab-partials exclusion
+// (beatlab has no instrument kind yet — they render via the spessasynth path). Instrument clips
+// (allowed since a later slice, docs/phase-8-plan.md's "Remaining" list) are covered in
+// test/format-v08.test.ts alongside the other v0.8 instrument-clip/timeline tests.
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -74,8 +76,6 @@ test('instrument validation fails loudly', () => {
   assert.throws(() => parse(INSTRUMENT_EXAMPLE.replace('  volume -6', '  soundfont piano 1')), /duplicate soundfont/)
   // synth block forbidden
   assert.throws(() => parse(INSTRUMENT_EXAMPLE.replace('  soundfont piano 0', '  synth')), /instrument tracks have no synth block/)
-  // clips forbidden (v0.6)
-  assert.throws(() => parse(INSTRUMENT_EXAMPLE.replace('  note u1 60 0 8 0.7', '  clip x\n    note c1 60 0 1 0.5')), /do not carry clips in v0\.6/)
   // soundfont line on a synth track forbidden
   const synthTrack = INSTRUMENT_EXAMPLE.replace('#98c379 instrument', '#98c379 synth')
   assert.throws(() => parse(synthTrack), /soundfont lines only belong in instrument tracks/)

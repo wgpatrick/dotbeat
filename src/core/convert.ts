@@ -285,6 +285,10 @@ export interface PartialInstrument {
   volume: number
   pan: number
   notes: BeatNote[]
+  /** v0.8+: instrument clips (notes-only, like synth clips — see BeatClip). Present iff the
+   * track has any; a future browser leg's clip UI would read this the same way beatlab's own
+   * Clip.notes works for synth tracks. */
+  clips?: { id: string; name: string; notes: BeatNote[] }[]
 }
 
 export function beatDocumentToPartialTracks(doc: BeatDocument): {
@@ -338,6 +342,7 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
         volume: t.instrument!.volume,
         pan: t.instrument!.pan,
         notes: t.notes.map((n) => ({ ...n })),
+        ...(t.clips.length > 0 ? { clips: t.clips.map((c) => ({ id: c.id, name: c.id, notes: c.notes.map((n) => ({ ...n })) })) } : {}),
       })),
   }
 }

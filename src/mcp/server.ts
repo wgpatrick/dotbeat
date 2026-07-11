@@ -13,7 +13,8 @@
 import { createInterface } from 'node:readline'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { dirname, join, resolve as pathResolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   parse,
@@ -39,6 +40,7 @@ import {
   formatPresetList,
   parseSelection,
   serializeSelection,
+  type BeatDocument,
 } from '../core/index.js'
 import { decodeWav, analyze, lint, formatLint } from '../metrics/index.js'
 import { checkpoint, history, restore } from '../history/index.js'
@@ -72,6 +74,70 @@ const num = (args: Record<string, unknown>, key: string): number => {
   return v
 }
 
+type InstrumentPresetResult = { presets: { program: number; bankMSB: number; bankLSB: number; name: string }[] } | { error: string }
+
+/** v0.8+ multi-preset listing (docs/phase-8-plan.md's "Remaining"): mirrors the CLI's
+ * `beat inspect` feature (cli/beat.mjs's instrumentPresetInfo) for MCP parity — reads the actual
+ * .sf2 bytes (sha256-verified against the media block) and enumerates every preset in the bank
+ * via spessasynth_core's SoundBankLoader (a pure binary parse; no audio context needed). Best-
+ * effort per track: a missing/unregistered/mismatched sample is reported rather than failing the
+ * whole inspect. */
+async function instrumentPresetInfo(file: string, doc: BeatDocument): Promise<Map<string, InstrumentPresetResult>> {
+  const info = new Map<string, InstrumentPresetResult>()
+  const instrumentTracks = doc.tracks.filter((t) => t.kind === 'instrument' && t.instrument)
+  if (instrumentTracks.length === 0) return info
+  const beatDir = dirname(pathResolve(file))
+  let SoundBankLoader: { fromArrayBuffer: (b: ArrayBuffer) => { presets: { program: number; bankMSB: number; bankLSB: number; name: string }[] } } | undefined
+  for (const t of instrumentTracks) {
+    const sample = doc.media.find((m) => m.id === t.instrument!.sample)
+    if (!sample) {
+      info.set(t.id, { error: `sample "${t.instrument!.sample}" is not in the media block` })
+      continue
+    }
+    const filePath = pathResolve(beatDir, sample.path)
+    if (!existsSync(filePath)) {
+      info.set(t.id, { error: `file not found: ${sample.path} (relative to ${beatDir})` })
+      continue
+    }
+    try {
+      const bytes = readFileSync(filePath)
+      const hash = createHash('sha256').update(bytes).digest('hex')
+      if (hash !== sample.sha256) {
+        info.set(t.id, { error: `sha256 mismatch for ${sample.path} (file ${hash.slice(0, 12)}..., document expects ${sample.sha256.slice(0, 12)}...)` })
+        continue
+      }
+      SoundBankLoader ??= (await import('spessasynth_core')).SoundBankLoader
+      const bank = SoundBankLoader.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+      const presets = bank.presets
+        .map((p) => ({ program: p.program, bankMSB: p.bankMSB, bankLSB: p.bankLSB, name: p.name }))
+        .sort((a, b) => a.bankMSB - b.bankMSB || a.bankLSB - b.bankLSB || a.program - b.program)
+      info.set(t.id, { presets })
+    } catch (e) {
+      info.set(t.id, { error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  return info
+}
+
+function formatInstrumentPresets(doc: BeatDocument, info: Map<string, InstrumentPresetResult>): string {
+  if (info.size === 0) return ''
+  const lines: string[] = ['', 'soundfont presets:']
+  for (const t of doc.tracks) {
+    const result = info.get(t.id)
+    if (!result) continue
+    if ('error' in result) {
+      lines.push(`  ${t.id}: ${result.error}`)
+      continue
+    }
+    lines.push(`  ${t.id}: ${result.presets.length} preset${result.presets.length === 1 ? '' : 's'}`)
+    for (const p of result.presets) {
+      const selected = p.program === t.instrument!.program ? ' [selected]' : ''
+      lines.push(`    program ${p.program} (bank ${p.bankMSB}/${p.bankLSB}): "${p.name}"${selected}`)
+    }
+  }
+  return lines.join('\n') + '\n'
+}
+
 const TOOLS: ToolDef[] = [
   {
     name: 'beat_init',
@@ -98,26 +164,31 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'beat_add_track',
-    description: 'Add a new track (synth or drums) to a .beat file with the format init patch — the way an agent builds a project up from beat_init. Returns the edit list.',
+    description:
+      'Add a new track (synth, drums, or instrument) to a .beat file with the format init patch — the way an agent builds a project up from beat_init. An instrument track is a sampled SF2 voice: pass soundfont_sample (a media id already registered via beat_sample) and optionally soundfont_program (the SF2 program number, default 0) — see beat_inspect on an instrument track for the bank\'s full preset list. Returns the edit list.',
     inputSchema: {
       type: 'object',
       properties: {
         file: { type: 'string' },
         id: { type: 'string', description: 'single alphanumeric token, e.g. "bass"' },
-        kind: { type: 'string', enum: ['synth', 'drums'] },
+        kind: { type: 'string', enum: ['synth', 'drums', 'instrument'] },
         name: { type: 'string', description: 'single token; defaults to id' },
         color: { type: 'string', description: 'lowercase #rrggbb; defaults to a palette cycle' },
+        soundfont_sample: { type: 'string', description: 'instrument tracks only: a media id (register the .sf2 with beat_sample first)' },
+        soundfont_program: { type: 'number', description: 'instrument tracks only: SF2 program number 0-127, default 0' },
       },
       required: ['file', 'id', 'kind'],
     },
     handler: (args) => {
       const file = str(args, 'file')
       const before = parse(readFileSync(file, 'utf8'))
+      const kind = str(args, 'kind') as 'synth' | 'drums' | 'instrument'
       const { doc } = addTrack(before, {
         id: str(args, 'id'),
-        kind: str(args, 'kind') as 'synth' | 'drums',
+        kind,
         ...(typeof args.name === 'string' ? { name: args.name } : {}),
         ...(typeof args.color === 'string' ? { color: args.color } : {}),
+        ...(kind === 'instrument' ? { soundfont: { sample: str(args, 'soundfont_sample'), program: typeof args.soundfont_program === 'number' ? args.soundfont_program : 0 } } : {}),
       })
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
@@ -142,13 +213,18 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_inspect',
     description:
-      'Overview of a .beat project file: bpm, loop length, tracks, synth settings, note ranges, drum grids. The place to start before editing.',
+      'Overview of a .beat project file: bpm, loop length, tracks, synth settings, note ranges, drum grids. For instrument tracks, also lists every preset available in the loaded SF2 bank (not just the one selected), marking the current selection. The place to start before editing.',
     inputSchema: {
       type: 'object',
       properties: { file: { type: 'string', description: 'path to the .beat file' } },
       required: ['file'],
     },
-    handler: (args) => describeDocument(parse(readFileSync(str(args, 'file'), 'utf8'))),
+    handler: async (args) => {
+      const file = str(args, 'file')
+      const doc = parse(readFileSync(file, 'utf8'))
+      const presetInfo = await instrumentPresetInfo(file, doc)
+      return describeDocument(doc) + formatInstrumentPresets(doc, presetInfo)
+    },
   },
   {
     name: 'beat_set',

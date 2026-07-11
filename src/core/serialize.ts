@@ -29,6 +29,11 @@ function serializeTrack(t: BeatTrack): string[] {
     lines.push(`  soundfont ${inst.sample} ${formatNumber(inst.program)}`)
     if (formatNumber(inst.volume) !== '-10') lines.push(`  volume ${formatNumber(inst.volume)}`)
     if (formatNumber(inst.pan) !== '0') lines.push(`  pan ${formatNumber(inst.pan)}`)
+    // v0.8+: instrument clips carry notes only (same grammar as synth-track clips)
+    for (const clip of t.clips) {
+      lines.push(`  clip ${clip.id}`)
+      lines.push(...sortedNoteLines(clip.notes, '    '))
+    }
     lines.push(...sortedNoteLines(t.notes, '  '))
     return lines
   }
