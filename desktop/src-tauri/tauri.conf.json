@@ -4,7 +4,16 @@
   "version": "0.1.0",
   "identifier": "com.dotbeat.desktop",
   "build": {
-    "frontendDist": "../src"
+    "devUrl": "http://localhost:5300",
+    "beforeDevCommand": {
+      "script": "npm run dev",
+      "cwd": "../../ui"
+    },
+    "frontendDist": "../../ui/dist",
+    "beforeBuildCommand": {
+      "script": "node ../desktop/sidecar/build.mjs && npm run build",
+      "cwd": "../../ui"
+    }
   },
   "app": {
     "withGlobalTauri": true,
@@ -29,6 +38,7 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": ["binaries/dotbeat-daemon"]
   }
 }

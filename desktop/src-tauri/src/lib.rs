@@ -1,47 +1,60 @@
-// dotbeat desktop shell (D1) — Tauri wrap of the beatlab GUI.
+// dotbeat desktop shell — Tauri wrap of `ui/`, dotbeat's own frontend (Phase 12 Stream 1, D12).
 //
-// Startup sequence (see docs/phase-9-tauri-spike-plan.md for the full writeup):
-//   1. Spawn `node cli/daemon.mjs <project.beat | project-folder> --port <DAEMON_PORT>` — the
-//      daemon-as-sidecar (docs/research/13-tauri-shell.md finding 4). For tonight's scaffold
-//      this runs the plain Node CLI as a child process rather than a compiled per-target-triple
-//      `externalBin` binary — see the plan doc's "what's still missing" section for that gap.
-//   2. Spawn beatlab's own `vite` dev server against a real beatlab checkout (the same
-//      spawnBeatlabDevServer invocation `cli/render.mjs`/`cli/daemon.mjs` already use).
-//   3. Poll both sidecars' ports until they accept TCP connections, then navigate the main
-//      window at `http://localhost:<vite>/musiclearning/?daw=<daemon>` — the same `?daw=<port>`
-//      bridge the existing browser-based daemon workflow already uses
-//      (`src/state/dawBridge.ts` in beatlab).
-//   4. A native "Open Project Folder" flow — reachable both from the splash page's button
-//      (`pick_project_folder`, only visible before the first navigation) and from the native
-//      File > Open Project Folder… menu item (works at any time, since it's outside the
-//      webview) — opens `tauri-plugin-dialog`'s folder picker, then actually **kills and
-//      respawns both sidecars against the chosen folder and re-navigates the window** (Phase 10
-//      Stream A; this used to just report the folder back without doing anything, see
-//      docs/phase-9-tauri-spike-plan.md's "what's still missing" section for the prior state).
-//   5. The chosen folder is also granted to the `tauri-plugin-fs` scope and, via
+// Phase 13 Stream D rewrite: this used to wrap BeatLab's dev server (`?daw=<port>` bridge into a
+// spawned `npx vite` sidecar against a sibling beatlab checkout) — that's gone. See
+// docs/phase-9-tauri-spike-plan.md's Phase 13 Stream D section for the full story of the switch.
+//
+// Startup sequence now:
+//   1. The *frontend* is no longer something this Rust code spawns or navigates to at all. Tauri
+//      itself serves it:
+//        - `tauri dev`: `build.devUrl` (ui's own `vite dev`, started via `beforeDevCommand`,
+//          `ui/package.json`'s own `dev` script) — Tauri auto-loads the window at that URL.
+//        - `tauri build` / a packaged app: `build.frontendDist` points at `ui/dist`, a real
+//          `vite build` production bundle (built by `beforeBuildCommand`) that Tauri embeds and
+//          serves via its own asset protocol — no dev server, no second Node-on-PATH dependency.
+//      `ui/src/daemon/bridge.ts` already defaults to `http://localhost:8420` with no `?daw=`
+//      query param needed (see `daemonBase()`), and the daemon always binds the fixed
+//      `DAEMON_PORT` below, so the frontend finds it with zero URL-wiring from this file.
+//   2. This file's only remaining job is the **daemon** sidecar (`beat daemon`,
+//      docs/research/13-tauri-shell.md finding 4):
+//        - debug builds (`cargo run` / `tauri dev`): spawn plain `node cli/daemon.mjs ...` —
+//          fast iteration, no rebuild-the-binary step on every code change.
+//        - release builds (`cargo build --release` / `tauri build`): spawn the real compiled
+//          `dotbeat-daemon` sidecar binary via `Command.sidecar()` (`bundle.externalBin`,
+//          built by `desktop/sidecar/build.mjs` — see that file for why a plain `pkg
+//          cli/daemon.mjs` doesn't work and what the actual two-stage build is). No Node-on-PATH
+//          dependency at all in this path — verified by running with `node`/`npx` stripped from
+//          PATH, see the plan doc's verification section.
+//   3. A native "Open Project Folder" flow (splash-page button pre-navigation is gone now that
+//      there's no splash page — reachable via the native File > Open Project Folder… menu,
+//      works at any time since it's outside the webview) opens `tauri-plugin-dialog`'s folder
+//      picker, then kills and respawns the daemon against the chosen folder. Since the frontend's
+//      URL is now fixed (no more `?daw=<port>` to renavigate to), a folder switch instead forces
+//      a webview reload (`window.eval("window.location.reload()")`) so the SPA re-fetches
+//      `GET /document` fresh against the new (same-port, different-project) daemon.
+//   4. The chosen folder is also granted to the `tauri-plugin-fs` scope and, via
 //      `tauri-plugin-persisted-scope`, persisted to disk so it's re-granted automatically on the
 //      next app launch (research 13 finding 5) — plus a small `last-project.json` in the app's
 //      data dir so the *daemon* itself reopens that same folder next launch too, not just the
-//      fs permission grant.
+//      fs permission grant. (Unchanged from Phase 10 Stream A.)
 //
-// Both child processes are killed when the app exits (see the `on_window_event` handler below).
+// The daemon sidecar is killed when the app exits (see the `on_window_event` handler below).
 
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
 const DAEMON_PORT: u16 = 8420;
-const VITE_PORT: u16 = 5173;
+const DAEMON_SIDECAR_NAME: &str = "dotbeat-daemon";
 
 struct Sidecars {
     daemon: Option<CommandChild>,
-    vite: Option<CommandChild>,
 }
 
 fn repo_root() -> PathBuf {
@@ -49,20 +62,14 @@ fn repo_root() -> PathBuf {
         return PathBuf::from(p);
     }
     // Dev mode: cargo runs from desktop/src-tauri, so the dotbeat repo root is two levels up.
+    // Only used by the debug (plain `node cli/daemon.mjs`) path and by initial_project_target's
+    // bundled-example fallback — the release sidecar path below doesn't need this at all, since
+    // Command.sidecar() resolves the bundled binary itself.
     std::env::current_dir()
         .expect("cwd")
         .join("../..")
         .canonicalize()
         .expect("repo root (set DOTBEAT_REPO_ROOT if this guess is wrong)")
-}
-
-fn beatlab_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("DOTBEAT_BEATLAB_DIR") {
-        return PathBuf::from(p);
-    }
-    // Convention fallback: a sibling checkout next to the dotbeat repo. Overridable via env var
-    // (the desktop/package.json `dev` script sets this explicitly — see its comment).
-    repo_root().join("../beatlab")
 }
 
 // Where we remember the last folder opened via the picker, so it can be reopened automatically
@@ -107,7 +114,10 @@ fn write_last_project_folder(app: &tauri::AppHandle, folder: &Path) {
 // The project target (a `.beat` file or a folder — `resolveProjectFile` on the daemon side
 // accepts either) to open at app startup: an explicit env var wins (dev-mode override), then
 // whatever folder was last opened via the picker (persists across restarts, see
-// `write_last_project_folder`), then the bundled example as a last resort.
+// `write_last_project_folder`), then the bundled example as a last resort. The bundled-example
+// fallback assumes a repo checkout is reachable (see repo_root()'s doc comment) — fine for this
+// stream's actual target (launching on the owner's own dev machine), not yet a general
+// "works from a downloaded, repo-less .app" story; see the plan doc's "still missing" section.
 fn initial_project_target(app: &tauri::AppHandle) -> PathBuf {
     if let Ok(p) = std::env::var("DOTBEAT_PROJECT_FILE") {
         return PathBuf::from(p);
@@ -127,8 +137,10 @@ fn log_line(line: &str) {
     let _ = std::io::Write::flush(&mut std::io::stdout());
 }
 
-// Tries every address "localhost" resolves to (127.0.0.1 AND ::1) — vite's default dev server
-// binds IPv6 loopback only when no --host is given, which an IPv4-only check would miss forever.
+// Tries every address "localhost" resolves to (127.0.0.1 AND ::1) — a lesson carried over from
+// this file's original vite-polling code (vite bound IPv6-loopback-only by default); the daemon
+// itself binds IPv4, but resolving both defensively costs nothing and matches what a browser/curl
+// does implicitly.
 fn wait_for_port(port: u16, timeout: Duration) -> bool {
     use std::net::ToSocketAddrs;
     let start = std::time::Instant::now();
@@ -152,149 +164,114 @@ fn wait_for_port(port: u16, timeout: Duration) -> bool {
     false
 }
 
-// Kills whatever sidecars are currently tracked in state (if any). Called both on window close
-// and right before spawning replacements when the user points the app at a new project folder.
+// Kills whatever daemon sidecar is currently tracked in state (if any). Called both on window
+// close and right before spawning a replacement when the user points the app at a new project
+// folder.
 fn kill_sidecars(handle: &tauri::AppHandle) {
     let state = handle.state::<Mutex<Sidecars>>();
     let mut guard = state.lock().unwrap();
     if let Some(child) = guard.daemon.take() {
         let _ = child.kill();
     }
-    if let Some(child) = guard.vite.take() {
-        let _ = child.kill();
-    }
 }
 
-// Spawns the daemon (pointed at `project_target`, a `.beat` file or a project folder) and the
-// beatlab vite dev server, waits for both ports, then navigates the main window to the
-// daemon-bridged URL. Used both for the initial app startup and for re-pointing at a folder
-// chosen later via `pick_project_folder` / the native File menu — any sidecars already tracked
-// in state are killed first so a folder switch doesn't leave orphaned processes behind.
-fn spawn_project(handle: &tauri::AppHandle, project_target: PathBuf) {
-    let repo = repo_root();
-    let beatlab = beatlab_dir();
-    log_line(&format!("repo root: {}", repo.display()));
-    log_line(&format!("beatlab dir: {}", beatlab.display()));
+// Spawns the daemon (pointed at `project_target`, a `.beat` file or a project folder), waits for
+// its port, then reloads the webview so the already-loaded frontend re-pulls the (possibly new)
+// document. Used both for the initial app startup and for re-pointing at a folder chosen later
+// via the native File menu — any daemon already tracked in state is killed first so a folder
+// switch doesn't leave an orphaned process behind.
+//
+// debug builds spawn plain `node cli/daemon.mjs` (fast iteration); release builds spawn the
+// compiled `dotbeat-daemon` sidecar binary (`Command.sidecar()`, resolved via `bundle.externalBin`
+// — no Node-on-PATH dependency). See desktop/sidecar/build.mjs for how that binary gets built.
+fn spawn_project(handle: &tauri::AppHandle, project_target: PathBuf, reload_after: bool) {
     log_line(&format!("project target: {}", project_target.display()));
-
-    if !beatlab.join("package.json").exists() {
-        log_line(&format!(
-            "FATAL: no beatlab checkout at {} — set DOTBEAT_BEATLAB_DIR",
-            beatlab.display()
-        ));
-        return;
-    }
 
     kill_sidecars(handle);
 
-    // 1. daemon sidecar: `node cli/daemon.mjs <project.beat | project-folder> --port 8420`
-    let daemon_script = repo.join("cli/daemon.mjs");
-    let (mut daemon_rx, daemon_child) = handle
-        .shell()
-        .command("node")
-        .args([
-            daemon_script.to_string_lossy().to_string(),
-            project_target.to_string_lossy().to_string(),
-            "--port".into(),
-            DAEMON_PORT.to_string(),
-        ])
-        .current_dir(repo.clone())
-        .spawn()
-        .expect("failed to spawn beat daemon sidecar");
+    let daemon_child = if cfg!(debug_assertions) {
+        let repo = repo_root();
+        let daemon_script = repo.join("cli/daemon.mjs");
+        log_line(&format!("repo root: {}", repo.display()));
+        log_line("spawning daemon via plain `node cli/daemon.mjs` (debug build)");
+        let (mut rx, child) = handle
+            .shell()
+            .command("node")
+            .args([
+                daemon_script.to_string_lossy().to_string(),
+                project_target.to_string_lossy().to_string(),
+                "--port".into(),
+                DAEMON_PORT.to_string(),
+            ])
+            .current_dir(repo)
+            .spawn()
+            .expect("failed to spawn beat daemon (debug, plain node)");
+        tauri::async_runtime::spawn(async move {
+            use tauri_plugin_shell::process::CommandEvent;
+            while let Some(event) = rx.recv().await {
+                if let CommandEvent::Stdout(line) | CommandEvent::Stderr(line) = event {
+                    log_line(&format!("[daemon] {}", String::from_utf8_lossy(&line)));
+                }
+            }
+        });
+        child
+    } else {
+        log_line("spawning daemon via the compiled sidecar binary (release build)");
+        let (mut rx, child) = handle
+            .shell()
+            .sidecar(DAEMON_SIDECAR_NAME)
+            .expect("dotbeat-daemon sidecar not found — run desktop/sidecar/build.mjs before `tauri build`")
+            .args([
+                project_target.to_string_lossy().to_string(),
+                "--port".into(),
+                DAEMON_PORT.to_string(),
+            ])
+            .spawn()
+            .expect("failed to spawn beat daemon sidecar");
+        tauri::async_runtime::spawn(async move {
+            use tauri_plugin_shell::process::CommandEvent;
+            while let Some(event) = rx.recv().await {
+                if let CommandEvent::Stdout(line) | CommandEvent::Stderr(line) = event {
+                    log_line(&format!("[daemon] {}", String::from_utf8_lossy(&line)));
+                }
+            }
+        });
+        child
+    };
     log_line("daemon sidecar spawned");
-
-    // 2. beatlab vite dev server sidecar. Restarted too (not just the daemon) so a folder switch
-    // always leaves both sidecars in a known-fresh state — vite itself doesn't care which
-    // project is open, but respawning it is cheap and avoids ever reasoning about a stale vite
-    // process left over from a previous folder.
-    //
-    // Invoked as `node <beatlab>/node_modules/vite/bin/vite.js` rather than `npx vite` (which is
-    // what cli/devserver.mjs uses) deliberately: npx execs through an intermediate `sh -c`
-    // wrapper process (confirmed by inspecting the process tree during this stream's manual
-    // verification — see docs/phase-9-tauri-spike-plan.md's Phase 10 Stream A section), so
-    // `CommandChild::kill()` here — which, unlike Node's `child_process`, has no `detached` +
-    // negative-PID group-kill equivalent exposed by tauri-plugin-shell — only reaches the `npx`
-    // wrapper and leaves the actual vite dev server running and still bound to the port. On a
-    // folder switch that meant the *new* vite instance found its port taken and silently moved
-    // to the next one, while the window still navigated to the old, now-wrong, hardcoded port.
-    // Calling vite's own entry script directly makes the spawned child the actual vite process,
-    // so a single `kill()` reliably takes it down before the replacement binds the same port.
-    let vite_bin = beatlab.join("node_modules/vite/bin/vite.js");
-    if !vite_bin.exists() {
-        log_line(&format!(
-            "FATAL: no vite binary at {} — run `npm install` in the beatlab checkout",
-            vite_bin.display()
-        ));
-        return;
-    }
-    let (mut vite_rx, vite_child) = handle
-        .shell()
-        .command("node")
-        .args([
-            vite_bin.to_string_lossy().to_string(),
-            "--port".into(),
-            VITE_PORT.to_string(),
-        ])
-        .current_dir(beatlab.clone())
-        .spawn()
-        .expect("failed to spawn beatlab vite dev server");
-    log_line("vite sidecar spawned");
 
     {
         let state = handle.state::<Mutex<Sidecars>>();
         let mut guard = state.lock().unwrap();
         guard.daemon = Some(daemon_child);
-        guard.vite = Some(vite_child);
     }
 
-    // Drain child stdout/stderr on background tasks so the pipes never back up, and log it
-    // plainly (this is what a developer watches during `tauri dev`).
-    tauri::async_runtime::spawn(async move {
-        use tauri_plugin_shell::process::CommandEvent;
-        while let Some(event) = daemon_rx.recv().await {
-            if let CommandEvent::Stdout(line) | CommandEvent::Stderr(line) = event {
-                log_line(&format!("[daemon] {}", String::from_utf8_lossy(&line)));
-            }
-        }
-    });
-    tauri::async_runtime::spawn(async move {
-        use tauri_plugin_shell::process::CommandEvent;
-        while let Some(event) = vite_rx.recv().await {
-            if let CommandEvent::Stdout(line) | CommandEvent::Stderr(line) = event {
-                log_line(&format!("[vite] {}", String::from_utf8_lossy(&line)));
-            }
-        }
-    });
-
-    // 3. Wait for both to come up, then (re-)navigate the window at the daemon-bridged URL —
-    // this is what actually makes a folder switch visible: the window reloads against the new
-    // daemon/vite pair instead of just reporting the picked path back to the page.
+    // Wait for the daemon's port, then (if this is a folder switch, not the initial boot) reload
+    // the webview so the already-loaded frontend re-pulls GET /document against the new daemon.
     let handle2 = handle.clone();
     std::thread::spawn(move || {
         log_line("poll thread started");
         let daemon_ok = wait_for_port(DAEMON_PORT, Duration::from_secs(15));
-        let vite_ok = wait_for_port(VITE_PORT, Duration::from_secs(30));
-        log_line(&format!("daemon up: {daemon_ok}, vite up: {vite_ok}"));
-        if !daemon_ok || !vite_ok {
-            log_line("FATAL: sidecar(s) never came up in time");
+        log_line(&format!("daemon up: {daemon_ok}"));
+        if !daemon_ok {
+            log_line("FATAL: daemon sidecar never came up in time");
             return;
         }
-        let url = format!("http://localhost:{VITE_PORT}/musiclearning/?daw={DAEMON_PORT}");
-        log_line(&format!("navigating main window to {url}"));
-        if let Some(window) = handle2.get_webview_window("main") {
-            let _ = window.navigate(url.parse().expect("valid url"));
-            let _ = handle2.emit("dotbeat://ready", url);
+        if reload_after {
+            if let Some(window) = handle2.get_webview_window("main") {
+                log_line("reloading webview to pick up the new project");
+                let _ = window.eval("window.location.reload()");
+            }
         }
     });
 }
 
 // Grants the chosen folder to the fs scope (persisted to disk across restarts by
 // tauri-plugin-persisted-scope, research 13 finding 5), remembers it as the project to reopen
-// next launch, and actually restarts the sidecars against it. This is the real "Open Folder"
-// flow — `pick_project_folder` and the native File menu both funnel into this.
+// next launch, and actually restarts the daemon against it. This is the real "Open Folder"
+// flow — the native File menu funnels into this.
 fn reopen_project_folder(app: &tauri::AppHandle, folder: PathBuf) {
     log_line(&format!("folder chosen: {}", folder.display()));
-    let _ = app.emit("dotbeat://reopening", folder.to_string_lossy().to_string());
 
     if let Some(fs_scope) = app.try_fs_scope() {
         match fs_scope.allow_directory(&folder, true) {
@@ -312,7 +289,7 @@ fn reopen_project_folder(app: &tauri::AppHandle, folder: PathBuf) {
     }
 
     write_last_project_folder(app, &folder);
-    spawn_project(app, folder);
+    spawn_project(app, folder, true);
 }
 
 #[tauri::command]
@@ -335,7 +312,7 @@ pub fn run() {
         // tauri-plugin-persisted-scope's own setup warning if the order is wrong.
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_persisted_scope::init())
-        .manage(Mutex::new(Sidecars { daemon: None, vite: None }))
+        .manage(Mutex::new(Sidecars { daemon: None }))
         .invoke_handler(tauri::generate_handler![pick_project_folder])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -353,9 +330,8 @@ pub fn run() {
                 log_line(&format!("fs scope on startup (restored by persisted-scope): {allowed:?}"));
             }
 
-            // Native File menu — the only way to reopen a different project folder once the
-            // window has already navigated away from the splash page (its button is gone at
-            // that point, since it's replaced by beatlab's own page).
+            // Native File menu — the only way to reopen a different project folder (there's no
+            // splash page anymore now that the frontend is ui/, loaded directly at startup).
             {
                 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
                 let open_folder = MenuItemBuilder::with_id("open_folder", "Open Project Folder…")
@@ -395,7 +371,7 @@ pub fn run() {
             }
 
             let target = initial_project_target(&handle);
-            spawn_project(&handle, target);
+            spawn_project(&handle, target, false);
 
             Ok(())
         })

@@ -332,3 +332,201 @@ remains out of scope tonight too, per `docs/phase-10-plan.md`'s explicit instruc
   it doesn't (`"dev": "tauri dev"`, no env vars). Pre-existing from the original phase 9 scaffold,
   not touched this stream (this stream's manual verification set the env vars by hand instead);
   worth a one-line fix next time someone's in this file for something else.
+
+## Phase 13 Stream D (2026-07-11): re-pointed at `ui/`, real sidecar packaging, a real launchable app
+
+*D12 (`docs/decisions.md`) forked dotbeat's frontend away from BeatLab; Phase 12 Stream 1 built
+`ui/` (React 18 + Zustand) from zero. This stream closes phase-13-plan.md's Stream D: the shell
+still pointed `frontendDist` at `"../src"` (a stale BeatLab-bridge scaffold path) and spawned a
+BeatLab `npx vite` sidecar — neither made sense anymore. Files touched: everything under
+`desktop/` per this stream's ownership (`desktop/src-tauri/*`, new `desktop/sidecar/*`,
+`desktop/package.json`); `desktop/src/` (the old vanilla-JS splash page tied to BeatLab's
+`?daw=<port>` navigation events) was deleted outright since nothing points at it anymore. No
+`ui/`, `src/`, `cli/`, `test/`, or `presets/` changes.*
+
+**Worth flagging up front**: this stream's worktree branch had diverged from `main` with zero
+shared git history (a stale base — `git merge-base` returned nothing) and was missing `desktop/`,
+`ui/`, and `docs/phase-13-plan.md` entirely. Confirmed the local `main` branch (not yet pushed to
+`origin/main`) had them and that this branch's own commits were content-identical duplicates of
+commits already on `main` under different hashes, so `git reset --hard main` was used to get onto
+the real starting point before any of the work below. Recorded here since it's an unusual amount
+of git archaeology for a "fix the pointing" stream.
+
+### 1. Fixed the pointing — but the architecture changed more than "fix a path"
+
+The old scaffold spawned a *second* sidecar (BeatLab's `npx vite` dev server) and had the Rust
+side `window.navigate()` to a hardcoded `http://localhost:5173/musiclearning/?daw=<port>` URL once
+both sidecars were up. That whole mechanism is gone:
+
+- **Dev mode** (`tauri dev`): `tauri.conf.json`'s `build.devUrl` now points at
+  `http://localhost:5300` (matches `ui/vite.config.ts`'s configured port) and
+  `beforeDevCommand` (`{"script": "npm run dev", "cwd": "../../ui"}`) runs `ui/package.json`'s own
+  `dev` script — Tauri's CLI starts it and loads the window at `devUrl` automatically. This file no
+  longer spawns or polls a frontend dev server at all.
+- **Production** (`tauri build`): `frontendDist` points at `../../ui/dist` (a real `vite build`
+  output) and `beforeBuildCommand` runs `node ../desktop/sidecar/build.mjs && npm run build` (see
+  #3 below for the sidecar half) before Tauri embeds `ui/dist`'s assets directly into the compiled
+  binary and serves them via its own built-in asset protocol at startup — no dev server, no static
+  file server sidecar to write or maintain. This is the "Tauri's asset protocol" option the plan
+  doc named as an alternative to a hand-rolled static server, and it turned out to be strictly
+  simpler: Tauri already does this natively once `frontendDist` is a real directory, nothing extra
+  to build.
+- `ui/src/daemon/bridge.ts`'s `daemonBase()` already defaults to `http://localhost:8420` with no
+  `?daw=` query param required (confirmed by reading it before assuming) — combined with the
+  daemon's port being a fixed constant, this means **no URL-wiring between the Rust side and the
+  frontend is needed at all** now. The old scaffold's whole "poll both ports, then navigate"
+  dance only existed because BeatLab needed the port threaded through a query string; `ui/` was
+  designed against a fixed default port from the start (research 15 already recommended this
+  shape), so that complexity just evaporates.
+- Folder re-pointing (`reopen_project_folder`) can no longer "navigate to a new bridged URL" since
+  there isn't one — it now calls `window.eval("window.location.reload()")` after the new daemon's
+  port comes up, forcing the already-loaded SPA to re-run its boot sequence and re-pull
+  `GET /document` fresh. Verified this actually works, not just compiles — see #4.
+
+### 2. Daemon dependency closure check (before touching anything)
+
+Confirmed `cli/daemon.mjs` → `src/daemon/daemon.ts` / `src/daemon/project.ts` → `src/core/index.ts`
+pull in only Node builtins (`node:http`, `node:fs`, `node:path`) plus dotbeat's own `core` module —
+no `tone`, no `node-web-audio-api`, no `spessasynth_lib` (those are engine/CLI-render concerns,
+not daemon concerns). A clean, native-module-free dependency closure, which matters a lot for #3.
+
+### 3. Real sidecar packaging — `desktop/sidecar/build.mjs`, and why it isn't a one-liner
+
+Research 13 finding 4 says "compile the Node daemon to a per-target-triple binary (yao-pkg/pkg),
+declare it in `bundle.externalBin`, launch via `Command.sidecar()`." That's the destination; the
+actual path there hit two real, empirically-discovered problems, both now solved and left as
+comments in the code so the next person doesn't have to rediscover them:
+
+- **`pkg -t node18-...` tries to compile Node from source and can fail.** `@yao-pkg/pkg` (the
+  maintained fork of the archived `vercel/pkg`, used here — `pkg` proper is stale) fetches
+  prebuilt Node base binaries from a remote cache keyed by exact version; there's no prebuilt for
+  `node18.20.8-macos-arm64` (`Error! 404: Not Found`), so it fell back to compiling Node from
+  source — a 20+ minute build that also failed outright (`make: *** [node] Error 2`) partway
+  through in this environment. Prebuilts exist for `node22`/`node24`, so the build targets
+  `node22-macos-arm64` (mapped from the Rust target triple in `TRIPLE_TO_PKG_TARGET`) instead —
+  the daemon has no version-specific syntax dependency, so this is a free fix, not a compromise.
+- **pkg's ESM handling can't cope with `cli/daemon.mjs` directly**, for two independent reasons:
+  (a) `pkg`'s ESM→CJS bytecode transformer explicitly refuses a module that combines a top-level
+  `await` with `export` statements — exactly `cli/daemon.mjs`'s own shape (its
+  `if (import.meta.url === (await import('node:url'))...)` self-invocation guard, which lets it
+  be both `node cli/daemon.mjs`'d directly and imported without auto-running). Passing
+  `--fallback-to-source` works around the bytecode failure, but (b) even shipped as plain source,
+  pkg's snapshot-filesystem ESM *entry* resolution couldn't find the multi-file `.mjs` graph at
+  runtime (`ERR_MODULE_NOT_FOUND` for the entry module itself, from inside pkg's own snapshot).
+  Fixed by not feeding pkg an ESM multi-file graph at all: `desktop/sidecar/daemon-entry.mjs` is a
+  new, small entry (duplicates `cli/daemon.mjs`'s ~15 lines of argv parsing rather than importing
+  it, specifically to avoid pulling in that top-level-await guard) that imports only the compiled
+  `dist/src/daemon/{daemon,project}.js` — verified free of top-level await / `import.meta` by
+  grepping the dist output before relying on it — and calls `daemonCommand`-equivalent logic with
+  a `.catch()` instead of a top-level `await`. `esbuild --bundle --format=cjs` turns that into one
+  self-contained ~66KB CJS file with zero external relative imports at runtime, and pkg compiles
+  *that* cleanly, with no warnings.
+
+`desktop/sidecar/build.mjs` runs the whole pipeline: `npm run build` (repo root, fresh `dist/`) →
+esbuild bundle → pkg compile → binary landed at
+`desktop/src-tauri/binaries/dotbeat-daemon-<target-triple>` (Tauri's `externalBin` naming
+convention; `aarch64-apple-darwin` on this machine, detected via `rustc -vV`). The binaries
+directory is gitignored (60MB+ generated artifact, fully reproducible via this script — same
+reasoning as `gen/schemas`) and rebuilt automatically by `tauri build`'s `beforeBuildCommand`.
+
+`desktop/src-tauri/src/lib.rs` branches on `cfg!(debug_assertions)`: debug builds
+(`cargo run`/`tauri dev`) still spawn plain `node cli/daemon.mjs` for fast iteration (no rebuild-
+the-binary-on-every-change tax); release builds spawn the compiled sidecar via
+`handle.shell().sidecar("dotbeat-daemon")`. `Cargo.toml`/`capabilities/default.json` needed no
+changes — `sidecar()` returns the same `Command` type `command()` does and goes through the same
+already-granted `shell:allow-execute` permission, confirmed by it actually working, not just by
+reading the plugin's permission schemas.
+
+### Verification (real runs against the actual compiled release bundle, not just `cargo build`)
+
+All of this was checked against the real output of `desktop/node_modules/.bin/tauri build`
+(`target/release/bundle/macos/dotbeat.app` + a `.dmg`), launched directly (not `tauri dev`,
+not `open` — running the `.app`'s Mach-O binary directly gives a stdout log to actually read,
+which `open` swallows):
+
+- **The sidecar binary is really in the bundle and really self-contained.**
+  `target/release/bundle/macos/dotbeat.app/Contents/MacOS/dotbeat-daemon` exists (a real Mach-O
+  arm64 executable, ~58MB). Launched the packaged app with `node`/`npx` stripped from `PATH`
+  entirely (`PATH="/usr/bin:/bin:/usr/sbin:/sbin"`, confirmed via `which node` failing first,
+  `PATH` restored afterward — never touched the user's actual shell config) and it still came up
+  clean: `[dotbeat] spawning daemon via the compiled sidecar binary (release build)` →
+  `port 8420 up after 2 attempt(s)` → `curl http://localhost:8420/document` returned the real
+  document. No Node-on-PATH dependency, genuinely verified rather than assumed from the plugin
+  docs.
+- **A real edit round-trips through the packaged app's daemon.**
+  `curl -X POST http://localhost:8420/edit -d '{"path":"bpm","value":"111"}'` against the running
+  packaged app returned `{"written":true}`, a follow-up `GET /document` showed `bpm: 111`, and
+  `git diff --stat examples/real-groove.beat` showed the one-line change landed on disk — the same
+  evidence bar prior sessions used, now against the release binary instead of a dev server.
+  (Reverted the file with `git checkout --` afterward so this verification run doesn't leave the
+  example project dirty.)
+- **The served frontend is really `ui/`'s build, not BeatLab's — checked two independent ways.**
+  (1) `strings` on the compiled `dotbeat-desktop` binary contains the *exact* hashed asset
+  filenames `ui/dist`'s own `vite build` just produced (`/assets/index-BYaGdBdA.js`,
+  `/assets/index-C8T7DJpz.css`) and zero BeatLab strings (`musiclearning`, `BeatLab — Music
+  Production Trainer` — both absent). Content-addressed hashes matching is about as strong as
+  static evidence gets short of literally unpacking Tauri's embedded-asset format. (2) Separately
+  drove the **dev-mode path** for real: started `ui`'s own `vite --port 5300` (what
+  `beforeDevCommand` would run) against a real `node cli/daemon.mjs examples/real-groove.beat
+  --port 8420`, then loaded `http://localhost:5300/` — the exact URL `devUrl` points the native
+  window at — in headless Chromium via Playwright (same substitution every prior session in this
+  doc used for the native-window gap). Result: title `dotbeat`, `window.__store` present, zero
+  console/page errors, and a screenshot showing dotbeat's real step-sequencer UI with the real
+  `real-groove.beat` pattern (kick/clap/hat steps matching the actual document) and a green
+  "● daemon" connection indicator — this is dotbeat's own product design (D12), not BeatLab's
+  curriculum UI, confirmed visually.
+- **Folder re-pointing and persisted scope still work, re-verified against the new architecture.**
+  Native `NSOpenPanel` still can't be driven in this sandboxed session (confirmed again — same
+  Accessibility-permission gap every prior session in this doc hit); used the same substitute
+  Phase 10 Stream A did, a temporary env-var-gated hook in `setup()` that calls
+  `reopen_project_folder()` directly, exercised once, then **removed before the final build and
+  commit** (the release bundle described above and the committed `lib.rs` do not contain it).
+  With it: pointed a running debug instance at a fresh empty `/tmp` folder — logs showed the
+  daemon killed and respawned (`created starter project .../project.beat`, `fs scope now allows
+  ...`, `reloading webview to pick up the new project`), `curl /document` before/after showed
+  `bpm 126` (real-groove.beat) → `bpm 120` with a single `lead` track (the starter default) — a
+  real project switch, not a relabeled old one — and `ps` showed exactly one `node cli/daemon.mjs`
+  process afterward, no orphan from the switch itself. Then **fully quit and relaunched with zero
+  env var overrides**: logs showed `fs scope on startup (restored by persisted-scope):
+  ["/tmp/dotbeat-folder-b", ...]` and `reopening last project folder from previous session:
+  /tmp/dotbeat-folder-b`, and `curl /document` confirmed `bpm 120` again — the same real
+  cross-process-restart evidence bar Phase 10 Stream A set, now re-passing against `ui/` instead
+  of BeatLab. All scratch state (`/tmp/dotbeat-folder-b`, `~/Library/Application
+  Support/com.dotbeat.desktop/`) removed after verification.
+- **The native-window screenshot gap — tried again, same result, worth noting one new data
+  point.** `osascript -e 'tell application "System Events" to get name of every process...'` this
+  time *did* list `dotbeat-desktop` among visible processes (unlike prior sessions where the
+  direct AppleScript call to the app timed out outright) — a small behavioral difference from
+  Phase 9/10's exact symptom, but `screencapture -x` still showed only the bare desktop, no app
+  window, matching the same "environment/session mismatch, not an app defect" conclusion those
+  sessions reached. Not re-litigated further; the dev-mode headless-Chromium screenshot above
+  substitutes for it, same as every prior session in this doc.
+- **A real, reproduced instance of a previously-documented gap**: killing the app process directly
+  (`kill -9`, used repeatedly during this stream's manual teardown between test runs) does leave
+  the daemon sidecar running afterward (`lsof -i :8420` still showed it bound) — exactly the
+  "force-quit orphans the sidecar" gap Phase 10 Stream A already flagged as known-and-unfixed, now
+  independently reproduced against the new sidecar-binary path rather than just the old
+  plain-`node` path. Still not fixed (out of scope for this stream too — same call as before).
+- Root `npm test`: **289 tests, 283 pass, 0 fail, 6 skipped** — unchanged baseline (this stream
+  touched nothing under `src/`, `cli/`, `test/`, `presets/`, or `ui/`).
+
+### What's honestly still missing
+
+- **Distribution to other machines**: this app runs correctly on the machine it was built on (ad-
+  hoc/linker-signed debug-adjacent local build; Gatekeeper's *downloaded-quarantine* checks don't
+  apply to a locally-built `.app`). No notarization, no Developer ID signing — research 13's
+  `externalBin`-notarization gotcha was never exercised because notarization itself wasn't
+  attempted. Matches Phase 11 plan's own scoping call ("what does shippable mean" — this stream,
+  like that plan, targets the owner's own machine, not distribution).
+- **A downloaded/repo-less `.app` won't find a bundled example project.** `initial_project_target`'s
+  last-resort fallback (`repo_root().join("examples/real-groove.beat")`) still assumes a dotbeat
+  repo checkout is reachable — fine for dev and for this stream's own verification (a real repo
+  checkout, `DOTBEAT_REPO_ROOT` set explicitly), not yet a "double-click the .app with no repo on
+  disk" story. First real user action (open-folder or the persisted last-project) sidesteps this
+  in practice, but a truly fresh install with neither would need a bundled resource of some kind
+  instead. Not attempted — out of scope per the same "shippable-to-whom" scoping as above.
+- **Sidecar cleanup on force-quit/crash** — see the reproduced gap above, still open.
+- **Cross-platform sidecar builds** — `desktop/sidecar/build.mjs`'s `TRIPLE_TO_PKG_TARGET` table
+  includes Windows/Linux entries but only `aarch64-apple-darwin` was actually built and verified
+  this stream (the only platform available). Untested, not claimed as working.
+- **The native-window screenshot gap** — unchanged, see above.
