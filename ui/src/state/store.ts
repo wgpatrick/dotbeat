@@ -23,6 +23,13 @@ interface DawState {
    * ephemeral and never in the .beat file — the daemon owns it; we read it via SSE + GET /selection
    * and write it via POST /selection (see bridge.ts). */
   selection: BeatSelection
+  /** Multi-note editing selection (Phase 17 Stream M): the ids of the notes currently selected in
+   * the piano roll for group move/resize/delete/nudge. This is GUI-only editing state and is
+   * DISTINCT from `selection` above — that is the D2 pointing protocol (tracks/lanes/bars) the
+   * daemon owns and `beat vary --scope selection` reads; this is just "which notes the pointer/
+   * keyboard is about to act on" inside NoteView. Note ids are globally unique across the doc, but
+   * NoteView only ever operates on the intersection with the currently-edited track's notes. */
+  editNoteIds: string[]
   /** Mixer mute/solo — GUI-only transport state, keyed by track id. NOT persisted to the .beat file
    * (the format carries no mute/solo field, and real DAWs treat these as session state). As of
    * Phase 14 Stream E these gate real audio: the engine reads isEffectivelyMuted per tick and sets
@@ -37,6 +44,7 @@ interface DawState {
   setPlaying: (p: boolean) => void
   setView: (v: AppView) => void
   setSelection: (s: BeatSelection) => void
+  setEditNoteIds: (ids: string[]) => void
   toggleMute: (id: string) => void
   toggleSolo: (id: string) => void
 }
@@ -51,6 +59,7 @@ export const useStore = create<DawState>((set) => ({
   masterLevel: undefined,
   view: 'editor',
   selection: {},
+  editNoteIds: [],
   mutes: {},
   solos: {},
 
@@ -67,6 +76,7 @@ export const useStore = create<DawState>((set) => ({
   setPlaying: (playing) => set({ playing }),
   setView: (view) => set({ view }),
   setSelection: (selection) => set({ selection }),
+  setEditNoteIds: (editNoteIds) => set({ editNoteIds }),
   toggleMute: (id) => set((s) => ({ mutes: { ...s.mutes, [id]: !s.mutes[id] } })),
   toggleSolo: (id) => set((s) => ({ solos: { ...s.solos, [id]: !s.solos[id] } })),
 }))

@@ -498,6 +498,16 @@ body {
 .noteview-grid {
   cursor: crosshair;
 }
+.noteview-grid:focus {
+  outline: none;
+}
+.noteview-marquee {
+  position: absolute;
+  z-index: 5;
+  background: rgba(120, 170, 255, 0.16);
+  border: 1px solid rgba(150, 190, 255, 0.9);
+  pointer-events: none;
+}
 .noteview-note {
   position: absolute;
   border-radius: 2px;
