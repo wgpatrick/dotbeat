@@ -113,3 +113,36 @@ field coverage, that's a predictable, small conflict handled by whichever merges
 spirit as every prior phase's predicted overlaps). Stream C is a new, disjoint area of `ui/`.
 Stream D is `desktop/` only, fully disjoint from the other three. `npm test` must stay green
 (289+/283+/0/6) throughout.
+
+## Result (2026-07-11)
+
+All four streams shipped and are merged into `main`. Final suite unchanged at **289 tests, 283
+passing, 0 failing, 6 skipped** (none of this phase's work is covered by the root suite except
+Stream B's one core addition, which regression-tested clean).
+
+- **Stream A**: full engine parity ported into `ui/src/audio/engine.ts` (257 → 945 lines) — drum
+  voices, sidechain, filter envelopes/LFOs, inserts/sends, clip automation. Verified tight against
+  the CLI reference render (LUFS/crest/spectral bands within ~0.7 points), plus a measured 2×
+  sidechain duck and a real kick-spectrum check. Instrument/SoundFont playback explicitly
+  deferred.
+- **Stream B**: real note/clip editing (add/move/resize/delete) and the full ~54-field param
+  surface (8 collapsible groups, a re-derived metadata-table pattern from BeatLab's
+  `DevicePanel`). Needed one approved, small, additive addition outside its assigned files — a
+  note-write grammar in `src/core/edit.ts`'s `setValue`, reusing already-tested `addNote`/
+  `removeNote` — since the `/edit` primitive had no note-write path at all. Verified byte-identical
+  to the equivalent `beat add-note` CLI output. **Merge required manual conflict resolution**
+  against Stream C (both touched `App.tsx`'s view shell and `bridge.ts`'s edit-mirroring) — resolved
+  by hand, re-typechecked `ui/` clean after.
+- **Stream C**: arrangement/song view (canvas + density-LOD, the validated approach from a
+  discarded Phase 11 attempt, rebuilt fresh here) and a mixer view, both live-verified against a
+  real multi-scene project with real selection round-trips through the daemon.
+- **Stream D**: the Tauri shell now actually points at `ui/` — production build embedded via
+  Tauri's asset protocol, a real compiled daemon sidecar (yao-pkg, not a spawned `node` process),
+  verified via `strings` on the built binary that zero BeatLab content remains and the app works
+  with `node`/`npx` stripped from PATH. **This is the first point at which "the Mac app" is
+  actually pointed at dotbeat's own product**, not a stale BeatLab-bridge config.
+- **Honestly still open**, carried into Phase 14: mixer mute/solo is GUI-only (doesn't gate audio
+  in the engine yet), no arrangement-view playhead during playback, instrument/SoundFont tracks
+  have no live-engine playback or dedicated param UI, the new note-grammar addition to
+  `src/core/edit.ts` has no dedicated unit test yet, no macOS notarization/distribution signing
+  (local-machine target only, a deliberate scope call), only macOS arm64 built/verified.
