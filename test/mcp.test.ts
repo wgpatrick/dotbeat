@@ -66,7 +66,22 @@ test('beat mcp speaks the MCP handshake and serves the tool suite', async () => 
 
     const list = await mcp.request('tools/list')
     const names = list.tools.map((t: { name: string }) => t.name)
-    for (const expected of ['beat_inspect', 'beat_set', 'beat_add_note', 'beat_rm_note', 'beat_diff', 'beat_metrics', 'beat_lint', 'beat_render']) {
+    for (const expected of [
+      'beat_inspect',
+      'beat_set',
+      'beat_add_note',
+      'beat_rm_note',
+      'beat_diff',
+      'beat_metrics',
+      'beat_lint',
+      'beat_render',
+      'beat_checkpoint',
+      'beat_history',
+      'beat_restore',
+      'beat_pin',
+      'beat_unpin',
+      'beat_pins',
+    ]) {
       assert.ok(names.includes(expected), `missing tool ${expected}`)
     }
     // every tool must carry a JSON schema an agent can act on

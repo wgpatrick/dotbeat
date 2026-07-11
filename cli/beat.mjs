@@ -87,8 +87,12 @@ const USAGE = `usage:
   beat render --offline <file> [-o out.wav]               real engine, no browser (see phase-4 notes)
   beat daemon <file> [--port 8420]
   beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)
-  beat history <file> [--limit N]                         list this project's checkpoints, newest first
+  beat history <file> [--limit N] [--collapsed]           list checkpoints, newest first (--collapsed folds
+                                                          unnamed runs between pins into "N more checkpoints")
   beat restore <file> <ref>                               go back to a checkpoint (append-only — never destroys work)
+  beat pin <file> <ref> <name...>                         name a checkpoint (<=25 chars), e.g. beat pin song.beat a1b2c3 rough mix v1
+  beat unpin <file> <name...>                             remove a pin by name
+  beat pins <file>                                        list this project's pins, newest checkpoint first
   beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon
   beat mcp                                                MCP server over stdio (all of the above as tools)
 
@@ -602,17 +606,41 @@ async function checkpointCmd(argv) {
   else process.stdout.write(`checkpoint ${result.ref}  ${result.when}  ${result.label}\n`)
 }
 
+// Shared with the --collapsed view below: one checkpoint line, pin name (if any) and intent
+// (if any) appended.
+function formatHistoryLine(e) {
+  const pin = e.pin ? `  [pin: ${e.pin}]` : ''
+  const intent = e.intent ? `  (intent: ${e.intent})` : ''
+  return `${e.ref}  ${e.when}  ${e.label}${pin}${intent}\n`
+}
+
 async function historyCmd(argv) {
-  const { history } = await import('../dist/src/history/index.js')
+  const { history, collapsedHistory } = await import('../dist/src/history/index.js')
   const limit = flagValue(argv, '--limit')
+  const collapsed = argv.includes('--collapsed') || argv.includes('--pinned')
   const file = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--limit')
-  if (!file) throw new BeatEditError('history needs <file> [--limit N]')
-  const entries = history(file, { ...(limit !== undefined ? { limit: Number(limit) } : {}) })
+  if (!file) throw new BeatEditError('history needs <file> [--limit N] [--collapsed]')
+  const opts = limit !== undefined ? { limit: Number(limit) } : {}
+
+  if (collapsed) {
+    const rows = collapsedHistory(file, opts)
+    if (rows.length === 0) {
+      process.stdout.write('no history yet\n')
+      return
+    }
+    for (const row of rows) {
+      if (row.kind === 'collapsed') process.stdout.write(`  ... ${row.count} more checkpoint${row.count === 1 ? '' : 's'} ...\n`)
+      else process.stdout.write(formatHistoryLine(row))
+    }
+    return
+  }
+
+  const entries = history(file, opts)
   if (entries.length === 0) {
     process.stdout.write('no history yet\n')
     return
   }
-  for (const e of entries) process.stdout.write(`${e.ref}  ${e.when}  ${e.label}${e.intent ? `  (intent: ${e.intent})` : ''}\n`)
+  for (const e of entries) process.stdout.write(formatHistoryLine(e))
 }
 
 async function restoreCmd(argv) {
@@ -622,6 +650,36 @@ async function restoreCmd(argv) {
   const result = restore(file, ref)
   if (result.skipped) process.stdout.write('that version is already the current one — nothing changed\n')
   else process.stdout.write(`restored — new checkpoint ${result.ref}  ${result.label}\n`)
+}
+
+async function pinCmd(argv) {
+  const { pin } = await import('../dist/src/history/index.js')
+  const [file, ref, ...nameParts] = argv
+  const name = nameParts.join(' ')
+  if (!file || !ref || !name) throw new BeatEditError('pin needs <file> <ref> <name> (a checkpoint from `beat history`, and a name up to 25 chars)')
+  const result = pin(file, ref, name)
+  process.stdout.write(`pinned ${result.ref} as "${result.name}"\n`)
+}
+
+async function unpinCmd(argv) {
+  const { unpin } = await import('../dist/src/history/index.js')
+  const [file, ...nameParts] = argv
+  const name = nameParts.join(' ')
+  if (!file || !name) throw new BeatEditError('unpin needs <file> <name>')
+  unpin(file, name)
+  process.stdout.write(`unpinned "${name}"\n`)
+}
+
+async function pinsCmd(argv) {
+  const { pins } = await import('../dist/src/history/index.js')
+  const [file] = argv
+  if (!file) throw new BeatEditError('pins needs <file>')
+  const entries = pins(file)
+  if (entries.length === 0) {
+    process.stdout.write('no pins yet\n')
+    return
+  }
+  for (const p of entries) process.stdout.write(`${p.ref}  ${p.when}  ${p.name}\n`)
 }
 
 // D2 pointing protocol: the selection lives in a running daemon's memory, so this command is a
@@ -702,6 +760,15 @@ async function main() {
       break
     case 'restore':
       await restoreCmd(rest)
+      break
+    case 'pin':
+      await pinCmd(rest)
+      break
+    case 'unpin':
+      await unpinCmd(rest)
+      break
+    case 'pins':
+      await pinsCmd(rest)
       break
     case 'presets':
       presetsCmd(rest)

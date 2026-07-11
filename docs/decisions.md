@@ -9,6 +9,33 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D10 — Named pins are git tags, not a sidecar file (2026-07-11)
+
+**Decision:** a "pin" (spec §4's named version, e.g. "rough mix v1") is a plain, annotated git
+tag in the same local history repo as the checkpoints, namespaced `pin/<slug>` (slug from the
+lowercased, hyphenated name) with the exact display name stored in the tag's own message. No new
+file format, no JSON sidecar, no metadata that could drift from the repo it describes.
+
+**Why:** the whole point of D3's history design is "no cloud, plain local git, user owns it" (the
+Splice Studio lesson, §4) — a sidecar pins.json would be a second thing to keep in sync with the
+repo, to lose on a partial copy, and to merge-conflict on if the project folder is ever shared via
+a real git remote. A tag has none of those problems: it's a ref in the same repo, travels with
+`git clone`/`cp -r` for free, and — because tags are immutable pointers — survives `restore`'s
+append-only rewrites automatically (a pinned commit is never deleted, so its tag never dangles).
+Considered git notes instead (attaching the name to the commit directly); rejected because notes
+don't have their own stable, human-typeable identifier the way a tag name does — listing/removing
+"the pin named X" is a `git tag --list`/`git tag -d` one-liner, whereas notes would need a
+convention-on-top for the same lookup. The one real limitation: tag names are repo-wide, so two
+different `.beat` files sharing one history repo could collide on an identical pin name; current
+usage is one project file per repo, so this is accepted for now and callers get a clear "already
+exists" error rather than silent corruption if it ever happens.
+
+**Revisit when:** a project folder routinely holds multiple `.beat` files sharing one history
+repo and pin-name collisions across files become a real complaint — scope the tag name to the
+file at that point (e.g. `pin/<file-slug>/<name-slug>`).
+
+---
+
 ## D9 — Canonical elision for optional params; presets are tooling, never grammar (v0.3)
 
 **Decision:** v0.3's ~46 optional synth params are serialized **iff their value differs from a

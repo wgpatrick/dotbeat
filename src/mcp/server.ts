@@ -41,7 +41,7 @@ import {
   serializeSelection,
 } from '../core/index.js'
 import { decodeWav, analyze, lint, formatLint } from '../metrics/index.js'
-import { checkpoint, history, restore } from '../history/index.js'
+import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
@@ -559,20 +559,29 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_history',
     description:
-      'List a .beat project\'s checkpoints, newest first: each line is a ref, ISO timestamp, the semantic label, and the recorded intent when there is one. Use this to find "the good version" the user wants to return to — read the labels/intents, then hand the chosen ref to beat_restore.',
+      'List a .beat project\'s checkpoints, newest first: each line is a ref, ISO timestamp, the semantic label (with its pin name appended when it has one), and the recorded intent when there is one. Use this to find "the good version" the user wants to return to — read the labels/intents/pins, then hand the chosen ref to beat_restore or beat_pin. Pass `collapsed: true` to fold runs of unnamed checkpoints between pins into a single "N more checkpoints" line — use that for a long history where only the pinned/named versions matter.',
     inputSchema: {
       type: 'object',
       properties: {
         file: { type: 'string' },
         limit: { type: 'number', description: 'max checkpoints to return (most recent first)' },
+        collapsed: { type: 'boolean', description: 'fold unnamed checkpoint runs between pins into summary lines instead of listing every one' },
       },
       required: ['file'],
     },
     handler: (args) => {
       const file = str(args, 'file')
-      const entries = history(file, typeof args.limit === 'number' ? { limit: args.limit } : {})
+      const opts = typeof args.limit === 'number' ? { limit: args.limit } : {}
+      const formatLine = (e: { ref: string; when: string; label: string; intent?: string; pin?: string }) =>
+        `${e.ref}  ${e.when}  ${e.label}${e.pin ? `  [pin: ${e.pin}]` : ''}${e.intent ? `  (intent: ${e.intent})` : ''}`
+      if (args.collapsed === true) {
+        const rows = collapsedHistory(file, opts)
+        if (rows.length === 0) return 'no history yet\n'
+        return rows.map((row) => (row.kind === 'collapsed' ? `  ... ${row.count} more checkpoint${row.count === 1 ? '' : 's'} ...` : formatLine(row))).join('\n') + '\n'
+      }
+      const entries = history(file, opts)
       if (entries.length === 0) return 'no history yet\n'
-      return entries.map((e) => `${e.ref}  ${e.when}  ${e.label}${e.intent ? `  (intent: ${e.intent})` : ''}`).join('\n') + '\n'
+      return entries.map(formatLine).join('\n') + '\n'
     },
   },
   {
@@ -591,6 +600,56 @@ const TOOLS: ToolDef[] = [
       const result = restore(str(args, 'file'), str(args, 'ref'))
       if (result.skipped) return 'that version is already the current one — nothing changed\n'
       return `restored — new checkpoint ${result.ref}  ${result.label}\n`
+    },
+  },
+  {
+    name: 'beat_pin',
+    description:
+      'Name a checkpoint ("rough mix v1", "the good bridge" — 25 characters or fewer) so it stands out in beat_history and survives any amount of unnamed-checkpoint noise around it. Storage is a plain git tag in the same local repo as the checkpoints — nothing new to back up, nothing restore can invalidate. Fails loudly if the ref is unknown, is not a checkpoint of this file, or the name is already used.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        ref: { type: 'string', description: 'a checkpoint ref from beat_history' },
+        name: { type: 'string', description: 'the pin\'s display name, <=25 characters' },
+      },
+      required: ['file', 'ref', 'name'],
+    },
+    handler: (args) => {
+      const result = pin(str(args, 'file'), str(args, 'ref'), str(args, 'name'))
+      return `pinned ${result.ref} as "${result.name}"\n`
+    },
+  },
+  {
+    name: 'beat_unpin',
+    description: 'Remove a pin by name. The underlying checkpoint is untouched — this only removes the name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        name: { type: 'string', description: 'the pin\'s display name, as given to beat_pin' },
+      },
+      required: ['file', 'name'],
+    },
+    handler: (args) => {
+      unpin(str(args, 'file'), str(args, 'name'))
+      return `unpinned "${str(args, 'name')}"\n`
+    },
+  },
+  {
+    name: 'beat_pins',
+    description: 'List a .beat project\'s named pins, newest checkpoint first: each line is the pinned checkpoint\'s ref, ISO timestamp, and pin name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+      },
+      required: ['file'],
+    },
+    handler: (args) => {
+      const entries = pins(str(args, 'file'))
+      if (entries.length === 0) return 'no pins yet\n'
+      return entries.map((p) => `${p.ref}  ${p.when}  ${p.name}`).join('\n') + '\n'
     },
   },
 ]
