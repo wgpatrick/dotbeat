@@ -199,3 +199,136 @@ Built and committed: `desktop-spike/` (the spike scaffold + its log), `desktop/`
 shell — daemon + beatlab-dev-server sidecars, `?daw=`-bridged navigation, native folder-picker
 command). Root `npm test` unaffected (196/196 minus the 6 known-flaky, pre-existing
 `history.test.js` cases). Worktree branch: `worktree-agent-a74b7ceadf58d5bd8`.
+
+## Phase 10 Stream A (2026-07-11): folder re-pointing + persisted fs scope
+
+*Closes the first two of this doc's "what's honestly still missing" bullets above (sidecar
+packaging and notarization/signing are explicitly out of scope, per `docs/phase-10-plan.md`).
+Files touched: `desktop/src-tauri/Cargo.toml`, `desktop/src-tauri/src/lib.rs`,
+`desktop/src/main.js`. No `src/`/`cli/`/`test/` changes.*
+
+### What was built
+
+1. **Folder re-pointing actually works now.** `pick_project_folder` used to open the native
+   dialog and just hand the chosen path back to the page — nothing else happened. The startup
+   sidecar-spawn logic was refactored out of `setup()` into a reusable `spawn_project()`, and a
+   new `reopen_project_folder()` wraps it: picking a folder now **kills both the daemon and vite
+   sidecars, respawns them pointed at the new folder** (the daemon's existing
+   `resolveProjectFile` already handles "folder → find-or-create the `.beat`", so no new
+   folder-resolution logic was needed on the Rust side), waits for both ports, and re-navigates
+   the main window — exactly the gap this doc flagged.
+2. **A native File menu**, since the splash page's "Open Project Folder…" button only exists
+   before the first navigation — once the window has navigated to beatlab's own page, that button
+   is gone with it. `File > Open Project Folder…` (Cmd/Ctrl+O) is wired in Rust via
+   `tauri::menu`, works at any point in the app's lifetime (it's outside the webview), and funnels
+   into the same `reopen_project_folder()`. A minimal `Edit` menu (undo/redo/cut/copy/paste/select
+   all) was added alongside it so overriding the default menu doesn't regress standard text-field
+   shortcuts.
+3. **`tauri-plugin-fs` + `tauri-plugin-persisted-scope`** (research 13 finding 5) are now
+   registered. Picking a folder calls `fs_scope().allow_directory(folder, true)`;
+   `tauri-plugin-persisted-scope` transparently persists that grant to
+   `<app-data-dir>/.persisted-scope` and restores it before `setup()` runs on the next launch —
+   confirmed by logging `fs_scope().allowed_patterns()` at the top of `setup()`.
+4. **A small addition beyond the literal ask**: a `last-project.json` in the app's data dir
+   remembers which folder was last opened and reopens it automatically on the next launch
+   (`initial_project_target()`, env var override still wins). Persisted-scope alone only persists
+   the fs *permission* grant — nothing in this app currently reads project files via
+   `tauri-plugin-fs`'s JS APIs, so on its own it would have had no user-visible effect. This makes
+   "a dialog-granted folder survives an app restart" actually mean something concrete: reopen the
+   app, get your last project back, not the bundled example.
+
+### A real bug found and fixed along the way
+
+The first version of the respawn logic reused `npx vite --port 5173` (same as the initial spike)
+and just called `CommandChild::kill()` on the tracked child before spawning a replacement. On a
+folder switch this **silently broke**: `npx` execs through an intermediate wrapper process
+(`cli/devserver.mjs` already has a comment documenting this exact issue and works around it
+Node-side with `detached: true` + a negative-PID group kill), so `kill()` only touched the `npx`
+process and left the actual vite dev server alive and still bound to port 5173.
+`tauri-plugin-shell`'s `CommandChild` has no process-group equivalent to reach for. The new vite
+instance found the port taken, silently moved to 5174, while the code still navigated the window
+to the hardcoded `:5173` URL — a window pointed at a stale server. Fixed by spawning
+`node <beatlab>/node_modules/vite/bin/vite.js --port <p>` directly instead of going through `npx`
+at all, which makes the tracked child the real vite process, so one `kill()` reliably takes it
+down before the replacement tries to bind the same port. Confirmed via `ps` (exactly one `vite`
+process after a switch, not two) and via the daemon/vite ports actually matching what the window
+navigated to.
+
+### Verification (real runs, not just compiling)
+
+Built via `cargo build` in `desktop/src-tauri` (clean, one pre-existing clippy warning unrelated
+to this change, no new warnings). Ran the actual binary (`cargo run`, since `desktop/package.json`
+has no `devUrl` configured — `tauri dev` and `cargo run` are equivalent here) against the real
+beatlab checkout already cloned at `/tmp/dotbeat-scratch/beatlab` from the prior spike session
+(confirmed `npm install`'d, `node_modules/vite/bin/vite.js` present).
+
+- **Fresh boot** (no persisted state): `curl http://localhost:8420/doc` returned `real-groove.beat`
+  (bpm 126, the bundled default); `fs scope on startup: []` in the logs, as expected for a clean
+  install.
+- **Folder switch mechanism**: since this sandboxed session can't drive macOS's native
+  `NSOpenPanel` (same Accessibility-permission gap documented below — `AppleScript`/`System
+  Events` calls hang until manually killed, exactly as this doc's Step 1 caveat found), the
+  underlying `reopen_project_folder()` was exercised directly via a temporary env-var-gated test
+  hook added for this one manual run and removed before committing (not part of the shipped
+  code). Simulated "picking" a second folder (`/tmp/dotbeat-scratch/project-b`, empty) produced,
+  in order, in the real log output: the daemon auto-creating a starter `project.beat` there, `ps`
+  showing exactly one new daemon process (args pointing at `project-b`) and one new vite process
+  (no orphans), `curl http://localhost:8420/doc` now returning bpm 120 (the starter-project
+  default, proving the daemon really restarted against the new folder and not just relabeled the
+  old one), and `fs scope now allows /tmp/dotbeat-scratch/project-b (persisted-scope will save
+  this to disk)` in the log.
+- **Full app-restart survival, end to end**: quit the process entirely, inspected
+  `~/Library/Application Support/com.dotbeat.desktop/` directly and found both
+  `last-project.json` (`{"folder":"/tmp/dotbeat-scratch/project-b"}`) and `.persisted-scope` (a
+  bincode file; `strings` on it shows the `project-b` path in plain text) written to disk. Then
+  relaunched the app with **zero env var overrides** — no `DOTBEAT_PROJECT_FILE`, no test hook —
+  and the real log showed `fs scope on startup (restored by persisted-scope):
+  ["/tmp/dotbeat-scratch/project-b", ...]` and `reopening last project folder from previous
+  session: /tmp/dotbeat-scratch/project-b`, with the daemon actually spawned against that path.
+  `curl http://localhost:8420/doc` confirmed bpm 120 again. This is a real cross-process-restart
+  observation, not an inference from reading the plugin's source.
+- **GUI rendering, not just the JSON API**: loaded the exact URL the window navigates to
+  (`http://localhost:5173/musiclearning/?daw=8420`) in headless Chromium via Playwright (same
+  substitution this doc's Step 2 already used, `playwright-core` is a devDependency, the Chromium
+  binary was already cached from the prior spike session) — page title `BeatLab — Music
+  Production Trainer`, `window.__store` present, zero console/page errors, and the screenshot
+  shows BPM 120 and a single empty "lead" synth track — the actual freshly-created `project-b`
+  starter project, not `real-groove.beat`'s drum pattern. Confirms the reopened project is really
+  reaching the GUI layer, not just the daemon's HTTP API.
+- **The native-window screenshot gap recurred, unchanged from Step 1**: `screencapture` and a
+  direct AppleScript/System Events call were attempted again this session and behaved identically
+  to this doc's original finding — the System Events call hung until manually killed (same
+  Accessibility-permission dialog neither this session nor a non-interactive script can dismiss).
+  Not re-litigated further, same honest gap as before, same substitute (headless Chromium on the
+  identical URL) used in its place.
+- All test artifacts (`/tmp/dotbeat-scratch/project-b`, the temporary verification script,
+  screenshots, and `~/Library/Application Support/com.dotbeat.desktop/`) were removed after
+  verification so this machine's real app state isn't left pointing at scratch test data.
+- Root `npm test`: **280 tests, 274 pass, 0 fail, 6 skipped** — unchanged from the expected
+  baseline (this stream touched nothing under `src/`, `cli/`, or `test/`).
+
+### Still honestly missing
+
+Everything this doc's original "what's still missing" list already scoped out of a one-day spike
+remains out of scope tonight too, per `docs/phase-10-plan.md`'s explicit instruction:
+
+- **Sidecar packaging** (`yao-pkg`/`pkg` → `externalBin`) — the daemon and vite both still run as
+  plain `node ...` child processes, not compiled per-target-triple binaries. Still needs Node on
+  PATH.
+- **beatlab isn't bundled** — still the dev server (vite + hot reload), not a production build.
+- **Packaging/signing** — no notarization, no code signing beyond the ad-hoc debug build.
+- **The native-window screenshot gap** — see above; unchanged, environmental, not re-attempted
+  beyond confirming it still reproduces identically.
+- **New, from this stream**: `on_window_event`'s sidecar cleanup only fires on a real window-close
+  UI event (or the Quit menu item, which triggers the same `CloseRequested`-adjacent teardown
+  path) — killing the app process directly (e.g. `pkill`, which is how this stream's automated
+  verification had to tear runs down between tests) bypasses it and orphans the sidecars. This
+  isn't a regression (the phase 9 scaffold had the same property, just never exercised this way),
+  but it's worth flagging: a crash or force-quit currently leaks the daemon/vite child processes
+  rather than cleaning them up. Not fixed tonight (SIGTERM/panic-hook cleanup wasn't in this
+  stream's scope) — noted here as still-open.
+- **`desktop/package.json`'s `dev` script vs. this file's own comment**: the `beatlab_dir()`
+  comment says "the desktop/package.json `dev` script sets [`DOTBEAT_BEATLAB_DIR`] explicitly" —
+  it doesn't (`"dev": "tauri dev"`, no env vars). Pre-existing from the original phase 9 scaffold,
+  not touched this stream (this stream's manual verification set the env vars by hand instead);
+  worth a one-line fix next time someone's in this file for something else.
