@@ -120,8 +120,10 @@ export interface BeatSelection {
   notes?: SelectionNote[]
 }
 
-/** Which of the top-level app screens is showing. */
-export type AppView = 'editor' | 'arrangement' | 'mixer' | 'history'
+/** Which facet the bottom detail pane shows — Ableton's Clip View (edit the clip's notes/hits) vs
+ * Device View (edit the track's sound). Phase 18 replaced the old four-screen `AppView` tab enum:
+ * the arrangement is now the unconditional main area, so there is no top-level screen to switch. */
+export type BottomPane = 'clip' | 'device'
 
 /** One checkpoint row from the daemon's GET /history (mirrors src/history/history.ts's
  * HistoryEntry — the daemon's JSON is the contract). `ref` is the short sha handle `restore` takes;
