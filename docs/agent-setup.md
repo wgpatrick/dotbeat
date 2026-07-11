@@ -7,6 +7,15 @@ BYO-Claude-Code fallback first (our MCP server + any client — near-zero new wo
 zero-setup path from "I have a `.beat` project folder" to "Claude Code is talking to it" — this
 doc plus `beat mcp-init` is that path.*
 
+> **Phase 17 Stream N (D14)**: this doc covers the zero-setup MCP *connection* step (`beat
+> mcp-init`, `.mcp.json`, confirming the round trip) and stays the canonical doc for that. Once
+> connected, `.claude/skills/dotbeat/SKILL.md` is the actual Claude Code skill artifact that teaches
+> an agent how to *use* dotbeat well from there — project layout, the full CLI/MCP command surface,
+> the `.beat` path grammar, the selection protocol, the render/metrics/critique loop, checkpoint
+> discipline, and common mistakes. It auto-loads when working in a dotbeat project; this doc doesn't
+> supersede it, the two are complementary (connection setup vs. how-to-use-it-well). If reading this
+> by hand rather than via Claude Code's skill auto-discovery, read the skill directory too.
+
 ## What `beat mcp` actually is
 
 `node cli/beat.mjs mcp` starts a newline-delimited JSON-RPC 2.0 server on stdin/stdout —
