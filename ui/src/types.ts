@@ -134,6 +134,11 @@ export interface HistoryEntry {
   pin?: string
 }
 
+/** One row of the daemon's GET /history?collapsed=true (mirrors src/history/history.ts's
+ * HistoryRow): either a real checkpoint, or a `{kind:'collapsed', count}` summary standing in for a
+ * run of unnamed checkpoints folded between pins (product-spec-desktop.md §4). */
+export type HistoryRow = ({ kind: 'checkpoint' } & HistoryEntry) | { kind: 'collapsed'; count: number }
+
 /** The nine core params, in the format's canonical order, with UI ranges + display formatting.
  * `osc` is an enum handled separately by the panel; the other eight are knobs. */
 export interface KnobSpec {

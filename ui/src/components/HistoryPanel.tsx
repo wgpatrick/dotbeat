@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useStore } from '../state/store'
 import { daemonBase } from '../daemon/bridge'
-import type { HistoryEntry } from '../types'
+import type { HistoryEntry, HistoryRow } from '../types'
 
 function formatWhen(iso: string): string {
   const d = new Date(iso)
@@ -30,24 +30,29 @@ function formatWhen(iso: string): string {
 
 export function HistoryPanel() {
   const doc = useStore((s) => s.doc) // re-fetch whenever the document changes (edits mint checkpoints)
-  const [entries, setEntries] = useState<HistoryEntry[] | null>(null)
+  const [rows, setRows] = useState<HistoryRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busyRef, setBusyRef] = useState<string | null>(null)
   const [pinningRef, setPinningRef] = useState<string | null>(null)
   const [pinName, setPinName] = useState('')
+  // Flat vs collapsed (product-spec-desktop.md §4: "unnamed checkpoints collapse between named
+  // pins... a long timeline still skims"). Collapsed is the default — it's the spec's must-have
+  // reading for a long history; flat stays one click away for when every checkpoint matters.
+  const [collapsed, setCollapsed] = useState(true)
 
   const load = useCallback(async () => {
     const base = daemonBase()
     try {
-      const res = await fetch(`${base}/history?limit=200`)
+      const res = await fetch(`${base}/history?limit=200${collapsed ? '&collapsed=true' : ''}`)
       if (!res.ok) throw new Error(`GET /history: HTTP ${res.status}`)
-      const body = (await res.json()) as { entries: HistoryEntry[] }
-      setEntries(body.entries)
+      const body = (await res.json()) as { entries?: HistoryEntry[]; rows?: HistoryRow[] }
+      const nextRows: HistoryRow[] = collapsed ? (body.rows ?? []) : (body.entries ?? []).map((e) => ({ kind: 'checkpoint' as const, ...e }))
+      setRows(nextRows)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-  }, [])
+  }, [collapsed])
 
   useEffect(() => {
     void load()
@@ -95,57 +100,73 @@ export function HistoryPanel() {
   return (
     <div className="history-panel" data-testid="history-panel">
       <div className="history-head">
-        <div className="history-title">Version history</div>
-        <div className="history-sub">newest first · restoring goes back without erasing work</div>
+        <div>
+          <div className="history-title">Version history</div>
+          <div className="history-sub">newest first · restoring goes back without erasing work</div>
+        </div>
+        <button
+          className="history-btn history-toggle"
+          onClick={() => setCollapsed((c) => !c)}
+          data-action="toggle-collapsed"
+          title={collapsed ? 'show every checkpoint' : 'fold unnamed checkpoints between pins'}
+        >
+          {collapsed ? 'Show all' : 'Collapse'}
+        </button>
       </div>
       {error && <div className="history-error">{error}</div>}
-      {entries === null && !error && <div className="history-empty">loading history…</div>}
-      {entries !== null && entries.length === 0 && <div className="history-empty">No checkpoints yet — make an edit to save one.</div>}
-      {entries && entries.length > 0 && (
+      {rows === null && !error && <div className="history-empty">loading history…</div>}
+      {rows !== null && rows.length === 0 && <div className="history-empty">No checkpoints yet — make an edit to save one.</div>}
+      {rows && rows.length > 0 && (
         <ul className="history-list">
-          {entries.map((e) => (
-            <li key={e.ref} className={`history-row ${e.pin ? 'pinned' : ''}`} data-ref={e.ref}>
-              <div className="history-row-main">
-                <div className="history-row-line">
-                  {e.pin && <span className="history-pin" title="pinned version">📌 {e.pin}</span>}
-                  <span className="history-label">{e.label}</span>
+          {rows.map((row, i) =>
+            row.kind === 'collapsed' ? (
+              <li key={`collapsed-${i}`} className="history-row history-row-collapsed" data-testid="history-collapsed-row">
+                {row.count} more checkpoint{row.count === 1 ? '' : 's'}
+              </li>
+            ) : (
+              <li key={row.ref} className={`history-row ${row.pin ? 'pinned' : ''}`} data-ref={row.ref}>
+                <div className="history-row-main">
+                  <div className="history-row-line">
+                    {row.pin && <span className="history-pin" title="pinned version">📌 {row.pin}</span>}
+                    <span className="history-label">{row.label}</span>
+                  </div>
+                  <div className="history-meta">
+                    <span className="history-when">{formatWhen(row.when)}</span>
+                    <span className="history-ref">{row.ref}</span>
+                    {row.intent && <span className="history-intent" title={row.intent}>“{row.intent}”</span>}
+                  </div>
                 </div>
-                <div className="history-meta">
-                  <span className="history-when">{formatWhen(e.when)}</span>
-                  <span className="history-ref">{e.ref}</span>
-                  {e.intent && <span className="history-intent" title={e.intent}>“{e.intent}”</span>}
+                <div className="history-row-actions">
+                  <button className="history-btn restore" onClick={() => restore(row.ref)} disabled={busyRef !== null} data-action="restore">
+                    {busyRef === row.ref ? 'Going back…' : 'Go back'}
+                  </button>
+                  {pinningRef === row.ref ? (
+                    <span className="history-pin-edit">
+                      <input
+                        className="history-pin-input"
+                        autoFocus
+                        maxLength={25}
+                        value={pinName}
+                        placeholder="name (≤25)"
+                        onChange={(ev) => setPinName(ev.target.value)}
+                        onKeyDown={(ev) => {
+                          if (ev.key === 'Enter') void savePin(row.ref)
+                          if (ev.key === 'Escape') setPinningRef(null)
+                        }}
+                      />
+                      <button className="history-btn pin-save" onClick={() => savePin(row.ref)}>Save</button>
+                    </span>
+                  ) : (
+                    !row.pin && (
+                      <button className="history-btn pin" onClick={() => { setPinningRef(row.ref); setPinName('') }} data-action="pin">
+                        Pin
+                      </button>
+                    )
+                  )}
                 </div>
-              </div>
-              <div className="history-row-actions">
-                <button className="history-btn restore" onClick={() => restore(e.ref)} disabled={busyRef !== null} data-action="restore">
-                  {busyRef === e.ref ? 'Going back…' : 'Go back'}
-                </button>
-                {pinningRef === e.ref ? (
-                  <span className="history-pin-edit">
-                    <input
-                      className="history-pin-input"
-                      autoFocus
-                      maxLength={25}
-                      value={pinName}
-                      placeholder="name (≤25)"
-                      onChange={(ev) => setPinName(ev.target.value)}
-                      onKeyDown={(ev) => {
-                        if (ev.key === 'Enter') void savePin(e.ref)
-                        if (ev.key === 'Escape') setPinningRef(null)
-                      }}
-                    />
-                    <button className="history-btn pin-save" onClick={() => savePin(e.ref)}>Save</button>
-                  </span>
-                ) : (
-                  !e.pin && (
-                    <button className="history-btn pin" onClick={() => { setPinningRef(e.ref); setPinName('') }} data-action="pin">
-                      Pin
-                    </button>
-                  )
-                )}
-              </div>
-            </li>
-          ))}
+              </li>
+            ),
+          )}
         </ul>
       )}
     </div>
