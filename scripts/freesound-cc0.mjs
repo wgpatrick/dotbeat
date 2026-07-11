@@ -45,7 +45,7 @@ const durMax = Number(flag('--dur-max', '1.5'))
 const outDir = flag('--out-dir', `freesound-${query.replace(/\s+/g, '-')}`)
 
 const filter = `license:"Creative Commons 0" duration:[${durMin} TO ${durMax}]`
-const fields = 'id,name,username,license,duration,type,avg_rating,num_ratings,tags,previews,url'
+const fields = 'id,name,username,license,duration,type,avg_rating,num_ratings,tags,previews,url,download'
 const searchUrl =
   `https://freesound.org/apiv2/search/text/?query=${encodeURIComponent(query)}` +
   `&filter=${encodeURIComponent(filter)}&fields=${fields}&sort=rating_desc&page_size=${Math.min(count * 3, 50)}&token=${key}`
@@ -108,4 +108,4 @@ for (const s of data.results) {
   }
 }
 writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
-console.log(`${taken} candidates prepped into ${outDir}/ (audition grade — see manifest.json)`)
+console.log(`${taken} candidates prepped into ${outDir}/ (${wantOriginal ? 'ORIGINAL quality' : 'audition grade'} — see manifest.json)`)

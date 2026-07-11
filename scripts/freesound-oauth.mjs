@@ -62,7 +62,11 @@ export async function getAccessToken() {
   return refreshed.access_token
 }
 
-const [cmd, arg] = process.argv.slice(2)
+// CLI dispatch only when executed directly — this file is also imported by freesound-cc0.mjs
+// for getAccessToken(), and an import must never parse the parent's argv or exit.
+import { pathToFileURL } from 'node:url'
+const isMain = import.meta.url === pathToFileURL(process.argv[1] ?? '').href
+const [cmd, arg] = isMain ? process.argv.slice(2) : []
 if (cmd === 'authorize') {
   needCreds()
   console.log('Open this URL, log in to Freesound, click "Authorize", then copy the code it shows:\n')
