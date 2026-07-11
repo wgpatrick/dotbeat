@@ -41,7 +41,12 @@ export function App() {
           <Scope />
         </aside>
         <main className="editor">
-          {track && track.kind === 'drums' && <StepSequencer track={track} />}
+          {track && track.kind === 'drums' && (
+            <>
+              <StepSequencer track={track} />
+              <SynthPanel track={track} />
+            </>
+          )}
           {track && track.kind === 'synth' && (
             <>
               <SynthPanel track={track} />

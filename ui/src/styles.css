@@ -363,6 +363,52 @@ body {
   font: inherit;
 }
 
+/* ---- grouped device panel (full param surface) ---- */
+.param-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.param-group {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px 10px;
+}
+.param-group-title {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.param-group[open] > .param-group-title {
+  color: var(--accent);
+}
+.param-group .knob-row {
+  margin-top: 8px;
+}
+.param-enum {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 48px;
+}
+.param-enum select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 4px;
+  font: inherit;
+  font-size: 11px;
+  max-width: 74px;
+}
+
 /* ---- note view ---- */
 .noteview-scroll {
   overflow-x: auto;
@@ -374,9 +420,39 @@ body {
   border-radius: 4px;
   min-width: min-content;
 }
+.noteview-grid {
+  cursor: crosshair;
+}
 .noteview-note {
   position: absolute;
   border-radius: 2px;
+  cursor: grab;
+  touch-action: none;
+}
+.noteview-note.selected {
+  outline: 1px solid #fff;
+  outline-offset: -1px;
+}
+.noteview-note:active {
+  cursor: grabbing;
+}
+.noteview-resize {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: ew-resize;
+}
+.note-del-btn {
+  background: #e0564c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
 }
 .noteview-barline {
   position: absolute;
