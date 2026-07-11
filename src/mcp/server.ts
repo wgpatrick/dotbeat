@@ -23,6 +23,7 @@ import {
   removeNote,
   addHit,
   removeHit,
+  humanize,
   quantizeNotes,
   addTrack,
   removeTrack,
@@ -259,6 +260,40 @@ const TOOLS: ToolDef[] = [
       const { doc } = removeHit(before, str(args, 'track'), str(args, 'hit_id'))
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_humanize',
+    description:
+      'Make a stiff, on-grid part feel played (the opposite of quantize; uses v0.7/v0.8 off-grid timing). Adds seeded jitter to note/hit start times (timing, in 16th steps) and velocities (velocity, 0..1), plus optional constant behind-the-beat drag (push_late, in steps — the J Dilla move) and offbeat swing (swing, 0..1). Deterministic under seed. Scope to specific note/hit ids with ids (e.g. resolve the user selection first). Works on synth/instrument notes or drum hits.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        timing: { type: 'number' },
+        velocity: { type: 'number' },
+        push_late: { type: 'number' },
+        swing: { type: 'number' },
+        seed: { type: 'number' },
+        ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = humanize(before, str(args, 'track'), {
+        ...(args.timing !== undefined ? { timing: num(args, 'timing') } : {}),
+        ...(args.velocity !== undefined ? { velocity: num(args, 'velocity') } : {}),
+        ...(args.push_late !== undefined ? { pushLate: num(args, 'push_late') } : {}),
+        ...(args.swing !== undefined ? { swing: num(args, 'swing') } : {}),
+        ...(args.seed !== undefined ? { seed: num(args, 'seed') } : {}),
+        ...(Array.isArray(args.ids) ? { ids: (args.ids as unknown[]).map(String) } : {}),
+      })
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'no events moved\n' : diff
     },
   },
   {
