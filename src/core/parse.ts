@@ -1,5 +1,5 @@
-import type { BeatClip, BeatDocument, BeatDrumHit, BeatDrumPattern, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultSynthFields } from './document.js'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumPattern, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -67,10 +67,27 @@ export function parse(text: string): BeatDocument {
   let inSynth = false
   let inSong = false
   let synthSeen = new Set<keyof BeatSynth>()
+  // v0.9: the currently-open `auto <track>.<param>` lane within a clip, if any — `point` lines
+  // (level 3) append to it until the next level <= 2 line closes it.
+  let currentAutoLane: BeatAutomationLane | null = null
   // v0.8 migration: legacy `pattern` lines accumulate here per track/clip, then expand to hits
   // at close (grammar-level patterns are gone; v<=0.7 files still parse into the new event model).
   const legacyTrackPatterns = new Map<BeatTrack, Partial<BeatDrumPattern>>()
   const legacyClipPatterns = new Map<BeatClip, Partial<BeatDrumPattern>>()
+
+  // v0.9: closes any open automation lane, validating it has >= 1 point (a lane with zero
+  // points has no canonical serialized form — see BeatAutomationLane) and unique point ids.
+  function closeAutoLaneIfOpen(lineNo: number) {
+    if (!currentAutoLane) return
+    const lane = currentAutoLane
+    if (lane.points.length === 0) throw new BeatParseError(`automation lane "${lane.param}" has no point lines`, lineNo)
+    const seen = new Set<string>()
+    for (const p of lane.points) {
+      if (seen.has(p.id)) throw new BeatParseError(`duplicate automation point id "${p.id}" in lane "${lane.param}"`, lineNo)
+      seen.add(p.id)
+    }
+    currentAutoLane = null
+  }
 
   function closeSynthIfOpen(lineNo: number) {
     if (!inSynth) return
@@ -90,6 +107,7 @@ export function parse(text: string): BeatDocument {
   }
 
   function closeClipIfOpen(lineNo: number) {
+    closeAutoLaneIfOpen(lineNo)
     if (!currentClip || !currentTrack) return
     const legacy = legacyClipPatterns.get(currentClip)
     if (legacy) {
@@ -160,6 +178,19 @@ export function parse(text: string): BeatDocument {
     const velocity = parseFloatStrict(velTok, lineNo, 'hit velocity')
     if (velocity <= 0 || velocity > 1) throw new BeatParseError(`hit velocity must be in (0, 1], got ${velocity}`, lineNo)
     return { id, lane: laneTok, start, velocity }
+  }
+
+  // v0.9: `point <id> <time> <value>` — one automation point inside an open `auto` lane. time
+  // is fractional 16th steps from the clip's start (v0.7 number rules); value is unconstrained
+  // (its legal range depends on which param the enclosing lane targets).
+  function parsePointLine(tokens: string[], lineNo: number): BeatAutomationPoint {
+    if (tokens.length !== 4) throw new BeatParseError('point expects exactly 3 values: <id> <time> <value>', lineNo)
+    const [, id, timeTok, valueTok] = tokens as [string, string, string, string]
+    if (!SLUG_RE.test(id)) throw new BeatParseError(`point ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
+    const time = parseFloatStrict(timeTok, lineNo, 'point time')
+    if (time < 0) throw new BeatParseError(`point time must be >= 0, got ${time}`, lineNo)
+    const value = parseFloatStrict(valueTok, lineNo, 'point value')
+    return { id, time, value }
   }
 
   // v0.8 migration: expand a legacy per-bar pattern into absolute hits. A step at velocity v
@@ -349,7 +380,7 @@ export function parse(text: string): BeatDocument {
         const id = tokens[1]!
         if (!SLUG_RE.test(id)) throw new BeatParseError(`clip ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
         if (currentTrack.clips.some((c) => c.id === id)) throw new BeatParseError(`duplicate clip id "${id}" on track "${currentTrack.id}"`, lineNo)
-        currentClip = { id, notes: [], hits: [] }
+        currentClip = { id, notes: [], hits: [], automation: [] }
         currentTrack.clips.push(currentClip)
         continue
       }
@@ -374,8 +405,11 @@ export function parse(text: string): BeatDocument {
     }
 
     if (level === 2) {
-      // clip content (notes for synth clips, pattern lanes for drum clips)
+      // clip content (notes for synth clips, pattern lanes for drum clips, v0.9 automation lanes)
       if (currentClip && currentTrack && !inSynth) {
+        // Any level-2 line here ends a previously-open automation lane (its `point` children are
+        // level 3) — close-and-validate it before handling this line, whatever it is.
+        closeAutoLaneIfOpen(lineNo)
         if (keyword === 'note') {
           if (currentTrack.kind !== 'synth') throw new BeatParseError(`note lines only belong in synth-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
           currentClip.notes.push(parseNoteLine(tokens, lineNo))
@@ -393,6 +427,22 @@ export function parse(text: string): BeatDocument {
           const { lane, steps } = parsePatternLine(tokens, acc, lineNo)
           acc[lane] = steps
           legacyClipPatterns.set(currentClip, acc)
+          continue
+        }
+        if (keyword === 'auto') {
+          // v0.9: `auto <track>.<param>` opens an automation lane; its points are level-3
+          // `point` lines, collected until the next level <= 2 line closes it (above).
+          if (tokens.length !== 2) throw new BeatParseError('auto expects exactly 1 value: <track>.<param>', lineNo)
+          const target = tokens[1]!
+          const dot = target.indexOf('.')
+          if (dot === -1) throw new BeatParseError(`auto target must be <track>.<param>, got "${target}"`, lineNo)
+          const targetTrack = target.slice(0, dot)
+          const param = target.slice(dot + 1)
+          if (targetTrack !== currentTrack.id) throw new BeatParseError(`auto target track "${targetTrack}" must match the enclosing track "${currentTrack.id}"`, lineNo)
+          if (!(AUTOMATABLE_SYNTH_PARAMS as readonly string[]).includes(param)) throw new BeatParseError(`"${param}" is not an automatable synth param (expected one of ${AUTOMATABLE_SYNTH_PARAMS.join(', ')})`, lineNo)
+          if (currentClip.automation.some((l) => l.param === param)) throw new BeatParseError(`duplicate automation lane "${param}" on clip "${currentClip.id}"`, lineNo)
+          currentAutoLane = { param, points: [] }
+          currentClip.automation.push(currentAutoLane)
           continue
         }
         throw new BeatParseError(`unexpected keyword "${keyword}" inside a clip`, lineNo)
@@ -440,6 +490,16 @@ export function parse(text: string): BeatDocument {
           break
       }
       continue
+    }
+
+    if (level === 3) {
+      // v0.9: the only level-3 content is `point` lines inside an open automation lane.
+      if (currentAutoLane && keyword === 'point') {
+        currentAutoLane.points.push(parsePointLine(tokens, lineNo))
+        continue
+      }
+      if (!currentAutoLane) throw new BeatParseError(`"${keyword}" outside of an automation lane`, lineNo)
+      throw new BeatParseError(`unexpected keyword "${keyword}" inside an automation lane`, lineNo)
     }
 
     throw new BeatParseError(`indentation too deep (level ${level})`, lineNo)

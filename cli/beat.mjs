@@ -29,6 +29,7 @@ import {
   removeNote,
   addHit,
   removeHit,
+  setAutomationPoint,
   humanize,
   quantizeNotes,
   addTrack,
@@ -73,6 +74,10 @@ const USAGE = `usage:
   beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,oh] [--render]
                                                           batch humanized FEEL variants (content variation) to audition + score
   beat vary --groups                                      list the mutation groups
+  beat automate <file> <track> <clip> <param> <time> <value> [--id p1]
+                                                          add or move a clip automation point (time in fractional
+                                                          16th steps from the clip's start; --id moves that point
+                                                          if it already exists, else adds it with that id)
   beat clip <file> <track> <clip-id>                      snapshot the track's live content into a clip
   beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
   beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
@@ -502,6 +507,21 @@ function songCmd(argv) {
   writeDoc(file, before, setSong(before, sections))
 }
 
+// v0.9 clip automation (docs/phase-9-automation-plan.md)
+function automateCmd(argv) {
+  const idIdx = argv.indexOf('--id')
+  const id = idIdx !== -1 ? argv[idIdx + 1] : undefined
+  const positional = argv.filter((a, i) => !(idIdx !== -1 && (i === idIdx || i === idIdx + 1)))
+  const [file, track, clip, param, time, value] = positional
+  if (!file || !track || !clip || !param || time === undefined || value === undefined) {
+    throw new BeatEditError('automate needs <file> <track> <clip> <param> <time> <value> [--id p1]')
+  }
+  const before = readDoc(file)
+  const { doc, created } = setAutomationPoint(before, track, clip, param, { time: Number(time), value: Number(value), ...(id !== undefined ? { id } : {}) })
+  writeDoc(file, before, doc)
+  if (!created) process.stdout.write(`(moved existing point)\n`)
+}
+
 async function sampleCmd(argv) {
   const [file, id, samplePath] = argv
   if (!file || !id || !samplePath) throw new BeatEditError('sample needs <file> <sample-id> <wav-path> (path relative to the .beat file)')
@@ -775,6 +795,9 @@ async function main() {
       break
     case 'vary':
       await varyCmd(rest)
+      break
+    case 'automate':
+      automateCmd(rest)
       break
     case 'clip':
       clipCmd(rest)

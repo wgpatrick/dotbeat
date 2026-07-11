@@ -119,15 +119,35 @@ export interface BeatNote {
   velocity: number // 0..1
 }
 
+/** v0.9: one automation point — a (time, value) pair on a clip's automation lane for one synth
+ * param. `time` is in 16th steps from the CLIP's own start (v0.7 fractional-number rules, same
+ * unit as note/hit `start`). Stable id (D6); no interpolation field (curve shape — linear vs
+ * hold — is deferred, see docs/phase-9-automation-plan.md). */
+export interface BeatAutomationPoint {
+  id: string
+  time: number // 16th steps from clip start, fractional, >= 0
+  value: number // raw units of the automated param (Hz, dB, 0..1, etc. — whatever the param uses)
+}
+
+/** v0.9: one automation lane — every point recorded for a single synth param within one clip.
+ * A lane only exists while it has >= 1 point (canonical elision: no lane = no automation for
+ * that param — one canonical form per state, same discipline as v0.3's synth-field elision). */
+export interface BeatAutomationLane {
+  param: string // a key from AUTOMATABLE_SYNTH_PARAMS below
+  points: BeatAutomationPoint[]
+}
+
 /** v0.4: a named snapshot of playable content, owned by a track. Mirrors beatlab's Clip (a
  * value copy, not a reference — see docs/phase-6-plan.md). Synth-track clips carry notes;
  * drum-track clips carry hits (v0.8; was a five-lane pattern through v0.7 — the parser
- * migrates). Clip automation is deliberately unmodeled (needs the automation grammar). Ids are
- * track-scoped human slugs (D6). */
+ * migrates). v0.9: clips may also carry automation lanes (deliberately NOT modeled at the live
+ * track / non-clip level — see docs/format-spec.md's v0.9 section for why clip-scoped-only was
+ * chosen). Ids are track-scoped human slugs (D6). */
 export interface BeatClip {
   id: string
   notes: BeatNote[] // synth tracks only; always [] for drums
   hits: BeatDrumHit[] // drum tracks only; always [] for synth
+  automation: BeatAutomationLane[] // v0.9; [] when the clip has none (serialized only when present)
 }
 
 /** v0.4: a scene maps tracks to clips — one complete statement of "what plays". Mirrors
@@ -277,6 +297,16 @@ export const SYNTH_FIELDS: readonly SynthFieldDef[] = [
 ] as const
 
 export const SYNTH_FIELD_BY_KEY: ReadonlyMap<string, SynthFieldDef> = new Map(SYNTH_FIELDS.map((f) => [f.key, f]))
+
+/** v0.9: the params clip automation may target — every NUMERIC synth field (core 9 minus the
+ * enum `osc`, plus every v0.3 field of kind 'number'). Enum/bool/trackref fields (osc,
+ * wtTable, filterType, osc2Type, lfoDest/lfo2Dest, lfoShape, duckSource) don't have a
+ * meaningful (time, value) curve, so they're excluded — derived from the existing tables
+ * rather than a hand-maintained parallel list (the "one table, many consumers" house style). */
+export const AUTOMATABLE_SYNTH_PARAMS: readonly string[] = [
+  ...SYNTH_PARAM_ORDER.filter((k) => k !== 'osc'),
+  ...SYNTH_FIELDS.filter((f) => f.kind === 'number').map((f) => f.key),
+]
 
 /** A BeatSynth with every optional field at its canonical default. */
 export function defaultSynthFields(): Omit<BeatSynth, (typeof SYNTH_PARAM_ORDER)[number]> {

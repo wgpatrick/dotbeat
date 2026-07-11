@@ -1,4 +1,4 @@
-import type { BeatDrumHit, BeatDocument, BeatNote, BeatScene, BeatTrack } from './document.js'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatDrumHit, BeatDocument, BeatNote, BeatScene, BeatTrack } from './document.js'
 import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -17,6 +17,25 @@ function sortedHitLines(hits: BeatDrumHit[], indent: string): string[] {
   return [...hits]
     .sort((a, b) => a.start - b.start || laneIndex(a.lane) - laneIndex(b.lane) || a.id.localeCompare(b.id))
     .map((h) => `${indent}hit ${h.id} ${h.lane} ${formatNumber(h.start)} ${formatNumber(h.velocity)}`)
+}
+
+// v0.9: canonical automation point order is (time, id) ascending, same discipline as notes/hits.
+function sortedPointLines(points: BeatAutomationPoint[], indent: string): string[] {
+  return [...points]
+    .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id))
+    .map((p) => `${indent}point ${p.id} ${formatNumber(p.time)} ${formatNumber(p.value)}`)
+}
+
+// v0.9: automation lanes serialize in source order (first-seen — like clips themselves; order
+// of creation is meaningful, not alphabetized). `trackId` prefixes the target so each `auto`
+// line is self-describing (same <track>.<param> addressing `beat set` already uses).
+function serializeAutomationLanes(trackId: string, lanes: BeatAutomationLane[], indent: string): string[] {
+  const lines: string[] = []
+  for (const lane of lanes) {
+    lines.push(`${indent}auto ${trackId}.${lane.param}`)
+    lines.push(...sortedPointLines(lane.points, `${indent}  `))
+  }
+  return lines
 }
 
 function serializeTrack(t: BeatTrack): string[] {
@@ -60,6 +79,7 @@ function serializeTrack(t: BeatTrack): string[] {
     lines.push(`  clip ${clip.id}`)
     if (t.kind === 'drums') lines.push(...sortedHitLines(clip.hits, '    '))
     lines.push(...sortedNoteLines(clip.notes, '    '))
+    lines.push(...serializeAutomationLanes(t.id, clip.automation, '    '))
   }
   if (t.kind === 'drums') {
     lines.push(...sortedHitLines(t.hits, '  '))

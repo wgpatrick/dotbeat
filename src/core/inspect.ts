@@ -2,9 +2,16 @@
 // for humans and agents. (The CLI's --json mode doesn't come through here — it just prints the
 // parsed document; this is the human-shaped view.)
 
-import type { BeatDocument, BeatTrack } from './document.js'
+import type { BeatClip, BeatDocument, BeatTrack } from './document.js'
 import { DRUM_LANES } from './document.js'
 import { formatNumber } from './format.js'
+
+// v0.9: ", auto: cutoff(3), volume(2)" — lane names + point counts, in lane order; empty when
+// the clip has no automation (the common case, and every v0.8-and-earlier file).
+function clipAutomationSummary(c: BeatClip): string {
+  if (c.automation.length === 0) return ''
+  return `, auto: ${c.automation.map((l) => `${l.param}(${l.points.length})`).join(', ')}`
+}
 
 function describeTrack(t: BeatTrack, loopSteps: number): string[] {
   const lines: string[] = []
@@ -43,7 +50,7 @@ function describeTrack(t: BeatTrack, loopSteps: number): string[] {
     }
   }
   if (t.clips.length > 0) {
-    lines.push(`  clips: ${t.clips.map((c) => `${c.id} (${t.kind === 'drums' ? `${c.hits.length} hits` : `${c.notes.length} note${c.notes.length === 1 ? '' : 's'}`})`).join(', ')}`)
+    lines.push(`  clips: ${t.clips.map((c) => `${c.id} (${t.kind === 'drums' ? `${c.hits.length} hits` : `${c.notes.length} note${c.notes.length === 1 ? '' : 's'}`}${clipAutomationSummary(c)})`).join(', ')}`)
   }
   return lines
 }

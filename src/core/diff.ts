@@ -10,7 +10,7 @@
 // machine-applicable changeset, and — later — the natural undo / --dry-run representation. Each
 // entry carries `before`/`after`, so inverting a diff is structurally trivial when we need it.
 
-import type { BeatDrumHit, BeatDocument, BeatNote, BeatTrack, DrumLane } from './document.js'
+import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatNote, BeatTrack, DrumLane } from './document.js'
 import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -43,6 +43,38 @@ export type DiffEntry =
   | { kind: 'lane-sample'; trackId: string; lane: DrumLane; before: string | null; after: string | null }
   // v0.6 instrument tracks
   | { kind: 'instrument-param'; trackId: string; param: 'soundfont' | 'program' | 'volume' | 'pan'; before: string | number; after: string | number }
+  // v0.9 clip automation (matched by (clipId, param, pointId) — points are stable ids, like notes/hits)
+  | { kind: 'automation-point-added'; trackId: string; clipId: string; param: string; point: { id: string; time: number; value: number } }
+  | { kind: 'automation-point-removed'; trackId: string; clipId: string; param: string; point: { id: string; time: number; value: number } }
+  | { kind: 'automation-point-changed'; trackId: string; clipId: string; param: string; pointId: string; changes: { field: 'time' | 'value'; before: number; after: number }[] }
+
+// v0.9: diffs one clip's automation lanes. Lanes match by param name; points within a lane match
+// by id (like notes/hits) — a point moved in time or re-valued reports as one changed entry, not
+// a remove+add pair, so the diff reads as "this point moved," not "a point vanished and another
+// appeared nearby."
+function diffClipAutomation(trackId: string, clipId: string, aLanes: BeatAutomationLane[], bLanes: BeatAutomationLane[], out: DiffEntry[]) {
+  const aByParam = new Map(aLanes.map((l) => [l.param, l]))
+  const bByParam = new Map(bLanes.map((l) => [l.param, l]))
+  const params = new Set([...aByParam.keys(), ...bByParam.keys()])
+  for (const param of params) {
+    const aPoints = new Map((aByParam.get(param)?.points ?? []).map((p) => [p.id, p]))
+    const bPoints = new Map((bByParam.get(param)?.points ?? []).map((p) => [p.id, p]))
+    for (const [pid, p] of aPoints) {
+      if (!bPoints.has(pid)) out.push({ kind: 'automation-point-removed', trackId, clipId, param, point: p })
+    }
+    for (const [pid, p] of bPoints) {
+      const before = aPoints.get(pid)
+      if (!before) {
+        out.push({ kind: 'automation-point-added', trackId, clipId, param, point: p })
+        continue
+      }
+      const changes: { field: 'time' | 'value'; before: number; after: number }[] = []
+      if (before.time !== p.time) changes.push({ field: 'time', before: before.time, after: p.time })
+      if (before.value !== p.value) changes.push({ field: 'value', before: before.value, after: p.value })
+      if (changes.length) out.push({ kind: 'automation-point-changed', trackId, clipId, param, pointId: pid, changes })
+    }
+  }
+}
 
 export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
   const out: DiffEntry[] = []
@@ -156,6 +188,11 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
       for (const k of aHitSet) if (!bHitSet.has(k)) hitDelta++
       for (const k of bHitSet) if (!aHitSet.has(k)) hitDelta++
       if (noteDelta || hitDelta) out.push({ kind: 'clip-changed', trackId: id, clipId: cid, noteDelta, hitDelta })
+
+      // v0.9 clip automation: unlike notes/hits above (reported as a delta count — a clip is a
+      // snapshot, re-snapshot noise is common), automation points are itemized per-point, matched
+      // by (param, id) — a knob move mid-clip is a specific musical fact worth naming, not noise.
+      diffClipAutomation(id, cid, ca.automation, cb.automation, out)
     }
   }
 
@@ -299,6 +336,15 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'instrument-param':
         lines.push(`${e.trackId}: ${e.param} ${fmtVal(e.before)} -> ${fmtVal(e.after)}`)
+        break
+      case 'automation-point-added':
+        lines.push(`${e.trackId}: clip "${e.clipId}" ${e.param} automation point added ${e.point.id} (step ${formatNumber(e.point.time)}, value ${formatNumber(e.point.value)})`)
+        break
+      case 'automation-point-removed':
+        lines.push(`${e.trackId}: clip "${e.clipId}" ${e.param} automation point removed ${e.point.id} (step ${formatNumber(e.point.time)}, value ${formatNumber(e.point.value)})`)
+        break
+      case 'automation-point-changed':
+        lines.push(`${e.trackId}: clip "${e.clipId}" ${e.param} automation point ${e.pointId} ${e.changes.map((c) => `${c.field} ${formatNumber(c.before)} -> ${formatNumber(c.after)}`).join(', ')}`)
         break
       case 'song-changed': {
         const fmt = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}(${x.bars})`).join(' ') : '(no song)')
