@@ -117,3 +117,42 @@ Shipped: 123/123 tests green; both repos pushed.
   freepats/muldjordkit" to unblock), spessasynth SF2 tier (next phase), and the drum-craft prep
   conventions (research 09 struck out on book-grade sources — prep-oneshot defaults remain
   self-derived).
+
+## Phase 10 Stream B update (2026-07-11)
+
+Both deferred items above are resolved for real, against verified real content (not a mock/stub
+bank) — see `docs/phase-10-plan.md` Stream B.
+
+- **FluidR3 GM: fetched, MIT-verified, bundled.** `scripts/fetch-fluidr3-gm.mjs` pulls the
+  Debian `fluid-soundfont-gm` package (a straight repack of the upstream musescore.org tarball;
+  license double-checked against both the Debian `copyright` file AND the MIT-license comment
+  embedded in the .sf2's own INFO chunk — "Licensed under the MIT License.", engineer "Frank
+  Wen", 13 named contributors, matching research 09's audit exactly), trims the full 148MB bank
+  down to 8 named GM presets (`Yamaha Grand Piano`, `Nylon String Guitar`, `Acoustic Bass`,
+  `Violin`, `Trumpet`, `Flute`, `Synth Drum`, and the `Standard` GM drum kit) via
+  spessasynth_core's own `trim()`/`writeSF2()` — same "small variant for repo size" move as the
+  piano fixture — down to 26MB, committed at `presets/sf2/fluidr3-gm-small.sf2` +
+  `.sf2.json` sidecar. **Exit criterion met**: `beat inspect` on a real `.beat` project pointed
+  at this bank lists all 8 real GM program names verbatim (verified live, plus
+  `test/fluidr3-gm-preset.test.ts`), exercising the multi-preset listing machinery
+  (Phase 9 Stream C) against real content for the first time.
+- **MuldjordKit: NOT actually blocked anymore — fetched, CC-BY-4.0-verified, bundled.** Phase 9
+  Stream F was right: `github.com/freepats/muldjordkit/releases/...` 302-redirects to a working
+  `release-assets.githubusercontent.com` URL and downloads fine from this machine.
+  `scripts/fetch-muldjordkit.mjs` pulls the SF2 release variant (not `.h2drumkit` — same
+  SoundBankLoader path as the other two fixtures, no new loader work needed), verifies
+  `LICENSE.txt` reads as CC-BY 4.0 and the README names Lars Muldjord, trims the full ~209MB /
+  480-sample kit to 2 velocity layers/key (76 samples, 43MB) via the same trim()/writeSF2() move,
+  committed at `presets/sf2/muldjordkit-small.sf2` + sidecar carrying both required credit lines
+  (Lars Muldjord's original + FreePats' assembly, plus the upstream DrumGizmo.org attribution
+  ask). Verified live: `beat inspect` loads it and reports `"MuldjordKit"` as the single preset
+  (`test/muldjordkit-preset.test.ts`). **Not yet done**: breaking this out into per-lane
+  one-shots (the `kit-init`/`kit-audiophob` convention — `presets/kit-<name>/kick.wav` etc.) —
+  mapping the kit's 13 real pieces onto dotbeat's 5 drum lanes is a curatorial judgment call
+  (the kit has no clap, for instance), not a fetch step, and stayed out of this stream's scope
+  (`presets/sf2/` only). Left as a clearly-flagged follow-up, not silently dropped.
+- Both fetch scripts are additive and reproducible (`scripts/fetch-fluidr3-gm.mjs`,
+  `scripts/fetch-muldjordkit.mjs`) — re-running them re-downloads and re-verifies from upstream
+  rather than trusting a cached blob's provenance.
+- `npm test`: 283/277/0/6 (was 280/274/0/6; +3 real tests against the newly bundled content, 0
+  regressions).
