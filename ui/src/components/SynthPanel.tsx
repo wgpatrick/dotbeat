@@ -32,6 +32,18 @@ function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec;
     )
   }
 
+  if (spec.kind === 'bool') {
+    // lfoSync/lfo2Sync (Phase 18 Stream R): a plain checkbox. Edit values are the literal strings
+    // "true"/"false" — edit.ts's 'bool' SYNTH_FIELD kind parses exactly those two tokens.
+    const value = p[spec.key] === true
+    return (
+      <label className="param-enum" title={spec.hint}>
+        <span className="knob-label">{spec.label}</span>
+        <input type="checkbox" checked={value} onChange={(ev) => postEdit(path, ev.target.checked ? 'true' : 'false')} />
+      </label>
+    )
+  }
+
   if (spec.kind === 'trackref') {
     // duckSource: null/undefined -> "none"; otherwise the referenced track id.
     const raw = p[spec.key]

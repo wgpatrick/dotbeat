@@ -7,6 +7,37 @@ export type OscType = 'sine' | 'triangle' | 'sawtooth' | 'square'
 
 export type TrackKind = 'synth' | 'drums' | 'instrument'
 
+/** Phase 18 Stream R: an LFO rate expressed as a tempo-synced note division instead of free Hz —
+ * Ableton's convention (Synced / Triplet / Dotted). `t` = triplet (2/3 the plain division's
+ * length), `d` = dotted (1.5x). Promoted from `DELIBERATELY_UNMODELED` (`lfoSync`/`lfoSyncRate`,
+ * `lfo2Sync`/`lfo2SyncRate` — see src/core/convert.ts) now that LFOs are getting real attention
+ * (docs/research/18-ableton-ui-architecture.md's LFO-depth section). */
+export type LfoSyncRate = '1/1' | '1/2' | '1/4' | '1/8' | '1/16' | '1/32' | '1/4t' | '1/8t' | '1/16t' | '1/4d' | '1/8d' | '1/16d'
+
+/** Phase 18 Stream R: the enumerated LFO destination set — ONE shared list for both lfoDest and
+ * lfo2Dest (see LFO_DESTS below), widened from the original 5-value {off,pitch,cutoff,amp,wtPos}
+ * toward AUTOMATABLE_SYNTH_PARAMS coverage per research 18's recommendation ("more LFOs and/or a
+ * larger but still-enumerated, still-single-token destination set... widening each LFO's allowed
+ * destination enum... If a user wants LFO1 on pan, they can't. Fix that."). Kept literal/enumerated
+ * (no free-routing matrix) — see docs/research/18-ableton-ui-architecture.md's LFO section. */
+export type LfoDestination =
+  | 'off'
+  | 'pitch'
+  | 'cutoff'
+  | 'resonance'
+  | 'amp'
+  | 'pan'
+  | 'wtPos'
+  | 'sendReverb'
+  | 'sendDelay'
+  | 'sendMod'
+  | 'eqLow'
+  | 'eqMid'
+  | 'eqHigh'
+  | 'compMix'
+  | 'distortionMix'
+  | 'bitcrushMix'
+
 // BeatLab's own lane set and order (DRUM_LANES in beatlab/src/types.ts). Order is canonical for
 // serialization: all five lanes are always emitted, in this order, so toggling any drum step is
 // always a one-line diff and never inserts or deletes lines (the Humdrum fixed-grid discipline —
@@ -63,13 +94,17 @@ export interface BeatSynth {
   filterEnvDecay: number
   filterEnvSustain: number
   filterEnvRelease: number
-  lfoRate: number // Hz
+  lfoRate: number // Hz (ignored when lfoSync is true — see lfoSyncRate)
   lfoDepth: number // 0..1
-  lfoDest: 'off' | 'pitch' | 'cutoff' | 'amp' | 'wtPos'
+  lfoDest: LfoDestination
+  lfoSync: boolean // true = lfoSyncRate (note division) drives the rate instead of lfoRate (Hz)
+  lfoSyncRate: LfoSyncRate
   lfoShape: 'sine' | 'custom'
   lfo2Rate: number
   lfo2Depth: number
-  lfo2Dest: 'off' | 'pitch' | 'cutoff' | 'amp' | 'wtPos'
+  lfo2Dest: LfoDestination
+  lfo2Sync: boolean
+  lfo2SyncRate: LfoSyncRate
   glide: number // seconds
   keytrackAmount: number
   velToFilterAmount: number
@@ -217,7 +252,57 @@ export interface BeatDocument {
 
 export const OSC_TYPES: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square']
 
-const LFO_DESTS = ['off', 'pitch', 'cutoff', 'amp', 'wtPos'] as const
+/** Phase 18 Stream R: widened from the original {off,pitch,cutoff,amp,wtPos} — see LfoDestination
+ * above for the rationale. Shared by lfoDest and lfo2Dest (SYNTH_FIELDS below): this ALSO fixes a
+ * real pre-existing bug — ui/src/audio/engine.ts's LFO2 implementation already switched on
+ * 'pan'/'sendReverb'/'sendDelay'/'sendMod'/'eqLow'/'eqMid'/'eqHigh'/'distortionMix', but the
+ * document schema only ever allowed the original 5 values for lfo2Dest too, so those engine
+ * branches were unreachable dead code — no document could legally set lfo2Dest to 'pan'. Exported
+ * so ui/src/audio/engine.ts's hand-maintained mirror can be kept in sync by inspection. */
+export const LFO_DESTS: readonly LfoDestination[] = [
+  'off',
+  'pitch',
+  'cutoff',
+  'resonance',
+  'amp',
+  'pan',
+  'wtPos',
+  'sendReverb',
+  'sendDelay',
+  'sendMod',
+  'eqLow',
+  'eqMid',
+  'eqHigh',
+  'compMix',
+  'distortionMix',
+  'bitcrushMix',
+]
+
+/** Phase 18 Stream R: the tempo-sync note-division vocabulary (lfoSyncRate/lfo2SyncRate) —
+ * Ableton's convention (plain / triplet 't' / dotted 'd'). Exported so ui/src/audio/engine.ts's
+ * mirror and ui/src/components/synthParams.ts's dropdown can match exactly. */
+export const LFO_SYNC_RATES: readonly LfoSyncRate[] = ['1/1', '1/2', '1/4', '1/8', '1/16', '1/32', '1/4t', '1/8t', '1/16t', '1/4d', '1/8d', '1/16d']
+
+/** Seconds-per-cycle of one tempo-synced LFO division at a given bpm. A "1/N" division is N-ths
+ * of a whole note (so "1/4" = one quarter note = 60/bpm seconds, matching a DAW click); 't'
+ * (triplet) shortens it to 2/3 (three fit where two normally would); 'd' (dotted) lengthens it to
+ * 1.5x (a note plus half its own length). Falls back to a quarter note for any unrecognized token
+ * (should never happen — callers only ever pass an LFO_SYNC_RATES member). */
+export function lfoSyncDivisionSeconds(bpm: number, division: LfoSyncRate): number {
+  const m = /^1\/(\d+)([td]?)$/.exec(division)
+  const denom = m ? Number(m[1]) : 4
+  const mod = m?.[2]
+  let seconds = ((60 / bpm) * 4) / denom // a whole note is 4 quarter notes long
+  if (mod === 't') seconds *= 2 / 3
+  else if (mod === 'd') seconds *= 1.5
+  return seconds
+}
+
+/** The synced LFO rate in Hz (1/period) — what lfoValueAt-style sine evaluation actually wants. */
+export function lfoSyncRateHz(bpm: number, division: LfoSyncRate): number {
+  const seconds = lfoSyncDivisionSeconds(bpm, division)
+  return seconds > 0 ? 1 / seconds : 1
+}
 
 /** The REQUIRED core 9 — always serialized, must all appear in every synth block (v0.1
  * contract, unchanged). BeatLab's own P_FULL progressive-reveal order, pan appended. */
@@ -261,10 +346,14 @@ export const SYNTH_FIELDS: readonly SynthFieldDef[] = [
   { key: 'lfoRate', kind: 'number', default: 4 },
   { key: 'lfoDepth', kind: 'number', default: 0 },
   { key: 'lfoDest', kind: 'enum', default: 'off', values: LFO_DESTS },
+  { key: 'lfoSync', kind: 'bool', default: false },
+  { key: 'lfoSyncRate', kind: 'enum', default: '1/4', values: LFO_SYNC_RATES },
   { key: 'lfoShape', kind: 'enum', default: 'sine', values: ['sine', 'custom'] },
   { key: 'lfo2Rate', kind: 'number', default: 3 },
   { key: 'lfo2Depth', kind: 'number', default: 0 },
   { key: 'lfo2Dest', kind: 'enum', default: 'off', values: LFO_DESTS },
+  { key: 'lfo2Sync', kind: 'bool', default: false },
+  { key: 'lfo2SyncRate', kind: 'enum', default: '1/8', values: LFO_SYNC_RATES },
   { key: 'glide', kind: 'number', default: 0 },
   { key: 'keytrackAmount', kind: 'number', default: 0 },
   { key: 'velToFilterAmount', kind: 'number', default: 0 },

@@ -237,16 +237,22 @@ v0.2's 9-param synth block could carry a melody but not a *sound* — the A/B ex
 `phase-5-plan.md` showed the same notes go from "video game music" to a real mix purely through
 the ~50 store-level params the format couldn't express. v0.3 exposes them:
 
-- **~46 optional synth params** may appear after the core 9, one name-value pair per line at the
+- **~50 optional synth params** may appear after the core 9, one name-value pair per line at the
   same indent: osc layers (`osc2Type/osc2Level/osc2Detune`, `subLevel`, `noiseLevel`, `fm*`,
   `unisonVoices/unisonWidth`, `wtTable/wtPos`), filter (`filterType`, `filterEnv*`), motion
-  (`lfo*`, `lfo2*`, `glide`, `keytrackAmount`, `velToFilterAmount`, `macroValue`), inserts
+  (`lfo*`, `lfo2*` — including tempo-sync `lfoSync/lfoSyncRate`/`lfo2Sync/lfo2SyncRate`, Phase 18 —
+  plus `glide`, `keytrackAmount`, `velToFilterAmount`, `macroValue`), inserts
   (`eq*`, `comp*`, `distortion*`, `bitcrush*`), sends (`sendReverb/sendDelay/sendMod`),
   sidechain (`duckSource` — a track id or `none` — plus `duckAmount`), and drum-voice shaping
   (`kickTune/kickPunch/kickDecay`, `snareTone/snareDecay`, `hatTone/hatDecay/openHatDecay`,
   audible on drum tracks). The full table, with types, enum values, and frozen defaults, is
   `SYNTH_FIELDS` in `src/core/document.ts` — the single source of truth that drives the parser,
-  serializer, editor, differ, and converter.
+  serializer, editor, differ, and converter. `lfoDest`/`lfo2Dest` share one enumerated destination
+  set (`LFO_DESTS`, also in `document.ts`) — kept literal (one canonical token, no free-routing
+  matrix) per `docs/research/18-ableton-ui-architecture.md`'s LFO-depth recommendation; Phase 18
+  Stream R widened it toward the automatable-param set (`resonance`, `pan`, sends, EQ, `compMix`,
+  `distortionMix`, `bitcrushMix` — previously the two LFOs had inconsistent/partly-dead
+  destination pools, now both reach the full shared set).
 - **Canonical elision**: an optional param is serialized **iff its value differs from its frozen
   default**, in `SYNTH_FIELDS` table order. Missing-at-parse means default. This keeps every
   state at exactly one canonical form (the round-trip property is unchanged), keeps files
@@ -260,9 +266,11 @@ the ~50 store-level params the format couldn't express. v0.3 exposes them:
   canonical form: elided).
 - **Deliberately unmodeled** (`DELIBERATELY_UNMODELED` in `src/core/convert.ts`): wavetable
   frame arrays (`wtCustomA/B`), step-LFO arrays (`lfoSteps`), insert ordering (`insertOrder`),
-  tempo-sync pairs (`lfoSync/lfoSyncRate`, `lfo2Sync/lfo2SyncRate`), and the arp
-  (`arpOn/arpRate/arpPattern`). Each needs grammar design of its own (arrays, ordered lists,
-  redundant either-or pairs); the converter reports exactly these as dropped and nothing else.
+  and the arp (`arpOn/arpRate/arpPattern`). Each needs grammar design of its own (arrays, ordered
+  lists); the converter reports exactly these as dropped and nothing else. (Tempo-sync pairs
+  `lfoSync/lfoSyncRate`/`lfo2Sync/lfo2SyncRate` were on this list through Phase 17 — a well-bounded
+  bool+enum pair, unlike the array-shaped fields above — and were promoted to real `SYNTH_FIELDS`
+  in Phase 18 Stream R.)
 - **Presets are tooling, not grammar.** There is no preset reference or include in the file — a
   document always spells out its own sound in full. `beat preset <file> <track> <name>` (and the
   `beat_preset` MCP tool) applies a named bag of param edits from `presets/factory.json` through

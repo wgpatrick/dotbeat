@@ -91,16 +91,16 @@ const BEAT_FORMAT_VERSION = '0.9'
 
 /** SynthParams fields the format deliberately does NOT model (each needs grammar design of its
  * own — large arrays, ordered lists, or redundant pairs; see docs/phase-5-plan.md). These are
- * the only fields a conversion is allowed to drop. */
+ * the only fields a conversion is allowed to drop. Phase 18 Stream R promoted `lfoSync`/
+ * `lfoSyncRate`/`lfo2Sync`/`lfo2SyncRate` OUT of this list — they're real SYNTH_FIELDS now (a
+ * well-bounded bool+enum pair, not the open-ended arrays/orderings the rest of this list is),
+ * so a conversion carries them across instead of dropping them (see toBeatSynth's generic
+ * SYNTH_FIELDS loop, which now covers all four automatically). */
 export const DELIBERATELY_UNMODELED = [
   'wtCustomA',
   'wtCustomB',
   'lfoSteps',
   'insertOrder',
-  'lfoSync',
-  'lfoSyncRate',
-  'lfo2Sync',
-  'lfo2SyncRate',
   'arpOn',
   'arpRate',
   'arpPattern',
