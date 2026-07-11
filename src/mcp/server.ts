@@ -42,6 +42,7 @@ import {
 } from '../core/index.js'
 import { decodeWav, analyze, lint, formatLint } from '../metrics/index.js'
 import { checkpoint, history, restore } from '../history/index.js'
+import { suggestNext, parseScoresLog } from '../vary/suggest.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -507,6 +508,30 @@ const TOOLS: ToolDef[] = [
           else resolve(stdout)
         })
       }),
+  },
+  {
+    name: 'beat_suggest',
+    description:
+      'Read a track\'s beat-scores.jsonl exhaust (written by beat_score / `beat score`) and propose the next `beat vary` round, biased toward the mutation group that has scored best so far. Aggregates picked-vs-rejected counts per group (Bradley-Terry odds-form against an implicit "not picked" baseline — a ranking signal, not a proven head-to-head result, since each vary round tests only one group) and, where enough picks share a numeric param, reports whether picks trend toward one end of that param\'s vary.ts range (e.g. brighter/darker on filter.cutoff). With no scored rounds yet for the track (cold start), says so and recommends a sensible first round instead of guessing. Returns the reasoning as plain text ending in a copy-pasteable `beat vary` command; never a bare score.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'path shown in the recommended command (the project this suggestion is for)' },
+        track: { type: 'string' },
+        target: { type: 'string', description: 'optional lane/id/param focus filter over the scores log (matched against round group names and picks\' edit paths / feel recipes)' },
+        log: { type: 'string', description: 'path to beat-scores.jsonl, default "beat-scores.jsonl"' },
+      },
+      required: ['file', 'track'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const track = str(args, 'track')
+      const logPath = typeof args.log === 'string' ? args.log : 'beat-scores.jsonl'
+      const text = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
+      const entries = parseScoresLog(text)
+      const suggestion = suggestNext(entries, track, { file, ...(typeof args.target === 'string' ? { target: args.target } : {}) })
+      return suggestion.reasoning.join('\n') + '\n'
+    },
   },
   {
     name: 'beat_checkpoint',
