@@ -34,6 +34,50 @@ test('the factory library parses and validates against the live field table', ()
   }
 })
 
+// Phase 12 Stream 2 (docs/phase-12-presets.md): the library grew from 4 presets to a real
+// categorized set covering both drum-voice kits and the full synth taxonomy research turned up
+// (Bass/Lead/Pad/Pluck/Keys/Arp/FX). These are tripwires against the count/shape silently
+// regressing, not a re-statement of every preset's params.
+test('the factory library covers a genre-named drum-voice kit per researched convention', () => {
+  const presets = parsePresetLibrary(factoryJson)
+  const drumKits = presets.filter((p) => p.kind === 'drums').map((p) => p.name)
+  assert.ok(drumKits.length >= 6, `expected >= 6 drum-voice kits, got ${drumKits.length}`)
+  for (const expected of ['driving-kit', '808-trap-kit', 'techno-kit', 'boom-bap-kit', 'lofi-kit', 'acoustic-rock-kit']) {
+    assert.ok(drumKits.includes(expected), `factory library must include the "${expected}" drum-voice kit`)
+  }
+})
+
+test('the factory library covers the researched synth taxonomy with multiple presets per category', () => {
+  const presets = parsePresetLibrary(factoryJson)
+  const synthPresets = presets.filter((p) => p.kind !== 'drums')
+  assert.ok(synthPresets.length >= 24, `expected >= 24 synth presets, got ${synthPresets.length}`)
+  // one representative name per researched category (Bass/Lead/Pad/Pluck/Keys/Arp/FX) — proves
+  // every category actually shipped, not just that the total count grew somewhere.
+  const names = synthPresets.map((p) => p.name)
+  for (const expected of [
+    'sub-sine-bass', 'reese-bass', 'wobble-bass', 'acid-bass', 'fm-bass', // Bass
+    'supersaw-lead', 'pluck-lead', 'square-chip-lead', 'fm-bell-lead', // Lead
+    'warm-pad', 'string-pad', 'glass-pad', 'dark-pad', // Pad
+    'crystal-pluck', 'warm-pluck', 'fm-pluck', 'marimba-pluck', // Pluck
+    'e-piano', 'bell-keys', 'organ-keys', 'warm-keys', // Keys
+    'arp-pluck', 'arp-bell', 'arp-sequence', // Arp
+    'riser-sweep', 'noise-impact', 'drone-texture', // FX
+  ]) {
+    assert.ok(names.includes(expected), `factory library must include "${expected}"`)
+  }
+})
+
+test('no two presets in the factory library share an identical param bag — every preset is genuinely distinct, not a relabeled duplicate', () => {
+  const presets = parsePresetLibrary(factoryJson)
+  const seen = new Map<string, string>()
+  for (const p of presets) {
+    const key = `${p.kind}:${JSON.stringify(Object.entries(p.params).sort())}`
+    const dupeOf = seen.get(key)
+    assert.ok(!dupeOf, `"${p.name}" has identical params to "${dupeOf}"`)
+    seen.set(key, p.name)
+  }
+})
+
 test('every factory preset applies cleanly to a fresh track of its kind', () => {
   for (const preset of parsePresetLibrary(factoryJson)) {
     const doc = projectWithDrums()
