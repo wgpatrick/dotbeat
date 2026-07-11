@@ -109,9 +109,11 @@ Shipped: 123/123 tests green; both repos pushed.
 - **Content**: kit-init (self-rendered CC0) + kit-audiophob (CC0, Debian-vetted, Freesound IDs
   in provenance) bundled; Freesound CC0 pipeline live at both audition (previews) and original
   (OAuth2) quality — full search→verify-license→download→prep→provenance in one command.
-- **Deferred, honestly**: live-browser verification of the bridge lane-loading (implemented +
-  typechecked; the daemon endpoint and the engine loader are each verified independently —
-  extending verify-m1's Playwright harness to assert lane audio is a follow-up), MuldjordKit
-  (blocked on GitHub-release proxy access), spessasynth SF2 tier (next), and the drum-craft
-  prep conventions (research 09 struck out on book-grade sources — prep-oneshot defaults remain
+- **Browser leg live-verified** (`scripts/verify-phase7.mjs`, full real stack: daemon + vite +
+  headless Chromium with ?daw=): the bridge fetched and loaded the sample-backed kick 654 ms
+  after page load with zero errors, and a `beat lane` edit to the FILE propagated into the
+  running browser in 75 ms. Every phase exit criterion is now met.
+- **Deferred, honestly**: MuldjordKit (blocked on GitHub-release proxy access — say "add
+  freepats/muldjordkit" to unblock), spessasynth SF2 tier (next phase), and the drum-craft prep
+  conventions (research 09 struck out on book-grade sources — prep-oneshot defaults remain
   self-derived).
