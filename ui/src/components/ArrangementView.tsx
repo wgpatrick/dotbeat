@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useStore } from '../state/store'
+import { useStore, isEffectivelyMuted } from '../state/store'
 import { postEdit, postSelection } from '../daemon/bridge'
 import { DRUM_LANES, type BeatDocument, type BeatTrack, type DrumLane } from '../types'
 
@@ -13,11 +13,103 @@ import { DRUM_LANES, type BeatDocument, type BeatTrack, type DrumLane } from '..
 // redraw on data/selection/size change (no rAF loop needed — matches Scope.tsx's convention but
 // without the animation loop).
 
-const ROW_H = 44
-const HEADER_W = 128
+const ROW_H = 56 // taller than the pre-Phase-18 44px: the header now stacks a name row + an inline mixer strip
+const HEADER_W = 264 // wide enough for the inline channel strip (mute/solo/volume/pan/sends) in the track header
 const RULER_H = 26
 const DETAIL_PX_PER_BAR = 32 // at or above this, draw real ticks; below, density blocks
 const DENSITY_REF = 6 // events/bar that reads as full-opacity (soft normalization, not a hard cap)
+
+// ── Inline channel-strip helpers (Phase 18): the arrangement track header carries a compact subset
+// of the full mixer, reusing MixerView's exact data-flow — volume/pan write `<id>.volume`/`<id>.pan`
+// (one-line diffs) and mute/solo drive the SAME store flags the engine reads per-tick to gate audio
+// (isEffectivelyMuted, Phase 14 Stream E). These four tiny formatters mirror MixerView's (kept local
+// so MixerView stays untouched — it remains the full-strip overlay). ──────────────────────────────
+const VOL_MIN = -60
+const VOL_MAX = 6
+function trackVolume(t: BeatTrack): number {
+  return t.kind === 'instrument' && t.instrument ? t.instrument.volume : t.synth.volume
+}
+function trackPan(t: BeatTrack): number {
+  return t.kind === 'instrument' && t.instrument ? t.instrument.pan : t.synth.pan
+}
+const fmtDb = (v: number) => (v <= VOL_MIN ? '-∞' : `${v > 0 ? '+' : ''}${v.toFixed(1)}`)
+const fmtPan = (v: number) => (Math.abs(v) < 0.02 ? 'C' : v < 0 ? `L${Math.round(-v * 100)}` : `R${Math.round(v * 100)}`)
+
+// Built-in sends (research 18: dotbeat's fixed reverb/delay/mod buses, not arbitrary return tracks).
+// Shown as glanceable badges for the sends that are actually dialed in — the same "read the real
+// synth-block field" approach MixerView's FxBadges uses. Instrument tracks carry a synth block the
+// engine ignores for playback, so (like FxBadges) we don't show sends there.
+const SEND_KEYS: { key: string; label: string }[] = [
+  { key: 'sendReverb', label: 'Rv' },
+  { key: 'sendDelay', label: 'Dl' },
+  { key: 'sendMod', label: 'Md' },
+]
+
+/** The compact inline channel strip embedded in each arrangement track header. Subscribes to the
+ * store's mute/solo flags (so it reflects and drives the real audio gate) and writes volume/pan via
+ * the same edit path the full MixerView uses. */
+function InlineStrip({ track }: { track: BeatTrack }) {
+  const muted = useStore((s) => !!s.mutes[track.id])
+  const soloed = useStore((s) => !!s.solos[track.id])
+  const toggleMute = useStore((s) => s.toggleMute)
+  const toggleSolo = useStore((s) => s.toggleSolo)
+
+  const vol = trackVolume(track)
+  const pan = trackPan(track)
+  const sends = track.kind === 'instrument' ? [] : SEND_KEYS.filter((s) => Number(track.synth[s.key] ?? 0) > 0)
+
+  return (
+    <div className="arr-strip">
+      <button
+        className={`arr-strip-btn mute ${muted ? 'on' : ''}`}
+        onClick={() => toggleMute(track.id)}
+        title="mute (session-only, gates real audio)"
+        data-mute={track.id}
+      >
+        M
+      </button>
+      <button
+        className={`arr-strip-btn solo ${soloed ? 'on' : ''}`}
+        onClick={() => toggleSolo(track.id)}
+        title="solo (session-only, gates real audio)"
+        data-solo={track.id}
+      >
+        S
+      </button>
+      <label className="arr-strip-vol" title={`volume ${fmtDb(vol)} dB`}>
+        <input
+          type="range"
+          min={VOL_MIN}
+          max={VOL_MAX}
+          step={0.1}
+          value={vol}
+          data-vol={track.id}
+          onChange={(e) => postEdit(`${track.id}.volume`, e.target.value)}
+        />
+        <span className="arr-strip-db">{fmtDb(vol)}</span>
+      </label>
+      <label className="arr-strip-pan" title={`pan ${fmtPan(pan)}`}>
+        <input
+          type="range"
+          min={-1}
+          max={1}
+          step={0.01}
+          value={pan}
+          data-pan={track.id}
+          onChange={(e) => postEdit(`${track.id}.pan`, e.target.value)}
+        />
+        <span className="arr-strip-panval">{fmtPan(pan)}</span>
+      </label>
+      <span className="arr-strip-sends" title="active built-in sends (reverb / delay / mod)">
+        {sends.map((s) => (
+          <span key={s.key} className="arr-send-badge">
+            {s.label}
+          </span>
+        ))}
+      </span>
+    </div>
+  )
+}
 
 type FlatNote = { start: number; duration: number; pitch: number } // start/duration in 16th steps, absolute over the song
 type FlatHit = { start: number; lane: DrumLane }
@@ -133,6 +225,9 @@ function TrackRow({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { track } = flat
+  // Dim the whole row when the track is effectively silenced (explicitly muted, or another track is
+  // soloed) — the same signal the engine's real audio gate reads (Phase 14 Stream E).
+  const dimmed = useStore((s) => isEffectivelyMuted(s, track.id))
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -230,12 +325,15 @@ function TrackRow({
   }, [flat, totalBars, pxPerBar, detail, sections, band, track])
 
   return (
-    <div className="arr-row" style={{ height: ROW_H }}>
-      <button className={`arr-track-header ${selected ? 'selected' : ''}`} style={{ width: HEADER_W }} onClick={onHeaderClick} title={`select track ${track.name}`}>
-        <span className="arr-track-swatch" style={{ background: track.color }} />
-        <span className="arr-track-name">{track.name}</span>
-        <span className={`arr-track-kind kind-${track.kind}`}>{track.kind[0]}</span>
-      </button>
+    <div className={`arr-row ${dimmed ? 'dimmed' : ''}`} style={{ height: ROW_H }}>
+      <div className={`arr-track-header ${selected ? 'selected' : ''}`} style={{ width: HEADER_W }}>
+        <button className="arr-track-select" onClick={onHeaderClick} title={`select track ${track.name}`}>
+          <span className="arr-track-swatch" style={{ background: track.color }} />
+          <span className="arr-track-name">{track.name}</span>
+          <span className={`arr-track-kind kind-${track.kind}`}>{track.kind[0]}</span>
+        </button>
+        <InlineStrip track={track} />
+      </div>
       <div className="arr-lane" data-track={track.id} onPointerDown={onRowPointerDown} style={{ touchAction: 'none' }}>
         <canvas ref={canvasRef} className="arr-canvas" />
       </div>
@@ -247,6 +345,7 @@ export function ArrangementView() {
   const doc = useStore((s) => s.doc)
   const selection = useStore((s) => s.selection)
   const setSelectedTrack = useStore((s) => s.setSelectedTrack)
+  const setBottomPaneOpen = useStore((s) => s.setBottomPaneOpen)
   // Playback position for the moving playhead. currentStep is the SAME grid-quantized song position
   // the step-sequencer/NoteView playheads already read (engine's Tone.getDraw() handoff, ported in
   // Phase 12 Stream 1) — reused here, not a second position-tracking mechanism. It ticks at most
@@ -340,8 +439,11 @@ export function ArrangementView() {
       setSelectedTrack(t.id)
       postEdit('selected_track', t.id)
       postSelection({ tracks: [t.id] })
+      // Selecting a track (re)opens the bottom detail pane on it — Ableton's "selection drives the
+      // bottom pane" idiom, and the way a collapsed pane comes back.
+      setBottomPaneOpen(true)
     },
-    [setSelectedTrack],
+    [setSelectedTrack, setBottomPaneOpen],
   )
 
   if (!doc) return null

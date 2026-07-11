@@ -594,34 +594,186 @@ body {
   margin-top: 4px;
 }
 
-/* ---- view tabs (top-bar navigation between editor / arrangement / mixer) ---- */
-.view-tabs {
+/* ---- Phase 18 top-bar chrome (Mixer / History buttons + compact scope) ---- */
+.topbar-scope {
+  flex: 0 0 auto;
+}
+.topbar-scope .scope-section {
+  padding: 0;
+  border: 0;
+  margin: 0;
+}
+.topbar-scope .scope-title,
+.topbar-scope .scope-label {
+  display: none;
+}
+.topbar-scope .scope-canvas {
+  width: 120px;
+  height: 34px;
+}
+.topbar-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.topbar-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.topbar-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.topbar-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #16171b;
+  font-weight: 600;
+}
+
+/* ---- Phase 18 workspace: arrangement (main) + selection-following bottom detail pane ---- */
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.main-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.bottom-pane {
+  flex: 0 0 auto;
+  height: 42vh;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+.bottom-pane-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.bottom-pane-track {
+  font-weight: 700;
+  font-size: 13px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pane-toggle {
   display: flex;
   gap: 2px;
-  margin-left: 18px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 2px;
 }
-.view-tab {
+.pane-tab {
   appearance: none;
   border: 0;
   background: transparent;
   color: var(--text-dim);
   font: inherit;
   font-size: 12px;
-  padding: 4px 12px;
+  padding: 4px 14px;
   border-radius: 5px;
   cursor: pointer;
 }
-.view-tab:hover {
+.pane-tab:hover {
   color: var(--text);
 }
-.view-tab.active {
+.pane-tab.active {
   background: var(--panel-2);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.bottom-pane-hint {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.pane-collapse {
+  margin-left: auto;
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  border-radius: 5px;
+  width: 24px;
+  height: 22px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.pane-collapse:hover {
   color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--line);
+  border-color: var(--accent);
+}
+.bottom-pane-body {
+  flex: 1;
+  overflow: auto;
+  padding: 14px;
+}
+
+/* ---- Phase 18 overlays: the full Mixer (modal) + the History drawer ---- */
+.overlay-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 50;
+  display: flex;
+}
+.overlay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex: 0 0 auto;
+}
+.overlay-title {
+  font-weight: 600;
+}
+.mixer-overlay {
+  margin: auto;
+  width: min(96vw, 1100px);
+  max-height: 90vh;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.history-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(90vw, 520px);
+  z-index: 50;
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---- arrangement / song view ---- */
@@ -701,23 +853,124 @@ body {
 .arr-track-header {
   flex: 0 0 auto;
   display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 3px 7px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  color: var(--text);
+}
+.arr-track-header.selected {
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--panel-2);
+}
+.arr-track-select {
+  display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 8px;
-  background: var(--panel);
+  width: 100%;
+  background: transparent;
   border: 0;
-  border-right: 1px solid var(--line);
+  padding: 0;
   color: var(--text);
   font: inherit;
   cursor: pointer;
   text-align: left;
 }
-.arr-track-header:hover {
-  background: var(--panel-2);
+.arr-track-select:hover .arr-track-name {
+  color: var(--accent);
 }
-.arr-track-header.selected {
-  box-shadow: inset 3px 0 0 var(--accent);
+
+/* inline channel strip inside the arrangement track header (Phase 18) */
+.arr-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.arr-strip input[type='range'] {
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.arr-strip-btn {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
   background: var(--panel-2);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+.arr-strip-btn.mute.on {
+  background: #c0503c;
+  border-color: #c0503c;
+  color: #fff;
+}
+.arr-strip-btn.solo.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1a1a;
+}
+.arr-strip-vol {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.arr-strip-vol input {
+  flex: 1;
+  min-width: 34px;
+}
+.arr-strip-db {
+  flex: 0 0 auto;
+  width: 30px;
+  text-align: right;
+  font-size: 9px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.arr-strip-pan {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.arr-strip-pan input {
+  width: 40px;
+}
+.arr-strip-panval {
+  width: 22px;
+  font-size: 9px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.arr-strip-sends {
+  display: flex;
+  gap: 2px;
+}
+.arr-send-badge {
+  font-size: 8px;
+  font-weight: 700;
+  padding: 0 2px;
+  border-radius: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--accent);
+}
+/* a silenced track (muted, or another track soloed) dims its content but keeps M/S usable */
+.arr-row.dimmed .arr-lane {
+  opacity: 0.4;
+}
+.arr-row.dimmed .arr-track-name {
+  opacity: 0.5;
 }
 .arr-track-swatch {
   width: 9px;

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppView, BeatDocument, BeatSelection } from '../types'
+import type { BottomPane, BeatDocument, BeatSelection } from '../types'
 
 // Discrete, note-grid-granularity state only (docs/research/15 §2): the document, the transport
 // flags, the selection, and the grid-quantized playhead step + per-step master level. Continuous
@@ -17,8 +17,22 @@ interface DawState {
   currentStep: number // -1 when stopped
   masterLevel: number | undefined // dB, from the master meter; undefined before first tick
 
-  /** Which top-level screen is showing (editor / arrangement / mixer). */
-  view: AppView
+  // ── Phase 18 GUI layout state (Ableton-shaped, additive/UI-only) ──────────────────────────────
+  // Replaces the old `view: AppView` four-tab switcher. The arrangement is now the unconditional
+  // main area; these flags drive the selection-following bottom detail pane, the History drawer, and
+  // the on-demand full-Mixer overlay (research 18: the full mixer is demoted from a peer tab to an
+  // optional "step back and balance" overlay that lives alongside the inline per-track strips).
+  /** Which facet the bottom detail pane shows for the selected track — Clip View (notes/hits) vs
+   * Device View (the sound). Toggled by Shift+Tab (Ableton) or the pane's Clip/Device labels. */
+  bottomPane: BottomPane
+  /** Whether the bottom detail pane is docked open. There is always a selected track (selectedTrackId
+   * falls back to the first), so the pane can always be shown; this lets the user collapse it and
+   * have selecting a track re-open it — Ableton's "drag the pane to the window bottom to close" idiom. */
+  bottomPaneOpen: boolean
+  /** Whether the version-history drawer is slid open over the main view (was the 4th tab). */
+  historyOpen: boolean
+  /** Whether the full all-strips Mixer overlay is open (was the 3rd tab; now an on-demand overlay). */
+  mixerOpen: boolean
   /** The daemon's current pointing selection (the D2 channel), mirrored locally. {} = unset. It is
    * ephemeral and never in the .beat file — the daemon owns it; we read it via SSE + GET /selection
    * and write it via POST /selection (see bridge.ts). */
@@ -42,7 +56,11 @@ interface DawState {
   setParseError: (m: string | null) => void
   setSelectedTrack: (id: string) => void
   setPlaying: (p: boolean) => void
-  setView: (v: AppView) => void
+  setBottomPane: (p: BottomPane) => void
+  toggleBottomPane: () => void
+  setBottomPaneOpen: (open: boolean) => void
+  toggleHistory: () => void
+  toggleMixer: () => void
   setSelection: (s: BeatSelection) => void
   setEditNoteIds: (ids: string[]) => void
   toggleMute: (id: string) => void
@@ -57,7 +75,10 @@ export const useStore = create<DawState>((set) => ({
   playing: false,
   currentStep: -1,
   masterLevel: undefined,
-  view: 'editor',
+  bottomPane: 'clip',
+  bottomPaneOpen: true,
+  historyOpen: false,
+  mixerOpen: false,
   selection: {},
   editNoteIds: [],
   mutes: {},
@@ -74,7 +95,11 @@ export const useStore = create<DawState>((set) => ({
   setParseError: (parseError) => set({ parseError }),
   setSelectedTrack: (selectedTrackId) => set({ selectedTrackId }),
   setPlaying: (playing) => set({ playing }),
-  setView: (view) => set({ view }),
+  setBottomPane: (bottomPane) => set({ bottomPane, bottomPaneOpen: true }),
+  toggleBottomPane: () => set((s) => ({ bottomPane: s.bottomPane === 'clip' ? 'device' : 'clip', bottomPaneOpen: true })),
+  setBottomPaneOpen: (bottomPaneOpen) => set({ bottomPaneOpen }),
+  toggleHistory: () => set((s) => ({ historyOpen: !s.historyOpen })),
+  toggleMixer: () => set((s) => ({ mixerOpen: !s.mixerOpen })),
   setSelection: (selection) => set({ selection }),
   setEditNoteIds: (editNoteIds) => set({ editNoteIds }),
   toggleMute: (id) => set((s) => ({ mutes: { ...s.mutes, [id]: !s.mutes[id] } })),
