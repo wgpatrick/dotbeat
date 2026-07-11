@@ -16,6 +16,10 @@ import {
   initDocument,
   addTrack,
   BeatPresetError,
+  filterPresetsByCategory,
+  PRESET_CATEGORIES,
+  SYNTH_PRESET_CATEGORIES,
+  DRUM_PRESET_CATEGORIES,
 } from '../src/core/index.js'
 
 const factoryJson = readFileSync(fileURLToPath(new URL('../presets/factory.json', import.meta.url)), 'utf8')
@@ -119,27 +123,84 @@ test('applying to a nonexistent track fails loudly', () => {
 })
 
 test('a library with an unknown param is rejected at load time', () => {
-  const bad = JSON.stringify({ version: 1, presets: [{ name: 'x', kind: 'synth', description: 'd', params: { warpDrive: 11 } }] })
+  const bad = JSON.stringify({ version: 1, presets: [{ name: 'x', kind: 'synth', category: 'bass', description: 'd', params: { warpDrive: 11 } }] })
   assert.throws(() => parsePresetLibrary(bad), /unknown synth param "warpDrive"/)
 })
 
 test('a library preset carrying a trackref param is rejected — routing is per-project', () => {
-  const bad = JSON.stringify({ version: 1, presets: [{ name: 'x', kind: 'synth', description: 'd', params: { duckSource: 'drums' } }] })
+  const bad = JSON.stringify({ version: 1, presets: [{ name: 'x', kind: 'synth', category: 'bass', description: 'd', params: { duckSource: 'drums' } }] })
   assert.throws(() => parsePresetLibrary(bad), /track reference/)
 })
 
 test('an invalid param VALUE is rejected at apply time by the same rules as beat set', () => {
-  const lib = JSON.stringify({ version: 1, presets: [{ name: 'x', kind: 'synth', description: 'd', params: { filterType: 'notch' } }] })
+  const lib = JSON.stringify({ version: 1, presets: [{ name: 'x', kind: 'synth', category: 'bass', description: 'd', params: { filterType: 'notch' } }] })
   const [preset] = parsePresetLibrary(lib)
   assert.throws(() => applyPreset(projectWithDrums(), 'lead', preset!), /filterType/)
+})
+
+// Phase 18 Stream S (docs/phase-18-content-taxonomy.md): every preset now carries an explicit
+// `category` field (research 18's content-taxonomy recommendation). This is the structural
+// coverage tripwire, same spirit as Phase 12 Stream 2's "no two presets share identical params"
+// test — it guards the taxonomy itself, not any one preset's specific category.
+test('every factory preset has a valid category drawn from the enumerated taxonomy, matching its kind', () => {
+  const presets = parsePresetLibrary(factoryJson)
+  assert.ok(presets.length > 0)
+  for (const p of presets) {
+    assert.ok(
+      (PRESET_CATEGORIES as readonly string[]).includes(p.category),
+      `"${p.name}" has category "${p.category}", not one of ${PRESET_CATEGORIES.join(', ')}`,
+    )
+    if (p.kind === 'drums') {
+      assert.ok(
+        (DRUM_PRESET_CATEGORIES as readonly string[]).includes(p.category),
+        `drum preset "${p.name}" has category "${p.category}", not one of ${DRUM_PRESET_CATEGORIES.join(', ')}`,
+      )
+    } else if (p.kind === 'synth') {
+      assert.ok(
+        (SYNTH_PRESET_CATEGORIES as readonly string[]).includes(p.category),
+        `synth preset "${p.name}" has category "${p.category}", not one of ${SYNTH_PRESET_CATEGORIES.join(', ')}`,
+      )
+    }
+  }
+})
+
+test('filterPresetsByCategory returns exactly the presets in that category and nothing else', () => {
+  const presets = parsePresetLibrary(factoryJson)
+  const bass = filterPresetsByCategory(presets, 'bass')
+  assert.ok(bass.length > 0)
+  for (const p of bass) assert.equal(p.category, 'bass')
+  // cross-check: every preset elsewhere in the library is NOT in the bass result
+  const bassNames = new Set(bass.map((p) => p.name))
+  for (const p of presets) {
+    if (p.category !== 'bass') assert.ok(!bassNames.has(p.name), `"${p.name}" leaked into the bass filter`)
+  }
+  assert.deepEqual(
+    bass.map((p) => p.name).sort(),
+    ['deep-sub-bass', 'sub-sine-bass', 'reese-bass', 'wobble-bass', 'acid-bass', 'fm-bass'].sort(),
+  )
+})
+
+test('filterPresetsByCategory rejects a category outside the enumerated taxonomy', () => {
+  const presets = parsePresetLibrary(factoryJson)
+  assert.throws(() => filterPresetsByCategory(presets, 'chords'), /unknown category/)
+})
+
+test('a preset with a category outside the taxonomy is rejected at load time', () => {
+  const bad = JSON.stringify({ version: 1, presets: [{ name: 'x', kind: 'synth', category: 'chords', description: 'd', params: {} }] })
+  assert.throws(() => parsePresetLibrary(bad), /category must be one of/)
+})
+
+test('a synth preset carrying a drum-only category is rejected at load time', () => {
+  const bad = JSON.stringify({ version: 1, presets: [{ name: 'x', kind: 'synth', category: 'techno', description: 'd', params: {} }] })
+  assert.throws(() => parsePresetLibrary(bad), /synth preset.*category must be one of/)
 })
 
 test('duplicate preset names are rejected', () => {
   const bad = JSON.stringify({
     version: 1,
     presets: [
-      { name: 'x', kind: 'synth', description: 'd', params: {} },
-      { name: 'x', kind: 'synth', description: 'd', params: {} },
+      { name: 'x', kind: 'synth', category: 'bass', description: 'd', params: {} },
+      { name: 'x', kind: 'synth', category: 'bass', description: 'd', params: {} },
     ],
   })
   assert.throws(() => parsePresetLibrary(bad), /duplicate preset name/)
