@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { type BeatNote, type BeatTrack } from '../types'
 import { postEdit } from '../daemon/bridge'
+import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 
 // An editable piano-roll view of a synth/instrument track's notes. Discrete/coarse (grid-quantized
@@ -34,6 +35,24 @@ const DEFAULT_DUR = 2 // steps (an eighth note)
 const DEFAULT_VEL = 0.8
 const VEL_LANE_H = 46 // px — the velocity-lane strip below the note grid
 const DRAG_THRESHOLD = 3 // px a pointer must move before a grid press counts as a marquee (vs. a tap-to-add)
+
+// ---- piano-key strip / pitch reference (Phase 19 Stream U, docs/phase-19-piano-roll-keys.md) ----
+// A vertical keyboard down the left edge + horizontal octave gridlines so notes read against a real
+// pitch reference (Ableton's MIDI Note Editor). Research findings, cited in the phase doc:
+//  - Ableton's note ruler spans the full addressable range (C-2..C8) and SCROLLS; it is NOT clipped
+//    to the clip's used notes. We render a generous octave-snapped window padded around the content
+//    (>= MIN_SPAN semitones) so an empty or single-note clip still gets a real keyboard, rather than
+//    the old ±3-semitone hug of the used notes.
+//  - Octave boundaries (each C) get a heavier line and a note-name label on the key; black-key rows
+//    get faint shading behind the grid (Ableton's subtle row shading).
+const KEY_W = 36 // px — width of the piano-key strip
+const MIN_SPAN = 48 // semitones (4 octaves) — the minimum pitch window, even for a sparse clip
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+const BLACK_PCS = new Set([1, 3, 6, 8, 10]) // pitch-classes that are black keys
+const pc = (pitch: number) => ((pitch % 12) + 12) % 12
+const isBlackKey = (pitch: number) => BLACK_PCS.has(pc(pitch))
+/** Scientific pitch notation: MIDI 60 = C4 (middle C), 0 = C-1. Used for the key labels. */
+const pitchName = (pitch: number) => `${NOTE_NAMES[pc(pitch)]}${Math.floor(pitch / 12) - 1}`
 
 type GroupNote = { id: string; origStart: number; origPitch: number; origDur: number }
 type Gesture = {
@@ -81,9 +100,22 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const [velPreview, setVelPreview] = useState<{ id: string; velocity: number } | null>(null)
   const velGesture = useRef<VelGesture | null>(null)
 
+  // Pitch window: a generous, octave-snapped range AROUND the clip's content — deliberately not
+  // clipped to the used notes (Ableton shows a scrollable full-range ruler; we render a padded
+  // window that always spans >= MIN_SPAN so a sparse clip still gets a real keyboard). `hi` is the
+  // top pitch (row 0); every existing interaction's y-math is `(hi - pitch) * ROW_H`, unchanged.
   const pitches = notes.map((n) => n.pitch)
-  const hi = notes.length ? Math.min(127, Math.max(...pitches) + 3) : 72
-  const lo = notes.length ? Math.max(0, Math.min(...pitches) - 3) : 48
+  const usedLo = notes.length ? Math.min(...pitches) : 60
+  const usedHi = notes.length ? Math.max(...pitches) : 60
+  let lo = Math.floor((usedLo - 12) / 12) * 12 // pad an octave below, snap down to a C
+  let hi = Math.ceil((usedHi + 13) / 12) * 12 - 1 // pad an octave above, snap up to a B (octave top)
+  if (hi - lo + 1 < MIN_SPAN) {
+    const center = Math.round((lo + hi) / 2)
+    lo = Math.floor((center - MIN_SPAN / 2) / 12) * 12
+    hi = lo + MIN_SPAN - 1
+  }
+  lo = Math.max(0, lo)
+  hi = Math.min(127, hi)
   const rows = hi - lo + 1
   const gridH = rows * ROW_H
 
@@ -328,7 +360,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
   }
 
   const tip = editable
-    ? 'click empty grid to add · drag to marquee-select · shift/cmd-click to multi-select · drag a note (or group) to move · drag its right edge to resize · arrows nudge · shift+←/→ resize · delete removes · double-click to delete'
+    ? 'click a key to preview · click empty grid to add · drag to marquee-select · shift/cmd-click to multi-select · drag a note (or group) to move · drag its right edge to resize · arrows nudge · shift+←/→ resize · delete removes · double-click to delete'
     : 'drum track — edit hits in the step sequencer above'
 
   // Rubber-band overlay geometry (grid-relative px), only while an actual drag is in progress.
@@ -364,18 +396,78 @@ export function NoteView({ track }: { track: BeatTrack }) {
         )}
       </div>
       <div className="noteview-scroll">
-        <div
-          ref={gridRef}
-          className="noteview-grid"
-          tabIndex={0}
-          style={{ height: gridH, width: `calc(${totalSteps} * var(--note-step-w))` }}
-          onPointerDown={onGridPointerDown}
-          onPointerMove={onGridPointerMove}
-          onPointerUp={onGridPointerUp}
-        >
-          {Array.from({ length: loopBars }, (_, b) => (
-            <div key={b} className="noteview-barline" style={{ left: `calc(${b * 16} * var(--note-step-w))` }} />
-          ))}
+        <div className="noteview-body" style={{ display: 'flex', alignItems: 'flex-start' }}>
+          {/* Piano-key strip: one row per pitch, black/white coloring, sticky to the left edge so it
+              stays pinned while the grid scrolls horizontally. Each row aligns 1:1 with a grid row
+              ((hi - pitch) * ROW_H). Clicking a key auditions that pitch through the track's live
+              engine voice (engine.previewNote). */}
+          <div
+            className="noteview-keys"
+            style={{ position: 'sticky', left: 0, zIndex: 6, flex: '0 0 auto', width: KEY_W, height: gridH, background: '#0f1014' }}
+          >
+            {Array.from({ length: rows }, (_, i) => {
+              const pitch = hi - i
+              const black = isBlackKey(pitch)
+              const isC = pc(pitch) === 0
+              return (
+                <div
+                  key={pitch}
+                  data-key-pitch={pitch}
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    if (editable) void engine.previewNote(track.id, pitch, DEFAULT_VEL)
+                  }}
+                  title={pitchName(pitch)}
+                  style={{
+                    position: 'absolute',
+                    top: i * ROW_H,
+                    left: 0,
+                    right: 0,
+                    height: ROW_H,
+                    boxSizing: 'border-box',
+                    background: black ? '#232630' : '#c3c7cf',
+                    color: black ? '#9aa0ab' : '#2a2c33',
+                    borderBottom: isC ? '1px solid #05060a' : '1px solid rgba(0,0,0,0.28)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'flex-end',
+                    paddingRight: 3,
+                    fontSize: 8,
+                    fontWeight: isC ? 700 : 400,
+                    cursor: editable ? 'pointer' : 'default',
+                    userSelect: 'none',
+                  }}
+                >
+                  {isC ? pitchName(pitch) : ''}
+                </div>
+              )
+            })}
+          </div>
+          <div className="noteview-lanes" style={{ flex: '0 0 auto' }}>
+            <div
+              ref={gridRef}
+              className="noteview-grid"
+              tabIndex={0}
+              style={{ height: gridH, width: `calc(${totalSteps} * var(--note-step-w))` }}
+              onPointerDown={onGridPointerDown}
+              onPointerMove={onGridPointerMove}
+              onPointerUp={onGridPointerUp}
+            >
+              {/* Black-key row shading + octave (C) gridlines, painted behind the notes and
+                  pointer-transparent so grid add/marquee are unaffected. */}
+              {Array.from({ length: rows }, (_, i) => {
+                const pitch = hi - i
+                if (!isBlackKey(pitch)) return null
+                return <div key={`sh${pitch}`} className="noteview-rowshade" style={{ position: 'absolute', left: 0, right: 0, top: i * ROW_H, height: ROW_H, background: 'rgba(255,255,255,0.028)', pointerEvents: 'none' }} />
+              })}
+              {Array.from({ length: rows }, (_, i) => {
+                const pitch = hi - i
+                if (pc(pitch) !== 0) return null
+                return <div key={`oct${pitch}`} className="noteview-octline" style={{ position: 'absolute', left: 0, right: 0, top: i * ROW_H, height: 0, borderTop: '1px solid #3a3f49', pointerEvents: 'none' }} />
+              })}
+              {Array.from({ length: loopBars }, (_, b) => (
+                <div key={b} className="noteview-barline" style={{ left: `calc(${b * 16} * var(--note-step-w))` }} />
+              ))}
           {notes.map((n) => {
             const shown = preview?.[n.id] ?? n
             return (
@@ -408,35 +500,37 @@ export function NoteView({ track }: { track: BeatTrack }) {
           {currentStep >= 0 && currentStep < totalSteps && (
             <div className="noteview-playhead" style={{ left: `calc(${currentStep} * var(--note-step-w))` }} />
           )}
-        </div>
-        {/* Velocity lane (Phase 16 Stream J): one bar per note, aligned under it. Drag (or click)
-            vertically on a bar to set that note's velocity — writes through the existing
-            `<track>.note.<id>.velocity` edit path (src/core/edit.ts's note grammar). */}
-        <div className="noteview-vel-lane" style={{ height: VEL_LANE_H, width: `calc(${totalSteps} * var(--note-step-w))` }}>
-          {Array.from({ length: loopBars }, (_, b) => (
-            <div key={b} className="noteview-barline" style={{ left: `calc(${b * 16} * var(--note-step-w))` }} />
-          ))}
-          {notes.map((n) => {
-            const velocity = velPreview && velPreview.id === n.id ? velPreview.velocity : n.velocity
-            const barH = Math.max(2, Math.round(velocity * VEL_LANE_H))
-            return (
-              <div
-                key={n.id}
-                className={`noteview-vel-bar${selSet.has(n.id) ? ' selected' : ''}`}
-                style={{
-                  left: `calc(${n.start} * var(--note-step-w))`,
-                  width: `calc(${n.duration} * var(--note-step-w) - 1px)`,
-                  height: barH,
-                  background: track.color,
-                }}
-                title={`velocity ${velocity}`}
-                data-vel-note-id={n.id}
-                onPointerDown={(e) => startVelocityGesture(n, e)}
-                onPointerMove={onVelPointerMove}
-                onPointerUp={onVelPointerUp}
-              />
-            )
-          })}
+            </div>
+            {/* Velocity lane (Phase 16 Stream J): one bar per note, aligned under it. Drag (or click)
+                vertically on a bar to set that note's velocity — writes through the existing
+                `<track>.note.<id>.velocity` edit path (src/core/edit.ts's note grammar). */}
+            <div className="noteview-vel-lane" style={{ height: VEL_LANE_H, width: `calc(${totalSteps} * var(--note-step-w))` }}>
+              {Array.from({ length: loopBars }, (_, b) => (
+                <div key={b} className="noteview-barline" style={{ left: `calc(${b * 16} * var(--note-step-w))` }} />
+              ))}
+              {notes.map((n) => {
+                const velocity = velPreview && velPreview.id === n.id ? velPreview.velocity : n.velocity
+                const barH = Math.max(2, Math.round(velocity * VEL_LANE_H))
+                return (
+                  <div
+                    key={n.id}
+                    className={`noteview-vel-bar${selSet.has(n.id) ? ' selected' : ''}`}
+                    style={{
+                      left: `calc(${n.start} * var(--note-step-w))`,
+                      width: `calc(${n.duration} * var(--note-step-w) - 1px)`,
+                      height: barH,
+                      background: track.color,
+                    }}
+                    title={`velocity ${velocity}`}
+                    data-vel-note-id={n.id}
+                    onPointerDown={(e) => startVelocityGesture(n, e)}
+                    onPointerMove={onVelPointerMove}
+                    onPointerUp={onVelPointerUp}
+                  />
+                )
+              })}
+            </div>
+          </div>
         </div>
       </div>
     </div>

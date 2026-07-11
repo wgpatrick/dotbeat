@@ -1013,6 +1013,38 @@ class Engine {
     this.triggerDrum(lane, Math.max(Tone.now(), (this.lastLaneTriggerTime[lane] ?? 0) + 0.005), velocity)
   }
 
+  /** Audition a single pitch through a synth/instrument track's live voice — the note-editor analog
+   * of previewDrum (NoteView.tsx's piano-strip: clicking a key auditions that pitch). Ensures the
+   * engine is started and the track's chain/voice is built with current params (sync()), then fires
+   * one short note. Deliberately minimal: for synth tracks it triggers the MAIN oscillator only
+   * (an audible reference pitch), not the full osc2/sub/noise/FM bank the sequenced tick renders —
+   * it's a "what pitch is this key" audition, not a full patch render. Instrument (SoundFont) tracks
+   * note-on then note-off their WorkletSynthesizer voice. A no-op for a track with no live voice. */
+  async previewNote(trackId: string, pitch: number, velocity = 0.8): Promise<void> {
+    await this.ensureStarted()
+    const doc = useStore.getState().doc
+    if (!doc) return
+    this.sync(doc) // build the chain/voice if it doesn't exist yet, with current params
+    const midi = Math.round(pitch)
+    const chain = this.chains.get(trackId)
+    if (chain) {
+      chain.synth.triggerAttackRelease(Tone.Frequency(midi, 'midi').toFrequency(), 0.4, undefined, velocity)
+      return
+    }
+    const voice = this.instruments.get(trackId)
+    if (voice) {
+      const vel = Math.max(1, Math.min(127, Math.round(velocity * 127)))
+      voice.synth.noteOn(0, midi, vel)
+      setTimeout(() => {
+        try {
+          voice.synth.noteOff(0, midi)
+        } catch {
+          // the voice may have been disposed (track removed / sample changed) before release
+        }
+      }, 400)
+    }
+  }
+
   async play(): Promise<void> {
     await this.ensureStarted()
     const doc = useStore.getState().doc
