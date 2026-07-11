@@ -247,6 +247,12 @@ export function ArrangementView() {
   const doc = useStore((s) => s.doc)
   const selection = useStore((s) => s.selection)
   const setSelectedTrack = useStore((s) => s.setSelectedTrack)
+  // Playback position for the moving playhead. currentStep is the SAME grid-quantized song position
+  // the step-sequencer/NoteView playheads already read (engine's Tone.getDraw() handoff, ported in
+  // Phase 12 Stream 1) — reused here, not a second position-tracking mechanism. It ticks at most
+  // 16x/bar, so it's allowed in reactive state (docs/research/15 §2); only the lightweight playhead
+  // div re-renders on it — the memoized row canvases don't (their effect deps exclude currentStep).
+  const currentStep = useStore((s) => s.currentStep)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [laneWidth, setLaneWidth] = useState(800)
   // Active drag band (bars), plus which axis is dragging (the ruler → all tracks, or a track id).
@@ -353,6 +359,14 @@ export function ArrangementView() {
 
   const modeLabel = detail ? 'detail view' : `density view (${pxPerBar.toFixed(1)}px/bar)`
 
+  // Playhead x in scroll-content coordinates: header column + fractional bar position. Step-precise
+  // (finer than the requested bar granularity, at no extra cost). Shown only while the transport is
+  // running and the position is within the song. It scrolls horizontally with the lanes (absolutely
+  // positioned inside the scroll container) and spans just the track rows, below the sticky ruler.
+  const totalSteps = totalBars * 16
+  const showPlayhead = currentStep >= 0 && currentStep < totalSteps && pxPerBar > 0
+  const playheadLeft = HEADER_W + (currentStep / 16) * pxPerBar
+
   return (
     <div className="arrangement">
       <div className="editor-toolbar">
@@ -405,6 +419,13 @@ export function ArrangementView() {
             onRowPointerDown={(e) => beginDrag(flat.track.id, e)}
           />
         ))}
+
+        {showPlayhead && (
+          <div
+            className="arr-playhead"
+            style={{ left: playheadLeft, top: RULER_H, height: flats.length * ROW_H }}
+          />
+        )}
       </div>
     </div>
   )

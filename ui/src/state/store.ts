@@ -24,9 +24,9 @@ interface DawState {
    * and write it via POST /selection (see bridge.ts). */
   selection: BeatSelection
   /** Mixer mute/solo — GUI-only transport state, keyed by track id. NOT persisted to the .beat file
-   * (the format carries no mute/solo field, and real DAWs treat these as session state). Audio
-   * gating from these is deferred until the engine exposes a per-track mute hook (Stream A owns the
-   * engine); today they drive the mixer's visual state and the effective-mute logic below. */
+   * (the format carries no mute/solo field, and real DAWs treat these as session state). As of
+   * Phase 14 Stream E these gate real audio: the engine reads isEffectivelyMuted per tick and sets
+   * each track's mute gate accordingly, in addition to driving the mixer's visual state. */
   mutes: Record<string, boolean>
   solos: Record<string, boolean>
 
@@ -72,7 +72,8 @@ export const useStore = create<DawState>((set) => ({
 }))
 
 /** A track is effectively silenced iff it is explicitly muted, OR any track is soloed and this one
- * is not among them (standard mixer solo semantics). GUI-only for now — see the store note. */
+ * is not among them (standard mixer solo semantics). Drives both the mixer's visual dimming and the
+ * engine's real per-track audio gate (Phase 14 Stream E). */
 export function isEffectivelyMuted(s: DawState, id: string): boolean {
   if (s.mutes[id]) return true
   const anySolo = Object.values(s.solos).some(Boolean)

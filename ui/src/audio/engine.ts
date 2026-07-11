@@ -33,7 +33,7 @@
 // instrument/SoundFont tracks (spessasynth — a separate, larger lift), and live-MIDI monitoring.
 
 import * as Tone from 'tone'
-import { useStore } from '../state/store'
+import { useStore, isEffectivelyMuted } from '../state/store'
 import { audioBufferToWav } from './wavEncode'
 import type { BeatDocument, BeatDrumHit, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType } from '../types'
 
@@ -230,6 +230,17 @@ interface SynthChain {
   compOut: Tone.Gain
   distortion: Tone.Distortion
   bitcrush: Tone.BitCrusher
+  // muteGain sits BEFORE the panner fan-out, so gating it to 0 silences both the dry path
+  // (panner->vol->master) AND the reverb/delay/mod sends (panner->*Send->return bus) — a mute that
+  // only touched vol would leave the wet sends audible. It's a dedicated gate, separate from vol, so
+  // the per-tick volume/duck ramps that write chain.vol never fight the mute state.
+  muteGain: Tone.Gain
+  // Post-fader side-tap for this track's own channel-strip meter (reads post-mute + post-volume, so
+  // it reflects exactly what the fader and the mute button do). A waveform Analyser, not a
+  // Tone.Meter: getTrackLevel computes RMS straight from the raw samples, which reads TRUE silence
+  // the instant the mute gate closes (a Tone.Meter peak-holds and decays only ~0.8 per read, so it
+  // lags to silence and its rate depends on how often it's polled — wrong for both the UI and tests).
+  levelTap: Tone.Analyser
   panner: Tone.Panner
   vol: Tone.Volume
   reverbSend: Tone.Gain
@@ -248,6 +259,8 @@ interface DrumBus {
   compOut: Tone.Gain
   distortion: Tone.Distortion
   bitcrush: Tone.BitCrusher
+  muteGain: Tone.Gain // gate before the panner fan-out (see SynthChain.muteGain)
+  levelTap: Tone.Analyser // post-fader waveform tap for the drums track's channel strip (see SynthChain.levelTap)
   panner: Tone.Panner
   vol: Tone.Volume
   reverbSend: Tone.Gain
@@ -278,6 +291,7 @@ interface Content {
 class Engine {
   private chains = new Map<string, SynthChain>()
   private drums: DrumKit | null = null
+  private drumTrackId: string | null = null
   private kickTuneHz = 32.7
   private repeatId: number | null = null
   private started = false
@@ -379,6 +393,8 @@ class Engine {
       const compOut = new Tone.Gain()
       const distortion = new Tone.Distortion({ distortion: 0, wet: 0 })
       const bitcrush = new Tone.BitCrusher(8)
+      const muteGain = new Tone.Gain(1)
+      const levelTap = new Tone.Analyser('waveform', 256)
       const panner = new Tone.Panner({ pan: 0, channelCount: 2 })
       const vol = new Tone.Volume(0)
       const reverbSend = new Tone.Gain(0)
@@ -389,9 +405,13 @@ class Engine {
       compressor.connect(compWet)
       compDry.connect(compOut)
       compWet.connect(compOut)
-      this.wireInsertChain(filter, eq3, compIn, compOut, distortion, bitcrush, panner)
+      // ...bitcrush -> muteGain -> panner: the mute gate is upstream of the fan-out so it catches
+      // the sends too.
+      this.wireInsertChain(filter, eq3, compIn, compOut, distortion, bitcrush, muteGain)
+      muteGain.connect(panner)
 
       panner.chain(vol, this.getMaster())
+      vol.connect(levelTap) // post-fader side-tap (not in the audible path)
       panner.connect(reverbSend)
       reverbSend.connect(reverb)
       panner.connect(delaySend)
@@ -399,7 +419,7 @@ class Engine {
       panner.connect(modSend)
       modSend.connect(mod)
 
-      this.drumBus = { filter, eq3, compIn, compDry, compressor, compWet, compOut, distortion, bitcrush, panner, vol, reverbSend, delaySend, modSend }
+      this.drumBus = { filter, eq3, compIn, compDry, compressor, compWet, compOut, distortion, bitcrush, muteGain, levelTap, panner, vol, reverbSend, delaySend, modSend }
     }
     return this.drumBus
   }
@@ -523,6 +543,8 @@ class Engine {
     const compOut = new Tone.Gain()
     const distortion = new Tone.Distortion({ distortion: 0, wet: 0 })
     const bitcrush = new Tone.BitCrusher(8)
+    const muteGain = new Tone.Gain(1)
+    const levelTap = new Tone.Analyser('waveform', 256)
 
     synth.connect(filter)
     osc2.chain(osc2Pan, osc2Gain, filter)
@@ -536,9 +558,12 @@ class Engine {
     compressor.connect(compWet)
     compDry.connect(compOut)
     compWet.connect(compOut)
-    this.wireInsertChain(filter, eq3, compIn, compOut, distortion, bitcrush, panner)
+    // ...bitcrush -> muteGain -> panner: gate before the fan-out so mute silences the sends too.
+    this.wireInsertChain(filter, eq3, compIn, compOut, distortion, bitcrush, muteGain)
+    muteGain.connect(panner)
 
     panner.chain(vol, this.getMaster())
+    vol.connect(levelTap) // post-fader side-tap for this track's meter (not in the audible path)
     panner.connect(reverbSend)
     reverbSend.connect(reverb)
     panner.connect(delaySend)
@@ -548,7 +573,7 @@ class Engine {
 
     return {
       synth, osc2, osc2Gain, osc2Pan, osc3, osc3Gain, osc3Pan, uniPairs, sub, subGain, noise, noiseGain, fm, fmGain,
-      filter, eq3, compIn, compDry, compressor, compWet, compOut, distortion, bitcrush, panner, vol, reverbSend, delaySend, modSend, lastOsc: null,
+      filter, eq3, compIn, compDry, compressor, compWet, compOut, distortion, bitcrush, muteGain, levelTap, panner, vol, reverbSend, delaySend, modSend, lastOsc: null,
     }
   }
 
@@ -605,7 +630,7 @@ class Engine {
       chain.synth, chain.osc2, chain.osc2Gain, chain.osc2Pan, chain.osc3, chain.osc3Gain, chain.osc3Pan,
       chain.sub, chain.subGain, chain.noise, chain.noiseGain, chain.fm, chain.fmGain, chain.filter, chain.eq3,
       chain.compIn, chain.compDry, chain.compressor, chain.compWet, chain.compOut, chain.distortion, chain.bitcrush,
-      chain.panner, chain.vol, chain.reverbSend, chain.delaySend, chain.modSend,
+      chain.muteGain, chain.levelTap, chain.panner, chain.vol, chain.reverbSend, chain.delaySend, chain.modSend,
     ]
     for (const u of chain.uniPairs) nodes.push(u.poly, u.pan, u.gain)
     for (const n of nodes) n.dispose()
@@ -631,11 +656,56 @@ class Engine {
       this.applyParams(chain, coerce(track.synth))
     }
     const drumsTrack = doc.tracks.find((t) => t.kind === 'drums')
+    this.drumTrackId = drumsTrack?.id ?? null
     if (drumsTrack) {
       const p = coerce(drumsTrack.synth)
       this.applyDrumBusParams(p)
       this.applyDrumVoiceParams(p)
     }
+    // Per-tick read of the mixer's mute/solo state -> real audio gating. sync() already runs every
+    // 16th tick, so a mute toggled mid-playback takes effect on the next step (well under a beat).
+    this.applyMuteGates()
+  }
+
+  /** Gate each track's output to 0 or 1 from the store's effective mute/solo state (mute wins; if
+   * anything is soloed only soloed tracks pass). Gated at muteGain (upstream of the panner fan-out)
+   * so the dry path AND the reverb/delay/mod sends are silenced together. Idempotent + cheap; safe
+   * to call every tick. */
+  private applyMuteGates(): void {
+    const state = useStore.getState()
+    for (const [id, chain] of this.chains) {
+      chain.muteGain.gain.value = isEffectivelyMuted(state, id) ? 0 : 1
+    }
+    if (this.drumBus && this.drumTrackId) {
+      this.drumBus.muteGain.gain.value = isEffectivelyMuted(state, this.drumTrackId) ? 0 : 1
+    }
+  }
+
+  /** RMS (in dB) of a waveform-analyser buffer. -Infinity for a silent (all-zero) buffer — which is
+   * exactly what a muted track's post-gate tap produces, with no smoothing lag. */
+  private static rmsDb(buf: Float32Array): number {
+    let sum = 0
+    for (let i = 0; i < buf.length; i++) sum += buf[i]! * buf[i]!
+    const rms = Math.sqrt(sum / buf.length)
+    return rms > 0 ? 20 * Math.log10(rms) : -Infinity
+  }
+
+  /** Live post-fader loudness (dB) of one track's own channel, for its mixer meter — read per-frame
+   * off the shared rAF driver, never through Zustand state. Computed as true RMS of the track's
+   * post-mute/post-fader tap, so a muted track reads -Infinity immediately. null for tracks with no
+   * live voice (e.g. instrument tracks, whose live playback is a separate stream). */
+  getTrackLevel(trackId: string): number | null {
+    const chain = this.chains.get(trackId)
+    if (chain) return Engine.rmsDb(chain.levelTap.getValue() as Float32Array)
+    if (this.drumBus && trackId === this.drumTrackId) return Engine.rmsDb(this.drumBus.levelTap.getValue() as Float32Array)
+    return null
+  }
+
+  /** True RMS (dB) of the live master output, decay-free (raw samples off the master waveform
+   * analyser) — for measurement code that needs an artifact-free master level. */
+  getMasterRms(): number | null {
+    const data = this.getWaveformData()
+    return data ? Engine.rmsDb(data) : null
   }
 
   triggerDrum(lane: DrumLane, time: number, velocity = 1): void {
