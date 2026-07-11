@@ -132,3 +132,41 @@ Each stream runs in its own git worktree/branch, keeps `npm test` green (modulo 
 noted above), commits as it goes (not pushed), and is merged back into `main` sequentially by hand
 once done, running the full suite after each merge. Streams A and C are the most likely to need a
 manual merge conflict resolution pass given the file overlap noted above.
+
+## Result (2026-07-11)
+
+All six streams shipped and are merged into `main`. Final suite: **280 tests, 274 passing, 0
+failing, 6 cleanly skipped** (the master-bus tests self-skip without the patched
+`node-web-audio-api` build, which isn't checked out on this machine — unrelated to tonight's work).
+
+- **Merge conflicts, exactly where predicted**: Stream D vs B collided on adjacent new imports in
+  `src/mcp/server.ts` (trivial, both import lists kept). Stream C vs A collided on a one-line
+  comment in `src/core/parse.ts` describing what a clip's level-2 lines can contain (both true,
+  merged into one comment covering automation lanes *and* instrument-track note clips). Streams B,
+  E, and F merged with zero conflicts.
+- **Stream D fixed a real pre-existing bug** while in `src/history/history.ts` for unrelated
+  reasons: the macOS tmpdir-symlink-vs-git-realpath mismatch that had been failing 6 `history.test.js`
+  tests on this machine all night. Fixed via `realpathSync`, verified, and confirmed by every
+  subsequent stream's clean run.
+- **One integration-time bug found and fixed** (not any single stream's fault): Stream C's
+  `test/master-bus.test.ts` suppressed a TypeScript error on only one of two dynamic
+  `import('node-web-audio-api')` calls; the module is a dangling symlink on this machine (the
+  patched upstream build was never checked out here), so `tsc` failed the whole build the moment
+  Stream C's branch landed. Fixed by suppressing both — the tests now skip cleanly instead, which
+  was always the intent.
+- **Also picked up mid-session**: an unrelated commit landed on `origin/main` from a separate
+  session ("D1 groundwork: daemon opens a project folder") — pulled in early since Stream F's
+  scaffold built directly on it.
+- **What actually shipped, concretely**: format v0.9 (clip automation, `beat automate`); `beat
+  suggest` (variation-loop rung 3, pairwise preference ranking over the scores exhaust); the
+  phase-8 instrument-track finish line (master-bus/limiter routing fixed, instrument clips/timeline,
+  multi-preset `beat inspect` listing); `beat pin`/`beat history --collapsed` (named checkpoints,
+  collapsed retention view); resolved selection-axis semantics + `beat vary --scope selection`; and
+  a **passed** WKWebView Web Audio spike plus a real `desktop/` Tauri D1 scaffold (daemon + beatlab
+  dev server as sidecars, native folder-open dialog).
+- **Honestly still open**: the Tauri shell's sidecar is a spawned `node`/dev-server process, not a
+  packaged binary; no signing/notarization; folder re-pointing doesn't yet restart the daemon;
+  beatlab-side engine wiring for clip automation is documented but unverified (no local beatlab
+  checkout with source to confirm against); GM/FluidR3 content itself wasn't fetched (the
+  preset-listing mechanism is content-agnostic and done). See each stream's own `docs/phase-9-*.md`
+  for full detail.
