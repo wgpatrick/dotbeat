@@ -76,13 +76,29 @@ selection
 ### Why this beats screenshots/computer-use
 
 Deterministic, instant, diffable, and works headless. The agent gets `bars 8-16 of track drums,
-lanes hh oh` — not "the user circled some pixels." `[research pending: prior art — how
-Cursor/Zed pass editor selections to the model, Photoshop's selection→generative-fill contract,
-Figma AI selection scoping — steal the best conventions.]`
+lanes hh oh` — not "the user circled some pixels."
 
-## 3. Agent placement: external driver vs embedded chat `[research pending]`
+### Research-validated (research 10, 24 claims verified 3-0)
 
-Two candidate shapes, not yet decided (owner explicitly deferred to research):
+Selection-as-context is the *converged* pattern across Cursor/VS Code/Zed/Visual Studio and
+Figma Prompt-to-Edit/Photoshop Generative Fill — highlight, then say "change this," edits
+applied to the user's real objects in place. Three conventions to adopt from the prior art:
+
+- **Layered context**: selection = implicit context; `@`-mentions in chat for off-screen
+  referents (`@drums`, `@bars 8-16`); a visible "what the agent read/changed" trace
+  (provenance) — and unlike VS Code's References dropdown, ours must include the *implicit*
+  context (the selection value), not just explicit mentions.
+- **Enforced scope, not suggested scope.** Verifiers found the prior art's weakness: selection
+  scoping there is design intent (VS Code edits escape selections; Photoshop had a
+  bleed-past-the-edge defect). Because our edits are semantic operations on stable IDs,
+  `--scope selection` can structurally *reject* mutations outside the selected set. A
+  guarantee no pixel/text-buffer tool can make — lead with it.
+- **Selection-without-prompt is a gesture**: Photoshop fills from a blank prompt + selection.
+  Ours: select the hats, hit "vary" — no typing.
+
+## 3. Agent placement: external driver vs embedded chat `[research in — owner call pending]`
+
+Two candidate shapes (owner explicitly deferred to research; research 10 is now in):
 
 - **A. External agent, live-updating DAW.** Claude Code (or any MCP client) runs beside the
   app, talks to the daemon/MCP server; the DAW window updates as edits land (it already does —
@@ -95,7 +111,21 @@ Two candidate shapes, not yet decided (owner explicitly deferred to research):
 - **Likely answer is a hybrid** (A's engine with B's front-end): the app embeds a chat *panel*
   that is a thin client to an external agent runtime (e.g. Claude Agent SDK / Claude Code
   headless) which itself talks MCP to the daemon. Musicians see one app; the agent stays real.
-  Research should pressure-test this against prior art before we commit.
+
+**Research 10 verdict: the hybrid is now research-backed, with one refinement — the embedded
+surface should be TWO-TIER.** Every first-party shipped pattern (VS Code, Cursor, Zed,
+Photoshop, Figma) is embedded but split into (1) a lightweight inline affordance *at the
+selection* (Cursor Cmd+K, Photoshop's Contextual Task Bar) for quick scoped edits, and (2) a
+full chat/agent panel for multi-step work — with escalation that carries the selection across
+(Cursor Cmd+L preloads the selection into Agent mode). Meanwhile the external-agent-over-MCP
+half has first-party momentum too: Anthropic ships official Claude connectors to Ableton,
+Splice, Blender, Adobe CC, Resolume et al. (April 2026), and community Ableton-MCP projects
+(Producer Pal) already do exactly our pattern. So: **option A is the correct interim** (works
+today, D1-era), and the end state is the hybrid — inline "vary this" affordance + chat panel,
+both fronting an external agent runtime over MCP. Acceptance UX from the same research:
+pending agent edits are *auditionable* (applied revertibly — hear it, then Keep/Undo, VS Code's
+model) and `beat vary` batches present as variation-then-choose (Photoshop's model). Owner
+sign-off still wanted before D5 commits to this.
 
 Decision criteria: implementation cost now, UX for non-terminal users, agent quality/upgrade
 path, key management, offline behavior.
