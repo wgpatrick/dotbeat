@@ -224,6 +224,20 @@ export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds
       for (const [lane, ls] of Object.entries(t.laneSamples)) {
         if (!ls) continue
         engine.loadLaneOneShot(lane, buffers.get(ls.sample), ls.sample, { gainDb: ls.gainDb, tune: ls.tune })
+        if (process.env.BEAT_ONESHOT_PROBE) {
+          const p = engine.getLaneOneShots?.()
+          const buf = buffers.get(ls.sample)
+          console.error(`[probe] lane ${lane}: buffer ${buf ? `${buf.duration.toFixed(3)}s ch${buf.numberOfChannels} rate${buf.sampleRate}` : 'MISSING'} meta=${JSON.stringify(p?.[lane])}`)
+          const orig = engine.triggerDrum.bind(engine)
+          engine.triggerDrum = (ln, vel, t) => {
+            try {
+              orig(ln, vel, t)
+              console.error(`[probe] triggerDrum ${ln} vel=${vel} t=${t} OK`)
+            } catch (e) {
+              console.error(`[probe] triggerDrum ${ln} vel=${vel} t=${t} THREW: ${e.message}`)
+            }
+          }
+        }
       }
     }
 

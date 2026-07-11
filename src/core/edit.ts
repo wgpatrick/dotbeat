@@ -265,7 +265,10 @@ export function addTrack(
     name,
     color,
     kind,
-    synth: { ...INIT_SYNTH },
+    // Drum tracks: the "synth" params drive the drum BUS in beatlab (cutoff = bus lowpass), so
+    // a fresh drum track opens the filter (beatlab's own bus default) — INIT_SYNTH's 2000 Hz is
+    // a lead-synth default that silently swallows hats/cymbals (found via a silent-hat render).
+    synth: kind === 'drums' ? { ...INIT_SYNTH, cutoff: 12000, resonance: 0.1 } : { ...INIT_SYNTH },
     ...(kind === 'instrument' ? { instrument: { sample: opts.soundfont!.sample, program: opts.soundfont!.program, volume: -10, pan: 0 } } : {}),
     laneSamples: {},
     clips: [],

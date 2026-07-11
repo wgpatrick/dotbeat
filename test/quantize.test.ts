@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { addNote, initDocument, quantizeNotes, BeatEditError } from '../src/core/index.js'
+import { addNote, addTrack, initDocument, quantizeNotes, BeatEditError } from '../src/core/index.js'
 
 function docWithNotes(notes: { pitch: number; start: number; duration: number; velocity?: number; id?: string }[]) {
   let doc = initDocument({ trackId: 'lead' })
@@ -80,4 +80,10 @@ test('fail-loudly edges', () => {
   assert.throws(() => quantizeNotes(doc, 'lead', { starts: false }), /nothing to quantize/)
   assert.throws(() => quantizeNotes(doc, 'lead', { noteIds: ['ghost'] }), /no note\(s\) "ghost"/)
   assert.throws(() => quantizeNotes(doc, 'nope', {}), BeatEditError)
+})
+
+test('fresh drum tracks open the bus filter (hats survive; found via silent-hat render)', () => {
+  const doc = initDocument({ trackId: 'lead' })
+  const { track } = addTrack(doc, { id: 'drums', kind: 'drums' })
+  assert.equal(track.synth.cutoff, 12000)
 })
