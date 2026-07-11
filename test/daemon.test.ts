@@ -154,3 +154,74 @@ test('round-trip sanity: the text the daemon writes re-parses to the same docume
     assert.deepEqual(onDisk, daemon.getDoc())
   })
 })
+
+// ─── Phase 19 Stream V: the arrangement-length surface (POST /song) ───────────────────────────────
+const postSong = (port: number, body: unknown) =>
+  fetch(`http://127.0.0.1:${port}/song`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
+test('POST /song append converts loop mode into song mode, keeping the loop as section 0', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const loopBars = daemon.getDoc().loopBars
+    assert.equal(daemon.getDoc().song, null) // fixture starts in loop mode
+
+    const res = await postSong(daemon.port, { op: 'append', bars: 6 })
+    assert.equal(res.status, 200)
+    assert.equal(((await res.json()) as { written: boolean }).written, true)
+
+    const doc = daemon.getDoc()
+    assert.ok(doc.song && doc.song.length === 2, 'appending from loop mode yields two sections')
+    // section 0 = the existing loop content, loopBars long; section 1 = the new 6-bar section.
+    assert.equal(doc.song![0]!.bars, loopBars)
+    assert.equal(doc.song![1]!.bars, 6)
+    // Both reference a real, freshly-minted scene whose slot map covers every track via snapshotted clips.
+    const sceneId = doc.song![0]!.scene
+    const scene = doc.scenes.find((s) => s.id === sceneId)
+    assert.ok(scene, 'the conversion minted a scene')
+    for (const t of doc.tracks) {
+      assert.equal(scene!.slots[t.id], sceneId, `track ${t.id} is mapped in the scene`)
+      assert.ok(t.clips.some((c) => c.id === sceneId), `track ${t.id} got a snapshot clip`)
+    }
+    // Persisted to disk and re-parses identically (in-memory === disk invariant).
+    assert.deepEqual(parse(readFileSync(filePath, 'utf8')), doc)
+  })
+})
+
+test('POST /song resize and delete edit the section list; delete refuses the last section', async () => {
+  await withDaemon(async (daemon) => {
+    await postSong(daemon.port, { op: 'append', bars: 6 }) // -> 2 sections (loop + 6)
+    await postSong(daemon.port, { op: 'append', bars: 8 }) // -> 3 sections, appended reuses last scene
+    let doc = daemon.getDoc()
+    assert.equal(doc.song!.length, 3)
+    assert.equal(doc.song![2]!.bars, 8)
+    assert.equal(doc.song![2]!.scene, doc.song![1]!.scene, 'append reuses the last section scene')
+
+    // resize section 1 to 5 bars — only that section changes.
+    await postSong(daemon.port, { op: 'resize', index: 1, bars: 5 })
+    doc = daemon.getDoc()
+    assert.equal(doc.song![1]!.bars, 5)
+
+    // delete the middle section — the outer two survive intact.
+    const keepScene0 = doc.song![0]!.scene
+    const keepBars2 = doc.song![2]!.bars
+    await postSong(daemon.port, { op: 'delete', index: 1 })
+    doc = daemon.getDoc()
+    assert.equal(doc.song!.length, 2)
+    assert.equal(doc.song![0]!.scene, keepScene0)
+    assert.equal(doc.song![1]!.bars, keepBars2)
+
+    // deleting down to one is allowed; deleting the last remaining section is refused (400).
+    await postSong(daemon.port, { op: 'delete', index: 1 })
+    assert.equal(daemon.getDoc().song!.length, 1)
+    const refused = await postSong(daemon.port, { op: 'delete', index: 0 })
+    assert.equal(refused.status, 400)
+    assert.equal(daemon.getDoc().song!.length, 1, 'the last section is still there')
+  })
+})
+
+test('POST /song rejects a bad op and an out-of-range bar count', async () => {
+  await withDaemon(async (daemon) => {
+    assert.equal((await postSong(daemon.port, { op: 'frobnicate' })).status, 400)
+    assert.equal((await postSong(daemon.port, { op: 'append', bars: 999 })).status, 400)
+    assert.equal(daemon.getDoc().song, null, 'a rejected append left the doc in loop mode')
+  })
+})

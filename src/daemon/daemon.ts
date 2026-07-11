@@ -32,7 +32,7 @@ import { readFileSync, writeFileSync, watch, existsSync, type FSWatcher } from '
 import { createHash } from 'node:crypto'
 import { basename, dirname, resolve } from 'node:path'
 import type { BeatDocument, BeatSelection } from '../core/index.js'
-import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, setValue, validateSelection, type ExternalSandboxPayload } from '../core/index.js'
+import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, setValue, validateSelection, saveClip, setScene, setSong, BeatEditError, type ExternalSandboxPayload } from '../core/index.js'
 // D3/D10 versioning surface over HTTP: the GUI's history panel (Phase 15 Stream H) reads the
 // checkpoint list and issues "go back" through these. All of it reuses src/history's real git-backed
 // functions — the daemon adds no versioning logic, just an HTTP face on the same verbs `beat
@@ -100,6 +100,69 @@ export function resolveVaryTarget(sel: BeatSelection, doc: BeatDocument, body: V
   }
   if (!VARY_GROUPS[group]) throw new BeatVaryError(`unknown group "${group}" (have: ${Object.keys(VARY_GROUPS).join(', ')})`)
   return { track, group }
+}
+
+// ─── Arrangement-length surface over HTTP (Phase 19 Stream V) ────────────────────────────────────
+// setValue's {path,value} grammar covers `loop_bars` (loop-mode length) but NOT the song timeline:
+// appending / deleting / resizing a section is a whole-list statement (setSong replaces the section
+// list; sections are few and order IS the data — see src/core/edit.ts). POST /song is a thin HTTP
+// face on core's setSong/setScene/saveClip, the same "reuse the real core verb" pattern /vary and
+// /history follow — no arrangement logic lives here, just the three high-level ops the GUI needs.
+
+/** Next free `sN` scene id (loop→song conversion mints one). */
+function nextSceneId(doc: BeatDocument): string {
+  let max = 0
+  for (const s of doc.scenes) {
+    const m = /^s(\d+)$/.exec(s.id)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return `s${max + 1}`
+}
+
+/** Build a scene from every track's LIVE content: snapshot each track into a clip named `sceneId`
+ * (core's saveClip) and map every track to it (core's setScene). This is how loop mode becomes song
+ * mode without discarding what's there — the existing loop content becomes a real, playable scene. */
+function sceneFromLiveContent(doc: BeatDocument, sceneId: string): BeatDocument {
+  let d = doc
+  const slots: Record<string, string> = {}
+  for (const t of d.tracks) {
+    d = saveClip(d, t.id, sceneId).doc
+    slots[t.id] = sceneId
+  }
+  return setScene(d, sceneId, slots)
+}
+
+/** Append a section. In song mode the new section reuses the last section's scene (its slot map is
+ * the "starting content" the spec asks for). In loop mode (song === null) this first converts to
+ * song mode: section 0 is the existing loop content (loopBars long), section 1 is the new one. */
+export function songAppend(doc: BeatDocument, bars: number): BeatDocument {
+  if (!Number.isInteger(bars) || bars < 1 || bars > 64) throw new BeatEditError(`section bars must be an integer 1-64, got ${bars}`)
+  if (doc.song && doc.song.length > 0) {
+    const last = doc.song[doc.song.length - 1]!
+    return setSong(doc, [...doc.song, { scene: last.scene, bars }])
+  }
+  const sceneId = nextSceneId(doc)
+  const withScene = sceneFromLiveContent(doc, sceneId)
+  return setSong(withScene, [
+    { scene: sceneId, bars: doc.loopBars },
+    { scene: sceneId, bars },
+  ])
+}
+
+/** Delete the section at `index`. Refuses to remove the last remaining section (a song block needs
+ * at least one section; clearing back to loop mode is a distinct, deliberate act, not a delete). */
+export function songDelete(doc: BeatDocument, index: number): BeatDocument {
+  if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no section to delete')
+  if (!Number.isInteger(index) || index < 0 || index >= doc.song.length) throw new BeatEditError(`section index ${index} out of range (0-${doc.song.length - 1})`)
+  if (doc.song.length === 1) throw new BeatEditError('cannot delete the last remaining section')
+  return setSong(doc, doc.song.filter((_, i) => i !== index))
+}
+
+/** Resize the section at `index` to `bars` bars (setSong validates the 1-64 range). */
+export function songResize(doc: BeatDocument, index: number, bars: number): BeatDocument {
+  if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no section to resize')
+  if (!Number.isInteger(index) || index < 0 || index >= doc.song.length) throw new BeatEditError(`section index ${index} out of range (0-${doc.song.length - 1})`)
+  return setSong(doc, doc.song.map((s, i) => (i === index ? { scene: s.scene, bars } : s)))
 }
 
 export interface DaemonOptions {
@@ -418,6 +481,34 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // Phase 19 Stream V: the arrangement-length edit surface the {path,value} /edit grammar can't
+    // express. One high-level op per call — append / delete / resize a song section — each a thin
+    // call into core's setSong/setScene/saveClip (see the helpers above), written the same
+    // canonical-to-canonical way /edit is. The GUI re-pulls /document afterward (the daemon doesn't
+    // echo its own writes). loop_bars (loop-mode length) still rides the ordinary /edit path.
+    if (req.method === 'POST' && url.pathname === '/song') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { op?: unknown; index?: unknown; bars?: unknown }
+          let next: BeatDocument
+          if (b.op === 'append') next = songAppend(doc, Number(b.bars))
+          else if (b.op === 'resize') next = songResize(doc, Number(b.index), Number(b.bars))
+          else if (b.op === 'delete') next = songDelete(doc, Number(b.index))
+          else {
+            json(res, 400, { error: `unknown song op "${String(b.op)}" (expected append|resize|delete)` })
+            return
+          }
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, song: doc.song })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return
     }

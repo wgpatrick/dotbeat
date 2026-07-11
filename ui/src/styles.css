@@ -1363,3 +1363,116 @@ body {
   padding: 4px 8px;
   width: 130px;
 }
+
+/* ---- arrangement length controls (Phase 19 Stream V) ---- */
+.arr-length-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+.arr-length-label {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  margin-right: 2px;
+}
+.arr-section-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px 2px 7px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.arr-chip-name {
+  color: var(--text);
+  font-weight: 600;
+  margin-right: 2px;
+}
+.arr-chip-bars {
+  color: var(--text-dim);
+  min-width: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.arr-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.arr-chip-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.arr-chip-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.arr-chip-btn.del:hover:not(:disabled) {
+  border-color: #e06c75;
+  color: #e06c75;
+}
+.arr-add-section {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.arr-add-section:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* Section right-edge resize handle sitting over the ruler. */
+.arr-section-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 4;
+  cursor: col-resize;
+}
+.arr-section-resize:hover {
+  background: rgba(224, 161, 60, 0.5);
+}
+.arr-resize-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px solid var(--accent);
+  pointer-events: none;
+  z-index: 5;
+}
+.arr-resize-label {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  padding: 0 4px;
+  background: var(--accent);
+  color: #16171b;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}

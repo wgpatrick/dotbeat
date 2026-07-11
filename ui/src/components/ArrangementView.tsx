@@ -1,7 +1,45 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
-import { postEdit, postSelection } from '../daemon/bridge'
+import { postEdit, postSelection, daemonBase } from '../daemon/bridge'
 import { DRUM_LANES, type BeatDocument, type BeatTrack, type DrumLane } from '../types'
+
+// ── Arrangement length (Phase 19 Stream V) ───────────────────────────────────────────────────────
+// Two length surfaces, matching the two document modes. Loop mode (doc.song === null) is a single
+// region sized by loop_bars — changed through the ordinary optimistic {path,value} /edit path
+// (postEdit), like every other one-line edit. Song mode's timeline IS the section list, which /edit
+// can't express as one line — appending/deleting/resizing a section is a whole-list setSong
+// statement — so those go through the daemon's additive POST /song route, then re-pull the
+// authoritative document (the daemon doesn't broadcast its own writes; see bridge.ts's /edit note).
+const LOOP_MIN = 1
+const LOOP_MAX = 64
+const clampBars = (n: number, lo = LOOP_MIN, hi = LOOP_MAX) => Math.max(lo, Math.min(hi, Math.round(n)))
+
+/** Change loop-mode length via the already-supported `loop_bars` edit path (optimistic + debounced;
+ * one canonical line on disk). */
+function changeLoopBars(next: number): void {
+  postEdit('loop_bars', String(clampBars(next)))
+}
+
+/** Issue one arrangement-length op to the daemon's /song route, then re-pull /document so the UI
+ * reflects the new sections/scenes/clips (the daemon doesn't echo its own writes). */
+async function postSong(body: { op: 'append' | 'resize' | 'delete'; index?: number; bars?: number }): Promise<void> {
+  const base = daemonBase()
+  try {
+    const res = await fetch(`${base}/song`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      console.warn(`[daw] POST /song ${body.op}: HTTP ${res.status}`, await res.text().catch(() => ''))
+      return
+    }
+    const docRes = await fetch(`${base}/document`)
+    if (docRes.ok) useStore.getState().setDoc((await docRes.json()) as BeatDocument)
+  } catch (err) {
+    console.warn('[daw] could not POST /song:', err)
+  }
+}
 
 // The arrangement / song view (D4, product-spec-desktop §5). Tracks as rows, bars as columns,
 // real scenes/clips/section boundaries from the document's song arrangement. Canvas-rendered, one
@@ -357,6 +395,10 @@ export function ArrangementView() {
   // Active drag band (bars), plus which axis is dragging (the ruler → all tracks, or a track id).
   const [drag, setDrag] = useState<{ axis: 'ruler' | string; start: number; cur: number } | null>(null)
   const dragRectLeft = useRef(0)
+  // Active length-resize drag on a section's right-edge handle (Phase 19). `bars` is the live,
+  // previewed length; it commits on pointer-up (loop_bars for loop mode, POST /song for song mode).
+  const [resize, setResize] = useState<{ index: number; startBar: number; startBars: number; startX: number; bars: number } | null>(null)
+  const resizePxPerBar = useRef(1)
 
   // Track the width available to the timeline lanes (total minus the fixed header column).
   useLayoutEffect(() => {
@@ -386,6 +428,7 @@ export function ArrangementView() {
   const totalBars = useMemo(() => sections.reduce((n, s) => n + s.bars, 0), [sections])
   const pxPerBar = totalBars > 0 ? laneWidth / totalBars : 0
   const detail = pxPerBar >= DETAIL_PX_PER_BAR
+  const songMode = !!doc?.song?.length
 
   const flats: TrackFlat[] = useMemo(() => {
     if (!doc) return []
@@ -410,6 +453,46 @@ export function ArrangementView() {
     },
     [barFromClientX],
   )
+
+  // Start a length-resize drag from a section's right-edge handle. stopPropagation keeps the ruler's
+  // own bar-range select from also firing; the actual length change is previewed live and committed
+  // on pointer-up (see the effect below).
+  const beginResize = useCallback(
+    (index: number, startBar: number, startBars: number, e: React.PointerEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      resizePxPerBar.current = pxPerBar || 1
+      setResize({ index, startBar, startBars, startX: e.clientX, bars: startBars })
+    },
+    [pxPerBar],
+  )
+
+  // Window-level move/up for the resize handle: preview the new bar count while dragging, commit once
+  // on release. Loop mode writes loop_bars (optimistic /edit); song mode resizes that section (/song).
+  useEffect(() => {
+    if (!resize) return
+    const onMove = (e: PointerEvent) =>
+      setResize((r) => {
+        if (!r) return r
+        const delta = (e.clientX - r.startX) / (resizePxPerBar.current || 1)
+        return { ...r, bars: clampBars(r.startBars + delta) }
+      })
+    const onUp = () => {
+      setResize((r) => {
+        if (r && r.bars !== r.startBars) {
+          if (songMode) void postSong({ op: 'resize', index: r.index, bars: r.bars })
+          else changeLoopBars(r.bars)
+        }
+        return null
+      })
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [resize, songMode])
 
   // Window-level move/up so a drag that leaves the element still tracks and always commits.
   useEffect(() => {
@@ -478,6 +561,89 @@ export function ArrangementView() {
         </span>
       </div>
 
+      {/* Length controls (Phase 19). Loop mode: shrink/grow loop_bars, or split into sections. Song
+          mode: per-section resize/delete + append (the section's right-edge handle in the ruler drags
+          the same lengths). */}
+      <div className="arr-length-bar">
+        {songMode ? (
+          <>
+            <span className="arr-length-label">sections</span>
+            {doc.song!.map((s, i) => (
+              <span className="arr-section-chip" key={i}>
+                <span className="arr-chip-name" title={`scene "${s.scene}"`}>{s.scene}</span>
+                <button
+                  className="arr-chip-btn"
+                  data-section-minus={i}
+                  title="one bar shorter"
+                  disabled={s.bars <= LOOP_MIN}
+                  onClick={() => postSong({ op: 'resize', index: i, bars: s.bars - 1 })}
+                >
+                  −
+                </button>
+                <span className="arr-chip-bars" data-section-bars={i}>{s.bars}</span>
+                <button
+                  className="arr-chip-btn"
+                  data-section-plus={i}
+                  title="one bar longer"
+                  disabled={s.bars >= LOOP_MAX}
+                  onClick={() => postSong({ op: 'resize', index: i, bars: s.bars + 1 })}
+                >
+                  +
+                </button>
+                <button
+                  className="arr-chip-btn del"
+                  data-section-delete={i}
+                  title="delete section"
+                  disabled={doc.song!.length <= 1}
+                  onClick={() => postSong({ op: 'delete', index: i })}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            <button
+              className="arr-add-section"
+              data-add-section="1"
+              title="append a section (duplicates the last section's content)"
+              onClick={() => postSong({ op: 'append', bars: doc.song![doc.song!.length - 1]!.bars })}
+            >
+              + section
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="arr-length-label">loop length</span>
+            <button
+              className="arr-chip-btn"
+              data-loop-minus="1"
+              title="one bar shorter"
+              disabled={doc.loopBars <= LOOP_MIN}
+              onClick={() => changeLoopBars(doc.loopBars - 1)}
+            >
+              −
+            </button>
+            <span className="arr-chip-bars" data-loop-bars>{doc.loopBars} bars</span>
+            <button
+              className="arr-chip-btn"
+              data-loop-plus="1"
+              title="one bar longer"
+              disabled={doc.loopBars >= LOOP_MAX}
+              onClick={() => changeLoopBars(doc.loopBars + 1)}
+            >
+              +
+            </button>
+            <button
+              className="arr-add-section"
+              data-add-section="1"
+              title="split into arrangement sections (keeps this loop as the first section)"
+              onClick={() => postSong({ op: 'append', bars: doc.loopBars })}
+            >
+              + section
+            </button>
+          </>
+        )}
+      </div>
+
       <div className="arr-scroll" ref={scrollRef}>
         {/* Ruler: section labels + boundaries; dragging it selects a bar range across all tracks. */}
         <div className="arr-ruler-row" style={{ height: RULER_H }}>
@@ -503,6 +669,26 @@ export function ArrangementView() {
                 className="arr-ruler-band"
                 style={{ left: rulerBand.start * pxPerBar, width: (rulerBand.end - rulerBand.start) * pxPerBar }}
               />
+            )}
+            {/* A resize handle occupying the last few px of each section (just inside its right
+                boundary) — drag to change its bar count (loop_bars in loop mode). Positioned inside
+                the boundary, not centered on it, so the rightmost section's handle stays clickable at
+                the timeline's fit-to-width right edge. Sits above the ruler's own bar-select drag; its
+                pointerdown stops propagation so a resize never also starts a selection. */}
+            {sections.map((s, i) => (
+              <div
+                key={`resize-${i}`}
+                className="arr-section-resize"
+                data-section-resize={i}
+                style={{ left: Math.max(0, (s.startBar + s.bars) * pxPerBar - 6) }}
+                title={`drag to resize (${s.bars} bars)`}
+                onPointerDown={(e) => beginResize(i, s.startBar, s.bars, e)}
+              />
+            ))}
+            {resize && (
+              <div className="arr-resize-guide" style={{ left: (resize.startBar + resize.bars) * pxPerBar }}>
+                <span className="arr-resize-label">{resize.bars} bars</span>
+              </div>
             )}
           </div>
         </div>
