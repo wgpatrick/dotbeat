@@ -78,3 +78,34 @@ Same worktree pattern. Both streams may touch `src/daemon/daemon.ts` additively 
 acceptable collision risk, handled at merge same as every prior phase. Both are `ui/`-heavy but in
 different, mostly-new files, low collision there. `npm test` must stay green throughout
 (293+/287+/0/6).
+
+## Result (2026-07-11)
+
+Both streams shipped and are merged into `main`, both fast-forward with zero merge conflicts.
+Final suite unchanged: **293 tests, 287 passing, 0 failing, 6 skipped**.
+
+- **Stream H**: real history panel (`GET /history`, `POST /restore`, `POST /pin`/`/unpin`, all
+  thin HTTP faces on `src/history/history.ts`'s existing functions). Verified against a real
+  git-backed project: checkpoints match `beat history`'s own output 1:1, restore genuinely
+  append-only (git log grew 4→5 commits, not a rewind — the restored-from commit stays intact),
+  GUI reflects the change live. **Real finding worth remembering**: `beat set`/`beat add-note`
+  do NOT auto-checkpoint as D3's design assumed — only explicit `beat checkpoint` does. Deferred:
+  collapsed view, a play button, a GUI unpin control (route exists, no button yet).
+- **Stream I**: the vary-and-audition affordance — the project's own named differentiator,
+  finally with a real GUI. `POST /vary` resolves the daemon's live selection into a scoped variant
+  batch (reusing `src/vary/vary.ts`'s real functions, enforcing scope — throws if aimed outside
+  the selection), never writing to disk until Keep. The GUI audition strip actually plays each
+  variant live through the running engine (not a static preview). Verified with a precise
+  before/after diff: stepped through 3 variants, kept #3, confirmed the exact kept params (not
+  variant 1, not the original) landed on disk. Deferred: lane-granular selection (currently
+  track-level; the daemon-side group inference already supports lanes, the click gesture just
+  isn't wired in `StepSequencer.tsx` yet), rung-2 `feel` variation over the affordance, wiring
+  Keep into the `beat score` exhaust.
+- **Both streams' daemon routes landed with zero conflicts** — Stream I branched from a base that
+  already included Stream H's merged routes, so `daemon.ts` merged clean both times.
+- **What this closes**: at this point, both of the two GUI-absent, product-defining surfaces
+  identified at the top of this phase (versioning, the vary-and-audition loop) are real and
+  live-verified, alongside Phase 13/14's engine parity, full editing, arrangement/mixer views, and
+  a genuinely packaged Mac app. The remaining gaps across Phases 12-15 are now mostly smaller
+  polish items (lane-granular vary selection, collapsed history display, instrument-track
+  meters/FX, velocity-drag note editing, insert-chain reordering) rather than missing surfaces.
