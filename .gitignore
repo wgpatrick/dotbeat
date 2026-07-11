@@ -4,3 +4,11 @@ dist/
 *.log
 dist-headless/
 .freesound-tokens.json
+
+# Tauri desktop shell (D1) — Rust build artifacts, never committed. (Cargo.lock IS committed,
+# per Rust convention for applications — reproducible builds.)
+target/
+
+# beatlab is cloned as a scratch checkout outside the repo for desktop dev/testing — if anyone
+# ever clones it *inside* the worktree by mistake, don't let it land in git history.
+/beatlab/

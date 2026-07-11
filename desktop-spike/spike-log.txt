@@ -1,0 +1,6 @@
+[2026-07-11T07:49:28.089Z] spike starting, userAgent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)
+[2026-07-11T07:49:28.096Z] AudioContext created, initial state=suspended
+[2026-07-11T07:49:28.165Z] after resume(), state=running
+[2026-07-11T07:49:28.167Z] oscillator scheduled: start=0.053 stop=0.353 currentTime=0.003
+[2026-07-11T07:49:28.517Z] tone completed via onended, ctx.state=running, ctx.currentTime=0.354
+[2026-07-11T07:49:28.521Z] PASS: spike succeeded end to end
