@@ -72,6 +72,9 @@ const USAGE = `usage:
   beat render <file> [-o out.wav] --beatlab-dir <path>    (or BEATLAB_DIR env)
   beat render --offline <file> [-o out.wav]               real engine, no browser (see phase-4 notes)
   beat daemon <file> [--port 8420]
+  beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)
+  beat history <file> [--limit N]                         list this project's checkpoints, newest first
+  beat restore <file> <ref>                               go back to a checkpoint (append-only — never destroys work)
   beat mcp                                                MCP server over stdio (all of the above as tools)
 
 paths for set: bpm | loop_bars | selected_track | <track>.<synth param> | <track>.name |
@@ -432,6 +435,44 @@ function diffCmd(argv) {
   process.exitCode = entries.length === 0 ? 0 : 1 // diff(1) convention
 }
 
+// ---- D3 history: checkpoint / history / restore (append-only, semantic labels) -------------
+// "Versioning without git vocabulary" (docs/product-spec-desktop.md §4). Dynamically imported so
+// this block stays self-contained.
+
+async function checkpointCmd(argv) {
+  const { checkpoint } = await import('../dist/src/history/index.js')
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !['--label', '--intent'].includes(argv[i - 1]))
+  const [file] = positional
+  if (!file) throw new BeatEditError('checkpoint needs <file> [--label L] [--intent I]')
+  const label = flagValue(argv, '--label')
+  const intent = flagValue(argv, '--intent')
+  const result = checkpoint(file, { ...(label ? { label } : {}), ...(intent ? { intent } : {}) })
+  if (result.skipped) process.stdout.write('no changes since the last checkpoint — nothing to save\n')
+  else process.stdout.write(`checkpoint ${result.ref}  ${result.when}  ${result.label}\n`)
+}
+
+async function historyCmd(argv) {
+  const { history } = await import('../dist/src/history/index.js')
+  const limit = flagValue(argv, '--limit')
+  const file = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--limit')
+  if (!file) throw new BeatEditError('history needs <file> [--limit N]')
+  const entries = history(file, { ...(limit !== undefined ? { limit: Number(limit) } : {}) })
+  if (entries.length === 0) {
+    process.stdout.write('no history yet\n')
+    return
+  }
+  for (const e of entries) process.stdout.write(`${e.ref}  ${e.when}  ${e.label}${e.intent ? `  (intent: ${e.intent})` : ''}\n`)
+}
+
+async function restoreCmd(argv) {
+  const { restore } = await import('../dist/src/history/index.js')
+  const [file, ref] = argv
+  if (!file || !ref) throw new BeatEditError('restore needs <file> <ref> (a checkpoint from `beat history`)')
+  const result = restore(file, ref)
+  if (result.skipped) process.stdout.write('that version is already the current one — nothing changed\n')
+  else process.stdout.write(`restored — new checkpoint ${result.ref}  ${result.label}\n`)
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2)
   switch (cmd) {
@@ -461,6 +502,15 @@ async function main() {
       break
     case 'diff':
       diffCmd(rest)
+      break
+    case 'checkpoint':
+      await checkpointCmd(rest)
+      break
+    case 'history':
+      await historyCmd(rest)
+      break
+    case 'restore':
+      await restoreCmd(rest)
       break
     case 'presets':
       presetsCmd(rest)
@@ -531,7 +581,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  if (err instanceof BeatEditError || err instanceof BeatParseError || err instanceof BeatPresetError) {
+  if (err instanceof BeatEditError || err instanceof BeatParseError || err instanceof BeatPresetError || err.name === 'HistoryError') {
     console.error(`error: ${err.message}`)
     process.exitCode = 2
   } else {

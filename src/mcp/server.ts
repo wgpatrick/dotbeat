@@ -36,6 +36,7 @@ import {
   formatPresetList,
 } from '../core/index.js'
 import { decodeWav, analyze, lint, formatLint } from '../metrics/index.js'
+import { checkpoint, history, restore } from '../history/index.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -390,6 +391,66 @@ const TOOLS: ToolDef[] = [
           else resolve(stdout)
         })
       }),
+  },
+  {
+    name: 'beat_checkpoint',
+    description:
+      'Save a restorable version of a .beat project. Call this after each batch of edits that fulfils one user request — pass the user\'s request verbatim as `intent` so the version can later be found by what was asked for. Without a `label` the checkpoint auto-labels itself from the semantic diff ("lead: cutoff 3200 -> 900"). Storage is a local git repo in the project folder (created invisibly); no git knowledge or setup is needed. Returns the new checkpoint\'s ref, or reports that nothing changed since the last one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        label: { type: 'string', description: 'optional human name for this version, e.g. "rough mix v1"; omit to auto-label from the diff' },
+        intent: { type: 'string', description: 'the user request that drove these edits — index the version by intent so "the good version" is findable later' },
+      },
+      required: ['file'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const result = checkpoint(file, {
+        ...(typeof args.label === 'string' ? { label: args.label } : {}),
+        ...(typeof args.intent === 'string' ? { intent: args.intent } : {}),
+      })
+      if (result.skipped) return 'no changes since the last checkpoint — nothing to save\n'
+      return `checkpoint ${result.ref}  ${result.when}  ${result.label}\n`
+    },
+  },
+  {
+    name: 'beat_history',
+    description:
+      'List a .beat project\'s checkpoints, newest first: each line is a ref, ISO timestamp, the semantic label, and the recorded intent when there is one. Use this to find "the good version" the user wants to return to — read the labels/intents, then hand the chosen ref to beat_restore.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        limit: { type: 'number', description: 'max checkpoints to return (most recent first)' },
+      },
+      required: ['file'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const entries = history(file, typeof args.limit === 'number' ? { limit: args.limit } : {})
+      if (entries.length === 0) return 'no history yet\n'
+      return entries.map((e) => `${e.ref}  ${e.when}  ${e.label}${e.intent ? `  (intent: ${e.intent})` : ''}`).join('\n') + '\n'
+    },
+  },
+  {
+    name: 'beat_restore',
+    description:
+      'Go back to an earlier checkpoint (ref from beat_history): rewrites the .beat file to that version and takes a fresh checkpoint. This is APPEND-ONLY and always safe — it never destroys work, because the pre-restore state stays in history and can itself be restored (redo is free). Use it freely whenever the user wants an earlier take back.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        ref: { type: 'string', description: 'a checkpoint ref from beat_history' },
+      },
+      required: ['file', 'ref'],
+    },
+    handler: (args) => {
+      const result = restore(str(args, 'file'), str(args, 'ref'))
+      if (result.skipped) return 'that version is already the current one — nothing changed\n'
+      return `restored — new checkpoint ${result.ref}  ${result.label}\n`
+    },
   },
 ]
 
