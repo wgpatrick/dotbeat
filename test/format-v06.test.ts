@@ -123,4 +123,10 @@ test('instrument tracks are excluded from beatlab partials (media still rides)',
   const partial = beatDocumentToPartialTracks(doc)
   assert.equal(partial.tracks.length, 0, 'beatlab has no instrument kind yet')
   assert.equal(partial.media.length, 1)
+  // browser leg: they ride the additive instruments field instead (played by the daw bridge)
+  assert.equal(partial.instruments.length, 1)
+  assert.deepEqual(
+    { ...partial.instruments[0], notes: partial.instruments[0]!.notes.length },
+    { id: 'keys', name: 'Keys', sample: 'piano', program: 0, volume: -6, pan: 0.1, notes: 2 },
+  )
 })

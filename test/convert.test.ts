@@ -34,13 +34,19 @@ test('selectedTrack pointing at the drum track survives — no fallback needed a
   assert.equal(doc.selectedTrack, 'drums')
 })
 
-test('the real drum pattern survives conversion exactly, lane by lane', () => {
+test('the real drum pattern survives conversion into hits (first bar reproduces it exactly)', () => {
   const { doc } = sandboxPayloadToBeatDocument(realPayload)
   const srcDrums = realPayload.tracks.find((t) => t.kind === 'drums')!
   const drums = doc.tracks.find((t) => t.id === srcDrums.id)!
   assert.equal(drums.kind, 'drums')
+  // v0.8: the 16-step pattern migrated to free-timed hits; the first bar (steps 0-15) must carry
+  // exactly the source's nonzero steps at the same velocities.
   for (const lane of ['kick', 'snare', 'clap', 'hat', 'openhat'] as const) {
-    assert.deepEqual(drums.pattern![lane], srcDrums.pattern![lane], `pattern.${lane}`)
+    const bar0 = new Map(drums.hits.filter((h) => h.lane === lane && h.start < 16).map((h) => [h.start, h.velocity]))
+    srcDrums.pattern![lane]!.forEach((v, step) => {
+      if (v > 0) assert.equal(bar0.get(step), v, `${lane} step ${step}`)
+      else assert.ok(!bar0.has(step), `${lane} step ${step} should be silent`)
+    })
   }
 })
 

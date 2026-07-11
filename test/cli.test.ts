@@ -33,7 +33,7 @@ function tempProject(): string {
 test('beat inspect prints the overview; --json prints the parsed document', () => {
   const file = tempProject()
   const text = beat(['inspect', file])
-  assert.match(text, /^format 0\.7 \| 126 bpm/)
+  assert.match(text, /^format 0\.8 \| 126 bpm/)
   assert.match(text, /^lead {2}"Lead" {2}synth/m)
   const json = JSON.parse(beat(['inspect', file, '--json'])) as { bpm: number; tracks: unknown[] }
   assert.equal(json.bpm, 126)
@@ -71,7 +71,7 @@ test('beat diff between two files reads like an edit list, exit code follows dif
   copyFileSync(a, b)
   beat(['set', b, 'drums.pattern.kick[3]', '0.7', 'lead.cutoff', '900'])
   const out = beat(['diff', a, b], { expectExit: 1 })
-  assert.match(out, /drums: kick step 3 added \(vel 0\.7\)/)
+  assert.match(out, /drums: kick hit added kick3 \(step 3, vel 0\.7\)/)
   assert.match(out, /lead: cutoff 3200 -> 900/)
   // identical files: exit 0, "no musical changes"
   const same = beat(['diff', a, a])

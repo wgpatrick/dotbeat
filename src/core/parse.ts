@@ -1,4 +1,4 @@
-import type { BeatClip, BeatDocument, BeatDrumPattern, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import type { BeatClip, BeatDocument, BeatDrumHit, BeatDrumPattern, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
 import { DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
@@ -67,6 +67,10 @@ export function parse(text: string): BeatDocument {
   let inSynth = false
   let inSong = false
   let synthSeen = new Set<keyof BeatSynth>()
+  // v0.8 migration: legacy `pattern` lines accumulate here per track/clip, then expand to hits
+  // at close (grammar-level patterns are gone; v<=0.7 files still parse into the new event model).
+  const legacyTrackPatterns = new Map<BeatTrack, Partial<BeatDrumPattern>>()
+  const legacyClipPatterns = new Map<BeatClip, Partial<BeatDrumPattern>>()
 
   function closeSynthIfOpen(lineNo: number) {
     if (!inSynth) return
@@ -77,24 +81,39 @@ export function parse(text: string): BeatDocument {
 
   // A drum pattern (track-level or clip-level) must arrive complete: all five lanes, equal step
   // counts — the same fail-loudly stance the synth block takes.
-  function checkDrumPattern(pattern: BeatDrumPattern | undefined, what: string, lineNo: number) {
-    const p = pattern ?? ({} as BeatDrumPattern)
+  function checkDrumPattern(pattern: Partial<BeatDrumPattern> | undefined, what: string, lineNo: number) {
+    const p = pattern ?? {}
     const missing = DRUM_LANES.filter((lane) => !(lane in p))
     if (missing.length) throw new BeatParseError(`${what} is missing pattern lane(s): ${missing.join(', ')}`, lineNo)
-    const lengths = new Set(DRUM_LANES.map((lane) => p[lane].length))
+    const lengths = new Set(DRUM_LANES.map((lane) => p[lane]!.length))
     if (lengths.size > 1) throw new BeatParseError(`${what} has pattern lanes of unequal length`, lineNo)
   }
 
   function closeClipIfOpen(lineNo: number) {
     if (!currentClip || !currentTrack) return
-    if (currentTrack.kind === 'drums') checkDrumPattern(currentClip.pattern, `clip "${currentClip.id}" in drum track "${currentTrack.id}"`, lineNo)
+    const legacy = legacyClipPatterns.get(currentClip)
+    if (legacy) {
+      // legacy pattern lines must be complete (all five lanes, equal length) to migrate cleanly
+      checkDrumPattern(legacy, `clip "${currentClip.id}" in drum track "${currentTrack.id}"`, lineNo)
+      const cycle = legacy[DRUM_LANES[0]]!.length // clips are one cycle (a bar); tile over itself
+      currentClip.hits.push(...expandPattern(legacy, cycle))
+      legacyClipPatterns.delete(currentClip)
+    }
+    if (currentTrack.kind === 'drums') assertUniqueHitIds(currentClip.hits, `clip "${currentClip.id}"`, lineNo)
     currentClip = null
   }
 
   function closeTrackIfOpen(lineNo: number) {
     closeClipIfOpen(lineNo)
     if (!currentTrack) return
-    if (currentTrack.kind === 'drums') checkDrumPattern(currentTrack.pattern, `drum track "${currentTrack.id}"`, lineNo)
+    const legacy = legacyTrackPatterns.get(currentTrack)
+    if (legacy) {
+      checkDrumPattern(legacy, `drum track "${currentTrack.id}"`, lineNo)
+      // a live pattern played every bar; tile across the whole loop (loopBars * 16 steps)
+      currentTrack.hits.push(...expandPattern(legacy, (loopBars ?? 1) * 16))
+      legacyTrackPatterns.delete(currentTrack)
+    }
+    if (currentTrack.kind === 'drums') assertUniqueHitIds(currentTrack.hits, `drum track "${currentTrack.id}"`, lineNo)
     if (currentTrack.kind === 'instrument' && !currentTrack.instrument) {
       throw new BeatParseError(`instrument track "${currentTrack.id}" is missing its soundfont line`, lineNo)
     }
@@ -116,7 +135,7 @@ export function parse(text: string): BeatDocument {
     return { id, pitch, start, duration, velocity }
   }
 
-  function parsePatternLine(tokens: string[], existing: BeatDrumPattern | undefined, lineNo: number): { lane: DrumLane; steps: number[] } {
+  function parsePatternLine(tokens: string[], existing: Partial<BeatDrumPattern> | undefined, lineNo: number): { lane: DrumLane; steps: number[] } {
     if (tokens.length < 3) throw new BeatParseError('pattern expects a lane name and at least 1 step velocity', lineNo)
     const lane = tokens[1]!
     if (!isDrumLane(lane)) throw new BeatParseError(`unknown drum lane "${lane}" (expected one of ${DRUM_LANES.join('|')})`, lineNo)
@@ -127,6 +146,45 @@ export function parse(text: string): BeatDocument {
       return v
     })
     return { lane, steps }
+  }
+
+  // v0.8: a free-timed drum hit — `hit <id> <lane> <start> <velocity>`. start is fractional
+  // steps (v0.7 number rules), absolute over the loop; no duration (one-shot trigger).
+  function parseHitLine(tokens: string[], lineNo: number): BeatDrumHit {
+    if (tokens.length !== 5) throw new BeatParseError('hit expects exactly 4 values: <id> <lane> <start> <velocity>', lineNo)
+    const [, id, laneTok, startTok, velTok] = tokens as [string, string, string, string, string]
+    if (!SLUG_RE.test(id)) throw new BeatParseError(`hit ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
+    if (!isDrumLane(laneTok)) throw new BeatParseError(`unknown drum lane "${laneTok}" (expected one of ${DRUM_LANES.join('|')})`, lineNo)
+    const start = parseFloatStrict(startTok, lineNo, 'hit start')
+    if (start < 0) throw new BeatParseError(`hit start must be >= 0, got ${start}`, lineNo)
+    const velocity = parseFloatStrict(velTok, lineNo, 'hit velocity')
+    if (velocity <= 0 || velocity > 1) throw new BeatParseError(`hit velocity must be in (0, 1], got ${velocity}`, lineNo)
+    return { id, lane: laneTok, start, velocity }
+  }
+
+  // v0.8 migration: expand a legacy per-bar pattern into absolute hits. A step at velocity v
+  // becomes a hit at that step; the 16-step cycle is tiled across `totalSteps` (loopBars*16 for
+  // a live track — the pattern played every bar; the pattern's own length for a clip). Ids are
+  // deterministic `<lane><step>` so re-parsing a migrated file is stable. See research 12.
+  function expandPattern(pattern: Partial<BeatDrumPattern>, totalSteps: number): BeatDrumHit[] {
+    const hits: BeatDrumHit[] = []
+    for (const lane of DRUM_LANES) {
+      const steps = pattern[lane]
+      if (!steps || steps.length === 0) continue
+      for (let k = 0; k < totalSteps; k++) {
+        const v = steps[k % steps.length]!
+        if (v > 0) hits.push({ id: `${lane}${k}`, lane, start: k, velocity: v })
+      }
+    }
+    return hits
+  }
+
+  function assertUniqueHitIds(hits: BeatDrumHit[], what: string, lineNo: number) {
+    const seen = new Set<string>()
+    for (const h of hits) {
+      if (seen.has(h.id)) throw new BeatParseError(`duplicate hit id "${h.id}" in ${what}`, lineNo)
+      seen.add(h.id)
+    }
   }
 
   for (let i = 0; i < rawLines.length; i++) {
@@ -186,6 +244,7 @@ export function parse(text: string): BeatDocument {
           laneSamples: {},
           clips: [],
           notes: [],
+          hits: [],
         }
         tracks.push(currentTrack)
       } else if (keyword === 'scene') {
@@ -290,7 +349,7 @@ export function parse(text: string): BeatDocument {
         const id = tokens[1]!
         if (!SLUG_RE.test(id)) throw new BeatParseError(`clip ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
         if (currentTrack.clips.some((c) => c.id === id)) throw new BeatParseError(`duplicate clip id "${id}" on track "${currentTrack.id}"`, lineNo)
-        currentClip = { id, notes: [] }
+        currentClip = { id, notes: [], hits: [] }
         currentTrack.clips.push(currentClip)
         continue
       }
@@ -298,10 +357,16 @@ export function parse(text: string): BeatDocument {
       if (keyword === 'note') {
         if (currentTrack.kind === 'drums') throw new BeatParseError(`note lines only belong in synth/instrument tracks; "${currentTrack.id}" is a drums track`, lineNo)
         currentTrack.notes.push(parseNoteLine(tokens, lineNo))
+      } else if (keyword === 'hit') {
+        if (currentTrack.kind !== 'drums') throw new BeatParseError(`hit lines only belong in drum tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+        currentTrack.hits.push(parseHitLine(tokens, lineNo))
       } else if (keyword === 'pattern') {
+        // legacy (v<=0.7): accumulate, migrate to hits at track close
         if (currentTrack.kind !== 'drums') throw new BeatParseError(`pattern lines only belong in drum tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
-        const { lane, steps } = parsePatternLine(tokens, currentTrack.pattern, lineNo)
-        currentTrack.pattern = { ...(currentTrack.pattern ?? ({} as BeatDrumPattern)), [lane]: steps }
+        const acc = legacyTrackPatterns.get(currentTrack) ?? {}
+        const { lane, steps } = parsePatternLine(tokens, acc, lineNo)
+        acc[lane] = steps
+        legacyTrackPatterns.set(currentTrack, acc)
       } else {
         throw new BeatParseError(`unexpected keyword "${keyword}" inside a track`, lineNo)
       }
@@ -316,10 +381,18 @@ export function parse(text: string): BeatDocument {
           currentClip.notes.push(parseNoteLine(tokens, lineNo))
           continue
         }
+        if (keyword === 'hit') {
+          if (currentTrack.kind !== 'drums') throw new BeatParseError(`hit lines only belong in drum-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+          currentClip.hits.push(parseHitLine(tokens, lineNo))
+          continue
+        }
         if (keyword === 'pattern') {
+          // legacy (v<=0.7) clip pattern: accumulate, migrate to hits at clip close
           if (currentTrack.kind !== 'drums') throw new BeatParseError(`pattern lines only belong in drum-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
-          const { lane, steps } = parsePatternLine(tokens, currentClip.pattern, lineNo)
-          currentClip.pattern = { ...(currentClip.pattern ?? ({} as BeatDrumPattern)), [lane]: steps }
+          const acc = legacyClipPatterns.get(currentClip) ?? {}
+          const { lane, steps } = parsePatternLine(tokens, acc, lineNo)
+          acc[lane] = steps
+          legacyClipPatterns.set(currentClip, acc)
           continue
         }
         throw new BeatParseError(`unexpected keyword "${keyword}" inside a clip`, lineNo)

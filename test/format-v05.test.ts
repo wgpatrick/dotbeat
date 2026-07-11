@@ -42,11 +42,8 @@ track drums Drums #e35d5d drums
 ${CORE_SYNTH}
   lane kick kick-909 -2 -3
   lane snare snare-x 0 0
-  pattern kick 0.9 0 0 0
-  pattern snare 0 0 0.8 0
-  pattern clap 0 0 0 0
-  pattern hat 0 0 0 0
-  pattern openhat 0 0 0 0
+  hit kick0 kick 0 0.9
+  hit snare2 snare 2 0.8
 `
 
 test('the media example round-trips byte-identically', () => {

@@ -10,7 +10,7 @@
 // machine-applicable changeset, and — later — the natural undo / --dry-run representation. Each
 // entry carries `before`/`after`, so inverting a diff is structurally trivial when we need it.
 
-import type { BeatDocument, BeatNote, BeatTrack, DrumLane } from './document.js'
+import type { BeatDrumHit, BeatDocument, BeatNote, BeatTrack, DrumLane } from './document.js'
 import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -24,12 +24,14 @@ export type DiffEntry =
   | { kind: 'note-added'; trackId: string; note: BeatNote }
   | { kind: 'note-removed'; trackId: string; note: BeatNote }
   | { kind: 'note-changed'; trackId: string; noteId: string; changes: { field: 'pitch' | 'start' | 'duration' | 'velocity'; before: number; after: number }[] }
-  | { kind: 'pattern-step'; trackId: string; lane: DrumLane; step: number; before: number; after: number }
-  | { kind: 'pattern-length'; trackId: string; lane: DrumLane; before: number; after: number }
+  // v0.8 drum hits (match by id, like notes)
+  | { kind: 'hit-added'; trackId: string; hit: BeatDrumHit }
+  | { kind: 'hit-removed'; trackId: string; hit: BeatDrumHit }
+  | { kind: 'hit-changed'; trackId: string; hitId: string; changes: { field: 'lane' | 'start' | 'velocity'; before: string | number; after: string | number }[] }
   // v0.4 song structure
   | { kind: 'clip-added'; trackId: string; clipId: string }
   | { kind: 'clip-removed'; trackId: string; clipId: string }
-  | { kind: 'clip-changed'; trackId: string; clipId: string; noteDelta: number; patternDelta: number }
+  | { kind: 'clip-changed'; trackId: string; clipId: string; noteDelta: number; hitDelta: number }
   | { kind: 'scene-added'; sceneId: string }
   | { kind: 'scene-removed'; sceneId: string }
   | { kind: 'scene-slot'; sceneId: string; trackId: string; before: string | null; after: string | null }
@@ -112,18 +114,21 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
       if (changes.length) out.push({ kind: 'note-changed', trackId: id, noteId: nid, changes })
     }
 
-    if (ta.pattern && tb.pattern) {
-      for (const lane of DRUM_LANES) {
-        const la = ta.pattern[lane]
-        const lb = tb.pattern[lane]
-        if (la.length !== lb.length) {
-          out.push({ kind: 'pattern-length', trackId: id, lane, before: la.length, after: lb.length })
-          continue // step-by-step comparison across different lengths would be noise
-        }
-        for (let i = 0; i < la.length; i++) {
-          if (la[i] !== lb[i]) out.push({ kind: 'pattern-step', trackId: id, lane, step: i, before: la[i]!, after: lb[i]! })
-        }
+    // v0.8 drum hits: match by id (like notes). Added/removed/changed(lane|start|velocity).
+    const aHits = new Map(ta.hits.map((h) => [h.id, h]))
+    const bHits = new Map(tb.hits.map((h) => [h.id, h]))
+    for (const [hid, h] of aHits) if (!bHits.has(hid)) out.push({ kind: 'hit-removed', trackId: id, hit: h })
+    for (const [hid, h] of bHits) {
+      const before = aHits.get(hid)
+      if (!before) {
+        out.push({ kind: 'hit-added', trackId: id, hit: h })
+        continue
       }
+      const changes: { field: 'lane' | 'start' | 'velocity'; before: string | number; after: string | number }[] = []
+      if (before.lane !== h.lane) changes.push({ field: 'lane', before: before.lane, after: h.lane })
+      if (before.start !== h.start) changes.push({ field: 'start', before: before.start, after: h.start })
+      if (before.velocity !== h.velocity) changes.push({ field: 'velocity', before: before.velocity, after: h.velocity })
+      if (changes.length) out.push({ kind: 'hit-changed', trackId: id, hitId: hid, changes })
     }
 
     // Clips match by ID (like everything else). Content changes report as counts — a clip is a
@@ -144,16 +149,13 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
       let noteDelta = 0
       for (const k of aNoteSet) if (!bNoteSet.has(k)) noteDelta++
       for (const k of bNoteSet) if (!aNoteSet.has(k)) noteDelta++
-      let patternDelta = 0
-      if (ca.pattern && cb.pattern) {
-        for (const lane of DRUM_LANES) {
-          const la = ca.pattern[lane]
-          const lb = cb.pattern[lane]
-          if (la.length !== lb.length) patternDelta += Math.abs(la.length - lb.length)
-          else for (let i = 0; i < la.length; i++) if (la[i] !== lb[i]) patternDelta++
-        }
-      }
-      if (noteDelta || patternDelta) out.push({ kind: 'clip-changed', trackId: id, clipId: cid, noteDelta, patternDelta })
+      const hitKey = (h: BeatDrumHit) => `${h.id}|${h.lane}|${h.start}|${h.velocity}`
+      const aHitSet = new Set(ca.hits.map(hitKey))
+      const bHitSet = new Set(cb.hits.map(hitKey))
+      let hitDelta = 0
+      for (const k of aHitSet) if (!bHitSet.has(k)) hitDelta++
+      for (const k of bHitSet) if (!aHitSet.has(k)) hitDelta++
+      if (noteDelta || hitDelta) out.push({ kind: 'clip-changed', trackId: id, clipId: cid, noteDelta, hitDelta })
     }
   }
 
@@ -231,7 +233,7 @@ export function formatDiff(entries: DiffEntry[]): string {
       case 'track-added':
         lines.push(
           `${e.trackId}: track added (${e.track.kind} "${e.track.name}", ${
-            e.track.kind === 'drums' ? 'drum pattern' : `${e.track.notes.length} note${e.track.notes.length === 1 ? '' : 's'}`
+            e.track.kind === 'drums' ? `${e.track.hits.length} hit${e.track.hits.length === 1 ? '' : 's'}` : `${e.track.notes.length} note${e.track.notes.length === 1 ? '' : 's'}`
           })`,
         )
         break
@@ -256,13 +258,14 @@ export function formatDiff(entries: DiffEntry[]): string {
       case 'note-changed':
         lines.push(`${e.trackId}: note ${e.noteId} ${e.changes.map((c) => `${c.field} ${formatNumber(c.before)} -> ${formatNumber(c.after)}`).join(', ')}`)
         break
-      case 'pattern-step':
-        lines.push(
-          `${e.trackId}: ${e.lane} step ${e.step} ${e.before === 0 ? `added (vel ${formatNumber(e.after)})` : e.after === 0 ? `removed (was ${formatNumber(e.before)})` : `${formatNumber(e.before)} -> ${formatNumber(e.after)}`}`,
-        )
+      case 'hit-added':
+        lines.push(`${e.trackId}: ${e.hit.lane} hit added ${e.hit.id} (step ${formatNumber(e.hit.start)}, vel ${formatNumber(e.hit.velocity)})`)
         break
-      case 'pattern-length':
-        lines.push(`${e.trackId}: ${e.lane} pattern length ${e.before} -> ${e.after} steps`)
+      case 'hit-removed':
+        lines.push(`${e.trackId}: ${e.hit.lane} hit removed ${e.hit.id} (step ${formatNumber(e.hit.start)})`)
+        break
+      case 'hit-changed':
+        lines.push(`${e.trackId}: hit ${e.hitId} ${e.changes.map((c) => `${c.field} ${typeof c.before === 'number' ? formatNumber(c.before) : c.before} -> ${typeof c.after === 'number' ? formatNumber(c.after) : c.after}`).join(', ')}`)
         break
       case 'clip-added':
         lines.push(`${e.trackId}: clip added "${e.clipId}"`)
@@ -271,7 +274,7 @@ export function formatDiff(entries: DiffEntry[]): string {
         lines.push(`${e.trackId}: clip removed "${e.clipId}"`)
         break
       case 'clip-changed':
-        lines.push(`${e.trackId}: clip "${e.clipId}" changed (${e.noteDelta} note change${e.noteDelta === 1 ? '' : 's'}, ${e.patternDelta} step change${e.patternDelta === 1 ? '' : 's'})`)
+        lines.push(`${e.trackId}: clip "${e.clipId}" changed (${e.noteDelta} note change${e.noteDelta === 1 ? '' : 's'}, ${e.hitDelta} hit change${e.hitDelta === 1 ? '' : 's'})`)
         break
       case 'scene-added':
         lines.push(`scene added "${e.sceneId}"`)

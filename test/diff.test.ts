@@ -60,15 +60,15 @@ test('note add/remove/move all read as musical edits', () => {
   assert.match(formatDiff(entriesMove), new RegExp(`^lead: note ${firstNote.id} start ${firstNote.start} -> ${firstNote.start + 4}\\n$`))
 })
 
-test('a drum-step toggle diffs to one pattern-step entry with add/remove phrasing', () => {
+test('v0.8: the step-toggle sugar diffs to one hit add/remove', () => {
   const a = realDoc()
-  const b = setValue(a, 'drums.pattern.kick[3]', '0.7')
+  const b = setValue(a, 'drums.pattern.kick[3]', '0.7') // step 3 empty -> adds hit kick3
   const entries = diffDocuments(a, b)
-  assert.deepEqual(entries, [{ kind: 'pattern-step', trackId: 'drums', lane: 'kick', step: 3, before: 0, after: 0.7 }])
-  assert.equal(formatDiff(entries), 'drums: kick step 3 added (vel 0.7)\n')
+  assert.deepEqual(entries, [{ kind: 'hit-added', trackId: 'drums', hit: { id: 'kick3', lane: 'kick', start: 3, velocity: 0.7 } }])
+  assert.equal(formatDiff(entries), 'drums: kick hit added kick3 (step 3, vel 0.7)\n')
   // and removing it phrases as removed
   const c = setValue(b, 'drums.pattern.kick[3]', '0')
-  assert.equal(formatDiff(diffDocuments(b, c)), 'drums: kick step 3 removed (was 0.7)\n')
+  assert.equal(formatDiff(diffDocuments(b, c)), 'drums: kick hit removed kick3 (step 3)\n')
 })
 
 test('track rename does NOT produce false-positive note/pattern diffs (ID matching)', () => {
@@ -103,7 +103,7 @@ test('a multi-edit session diffs to a complete, readable edit list', () => {
   const text = formatDiff(diffDocuments(a, b))
   assert.equal(
     text,
-    ['bpm: 126 -> 124', 'drums: snare step 7 added (vel 0.6)', 'bass: note added test1 (pitch 36, start 0, dur 4, vel 0.85)', 'lead: cutoff 3200 -> 900'].join('\n') + '\n',
+    ['bpm: 126 -> 124', 'drums: snare hit added snare7 (step 7, vel 0.6)', 'bass: note added test1 (pitch 36, start 0, dur 4, vel 0.85)', 'lead: cutoff 3200 -> 900'].join('\n') + '\n',
   )
 })
 
@@ -155,7 +155,7 @@ test('removeNote returns the removed note and rejects unknown ids', () => {
 
 test('describeDocument gives a compact, exact overview of the real project', () => {
   const text = describeDocument(realDoc())
-  assert.match(text, /^format 0\.7 \| 126 bpm \| 4 bars \(64 steps\) \| selected: drums\n/)
+  assert.match(text, /^format 0\.8 \| 126 bpm \| 4 bars \(64 steps\) \| selected: drums\n/)
   assert.match(text, /tracks: 4\n/)
   assert.match(text, /^lead {2}"Lead" {2}synth/m)
   assert.match(text, /cutoff 3200 Hz/)

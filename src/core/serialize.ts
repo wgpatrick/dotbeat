@@ -1,4 +1,4 @@
-import type { BeatDocument, BeatDrumPattern, BeatNote, BeatScene, BeatTrack } from './document.js'
+import type { BeatDrumHit, BeatDocument, BeatNote, BeatScene, BeatTrack } from './document.js'
 import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -9,10 +9,14 @@ function sortedNoteLines(notes: BeatNote[], indent: string): string[] {
     .map((n) => `${indent}note ${n.id} ${n.pitch} ${formatNumber(n.start)} ${formatNumber(n.duration)} ${formatNumber(n.velocity)}`)
 }
 
-// Canonical: all five lanes, always, in DRUM_LANES order — a step toggle is always a one-line
-// diff and never inserts/deletes lines. See format-spec.md.
-function patternLines(pattern: BeatDrumPattern, indent: string): string[] {
-  return DRUM_LANES.map((lane) => `${indent}pattern ${lane} ${pattern[lane].map(formatNumber).join(' ')}`)
+// v0.8: canonical drum-hit order is (start, lane-in-DRUM_LANES-order, id) ascending — one hit per
+// line, so an added/moved hit is a one-line diff. Hits are free-timed events (research 12); the
+// old fixed-grid `pattern` lines are gone from the grammar (migrated on parse).
+const laneIndex = (lane: string) => DRUM_LANES.indexOf(lane as (typeof DRUM_LANES)[number])
+function sortedHitLines(hits: BeatDrumHit[], indent: string): string[] {
+  return [...hits]
+    .sort((a, b) => a.start - b.start || laneIndex(a.lane) - laneIndex(b.lane) || a.id.localeCompare(b.id))
+    .map((h) => `${indent}hit ${h.id} ${h.lane} ${formatNumber(h.start)} ${formatNumber(h.velocity)}`)
 }
 
 function serializeTrack(t: BeatTrack): string[] {
@@ -51,14 +55,14 @@ function serializeTrack(t: BeatTrack): string[] {
     }
   }
   // v0.4 clips: source order (creation order is meaningful, like tracks); content in canonical
-  // form (sorted notes / all-five-lanes patterns) one indent level deeper than live content.
+  // form (sorted notes / sorted hits) one indent level deeper than live content.
   for (const clip of t.clips) {
     lines.push(`  clip ${clip.id}`)
-    if (t.kind === 'drums' && clip.pattern) lines.push(...patternLines(clip.pattern, '    '))
+    if (t.kind === 'drums') lines.push(...sortedHitLines(clip.hits, '    '))
     lines.push(...sortedNoteLines(clip.notes, '    '))
   }
-  if (t.kind === 'drums' && t.pattern) {
-    lines.push(...patternLines(t.pattern, '  '))
+  if (t.kind === 'drums') {
+    lines.push(...sortedHitLines(t.hits, '  '))
   }
   lines.push(...sortedNoteLines(t.notes, '  '))
   return lines

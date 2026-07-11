@@ -3,7 +3,7 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import type { BeatDrumHit, BeatDocument, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
 import { DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -57,20 +57,24 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   const rest = path.slice(dot + 1)
   const track = findTrack(doc, trackId)
 
-  // pattern step: <track>.pattern.<lane>[<step>]
+  // pattern step: <track>.pattern.<lane>[<step>] — v0.8 grid SUGAR over free-timed hits.
+  // Upserts/removes the on-grid hit at integer step `step` (canonical id `<lane><step>`); a
+  // velocity of 0 removes it. Off-grid hits at fractional starts are untouched. Keeps the
+  // familiar step-toggle vocabulary working over the event model (research 12: grid as input).
   const patternMatch = rest.match(/^pattern\.([a-z]+)\[(\d+)\]$/)
   if (patternMatch) {
     if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — no pattern to edit`)
     const lane = patternMatch[1]!
     if (!(DRUM_LANES as readonly string[]).includes(lane)) throw new BeatEditError(`unknown drum lane "${lane}" (expected one of ${DRUM_LANES.join('|')})`)
     const step = Number(patternMatch[2]!)
-    const steps = track.pattern![lane as DrumLane]
-    if (step >= steps.length) throw new BeatEditError(`step ${step} out of range (pattern has ${steps.length} steps, 0-${steps.length - 1})`)
+    const maxStep = doc.loopBars * 16
+    if (step >= maxStep) throw new BeatEditError(`step ${step} out of range (loop is ${maxStep} steps, 0-${maxStep - 1}); use beat add-hit for an off-grid hit past the loop`)
     const vel = parseNum(value, `pattern.${lane}[${step}]`)
     if (vel < 0 || vel > 1) throw new BeatEditError(`step velocities must be 0..1, got ${vel}`)
-    const nextSteps = [...steps]
-    nextSteps[step] = vel
-    return replaceTrack(doc, { ...track, pattern: { ...track.pattern!, [lane]: nextSteps } })
+    const id = `${lane}${step}`
+    const rest2 = track.hits.filter((h) => h.id !== id && !(h.lane === lane && h.start === step))
+    const nextHits = vel > 0 ? [...rest2, { id, lane: lane as DrumLane, start: step, velocity: canon(vel) }] : rest2
+    return replaceTrack(doc, { ...track, hits: nextHits })
   }
 
   // track metadata
@@ -190,13 +194,35 @@ export interface QuantizeOptions {
  * of one grid cell after end-quantize, matching Ableton's behavior. */
 export function quantizeNotes(doc: BeatDocument, trackId: string, opts: QuantizeOptions = {}): { doc: BeatDocument; changed: number } {
   const track = findTrack(doc, trackId)
-  if (track.kind === 'drums') throw new BeatEditError(`track "${trackId}" is a drums track — its pattern is already grid-quantized (off-grid drums are a future format rev)`)
   const grid = opts.grid ?? 1
   const amount = opts.amount ?? 1
-  const starts = opts.starts ?? true
-  const ends = opts.ends ?? false
   if (!Number.isFinite(grid) || grid <= 0) throw new BeatEditError(`grid must be > 0 steps, got ${grid}`)
   if (!Number.isFinite(amount) || amount < 0 || amount > 1) throw new BeatEditError(`amount must be 0..1, got ${amount}`)
+
+  // v0.8: drum tracks quantize their free-timed hits (starts only — hits are durationless
+  // triggers). Same amount knob; noteIds scopes to specific hit ids.
+  if (track.kind === 'drums') {
+    if (opts.ends) throw new BeatEditError('drum hits have no duration — ends quantize does not apply')
+    if (opts.starts === false) throw new BeatEditError('nothing to quantize: drum hits only have starts')
+    if (opts.noteIds) {
+      const have = new Set(track.hits.map((h) => h.id))
+      const missing = opts.noteIds.filter((id) => !have.has(id))
+      if (missing.length) throw new BeatEditError(`no hit(s) ${missing.map((m) => `"${m}"`).join(', ')} on track "${trackId}"`)
+    }
+    const wantedH = opts.noteIds ? new Set(opts.noteIds) : null
+    let changedH = 0
+    const hits = track.hits.map((h) => {
+      if (wantedH && !wantedH.has(h.id)) return h
+      const start = canon(h.start + amount * (Math.round(h.start / grid) * grid - h.start))
+      if (start === h.start) return h
+      changedH++
+      return { ...h, start }
+    })
+    return { doc: replaceTrack(doc, { ...track, hits }), changed: changedH }
+  }
+
+  const starts = opts.starts ?? true
+  const ends = opts.ends ?? false
   if (!starts && !ends) throw new BeatEditError('nothing to quantize: enable starts and/or ends')
   if (opts.noteIds) {
     const have = new Set(track.notes.map((n) => n.id))
@@ -240,10 +266,7 @@ function validateTrackIdentity(id: string, name: string, color: string) {
   if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatEditError(`color must be a lowercase hex color like #c678dd, got "${color}"`)
 }
 
-const emptyBeatPattern = (): BeatDrumPattern =>
-  Object.fromEntries(DRUM_LANES.map((lane) => [lane, Array<number>(16).fill(0)])) as BeatDrumPattern
-
-/** Adds a new track with the format's init patch (INIT_SYNTH; empty 16-step pattern for drums).
+/** Adds a new track with the format's init patch (INIT_SYNTH; drum tracks start with no hits).
  * Color defaults cycle TRACK_COLORS by track index; name defaults to the id. */
 export function addTrack(
   doc: BeatDocument,
@@ -273,9 +296,41 @@ export function addTrack(
     laneSamples: {},
     clips: [],
     notes: [],
-    ...(kind === 'drums' ? { pattern: emptyBeatPattern() } : {}),
+    hits: [],
   }
   return { doc: { ...doc, tracks: [...doc.tracks, track] }, track }
+}
+
+/** Adds a free-timed drum hit to a drum track (v0.8). If `id` is omitted, mints the next free
+ * `h<n>` id above the current max. start is in fractional 16th steps (snapped to canonical
+ * precision); velocity in (0, 1]. */
+export function addHit(doc: BeatDocument, trackId: string, hit: { lane: DrumLane; start: number; velocity: number; id?: string }): { doc: BeatDocument; hit: BeatDrumHit } {
+  const track = findTrack(doc, trackId)
+  if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — hits only belong on drum tracks`)
+  if (!(DRUM_LANES as readonly string[]).includes(hit.lane)) throw new BeatEditError(`unknown drum lane "${hit.lane}" (expected one of ${DRUM_LANES.join('|')})`)
+  if (!Number.isFinite(hit.start) || hit.start < 0) throw new BeatEditError(`hit start must be a step position >= 0, got ${hit.start}`)
+  if (hit.velocity <= 0 || hit.velocity > 1) throw new BeatEditError(`hit velocity must be in (0, 1], got ${hit.velocity}`)
+  let id = hit.id
+  if (id === undefined) {
+    let max = 0
+    for (const h of track.hits) {
+      const m = h.id.match(/^h(\d+)$/)
+      if (m) max = Math.max(max, Number(m[1]))
+    }
+    id = `h${max + 1}`
+  } else if (track.hits.some((h) => h.id === id)) {
+    throw new BeatEditError(`hit id "${id}" already exists on track "${trackId}"`)
+  }
+  const added: BeatDrumHit = { id, lane: hit.lane, start: canon(hit.start), velocity: canon(hit.velocity) }
+  return { doc: replaceTrack(doc, { ...track, hits: [...track.hits, added] }), hit: added }
+}
+
+/** Removes a drum hit by id. */
+export function removeHit(doc: BeatDocument, trackId: string, hitId: string): { doc: BeatDocument; hit: BeatDrumHit } {
+  const track = findTrack(doc, trackId)
+  const hit = track.hits.find((h) => h.id === hitId)
+  if (!hit) throw new BeatEditError(`no hit "${hitId}" on track "${trackId}"`)
+  return { doc: replaceTrack(doc, { ...track, hits: track.hits.filter((h) => h.id !== hitId) }), hit }
 }
 
 /** Removes a track. A document keeps at least one track (the grammar's selected_track needs a
@@ -337,7 +392,7 @@ export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: 
   const loopBars = opts.loopBars ?? 2
   if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
   if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
-  const base: BeatDocument = { formatVersion: '0.7', bpm, loopBars, selectedTrack: '', media: [], tracks: [], scenes: [], song: null }
+  const base: BeatDocument = { formatVersion: '0.8', bpm, loopBars, selectedTrack: '', media: [], tracks: [], scenes: [], song: null }
   const { doc } = addTrack(base, { id: opts.trackId ?? 'lead', kind: 'synth' })
   return { ...doc, selectedTrack: doc.tracks[0]!.id }
 }
@@ -352,7 +407,7 @@ export function saveClip(doc: BeatDocument, trackId: string, clipId: string): { 
   const clip = {
     id: clipId,
     notes: track.notes.map((n) => ({ ...n })),
-    ...(track.kind === 'drums' && track.pattern ? { pattern: structuredClone(track.pattern) } : {}),
+    hits: track.kind === 'drums' ? track.hits.map((h) => ({ ...h })) : [],
   }
   const existing = track.clips.findIndex((c) => c.id === clipId)
   const clips = existing === -1 ? [...track.clips, clip] : track.clips.map((c, i) => (i === existing ? clip : c))

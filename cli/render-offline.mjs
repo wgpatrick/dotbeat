@@ -192,6 +192,21 @@ export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds
   useStore.setState({ mode: 'sandbox', tracks: [] })
   useStore.getState().applyDawState(beatDocumentToPartialTracks(doc))
 
+  // v0.8: in loop mode, drum tracks render from their true free-timed hits (scheduled after
+  // play(), below). The GUI-facing partial projected those hits onto a 16-step grid; zero that
+  // grid in the store so the engine's per-16th tick doesn't ALSO trigger them (quantized and
+  // doubled). Song mode keeps the tick/pattern path (off-grid drums in songs are a later slice).
+  if (doc.song === null) {
+    const st = useStore.getState()
+    useStore.setState({
+      tracks: st.tracks.map((tr) =>
+        tr.kind === 'drums' && tr.pattern
+          ? { ...tr, pattern: Object.fromEntries(Object.entries(tr.pattern).map(([lane, steps]) => [lane, steps.map(() => 0)])) }
+          : tr,
+      ),
+    })
+  }
+
   // v0.5 media: resolve each lane sample relative to the .beat file, verify content hash
   // (fail loudly — a wrong-bytes sample is a corrupt project, not a soft warning), decode, and
   // hand the buffer to the engine's per-lane one-shot loader.
@@ -322,6 +337,25 @@ export async function renderOffline({ beatPath, outPath, beatlabDir, tailSeconds
   // fixed it ("also guard for negative nyquist freqs" et seq., unreleased); we build the binding
   // against that — scripts/build-patched-webaudio.sh — so the hats render with their true
   // square carriers. See docs/upstream/node-web-audio-api-findings.md for the full story.)
+  // v0.8: schedule free-timed drum hits through the drum bus at their true fractional times
+  // (loop mode). engine.triggerDrum(lane, velocity, timeSec) routes through the lane one-shots /
+  // synth voices + drum bus — the same path the tick uses, but at arbitrary times instead of
+  // grid steps. This is what makes off-grid drums (the J Dilla feel) actually render.
+  if (doc.song === null) {
+    const stepSeconds = 60 / doc.bpm / 4
+    let scheduled = 0
+    for (const t of doc.tracks) {
+      if (t.kind !== 'drums') continue
+      for (const h of t.hits) {
+        const at = h.start * stepSeconds
+        if (at < loopSeconds) {
+          engine.triggerDrum(h.lane, at, h.velocity) // beatlab signature: (lane, time, velocity)
+          scheduled++
+        }
+      }
+    }
+    if (scheduled) console.log(`drums: scheduled ${scheduled} free-timed hit(s)`)
+  }
   stamp('engine-play')
   // render(false) = synchronous clock: no setTimeout yield between scheduling blocks — in a CLI
   // there is no main thread to keep responsive.

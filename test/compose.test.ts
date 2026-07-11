@@ -40,8 +40,7 @@ test('addTrack: defaults, palette cycling, drums get an empty 16-step pattern, d
   assert.equal(first.track.name, 'bass')
   const drums = addTrack(doc, { id: 'drums', kind: 'drums' })
   doc = drums.doc
-  assert.equal(drums.track.pattern!.kick.length, 16)
-  assert.ok(drums.track.pattern!.kick.every((v) => v === 0))
+  assert.deepEqual(drums.track.hits, []) // v0.8: fresh drum tracks start with no hits
   assert.notEqual(first.track.color, drums.track.color, 'palette cycles')
   assert.deepEqual(parse(serialize(doc)), doc, 'round-trips with all three tracks')
   assert.throws(() => addTrack(doc, { id: 'bass', kind: 'synth' }), BeatEditError)
@@ -68,8 +67,9 @@ test('the full compose-from-nothing flow builds a valid groove (core level)', ()
   doc = addNote(doc, 'bass', { pitch: 33, start: 0, duration: 4, velocity: 0.85 }).doc
   doc = addNote(doc, 'bass', { pitch: 36, start: 8, duration: 4, velocity: 0.8 }).doc
   const text = serialize(doc)
-  assert.deepEqual(parse(text), doc)
-  assert.match(text, /^ {2}pattern kick 0\.9 0 0 0 0 0 0 0 0\.9 /m)
+  assert.equal(serialize(parse(text)), text, 'canonical round-trip is idempotent')
+  assert.match(text, /^ {2}hit kick0 kick 0 0\.9$/m)
+  assert.match(text, /^ {2}hit kick8 kick 8 0\.9$/m)
   assert.match(text, /^ {2}note u\d+ 33 0 4 0\.85$/m)
 })
 
@@ -78,8 +78,8 @@ test('the same flow through the CLI: init -> add-track -> set -> add-note, all e
   const file = join(dir, 'new.beat')
   const init = beat(['init', file, '--bpm', '126', '--bars', '1'])
   assert.match(init, /created .*126 bpm, 1 bar/)
-  assert.match(beat(['add-track', file, 'drums', 'drums']), /^drums: track added \(drums "drums", drum pattern\)\n$/)
-  assert.match(beat(['set', file, 'drums.pattern.kick[0]', '0.9']), /kick step 0 added/)
+  assert.match(beat(['add-track', file, 'drums', 'drums']), /^drums: track added \(drums "drums", 0 hits\)\n$/)
+  assert.match(beat(['set', file, 'drums.pattern.kick[0]', '0.9']), /kick hit added/)
   assert.match(beat(['add-note', file, 'lead', '64', '0', '2', '0.8']), /note added/)
   const doc = parse(readFileSync(file, 'utf8'))
   assert.equal(doc.tracks.length, 2)

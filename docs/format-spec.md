@@ -331,14 +331,38 @@ storage limitation.
   off-grid 3.5) rendered through the real beatlab graph measure a 187.6 ms inter-onset gap vs
   187.5 ms expected (0.07 ms error). The spessasynth instrument path already floors fractional
   steps to sample positions.
-- Drum patterns remain grid-quantized 16-step lanes in v0.7 — off-grid drums need either a
-  per-lane swing parameter or note-style hit lines (deliberately deferred; the pattern grid's
-  one-line-per-lane diffability is worth keeping for the common case).
+- Drum patterns remain grid-quantized 16-step lanes in v0.7 — v0.8 makes them fully general
+  (below).
 - Quantize is an *operation*, not part of the grammar (the Ableton model, owner-directed):
   `beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes ...]`
   (also `beat_quantize` over MCP). Starts and ends snap independently; `--amount 0.5` moves
   notes halfway to the grid (tighten without flattening); an end that would collapse onto its
   start keeps one grid cell of length. Idempotent at amount 1.
+
+### v0.8 additions — fully general drum hits (owner decision; research 12)
+
+Drums stop being a step grid and become free-timed events, the way every mature DAW stores them
+(Ableton MIDI notes, FL piano-roll notes, SMF, Hydrogen `.h2pattern` — see
+`docs/research/12-drum-representation.md`, 25/25 verified). The step grid survives as a *view*,
+not the storage model.
+
+- **`hit <id> <lane> <start> <velocity>`** on a drum track (or drum-track clip): stable id, one
+  of the five lanes, a fractional `start` in 16th steps (v0.7 number rules, absolute over the
+  loop), velocity in (0, 1]. No duration — drum voices are one-shot triggers (SMF note-off is
+  irrelevant for percussion; Hydrogen uses `length=-1`). Canonical order: (start, lane, id).
+- **`pattern` lines are gone from the grammar** but v≤0.7 files still parse: legacy patterns
+  migrate to hits on read (a step at velocity v → a hit at that step, the per-bar cycle tiled
+  across the loop; ids `<lane><step>`). Lossless and automatic — old projects just work.
+- **Grid sugar stays**: `beat set <track>.pattern.<lane>[<step>] <vel>` upserts/removes the
+  on-grid hit at that integer step (0 removes); `beat inspect` still draws the `X...X` lane
+  strip for the first bar and annotates off-grid hits (`N off-grid`). `beat quantize` now
+  supports drums (starts only). New off-grid hits: `beat add-hit` / `beat_add_hit`.
+- **Rendering**: the offline renderer schedules hits at their true fractional times through the
+  drum bus (`engine.triggerDrum(lane, timeSec, velocity)`), bypassing the 16-step tick — in
+  loop mode, verified sample-accurate (two snares 4.5 steps apart measured a 4.500-step gap,
+  ±0ms). The GUI still consumes the projected 16-step pattern (a quantized view); off-grid hits
+  live in the file and the daemon carries them over on GUI pushes, so they are never lost. Song
+  mode still routes drums through the on-grid tick (off-grid drums in songs are a later slice).
 
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 

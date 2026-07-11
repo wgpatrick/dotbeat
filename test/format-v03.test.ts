@@ -85,11 +85,10 @@ ${CORE_SYNTH}
 track b B #e35d5d drums
 ${CORE_SYNTH}
     kickPunch 0.08
-  pattern kick 0.9 0 0 0
-  pattern snare 0 0 0.8 0
-  pattern clap 0 0 0 0
-  pattern hat 0.5 0.5 0.5 0.5
-  pattern openhat 0 0 0 0.4
+  hit kick0 kick 0 0.9
+  hit hat0 hat 0 0.5
+  hit snare2 snare 2 0.8
+  hit openhat3 openhat 3 0.4
 `
   const doc = parse(text)
   assert.equal(serialize(doc), text)

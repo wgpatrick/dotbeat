@@ -21,6 +21,8 @@ import {
   setValue,
   addNote,
   removeNote,
+  addHit,
+  removeHit,
   quantizeNotes,
   addTrack,
   removeTrack,
@@ -214,6 +216,44 @@ const TOOLS: ToolDef[] = [
       const file = str(args, 'file')
       const before = parse(readFileSync(file, 'utf8'))
       const { doc } = removeNote(before, str(args, 'track'), str(args, 'note_id'))
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_add_hit',
+    description: 'Add a free-timed drum hit to a drum track (format v0.8). start is in fractional 16th-note steps (e.g. 4.5 is halfway between steps 4 and 5 — the off-grid timing that gives a groove its feel); velocity 0..1. lane is one of kick|snare|clap|hat|openhat.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        lane: { type: 'string' },
+        start: { type: 'number' },
+        velocity: { type: 'number' },
+      },
+      required: ['file', 'track', 'lane', 'start', 'velocity'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = addHit(before, str(args, 'track'), { lane: str(args, 'lane') as never, start: num(args, 'start'), velocity: num(args, 'velocity') })
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_rm_hit',
+    description: 'Remove a drum hit by its id (as shown in the file / diffs) from a drum track.',
+    inputSchema: {
+      type: 'object',
+      properties: { file: { type: 'string' }, track: { type: 'string' }, hit_id: { type: 'string' } },
+      required: ['file', 'track', 'hit_id'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = removeHit(before, str(args, 'track'), str(args, 'hit_id'))
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
     },

@@ -1,4 +1,4 @@
-format_version 0.7
+format_version 0.8
 bpm 126
 loop_bars 4
 selected_track drums
@@ -14,11 +14,50 @@ track drums Drums #e06c75 drums
     sustain 0.7
     release 0.3
     pan 0
-  pattern kick 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0
-  pattern snare 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-  pattern clap 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0
-  pattern hat 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0
-  pattern openhat 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0
+  hit kick0 kick 0 1
+  hit hat2 hat 2 1
+  hit kick4 kick 4 1
+  hit clap4 clap 4 1
+  hit hat6 hat 6 1
+  hit kick8 kick 8 1
+  hit hat10 hat 10 1
+  hit kick12 kick 12 1
+  hit clap12 clap 12 1
+  hit hat14 hat 14 1
+  hit openhat14 openhat 14 1
+  hit kick16 kick 16 1
+  hit hat18 hat 18 1
+  hit kick20 kick 20 1
+  hit clap20 clap 20 1
+  hit hat22 hat 22 1
+  hit kick24 kick 24 1
+  hit hat26 hat 26 1
+  hit kick28 kick 28 1
+  hit clap28 clap 28 1
+  hit hat30 hat 30 1
+  hit openhat30 openhat 30 1
+  hit kick32 kick 32 1
+  hit hat34 hat 34 1
+  hit kick36 kick 36 1
+  hit clap36 clap 36 1
+  hit hat38 hat 38 1
+  hit kick40 kick 40 1
+  hit hat42 hat 42 1
+  hit kick44 kick 44 1
+  hit clap44 clap 44 1
+  hit hat46 hat 46 1
+  hit openhat46 openhat 46 1
+  hit kick48 kick 48 1
+  hit hat50 hat 50 1
+  hit kick52 kick 52 1
+  hit clap52 clap 52 1
+  hit hat54 hat 54 1
+  hit kick56 kick 56 1
+  hit hat58 hat 58 1
+  hit kick60 kick 60 1
+  hit clap60 clap 60 1
+  hit hat62 hat 62 1
+  hit openhat62 openhat 62 1
 
 track bass Bass #56b6c2 synth
   synth

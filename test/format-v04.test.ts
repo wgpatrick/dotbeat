@@ -28,13 +28,8 @@ const CORE_SYNTH = `  synth
     release 0.1
     pan 0`
 
-const DRUM_LANES_BLOCK = (indent: string, kick = '0.9 0 0 0') => `${indent}pattern kick ${kick}
-${indent}pattern snare 0 0 0 0
-${indent}pattern clap 0 0 0 0
-${indent}pattern hat 0 0 0 0
-${indent}pattern openhat 0 0 0 0`
-
-const SONG_EXAMPLE = `format_version 0.4
+// v0.8: drum content is free-timed hits (was pattern lines through v0.7).
+const SONG_EXAMPLE = `format_version 0.8
 bpm 124
 loop_bars 1
 selected_track lead
@@ -51,8 +46,7 @@ ${CORE_SYNTH}
 track drums Drums #e35d5d drums
 ${CORE_SYNTH}
   clip four
-${DRUM_LANES_BLOCK('    ')}
-${DRUM_LANES_BLOCK('  ', '0 0 0 0')}
+    hit kick0 kick 0 0.9
 
 scene intro
   slot lead quiet
@@ -79,8 +73,8 @@ test('clips, scenes, and song parse into the expected shapes', () => {
   assert.equal(lead.clips[1]!.notes.length, 2)
   assert.equal(lead.notes.length, 1, 'live loop content stays separate from clips')
   const drums = doc.tracks[1]!
-  assert.equal(drums.clips[0]!.pattern!.kick[0], 0.9)
-  assert.equal(drums.pattern!.kick[0], 0, 'live pattern separate from clip pattern')
+  assert.deepEqual(drums.clips[0]!.hits, [{ id: 'kick0', lane: 'kick', start: 0, velocity: 0.9 }])
+  assert.equal(drums.hits.length, 0, 'live hits separate from clip hits')
   assert.deepEqual(doc.scenes.map((s) => s.id), ['intro', 'main'])
   assert.deepEqual(doc.scenes[1]!.slots, { lead: 'busy', drums: 'four' })
   assert.deepEqual(doc.song, [
@@ -137,9 +131,22 @@ test('duplicate clip ids per track, duplicate scenes, duplicate slots are reject
   )
 })
 
-test('a drum clip missing a lane is rejected (same completeness rule as track patterns)', () => {
-  const bad = SONG_EXAMPLE.replace('    pattern openhat 0 0 0 0\n  pattern kick', '  pattern kick')
-  assert.throws(() => parse(bad), /clip "four" in drum track "drums" is missing pattern lane\(s\): openhat/)
+test('a legacy (v<=0.7) drum clip pattern missing a lane is rejected on migration', () => {
+  // v0.8 clips use hits, but a legacy pattern-based clip must still be complete to migrate cleanly
+  const legacyClip = `format_version 0.4
+bpm 124
+loop_bars 1
+selected_track drums
+
+track drums Drums #e35d5d drums
+${CORE_SYNTH}
+  clip four
+    pattern kick 0.9 0 0 0
+    pattern snare 0 0 0 0
+    pattern clap 0 0 0 0
+    pattern hat 0 0 0 0
+`
+  assert.throws(() => parse(legacyClip), /clip "four" in drum track "drums" is missing pattern lane\(s\): openhat/)
 })
 
 test('canonical order is enforced: tracks before scenes before song', () => {

@@ -14,10 +14,22 @@ export type TrackKind = 'synth' | 'drums' | 'instrument'
 export const DRUM_LANES = ['kick', 'snare', 'clap', 'hat', 'openhat'] as const
 export type DrumLane = (typeof DRUM_LANES)[number]
 
-// One velocity (0..1) per step; 0 = off. In BeatLab this is a 16-step (one-bar) cycle that
-// repeats across the loop, independent of loop_bars — the format stores whatever length the app
-// uses, requiring only that all lanes agree.
+// One velocity (0..1) per step; 0 = off. This is BeatLab's 16-step (one-bar) cycle shape.
+// Since v0.8 it is a VIEW/interchange shape only (GUI payloads, engine partials, migration of
+// v<=0.7 files) — the document itself stores drums as free-timed BeatDrumHit events. See
+// docs/research/12-drum-representation.md: every mature DAW stores events, grids are views.
 export type BeatDrumPattern = Record<DrumLane, number[]>
+
+/** v0.8: one drum hit — a free-timed trigger event, fully general (owner decision). `start` is
+ * in 16th steps from the loop start, fractional allowed (v0.7 number rules), ABSOLUTE across
+ * loop_bars (unlike the old per-bar pattern cycle). No duration: drum voices/one-shots are
+ * triggers (SMF note-off irrelevance for percussion; Hydrogen's length=-1 — research 12). */
+export interface BeatDrumHit {
+  id: string
+  lane: DrumLane
+  start: number // 16th steps, fractional, absolute over the loop
+  velocity: number // (0..1]; a zero-velocity hit is meaningless and rejected
+}
 
 export interface BeatSynth {
   // ---- the required core 9 (v0.1, always serialized) ----
@@ -109,12 +121,13 @@ export interface BeatNote {
 
 /** v0.4: a named snapshot of playable content, owned by a track. Mirrors beatlab's Clip (a
  * value copy, not a reference — see docs/phase-6-plan.md). Synth-track clips carry notes;
- * drum-track clips carry a full five-lane pattern. Clip automation is deliberately unmodeled
- * (needs the automation grammar). Ids are track-scoped human slugs (D6). */
+ * drum-track clips carry hits (v0.8; was a five-lane pattern through v0.7 — the parser
+ * migrates). Clip automation is deliberately unmodeled (needs the automation grammar). Ids are
+ * track-scoped human slugs (D6). */
 export interface BeatClip {
   id: string
   notes: BeatNote[] // synth tracks only; always [] for drums
-  pattern?: BeatDrumPattern // drum tracks only; absent for synth
+  hits: BeatDrumHit[] // drum tracks only; always [] for synth
 }
 
 /** v0.4: a scene maps tracks to clips — one complete statement of "what plays". Mirrors
@@ -168,7 +181,7 @@ export interface BeatTrack {
   laneSamples: Partial<Record<DrumLane, BeatLaneSample>> // v0.5; drum tracks only, {} when none
   clips: BeatClip[] // v0.4; [] when the track has none (serialized only when present)
   notes: BeatNote[] // synth tracks only; always [] for drums
-  pattern?: BeatDrumPattern // drum tracks only; absent for synth
+  hits: BeatDrumHit[] // v0.8; drum tracks only, always [] for synth/instrument
 }
 
 export interface BeatDocument {

@@ -1,5 +1,35 @@
-import type { BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, OscType, TrackKind } from './document.js'
+import type { BeatDrumHit, BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
 import { DRUM_LANES, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultSynthFields } from './document.js'
+
+/** v0.8: expand a per-bar step pattern (beatlab's shape) into absolute hits, tiled across
+ * `totalSteps`. The inverse of hitsToPattern. Used when importing a beatlab payload. */
+function patternToHits(pattern: Record<string, number[]>, totalSteps: number): BeatDrumHit[] {
+  const hits: BeatDrumHit[] = []
+  for (const lane of DRUM_LANES) {
+    const steps = pattern[lane]
+    if (!steps || steps.length === 0) continue
+    for (let k = 0; k < totalSteps; k++) {
+      const v = steps[k % steps.length]!
+      if (v > 0) hits.push({ id: `${lane}${k}`, lane, start: k, velocity: v })
+    }
+  }
+  return hits
+}
+
+/** v0.8: project free-timed hits back onto beatlab's 16-step grid — a QUANTIZED VIEW for the
+ * GUI/engine, which still speak patterns (research 12: the grid is a view over events). A hit
+ * lands in the step nearest its start (mod 16, so it shows in the one-bar cycle); off-grid hits
+ * are snapped in this projection only — the .beat file keeps their true time, and the daemon
+ * carries them over on GUI pushes so they are never lost. Velocity is max-wins on collisions. */
+function hitsToPattern(hits: BeatDrumHit[]): BeatDrumPattern {
+  const pattern = Object.fromEntries(DRUM_LANES.map((lane) => [lane, Array<number>(16).fill(0)])) as BeatDrumPattern
+  for (const h of hits) {
+    const step = Math.round(h.start) % 16
+    const cell = ((step % 16) + 16) % 16
+    if (h.velocity > pattern[h.lane][cell]!) pattern[h.lane][cell] = h.velocity
+  }
+  return pattern
+}
 
 // A structural (not imported) type for BeatLab's real SandboxPayload shape
 // (beatlab/src/state/sandboxPersistence.ts). Deliberately loose/local rather than a hard
@@ -25,7 +55,7 @@ export interface ExternalSandboxPayload {
   arrangement?: { enabled?: boolean; mode?: string | null; timeline?: { sceneId: string; bars: number }[] }
 }
 
-const BEAT_FORMAT_VERSION = '0.7'
+const BEAT_FORMAT_VERSION = '0.8'
 
 /** SynthParams fields the format deliberately does NOT model (each needs grammar design of its
  * own — large arrays, ordered lists, or redundant pairs; see docs/phase-5-plan.md). These are
@@ -143,6 +173,9 @@ function toBeatPattern(source: Record<string, number[]> | undefined, trackId: st
 export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): { doc: BeatDocument; report: ConversionReport } {
   const report: ConversionReport = { droppedTracks: [], droppedSynthParams: {}, selectedTrackFellBack: false, droppedFields: [] }
 
+  // beatlab patterns are one-bar (16-step) cycles; a live track's plays every bar across the
+  // loop, so migrate it across loopBars*16 steps; a clip's is one bar (16 steps). (v0.8)
+  const loopSteps = payload.loopBars * 16
   const tracks: BeatTrack[] = payload.tracks.map((t) => ({
     id: t.id,
     name: t.name,
@@ -156,11 +189,11 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
       return {
         id: c.id,
         notes: t.kind === 'synth' ? c.notes.map(toBeatNote) : [],
-        ...(t.kind === 'drums' ? { pattern: toBeatPattern(c.pattern, `${t.id} clip ${c.id}`) } : {}),
+        hits: t.kind === 'drums' ? patternToHits(toBeatPattern(c.pattern, `${t.id} clip ${c.id}`), 16) : [],
       }
     }),
     notes: t.kind === 'synth' ? t.notes.map(toBeatNote) : [],
-    ...(t.kind === 'drums' ? { pattern: toBeatPattern(t.pattern, t.id) } : {}),
+    hits: t.kind === 'drums' ? patternToHits(toBeatPattern(t.pattern, t.id), loopSteps) : [],
   }))
 
   let selectedTrack = payload.selectedTrackId
@@ -240,6 +273,20 @@ export interface PartialTrack {
 const EMPTY_PATTERN = (): BeatDrumPattern =>
   Object.fromEntries(DRUM_LANES.map((lane) => [lane, Array<number>(16).fill(0)])) as BeatDrumPattern
 
+/** v0.6+: instrument tracks ride the payload as a SEPARATE additive field, not as tracks —
+ * beatlab's store has no instrument kind, but the dev-gated daw bridge plays them via
+ * spessasynth's worklet (browser leg of phase 8). Consumers that don't know the field
+ * ignore it. */
+export interface PartialInstrument {
+  id: string
+  name: string
+  sample: string
+  program: number
+  volume: number
+  pan: number
+  notes: BeatNote[]
+}
+
 export function beatDocumentToPartialTracks(doc: BeatDocument): {
   bpm: number
   loopBars: number
@@ -248,6 +295,7 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
   scenes: { id: string; name: string; clipIds: Record<string, string> }[]
   song: { sceneId: string; bars: number }[] | null
   media: { id: string; sha256: string; path: string }[]
+  instruments: PartialInstrument[]
 } {
   return {
     bpm: doc.bpm,
@@ -262,7 +310,9 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
       kind: t.kind,
       notes: t.notes,
       synth: { ...t.synth },
-      ...(t.pattern ? { pattern: structuredClone(t.pattern) } : {}),
+      // v0.8: hits projected onto the 16-step grid — the quantized VIEW the GUI/engine consume
+      // (off-grid hits kept in the file, carried over by the daemon on GUI pushes)
+      ...(t.kind === 'drums' ? { pattern: hitsToPattern(t.hits) } : {}),
       ...(Object.keys(t.laneSamples).length > 0 ? { laneSamples: structuredClone(t.laneSamples) as Record<string, { sample: string; gainDb: number; tune: number }> } : {}),
       ...(t.clips.length > 0
         ? {
@@ -270,7 +320,7 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
               id: c.id,
               name: c.id,
               notes: c.notes.map((n) => ({ ...n })),
-              pattern: c.pattern ? structuredClone(c.pattern) : EMPTY_PATTERN(),
+              pattern: t.kind === 'drums' ? hitsToPattern(c.hits) : EMPTY_PATTERN(),
             })),
           }
         : {}),
@@ -278,5 +328,16 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
     scenes: doc.scenes.map((s) => ({ id: s.id, name: s.id, clipIds: { ...s.slots } })),
     song: doc.song ? doc.song.map((x) => ({ sceneId: x.scene, bars: x.bars })) : null,
     media: doc.media.map((m) => ({ ...m })),
+    instruments: doc.tracks
+      .filter((t) => t.kind === 'instrument')
+      .map((t) => ({
+        id: t.id,
+        name: t.name,
+        sample: t.instrument!.sample,
+        program: t.instrument!.program,
+        volume: t.instrument!.volume,
+        pan: t.instrument!.pan,
+        notes: t.notes.map((n) => ({ ...n })),
+      })),
   }
 }

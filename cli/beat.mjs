@@ -27,6 +27,8 @@ import {
   setValue,
   addNote,
   removeNote,
+  addHit,
+  removeHit,
   quantizeNotes,
   addTrack,
   removeTrack,
@@ -51,6 +53,8 @@ const USAGE = `usage:
   beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
   beat add-note <file> <track> <pitch> <start> <duration> <velocity>
   beat rm-note <file> <track> <note-id>
+  beat add-hit <file> <track> <lane> <start> <velocity>   free-timed drum hit (start in fractional 16th steps)
+  beat rm-hit <file> <track> <hit-id>
   beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes id,id]
                                                           snap notes toward the grid (grid in 16th steps:
                                                           1=16ths 2=8ths 4=quarters 0.5=32nds; amount<1 = partial)
@@ -162,6 +166,22 @@ function rmNoteCmd(argv) {
   if (!file || !track || !noteId) throw new BeatEditError('rm-note needs <file> <track> <note-id>')
   const before = readDoc(file)
   const { doc } = removeNote(before, track, noteId)
+  writeDoc(file, before, doc)
+}
+
+function addHitCmd(argv) {
+  const [file, track, lane, start, velocity] = argv
+  if (!file || !track || !lane || start === undefined || velocity === undefined) throw new BeatEditError('add-hit needs <file> <track> <lane> <start> <velocity>')
+  const before = readDoc(file)
+  const { doc } = addHit(before, track, { lane, start: Number(start), velocity: Number(velocity) })
+  writeDoc(file, before, doc)
+}
+
+function rmHitCmd(argv) {
+  const [file, track, hitId] = argv
+  if (!file || !track || !hitId) throw new BeatEditError('rm-hit needs <file> <track> <hit-id>')
+  const before = readDoc(file)
+  const { doc } = removeHit(before, track, hitId)
   writeDoc(file, before, doc)
 }
 
@@ -455,6 +475,12 @@ async function main() {
       break
     case 'rm-note':
       rmNoteCmd(rest)
+      break
+    case 'add-hit':
+      addHitCmd(rest)
+      break
+    case 'rm-hit':
+      rmHitCmd(rest)
       break
     case 'quantize':
       quantizeCmd(rest)

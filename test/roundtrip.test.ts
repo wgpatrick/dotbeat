@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { parse, serialize, BeatParseError, defaultSynthFields, type BeatDocument } from '../src/core/index.js'
+import { parse, serialize, setValue, BeatParseError, defaultSynthFields, type BeatDocument } from '../src/core/index.js'
 
 const WORKED_EXAMPLE = `format_version 0.2
 bpm 124
@@ -82,14 +82,39 @@ test('serialize(parse(x)) === x for the worked example (byte-identical round tri
   assert.equal(serialize(doc), WORKED_EXAMPLE)
 })
 
-test('serialize(parse(x)) === x for a drum track (byte-identical round trip)', () => {
-  const doc = parse(DRUM_EXAMPLE)
+test('v0.8 migration: a legacy pattern-based drum track parses into free-timed hits', () => {
+  const doc = parse(DRUM_EXAMPLE) // loop_bars 4 -> 64 steps; per-bar pattern tiled across the loop
   const drums = doc.tracks[0]!
   assert.equal(drums.kind, 'drums')
-  assert.equal(drums.pattern!.kick.length, 16)
-  assert.equal(drums.pattern!.kick[0], 0.9)
   assert.equal(drums.notes.length, 0)
-  assert.equal(serialize(doc), DRUM_EXAMPLE)
+  // kick fires on steps 0,4,8,12 of each bar -> 16 hits across 4 bars
+  const kicks = drums.hits.filter((h) => h.lane === 'kick')
+  assert.equal(kicks.length, 16)
+  assert.deepEqual(kicks.map((h) => h.start).sort((a, b) => a - b).slice(0, 5), [0, 4, 8, 12, 16])
+  assert.ok(kicks.every((h) => h.velocity === 0.9))
+  // one openhat per bar at step 14 -> 4 hits
+  assert.equal(drums.hits.filter((h) => h.lane === 'openhat').length, 4)
+})
+
+const DRUM_HITS_EXAMPLE = `format_version 0.8
+bpm 124
+loop_bars 1
+selected_track drums
+
+track drums Drums #e35d5d drums
+${SYNTH_BLOCK}
+  hit kick0 kick 0 0.9
+  hit hat2 hat 2 0.6
+  hit snare4 snare 4 0.8
+  hit hat5 hat 5.5 0.55
+`
+
+test('v0.8 drum hits round-trip byte-identically (incl. an off-grid hit)', () => {
+  const doc = parse(DRUM_HITS_EXAMPLE)
+  assert.equal(serialize(doc), DRUM_HITS_EXAMPLE)
+  const drums = doc.tracks[0]!
+  assert.equal(drums.hits.length, 4)
+  assert.ok(drums.hits.some((h) => h.start === 5.5), 'off-grid hit preserved')
 })
 
 test('canonical note sort: notes out of order in the source still serialize sorted by (start, pitch, id)', () => {
@@ -133,6 +158,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
           { id: 'u1', pitch: 33, start: 0, duration: 2, velocity: 0.8 },
           { id: 'u2', pitch: 33, start: 4, duration: 2, velocity: 0.8 },
         ],
+        hits: [],
       },
       {
         id: 'drums',
@@ -143,13 +169,12 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
         laneSamples: {},
         clips: [],
         notes: [],
-        pattern: {
-          kick: [0.9, 0, 0, 0],
-          snare: [0, 0, 0.8, 0],
-          clap: [0, 0, 0, 0],
-          hat: [0.5, 0.5, 0.5, 0.5],
-          openhat: [0, 0, 0, 0.4],
-        },
+        hits: [
+          { id: 'k0', lane: 'kick', start: 0, velocity: 0.9 },
+          { id: 'h0', lane: 'hat', start: 2, velocity: 0.5 },
+          { id: 's1', lane: 'snare', start: 4, velocity: 0.8 },
+          { id: 'k1', lane: 'kick', start: 8.5, velocity: 0.7 },
+        ],
       },
     ],
     media: [],
@@ -187,6 +212,7 @@ test('formatNumber stabilizes floating-point noise so round-tripping is idempote
         laneSamples: {},
         clips: [],
         notes: [],
+        hits: [],
       },
     ],
     media: [],
@@ -210,18 +236,13 @@ test('a single synth-param edit produces exactly one changed line', () => {
   assert.deepEqual(changed, ['    cutoff 4500'])
 })
 
-test('a single drum-step toggle produces exactly one changed line', () => {
+test('v0.8: the pattern-step sugar adds exactly one hit line (clean diff)', () => {
   const before = parse(DRUM_EXAMPLE)
-  const drums = before.tracks[0]!
-  const kick = [...drums.pattern!.kick]
-  kick[2] = 0.7 // add a kick on the 3rd step
-  const after: BeatDocument = { ...before, tracks: [{ ...drums, pattern: { ...drums.pattern!, kick } }] }
-  const beforeLines = serialize(before).split('\n')
-  const afterLines = serialize(after).split('\n')
-  assert.equal(beforeLines.length, afterLines.length) // all 5 lanes always emitted — no line count change
-  const changed = beforeLines.filter((l, i) => l !== afterLines[i])
-  assert.equal(changed.length, 1)
-  assert.match(changed[0]!, /^ {2}pattern kick /)
+  // step 2 of the kick lane is empty in the fixture; toggling it on adds one hit
+  const after = setValue(before, 'drums.pattern.kick[2]', '0.7')
+  const beforeLines = new Set(serialize(before).split('\n'))
+  const added = serialize(after).split('\n').filter((l) => !beforeLines.has(l))
+  assert.deepEqual(added, ['  hit kick2 kick 2 0.7'])
 })
 
 test('rejects malformed indentation', () => {
