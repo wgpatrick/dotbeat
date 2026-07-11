@@ -178,6 +178,18 @@ Still open (tracked in research 11): media/binary versioning at scale (LFS vs co
 our media is already sha256-addressed), and what tripped users of git-hiding tools like
 Abstract — revisit before D3 ships.
 
+**Shipped 2026-07-11: named pins + collapsed history (closes the "named versions" line item and
+the retention/collapse open question below).** `beat pin <file> <ref> <name>` names a checkpoint
+(<=25 chars, Figma's budget); `beat unpin`/`beat pins` remove/list them. Storage is a plain git
+tag (`pin/<slug>`, annotated with the exact display name) in the same local repo as the
+checkpoints themselves — no new sidecar file, nothing a cloud shutdown could take with it, and
+because tags are immutable refs, a pin is untouched by `restore`'s append-only rewrites (see D10).
+`beat history` now shows a pinned entry's name alongside its semantic label (`[pin: rough mix
+v1]`); `beat history --collapsed` folds runs of unnamed checkpoints between pins into a single
+"N more checkpoints" line so a long timeline still skims. Same shape as MCP tools
+(`beat_pin`/`beat_unpin`/`beat_pins`, plus a `collapsed` flag on `beat_history`) and CLI
+(`src/history/history.ts`, `cli/beat.mjs`, `src/mcp/server.ts`).
+
 ## 5. The full-song view
 
 The arrangement timeline (format v0.4 scenes/song) is the spine: tracks as rows, bars as
@@ -239,7 +251,10 @@ research. The native audio engine (old M4) proceeds independently underneath.
 - Selection grammar details: does a selection of `bars 8 16` with no tracks mean "all tracks"?
   (leaning yes — axes are filters, absent = unfiltered).
 - History retention: every keystroke-ish edit vs debounced batches (leaning: one checkpoint per
-  CLI command / per GUI gesture-end, debounced 2s).
+  CLI command / per GUI gesture-end, debounced 2s). Still open (this is about *when a checkpoint
+  gets created*). What's now shipped is the adjacent *display* question — unnamed checkpoints
+  collapsing between named pins so a long timeline skims (§4, `beat history --collapsed`) — which
+  works regardless of how cadence above is eventually decided.
 - Does the embedded GUI keep its own undo stack distinct from checkpoints? (almost certainly
   yes — in-memory undo for typing-speed edits, checkpoints for "versions I might return to").
 - Multi-window / multiple projects open at once — daemon-per-project vs one daemon multiplexing.
