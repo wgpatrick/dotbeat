@@ -9,6 +9,56 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D15 — one canonical audio engine: `ui/src/audio/engine.ts`; both CLI render paths retarget to it (2026-07-11)
+
+**The problem, precisely.** Four things currently produce audio from a `.beat` file, and they are
+not four equally-valid options — they're one architectural smell plus one real duplication:
+
+1. **`cli/render.mjs`** — headless Chromium driving BeatLab's *own* live engine. Hard-requires
+   `--beatlab-dir`/`BEATLAB_DIR`: a separate repo checkout on disk.
+2. **`cli/render-offline.mjs`** — `scripts/build-headless-engine.mjs` bundles BeatLab's *own*
+   engine+store headlessly, run via `node-web-audio-api`'s polyfill instead of a browser. Also
+   hard-requires a BeatLab checkout, **and** needs a locally-patched `node-web-audio-api` build
+   (the plain npm release explodes on FM-through-zero hi-hats) that isn't present on this machine
+   — confirmed this session (Phase 12 Stream 2) to render **total silence** in this environment,
+   not a degraded result, a silent no-op.
+3. **`ui/src/audio/engine.ts`** — dotbeat's own hand-ported, hand-adapted copy of BeatLab's
+   engine, now full parity (Phase 13 Stream A) and the only one of the four that's actually
+   *dotbeat's own code*, in this repo, driving the actual product (the live GUI).
+4. **BeatLab's own live engine**, in the separate `wgpatrick/beatlab` repo — the ancestral source
+   #3 was ported from, still what BeatLab's own app runs, no longer anything dotbeat's product
+   renders through directly (D12 ended that relationship at the product level) but still what
+   *paths 1 and 2 secretly depend on*.
+
+So it's not "four independent engines to unify" — it's **one real engine dotbeat owns (#3), one
+real engine BeatLab owns (#4) that dotbeat has no business still depending on post-D12, and two
+CLI entry points (#1, #2) that reach across the D12 fork line to use BeatLab's instead of
+dotbeat's own.** That dependency is the actual bug: every one of tonight's engine-parity
+verifications (Phase 13 Stream A's metric comparisons, Phase 14's mute/solo and instrument-track
+checks) already treats `ui/`'s engine as the reference-worthy one — the CLI paths pointing at
+BeatLab instead are now testing the wrong thing, and #2 is outright broken.
+
+**Decision:** `ui/src/audio/engine.ts` is the one canonical engine. `cli/render.mjs` gets
+retargeted to drive dotbeat's own `ui/` (headless Chromium against a locally-served build of
+`ui/`, the same pattern `ui/verify*.mjs` already uses — no BeatLab checkout involved at all).
+`cli/render-offline.mjs` — silently broken, dependent on an unpatched external library *and* an
+external repo — is retired rather than repaired-in-place; if a faster-than-realtime batch render
+path is needed later (it matters for `beat vary`/`beat score` batch throughput), that's a fresh
+build bundling `ui/`'s own engine headlessly, not a fix to code that reaches into BeatLab.
+`scripts/build-headless-engine.mjs` and its BeatLab-checkout dependency retire with it.
+
+**Why now, not later:** the owner's own words this session — "that seems like something that
+definitely needs to be resolved... let's figure this out quickly... sounds like a priority."
+Correct call: every stream about to touch the engine (FX arsenal, audio-clip editing for M4)
+would otherwise have to pick which of two divergent engines to extend, and Phase 12-14 already
+implicitly answered that question in `ui/`'s favor without anyone writing it down.
+
+**Revisit when:** never for #1/#2's BeatLab dependency (that's just wrong now, not a tradeoff) —
+only revisit whether a *second, faster* render harness for dotbeat's own engine is worth building,
+once real usage shows CLI render speed is actually a bottleneck.
+
+---
+
 ## D14 — BYO-Claude-Code is the agent surface for now, not an embedded chat panel (2026-07-11)
 
 **Decision:** the "agent placement" question `docs/product-spec-desktop.md` §3 left open (owner
