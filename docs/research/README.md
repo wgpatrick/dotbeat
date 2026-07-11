@@ -92,3 +92,15 @@ mitigations (preference surrogate + clustering, then preferential BO) form the l
 for the scoring exhaust. Honest gaps: zero surviving claims on neural sound-matching data
 regimes, shipped-product precedent, or PBO-on-audio sample efficiency — the audio transfer of
 Sequential Gallery is unproven and would be a genuine contribution.
+
+## 09 — Sample-source license audit (added 2026-07-11)
+
+[`09-sample-source-licenses.md`](09-sample-source-licenses.md) — the content layer for Phase 7,
+verified against primary license texts: 25/25 claims confirmed. Bundle-today shortlist: FreePats
+CC0 banks, FreePats MuldjordKit (CC-BY 4.0, fully documented chain, ships as .h2drumkit with
+per-instrument samples), Audiophob Hydrogen kit (CC0, Debian-vetted), FluidR3 GM (genuinely
+MIT). GeneralUser GS is permissive but carries a self-disclosed provenance caveat. Hydrogen kits
+are heterogeneously licensed per kit — the Debian DEP-5 copyright audit is the authoritative
+per-kit source, not the free-text <license> field. Nothing survived on 99Sounds/BPB/SampleSwap/
+MusicRadar/VSCO/Salamander — NOT cleared. Drum-craft/prep questions again produced zero verified
+claims (third strike for blog-grade sourcing) — needs a book-grade pass.
