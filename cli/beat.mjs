@@ -105,6 +105,8 @@ const USAGE = `usage:
   beat pins <file>                                        list this project's pins, newest checkpoint first
   beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon
   beat mcp                                                MCP server over stdio (all of the above as tools)
+  beat mcp-init <file> [--force]                          write a .mcp.json next to <file> so Claude Code
+                                                          (or any MCP client) auto-discovers 'beat mcp' there
 
 paths for set: bpm | loop_bars | selected_track | <track>.<synth param> | <track>.name |
                <track>.color | <track>.pattern.<lane>[<step>]`
@@ -860,6 +862,29 @@ async function selectionCmd(argv) {
   process.stdout.write(Object.keys(sel).length === 0 ? 'no selection\n' : serializeSelection(sel))
 }
 
+// D5's "BYO-Claude-Code fallback" (docs/product-spec-desktop.md §6): `beat mcp` already runs a
+// full stdio JSON-RPC MCP server, but pointing a client at it was tribal knowledge (the right
+// command, the right absolute path to this repo's beat.mjs). This writes the one-file config
+// Claude Code (or any MCP client) auto-discovers on startup, so opening the project folder is
+// the entire setup step.
+function mcpInitCmd(argv) {
+  const file = argv.find((a) => !a.startsWith('--'))
+  if (!file) throw new BeatEditError('mcp-init needs a <file> — the .beat project to point an MCP client at')
+  if (!existsSync(file)) throw new BeatEditError(`${file} does not exist — run \`beat init ${file}\` first`)
+  const force = argv.includes('--force')
+  const beatScript = new URL(import.meta.url).pathname // this file's own absolute path
+  const projectDir = dirname(resolve(file))
+  const configPath = resolve(projectDir, '.mcp.json')
+  if (existsSync(configPath) && !force) throw new BeatEditError(`${configPath} already exists — pass --force to overwrite`)
+  const config = { mcpServers: { beat: { command: 'node', args: [beatScript, 'mcp'] } } }
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n')
+  process.stdout.write(
+    `wrote ${configPath}\n\n` +
+      `next: open ${projectDir} in Claude Code (or any MCP client that reads .mcp.json) — the\n` +
+      `"beat" server is auto-discovered. Try a tool call: beat_inspect on "${basename(file)}".\n`,
+  )
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2)
   switch (cmd) {
@@ -961,6 +986,9 @@ async function main() {
       await runMcpServer()
       return // serves stdio until stdin closes
     }
+    case 'mcp-init':
+      mcpInitCmd(rest)
+      break
     case 'render': {
       if (rest.includes('--offline')) {
         // offline path runs in a separate process: its web-audio polyfill patches globalThis,

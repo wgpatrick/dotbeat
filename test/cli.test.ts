@@ -99,3 +99,38 @@ test('THE M2 EXIT CRITERION: beat diff between two git commits reads like an edi
     'lead: cutoff 3200 -> 900',
   ])
 })
+
+// Phase 10 Stream C: the BYO-Claude-Code onboarding path (docs/agent-setup.md,
+// docs/product-spec-desktop.md §6 D5) starts with `beat mcp-init` writing a ready-to-use
+// .mcp.json next to the project — this is the config-generation logic, tested for real.
+test('beat mcp-init writes a .mcp.json next to the project pointing at this beat.mjs\'s "mcp" command', () => {
+  const file = tempProject()
+  const dir = dirname(file)
+  const out = beat(['mcp-init', file])
+  assert.match(out, /wrote .*\.mcp\.json/)
+  assert.match(out, /beat_inspect/)
+  const config = JSON.parse(readFileSync(join(dir, '.mcp.json'), 'utf8'))
+  assert.deepEqual(Object.keys(config.mcpServers), ['beat'])
+  assert.equal(config.mcpServers.beat.command, 'node')
+  assert.equal(config.mcpServers.beat.args[0], beatCli)
+  assert.equal(config.mcpServers.beat.args[1], 'mcp')
+})
+
+test('beat mcp-init refuses to overwrite an existing .mcp.json without --force', () => {
+  const file = tempProject()
+  const dir = dirname(file)
+  beat(['mcp-init', file])
+  const out = beat(['mcp-init', file], { expectExit: 2 })
+  assert.match(out, /already exists.*--force/)
+  // --force does overwrite
+  const forced = beat(['mcp-init', file, '--force'])
+  assert.match(forced, /wrote .*\.mcp\.json/)
+  const config = JSON.parse(readFileSync(join(dir, '.mcp.json'), 'utf8'))
+  assert.equal(config.mcpServers.beat.args[1], 'mcp')
+})
+
+test('beat mcp-init errors on a missing project file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-cli-test-'))
+  const out = beat(['mcp-init', join(dir, 'nope.beat')], { expectExit: 2 })
+  assert.match(out, /does not exist/)
+})
