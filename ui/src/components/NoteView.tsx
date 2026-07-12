@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { declaredLaneNames, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
+import { declaredLaneNames, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
 import { postEdit, postSelection, postPitchTime, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
@@ -187,12 +187,77 @@ function snapStep(raw: number, freehand: boolean): number {
   return freehand ? Math.round(raw * 10000) / 10000 : Math.round(raw)
 }
 
+// ---- clip-view playhead resolution (Phase 24 Stream CG bug fix) --------------------------------
+// `currentStep` from the store is the ABSOLUTE song-timeline step once a real `song` array exists
+// (engine.ts's tick(): `step = rawStep % totalSteps` where `totalSteps` is the whole song's length,
+// not one clip's). Rendering the playhead directly against `currentStep` (the old bug) made the
+// line disappear almost immediately in song mode, since it only stayed inside `[0, loopBars*16)`
+// for the first section. Fixed by mirroring engine.ts's own `contentOf` resolution: find which
+// section is playing right now, check whether ITS scene maps this track to the SAME clip NoteView
+// is displaying, and if so convert the absolute step to a clip-relative, tiled position with the
+// exact same modulo math `contentOf` uses for real playback.
+//
+// "The clip NoteView is displaying" needs its own definition since there's no per-clip selector in
+// the GUI yet (ClipPropertiesPanel.tsx's own header comment) — reuses that same file's established
+// "primary clip" rule (the first song-section's scene that maps this track to a real, existing
+// clip), duplicated locally for the same reason ClipPropertiesPanel duplicates it from
+// ArrangementView: four lines, not worth a shared module, kept in lockstep by this comment.
+function primaryClipFor(track: BeatTrack, doc: BeatDocument): BeatClip | null {
+  if (!doc.song) return null
+  for (const section of doc.song) {
+    const scene = doc.scenes.find((s) => s.id === section.scene)
+    const clipId = scene?.slots[track.id]
+    if (!clipId) continue
+    const clip = track.clips.find((c) => c.id === clipId)
+    if (clip) return clip
+  }
+  return null
+}
+
+/** Returns the clip-relative, tiled step to render the playhead at, or `null` if no playhead
+ * should render at all (stopped, or the open clip isn't the one actually playing right now). */
+function resolveClipPlayhead(track: BeatTrack, doc: BeatDocument | null, currentStep: number, loopBars: number): number | null {
+  if (!doc || currentStep < 0) return null
+  const song = doc.song && doc.song.length > 0 ? doc.song : null
+  const loopSteps = loopBars * 16
+  if (!song) {
+    // Loop mode (no song block): engine.ts's tick() computes `step` as `rawStep % (loopBars*16)`
+    // directly whenever there's no song array, so `currentStep` IS already clip-relative — same
+    // condition this playhead always used before song mode existed.
+    return currentStep < loopSteps ? currentStep : null
+  }
+  const openClip = primaryClipFor(track, doc)
+  if (!openClip) return null
+  // Which section is playing right now, from the absolute step — the same cumulative-bars walk
+  // engine.ts's contentOf does from `bar`.
+  const bar = Math.floor(currentStep / 16)
+  let cursor = 0
+  let sectionStartBar = 0
+  let sceneId: string | null = null
+  for (const section of song) {
+    if (bar < cursor + section.bars) {
+      sectionStartBar = cursor
+      sceneId = section.scene
+      break
+    }
+    cursor += section.bars
+  }
+  if (sceneId === null) return null
+  const scene = doc.scenes.find((s) => s.id === sceneId)
+  const clipId = scene?.slots[track.id]
+  if (!clipId || clipId !== openClip.id) return null // this track isn't playing the open clip right now
+  const rel = currentStep - sectionStartBar * 16
+  return ((rel % loopSteps) + loopSteps) % loopSteps
+}
+
 export function NoteView({ track }: { track: BeatTrack }) {
+  const doc = useStore((s) => s.doc)
   const loopBars = useStore((s) => s.doc?.loopBars ?? 1)
   const currentStep = useStore((s) => s.currentStep)
   const sel = useStore((s) => s.editNoteIds)
   const setSel = useStore((s) => s.setEditNoteIds)
   const totalSteps = loopBars * 16
+  const playheadStep = resolveClipPlayhead(track, doc, currentStep, loopBars)
   const isDrums = track.kind === 'drums'
   const editable = true // every track kind (synth/instrument/drums) edits through this one view now
   const eventKind: 'note' | 'hit' = isDrums ? 'hit' : 'note'
@@ -767,8 +832,8 @@ export function NoteView({ track }: { track: BeatTrack }) {
             )
           })}
           {mqStyle && <div className="noteview-marquee" style={mqStyle} />}
-          {currentStep >= 0 && currentStep < totalSteps && (
-            <div className="noteview-playhead" style={{ left: `calc(${currentStep} * var(--note-step-w))` }} />
+          {playheadStep !== null && (
+            <div className="noteview-playhead" style={{ left: `calc(${playheadStep} * var(--note-step-w))` }} />
           )}
             </div>
             {/* Velocity lane (Phase 16 Stream J): one bar per event, aligned under it. Drag (or click)
