@@ -1080,6 +1080,29 @@ body {
   color: var(--accent);
 }
 
+/* ---- Quantize control group (Phase 26 Stream DF) ---- */
+.pitch-time-quantize input[type='range'] {
+  width: 70px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+.pitch-time-amount-readout {
+  min-width: 32px;
+  font-family: ui-monospace, monospace;
+  color: var(--text, #e6e8ec);
+}
+.pitch-time-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+.pitch-time-checkbox input[type='checkbox'] {
+  width: auto;
+  margin: 0;
+}
+
 /* ---- scope ---- */
 .scope-section {
   padding: 10px 14px;

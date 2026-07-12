@@ -66,6 +66,7 @@ import {
   setLaneBacking,
   setLaneParam,
   humanize,
+  quantizeNotes,
   addGroup,
   removeGroup,
   renameGroup,
@@ -919,7 +920,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
 
     // Phase 23 Stream BA: the six Pitch & Time operations + Consolidate (src/core/pitchtime.ts),
-    // reachable from the piano-roll's new operations panel. One op per call:
+    // reachable from the piano-roll's new operations panel. Phase 26 Stream DF adds `quantize`
+    // (src/core/edit.ts's quantizeNotes) to the SAME route rather than inventing a new one — it's
+    // the identical shape (whole-track batch op, optional noteIds scope) research 57 flagged as
+    // "the single cheapest, highest-value item" once a GUI affordance exists for it. One op per call:
     //   { op:'transpose',  track, semitones, noteIds? }
     //   { op:'timeScale',  track, factor, noteIds? }
     //   { op:'fitToScale', track, root, scale, noteIds? }
@@ -927,6 +931,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     //   { op:'reverse',    track, noteIds? }
     //   { op:'legato',     track, gap?, noteIds? }
     //   { op:'consolidate', track, noteIds? }
+    //   { op:'quantize',   track, grid?, amount?, starts?, ends?, noteIds? }
     // Returns the full raw document (no SSE echo of the daemon's own writes), same as /add-track.
     if (req.method === 'POST' && url.pathname === '/pitch-time') {
       readBody(req)
@@ -941,6 +946,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             scale?: unknown
             axis?: unknown
             gap?: unknown
+            grid?: unknown
+            amount?: unknown
+            starts?: unknown
+            ends?: unknown
           }
           if (typeof b.track !== 'string') {
             json(res, 400, { error: 'body must include track: string' })
@@ -973,8 +982,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             case 'consolidate':
               result = consolidateRatchet(doc, b.track, opts)
               break
+            case 'quantize':
+              result = quantizeNotes(doc, b.track, {
+                ...opts,
+                ...(typeof b.grid === 'number' ? { grid: b.grid } : {}),
+                ...(typeof b.amount === 'number' ? { amount: b.amount } : {}),
+                ...(typeof b.starts === 'boolean' ? { starts: b.starts } : {}),
+                ...(typeof b.ends === 'boolean' ? { ends: b.ends } : {}),
+              })
+              break
             default:
-              json(res, 400, { error: `unknown op "${String(b.op)}" (expected transpose|timeScale|fitToScale|invert|reverse|legato|consolidate)` })
+              json(res, 400, { error: `unknown op "${String(b.op)}" (expected transpose|timeScale|fitToScale|invert|reverse|legato|consolidate|quantize)` })
               return
           }
           const written = writeIfChanged(result.doc)
@@ -982,7 +1000,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           json(res, 200, { written, changed: result.changed, doc })
         })
         .catch((err) => {
-          const status = err instanceof BeatPitchTimeError || err instanceof SyntaxError ? 400 : 500
+          const status = err instanceof BeatPitchTimeError || err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
           json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return
