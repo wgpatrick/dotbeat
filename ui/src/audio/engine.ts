@@ -1865,9 +1865,14 @@ class Engine {
 
       panner.chain(vol, this.getMaster())
       vol.connect(levelTap) // post-fader side-tap (not in the audible path)
-      panner.connect(reverbSend)
+      // Sends tap off `vol` (post-fader), not `panner` — so riding this bus's fader also scales the
+      // wet reverb/delay signal reaching the shared buses, matching Ableton's documented Post
+      // default for return-track sends (manual p.387). Both are still downstream of `muteGain`
+      // (upstream of `panner`), so muting the bus silences the sends too. See docs/research/69-
+      // ableton-comparison-master-synthesis.md §0 Bug 1.
+      vol.connect(reverbSend)
       reverbSend.connect(reverb)
-      panner.connect(delaySend)
+      vol.connect(delaySend)
       delaySend.connect(delay)
 
       this.drumBus = { filter, eq3, compIn, compDry, compressor, compWet, compOut, distortion, bitcrush, saturator, chorus, phaser, pingPong, muteGain, levelTap, panner, vol, reverbSend, delaySend }
@@ -2247,9 +2252,14 @@ class Engine {
 
     panner.chain(vol, this.getMaster())
     vol.connect(levelTap) // post-fader side-tap for this track's meter (not in the audible path)
-    panner.connect(reverbSend)
+    // Sends tap off `vol` (post-fader), not `panner` — so riding this track's fader also scales the
+    // wet reverb/delay signal reaching the shared buses, matching Ableton's documented Post default
+    // for return-track sends (manual p.387). Both are still downstream of `muteGain` (upstream of
+    // `panner`), so muting the track silences the sends too. See docs/research/69-ableton-
+    // comparison-master-synthesis.md §0 Bug 1.
+    vol.connect(reverbSend)
     reverbSend.connect(reverb)
-    panner.connect(delaySend)
+    vol.connect(delaySend)
     delaySend.connect(delay)
 
     return {
@@ -3369,20 +3379,26 @@ class Engine {
       if (!cutoffLfoApplied && cutoffAuto && cutoffAuto.length) {
         chain.filter.frequency.linearRampToValueAtTime(baseCutoff, rampTime)
       }
-      if (p.lfoDest === 'amp' && lfoOn) {
-        chain.vol.volume.linearRampToValueAtTime(p.volume + p.lfoDepth * lfo * 12, rampTime)
-      }
-      if (p.lfo2Dest === 'amp' && lfo2On) {
-        chain.vol.volume.linearRampToValueAtTime(p.volume + p.lfo2Depth * lfo2 * 12, rampTime)
+
+      // Automated-value lookup, shared by the generic automation pass below and by
+      // applyLfoAdditive's composition base — a clip-automation lane's key ('volume') doesn't
+      // always match the LFO destination enum's name for the same param ('amp'), so this is keyed
+      // by the automation lane name and applyLfoAdditive maps its own dest onto it per-case.
+      const autoVal = (key: string): number | undefined => {
+        const points = content.automation.get(key)
+        return points && points.length ? interpolateAutomation(points, content.contentStep, false) : undefined
       }
 
       // Generic clip automation for the remaining live-rampable params (cutoff handled above,
-      // duckAmount handled with the duck below). Last write wins within a tick if a param is also
-      // driven by an LFO — a documented step-resolution tradeoff, same as BeatLab. eq3/comp/
-      // distortion/bitcrush destinations are TYPE-addressed (findEffect), same as before this
-      // stream — if the track's chain no longer includes that effect type at all, the ramp is a
-      // silent no-op (there's nothing to modulate); a merely-bypassed instance still ramps (see
-      // findEffect's comment) so re-enabling it doesn't jump.
+      // duckAmount handled with the duck below). If an LFO ALSO targets the same destination this
+      // tick, applyLfoAdditive (below) runs after this loop and composes around whatever value was
+      // just written here (via autoVal) rather than overwriting it — the same base/offset
+      // composition already proven for cutoff above, generalized to every shared destination (see
+      // docs/research/69-ableton-comparison-master-synthesis.md §0 Bug 2). eq3/comp/distortion/
+      // bitcrush destinations are TYPE-addressed (findEffect), same as before this stream — if the
+      // track's chain no longer includes that effect type at all, the ramp is a silent no-op
+      // (there's nothing to modulate); a merely-bypassed instance still ramps (see findEffect's
+      // comment) so re-enabling it doesn't jump.
       for (const [key, points] of content.automation) {
         if (key === 'cutoff' || key === 'duckAmount' || !points.length) continue
         const val = interpolateAutomation(points, content.contentStep, false)
@@ -3414,34 +3430,43 @@ class Engine {
       // document schema at all — see LFO_DESTS's comment) — now both LFOs share one destination
       // enum and both can reach the full set. One function, called once per LFO with its own
       // dest/depth/value, so there's exactly one place that knows how each destination maps onto
-      // the live audio graph. ('off'/'pitch'/'cutoff'/'amp' are handled above/below.) 'wtPos'
-      // (Phase 26 Stream DH) is a STEPPED destination, not a ramp like the others — there's no
-      // AudioParam to ramp, setWavetable regenerates the oscillator's partials outright, so it
-      // only actually moves anything when the track's own osc is 'wavetable' (a no-op otherwise,
-      // same shape as eqLow/compMix/etc. being a no-op when the matching effect isn't present).
+      // the live audio graph. ('off'/'pitch'/'cutoff' are handled above.) Every ramped case below
+      // composes against `autoVal(...) ?? p.<field>` — the value the clip-automation pass above
+      // just wrote for this tick, if any, else the static field value — so an LFO sharing a
+      // destination with an automation lane modulates AROUND the drawn curve instead of silently
+      // discarding it (Bug 2, Phase 26 Stream DA). This also folds 'amp' (volume) into the same
+      // rule instead of its previous special-cased, opposite-order handling (automation used to
+      // always beat the LFO for volume specifically) — now all three cases (cutoff, volume,
+      // everything else) share one consistent compose-with-automation rule. 'wtPos' (Phase 26
+      // Stream DH) is a STEPPED destination, not a ramp like the others — there's no AudioParam to
+      // ramp, setWavetable regenerates the oscillator's partials outright, so it only actually
+      // moves anything when the track's own osc is 'wavetable' (a no-op otherwise, same shape as
+      // eqLow/compMix/etc. being a no-op when the matching effect isn't present); it has no stored
+      // automation lane, so there's no autoVal(...) composition for it either.
       const applyLfoAdditive = (dest: LfoDest, depth: number, lfoVal: number): void => {
         const d = depth * lfoVal
         const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
         switch (dest) {
           case 'wtPos': if (p.osc === 'wavetable') this.setWavetable(chain, p.wtTable, clamp01(p.wtPos + d), false); break
-          case 'resonance': chain.filter.Q.linearRampToValueAtTime(Math.max(0, p.resonance + d * 8), rampTime); break
-          case 'pan': chain.panner.pan.linearRampToValueAtTime(Math.max(-1, Math.min(1, p.pan + d)), rampTime); break
-          case 'sendReverb': chain.reverbSend.gain.linearRampToValueAtTime(clamp01(p.sendReverb + d * 0.5), rampTime); break
-          case 'sendDelay': chain.delaySend.gain.linearRampToValueAtTime(clamp01(p.sendDelay + d * 0.5), rampTime); break
-          case 'eqLow': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.low.linearRampToValueAtTime(p.eqLow + d * 12, rampTime); break }
-          case 'eqMid': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.mid.linearRampToValueAtTime(p.eqMid + d * 12, rampTime); break }
-          case 'eqHigh': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.high.linearRampToValueAtTime(p.eqHigh + d * 12, rampTime); break }
+          case 'amp': chain.vol.volume.linearRampToValueAtTime((autoVal('volume') ?? p.volume) + d * 12, rampTime); break
+          case 'resonance': chain.filter.Q.linearRampToValueAtTime(Math.max(0, (autoVal('resonance') ?? p.resonance) + d * 8), rampTime); break
+          case 'pan': chain.panner.pan.linearRampToValueAtTime(Math.max(-1, Math.min(1, (autoVal('pan') ?? p.pan) + d)), rampTime); break
+          case 'sendReverb': chain.reverbSend.gain.linearRampToValueAtTime(clamp01((autoVal('sendReverb') ?? p.sendReverb) + d * 0.5), rampTime); break
+          case 'sendDelay': chain.delaySend.gain.linearRampToValueAtTime(clamp01((autoVal('sendDelay') ?? p.sendDelay) + d * 0.5), rampTime); break
+          case 'eqLow': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.low.linearRampToValueAtTime((autoVal('eqLow') ?? p.eqLow) + d * 12, rampTime); break }
+          case 'eqMid': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.mid.linearRampToValueAtTime((autoVal('eqMid') ?? p.eqMid) + d * 12, rampTime); break }
+          case 'eqHigh': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.high.linearRampToValueAtTime((autoVal('eqHigh') ?? p.eqHigh) + d * 12, rampTime); break }
           case 'compMix': {
             const e = findEffect(chain, 'comp')
             if (e) {
-              const v = clamp01(p.compMix + d * 0.5)
+              const v = clamp01((autoVal('compMix') ?? p.compMix) + d * 0.5)
               e.compDry!.gain.linearRampToValueAtTime(1 - v, rampTime)
               e.compWet!.gain.linearRampToValueAtTime(v, rampTime)
             }
             break
           }
-          case 'distortionMix': { const e = findEffect(chain, 'distortion'); if (e) e.distortion!.wet.linearRampToValueAtTime(clamp01(p.distortionMix + d * 0.5), rampTime); break }
-          case 'bitcrushMix': { const e = findEffect(chain, 'bitcrush'); if (e) e.bitcrush!.wet.linearRampToValueAtTime(clamp01(p.bitcrushMix + d * 0.5), rampTime); break }
+          case 'distortionMix': { const e = findEffect(chain, 'distortion'); if (e) e.distortion!.wet.linearRampToValueAtTime(clamp01((autoVal('distortionMix') ?? p.distortionMix) + d * 0.5), rampTime); break }
+          case 'bitcrushMix': { const e = findEffect(chain, 'bitcrush'); if (e) e.bitcrush!.wet.linearRampToValueAtTime(clamp01((autoVal('bitcrushMix') ?? p.bitcrushMix) + d * 0.5), rampTime); break }
         }
       }
       if (lfoOn) applyLfoAdditive(p.lfoDest, p.lfoDepth, lfo)
