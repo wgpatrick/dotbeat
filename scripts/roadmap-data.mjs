@@ -321,6 +321,30 @@ export const rows = [
     core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
     research: 'research/71-ux-clip-view-midi-editing.md', plan: null,
   },
+  {
+    area: 'Note editing (piano roll)', feature: 'Colored Clip View title bar',
+    description: 'NoteView stacked multiple visually-identical dark strips with no colored anchor point back to the track being edited, unlike Ableton\'s colored per-clip title bar convention. Adds a sticky .noteview-titlebar using track.color as background (luminance-based text color selection), pinned to the top of the panel stack while scrolling.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: 'phase-27-plan.md',
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Velocity lane: drop redundant on-grid opacity encoding, add live drag-value readout',
+    description: 'A note\'s on-grid opacity used to be driven by velocity AND chance stacked together, making either hard to read at a glance. Grid notes now render at flat opacity regardless of velocity (chance-dimming preserved, now legible on its own); dragging a velocity or chance lane marker shows a live floating value label, matching ArrangementView\'s existing automation-lane drag-label pattern.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: 'phase-27-plan.md',
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Two-sided clip-loop handle, visible at rest',
+    description: 'The clip-loop handle was end-only and thin, unlike Ableton\'s brace draggable at both edges and legible as grabbable without hovering. Generalized the existing origStart-aware gesture with an edge: \'start\' | \'end\' field, added a symmetric start-edge handle, and thickened both with a triangular grip cap bracketing the loop range.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: 'phase-27-plan.md',
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Distinct visual identity per NoteView bottom panel',
+    description: 'ClipPropertiesPanel/PitchTimePanel/NoteNameReadout/NoteInspector/DrumLanePanel rendered as visually identical dark strips. Each gets a 3px left-border accent (amber/blue/green/gray/cyan), reusing the app\'s existing per-track-kind color convention rather than adopting a collapsible-header pattern uniformly (would force a re-expand click on every note selection, since NoteInspector remounts fresh per selected note).',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: 'phase-27-plan.md',
+  },
 
   // ── Drum programming ─────────────────────────────────────────────────────
   {
@@ -606,6 +630,12 @@ export const rows = [
     description: 'ClipPropertiesPanel\'s loop start/end are purely typed `<input type="number">` fields — no way to capture "wherever the playhead currently is" into a field with one click, unlike Ableton\'s Set-button pattern next to every Start/End/Position/Length field in its Clip panel. Companion to "Clip-level loop/length/time-signature properties" above, same panel.',
     core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
     research: 'research/71-ux-clip-view-midi-editing.md', plan: null,
+  },
+  {
+    area: 'Arrangement / song structure', feature: 'Bar-range selection band spans every track row (Ableton full-arrangement convention)',
+    description: 'A lane drag used to tint only the row physically dragged across; Ableton\'s default time-range selection spans the full arrangement (every track) at once. bandForTrack() now renders the active/committed band on every visible row unconditionally — a pure rendering-scope change, the underlying selection data (daemon.getSelection(), resolveVaryTarget()) stays scoped exactly as before.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/70-ux-arrangement-view.md', plan: 'phase-27-plan.md',
   },
 
   // ── Synth sound design ──────────────────────────────────────────────────
@@ -1015,6 +1045,18 @@ export const rows = [
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/72-ux-device-view.md', plan: null,
   },
+  {
+    area: 'Core effects', feature: 'Leading Activator-style bypass toggle on EffectRow',
+    description: 'The bypass toggle sat 5th of 6 elements in .effect-row, styled like every other small icon, right next to the destructive remove button, unlike Ableton\'s oversized, leftmost, colored Activator circle. Moved to the leading position with a filled/hollow circle glyph (same postEffectEnabled edit path, same keyboard accessibility), with real spacing from the remove button.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/72-ux-device-view.md', plan: 'phase-27-plan.md',
+  },
+  {
+    area: 'Core effects', feature: 'Knob.tsx click-to-type numeric value entry',
+    description: 'Knob.tsx was drag-only — no click-to-type, unlike Ableton\'s boxed/editable numeric readouts. .knob-value now toggles to a real editable input on click, committing through the same onChange the drag path already uses (clamped to [min, max]); Escape reverts without committing.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/72-ux-device-view.md', plan: 'phase-27-plan.md',
+  },
 
   // ── Automation ───────────────────────────────────────────────────────────
   {
@@ -1189,9 +1231,9 @@ export const rows = [
   // browser/note-drag-specific affordances research 73/74 flagged.
   {
     area: 'Drag & drop (cross-cutting)', feature: 'Unify all five drag surfaces onto one canonical "currently dragging" token',
-    description: 'Today: effect-row reorder uses `opacity: 0.4` + solid accent border; the clip-block cross-track move uses `opacity: 0.65` + dashed border + `grabbing` cursor + `z-index: 4`; the library→track/lane drop target and (pre-Stream-EB) the note-drag have no treatment at all — four independently-invented answers to the same visual question across five surfaces, zero shared code. Phase 27 Stream EB establishes the primitive for the P0 surfaces (drop-target highlight + note-drag); this row is the full retrofit — point `EffectRow`, the clip-block drag, and the section-chip reorder at the same canonical token/class instead of their own bespoke CSS.',
-    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
-    research: 'research/74-ux-drag-and-drop.md', plan: null,
+    description: 'Today: effect-row reorder uses `opacity: 0.4` + solid accent border; the clip-block cross-track move uses `opacity: 0.65` + dashed border + `grabbing` cursor + `z-index: 4`; the library→track/lane drop target and (pre-Stream-EB) the note-drag have no treatment at all — four independently-invented answers to the same visual question across five surfaces, zero shared code. `ui/src/dragDrop.ts`\'s `makeDropTargetHandlers`/`useDropTarget` plus one canonical `.dragging`/`.drop-target-hover` pair in `styles.css` (fixing the track-header dragleave bug along the way) now cover all five surfaces: `EffectRow` reorder and the section-chip reorder had their own redundant `opacity: 0.4` rules deleted entirely (now pure inheritance, confirmed via a CSSOM audit in the stream\'s own verify script), the clip-block drag kept only its genuine extras (dashed border, cursor, z-index) on top of the shared base, and the drum-lane drop target + piano-roll note-drag (previously zero visual distinction) both now use the shared classes too.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/74-ux-drag-and-drop.md', plan: 'phase-27-plan.md',
   },
   {
     area: 'Drag & drop (cross-cutting)', feature: 'At-rest drag-handle affordance on browser rows and piano-roll notes',
@@ -1356,6 +1398,12 @@ export const rows = [
     description: 'Previews go through whatever the master bus is already doing (no dedicated gain stage), unlike Ableton\'s separate Preview/Cue Volume knob living in the Master track\'s own strip. Currently previewing at full master level can be jarring mid-mix-review. Low cost as a single global control — sequence alongside the preview scrub/waveform strip above so it lands in the same footer element rather than as a separate bolt-on.',
     core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
     research: 'research/73-ux-browser.md', plan: null,
+  },
+  {
+    area: 'Preset / content library', feature: 'Content browser row polish: per-type icon + in-place preview indicator',
+    description: 'Every row used the identical preview-circle icon regardless of content type, and preview feedback was a tiny button-state change with no in-place indicator. Adds a distinct inline-SVG glyph per type (preset-synth/preset-drums/kit/kit-lane/soundfont) plus a real row-level "currently previewing" pulse, self-clearing per content type\'s approximate preview duration.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/73-ux-browser.md', plan: 'phase-27-plan.md',
   },
 
   // ── Macros ───────────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@ blob you hope merges.
 
 ```bash
 npm install
-npm test                          # 564 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
+npm test                          # 603 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat bass.cutoff 900   # prints "bass: cutoff 700 -> 900"
@@ -22,6 +22,7 @@ node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical ed
 node cli/beat.mjs render examples/real-groove.beat -o out.wav     # dotbeat's own engine, headless
 node cli/beat.mjs metrics out.wav                                 # LUFS (BS.1770), true peak, crest, spectrum, stereo
 node cli/beat.mjs checkpoint song.beat --label "rough mix"        # a restorable version, git-backed
+node cli/beat.mjs macro apply song.beat bass space 50              # a knob that resolves to real literal edits, no indirection
 node cli/beat.mjs mcp                                             # the whole toolchain as MCP tools for an AI agent
 node cli/beat.mjs daemon examples/real-groove.beat                # two-way sync backend for the GUI
 
@@ -54,7 +55,7 @@ the full thesis and prior-art comparison.
 
 | Path | What |
 |---|---|
-| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (92 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
+| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (261 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, prior-art comparison, research provenance. |
 | `src/core/` | The `.beat` format: types, parser, serializer, converter, semantic diff, edit primitives (quantize/humanize/transpose/fit-to-scale/groove/…), inspect. Pure TS, no GUI deps. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over HTTP/SSE, echo suppression by canonical-text comparison. |
@@ -65,11 +66,11 @@ the full thesis and prior-art comparison.
 | `ui/` | dotbeat's own GUI (Vite + React + Tone.js) — arrangement view, piano-roll/drum-lane clip editing, mixer, effects chain, content browser. Its own product design, not a wrapped teaching app (see `docs/decisions.md` D12). |
 | `desktop/` | Tauri desktop shell — early-stage, working toward a native Mac app (`docs/product-spec-desktop.md`). |
 | `cli/beat.mjs` | The unified `beat` CLI — run with no args for the full, current command list. |
-| `test/` | 564 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
+| `test/` | 603 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
 | `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
 | `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
 | `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
-| [`docs/research/`](docs/research/) | 69 research passes — landscape/prior-art, engine architecture, and (most recently) a full chapter-by-chapter comparison against Ableton Live's own reference manual. |
+| [`docs/research/`](docs/research/) | 74 research passes — landscape/prior-art, engine architecture, and two full passes against Ableton Live's own reference manual: one feature-by-feature (chapters 50-69), one implementation-level UI/UX detail grounded in the manual's own screenshots (70-74). |
 | [`docs/decisions.md`](docs/decisions.md) | 15 numbered design decisions with rationale and "revisit when" — check before proposing something that might contradict one. |
 | [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format grammar. |
 | [`docs/architecture.md`](docs/architecture.md) | Component architecture (daemon, engine, CLI, MCP, GUI/desktop tiers). |
@@ -78,11 +79,18 @@ the full thesis and prior-art comparison.
 
 Well past the original v0 proof-of-concept: dotbeat now has its own GUI (arrangement view, clip
 authoring, mixer, effects chain, content browser — not a wrapped version of the BeatLab teaching
-app it started from), a 564-test suite, a git-backed checkpoint/restore history system, and a
-growing library of adversarially-researched design docs, including a full feature-by-feature
-comparison against Ableton Live 12's own reference manual. `docs/product-roadmap.md` tracks every
-feature's real status; `ROADMAP.md` has the thesis and architecture. The core loop is still the
-same one this project was built to prove: a hand-inspectable `.beat` file is the source of truth
-for a live GUI session, a CLI, and an AI agent, all at once — turn a knob in the GUI and `git
-diff` shows exactly one changed line; edit the file by hand and the GUI hot-reloads without
+app it started from), a 603-test suite, a session-local undo/redo stack alongside the git-backed
+checkpoint/restore history system, and a growing library of adversarially-researched design docs.
+Two full research passes against Ableton Live 12's own reference manual have directly shaped
+recent work: a feature-by-feature comparison drove a batch of P0 shipments (in-session undo/redo,
+a real wavetable oscillator, Macro Controls, a drum-sampler voice, curved automation, generalized
+velocity/key modulation, instrument-track effect-chain parity, and two real audio correctness bugs
+fixed along the way), and a follow-up implementation-level UI/UX pass — grounded in the manual's
+own screenshots plus live screenshots of dotbeat's own GUI, not text alone — is now reshaping the
+arrangement view, clip view, device panel, content browser, and drag-and-drop interactions to
+match Ableton's actual interaction conventions where it makes sense to. `docs/product-roadmap.md`
+tracks every feature's real status; `ROADMAP.md` has the thesis and architecture. The core loop is
+still the same one this project was built to prove: a hand-inspectable `.beat` file is the source
+of truth for a live GUI session, a CLI, and an AI agent, all at once — turn a knob in the GUI and
+`git diff` shows exactly one changed line; edit the file by hand and the GUI hot-reloads without
 stopping playback.
