@@ -284,10 +284,22 @@ export const rows = [
     research: 'research/17-track-fx-arsenal.md', plan: 'phase-23-stream-be.md',
   },
   {
-    area: 'Extended FX arsenal', feature: 'Grain Delay / Vinyl Distortion / Resonators',
-    description: 'Real custom DSP built from Tone.js primitives (GrainPlayer, WaveShaper+Noise, filter bank) — bigger lifts, good Phase-19+ candidates.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/17-track-fx-arsenal.md', plan: null,
+    area: 'Extended FX arsenal', feature: 'Grain Delay',
+    description: 'A hand-built granular pitch-shifting delay — Tone.Delay + Tone.Gain feedback + Tone.PitchShift (Tone.js\'s own internal granular pitch-shift algorithm, exposing a real windowSize grain-size control) in one feedback loop, so every repeat is both re-granulated and re-pitched (cumulative shimmer). A real EffectType chain member (unlike Stream AC\'s fixed inserts), synth tracks only.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/17-track-fx-arsenal.md', plan: 'phase-23-stream-bf.md',
+  },
+  {
+    area: 'Extended FX arsenal', feature: 'Vinyl Distortion',
+    description: 'Tone.WaveShaper asymmetric tape/record-style soft-clip saturation + a seeded, reproducible surface-noise/crackle bed (a hand-generated buffer via a streaming mulberry32 PRNG, not Tone.Noise — which has no public seed API and would make renders non-reproducible) plus a tone-tilt filter.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/17-track-fx-arsenal.md', plan: 'phase-23-stream-bf.md',
+  },
+  {
+    area: 'Extended FX arsenal', feature: 'Resonators',
+    description: 'A bank of 5 tuned Tone.Filter bandpass nodes (fifths/major/minor/octaves/harmonic interval sets around a root frequency, Q as the ring/decay proxy) approximating physical resonance — the closest a plain biquad filter bank gets without Corpus\'s AudioWorklet-tier custom DSP.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/17-track-fx-arsenal.md', plan: 'phase-23-stream-bf.md',
   },
   {
     area: 'Extended FX arsenal', feature: 'Corpus',

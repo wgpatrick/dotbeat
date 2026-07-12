@@ -54,6 +54,14 @@ export type ChorusMode = 'off' | 'chorus' | 'ensemble' | 'vibrato'
  * sin()-based fold for fold — authored once per curve CHANGE in engine.ts, not per sample. */
 export type SaturatorCurve = 'analog' | 'warm' | 'clip' | 'fold'
 
+/** Phase 23 Stream BF: Resonators' tuned bank — which interval set the (up to 5) bandpass
+ * filters sit at, relative to `resonatorFreq` (research 17 §5's deferred list: "a bank of up to
+ * 5 Tone.Filter (bandpass) nodes tuned to pitched frequencies"). 'fifths'/'octaves'/'harmonic'
+ * approximate a plucked-string/tube's own overtone series at different densities; 'major'/'minor'
+ * tune the bank to a triad instead, for a more melodic/pitched resonance character. See
+ * ui/src/audio/engine.ts's RESONATOR_CHORD_OFFSETS for the actual semitone-offset tables. */
+export type ResonatorChord = 'fifths' | 'major' | 'minor' | 'octaves' | 'harmonic'
+
 // BeatLab's own lane set and order (DRUM_LANES in beatlab/src/types.ts). Order is canonical for
 // serialization: all five lanes are always emitted, in this order, so toggling any drum step is
 // always a one-line diff and never inserts or deletes lines (the Humdrum fixed-grid discipline —
@@ -302,6 +310,28 @@ export interface BeatSynth {
   // the only "off" this insert needs. ----
   utilityWidth: number // 0..1; 0 = mono (all mid), 1 = max stereo (all side), 0.5 = neutral/no change (default)
   utilityGain: number // dB trim; 0 = neutral (default)
+  // ---- Phase 23 Stream BF: Grain Delay (research 17 §5's deferred list — a real granular delay,
+  // hand-built from Tone.Delay + Tone.PitchShift in a feedback loop; see ui/src/audio/engine.ts's
+  // GrainDelayNodes for the topology). A genuine EffectType chain member (unlike Stream AC's
+  // fixed inserts) — only audible on a track that `effect-add`s a 'grainDelay' instance. ----
+  grainDelayTime: number // seconds, base delay/grain repeat time
+  grainDelayFeedback: number // 0..1; how much of each repeat feeds back for the next
+  grainDelaySize: number // seconds, the pitch-shifter's grain WINDOW size — small = audibly grainy/choppy, large = smooth
+  grainDelayPitch: number // semitones (-24..24) applied EVERY pass through the feedback loop (cumulative shimmer/dive)
+  grainDelayMix: number // 0..1; 0 = insert bypassed
+  // ---- Phase 23 Stream BF: Vinyl Distortion (research 17 §5's deferred list — WaveShaper
+  // harmonic saturation + a seeded, reproducible surface-noise/crackle bed; see engine.ts's
+  // VinylNodes) ----
+  vinylDrive: number // 0..1, waveshaper pre-gain — the "worn playback" harmonic saturation amount
+  vinylNoiseLevel: number // 0..1; 0 = no surface noise/crackle bed (default, canonical elision)
+  vinylTone: number // 0..1; low = dull/muffled wet-path tone, high = brighter/more open
+  vinylMix: number // 0..1; 0 = insert bypassed
+  // ---- Phase 23 Stream BF: Resonators (research 17 §5's deferred list — a bank of up to 5 tuned
+  // bandpass Tone.Filter nodes approximating physical resonance; see engine.ts's ResonatorNodes) ----
+  resonatorFreq: number // Hz, the bank's root/base frequency
+  resonatorChord: ResonatorChord // which interval set the (up to 5) filters sit at, relative to resonatorFreq
+  resonatorQ: number // filter Q — higher = narrower bandwidth = longer, more pitched ringing (the bank's "decay" proxy)
+  resonatorMix: number // 0..1; 0 = insert bypassed
   sendReverb: number // 0..1
   sendDelay: number // 0..1
   duckSource: string | null // track id whose kick ducks this track; null = off ("none" in text)
@@ -531,25 +561,54 @@ export interface BeatInstrument {
 // working unmodified. This means dotbeat does not yet support two independent instances of the
 // SAME type with different params (both would read the one shared eqLow etc.) — a documented scope
 // cut, not an oversight; see docs/phase-22-stream-aa.md.
-// Phase 23 Stream BE: widened from the original four (eq3/comp/distortion/bitcrush) to add Auto
-// Filter, Auto Pan, Tremolo, and Utility — additive entries in the SAME reorderable chain
-// mechanism Stream AA built (docs/phase-22-stream-aa.md), not a parallel mechanism (see how Stream
-// AC's saturator/chorus/phaser/pingPong instead landed as a FIXED tail outside this chain,
-// ui/src/audio/engine.ts's SynthChain.saturator/chorus/phaser/pingPong comment — a documented gap
-// this stream does NOT repeat for its own four). Redux does NOT get a fifth new type here — its
-// downsampling half rides on the existing `bitcrush` type as a new field (bitcrushRate above); see
-// docs/phase-23-stream-be.md for the full reasoning.
-export type EffectType = 'eq3' | 'comp' | 'distortion' | 'bitcrush' | 'autoFilter' | 'autoPan' | 'tremolo' | 'utility'
-export const EFFECT_TYPES: readonly EffectType[] = ['eq3', 'comp', 'distortion', 'bitcrush', 'autoFilter', 'autoPan', 'tremolo', 'utility']
+//
+// Phase 23 Streams BE and BF each widened this enum additively: BE added Auto Filter, Auto Pan,
+// Tremolo, and Utility (research 17 §5.5/§5.6 — Redux does NOT get a fifth new type here, its
+// downsampling half rides on the existing `bitcrush` type as a new field, bitcrushRate above; see
+// docs/phase-23-stream-be.md); BF added three real-DSP types — grainDelay/vinylDistortion/
+// resonator (research 17 §5's "meaningfully bigger lifts" list; see docs/phase-23-stream-bf.md).
+// All seven new types are plain additive members of this same enum, exactly like every other
+// insert: an agent adds one with `effect-add`, and it takes its params from the matching
+// SYNTH_FIELDS groups below. Unlike Stream AC's four (saturator/chorus/phaser/pingPong), which are
+// FIXED, always-wired inserts outside this list (ui/src/audio/engine.ts's SynthChain.saturator
+// etc. — see that interface's comment for why), all seven of BE's and BF's new types are genuinely
+// PART of the reorderable chain: they only exist in a live track's audio graph when its `effects`
+// list actually contains one, same as eq3/comp/distortion/bitcrush.
+export type EffectType =
+  | 'eq3'
+  | 'comp'
+  | 'distortion'
+  | 'bitcrush'
+  | 'autoFilter'
+  | 'autoPan'
+  | 'tremolo'
+  | 'utility'
+  | 'grainDelay'
+  | 'vinylDistortion'
+  | 'resonator'
+export const EFFECT_TYPES: readonly EffectType[] = [
+  'eq3',
+  'comp',
+  'distortion',
+  'bitcrush',
+  'autoFilter',
+  'autoPan',
+  'tremolo',
+  'utility',
+  'grainDelay',
+  'vinylDistortion',
+  'resonator',
+]
 
-// The ORIGINAL four types (Stream AA), frozen — this is the migration/canonical-elision target
-// (defaultEffectChain, below), deliberately NOT derived from EFFECT_TYPES above: EFFECT_TYPES is
-// "every legal type a user may add," which now includes Stream BE's four; the default chain must
-// stay exactly what it always was, or every existing .beat file (and every file that predates this
-// stream) would suddenly gain new effect-chain entries on next parse/serialize. Adding an
-// autoFilter/autoPan/tremolo/utility instance is always an explicit `beat effect-add` (or GUI
-// equivalent) — it never joins a track's chain silently.
-const DEFAULT_EFFECT_TYPES: readonly EffectType[] = ['eq3', 'comp', 'distortion', 'bitcrush']
+// The ORIGINAL four types only — the sole migration/canonical-default target defaultEffectChain()
+// below builds. Kept as its own list (rather than reusing EFFECT_TYPES, which now has eleven
+// members) so adding new effect types can NEVER silently change what "a synth track that never
+// mentions effects" means: every pre-v0.10 file, and every fresh track, must keep migrating to
+// exactly eq3->comp->distortion->bitcrush (Stream AA's frozen contract, test/format-v10-
+// effects.test.ts's very first test) — not the four original types plus seven new, always-on,
+// silently-added ones. A track picks up any of BE's/BF's new types only via an explicit
+// `effect-add` (or a hand-written `effect` line), never by default.
+const LEGACY_DEFAULT_EFFECT_TYPES: readonly EffectType[] = ['eq3', 'comp', 'distortion', 'bitcrush']
 
 export interface BeatEffect {
   id: string // track-scoped stable id (D6) — what makes a reorder a MOVE, not a delete+insert
@@ -563,7 +622,7 @@ export interface BeatEffect {
  * effect lines entirely — one canonical form per state, and every existing .beat file keeps
  * serializing byte-identically. Returns a fresh array (never share one array instance). */
 export function defaultEffectChain(): BeatEffect[] {
-  return DEFAULT_EFFECT_TYPES.map((type) => ({ id: type, type, enabled: true }))
+  return LEGACY_DEFAULT_EFFECT_TYPES.map((type) => ({ id: type, type, enabled: true }))
 }
 
 /** True iff `effects` is exactly the default chain (same length, same id/type/enabled per index,
@@ -668,6 +727,8 @@ export const LFO_DESTS: readonly LfoDestination[] = [
 export const BEAT_REPEAT_MODES: readonly BeatRepeatMode[] = ['mix', 'insert', 'gate']
 export const CHORUS_MODES: readonly ChorusMode[] = ['off', 'chorus', 'ensemble', 'vibrato']
 export const SATURATOR_CURVES: readonly SaturatorCurve[] = ['analog', 'warm', 'clip', 'fold']
+/** Phase 23 Stream BF enum, same "exported so ui/'s hand-kept mirrors match exactly" convention. */
+export const RESONATOR_CHORDS: readonly ResonatorChord[] = ['fifths', 'major', 'minor', 'octaves', 'harmonic']
 
 /** Phase 18 Stream R: the tempo-sync note-division vocabulary (lfoSyncRate/lfo2SyncRate) —
  * Ableton's convention (plain / triplet 't' / dotted 'd'). Exported so ui/src/audio/engine.ts's
@@ -806,6 +867,22 @@ export const SYNTH_FIELDS: readonly SynthFieldDef[] = [
   // ---- Phase 23 Stream BE: Utility ----
   { key: 'utilityWidth', kind: 'number', default: 0.5 },
   { key: 'utilityGain', kind: 'number', default: 0 },
+  // ---- Phase 23 Stream BF: Grain Delay ----
+  { key: 'grainDelayTime', kind: 'number', default: 0.25 },
+  { key: 'grainDelayFeedback', kind: 'number', default: 0.35 },
+  { key: 'grainDelaySize', kind: 'number', default: 0.1 },
+  { key: 'grainDelayPitch', kind: 'number', default: 0 },
+  { key: 'grainDelayMix', kind: 'number', default: 0 },
+  // ---- Phase 23 Stream BF: Vinyl Distortion ----
+  { key: 'vinylDrive', kind: 'number', default: 0.3 },
+  { key: 'vinylNoiseLevel', kind: 'number', default: 0 },
+  { key: 'vinylTone', kind: 'number', default: 0.5 },
+  { key: 'vinylMix', kind: 'number', default: 0 },
+  // ---- Phase 23 Stream BF: Resonators ----
+  { key: 'resonatorFreq', kind: 'number', default: 220 },
+  { key: 'resonatorChord', kind: 'enum', default: 'fifths', values: RESONATOR_CHORDS },
+  { key: 'resonatorQ', kind: 'number', default: 20 },
+  { key: 'resonatorMix', kind: 'number', default: 0 },
   { key: 'sendReverb', kind: 'number', default: 0 },
   { key: 'sendDelay', kind: 'number', default: 0 },
   { key: 'duckSource', kind: 'trackref', default: null },

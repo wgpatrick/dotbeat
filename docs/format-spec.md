@@ -464,14 +464,21 @@ removable, reorderable — without its indirection mechanism).
   effect <id> <type> [bypassed]     # one line per insert, in FILE order = CHAIN order
 ```
 
-- **`type`** is one of `eq3|comp|distortion|bitcrush|autoFilter|autoPan|tremolo|utility` — the
-  original four built-in inserts every synth track already has knobs for (`eqLow`/`eqMid`/
-  `eqHigh`, `comp*`, `distortion*`, `bitcrush*` in `SYNTH_FIELDS`, unchanged), plus four more added
-  Phase 23 Stream BE (`autoFilter*`/`autoPan*`/`tremolo*`/`utility*`, same table — see below). An
-  `effect` line only says WHETHER, WHERE, and IN WHAT ORDER a type runs — the type's own params
-  still live in the synth block, exactly as before. (This means dotbeat does not yet support two
-  independently-parameterized instances of the same type — both would read the one shared `eqLow`
-  etc. — a deliberate, documented scope cut, not an oversight; see `docs/phase-22-stream-aa.md`.)
+- **`type`** is one of `eq3|comp|distortion|bitcrush|autoFilter|autoPan|tremolo|utility|grainDelay|
+  vinylDistortion|resonator` — the original four built-in inserts every synth track already has
+  knobs for (`eqLow`/`eqMid`/`eqHigh`, `comp*`, `distortion*`, `bitcrush*` in `SYNTH_FIELDS`,
+  unchanged), plus four more added Phase 23 Stream BE (`autoFilter*`/`autoPan*`/`tremolo*`/
+  `utility*`, same table — see below), plus three real custom-DSP inserts added Phase 23 Stream BF
+  (`docs/phase-23-stream-bf.md`) — `grainDelay*` (a hand-built granular pitch-shifting delay,
+  `Tone.Delay`+`Tone.PitchShift` in a feedback loop), `vinyl*` (WaveShaper harmonic saturation + a
+  seeded, reproducible surface-noise/crackle bed), and `resonator*` (a bank of up to 5 tuned
+  bandpass filters approximating physical resonance). All seven of BE's and BF's new types are
+  plain ADDITIVE members of the same `EffectType` enum (`EFFECT_TYPES` in `src/core/document.ts`),
+  not a new subsystem. An `effect` line only says WHETHER, WHERE, and IN WHAT ORDER a type runs —
+  the type's own params still live in the synth block, exactly as before. (This means dotbeat does
+  not yet support two independently-parameterized instances of the same type — both would read the
+  one shared `eqLow` etc. — a deliberate, documented scope cut, not an oversight; see
+  `docs/phase-22-stream-aa.md`.)
 - **`id`** is a stable, track-scoped human slug (D6) — what makes a reorder read as a MOVE (a line
   changes position) rather than a delete-and-reinsert-different-content pair (the alsdiff lesson,
   same discipline as note/hit/clip ids). Defaults (below) use the type name as the id (`eq3`,
@@ -544,6 +551,24 @@ the now-widened `EFFECT_TYPES`) — a track only gets one of the four new types 
   auto-derives from every `kind: 'number'` `SYNTH_FIELDS` row); none were added to `LFO_DESTS` —
   same explicit scope cut Stream AC made for its own four new inserts ("a separate, smaller
   follow-up if wanted, not required").
+
+### v0.10 additions — Grain Delay / Vinyl Distortion / Resonators (Phase 23 Stream BF)
+
+Three additive `EffectType` members closing research 17 §5's "meaningfully bigger lift" list (the
+three effects Phase 22 Stream AC deferred past its own build-next-four). No grammar changes beyond
+the three new `type` values above and their `SYNTH_FIELDS` params (`grainDelay*`/`vinyl*`/
+`resonator*`, canonical-elided exactly like every other insert's params — 0/`off`-valued fields
+emit no line). Unlike Stream AC's saturator/chorus/phaser/pingPong (fixed, always-wired inserts
+outside the reorderable list, wired identically on drum tracks' own fixed bus), these three are
+genuine `effects` chain members: **synth tracks only**, and — a deliberate scope decision, not an
+oversight — **not** given a drum-bus equivalent (`getDrumBus()`/`applyDrumBusParams()` in
+`ui/src/audio/engine.ts` are untouched by this stream). `grainDelay*`/`vinyl*`/`resonator*` fields
+still exist in every track's synth block (including drum tracks', since `BeatSynth` is one shared
+shape) but sit at their canonical defaults and are inert there — no different from any other
+synth-only field (e.g. `wtPos`) a drum track's block also carries but the drum bus never reads. See
+`docs/phase-23-stream-bf.md` for the DSP design decisions (why `Tone.PitchShift` rather than
+`Tone.GrainPlayer`, the seeded-noise-buffer reproducibility approach, the tuned-filter-bank
+resonance model).
 
 ### v0.10 additions — open drum lanes + optional hit duration (Phase 22 Stream AB; research 19/20)
 

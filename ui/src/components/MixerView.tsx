@@ -151,6 +151,12 @@ const FX_BADGES: { key: string; label: string; active: (p: Record<string, unknow
   { key: 'autopan', label: 'APan', active: (p) => num(p.autoPanMix) > 0 },
   { key: 'tremolo', label: 'Trem', active: (p) => num(p.tremoloMix) > 0 },
   { key: 'utility', label: 'Util', active: (p) => num(p.utilityWidth) !== 0.5 || num(p.utilityGain) !== 0 },
+  // Phase 23 Stream BF: same *Mix=0-is-bypassed heuristic (still param-only, not chain-membership-
+  // aware — matching the pre-existing imprecision every badge above already has, see this array's
+  // own header comment).
+  { key: 'graindelay', label: 'GrD', active: (p) => num(p.grainDelayMix) > 0 },
+  { key: 'vinyldistortion', label: 'Vny', active: (p) => num(p.vinylMix) > 0 },
+  { key: 'resonator', label: 'Rez', active: (p) => num(p.resonatorMix) > 0 },
 ]
 
 function num(v: unknown): number {

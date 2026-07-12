@@ -24,9 +24,9 @@ data file, not this file directly, so it stays in sync with the matching artifac
 A feature with links in both columns but status "Not started" means: fully scoped, ready for a
 stream to pick up — not guesswork, a decision away from being built.
 
-## Snapshot — 82 features tracked
+## Snapshot — 84 features tracked
 
-**52** Done · **1** In progress · **29** Not started
+**55** Done · **1** In progress · **28** Not started
 
 ---
 
@@ -127,7 +127,9 @@ stream to pick up — not guesswork, a decision away from being built.
 | Auto Filter / Auto Pan / Tremolo | Dedicated Ableton-named devices — thin wrappers around Tone.AutoFilter/AutoPanner/Tremolo, ADDITIVE entries in the same reorderable effect chain (autoFilter/autoPan/tremolo EffectType members), each with its own Rate/Depth/Mix (Tremolo also Spread). The shared LFO destination matrix already covers the sonic capability; the value here is Ableton-authentic naming and a third, independent modulation source, not new sound. | ✅ done | ✅ done | ✅ done | ✅ Done | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | [`phase-23-stream-be.md`](phase-23-stream-be.md) |
 | Redux (downsampling half) | A new bitcrushRate field on the EXISTING bitcrush type (not a new EffectType) — Ableton's own Redux is one device, two dimensions, and bit-reduction already owned bitcrush's bit-depth half. A hand-built sample-and-hold decimator (raw ScriptProcessorNode; Tone.js has no built-in Rate/Jitter node), gated by the SAME bitcrushMix as bit-depth reduction — one shared dry/wet knob for the whole device. | ✅ done | ✅ done | ✅ done | ✅ Done | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | [`phase-23-stream-be.md`](phase-23-stream-be.md) |
 | Utility (stereo width / gain trim) | Near-free via Tone.StereoWidener (utilityWidth, 0=mono/1=max stereo/0.5=neutral default) plus a static utilityGain dB trim — a mixing-hygiene tool, not a sound-design reach. No Mix field (like eq3, the chain's per-instance bypass is its only "off"). | ✅ done | ✅ done | ✅ done | ✅ Done | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | [`phase-23-stream-be.md`](phase-23-stream-be.md) |
-| Grain Delay / Vinyl Distortion / Resonators | Real custom DSP built from Tone.js primitives (GrainPlayer, WaveShaper+Noise, filter bank) — bigger lifts, good Phase-19+ candidates. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
+| Grain Delay | A hand-built granular pitch-shifting delay — Tone.Delay + Tone.Gain feedback + Tone.PitchShift (Tone.js's own internal granular pitch-shift algorithm, exposing a real windowSize grain-size control) in one feedback loop, so every repeat is both re-granulated and re-pitched (cumulative shimmer). A real EffectType chain member (unlike Stream AC's fixed inserts), synth tracks only. | ✅ done | ✅ done | ✅ done | ✅ Done | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | [`phase-23-stream-bf.md`](phase-23-stream-bf.md) |
+| Vinyl Distortion | Tone.WaveShaper asymmetric tape/record-style soft-clip saturation + a seeded, reproducible surface-noise/crackle bed (a hand-generated buffer via a streaming mulberry32 PRNG, not Tone.Noise — which has no public seed API and would make renders non-reproducible) plus a tone-tilt filter. | ✅ done | ✅ done | ✅ done | ✅ Done | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | [`phase-23-stream-bf.md`](phase-23-stream-bf.md) |
+| Resonators | A bank of 5 tuned Tone.Filter bandpass nodes (fifths/major/minor/octaves/harmonic interval sets around a root frequency, Q as the ring/decay proxy) approximating physical resonance — the closest a plain biquad filter bank gets without Corpus's AudioWorklet-tier custom DSP. | ✅ done | ✅ done | ✅ done | ✅ Done | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | [`phase-23-stream-bf.md`](phase-23-stream-bf.md) |
 | Corpus | Resonant-body physical-modeling effect — no Tone.js primitive gets close; AudioWorklet-tier custom DSP, lowest priority. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
 
 ## Automation

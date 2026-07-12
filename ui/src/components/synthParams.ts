@@ -77,6 +77,8 @@ const LFO_DESTS = [
 const BEAT_REPEAT_MODES = ['mix', 'insert', 'gate'] as const
 const CHORUS_MODES = ['off', 'chorus', 'ensemble', 'vibrato'] as const
 const SATURATOR_CURVES = ['analog', 'warm', 'clip', 'fold'] as const
+// Phase 23 Stream BF: mirrors document.ts's RESONATOR_CHORDS.
+const RESONATOR_CHORDS = ['fifths', 'major', 'minor', 'octaves', 'harmonic'] as const
 // Tempo-sync note divisions (lfoSyncRate/lfo2SyncRate) — mirrors document.ts's LFO_SYNC_RATES.
 const LFO_SYNC_RATES = ['1/1', '1/2', '1/4', '1/8', '1/16', '1/32', '1/4t', '1/8t', '1/16t', '1/4d', '1/8d', '1/16d'] as const
 
@@ -278,6 +280,39 @@ export const PARAM_GROUPS: ParamGroup[] = [
     kinds: ['synth'],
     open: false,
     params: [k('utilityWidth', 'Width', 0, 1, fmt.pct), k('utilityGain', 'Gain', -24, 24, fmt.db)],
+  },
+  // Phase 23 Stream BF: these three are real EffectType CHAIN members (document.ts's EFFECT_TYPES),
+  // unlike the fixed inserts above — knobs here only do something audible once the matching effect
+  // is actually `effect-add`ed via the Effect Chain panel (same decoupled-knobs-vs-chain-membership
+  // convention the 'inserts' group above already has for eq3/comp/distortion/bitcrush). synth-only:
+  // drum tracks never carry an `effects` chain (see BeatTrack.effects), so these controls would be
+  // dead weight there — unlike the AC group above, which drum tracks' OWN fixed bus also wires.
+  {
+    id: 'graindelay',
+    title: 'Grain Delay',
+    kinds: ['synth'],
+    open: false,
+    params: [
+      k('grainDelayTime', 'Time', 0.02, 2, fmt.sec, true),
+      k('grainDelayFeedback', 'Fdbk', 0, 0.92, fmt.pct),
+      k('grainDelaySize', 'Grain', 0.01, 1, fmt.sec, true),
+      k('grainDelayPitch', 'Pitch', -24, 24, (v) => `${v > 0 ? '+' : ''}${Math.round(v)}st`),
+      k('grainDelayMix', 'Mix', 0, 1, fmt.pct),
+    ],
+  },
+  {
+    id: 'vinyldistortion',
+    title: 'Vinyl Distortion',
+    kinds: ['synth'],
+    open: false,
+    params: [k('vinylDrive', 'Drive', 0, 1, fmt.pct), k('vinylNoiseLevel', 'Noise', 0, 1, fmt.pct), k('vinylTone', 'Tone', 0, 1, fmt.pct), k('vinylMix', 'Mix', 0, 1, fmt.pct)],
+  },
+  {
+    id: 'resonator',
+    title: 'Resonators',
+    kinds: ['synth'],
+    open: false,
+    params: [k('resonatorFreq', 'Freq', 40, 4000, fmt.hz, true), e('resonatorChord', 'Chord', RESONATOR_CHORDS), k('resonatorQ', 'Q', 0.5, 200, fmt.num1, true), k('resonatorMix', 'Mix', 0, 1, fmt.pct)],
   },
   {
     id: 'sends',

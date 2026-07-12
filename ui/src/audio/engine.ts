@@ -115,6 +115,23 @@ const CHORUS_MODES: readonly ChorusMode[] = ['off', 'chorus', 'ensemble', 'vibra
 type SaturatorCurve = 'analog' | 'warm' | 'clip' | 'fold'
 const SATURATOR_CURVES: readonly SaturatorCurve[] = ['analog', 'warm', 'clip', 'fold']
 
+// Phase 23 Stream BF: hand-kept mirror of document.ts's ResonatorChord/RESONATOR_CHORDS (same
+// convention as the Stream AC mirrors just above).
+type ResonatorChord = 'fifths' | 'major' | 'minor' | 'octaves' | 'harmonic'
+const RESONATOR_CHORDS: readonly ResonatorChord[] = ['fifths', 'major', 'minor', 'octaves', 'harmonic']
+// Semitone offsets (from resonatorFreq) for each of the bank's up to 5 tuned bandpass filters —
+// 'fifths'/'octaves'/'harmonic' approximate a plucked-string/tube's own overtone series at
+// different densities (harmonic = literal harmonic-series semitone approximations for partials
+// 1-5: 0, 12, 19, 24, 28); 'major'/'minor' tune the bank to a triad instead, for a more
+// melodic/pitched resonance than a pure overtone stack.
+const RESONATOR_CHORD_OFFSETS: Record<ResonatorChord, readonly number[]> = {
+  fifths: [0, 7, 12, 19, 24],
+  major: [0, 4, 7, 12, 16],
+  minor: [0, 3, 7, 12, 15],
+  octaves: [0, 12, 24, 36, 48],
+  harmonic: [0, 12, 19, 24, 28],
+}
+
 // Tempo-sync (Phase 18 Stream R): mirrors src/core/document.ts's LfoSyncRate/LFO_SYNC_RATES/
 // lfoSyncRateHz exactly (same hand-kept-mirror convention as LFO_DESTS above).
 type LfoSyncRate = '1/1' | '1/2' | '1/4' | '1/8' | '1/16' | '1/32' | '1/4t' | '1/8t' | '1/16t' | '1/4d' | '1/8d' | '1/16d'
@@ -234,6 +251,19 @@ interface EngineSynth {
   tremoloMix: number
   utilityWidth: number
   utilityGain: number
+  grainDelayTime: number
+  grainDelayFeedback: number
+  grainDelaySize: number
+  grainDelayPitch: number
+  grainDelayMix: number
+  vinylDrive: number
+  vinylNoiseLevel: number
+  vinylTone: number
+  vinylMix: number
+  resonatorFreq: number
+  resonatorChord: ResonatorChord
+  resonatorQ: number
+  resonatorMix: number
   sendReverb: number
   sendDelay: number
   duckSource: string | null
@@ -261,6 +291,7 @@ function coerce(p: BeatSynth): EngineSynth {
   const beatRepeatMode = (v: unknown, d: BeatRepeatMode): BeatRepeatMode => (typeof v === 'string' && BEAT_REPEAT_MODES.includes(v as BeatRepeatMode) ? (v as BeatRepeatMode) : d)
   const chorusMode = (v: unknown, d: ChorusMode): ChorusMode => (typeof v === 'string' && CHORUS_MODES.includes(v as ChorusMode) ? (v as ChorusMode) : d)
   const saturatorCurve = (v: unknown, d: SaturatorCurve): SaturatorCurve => (typeof v === 'string' && SATURATOR_CURVES.includes(v as SaturatorCurve) ? (v as SaturatorCurve) : d)
+  const resonatorChord = (v: unknown, d: ResonatorChord): ResonatorChord => (typeof v === 'string' && RESONATOR_CHORDS.includes(v as ResonatorChord) ? (v as ResonatorChord) : d)
   return {
     osc: osc(p.osc, 'sawtooth'),
     volume: num(p.volume, -10),
@@ -348,6 +379,19 @@ function coerce(p: BeatSynth): EngineSynth {
     tremoloMix: num(p.tremoloMix, 0),
     utilityWidth: num(p.utilityWidth, 0.5),
     utilityGain: num(p.utilityGain, 0),
+    grainDelayTime: num(p.grainDelayTime, 0.25),
+    grainDelayFeedback: num(p.grainDelayFeedback, 0.35),
+    grainDelaySize: num(p.grainDelaySize, 0.1),
+    grainDelayPitch: num(p.grainDelayPitch, 0),
+    grainDelayMix: num(p.grainDelayMix, 0),
+    vinylDrive: num(p.vinylDrive, 0.3),
+    vinylNoiseLevel: num(p.vinylNoiseLevel, 0),
+    vinylTone: num(p.vinylTone, 0.5),
+    vinylMix: num(p.vinylMix, 0),
+    resonatorFreq: num(p.resonatorFreq, 220),
+    resonatorChord: resonatorChord(p.resonatorChord, 'fifths'),
+    resonatorQ: num(p.resonatorQ, 20),
+    resonatorMix: num(p.resonatorMix, 0),
     sendReverb: num(p.sendReverb, 0),
     sendDelay: num(p.sendDelay, 0),
     duckSource: typeof p.duckSource === 'string' && p.duckSource && p.duckSource !== 'none' ? p.duckSource : null,
@@ -399,16 +443,31 @@ function interpolateAutomation(points: { time: number; value: number }[], posSte
 // convention as LFO_DESTS/LFO_SYNC_RATES above). Replaces the old fixed
 // EQ3->comp->distortion->bitcrush insert order this file's header comment used to list as "NOT
 // ported" — the chain is now built by iterating the track's declared, ordered `effects` list.
-// Phase 23 Stream BE widened this to eight types (autoFilter/autoPan/tremolo/utility ADDED to the
-// same reorderable mechanism, not a parallel one — see EffectRuntime/buildEffectRuntime below).
-type EffectType = 'eq3' | 'comp' | 'distortion' | 'bitcrush' | 'autoFilter' | 'autoPan' | 'tremolo' | 'utility'
+// Phase 23 Streams BE and BF widened this to eleven types: BE added autoFilter/autoPan/tremolo/
+// utility, BF added grainDelay/vinylDistortion/resonator — all seven ADDED to the same reorderable
+// mechanism, not a parallel one (see EffectRuntime/buildEffectRuntime below and document.ts's
+// EffectType comment for why these are real chain members, unlike Stream AC's fixed saturator/
+// chorus/phaser/pingPong inserts below).
+type EffectType =
+  | 'eq3'
+  | 'comp'
+  | 'distortion'
+  | 'bitcrush'
+  | 'autoFilter'
+  | 'autoPan'
+  | 'tremolo'
+  | 'utility'
+  | 'grainDelay'
+  | 'vinylDistortion'
+  | 'resonator'
 
 // One live effect instance's Tone nodes. `entry`/`exit` are the two nodes the chain SPINE
 // connects to (upstream -> entry, exit -> downstream); everything else is that effect's own
 // internal wiring, built once and never touched by reordering. Each type also exposes its OWN
-// param nodes (eq3/compressor/compDry/compWet/distortion/bitcrush) so applyEffectParams and the
-// LFO/clip-automation destinations below can reach them directly, keyed by TYPE (not id) — see
-// findEffect. `nodes` is every Tone node this instance owns, for disposeChain/disposeEffect.
+// param nodes (eq3/compressor/compDry/compWet/distortion/bitcrush/grainDelay/vinylDistortion/
+// resonator) so applyEffectParams and the LFO/clip-automation destinations below can reach them
+// directly, keyed by TYPE (not id) — see findEffect. `nodes` is every Tone node this instance
+// owns, for disposeChain/disposeEffect.
 interface EffectRuntime {
   id: string
   type: EffectType
@@ -435,6 +494,9 @@ interface EffectRuntime {
   autoPan?: Tone.AutoPanner
   tremolo?: Tone.Tremolo
   utility?: { widener: Tone.StereoWidener; gainTrim: Tone.Volume }
+  grainDelay?: GrainDelayNodes
+  vinylDistortion?: VinylNodes
+  resonator?: ResonatorNodes
 }
 
 // Phase 23 Stream BE — Redux's downsampling half (research 17 §5.6: "Tone.js has no built-in
@@ -484,10 +546,13 @@ function buildDownsampler(): DownsamplerNode {
  * buildSynthChain used to wire unconditionally for all four; now built lazily, one instance per
  * declared chain entry. eq3/distortion are single nodes (entry === exit); comp/bitcrush keep a
  * dry/wet fan-in shape (entry = a Gain that fans into dry+processing, exit = the Gain that sums
- * them back). autoFilter/autoPan/tremolo are single Tone effect nodes with their own internal
- * wet/dry (entry === exit, like eq3/distortion); utility has no wet/dry (like eq3) since its two
- * params (width/gain) ARE the effect, not something to blend. */
-function buildEffectRuntime(id: string, type: EffectType): EffectRuntime {
+ * them back — bitcrush's pair also carries Stream BE's Redux downsampler alongside the bit-
+ * crusher, see the 'bitcrush' case below). autoFilter/autoPan/tremolo are single Tone effect nodes
+ * with their own internal wet/dry (entry === exit, like eq3/distortion); utility has no wet/dry
+ * (like eq3) since its two params (width/gain) ARE the effect, not something to blend. `trackId`
+ * is ONLY used by vinylDistortion, to seed its reproducible noise buffer (see
+ * buildVinylDistortion) — every other type ignores it. */
+function buildEffectRuntime(id: string, type: EffectType, trackId: string): EffectRuntime {
   switch (type) {
     case 'eq3': {
       const eq3 = new Tone.EQ3()
@@ -551,6 +616,18 @@ function buildEffectRuntime(id: string, type: EffectType): EffectRuntime {
       widener.connect(gainTrim)
       return { id, type, entry: widener, exit: gainTrim, nodes: [widener, gainTrim], utility: { widener, gainTrim } }
     }
+    case 'grainDelay': {
+      const g = buildGrainDelay()
+      return { id, type, entry: g.in, exit: g.out, nodes: grainDelayNodeList(g), grainDelay: g }
+    }
+    case 'vinylDistortion': {
+      const v = buildVinylDistortion(hashSeed(trackId, id, 'vinylNoise'))
+      return { id, type, entry: v.in, exit: v.out, nodes: vinylNodeList(v), vinylDistortion: v }
+    }
+    case 'resonator': {
+      const r = buildResonatorBank()
+      return { id, type, entry: r.in, exit: r.out, nodes: resonatorNodeList(r), resonator: r }
+    }
   }
 }
 
@@ -613,6 +690,15 @@ function applyEffectParams(e: EffectRuntime, p: EngineSynth): void {
   if (e.utility) {
     e.utility.widener.width.value = p.utilityWidth
     e.utility.gainTrim.volume.value = p.utilityGain
+  }
+  if (e.grainDelay) {
+    applyGrainDelay(e.grainDelay, p.grainDelayTime, p.grainDelayFeedback, p.grainDelaySize, p.grainDelayPitch, p.grainDelayMix)
+  }
+  if (e.vinylDistortion) {
+    applyVinylDistortion(e.vinylDistortion, p.vinylDrive, p.vinylNoiseLevel, p.vinylTone, p.vinylMix)
+  }
+  if (e.resonator) {
+    applyResonatorBank(e.resonator, p.resonatorFreq, p.resonatorChord, p.resonatorQ, p.resonatorMix)
   }
 }
 
@@ -815,6 +901,245 @@ function saturatorNodeList(s: SaturatorNodes): Tone.ToneAudioNode[] {
 }
 function pingPongNodeList(pp: PingPongNodes): Tone.ToneAudioNode[] {
   return [pp.in, pp.delayL, pp.delayR, pp.feedLL, pp.feedLR, pp.feedRR, pp.feedRL, pp.panL, pp.panR, pp.wobble, pp.dry, pp.wet, pp.out]
+}
+
+// ============================================================================================
+// Phase 23 Stream BF — the three "meaningfully bigger lift" effects research 17 §5 deferred past
+// Stream AC's build-next-four: Grain Delay, Vinyl Distortion, Resonators. Unlike AC's saturator/
+// chorus/phaser/pingPong (fixed, always-wired inserts — see SynthChain's own comment), these three
+// are genuine EffectType chain members (document.ts's EffectType/EFFECT_TYPES): built lazily by
+// buildEffectRuntime, one instance per declared `effect` line, spliced into the chain SPINE by
+// reconcileEffectChain exactly like eq3/comp/distortion/bitcrush already are.
+
+// ---- Grain Delay -----------------------------------------------------------------------------
+// Research 17 §5's own suggested shape was "Tone.GrainPlayer + custom capture" — but GrainPlayer
+// is fundamentally a BUFFER PLAYER (plays a pre-loaded AudioBuffer with granular controls), not an
+// insert effect that grains its own LIVE input; adapting it into a real-time insert would need a
+// rolling capture buffer with no Tone.js primitive to build it from (the same class of problem
+// Beat Repeat sidesteps at the SCHEDULING layer in resolveBeatRepeat above — but Grain Delay's
+// character lives in the AUDIO signal itself, not just note/hit retriggering, so that shortcut
+// doesn't apply here). Tone.PitchShift is the more honest primitive: it implements a REAL granular
+// pitch-shifting algorithm internally (overlapping delay-line grains with a `windowSize` the class
+// exposes directly) — literally what a hardware/plugin "shimmer"/grain delay pedal does (a delay
+// line + a granular pitch-shifter, often in the SAME feedback loop so every repeat is pitched
+// again). This hand-builds that topology from primitives (Tone.Delay + Tone.Gain feedback +
+// Tone.PitchShift), same "hand-built network, not a single dropped-in class" discipline Stream
+// AC's ping-pong delay established, rather than either (a) a naive PitchShift-as-effect one-liner
+// with no delay/feedback character at all, or (b) chasing GrainPlayer into live-buffer-capture
+// territory research 17 explicitly flags as its own, bigger, AudioWorklet-tier problem (the same
+// tier Corpus is scoped out of this stream for).
+interface GrainDelayNodes {
+  in: Tone.Gain
+  delay: Tone.Delay
+  pitchShift: Tone.PitchShift
+  feedback: Tone.Gain
+  dry: Tone.Gain
+  wet: Tone.Gain
+  out: Tone.Gain
+}
+function buildGrainDelay(): GrainDelayNodes {
+  const inN = new Tone.Gain(1)
+  const delay = new Tone.Delay(0.25, 2)
+  const pitchShift = new Tone.PitchShift({ pitch: 0, windowSize: 0.1 })
+  const feedback = new Tone.Gain(0)
+  const dry = new Tone.Gain(1)
+  const wet = new Tone.Gain(0)
+  const out = new Tone.Gain()
+  // Feedback loop: delay -> pitchShift -> feedback -> back into delay. Every pass back through
+  // pitchShift both re-grains (windowSize's audible chopping/warble) AND re-pitches (grainDelay
+  // Pitch semitones), so repeat N is pitched N * grainDelayPitch semitones from the original — the
+  // classic ascending/descending "shimmer" grain-delay signature. The wet tap is AFTER pitchShift
+  // (not after the raw delay), so even a single repeat (before any feedback) already carries the
+  // granular/pitched character, not just a plain echo.
+  inN.connect(delay)
+  delay.connect(pitchShift)
+  pitchShift.connect(feedback)
+  feedback.connect(delay)
+  pitchShift.connect(wet)
+  inN.connect(dry)
+  dry.connect(out)
+  wet.connect(out)
+  return { in: inN, delay, pitchShift, feedback, dry, wet, out }
+}
+/** Feedback is clamped to 0.92 (not 1) — a real, deliberate choice, not an oversight: Tone.
+ * PitchShift's own grain algorithm adds a small amount of processing latency/artifact energy each
+ * pass, so a feedback loop that's allowed to hit unity gain can very slowly build toward a runaway
+ * hot signal over a long render (unlike Ping Pong Delay's plain delay-line feedback, which has no
+ * such per-pass gain-adding side effect and can safely allow feedback up to 1 elsewhere in this
+ * file). 0.92 still reads as "near-infinite" repeats musically while keeping every render stable. */
+function applyGrainDelay(nodes: GrainDelayNodes, time: number, feedback: number, size: number, pitch: number, mix: number): void {
+  nodes.delay.delayTime.value = Math.max(0.01, Math.min(2, time))
+  nodes.feedback.gain.value = Math.max(0, Math.min(0.92, feedback))
+  nodes.pitchShift.windowSize = Math.max(0.01, Math.min(1, size))
+  nodes.pitchShift.pitch = pitch
+  nodes.dry.gain.value = 1 - mix
+  nodes.wet.gain.value = mix
+}
+function grainDelayNodeList(g: GrainDelayNodes): Tone.ToneAudioNode[] {
+  return [g.in, g.delay, g.pitchShift, g.feedback, g.dry, g.wet, g.out]
+}
+
+// ---- Vinyl Distortion -------------------------------------------------------------------------
+// Research 17 §5: "Tone.WaveShaper + Tone.Noise" for the harmonic-distortion half and the
+// surface-noise half respectively. Built here from Tone.WaveShaper (an authored asymmetric
+// tape/record-playback-style soft-clip curve, same "author once, apply per curve-type change"
+// discipline as Saturator's buildSaturatorCurve) PLUS a hand-generated, SEEDED noise buffer rather
+// than Tone.Noise directly — Tone.Noise's own internal buffer generation has no public seed API
+// (it draws from Math.random() at construction), which would make every render of the SAME
+// document sound different, breaking dotbeat's "the same document always renders the same audio"
+// contract every other stochastic element in this file (seededRoll/chanceFires above) is built to
+// honor. Instead: a short buffer of hiss + sparse crackle pops is generated ONCE per effect
+// instance from a seed derived from (trackId, effect id) via makeNoiseStream below (a proper
+// STREAMING mulberry32 generator, distinct from the one-shot mulberry32(seed)/hashSeed pair above
+// which mix ONE value per call for per-event dice-rolls — bulk buffer fill needs many values in
+// sequence from one seed), looped continuously through a Tone.Player. Reproducible: the same
+// (trackId, id) always generates the identical noise buffer, every render.
+interface VinylNodes {
+  in: Tone.Gain
+  preGain: Tone.Gain
+  shaper: Tone.WaveShaper
+  noisePlayer: Tone.Player
+  noiseGain: Tone.Gain
+  wetSum: Tone.Gain
+  toneFilter: Tone.Filter
+  dry: Tone.Gain
+  wet: Tone.Gain
+  out: Tone.Gain
+}
+/** A proper STREAMING mulberry32 PRNG (internal state advances across calls) — see VinylNodes'
+ * doc comment for why this is a different shape from the one-shot mulberry32(seed) above. */
+function makeNoiseStream(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a |= 0
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+const VINYL_NOISE_SECONDS = 3
+/** Generates a mono, seeded surface-noise-and-crackle buffer: a gentle one-pole-lowpassed white
+ * noise floor (softer/more "surface hiss"-like than raw white noise) plus sparse, seeded
+ * high-amplitude crackle pops — real vinyl's two audible noise components in one buffer, one
+ * `vinylNoiseLevel` knob controls both together via the downstream gain (see applyVinylDistortion).
+ * Built once per effect instance (buildVinylDistortion), never regenerated per-tick. */
+function buildVinylNoiseBuffer(seed: number): Tone.ToneAudioBuffer {
+  const ctx = Tone.getContext().rawContext as unknown as AudioContext
+  const sr = ctx.sampleRate
+  const length = Math.max(1, Math.round(sr * VINYL_NOISE_SECONDS))
+  const raw = ctx.createBuffer(1, length, sr)
+  const data = raw.getChannelData(0)
+  const rand = makeNoiseStream(seed)
+  let lp = 0
+  for (let i = 0; i < length; i++) {
+    const white = rand() * 2 - 1
+    lp += (white - lp) * 0.2
+    let s = lp
+    if (rand() < 0.0008) s += (rand() * 2 - 1) * (0.5 + rand() * 0.5) // sparse seeded crackle pop
+    data[i] = Math.max(-1, Math.min(1, s))
+  }
+  return new Tone.ToneAudioBuffer(raw)
+}
+/** Authored once (curve never changes per-tick — Vinyl Distortion has one fixed curve, unlike
+ * Saturator's curve-family enum): a mild asymmetric tanh soft-clip, the "worn tape/record
+ * playback" character rather than a harsh digital clip. */
+function buildVinylCurve(): Float32Array {
+  const n = 1024
+  const curve = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1
+    curve[i] = x >= 0 ? Math.tanh(x * 2.2) : Math.tanh(x * 1.6) * 0.85
+  }
+  return curve
+}
+function buildVinylDistortion(noiseSeed: number): VinylNodes {
+  const inN = new Tone.Gain(1)
+  const preGain = new Tone.Gain(1)
+  const shaper = new Tone.WaveShaper(buildVinylCurve())
+  const noisePlayer = new Tone.Player({ url: buildVinylNoiseBuffer(noiseSeed), loop: true })
+  const noiseGain = new Tone.Gain(0)
+  const wetSum = new Tone.Gain(1)
+  const toneFilter = new Tone.Filter(8000, 'lowpass')
+  const dry = new Tone.Gain(1)
+  const wet = new Tone.Gain(0)
+  const out = new Tone.Gain()
+  inN.connect(preGain)
+  preGain.connect(shaper)
+  shaper.connect(wetSum)
+  noisePlayer.connect(noiseGain)
+  noiseGain.connect(wetSum)
+  wetSum.connect(toneFilter)
+  toneFilter.connect(wet)
+  inN.connect(dry)
+  dry.connect(out)
+  wet.connect(out)
+  noisePlayer.start() // continuous background bed, same "start once at build time" convention as pingPong's wobble LFO/chorus above
+  return { in: inN, preGain, shaper, noisePlayer, noiseGain, wetSum, toneFilter, dry, wet, out }
+}
+function applyVinylDistortion(nodes: VinylNodes, drive: number, noiseLevel: number, tone: number, mix: number): void {
+  nodes.preGain.gain.value = 1 + Math.max(0, Math.min(1, drive)) * 6
+  // Headroom-capped at 0.35 so even noiseLevel=1 sits UNDER typical signal level, not overwhelms it
+  // — a real added noise FLOOR, matching what "surface noise" means on an actual record.
+  nodes.noiseGain.gain.value = Math.max(0, Math.min(1, noiseLevel)) * 0.35
+  const t = Math.max(0, Math.min(1, tone))
+  nodes.toneFilter.frequency.value = 800 + t * 11000 // 0 = dull/muffled, 1 = brighter/more open
+  nodes.dry.gain.value = 1 - mix
+  nodes.wet.gain.value = mix
+}
+function vinylNodeList(v: VinylNodes): Tone.ToneAudioNode[] {
+  return [v.in, v.preGain, v.shaper, v.noisePlayer, v.noiseGain, v.wetSum, v.toneFilter, v.dry, v.wet, v.out]
+}
+
+// ---- Resonators -------------------------------------------------------------------------------
+// Research 17 §5: "a bank of up to 5 Tone.Filter (bandpass) nodes tuned to pitched frequencies" —
+// no dedicated Tone.js class exists (that's Corpus-tier, explicitly out of this stream's scope),
+// but a parallel bank of narrow bandpass filters is a reasonable, honestly-approximate physical-
+// resonance model: each filter rings at its own tuned frequency when excited by a broadband
+// transient, and Q sets how narrow (= how long-ringing) that resonance is — the closest thing a
+// plain biquad filter bank has to a physical resonator's own decay time.
+interface ResonatorNodes {
+  in: Tone.Gain
+  filters: Tone.Filter[] // 5 parallel bandpass filters, tuned by applyResonatorBank
+  sum: Tone.Gain
+  dry: Tone.Gain
+  wet: Tone.Gain
+  out: Tone.Gain
+}
+const RESONATOR_BANK_SIZE = 5
+function buildResonatorBank(): ResonatorNodes {
+  const inN = new Tone.Gain(1)
+  const filters = Array.from({ length: RESONATOR_BANK_SIZE }, () => new Tone.Filter({ type: 'bandpass', frequency: 220, Q: 20 }))
+  const sum = new Tone.Gain(1)
+  const dry = new Tone.Gain(1)
+  const wet = new Tone.Gain(0)
+  const out = new Tone.Gain()
+  for (const f of filters) {
+    inN.connect(f)
+    f.connect(sum)
+  }
+  sum.connect(wet)
+  inN.connect(dry)
+  dry.connect(out)
+  wet.connect(out)
+  return { in: inN, filters, sum, dry, wet, out }
+}
+function applyResonatorBank(nodes: ResonatorNodes, freq: number, chord: ResonatorChord, q: number, mix: number): void {
+  const offsets = RESONATOR_CHORD_OFFSETS[chord]
+  const nyquistSafe = Tone.getContext().sampleRate / 2 - 200
+  const root = Math.max(20, freq)
+  const clampedQ = Math.max(0.5, Math.min(200, q))
+  for (let i = 0; i < nodes.filters.length; i++) {
+    const semis = offsets[i] ?? offsets[offsets.length - 1] ?? 0
+    const f = Math.max(40, Math.min(nyquistSafe, root * Math.pow(2, semis / 12)))
+    nodes.filters[i]!.frequency.value = f
+    nodes.filters[i]!.Q.value = clampedQ
+  }
+  nodes.dry.gain.value = 1 - mix
+  nodes.wet.gain.value = mix
+}
+function resonatorNodeList(r: ResonatorNodes): Tone.ToneAudioNode[] {
+  return [r.in, ...r.filters, r.sum, r.dry, r.wet, r.out]
 }
 
 // Phase 22 Stream AC — Beat Repeat (research 17 §5.2 + §4.3): scheduling-layer stutter, NOT a
@@ -1681,8 +2006,10 @@ class Engine {
    * built and kept current (still receives applyEffectParams below) but is NOT spliced into the
    * spine at all — a real routing bypass, not a wet/dry illusion (see BeatEffect.enabled's own
    * comment in src/core/document.ts; this is the one place that "real bypass" choice is
-   * implemented). */
-  private reconcileEffectChain(chain: SynthChain, effects: BeatEffect[]): void {
+   * implemented). `trackId` is threaded through ONLY so vinylDistortion instances can seed their
+   * reproducible noise buffer from (trackId, effect id) — see buildEffectRuntime/
+   * buildVinylDistortion. */
+  private reconcileEffectChain(chain: SynthChain, effects: BeatEffect[], trackId: string): void {
     const sig = effects.map((e) => `${e.id}:${e.type}:${e.enabled}`).join('|')
     if (sig === chain.effectsSig) return
 
@@ -1695,7 +2022,7 @@ class Engine {
       }
     }
     for (const e of effects) {
-      if (!chain.effects.has(e.id)) chain.effects.set(e.id, buildEffectRuntime(e.id, e.type))
+      if (!chain.effects.has(e.id)) chain.effects.set(e.id, buildEffectRuntime(e.id, e.type, trackId))
     }
 
     // Re-wire the spine: filter -> [enabled effects, in file order] -> muteGain. Disconnecting
@@ -1717,7 +2044,7 @@ class Engine {
     chain.effectsSig = sig
   }
 
-  private applyParams(chain: SynthChain, p: EngineSynth, effects: BeatEffect[]): void {
+  private applyParams(chain: SynthChain, p: EngineSynth, effects: BeatEffect[], trackId: string): void {
     const env = { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release }
     chain.synth.set({ envelope: env, portamento: p.glide })
     if (chain.lastOsc !== p.osc) {
@@ -1749,7 +2076,7 @@ class Engine {
     chain.vol.volume.value = p.volume
     chain.reverbSend.gain.value = p.sendReverb
     chain.delaySend.gain.value = p.sendDelay
-    this.reconcileEffectChain(chain, effects)
+    this.reconcileEffectChain(chain, effects, trackId)
     for (const runtime of chain.effects.values()) applyEffectParams(runtime, p)
     applySaturator(chain.saturator, p.saturatorCurve, p.saturatorDrive, p.saturatorMix)
     // See applyDrumBusParams for the chorusMode 'off'/'vibrato' special-casing rationale.
@@ -1795,7 +2122,7 @@ class Engine {
         chain = this.buildSynthChain()
         this.chains.set(track.id, chain)
       }
-      this.applyParams(chain, coerce(track.synth), track.effects ?? [])
+      this.applyParams(chain, coerce(track.synth), track.effects ?? [], track.id)
     }
     const drumsTrack = doc.tracks.find((t) => t.kind === 'drums')
     this.drumTrackId = drumsTrack?.id ?? null
@@ -2181,7 +2508,10 @@ class Engine {
   async previewSynthPreset(params: Partial<BeatSynth>, pitch = 60, velocity = 0.85): Promise<void> {
     await this.ensureStarted()
     const chain = this.buildSynthChain()
-    this.applyParams(chain, coerce(params as BeatSynth), [])
+    // effects is always [] here (an ephemeral preview voice never carries a chain), so the
+    // placeholder trackId below is never actually read (buildEffectRuntime only fires for a
+    // non-empty effects list) — see applyParams'/reconcileEffectChain's own trackId doc comment.
+    this.applyParams(chain, coerce(params as BeatSynth), [], '__preview__')
     const freq = Tone.Frequency(Math.round(pitch), 'midi').toFrequency()
     chain.synth.triggerAttackRelease(freq, 0.5, undefined, velocity)
     setTimeout(() => this.disposeChain(chain), 1800)
