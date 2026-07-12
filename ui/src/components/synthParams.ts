@@ -108,7 +108,12 @@ export const PARAM_GROUPS: ParamGroup[] = [
       k('wtPos', 'WTpos', 0, 1, fmt.pct),
       e('osc2Type', 'Osc2', OSC_TYPES),
       k('osc2Level', 'Osc2', 0, 1, fmt.pct),
-      k('osc2Detune', 'Detune', -1200, 1200, fmt.cents),
+      // Owner feedback: ±1200 (a full octave) reads as an interval/harmony control, not "detune" —
+      // narrowed to ±100 cents, the conventional thickening-detune range most synths use (Serum,
+      // Massive, etc.); a full-octave layer belongs to a coarse/interval control this doesn't have
+      // yet, not this knob. No format/validation change — osc2Detune itself is still an unclamped
+      // number field, this only narrows the GUI knob's own slider range.
+      k('osc2Detune', 'Detune', -100, 100, fmt.cents),
       k('subLevel', 'Sub', 0, 1, fmt.pct),
       k('noiseLevel', 'Noise', 0, 1, fmt.pct),
       k('fmLevel', 'FM', 0, 1, fmt.pct),
