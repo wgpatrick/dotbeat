@@ -138,14 +138,14 @@ export const rows = [
   {
     area: 'Note editing (piano roll)', feature: 'GUI Quantize',
     description: 'A complete, tested backend (`quantizeNotes`, src/core/edit.ts:390-466) already wired to `beat quantize` (CLI) and `beat_quantize` (MCP) — but grepping `NoteView.tsx` confirms zero button, shortcut, or panel control calls it anywhere. Ableton dedicates four entry points to quantize (record-time, drag-to-grid, a dedicated MIDI Tool panel, `Ctrl/Cmd+U`) — more surface area than any other single operation in ch.11. Add a Quantize control group to `PitchTimePanel` (NoteView.tsx:1105-1223): grid-size dropdown, amount slider (0-100%), starts/ends checkboxes, wired through the existing `POST /pitch-time` route with a new `quantize` op. No new core primitive, no format change — the single cheapest, highest-value item in the whole MIDI-editing comparison.',
-    core: 'done', cli: 'done', gui: 'missing', status: 'progress',
-    research: 'research/57-ableton-vs-dotbeat-editing-midi.md', plan: null,
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/57-ableton-vs-dotbeat-editing-midi.md', plan: 'phase-26-plan.md',
   },
   {
     area: 'Note editing (piano roll)', feature: 'Copy/duplicate notes (+ basic clipboard)',
     description: 'A full read of `src/core/edit.ts` finds `addNote`/`removeNote` but no duplicate-in-place or clipboard concept anywhere — dotbeat\'s piano roll cannot duplicate a note or phrase today without manually re-typing coordinates via the CLI. Ableton: `Ctrl/Option`-drag copies instead of moving, addable mid-drag (manual ch.10 p.247). New `copyNotes`/`duplicateNotes` in `src/core/edit.ts` (thin wrapper on `addNote`, fresh ids, `start` offset); in `NoteView.tsx`, Alt/Cmd-held-at-drag-start commits via the duplicate primitive instead of `commitMove`; a plain `Cmd/Ctrl+C`/`+V` clipboard reuses the same primitive.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/57-ableton-vs-dotbeat-editing-midi.md', plan: null,
+    core: 'done', cli: 'missing', gui: 'done', status: 'progress',
+    research: 'research/57-ableton-vs-dotbeat-editing-midi.md', plan: 'phase-26-plan.md',
   },
   {
     area: 'Note editing (piano roll)', feature: 'Split / Chop / Join for MIDI notes',
@@ -302,8 +302,8 @@ export const rows = [
   {
     area: 'Drum programming', feature: 'Drum-sampler voice type (sample + AHD envelope + filter + playback effects)',
     description: 'Ableton\'s Drum Sampler bundles a real sample-backed voice with an AHD-ish envelope, one filter, and a short list of dedicated playback effects (Stretch/Pitch Env/Punch/8-Bit/FM/Ring Mod/Sub Osc/Noise) — distinct from today\'s all-procedural-synth drum lanes (manual ch.30 pp.691-695). Independently named in `docs/decisions.md`\'s Tier 2 sound-quality strategy as "the biggest single \'video game music\' tell left." Add a `sample`-backed lane envelope/filter/playback-effect param set riding the existing `setLaneParam` primitive the v0.10 open lane model already uses for synth-backed lanes — scoped to Drum Sampler\'s leaner surface (Start/Length/Gain, one AHD-ish envelope, one filter, a short playback-effect list), explicitly not Ableton\'s full multisampling Sampler stack.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/68-ableton-vs-dotbeat-instrument-reference.md', plan: null,
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/68-ableton-vs-dotbeat-instrument-reference.md', plan: 'phase-26-plan.md',
   },
   {
     area: 'Drum programming', feature: 'Round Robin sample playback',
@@ -540,8 +540,8 @@ export const rows = [
   {
     area: 'Synth sound design', feature: 'Real wavetable oscillator',
     description: '`wtPos`/`wtTable` are live fields an LFO can even target (synthParams.ts:130-131), but `OscType` is sine/tri/saw/square only (engine.ts:311) — `wtPos` is a dead knob, dotbeat\'s single sharpest, lowest-ambiguity gap versus Ableton\'s Wavetable instrument (manual ch.30 pp.775-779). A small table-per-category library matching the existing 4-value `wtTable` enum, linear-interpolated scan across `wtPos`, as a `PolySynth`-compatible custom oscillator (or an `AudioWorkletProcessor` if per-frame `PeriodicWave` regen proves too costly for live scanning). Land as a new `OscType` value so it inherits existing envelope/unison/LFO plumbing for free, rather than a parallel oscillator bank.',
-    core: 'missing', cli: 'na', gui: 'missing', status: 'not-started',
-    research: 'research/68-ableton-vs-dotbeat-instrument-reference.md', plan: null,
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/68-ableton-vs-dotbeat-instrument-reference.md', plan: 'phase-26-plan.md',
   },
   {
     area: 'Synth sound design', feature: 'Mono/Legato voice mode + per-instrument polyphony limit/glide',
@@ -608,8 +608,8 @@ export const rows = [
   {
     area: 'LFOs / modulation', feature: 'Per-parameter velocity/key modulation, generalized',
     description: 'Today exactly two hardcoded single-destination knobs exist: `velToFilterAmount` and `keytrackAmount`, both cutoff-only (engine.ts:~3049-3055). Ableton\'s instruments carry per-parameter Velocity/Key modulation sliders on nearly every knob, not just filter/amp (manual ch.30, Analog pp.667-669, Operator 9 instances in one instrument pp.729-731, Tension pp.765-769). Extend the existing "flat enum of named destinations + one amount slider" pattern already proven twice for `LFO_DESTS` (synthParams.ts:82-98,172-190) to a `velDest`/`velAmount` and `keyDest`/`keyAmount` pair reusing the same destination list. Lands in the same per-note dispatch block that already computes `keytrackMult`/`velMult`, generalized to a destination switch. The single largest modulation-flexibility gap named across the instrument comparison, and architecturally cheap given the LFO precedent.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/68-ableton-vs-dotbeat-instrument-reference.md', plan: null,
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/68-ableton-vs-dotbeat-instrument-reference.md', plan: 'phase-26-plan.md',
   },
 
   // ── Instrument / SoundFont tracks ───────────────────────────────────────
@@ -622,8 +622,8 @@ export const rows = [
   {
     area: 'Instrument / SoundFont tracks', feature: 'Instrument-track + drum-bus reorderable FX chain parity',
     description: 'Ableton\'s device-chain rule is stated flatly: MIDI effects → instrument → any number of audio effects, same as an audio track from that point on (manual ch.3 pp.46,53). `InstrumentPanel.tsx` renders only a program picker plus two Knobs (volume, pan), no effect chain at all (confirmed: 192-line file, no EffectChain usage) — the one place dotbeat\'s current model visibly deviates from Ableton\'s own stated device-chain rule, not just an incomplete feature. Drum tracks have the identical asymmetry: `BeatTrack.effects` (src/core/document.ts:708-712) is synth-tracks-only, and drum buses get a fixed insert order outside the reorderable list (`ui/src/audio/engine.ts:1493-1494`\'s own comment: "v0.10\'s effects field is synth-tracks-only"). `reconcileEffectChain`/`buildEffectRuntime`/`EFFECT_TYPES` are already fully generic — the type-level restriction is the only thing narrowing it. Widen to instrument AND drum tracks in one pass rather than fixing instrument tracks alone and leaving drum tracks asymmetric with no principled reason; render via `InstrumentPanel.tsx` reusing `SynthPanel.tsx`\'s `EffectChain` UI.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/50-ableton-vs-dotbeat-live-concepts.md', plan: null,
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/50-ableton-vs-dotbeat-live-concepts.md', plan: 'phase-26-plan.md',
   },
   {
     area: 'Instrument / SoundFont tracks', feature: 'One-shot sampler instrument track kind',
@@ -648,8 +648,8 @@ export const rows = [
   {
     area: 'Mixer', feature: 'Peak metering + per-effect chain-row level meter',
     description: 'dotbeat\'s `TrackMeter` (MixerView.tsx:93-123) reads `engine.getTrackLevel`, which is RMS-only (confirmed: no peak segment, no sticky "went over 0dB" marker anywhere). Ableton shows peak AND RMS simultaneously, plus resettable peak indicators (manual ch.18 p.381-383). Two independently-reported symptoms converge on the same fix: "not clear if effects are doing anything" (research 63, per-device meters) and a headroom bug that was invisible on an RMS-only meter (research 61, mixer peak metering) — the crest-factor collapse `docs/volume-fader-bugfix.md` found was close to invisible without this. Add a peak segment (short-window max, e.g. last 100-300ms) alongside the existing RMS bar in `TrackMeter`, plus a sticky reset marker; extend the same tap pattern to a per-effect level indicator on each `EffectRow` (SynthPanel.tsx:94-163), keyed by `BeatEffect.id` off whatever node `reconcileEffectChain` spliced in.',
-    core: 'missing', cli: 'na', gui: 'missing', status: 'not-started',
-    research: 'research/61-ableton-vs-dotbeat-mixing.md', plan: null,
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/61-ableton-vs-dotbeat-mixing.md', plan: 'phase-26-plan.md',
   },
   {
     area: 'Mixer', feature: 'General-purpose Group Track / submix bus (real audio summing + shared FX)',
