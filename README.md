@@ -4,140 +4,85 @@
 > agent — can edit in a real GUI, render from the command line, `git diff`, and get sound-design
 > critique on.
 
-This repository holds the research/planning behind the direction, **plus the working code for
-Phases 0-5**: a real `.beat` text format (parser + serializer + converter, drums included — and
-since **v0.3** the full sound-design surface: osc layers, unison, sub, filter envelope, LFOs,
-EQ/comp/distortion/bitcrush inserts, reverb/delay sends, sidechain duck, drum-voice shaping,
-with canonical elision so defaults never clutter the file), a
-**daemon** that keeps the file and a live GUI in two-way sync (GUI knob-turn → one-line
-`git diff` in 262 ms; `vim` edit → GUI hot-reloads in 117 ms, playback uninterrupted), an
-**agent-native CLI** (`inspect`/`set`/semantic `diff`/**presets**/render/**DSP metrics**/**mix
-lint**) with an **MCP server** over all of it, and a closed render→measure→edit→re-measure loop
-proven to hit a loudness target to 0.01 LU — all driving the actual
-[BeatLab](https://github.com/wgpatrick/beatlab) app (a working Tone.js + React web DAW /
-production trainer, which this project forks in spirit).
+Solo project, built in paired sessions with Claude. The `.beat` text format is the product: a
+real GUI (dotbeat's own, not a wrapped teaching tool), a CLI (`beat`), and an MCP server for AI
+agents all edit the **same file**, and every edit is a one- or two-line `git diff` — not a binary
+blob you hope merges.
 
 ```bash
 npm install
-npm test                          # 123 tests: format, conversion vs real data, daemon sync, CLI, presets, vary, DSP metrics, MCP
+npm test                          # 564 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
-node cli/beat.mjs set examples/real-groove.beat lead.cutoff 900   # prints "lead: cutoff 3200 -> 900"
-node cli/beat.mjs presets                                         # the factory sound library
-node cli/beat.mjs preset song.beat drums driving-kit              # a preset = a readable bag of set edits
-node cli/beat.mjs vary song.beat drums kick --render              # 9 small-diff variants to audition...
+node cli/beat.mjs set examples/real-groove.beat bass.cutoff 900   # prints "bass: cutoff 700 -> 900"
+node cli/beat.mjs quantize examples/real-groove.beat bass --grid 1 --amount 0.6   # partial-strength snap to 16ths
+node cli/beat.mjs vary examples/real-groove.beat drums kick --render             # small-diff variants to audition...
 node cli/beat.mjs score vary-kick-42 3 7 1                        # ...ranked picks -> git-tracked taste log
-node cli/beat.mjs sample song.beat kick-x media/kick.wav          # register real audio (sha256-pinned)
-node cli/beat.mjs lane song.beat drums kick kick-x -2 0           # that lane now plays the sample
 node cli/beat.mjs diff --git HEAD~1 HEAD song.beat                # a musical edit list, not line noise
-node cli/beat.mjs render examples/real-groove.beat -o out.wav     # dotbeat's own engine, headless — no BeatLab checkout
+node cli/beat.mjs render examples/real-groove.beat -o out.wav     # dotbeat's own engine, headless
 node cli/beat.mjs metrics out.wav                                 # LUFS (BS.1770), true peak, crest, spectrum, stereo
-node cli/beat.mjs lint out.wav                                    # deterministic mix findings + .beat edits to try
-node cli/beat.mjs mcp                                             # all of the above as MCP tools for an AI agent
-node cli/beat.mjs daemon examples/real-groove.beat                # two-way sync: open the dotbeat GUI with ?daw=8420
+node cli/beat.mjs checkpoint song.beat --label "rough mix"        # a restorable version, git-backed
+node cli/beat.mjs mcp                                             # the whole toolchain as MCP tools for an AI agent
+node cli/beat.mjs daemon examples/real-groove.beat                # two-way sync backend for the GUI
+
+cd ui && npm install && npm run dev   # dotbeat's own frontend (Vite + React), talks to the daemon above
 ```
+
+Run `node cli/beat.mjs` with no arguments for the full command list — it's grown a lot (track
+groups, drum kits, audio-clip splitting, effect chains, checkpoint/restore/pin history, selection
+sync with the GUI) since the walkthrough above.
 
 ## The idea in one picture
 
 ```
    song.beat  (plain text, in git)
       │
-      ├─►  GUI            edit notes/knobs → one-line diffs
-      ├─►  CLI            beat render / inspect / set / diff
-      ├─►  AI agent       edits the file, renders, critiques, proposes diffs
-      └─►  git            branch, diff, merge, review — like code
+      ├─►  GUI            edit notes/knobs/arrangement → one-line diffs
+      ├─►  CLI            beat render / inspect / set / diff / vary / checkpoint
+      ├─►  AI agent        edits the file, renders, critiques, proposes diffs (MCP)
+      └─►  git             branch, diff, merge, review — like code
 ```
 
-Nobody currently holds all of **GUI + diff-friendly-text-file + CLI/agent** at once — **confirmed**,
-not just plausible: openDAW has the GUI and a headless engine but zips its projects into an opaque
-binary bundle; REAPER has genuinely text project files but even its own practitioners say git
-"cannot meaningfully diff or merge" them; Strudel/Tidal are text-native but have no GUI (the
-round-trip trap). This project aims at that gap. See [`ROADMAP.md`](ROADMAP.md) §1 for the full,
-now fully-verified version.
+Nobody currently holds all of **GUI + diff-friendly-text-file + CLI/agent** at once — openDAW has
+the GUI and a headless engine but zips its projects into an opaque binary bundle; REAPER has
+genuinely text project files but even its own practitioners say git "cannot meaningfully diff or
+merge" them; Ableton's `.als` is gzipped XML with no native diff story at all; Strudel/Tidal are
+text-native but have no GUI. This project aims at that gap. See [`ROADMAP.md`](ROADMAP.md) for
+the full thesis and prior-art comparison.
 
 ## What's here
 
 | Path | What |
 |---|---|
-| [`docs/phase-5-plan.md`](docs/phase-5-plan.md) | **Start here for what's built.** Format v0.3 — the file carries the *sound*, not just the notes (~55 params, canonical elision, presets-as-tooling; exit test: a real 4-track mix reproduced from pure text with exact engine-state equivalence). Prior slices: [`phase-4-plan.md`](docs/phase-4-plan.md) (real engine offline, no browser), [`phase-3-plan.md`](docs/phase-3-plan.md) (metrics/lint/MCP), [`phase-2-plan.md`](docs/phase-2-plan.md) (CLI + semantic diff), [`phase-1-plan.md`](docs/phase-1-plan.md) (daemon + sync), [`phase-0-plan.md`](docs/phase-0-plan.md) (format + render). |
-| [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, milestones, risks. |
-| `src/core/` | The `.beat` format: types, parser, serializer, converter (synth + drum tracks), **semantic diff**, edit primitives, inspect. Pure TS, zero deps on beatlab/React/Tone.js. |
-| `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over a 3-endpoint HTTP/SSE protocol, echo suppression by canonical-text comparison. |
-| `src/metrics/` | The guardrail layer (D2): integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, stereo field — plus the deterministic mix-lint rules. Zero deps, validated against the spec's calibration cases. |
-| `src/mcp/` | `beat mcp` — zero-dep stdio MCP server exposing the whole toolchain (inspect/set/notes/diff/metrics/lint/render) to AI agents. |
-| `test/` | 123 tests — format round-trips (v0.2 and v0.3 elision/enums/trackrefs), conversion fidelity against a real exported project, presets, daemon sync, CLI (incl. diff-between-real-git-commits), DSP metrics vs known-answer signals, MCP protocol. |
-| `cli/beat.mjs` | The unified `beat` CLI: `init`, `add-track`/`rm-track`, `inspect`, `set`, `add-note`/`rm-note`, `diff` (files or git revs), `presets`/`preset`, `vary`/`score` (the variation-and-taste loop), `metrics`, `lint`, `render` (dotbeat's own engine, headless Chromium), `daemon`, `mcp` — enough to compose from a blank file. |
-| `presets/factory.json` | The factory sound library — curated voicings (seeded from a real approved mix), applied as ordinary edits, never referenced by the format itself. |
-| `ui/verify*.mjs` | The measured proofs, run against dotbeat's own frontend + engine: end-to-end GUI editing (`verify.mjs`), engine parity / sidechain / drum-voice measurement off real captured audio (`verify-engine-parity.mjs`). (The earlier BeatLab-dependent `scripts/verify-m*/phase*.mjs` proofs were retired with the BeatLab render paths in Phase 17 / D15.) |
-| `examples/real-groove.beat`, `examples/night-shift.beat` | Real projects as `.beat` text — the groove the proof runs use, and the 4-track Night Shift mix whose entire sound design lives in the file. |
-| [`docs/research/`](docs/research/) | Eight deep-research reports, **all fully adversarially verified** — every research gap the roadmap ever flagged is now resolved (engine architecture, live-coding landscape, demand signal). |
-| [`docs/opendaw-notes.md`](docs/opendaw-notes.md) | Source-code archaeology — openDAW/DAWproject/automix-toolkit/node-web-audio-api read directly, not summarized secondhand. |
-| [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format spec — v0 grammar frozen and implemented, grounded in real prior art (Csound, Humdrum, DAWproject). |
-| [`docs/architecture.md`](docs/architecture.md) | Component architecture (daemon, engine, CLI, MCP, web/Tauri tiers). |
-| [`docs/decisions.md`](docs/decisions.md) | Key design decisions and their rationale, corrected where research findings changed. |
-| [`docs/research-summary.html`](docs/research-summary.html) | Visual synthesis — **predates the final verification pass**; `ROADMAP.md` is the current source of truth. |
-
-## The findings that shaped this
-
-1. **The empty quadrant is confirmed, not just plausible.** The fully-verified landscape report's
-   own conclusion: *"the evidence positively refutes the idea that this space is already
-   filled."* Real, citable demand signal found: DAWproject's own community has an **open,
-   unresolved GitHub issue (#40, since Jan 2023)** requesting exactly the diff/version-control
-   support we're building. *(`docs/research/01-landscape.md`)*
-2. **Real prior art resolves the format-syntax question.** Csound `.sco` is the closest analog to
-   our line-per-event design; Humdrum `**kern`'s own spec explicitly names and solves the same
-   diff-false-positive problem we're solving; DAWproject's schema gives us real vocabulary to
-   borrow. Format style is no longer an open question — see `ROADMAP.md` §4.
-   *(`docs/research/04-format-prior-art.md`)*
-3. **Web-audio has a confirmed hard ceiling on recorded audio.** ~30ms vs ~10ms round-trip
-   latency. Fine for MIDI/synth (which is what BeatLab already is); needs a native (Tauri) tier
-   for low-latency recording and plugin hosting. *(`docs/research/02-web-stack-feasibility.md`)*
-4. **AI can't be trusted to "hear" a mix — confirmed, with real nuance.** Audio-LLMs show severe
-   text-prior bias and perception-dominated errors on general music understanding. Important
-   honest caveat carried through: *no benchmark has directly tested mix-critique tasks* — this is
-   a well-evidenced inference, not a direct proof, which is exactly why the critique loop is
-   architected metrics-first (DSP measurements as ground truth, LLM narrates, never judges alone).
-   *(`docs/research/03-ai-listening.md`)*
-5. **openDAW itself validates the direction.** Direct source reading found no design rationale
-   anywhere for its opaque project-bundle format beyond a cross-language (Rust/TypeScript) parity
-   requirement that doesn't apply to us — the strongest evidence yet that diff-friendly text
-   hasn't been tried and rejected, just never tried. *(`docs/opendaw-notes.md`)*
-
-## Research provenance
-
-Five research passes: four via a search→fetch→extract→**adversarially-verify** harness (all now
-**fully verified**, zero infrastructure errors on the final run — an earlier attempt hit a
-rate-limit mid-run and was resumed to completion), plus one **source-code archaeology** pass
-(cloning and reading actual repos, not web search). 347 raw claims were extracted across the four
-research reports; every claim queued for verification resolved cleanly to confirmed or refuted —
-see [`docs/research/README.md`](docs/research/README.md) for the full methodology, including a
-worked example of a claim that looked right in early research and was corrected on
-reverification. Several specific statistics drafted into an earlier version of `ROADMAP.md` did
-**not** survive full verification and have been corrected in place, with the correction visible
-inline rather than silently fixed.
+| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (92 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
+| [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, prior-art comparison, research provenance. |
+| `src/core/` | The `.beat` format: types, parser, serializer, converter, semantic diff, edit primitives (quantize/humanize/transpose/fit-to-scale/groove/…), inspect. Pure TS, no GUI deps. |
+| `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over HTTP/SSE, echo suppression by canonical-text comparison. |
+| `src/history/` | Checkpoint/restore/pin — a git-backed, append-only version history (`beat checkpoint`/`history`/`restore`/`pin`). |
+| `src/metrics/` | The guardrail layer: integrated LUFS (ITU-R BS.1770), true peak, crest, spectral balance, stereo field, plus deterministic mix-lint rules. Zero deps. |
+| `src/vary/` | The variation-and-taste loop: `beat vary` generates small-diff variants, `beat score` records ranked picks, `beat suggest` proposes the next round from that history. |
+| `src/mcp/` | `beat mcp` — zero-dep stdio MCP server exposing the whole toolchain to AI agents. |
+| `ui/` | dotbeat's own GUI (Vite + React + Tone.js) — arrangement view, piano-roll/drum-lane clip editing, mixer, effects chain, content browser. Its own product design, not a wrapped teaching app (see `docs/decisions.md` D12). |
+| `desktop/` | Tauri desktop shell — early-stage, working toward a native Mac app (`docs/product-spec-desktop.md`). |
+| `cli/beat.mjs` | The unified `beat` CLI — run with no args for the full, current command list. |
+| `test/` | 564 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
+| `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
+| `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
+| `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
+| [`docs/research/`](docs/research/) | 69 research passes — landscape/prior-art, engine architecture, and (most recently) a full chapter-by-chapter comparison against Ableton Live's own reference manual. |
+| [`docs/decisions.md`](docs/decisions.md) | 15 numbered design decisions with rationale and "revisit when" — check before proposing something that might contradict one. |
+| [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format grammar. |
+| [`docs/architecture.md`](docs/architecture.md) | Component architecture (daemon, engine, CLI, MCP, GUI/desktop tiers). |
 
 ## Status
 
-**Phases 0-5 (ROADMAP M0/M1/M2 + both M3 slices minus arrangement, plus the v0.3 sound
-surface) complete.** As of Phase 5 the format carries the *sound*, not just the notes: a real
-4-track mix (drums/bass/pad/lead with sidechain ducking, unison pads, filter-env plucks, sends)
-lives entirely in `examples/night-shift.beat` — built with four preset applications plus five
-`beat set` edits, verified to produce the exact same engine state as the hand-patched original
-(`scripts/verify-phase5.mjs`). The core loop is real, not argued: a
-hand-inspectable `.beat` file — the *whole* groove, drums included — is the source of truth for
-a live GUI session. Turn a knob in the GUI and `git diff` shows exactly one changed line
-(262 ms, measured). Edit the file in an editor and the GUI hot-reloads without stopping playback
-(117 ms, measured). And the CLI is now agent-native: `beat inspect` / `set` / `add-note` /
-`diff`, where `beat diff --git HEAD~1 HEAD song.beat` prints a *musical* edit list
-(`lead: cutoff 3200 -> 900`, `bass: note added ...`) — verified by an automated test against a
-real git repo. The guardrail layer is real: a zero-dep DSP metrics
-engine (integrated LUFS per ITU-R BS.1770, true peak, crest, spectral balance, stereo field)
-measured a real render round trip to **0.01 LU of its target**, `beat lint` turns those numbers
-into deterministic findings that name the `.beat` edit to try, and `beat mcp` exposes the whole
-toolchain to AI agents — with every number coming from DSP, never a model (decision D2, built
-exactly as the verified research demanded). Rendering goes through **dotbeat's own audio engine**
-(`ui/src/audio/engine.ts`, the same one the live GUI plays): `beat render` boots the daemon on the
-file, serves `ui/` headlessly in Chromium, and captures the live master output to WAV — no BeatLab
-checkout anywhere on the machine (decision D15; the two earlier BeatLab-dependent render paths were
-consolidated onto this one engine in Phase 17). See
-[`docs/phase-17-engine-consolidation.md`](docs/phase-17-engine-consolidation.md).
+Well past the original v0 proof-of-concept: dotbeat now has its own GUI (arrangement view, clip
+authoring, mixer, effects chain, content browser — not a wrapped version of the BeatLab teaching
+app it started from), a 564-test suite, a git-backed checkpoint/restore history system, and a
+growing library of adversarially-researched design docs, including a full feature-by-feature
+comparison against Ableton Live 12's own reference manual. `docs/product-roadmap.md` tracks every
+feature's real status; `ROADMAP.md` has the thesis and architecture. The core loop is still the
+same one this project was built to prove: a hand-inspectable `.beat` file is the source of truth
+for a live GUI session, a CLI, and an AI agent, all at once — turn a knob in the GUI and `git
+diff` shows exactly one changed line; edit the file by hand and the GUI hot-reloads without
+stopping playback.
