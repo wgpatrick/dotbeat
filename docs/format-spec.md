@@ -244,8 +244,10 @@ the ~50 store-level params the format couldn't express. v0.3 exposes them:
   plus `glide`, `keytrackAmount`, `velToFilterAmount`, `macroValue`), inserts
   (`eq*`, `comp*`, `distortion*`, `bitcrush*`, `pingPong*`, `chorus*`, `phaser*`, `saturator*` —
   the last four added Phase 22 Stream AC, `research/17-track-fx-arsenal.md` §5; Chorus/Phaser
-  retired the old shared, un-configurable `sendMod` bus in favor of real per-track inserts),
-  scheduling-layer beat-repeat stutter (`beatRepeat*` — grid/gate/chance/mode; note/hit
+  retired the old shared, un-configurable `sendMod` bus in favor of real per-track inserts —
+  plus `autoFilter*`, `autoPan*`, `tremolo*`, `utility*`, and `bitcrushRate` added Phase 23 Stream
+  BE, see the v0.10 effect-chain section below), scheduling-layer beat-repeat stutter
+  (`beatRepeat*` — grid/gate/chance/mode; note/hit
   re-scheduling in the engine's tick loop, not an audio-graph insert), sends
   (`sendReverb/sendDelay`), sidechain (`duckSource` — a track id or `none` — plus `duckAmount`),
   and drum-voice shaping (`kickTune/kickPunch/kickDecay`, `snareTone/snareDecay`,
@@ -462,13 +464,14 @@ removable, reorderable — without its indirection mechanism).
   effect <id> <type> [bypassed]     # one line per insert, in FILE order = CHAIN order
 ```
 
-- **`type`** is one of `eq3|comp|distortion|bitcrush` — the same four built-in inserts every synth
-  track already has knobs for (`eqLow`/`eqMid`/`eqHigh`, `comp*`, `distortion*`, `bitcrush*` in
-  `SYNTH_FIELDS`, unchanged). An `effect` line only says WHETHER, WHERE, and IN WHAT ORDER a type
-  runs — the type's own params still live in the synth block, exactly as before. (This means
-  dotbeat does not yet support two independently-parameterized instances of the same type — both
-  would read the one shared `eqLow` etc. — a deliberate, documented scope cut, not an oversight;
-  see `docs/phase-22-stream-aa.md`.)
+- **`type`** is one of `eq3|comp|distortion|bitcrush|autoFilter|autoPan|tremolo|utility` — the
+  original four built-in inserts every synth track already has knobs for (`eqLow`/`eqMid`/
+  `eqHigh`, `comp*`, `distortion*`, `bitcrush*` in `SYNTH_FIELDS`, unchanged), plus four more added
+  Phase 23 Stream BE (`autoFilter*`/`autoPan*`/`tremolo*`/`utility*`, same table — see below). An
+  `effect` line only says WHETHER, WHERE, and IN WHAT ORDER a type runs — the type's own params
+  still live in the synth block, exactly as before. (This means dotbeat does not yet support two
+  independently-parameterized instances of the same type — both would read the one shared `eqLow`
+  etc. — a deliberate, documented scope cut, not an oversight; see `docs/phase-22-stream-aa.md`.)
 - **`id`** is a stable, track-scoped human slug (D6) — what makes a reorder read as a MOVE (a line
   changes position) rather than a delete-and-reinsert-different-content pair (the alsdiff lesson,
   same discipline as note/hit/clip ids). Defaults (below) use the type name as the id (`eq3`,
@@ -506,6 +509,42 @@ removable, reorderable — without its indirection mechanism).
   same reasoning clip/scene/song get dedicated verbs instead of overloading `beat set`) and
   `setEffectEnabled` (fits `beat set`'s plain `path=value` grammar too, as
   `<track>.effect.<id>.enabled`, alongside its own `beat effect-bypass`/`beat_effect_bypass`).
+
+### v0.10 additions — Auto Filter / Auto Pan / Tremolo / Utility + Redux downsampling (Phase 23 Stream BE)
+
+Widens `EffectType`/`EFFECT_TYPES` (above) from the original four to eight — `autoFilter`,
+`autoPan`, `tremolo`, `utility` are ADDITIVE entries in the SAME reorderable chain Stream AA built
+(`research/17-track-fx-arsenal.md` §5's "deferred, with reasons" list), not a new mechanism. The
+one thing that must NOT change is `defaultEffectChain()`: it stays exactly `eq3, comp, distortion,
+bitcrush` (a separate, frozen `DEFAULT_EFFECT_TYPES` constant in `document.ts`, not derived from
+the now-widened `EFFECT_TYPES`) — a track only gets one of the four new types by an explicit
+`beat effect-add`/GUI add, never silently as part of migration.
+
+- **Auto Filter / Auto Pan / Tremolo** (`autoFilter*`/`autoPan*`/`tremolo*` fields) are thin
+  wrappers around `Tone.AutoFilter`/`Tone.AutoPanner`/`Tone.Tremolo` — each has its own `*Mix`
+  (0 = insert bypassed, same convention as `compMix`/`distortionMix`/`bitcrushMix`). Their sonic
+  capability already exists via the shared `lfoDest`/`lfo2Dest` modulation matrix (`cutoff`/`pan`/
+  `amp` destinations); the value of a dedicated device is Ableton-authentic naming and a THIRD,
+  independent modulation source (its own rate/depth, not shared with LFO1/LFO2), not new sound —
+  kept deliberately lean (no LFO-shape/sync options these devices' Tone.js classes don't expose).
+- **Utility** (`utilityWidth`/`utilityGain`) wraps `Tone.StereoWidener` (mid/side width, 0=mono,
+  1=max stereo, 0.5=neutral/no-change default) plus a static dB gain trim. No `*Mix` field — like
+  `eq3`, it has no wet/dry knob of its own; the chain's per-instance `bypassed` token is its only
+  "off".
+- **Redux's downsampling half** (`bitcrushRate`) is a NEW FIELD on the EXISTING `bitcrush` type,
+  not a fifth new `EffectType` — Ableton's own Redux is one device with two dimensions (bit depth +
+  sample rate), and dotbeat's `bitcrush` already owns bit-depth reduction (`bitcrushBits`), so the
+  sample-rate half joins it rather than duplicating a second insert covering the same conceptual
+  device. `bitcrushRate` is a sample-and-hold decimator's hold factor (1 = off/no reduction,
+  canonical default); gated by the SAME `bitcrushMix` as bit-depth reduction (one shared dry/wet
+  knob for the whole device, matching Ableton's one Dry/Wet on Redux). See
+  `docs/phase-23-stream-be.md` for the full reasoning and the engine-side implementation (a small
+  hand-built downsampler — Tone.js has no built-in Rate/Jitter node).
+- All fourteen new numeric fields are automation-lane-capable for free (`AUTOMATABLE_SYNTH_PARAMS`
+  auto-derives from every `kind: 'number'` `SYNTH_FIELDS` row); none were added to `LFO_DESTS` —
+  same explicit scope cut Stream AC made for its own four new inserts ("a separate, smaller
+  follow-up if wanted, not required").
+
 ### v0.10 additions — open drum lanes + optional hit duration (Phase 22 Stream AB; research 19/20)
 
 Research 19 (`docs/research/19-drum-voice-expansion.md`) and research 20

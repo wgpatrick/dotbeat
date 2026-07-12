@@ -181,6 +181,9 @@ export const PARAM_GROUPS: ParamGroup[] = [
       k('distortionMix', 'DrvMix', 0, 1, fmt.pct),
       k('bitcrushBits', 'Bits', 1, 16, fmt.int),
       k('bitcrushMix', 'CrushMix', 0, 1, fmt.pct),
+      // Phase 23 Stream BE (Redux): the SAME bitcrush insert's sample-rate-reduction half, gated
+      // by the same CrushMix above (one shared dry/wet, see docs/phase-23-stream-be.md).
+      k('bitcrushRate', 'Redux', 1, 50, fmt.int, true),
     ],
   },
   {
@@ -230,6 +233,51 @@ export const PARAM_GROUPS: ParamGroup[] = [
     kinds: ['synth', 'drums'],
     open: false,
     params: [e('saturatorCurve', 'Curve', SATURATOR_CURVES), k('saturatorDrive', 'Drive', 0, 1, fmt.pct), k('saturatorMix', 'Mix', 0, 1, fmt.pct)],
+  },
+  // Phase 23 Stream BE: Auto Filter / Auto Pan / Tremolo / Utility — additive entries in Stream
+  // AA's reorderable effect chain (unlike inserts/pingpong/beatrepeat/chorusphaser/saturator
+  // above, which are wired for BOTH synth and drum tracks, these four are synth-tracks-only —
+  // see src/core/document.ts's BeatTrack.effects comment — so `kinds` is ['synth'] only; showing
+  // them on a drum track's panel would be decorative knobs with no engine wiring behind them).
+  {
+    id: 'autofilter',
+    title: 'Auto Filter',
+    kinds: ['synth'],
+    open: false,
+    params: [
+      k('autoFilterRate', 'Rate', 0.02, 10, fmt.hz, true),
+      k('autoFilterDepth', 'Depth', 0, 1, fmt.pct),
+      k('autoFilterBaseFrequency', 'Base', 20, 4000, fmt.hz, true),
+      k('autoFilterOctaves', 'Octaves', 0.5, 6, fmt.num1),
+      e('autoFilterType', 'Type', ['lowpass', 'bandpass', 'highpass']),
+      k('autoFilterMix', 'Mix', 0, 1, fmt.pct),
+    ],
+  },
+  {
+    id: 'autopan',
+    title: 'Auto Pan',
+    kinds: ['synth'],
+    open: false,
+    params: [k('autoPanRate', 'Rate', 0.02, 10, fmt.hz, true), k('autoPanDepth', 'Depth', 0, 1, fmt.pct), k('autoPanMix', 'Mix', 0, 1, fmt.pct)],
+  },
+  {
+    id: 'tremolo',
+    title: 'Tremolo',
+    kinds: ['synth'],
+    open: false,
+    params: [
+      k('tremoloRate', 'Rate', 0.5, 20, fmt.hz, true),
+      k('tremoloDepth', 'Depth', 0, 1, fmt.pct),
+      k('tremoloSpread', 'Spread', 0, 180, fmt.int),
+      k('tremoloMix', 'Mix', 0, 1, fmt.pct),
+    ],
+  },
+  {
+    id: 'utility',
+    title: 'Utility',
+    kinds: ['synth'],
+    open: false,
+    params: [k('utilityWidth', 'Width', 0, 1, fmt.pct), k('utilityGain', 'Gain', -24, 24, fmt.db)],
   },
   {
     id: 'sends',

@@ -145,6 +145,12 @@ const FX_BADGES: { key: string; label: string; active: (p: Record<string, unknow
   { key: 'phaser', label: 'Pha', active: (p) => num(p.phaserMix) > 0 },
   { key: 'pingpong', label: 'PP', active: (p) => num(p.pingPongMix) > 0 },
   { key: 'beatrepeat', label: 'BR', active: (p) => num(p.beatRepeatGate) > 0 },
+  // Phase 23 Stream BE: same *Mix=0-is-bypassed heuristic (Utility has no Mix — width away from
+  // its neutral 0.5 or a nonzero gain trim is its own "doing something" signal instead).
+  { key: 'autofilter', label: 'AFlt', active: (p) => num(p.autoFilterMix) > 0 },
+  { key: 'autopan', label: 'APan', active: (p) => num(p.autoPanMix) > 0 },
+  { key: 'tremolo', label: 'Trem', active: (p) => num(p.tremoloMix) > 0 },
+  { key: 'utility', label: 'Util', active: (p) => num(p.utilityWidth) !== 0.5 || num(p.utilityGain) !== 0 },
 ]
 
 function num(v: unknown): number {

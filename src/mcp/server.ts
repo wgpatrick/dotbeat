@@ -480,13 +480,13 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_effect_add',
     description:
-      "Add an insert to a synth track's effect chain (format v0.10). Array order in the file IS chain order — no separate index field — so this is dotbeat's answer to \"reorder/add/remove effects,\" built as flat ordered text rather than a box/pointer graph (docs/research/21-opendaw-devices-effects.md #1). type is one of eq3|comp|distortion|bitcrush (the same four built-in inserts every synth track already has knobs for — see beat_set's eqLow/compMix/distortionMix/bitcrushMix etc.; this tool only changes whether/where/in-what-order they run, not their own params). Omit id to mint one (the type name, or type_2/_3... on collision); omit index to append. Returns the musical edit list.",
+      "Add an insert to a synth track's effect chain (format v0.10). Array order in the file IS chain order — no separate index field — so this is dotbeat's answer to \"reorder/add/remove effects,\" built as flat ordered text rather than a box/pointer graph (docs/research/21-opendaw-devices-effects.md #1). type is one of eq3|comp|distortion|bitcrush|autoFilter|autoPan|tremolo|utility — the four original built-in inserts (see beat_set's eqLow/compMix/distortionMix/bitcrushMix etc.) plus Phase 23 Stream BE's Auto Filter/Auto Pan/Tremolo/Utility (autoFilter*/autoPan*/tremolo*/utility* params — Redux's downsampling half rides bitcrushRate on the existing bitcrush type, not a new one). This tool only changes whether/where/in-what-order a type runs, not its own params. Omit id to mint one (the type name, or type_2/_3... on collision); omit index to append. Returns the musical edit list.",
     inputSchema: {
       type: 'object',
       properties: {
         file: { type: 'string' },
         track: { type: 'string' },
-        type: { type: 'string', description: 'eq3 | comp | distortion | bitcrush' },
+        type: { type: 'string', description: 'eq3 | comp | distortion | bitcrush | autoFilter | autoPan | tremolo | utility' },
         id: { type: 'string', description: 'a stable id for this instance; omit to mint one' },
         index: { type: 'number', description: '0-based insert position; omit to append at the end of the chain' },
         bypassed: { type: 'boolean', description: 'add it already bypassed; default false (active)' },

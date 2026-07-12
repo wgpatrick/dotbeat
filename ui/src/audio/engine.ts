@@ -198,6 +198,7 @@ interface EngineSynth {
   distortionMix: number
   bitcrushBits: number
   bitcrushMix: number
+  bitcrushRate: number
   pingPongTime: number
   pingPongFeedback: number
   pingPongCrossFeed: number
@@ -218,6 +219,21 @@ interface EngineSynth {
   saturatorCurve: SaturatorCurve
   saturatorDrive: number
   saturatorMix: number
+  autoFilterRate: number
+  autoFilterDepth: number
+  autoFilterOctaves: number
+  autoFilterBaseFrequency: number
+  autoFilterType: FilterType
+  autoFilterMix: number
+  autoPanRate: number
+  autoPanDepth: number
+  autoPanMix: number
+  tremoloRate: number
+  tremoloDepth: number
+  tremoloSpread: number
+  tremoloMix: number
+  utilityWidth: number
+  utilityGain: number
   sendReverb: number
   sendDelay: number
   duckSource: string | null
@@ -296,6 +312,7 @@ function coerce(p: BeatSynth): EngineSynth {
     distortionMix: num(p.distortionMix, 0),
     bitcrushBits: num(p.bitcrushBits, 8),
     bitcrushMix: num(p.bitcrushMix, 0),
+    bitcrushRate: num(p.bitcrushRate, 1),
     pingPongTime: num(p.pingPongTime, 0.19),
     pingPongFeedback: num(p.pingPongFeedback, 0.3),
     pingPongCrossFeed: num(p.pingPongCrossFeed, 1),
@@ -316,6 +333,21 @@ function coerce(p: BeatSynth): EngineSynth {
     saturatorCurve: saturatorCurve(p.saturatorCurve, 'analog'),
     saturatorDrive: num(p.saturatorDrive, 0),
     saturatorMix: num(p.saturatorMix, 0),
+    autoFilterRate: num(p.autoFilterRate, 1),
+    autoFilterDepth: num(p.autoFilterDepth, 1),
+    autoFilterOctaves: num(p.autoFilterOctaves, 2.6),
+    autoFilterBaseFrequency: num(p.autoFilterBaseFrequency, 200),
+    autoFilterType: (['lowpass', 'bandpass', 'highpass'].includes(String(p.autoFilterType)) ? p.autoFilterType : 'lowpass') as FilterType,
+    autoFilterMix: num(p.autoFilterMix, 0),
+    autoPanRate: num(p.autoPanRate, 1),
+    autoPanDepth: num(p.autoPanDepth, 1),
+    autoPanMix: num(p.autoPanMix, 0),
+    tremoloRate: num(p.tremoloRate, 10),
+    tremoloDepth: num(p.tremoloDepth, 0.5),
+    tremoloSpread: num(p.tremoloSpread, 180),
+    tremoloMix: num(p.tremoloMix, 0),
+    utilityWidth: num(p.utilityWidth, 0.5),
+    utilityGain: num(p.utilityGain, 0),
     sendReverb: num(p.sendReverb, 0),
     sendDelay: num(p.sendDelay, 0),
     duckSource: typeof p.duckSource === 'string' && p.duckSource && p.duckSource !== 'none' ? p.duckSource : null,
@@ -367,7 +399,9 @@ function interpolateAutomation(points: { time: number; value: number }[], posSte
 // convention as LFO_DESTS/LFO_SYNC_RATES above). Replaces the old fixed
 // EQ3->comp->distortion->bitcrush insert order this file's header comment used to list as "NOT
 // ported" — the chain is now built by iterating the track's declared, ordered `effects` list.
-type EffectType = 'eq3' | 'comp' | 'distortion' | 'bitcrush'
+// Phase 23 Stream BE widened this to eight types (autoFilter/autoPan/tremolo/utility ADDED to the
+// same reorderable mechanism, not a parallel one — see EffectRuntime/buildEffectRuntime below).
+type EffectType = 'eq3' | 'comp' | 'distortion' | 'bitcrush' | 'autoFilter' | 'autoPan' | 'tremolo' | 'utility'
 
 // One live effect instance's Tone nodes. `entry`/`exit` are the two nodes the chain SPINE
 // connects to (upstream -> entry, exit -> downstream); everything else is that effect's own
@@ -381,21 +415,78 @@ interface EffectRuntime {
   entry: Tone.ToneAudioNode
   exit: Tone.ToneAudioNode
   nodes: Tone.ToneAudioNode[]
+  // Native (non-Tone) nodes this instance owns, disconnect()-only cleanup (no `.dispose()`) —
+  // currently only bitcrush's Redux downsampler (see buildDownsampler below: a raw
+  // ScriptProcessorNode, no Tone.js built-in does sample-rate reduction). Kept OFF `nodes` (which
+  // is strictly Tone.ToneAudioNode[], iterated by callers that call `.dispose()` on every entry)
+  // rather than widening that array's type for one case — see the two call sites that check this
+  // (reconcileEffectChain's removal loop, disposeChain).
+  raw?: AudioNode[]
   eq3?: Tone.EQ3
   compressor?: Tone.Compressor
   compDry?: Tone.Gain
   compWet?: Tone.Gain
   distortion?: Tone.Distortion
   bitcrush?: Tone.BitCrusher
+  bitcrushDry?: Tone.Gain
+  bitcrushWet?: Tone.Gain
+  downsampler?: DownsamplerNode
+  autoFilter?: Tone.AutoFilter
+  autoPan?: Tone.AutoPanner
+  tremolo?: Tone.Tremolo
+  utility?: { widener: Tone.StereoWidener; gainTrim: Tone.Volume }
+}
+
+// Phase 23 Stream BE — Redux's downsampling half (research 17 §5.6: "Tone.js has no built-in
+// Rate/Jitter node"). A sample-and-hold decimator: holds each channel's last sample for `hold`
+// consecutive input samples before taking a new one — the classic sample-rate-reduction trick
+// (aliases high-frequency content down as `hold` increases, the same mechanism a hardware sample-
+// rate reducer uses). Built as a raw ScriptProcessorNode rather than a custom AudioWorklet:
+// synchronous construction (no addModule()/blob-URL registration race to await — see BitCrusher's
+// own ToneAudioWorklet base class, node_modules/tone, for what that dance looks like) and plain,
+// portable JS state (a held L/R sample + a counter), no bundler-asset wiring needed.
+// ScriptProcessorNode is deprecated but still implemented by every browser this project targets
+// (Chromium, via Playwright) — an accepted tradeoff for "small," per the research doc's framing.
+// See docs/phase-23-stream-be.md for the fuller design writeup.
+interface DownsamplerNode {
+  node: ScriptProcessorNode
+  setHold: (n: number) => void
+}
+const DOWNSAMPLER_BUFFER_SIZE = 1024
+function buildDownsampler(): DownsamplerNode {
+  const ctx = Tone.getContext().rawContext as AudioContext
+  const node = ctx.createScriptProcessor(DOWNSAMPLER_BUFFER_SIZE, 2, 2)
+  let hold = 1 // samples to hold; 1 = passthrough (no reduction) — bitcrushRate's default/off state
+  let counter = 0
+  let heldL = 0
+  let heldR = 0
+  node.onaudioprocess = (ev: AudioProcessingEvent) => {
+    const inL = ev.inputBuffer.getChannelData(0)
+    const inR = ev.inputBuffer.numberOfChannels > 1 ? ev.inputBuffer.getChannelData(1) : inL
+    const outL = ev.outputBuffer.getChannelData(0)
+    const outR = ev.outputBuffer.getChannelData(1)
+    for (let i = 0; i < inL.length; i++) {
+      if (counter <= 0) {
+        heldL = inL[i]!
+        heldR = inR[i]!
+        counter = hold
+      }
+      counter--
+      outL[i] = heldL
+      outR[i] = heldR
+    }
+  }
+  return { node, setHold: (n: number) => { hold = Math.max(1, Math.round(n)) } }
 }
 
 /** Builds one effect instance's Tone subgraph (internal wiring only — NOT connected to anything
  * upstream/downstream yet, that's the chain-spine's job in reconcileEffectChain). Mirrors what
  * buildSynthChain used to wire unconditionally for all four; now built lazily, one instance per
- * declared chain entry. eq3/distortion/bitcrush are single nodes (entry === exit); comp keeps its
- * existing dry/wet fan-in shape (entry = a Gain that fans into dry+compressor, exit = the Gain
- * that sums them back — unchanged internal shape from the old hardcoded chain, just no longer
- * spliced into a fixed position). */
+ * declared chain entry. eq3/distortion are single nodes (entry === exit); comp/bitcrush keep a
+ * dry/wet fan-in shape (entry = a Gain that fans into dry+processing, exit = the Gain that sums
+ * them back). autoFilter/autoPan/tremolo are single Tone effect nodes with their own internal
+ * wet/dry (entry === exit, like eq3/distortion); utility has no wet/dry (like eq3) since its two
+ * params (width/gain) ARE the effect, not something to blend. */
 function buildEffectRuntime(id: string, type: EffectType): EffectRuntime {
   switch (type) {
     case 'eq3': {
@@ -419,8 +510,46 @@ function buildEffectRuntime(id: string, type: EffectType): EffectRuntime {
       return { id, type, entry: distortion, exit: distortion, nodes: [distortion], distortion }
     }
     case 'bitcrush': {
+      // Phase 23 Stream BE: bit-depth reduction (Tone.BitCrusher) and Redux's sample-rate
+      // reduction (the raw downsampler) share ONE dry/wet pair driven by bitcrushMix — the same
+      // "one Mix knob bypasses the whole device" contract every other insert has, now covering
+      // both dimensions of this one (see docs/phase-23-stream-be.md). bitcrush.wet is forced to 1
+      // (always fully wet internally) so the OUTER pair here is the only blend that matters.
+      const inN = new Tone.Gain(1)
+      const dry = new Tone.Gain(1)
+      const wet = new Tone.Gain(0)
+      const out = new Tone.Gain()
       const bitcrush = new Tone.BitCrusher(8)
-      return { id, type, entry: bitcrush, exit: bitcrush, nodes: [bitcrush], bitcrush }
+      bitcrush.wet.value = 1
+      const downsampler = buildDownsampler()
+      inN.connect(dry)
+      dry.connect(out)
+      Tone.connect(inN, downsampler.node)
+      Tone.connect(downsampler.node, bitcrush)
+      bitcrush.connect(wet)
+      wet.connect(out)
+      return {
+        id, type, entry: inN, exit: out, nodes: [inN, dry, wet, out, bitcrush], raw: [downsampler.node],
+        bitcrush, bitcrushDry: dry, bitcrushWet: wet, downsampler,
+      }
+    }
+    case 'autoFilter': {
+      const autoFilter = new Tone.AutoFilter({ frequency: 1, depth: 1, baseFrequency: 200, octaves: 2.6, filter: { type: 'lowpass', rolloff: -12, Q: 1 }, wet: 0 }).start()
+      return { id, type, entry: autoFilter, exit: autoFilter, nodes: [autoFilter], autoFilter }
+    }
+    case 'autoPan': {
+      const autoPan = new Tone.AutoPanner({ frequency: 1, depth: 1, wet: 0 }).start()
+      return { id, type, entry: autoPan, exit: autoPan, nodes: [autoPan], autoPan }
+    }
+    case 'tremolo': {
+      const tremolo = new Tone.Tremolo({ frequency: 10, depth: 0.5, spread: 180, wet: 0 }).start()
+      return { id, type, entry: tremolo, exit: tremolo, nodes: [tremolo], tremolo }
+    }
+    case 'utility': {
+      const widener = new Tone.StereoWidener(0.5)
+      const gainTrim = new Tone.Volume(0)
+      widener.connect(gainTrim)
+      return { id, type, entry: widener, exit: gainTrim, nodes: [widener, gainTrim], utility: { widener, gainTrim } }
     }
   }
 }
@@ -453,7 +582,37 @@ function applyEffectParams(e: EffectRuntime, p: EngineSynth): void {
   }
   if (e.bitcrush) {
     e.bitcrush.bits.value = Math.round(p.bitcrushBits)
-    e.bitcrush.wet.value = p.bitcrushMix
+    e.downsampler?.setHold(p.bitcrushRate)
+    // Shared dry/wet for the whole bitcrush device (bit depth + Redux's sample-rate reduction) —
+    // see buildEffectRuntime's 'bitcrush' case for why this is an OUTER pair, not bitcrush.wet
+    // (forced to 1 there) directly.
+    if (e.bitcrushDry && e.bitcrushWet) {
+      e.bitcrushDry.gain.value = 1 - p.bitcrushMix
+      e.bitcrushWet.gain.value = p.bitcrushMix
+    }
+  }
+  if (e.autoFilter) {
+    e.autoFilter.frequency.value = p.autoFilterRate
+    e.autoFilter.depth.value = p.autoFilterDepth
+    e.autoFilter.baseFrequency = p.autoFilterBaseFrequency
+    e.autoFilter.octaves = p.autoFilterOctaves
+    e.autoFilter.filter.type = p.autoFilterType
+    e.autoFilter.wet.value = p.autoFilterMix
+  }
+  if (e.autoPan) {
+    e.autoPan.frequency.value = p.autoPanRate
+    e.autoPan.depth.value = p.autoPanDepth
+    e.autoPan.wet.value = p.autoPanMix
+  }
+  if (e.tremolo) {
+    e.tremolo.frequency.value = p.tremoloRate
+    e.tremolo.depth.value = p.tremoloDepth
+    e.tremolo.spread = p.tremoloSpread
+    e.tremolo.wet.value = p.tremoloMix
+  }
+  if (e.utility) {
+    e.utility.widener.width.value = p.utilityWidth
+    e.utility.gainTrim.volume.value = p.utilityGain
   }
 }
 
@@ -796,21 +955,22 @@ interface SynthChain {
   filter: Tone.Filter
   // Phase 22 Stream AA: the ordered, reorderable effect chain, keyed by stable effect id — a
   // reorder/add/remove/bypass in the document reconciles here (reconcileEffectChain) rather than
-  // through four hardcoded fields. `effectOrder` is the live chain order (ids); `effectsSig` is
+  // through hardcoded fields. `effectOrder` is the live chain order (ids); `effectsSig` is
   // the last-wired signature (id:type:enabled joined) so param-only ticks skip re-wiring. Covers
-  // the FOUR effect types the format grammar currently declares (`EffectType` in document.ts:
-  // eq3/comp/distortion/bitcrush) — the only ones a `.beat` file can list/reorder today.
+  // the EIGHT effect types the format grammar declares (`EffectType` in document.ts:
+  // eq3/comp/distortion/bitcrush, plus Phase 23 Stream BE's autoFilter/autoPan/tremolo/utility) —
+  // the only ones a `.beat` file can list/reorder today.
   effects: Map<string, EffectRuntime>
   effectOrder: string[]
   effectsSig: string
   // Phase 22 Stream AC: saturator -> chorus -> phaser -> pingPong, inserted after the reorderable
   // chain's exit and before muteGain (research 17 §5's build order). Fixed inserts, NOT part of
-  // the reorderable `effects` list above — the format's EffectType enum doesn't cover these four
-  // yet (a real follow-up: extending EffectType would let them join the reorderable chain too),
-  // and they're wired identically on DrumBus below, which has no reorderable-list concept at all
-  // (v0.10's `effects` field is synth-tracks-only, format-spec.md's serialize note). Scoping them
-  // as fixed-after-the-list keeps synth and drum tracks consistent rather than fixing this
-  // asymmetry only on one track kind.
+  // the reorderable `effects` list above (this is the shape Stream BE deliberately did NOT repeat
+  // for its own four new types — see EffectRuntime/buildEffectRuntime above, which DID extend
+  // EffectType/the reorderable list instead), and they're wired identically on DrumBus below,
+  // which has no reorderable-list concept at all (v0.10's `effects` field is synth-tracks-only,
+  // format-spec.md's serialize note). Scoping them as fixed-after-the-list keeps synth and drum
+  // tracks consistent rather than fixing this asymmetry only on one track kind.
   saturator: SaturatorNodes
   chorus: Tone.Chorus
   phaser: Tone.Phaser
@@ -1530,6 +1690,7 @@ class Engine {
     for (const [id, runtime] of [...chain.effects]) {
       if (!wanted.has(id)) {
         for (const n of runtime.nodes) n.dispose()
+        if (runtime.raw) for (const n of runtime.raw) n.disconnect()
         chain.effects.delete(id)
       }
     }
@@ -1610,7 +1771,10 @@ class Engine {
       chain.muteGain, chain.levelTap, chain.panner, chain.vol, chain.reverbSend, chain.delaySend,
     ]
     for (const u of chain.uniPairs) nodes.push(u.poly, u.pan, u.gain)
-    for (const runtime of chain.effects.values()) nodes.push(...runtime.nodes)
+    for (const runtime of chain.effects.values()) {
+      nodes.push(...runtime.nodes)
+      if (runtime.raw) for (const n of runtime.raw) n.disconnect()
+    }
     for (const n of nodes) n.dispose()
   }
 

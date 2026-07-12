@@ -987,7 +987,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         .then((body) => {
           const b = JSON.parse(body) as { track?: unknown; type?: unknown; id?: unknown; index?: unknown; bypassed?: unknown }
           if (typeof b.track !== 'string' || typeof b.type !== 'string') {
-            json(res, 400, { error: 'body must include string track and type (eq3|comp|distortion|bitcrush)' })
+            json(res, 400, { error: 'body must include string track and type (eq3|comp|distortion|bitcrush|autoFilter|autoPan|tremolo|utility)' })
             return
           }
           const opts: Parameters<typeof addEffect>[3] = {}

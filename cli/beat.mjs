@@ -138,7 +138,7 @@ const USAGE = `usage:
   beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
   beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)
   beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample
-  beat effect-add <file> <track> <eq3|comp|distortion|bitcrush> [--id id] [--index n] [--bypassed]
+  beat effect-add <file> <track> <eq3|comp|distortion|bitcrush|autoFilter|autoPan|tremolo|utility> [--id id] [--index n] [--bypassed]
                                                           add an insert to a synth track's effect chain
                                                           (default: appended, enabled; order in the file IS chain order)
   beat effect-rm <file> <track> <effect-id>               remove an insert by id
@@ -946,7 +946,7 @@ function effectAddCmd(argv) {
     return prev !== '--id' && prev !== '--index'
   })
   const [file, track, type] = positional
-  if (!file || !track || !type) throw new BeatEditError('effect-add needs <file> <track> <eq3|comp|distortion|bitcrush> [--id id] [--index n] [--bypassed]')
+  if (!file || !track || !type) throw new BeatEditError('effect-add needs <file> <track> <eq3|comp|distortion|bitcrush|autoFilter|autoPan|tremolo|utility> [--id id] [--index n] [--bypassed]')
   const before = readDoc(file)
   const { doc } = addEffect(before, track, type, { ...(id !== undefined ? { id } : {}), ...(index !== undefined ? { index } : {}), enabled: !bypassed })
   writeDoc(file, before, doc)

@@ -241,6 +241,15 @@ export interface BeatSynth {
   distortionMix: number
   bitcrushBits: number
   bitcrushMix: number
+  // Phase 23 Stream BE (Redux, research 17 §5.6): the SAME `bitcrush` insert's downsampling half
+  // — bit-depth reduction (above) and sample-rate reduction share one device/one EffectType,
+  // matching Ableton's own Redux (one device, two dimensions), not a second insert type. A
+  // sample-and-hold decimator: holds each channel's last sample for `bitcrushRate` consecutive
+  // samples before taking a new one (ui/src/audio/engine.ts's buildDownsampler — no Tone.js
+  // built-in does this). 1 = off/no reduction (default, elided); an integer >= 1 hold factor.
+  // Gated by the SAME `bitcrushMix` as bit-depth reduction (see docs/phase-23-stream-be.md for
+  // why one shared dry/wet knob, not a second Mix field).
+  bitcrushRate: number
   // ---- Phase 22 Stream AC: Ping Pong Delay insert (research 17 §5.1 + research 21 row 4) ----
   pingPongTime: number // seconds, per-side delay time
   pingPongFeedback: number // 0..1
@@ -267,6 +276,32 @@ export interface BeatSynth {
   saturatorCurve: SaturatorCurve
   saturatorDrive: number // 0..1, input gain into the shaper
   saturatorMix: number // 0..1; 0 = insert bypassed
+  // ---- Phase 23 Stream BE: Auto Filter (research 17 §5.5) — Tone.AutoFilter, a filter swept by
+  // its own dedicated LFO. Sonic capability already exists via lfoDest:'cutoff' on the shared
+  // LFO1/LFO2 (LfoDestination below); this device's value is Ableton-authentic naming and a THIRD,
+  // independent modulation source, not new sound (see docs/phase-23-stream-be.md). ----
+  autoFilterRate: number // Hz, LFO rate driving the filter cutoff sweep
+  autoFilterDepth: number // 0..1, LFO depth (octaves swept, scaled by autoFilterOctaves)
+  autoFilterOctaves: number // octaves above autoFilterBaseFrequency the LFO sweeps
+  autoFilterBaseFrequency: number // Hz, floor of the filter sweep
+  autoFilterType: 'lowpass' | 'bandpass' | 'highpass'
+  autoFilterMix: number // 0..1; 0 = insert bypassed
+  // ---- Phase 23 Stream BE: Auto Pan (research 17 §5.5) — Tone.AutoPanner. ----
+  autoPanRate: number // Hz
+  autoPanDepth: number // 0..1
+  autoPanMix: number // 0..1; 0 = insert bypassed
+  // ---- Phase 23 Stream BE: Tremolo (research 17 §5.5) — Tone.Tremolo (stereo, phase-inverted
+  // L/R amplitude modulation). ----
+  tremoloRate: number // Hz
+  tremoloDepth: number // 0..1
+  tremoloSpread: number // degrees, stereo phase offset between channels (180 = classic tremolo)
+  tremoloMix: number // 0..1; 0 = insert bypassed
+  // ---- Phase 23 Stream BE: Utility (research 17 §5.6) — Tone.StereoWidener (mid/side width) +
+  // a static gain trim. No Mix field: like eq3, this insert has no wet/dry knob of its own — its
+  // own two params ARE the effect, and the chain's per-instance bypass (BeatEffect.enabled) is
+  // the only "off" this insert needs. ----
+  utilityWidth: number // 0..1; 0 = mono (all mid), 1 = max stereo (all side), 0.5 = neutral/no change (default)
+  utilityGain: number // dB trim; 0 = neutral (default)
   sendReverb: number // 0..1
   sendDelay: number // 0..1
   duckSource: string | null // track id whose kick ducks this track; null = off ("none" in text)
@@ -496,8 +531,25 @@ export interface BeatInstrument {
 // working unmodified. This means dotbeat does not yet support two independent instances of the
 // SAME type with different params (both would read the one shared eqLow etc.) — a documented scope
 // cut, not an oversight; see docs/phase-22-stream-aa.md.
-export type EffectType = 'eq3' | 'comp' | 'distortion' | 'bitcrush'
-export const EFFECT_TYPES: readonly EffectType[] = ['eq3', 'comp', 'distortion', 'bitcrush']
+// Phase 23 Stream BE: widened from the original four (eq3/comp/distortion/bitcrush) to add Auto
+// Filter, Auto Pan, Tremolo, and Utility — additive entries in the SAME reorderable chain
+// mechanism Stream AA built (docs/phase-22-stream-aa.md), not a parallel mechanism (see how Stream
+// AC's saturator/chorus/phaser/pingPong instead landed as a FIXED tail outside this chain,
+// ui/src/audio/engine.ts's SynthChain.saturator/chorus/phaser/pingPong comment — a documented gap
+// this stream does NOT repeat for its own four). Redux does NOT get a fifth new type here — its
+// downsampling half rides on the existing `bitcrush` type as a new field (bitcrushRate above); see
+// docs/phase-23-stream-be.md for the full reasoning.
+export type EffectType = 'eq3' | 'comp' | 'distortion' | 'bitcrush' | 'autoFilter' | 'autoPan' | 'tremolo' | 'utility'
+export const EFFECT_TYPES: readonly EffectType[] = ['eq3', 'comp', 'distortion', 'bitcrush', 'autoFilter', 'autoPan', 'tremolo', 'utility']
+
+// The ORIGINAL four types (Stream AA), frozen — this is the migration/canonical-elision target
+// (defaultEffectChain, below), deliberately NOT derived from EFFECT_TYPES above: EFFECT_TYPES is
+// "every legal type a user may add," which now includes Stream BE's four; the default chain must
+// stay exactly what it always was, or every existing .beat file (and every file that predates this
+// stream) would suddenly gain new effect-chain entries on next parse/serialize. Adding an
+// autoFilter/autoPan/tremolo/utility instance is always an explicit `beat effect-add` (or GUI
+// equivalent) — it never joins a track's chain silently.
+const DEFAULT_EFFECT_TYPES: readonly EffectType[] = ['eq3', 'comp', 'distortion', 'bitcrush']
 
 export interface BeatEffect {
   id: string // track-scoped stable id (D6) — what makes a reorder a MOVE, not a delete+insert
@@ -511,7 +563,7 @@ export interface BeatEffect {
  * effect lines entirely — one canonical form per state, and every existing .beat file keeps
  * serializing byte-identically. Returns a fresh array (never share one array instance). */
 export function defaultEffectChain(): BeatEffect[] {
-  return EFFECT_TYPES.map((type) => ({ id: type, type, enabled: true }))
+  return DEFAULT_EFFECT_TYPES.map((type) => ({ id: type, type, enabled: true }))
 }
 
 /** True iff `effects` is exactly the default chain (same length, same id/type/enabled per index,
@@ -709,6 +761,8 @@ export const SYNTH_FIELDS: readonly SynthFieldDef[] = [
   { key: 'distortionMix', kind: 'number', default: 0 },
   { key: 'bitcrushBits', kind: 'number', default: 8 },
   { key: 'bitcrushMix', kind: 'number', default: 0 },
+  // ---- Phase 23 Stream BE: Redux's downsampling half (same `bitcrush` insert) ----
+  { key: 'bitcrushRate', kind: 'number', default: 1 },
   // ---- Phase 22 Stream AC: Ping Pong Delay ----
   { key: 'pingPongTime', kind: 'number', default: 0.19 },
   { key: 'pingPongFeedback', kind: 'number', default: 0.3 },
@@ -733,6 +787,25 @@ export const SYNTH_FIELDS: readonly SynthFieldDef[] = [
   { key: 'saturatorCurve', kind: 'enum', default: 'analog', values: SATURATOR_CURVES },
   { key: 'saturatorDrive', kind: 'number', default: 0 },
   { key: 'saturatorMix', kind: 'number', default: 0 },
+  // ---- Phase 23 Stream BE: Auto Filter ----
+  { key: 'autoFilterRate', kind: 'number', default: 1 },
+  { key: 'autoFilterDepth', kind: 'number', default: 1 },
+  { key: 'autoFilterOctaves', kind: 'number', default: 2.6 },
+  { key: 'autoFilterBaseFrequency', kind: 'number', default: 200 },
+  { key: 'autoFilterType', kind: 'enum', default: 'lowpass', values: ['lowpass', 'bandpass', 'highpass'] },
+  { key: 'autoFilterMix', kind: 'number', default: 0 },
+  // ---- Phase 23 Stream BE: Auto Pan ----
+  { key: 'autoPanRate', kind: 'number', default: 1 },
+  { key: 'autoPanDepth', kind: 'number', default: 1 },
+  { key: 'autoPanMix', kind: 'number', default: 0 },
+  // ---- Phase 23 Stream BE: Tremolo ----
+  { key: 'tremoloRate', kind: 'number', default: 10 },
+  { key: 'tremoloDepth', kind: 'number', default: 0.5 },
+  { key: 'tremoloSpread', kind: 'number', default: 180 },
+  { key: 'tremoloMix', kind: 'number', default: 0 },
+  // ---- Phase 23 Stream BE: Utility ----
+  { key: 'utilityWidth', kind: 'number', default: 0.5 },
+  { key: 'utilityGain', kind: 'number', default: 0 },
   { key: 'sendReverb', kind: 'number', default: 0 },
   { key: 'sendDelay', kind: 'number', default: 0 },
   { key: 'duckSource', kind: 'trackref', default: null },

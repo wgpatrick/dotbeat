@@ -87,6 +87,11 @@ export const VARY_GROUPS: Readonly<Record<string, readonly VaryParamDef[]>> = {
     { key: 'chorusMix', min: 0, max: 0.7, scale: 'linear' },
     { key: 'phaserMix', min: 0, max: 0.6, scale: 'linear' },
     { key: 'saturatorMix', min: 0, max: 0.7, scale: 'linear' },
+    // Phase 23 Stream BE: same "bounded bypassable insert" shape as the Mix knobs above.
+    { key: 'autoFilterMix', min: 0, max: 0.7, scale: 'linear' },
+    { key: 'autoPanMix', min: 0, max: 0.7, scale: 'linear' },
+    { key: 'tremoloMix', min: 0, max: 0.7, scale: 'linear' },
+    { key: 'bitcrushRate', min: 1, max: 8, scale: 'log' },
   ],
   sends: [
     { key: 'sendReverb', min: 0, max: 0.8, scale: 'linear' },
