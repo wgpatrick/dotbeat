@@ -223,6 +223,9 @@ test('POST /song rejects a bad op and an out-of-range bar count', async () => {
     assert.equal((await postSong(daemon.port, { op: 'frobnicate' })).status, 400)
     assert.equal((await postSong(daemon.port, { op: 'append', bars: 999 })).status, 400)
     assert.equal(daemon.getDoc().song, null, 'a rejected append left the doc in loop mode')
+  })
+})
+
 // Phase 20 Stream W: track structure add/remove over HTTP (the GUI's track-management surface).
 test('POST /add-track appends a track, writes it to the file, and returns the fresh document', async () => {
   await withDaemon(async (daemon, filePath) => {
