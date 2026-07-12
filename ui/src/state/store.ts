@@ -92,6 +92,13 @@ interface DawState {
    * this" button derives the range from the section's own bars) — reuses that axis rather than
    * inventing a second one; setting a loop region does not itself change `selection`. */
   loopRegion: { start: number; end: number } | null
+  /** Phase 24 Stream CH: the id of the track currently being AUDITIONED (NoteView's "preview this
+   * clip" button — engine.auditionClip()/stopAudition()), or null when nothing is auditioning.
+   * Session-only, like `playing` — mirrors the engine's own internal audition flag purely so
+   * NoteView's button can render its own play/stop state reactively. Mutually exclusive with
+   * `playing`: starting normal playback clears this (engine.play()), and starting an audition
+   * doesn't touch `playing` (see engine.ts's auditionClip/stopAudition). */
+  auditioningTrackId: string | null
 
   setDoc: (doc: BeatDocument) => void
   setConnected: (c: boolean) => void
@@ -111,6 +118,7 @@ interface DawState {
   toggleSolo: (id: string) => void
   setOverlapPolicy: (p: DawState['overlapPolicy']) => void
   setLoopRegion: (r: { start: number; end: number } | null) => void
+  setAuditioning: (trackId: string | null) => void
 }
 
 export const useStore = create<DawState>((set) => ({
@@ -133,6 +141,7 @@ export const useStore = create<DawState>((set) => ({
   solos: {},
   overlapPolicy: 'push-existing', // matches the pre-Stream-AG unconditional-shift behavior
   loopRegion: null,
+  auditioningTrackId: null,
 
   setDoc: (doc) =>
     set((s) => ({
@@ -158,6 +167,7 @@ export const useStore = create<DawState>((set) => ({
   toggleSolo: (id) => set((s) => ({ solos: { ...s.solos, [id]: !s.solos[id] } })),
   setOverlapPolicy: (overlapPolicy) => set({ overlapPolicy }),
   setLoopRegion: (loopRegion) => set({ loopRegion }),
+  setAuditioning: (auditioningTrackId) => set({ auditioningTrackId }),
 }))
 
 /** A track is effectively silenced iff it is explicitly muted, OR any track is soloed and this one

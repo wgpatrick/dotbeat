@@ -1639,6 +1639,14 @@ class Engine {
   private started = false
   private lastLaneTriggerTime: Record<string, number> = {}
 
+  // Phase 24 Stream CH: "audition a clip in isolation" (docs/phase-24-stream-ch.md). Non-null while
+  // NoteView's "preview this clip" control is active — the id of the ONE track whose own live/loop-
+  // mode content (`track.notes`/`track.hits`, exactly what NoteView.tsx edits) should play, tiling
+  // every `doc.loopBars` bars, regardless of the transport's actual song position. Every OTHER
+  // track is silenced for the duration (see tick()'s content-resolution branch below) — true
+  // isolation, not a mute/solo trick, so it never perturbs the mixer's persisted mute/solo state.
+  private auditionTrackId: string | null = null
+
   // Phase 22 Stream AB: declared-lane dispatch state (see the LaneVoice types above). Live only
   // while the drums track has a non-empty `lanes` list; the legacy `drums`/`kickTuneHz` fields
   // above stay untouched and are what's used otherwise.
@@ -2816,6 +2824,12 @@ class Engine {
     await this.ensureStarted()
     const doc = useStore.getState().doc
     if (!doc) return
+    // Phase 24 Stream CH: normal song playback always wins over an in-progress audition — starting
+    // Play stops whatever clip was being auditioned (requirement: audition stops "when the user
+    // starts normal song playback"). Clearing this BEFORE sync()/scheduleRepeat below means the very
+    // next tick() already resolves every track normally, no one-tick glitch.
+    this.auditionTrackId = null
+    useStore.getState().setAuditioning(null)
     this.sync(doc)
     const t = Tone.getTransport()
     t.bpm.value = doc.bpm
@@ -2851,6 +2865,46 @@ class Engine {
     }
   }
 
+  /** Phase 24 Stream CH — "audition a clip in isolation" (docs/phase-24-stream-ch.md). Plays the
+   * given track's OWN top-level notes/hits (exactly the content NoteView.tsx edits) directly,
+   * tiling every `doc.loopBars` bars, regardless of the document's actual song position — the same
+   * transport this track's content would get in plain loop mode, borrowed for a moment even when
+   * the project is really in song mode. Every OTHER track stays silent for the duration (see
+   * tick()'s `auditionTrackId` branch) so this is a true solo-preview, not a mix. Mutually exclusive
+   * with normal playback: starting an audition here doesn't touch `playing` (TransportBar's own
+   * Play/Stop keeps reflecting the real song transport), and starting normal playback (play(),
+   * above) always clears an in-progress audition. Safe to call again to switch which track is being
+   * auditioned (or to restart the same one from bar 0) — reuses the same scheduleRepeat/tick() path
+   * play() does, just with the loop narrowed to this track's own tiling length and content pinned to
+   * one track. */
+  async auditionClip(trackId: string): Promise<void> {
+    await this.ensureStarted()
+    const doc = useStore.getState().doc
+    if (!doc) return
+    useStore.getState().setPlaying(false) // this is not "the song playing" — keep TransportBar honest
+    this.sync(doc)
+    const t = Tone.getTransport()
+    t.bpm.value = doc.bpm
+    t.loop = true
+    t.loopStart = 0
+    t.loopEnd = `${doc.loopBars}m`
+    this.auditionTrackId = trackId
+    if (this.repeatId !== null) t.clear(this.repeatId)
+    this.repeatId = t.scheduleRepeat((time) => this.tick(time), '16n', 0)
+    t.position = 0
+    t.start()
+    useStore.getState().setAuditioning(trackId)
+  }
+
+  /** Stop an in-progress clip audition (Phase 24 Stream CH) — full transport teardown (same as
+   * stop(), which this delegates to) plus clearing the audition flag. Safe to call even when
+   * nothing is auditioning (e.g. a stray click after it already ended on its own). */
+  stopAudition(): void {
+    this.auditionTrackId = null
+    useStore.getState().setAuditioning(null)
+    this.stop()
+  }
+
   stop(): void {
     const t = Tone.getTransport()
     t.stop()
@@ -2873,6 +2927,13 @@ class Engine {
     // AudioContext time (which only ever counts up from the context's own start), so it always
     // catches every pending callback regardless of how "due" it already is.
     Tone.getDraw().cancel(0)
+    // Phase 24 Stream CH: stop() is the general "everything off" path (also called BY
+    // stopAudition() above) — clear the audition flag here too so a direct engine.stop() call
+    // (e.g. TransportBar's Stop button) always leaves auditioning cleanly off, not just paused.
+    if (this.auditionTrackId !== null) {
+      this.auditionTrackId = null
+      useStore.getState().setAuditioning(null)
+    }
     this.lastLaneTriggerTime = {}
     for (const voice of this.instruments.values()) {
       try {
@@ -3057,8 +3118,16 @@ class Engine {
     const stepSeconds = Tone.Time('16n').toSeconds()
 
     for (const track of doc.tracks) {
-      const content = this.contentOf(track, step, doc.loopBars, song, doc.scenes, bar)
-      if (!content) continue // song mode: this track is silent this section
+      // Phase 24 Stream CH: while auditioning, ONLY the auditioned track plays — its own top-level
+      // notes/hits (the exact data NoteView.tsx edits), tiled every doc.loopBars bars, exactly like
+      // loop-mode content, regardless of whether the document is actually in song mode right now.
+      // Every other track is silenced outright (content = null), not just muted — real isolation.
+      const content = this.auditionTrackId
+        ? track.id === this.auditionTrackId
+          ? { notes: track.notes, hits: track.hits, automation: new Map<string, { time: number; value: number }[]>(), contentStep: step % (doc.loopBars * 16), audio: null }
+          : null
+        : this.contentOf(track, step, doc.loopBars, song, doc.scenes, bar)
+      if (!content) continue // song mode: this track is silent this section (or audition: not the auditioned track)
 
       if (track.kind === 'drums') {
         const p = coerce(track.synth)

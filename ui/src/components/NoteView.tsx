@@ -239,6 +239,13 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const currentStep = useStore((s) => s.currentStep)
   const sel = useStore((s) => s.editNoteIds)
   const setSel = useStore((s) => s.setEditNoteIds)
+  // Phase 24 Stream CH: "audition this clip" — plays THIS track's own live notes/hits (what this
+  // view edits) regardless of song position; see engine.ts's auditionClip/stopAudition doc comments
+  // for why that's otherwise inaudible in song mode. `auditioning` is true only when THIS track is
+  // the one being previewed (another track's audition, if that were ever possible concurrently,
+  // wouldn't flip this button — though in practice only one audition ever runs at a time).
+  const auditioningTrackId = useStore((s) => s.auditioningTrackId)
+  const auditioning = auditioningTrackId === track.id
   const totalSteps = loopBars * 16
   const playheadStep = resolveClipPlayhead(track, doc, currentStep, loopBars)
   // Phase 24 Stream CJ: the SAME "primary clip" ClipPropertiesPanel.tsx's numeric loop fields
@@ -726,6 +733,23 @@ export function NoteView({ track }: { track: BeatTrack }) {
         <span className="editor-title" style={{ color: track.color }}>
           {track.name}
         </span>
+        {editable && (
+          <button
+            className={`clip-audition-btn ${auditioning ? 'active' : ''}`}
+            data-action="audition-clip"
+            title={
+              auditioning
+                ? 'stop auditioning this clip'
+                : "preview this clip's own notes/hits directly, regardless of song position (silences every other track while auditioning)"
+            }
+            onClick={() => {
+              if (auditioning) void engine.stopAudition()
+              else void engine.auditionClip(track.id)
+            }}
+          >
+            {auditioning ? '■ Stop' : '▶ Preview clip'}
+          </button>
+        )}
         <span className="toolbar-tip">
           {events.length} {eventKind === 'note' ? 'note' : 'hit'}
           {events.length === 1 ? '' : 's'}

@@ -310,6 +310,22 @@ body {
   color: var(--text-dim);
   font-size: 11px;
 }
+/* Phase 24 Stream CH: "preview this clip" audition toggle — same play/stop color language as
+   .play-btn/.play-btn.stop (TransportBar), just sized for the editor toolbar. */
+.clip-audition-btn {
+  background: var(--accent);
+  color: #1a1a1a;
+  border: none;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.clip-audition-btn.active {
+  background: #e0564c;
+  color: #fff;
+}
 
 /* ---- Phase 20 Stream W: track add + project-folder controls (arrangement toolbar) ---- */
 .arr-project-controls {
