@@ -40,8 +40,10 @@ function freshSynthDoc() {
   return doc
 }
 
-test('eq7 is a valid EFFECT_TYPES member, additive to the original four', () => {
-  assert.deepEqual(EFFECT_TYPES, ['eq3', 'comp', 'distortion', 'bitcrush', 'eq7'])
+test('eq7 is a valid EFFECT_TYPES member, additive to the original four (sibling streams BE/BF have since widened the enum further with their own types, so this checks inclusion, not exact membership)', () => {
+  for (const t of ['eq3', 'comp', 'distortion', 'bitcrush', 'eq7']) {
+    assert.ok((EFFECT_TYPES as readonly string[]).includes(t), `EFFECT_TYPES should include "${t}"`)
+  }
 })
 
 test('defaultEffectChain() / isDefaultEffectChain() are UNCHANGED by adding eq7 — no phantom insert on any existing track', () => {
