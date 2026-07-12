@@ -472,6 +472,41 @@ export async function postAudioSplit(track: string, clip: string, at: number, ne
   return { firstId, secondId }
 }
 
+// ─── Pitch & Time operations + Consolidate (Phase 23 Stream BA) ─────────────────────────────────
+// The six Ableton-style one-shot ops (src/core/pitchtime.ts) plus ratchet's Consolidate action.
+// Phase 22 Stream AD shipped these CLI/MCP-only ("no daemon route needed"); this stream adds POST
+// /pitch-time (daemon.ts) so the piano roll's new operations panel can call them directly. Same
+// shape as postAddTrack/postAudioSplit: the daemon RETURNS the full raw document (it never echoes
+// its own writes over SSE), applied straight to the store — no optimistic local mirror, since a
+// batch op like reverse/legato/consolidate can touch many notes and mint/remove ids in one call.
+
+export type PitchTimeOp =
+  | { op: 'transpose'; track: string; semitones: number; noteIds?: string[] }
+  | { op: 'timeScale'; track: string; factor: number; noteIds?: string[] }
+  | { op: 'fitToScale'; track: string; root: number; scale: string; noteIds?: string[] }
+  | { op: 'invert'; track: string; axis?: number; noteIds?: string[] }
+  | { op: 'reverse'; track: string; noteIds?: string[] }
+  | { op: 'legato'; track: string; gap?: number; noteIds?: string[] }
+  | { op: 'consolidate'; track: string; noteIds?: string[] }
+
+/** Issue one Pitch & Time / Consolidate op. Throws with the daemon's error message on a 4xx (e.g.
+ * an unknown scale name or a track that isn't a note track). Returns how many notes changed, so
+ * the panel can report "no-op" (e.g. Consolidate with nothing ratcheted in scope) honestly. */
+export async function postPitchTime(body: PitchTimeOp): Promise<number> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/pitch-time`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { changed, doc } = (await res.json()) as { written: boolean; changed: number; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
+  return changed
+}
 
 // ─── vary-and-audition (Phase 15 Stream I) ──────────────────────────────────────────────────────
 // The daemon's POST /vary returns a batch of param-variants, each a list of {path,value} edits in

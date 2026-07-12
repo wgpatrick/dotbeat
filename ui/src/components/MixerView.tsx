@@ -29,6 +29,19 @@ function trackPan(t: BeatTrack): number {
 const fmtDb = (v: number) => (v <= VOL_MIN ? '-∞' : `${v > 0 ? '+' : ''}${v.toFixed(1)}`)
 const fmtPan = (v: number) => (Math.abs(v) < 0.02 ? 'C' : v < 0 ? `L${Math.round(-v * 100)}` : `R${Math.round(v * 100)}`)
 
+// ---- groove/shuffle (Phase 23 Stream BA) --------------------------------------------------------
+// Two literal track-level fields (src/core/document.ts's shuffleAmount/shuffleGrid — a reversible
+// playback-time warp, src/core/groove.ts's warpStep/unwarpStep; see docs/phase-22-stream-ad.md).
+// Phase 22 Stream AD shipped the format/CLI/MCP side with "no GUI knob yet" — this is that knob
+// pair, placed on the mixer strip per the plan's own suggestion ("wherever track-level synth params
+// already surface"). Every track kind carries these fields (BeatTrack.shuffleAmount/shuffleGrid are
+// not optional), so the knobs render for every strip, not just note tracks.
+const fmtShuffle = (v: number) => `${Math.round(v * 100)}%`
+const fmtGrid = (v: number) => {
+  const g = Math.max(1, Math.round(v))
+  return g === 1 ? '16th' : g === 2 ? '8th' : g === 4 ? '4th' : `${g}`
+}
+
 /** A vertical level fader — pointer-drag to set dB (linear over the dB range, DAW-standard). */
 function Fader({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const drag = useRef<{ startY: number; startNorm: number } | null>(null)
@@ -184,6 +197,27 @@ function ChannelStrip({ track }: { track: BeatTrack }) {
 
       <Knob label="Pan" value={pan} min={-1} max={1} format={fmtPan} onChange={(v) => postEdit(`${track.id}.pan`, String(v))} />
 
+      <div className="mixer-strip-groove" data-groove-knobs={track.id}>
+        <Knob
+          label="Shuffle"
+          value={track.shuffleAmount}
+          min={0}
+          max={1}
+          format={fmtShuffle}
+          onChange={(v) => postEdit(`${track.id}.shuffleAmount`, String(Math.max(0, Math.min(1, v))))}
+          hint="groove/shuffle amount — a reversible playback-time warp (src/core/groove.ts), never baked into stored note/hit positions; 0 = off"
+        />
+        <Knob
+          label="Grid"
+          value={track.shuffleGrid}
+          min={1}
+          max={4}
+          format={fmtGrid}
+          onChange={(v) => postEdit(`${track.id}.shuffleGrid`, String(Math.max(1, Math.round(v))))}
+          hint="which 16th-step subdivision the shuffle pairs against — 1 = swung 16ths, 2 = swung 8ths, 4 = swung quarters"
+        />
+      </div>
+
       <div className="mixer-strip-fader">
         <div className="mixer-fader-row">
           <Fader value={vol} onChange={(v) => postEdit(`${track.id}.volume`, String(v))} />
@@ -213,7 +247,7 @@ export function MixerView() {
         <span className="editor-title">mixer</span>
         <span className="toolbar-tip">
           level + pan write to the .beat (one-line diff) · mute/solo are session-only but now gate audio (incl. instrument tracks) · live per-track
-          meters (incl. instrument tracks) · badges show each strip's active insert chain
+          meters (incl. instrument tracks) · badges show each strip's active insert chain · shuffle/grid knobs write groove
         </span>
       </div>
       <div className="mixer-strips">

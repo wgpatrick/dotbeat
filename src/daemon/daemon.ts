@@ -74,6 +74,15 @@ import {
   type BeatPreset,
   type EffectType,
 } from '../core/index.js'
+// Phase 23 Stream BA: the six Pitch & Time operations + Consolidate, over HTTP. Phase 22 Stream AD
+// shipped these as CLI/MCP-only edit primitives ("no daemon route, matching quantize's own
+// precedent" — the generic {path,value} /edit channel covers everything grammar-level quantize
+// touches). But unlike quantize (one scalar per note), each of these is a whole-track batch op with
+// its own parameter shape (semitones/factor/root+scale/axis/gap) that doesn't fit postEdit's single
+// {path,value} grammar any better than /song or /audio-split's ops do — so this route mirrors THEIR
+// additive shape exactly: one POST, one op, RETURNS the full raw document (no SSE echo of the
+// daemon's own writes) so the GUI applies it directly, same as postAddTrack/postEffectAdd.
+import { transposeNotes, timeScaleNotes, fitToScaleNotes, invertNotes, reverseNotes, legatoNotes, consolidateRatchet, BeatPitchTimeError } from '../core/pitchtime.js'
 // D3/D10 versioning surface over HTTP: the GUI's history panel (Phase 15 Stream H) reads the
 // checkpoint list and issues "go back" through these. All of it reuses src/history's real git-backed
 // functions — the daemon adds no versioning logic, just an HTTP face on the same verbs `beat
@@ -752,6 +761,76 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // Phase 23 Stream BA: the six Pitch & Time operations + Consolidate (src/core/pitchtime.ts),
+    // reachable from the piano-roll's new operations panel. One op per call:
+    //   { op:'transpose',  track, semitones, noteIds? }
+    //   { op:'timeScale',  track, factor, noteIds? }
+    //   { op:'fitToScale', track, root, scale, noteIds? }
+    //   { op:'invert',     track, axis?, noteIds? }
+    //   { op:'reverse',    track, noteIds? }
+    //   { op:'legato',     track, gap?, noteIds? }
+    //   { op:'consolidate', track, noteIds? }
+    // Returns the full raw document (no SSE echo of the daemon's own writes), same as /add-track.
+    if (req.method === 'POST' && url.pathname === '/pitch-time') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as {
+            op?: unknown
+            track?: unknown
+            noteIds?: unknown
+            semitones?: unknown
+            factor?: unknown
+            root?: unknown
+            scale?: unknown
+            axis?: unknown
+            gap?: unknown
+          }
+          if (typeof b.track !== 'string') {
+            json(res, 400, { error: 'body must include track: string' })
+            return
+          }
+          const opts = Array.isArray(b.noteIds) ? { noteIds: (b.noteIds as unknown[]).map(String) } : {}
+          let result: { doc: BeatDocument; changed: number }
+          switch (b.op) {
+            case 'transpose':
+              if (typeof b.semitones !== 'number') throw new BeatPitchTimeError('transpose needs semitones: number')
+              result = transposeNotes(doc, b.track, b.semitones, opts)
+              break
+            case 'timeScale':
+              if (typeof b.factor !== 'number') throw new BeatPitchTimeError('timeScale needs factor: number')
+              result = timeScaleNotes(doc, b.track, b.factor, opts)
+              break
+            case 'fitToScale':
+              if (typeof b.root !== 'number' || typeof b.scale !== 'string') throw new BeatPitchTimeError('fitToScale needs root: number, scale: string')
+              result = fitToScaleNotes(doc, b.track, b.root, b.scale, opts)
+              break
+            case 'invert':
+              result = invertNotes(doc, b.track, typeof b.axis === 'number' ? b.axis : undefined, opts)
+              break
+            case 'reverse':
+              result = reverseNotes(doc, b.track, opts)
+              break
+            case 'legato':
+              result = legatoNotes(doc, b.track, { ...opts, ...(typeof b.gap === 'number' ? { gap: b.gap } : {}) })
+              break
+            case 'consolidate':
+              result = consolidateRatchet(doc, b.track, opts)
+              break
+            default:
+              json(res, 400, { error: `unknown op "${String(b.op)}" (expected transpose|timeScale|fitToScale|invert|reverse|legato|consolidate)` })
+              return
+          }
+          const written = writeIfChanged(result.doc)
+          revalidateSelection()
+          json(res, 200, { written, changed: result.changed, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatPitchTimeError || err instanceof SyntaxError ? 400 : 500
           json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return

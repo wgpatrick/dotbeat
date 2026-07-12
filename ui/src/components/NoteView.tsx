@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { declaredLaneNames, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
-import { postEdit, postSelection } from '../daemon/bridge'
+import { postEdit, postSelection, postPitchTime, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
@@ -42,8 +42,23 @@ const ROW_H = 12
 const DEFAULT_DUR = 2 // steps (an eighth note) — melodic notes only; a fresh hit has NO duration (a marker)
 const DEFAULT_VEL = 0.8
 const VEL_LANE_H = 46 // px — the velocity-lane strip below the note grid
+const CHANCE_LANE_H = 24 // px — the chance-paint strip below the velocity lane (Phase 23 Stream BA)
 const DRAG_THRESHOLD = 3 // px a pointer must move before a grid press counts as a marquee (vs. a tap-to-add)
 const MARKER_W = 7 // px — a durationless hit's fixed-width marker (a diamond)
+
+// ---- ratchet visual glyph (Phase 23 Stream BA) --------------------------------------------------
+// A lightweight, DISPLAY-ONLY mirror of src/core/pitchtime.ts's ratchetSlots edge math (ui/ has no
+// build-time dependency on src/core — see engine.ts's own hand-mirror of the exact same formula for
+// live playback). Returns the fractional (0..1) INTERNAL division points for `count` ratchet
+// repeats shaped by `curve`, used only to paint tick marks on a ratcheted note in the piano roll —
+// not audio-accurate scheduling (that's ratchetSlots/engine.ts's job).
+function ratchetTicks(count: number, curve: number): number[] {
+  if (count <= 1) return []
+  const k = curve >= 0 ? 1 + curve * 3 : 1 / (1 - curve * 3)
+  const ticks: number[] = []
+  for (let i = 1; i < count; i++) ticks.push(Math.pow(i / count, k))
+  return ticks
+}
 
 // ---- piano-key strip / pitch reference (Phase 19 Stream U, docs/phase-19-piano-roll-keys.md) ----
 const KEY_W = 36 // px — width of the left-gutter strip (piano keys, or lane-name labels)
@@ -131,6 +146,12 @@ interface EditorEvent {
   duration: number | undefined
   velocity: number
   row: number
+  // v0.10 note-only fields (Phase 23 Stream BA) — undefined for a drum hit (BeatDrumHit carries
+  // none of these). Drive the piano-roll's at-a-glance chance/ratchet glyphs and the chance-paint
+  // lane; the values themselves are edited via NoteInspector or the chance lane below, never here.
+  chance?: number
+  ratchetCount?: number
+  ratchetCurve?: number
 }
 
 type GroupEv = { id: string; origStart: number; origRow: number; origDur: number | undefined }
@@ -179,7 +200,16 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const axis = isDrums ? buildLaneAxis(track) : buildPitchAxis(track.notes)
   const events: EditorEvent[] = isDrums
     ? track.hits.map((h) => ({ id: h.id, start: h.start, duration: h.duration, velocity: h.velocity, row: axis.rowOfValue(h.lane) }))
-    : track.notes.map((n) => ({ id: n.id, start: n.start, duration: n.duration, velocity: n.velocity, row: axis.rowOfValue(n.pitch) }))
+    : track.notes.map((n) => ({
+        id: n.id,
+        start: n.start,
+        duration: n.duration,
+        velocity: n.velocity,
+        row: axis.rowOfValue(n.pitch),
+        chance: n.chance,
+        ratchetCount: n.ratchetCount,
+        ratchetCurve: n.ratchetCurve,
+      }))
 
   const selSet = new Set(sel)
   // Preview overrides during a drag: a map keyed by event id (a group move/resize previews many at once).
@@ -195,6 +225,13 @@ export function NoteView({ track }: { track: BeatTrack }) {
   // one (installKitLane's targetLane override).
   const [dropHoverRow, setDropHoverRow] = useState<number | null>(null)
   const velGesture = useRef<VelGesture | null>(null)
+  // Chance-paint lane (Phase 23 Stream BA, research 22 §1.4's PropertyDrawModifier reference): a
+  // draw-ACROSS-notes gesture, unlike the velocity lane above (which anchors to the one note
+  // pressed). `chancePreview` accumulates every note the pointer has painted so far this drag, keyed
+  // by note id, so multiple notes update live as the pointer sweeps across them; commit fans out one
+  // postEdit per touched note on release. Note-only (drum hits carry no chance field).
+  const [chancePreview, setChancePreview] = useState<Record<string, number> | null>(null)
+  const chanceGesture = useRef<{ rect: DOMRect } | null>(null)
 
   const rows = axis.rowCount
   const gridH = rows * ROW_H
@@ -473,10 +510,63 @@ export function NoteView({ track }: { track: BeatTrack }) {
     postEdit(`${track.id}.${editPrefix}.${g.id}.velocity`, String(p.velocity))
   }
 
+  // ---- chance (draw-across-notes paint gesture, Phase 23 Stream BA) ----
+  // Y within the lane -> 0-100 chance (top = 100%/always fires, bottom = 0%/never) — same convention
+  // as velocityFromY, just an int percent instead of a 0..1 float.
+  function chanceValueFromY(rect: DOMRect, clientY: number): number {
+    const y = Math.max(0, Math.min(rect.height, clientY - rect.top))
+    return Math.round(Math.max(0, Math.min(1, 1 - y / rect.height)) * 100)
+  }
+
+  /** Paints every NOTE whose x-range the pointer is currently over into `acc` (mutated in place) at
+   * the current Y's chance value — the "draw across" part: unlike the velocity gesture (anchored to
+   * one bar), this re-evaluates which note is under the pointer on every move. */
+  function paintChanceAt(rect: DOMRect, clientX: number, clientY: number, acc: Record<string, number>) {
+    const stepW = rect.width / totalSteps
+    const value = chanceValueFromY(rect, clientY)
+    const x = clientX - rect.left
+    for (const ev of events) {
+      const w = ev.duration ?? 0
+      const x0 = ev.start * stepW
+      const x1 = x0 + Math.max(w * stepW, MARKER_W)
+      if (x >= x0 && x <= x1) acc[ev.id] = value
+    }
+  }
+
+  function onChanceLanePointerDown(e: React.PointerEvent) {
+    if (!editable || isDrums) return
+    e.preventDefault()
+    const rect = e.currentTarget.getBoundingClientRect()
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    chanceGesture.current = { rect }
+    const acc: Record<string, number> = {}
+    paintChanceAt(rect, e.clientX, e.clientY, acc)
+    setChancePreview(acc)
+  }
+
+  function onChanceLanePointerMove(e: React.PointerEvent) {
+    const g = chanceGesture.current
+    if (!g) return
+    setChancePreview((prev) => {
+      const acc = { ...(prev ?? {}) }
+      paintChanceAt(g.rect, e.clientX, e.clientY, acc)
+      return acc
+    })
+  }
+
+  function onChanceLanePointerUp() {
+    const g = chanceGesture.current
+    const p = chancePreview
+    chanceGesture.current = null
+    setChancePreview(null)
+    if (!g || !p) return
+    for (const [id, value] of Object.entries(p)) postEdit(`${track.id}.note.${id}.chance`, String(value))
+  }
+
   const tip = editable
     ? isDrums
       ? 'click a lane label to preview + select · click empty grid to add a hit (a marker — no duration) · drag to marquee-select · shift/cmd-click to multi-select · drag a hit (or group) to move · drag its right edge to gate/sustain it (marker -> bar) · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand (off-grid) placement'
-      : 'click a key to preview · click empty grid to add · drag to marquee-select · shift/cmd-click to multi-select · drag a note (or group) to move · drag its right edge to resize · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand placement'
+      : 'click a key to preview · click empty grid to add · drag to marquee-select · shift/cmd-click to multi-select · drag a note (or group) to move · drag its right edge to resize · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand placement · dashed/dim = chance<100 · ticks = ratchet · drag the chance lane across notes to paint probability'
     : ''
 
   // Rubber-band overlay geometry (grid-relative px), only while an actual drag is in progress.
@@ -623,17 +713,27 @@ export function NoteView({ track }: { track: BeatTrack }) {
           {events.map((ev) => {
             const shown = preview?.[ev.id] ?? ev
             const isMarker = shown.duration === undefined
+            // v0.10 at-a-glance glyphs (Phase 23 Stream BA) — note-only (ev.chance/ratchetCount are
+            // undefined for a drum hit): a note with chance<100 draws dimmed + dashed (it might not
+            // fire this pass); a ratcheted note (ratchetCount>1) draws internal tick marks at its
+            // repeat boundaries. Neither changes the underlying velocity-driven opacity math, just
+            // multiplies/overlays it, so a quiet AND probabilistic note still reads as both.
+            const chance = ev.chance
+            const isChancy = chance !== undefined && chance < 100
+            const ratchetCount = ev.ratchetCount ?? 1
+            const isRatcheted = ratchetCount > 1
+            const ticks = isRatcheted ? ratchetTicks(ratchetCount, ev.ratchetCurve ?? 0) : []
             return (
               <div
                 key={ev.id}
-                className={`noteview-note${selSet.has(ev.id) ? ' selected' : ''}${isMarker ? ' marker' : ''}`}
+                className={`noteview-note${selSet.has(ev.id) ? ' selected' : ''}${isMarker ? ' marker' : ''}${isChancy ? ' chancy' : ''}${isRatcheted ? ' ratcheted' : ''}`}
                 style={{
                   left: `calc(${shown.start} * var(--note-step-w))`,
                   width: isMarker ? `${MARKER_W}px` : `calc(${shown.duration} * var(--note-step-w) - 1px)`,
                   top: shown.row * ROW_H,
                   height: ROW_H - 1,
                   background: track.color,
-                  opacity: 0.45 + ev.velocity * 0.55,
+                  opacity: (0.45 + ev.velocity * 0.55) * (isChancy ? 0.6 : 1),
                   // A marker (no duration — a one-shot trigger) is a small pill, not a bar; a bar
                   // has square corners like the melodic notes. No transform/rotation on the
                   // container itself, so the resize-handle child's pointer math stays screen-space.
@@ -641,10 +741,14 @@ export function NoteView({ track }: { track: BeatTrack }) {
                 }}
                 title={
                   eventKind === 'note'
-                    ? `pitch ${axis.valueOfRow(shown.row)} · start ${shown.start} · dur ${shown.duration} · vel ${ev.velocity}`
+                    ? `pitch ${axis.valueOfRow(shown.row)} · start ${shown.start} · dur ${shown.duration} · vel ${ev.velocity}` +
+                      (isChancy ? ` · chance ${chance}%` : '') +
+                      (isRatcheted ? ` · ratchet x${ratchetCount}` : '')
                     : `${axis.valueOfRow(shown.row)} · start ${shown.start}${shown.duration !== undefined ? ` · dur ${shown.duration}` : ' · one-shot'} · vel ${ev.velocity}`
                 }
                 data-note-id={ev.id}
+                data-chance={isChancy ? chance : undefined}
+                data-ratchet-count={isRatcheted ? ratchetCount : undefined}
                 onDoubleClick={(e) => {
                   e.stopPropagation()
                   deleteEvent(ev.id)
@@ -653,6 +757,9 @@ export function NoteView({ track }: { track: BeatTrack }) {
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
               >
+                {ticks.map((t, i) => (
+                  <div key={`rt${i}`} className="noteview-ratchet-tick" style={{ left: `${t * 100}%` }} />
+                ))}
                 {editable && <div className="noteview-resize" onPointerDown={(e) => startGesture('resize', ev, e)} />}
               </div>
             )
@@ -692,11 +799,199 @@ export function NoteView({ track }: { track: BeatTrack }) {
                 )
               })}
             </div>
+            {/* Chance lane (Phase 23 Stream BA, research 22 §1.4's PropertyDrawModifier reference):
+                the draw-across-notes gesture — drag horizontally and every note the pointer sweeps
+                over gets painted to the current Y's chance value (top = 100%, bottom = 0%), unlike
+                the velocity lane above which only ever edits the one bar originally pressed. Note-
+                only (drum hits carry no chance field). */}
+            {!isDrums && (
+              <div
+                className="noteview-chance-lane"
+                style={{ height: CHANCE_LANE_H, width: `calc(${totalSteps} * var(--note-step-w))` }}
+                onPointerDown={onChanceLanePointerDown}
+                onPointerMove={onChanceLanePointerMove}
+                onPointerUp={onChanceLanePointerUp}
+                title="drag across notes to paint their chance (probability of firing each playback pass) — top = 100%, bottom = 0%"
+              >
+                {Array.from({ length: loopBars }, (_, b) => (
+                  <div key={b} className="noteview-barline" style={{ left: `calc(${b * 16} * var(--note-step-w))` }} />
+                ))}
+                {events.map((ev) => {
+                  const chance = chancePreview?.[ev.id] ?? ev.chance ?? 100
+                  const barH = Math.max(2, Math.round((chance / 100) * CHANCE_LANE_H))
+                  const w = ev.duration ?? 0
+                  return (
+                    <div
+                      key={ev.id}
+                      className={`noteview-chance-bar${selSet.has(ev.id) ? ' selected' : ''}${chance < 100 ? ' active' : ''}`}
+                      style={{
+                        left: `calc(${ev.start} * var(--note-step-w))`,
+                        width: `calc(${w} * var(--note-step-w) - 1px)`,
+                        height: barH,
+                      }}
+                      title={`chance ${chance}%`}
+                      data-chance-note-id={ev.id}
+                    />
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
+      {!isDrums && <PitchTimePanel track={track} noteIds={sel} />}
       {editable && eventKind === 'note' && sel.length === 1 && (
         <NoteInspector key={sel[0]} note={track.notes.find((n) => n.id === sel[0])} trackId={track.id} />
+      )}
+    </div>
+  )
+}
+
+// ---- Pitch & Time operations panel (Phase 23 Stream BA) ----------------------------------------
+// The six Ableton "Clip View > Pitch & Time" one-shot ops (transpose/×2÷2/fit-to-scale/invert/
+// reverse/legato — src/core/pitchtime.ts) plus ratchet's Consolidate action, reachable from the
+// note-selection context research 18 §2 describes: shipped CLI/MCP-only by Phase 22 Stream AD ("no
+// daemon route... this matches quantize's own precedent" — but unlike quantize, each of these is a
+// whole-track BATCH op with its own parameter shape, not a single {path,value} scalar, so it needed
+// its own additive daemon route the same way /song and /audio-split did — see daemon.ts's POST
+// /pitch-time and bridge.ts's postPitchTime). Always visible for a note (non-drum) track — NOT
+// gated on a selection existing, since every op works over "the whole track" when nothing is
+// selected (the exact same `--notes` optional-scoping vocabulary the CLI/MCP tools already use).
+
+// Hand-mirrors src/core/pitchtime.ts's SCALES keys exactly (ui/ has no build-time dependency on
+// src/core — the same convention groove/chance/ratchet's engine-side mirrors already use).
+const SCALE_NAMES = [
+  'chromatic',
+  'major',
+  'minor',
+  'dorian',
+  'phrygian',
+  'lydian',
+  'mixolydian',
+  'locrian',
+  'harmonicMinor',
+  'melodicMinor',
+  'majorPentatonic',
+  'minorPentatonic',
+  'blues',
+] as const
+const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+
+function PitchTimePanel({ track, noteIds }: { track: BeatTrack; noteIds: string[] }) {
+  const [semitones, setSemitones] = useState(1)
+  const [gap, setGap] = useState(0)
+  const [root, setRoot] = useState(0)
+  const [scale, setScale] = useState<string>('major')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const scoped = noteIds.length > 0 ? noteIds : undefined
+  const scopeLabel = noteIds.length > 0 ? `${noteIds.length} note${noteIds.length === 1 ? '' : 's'} selected` : 'whole track'
+
+  async function run(body: PitchTimeOp) {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const changed = await postPitchTime(body)
+      setMsg(changed > 0 ? `${changed} note${changed === 1 ? '' : 's'} changed` : 'no change (already at rest)')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="pitch-time-panel" title="Pitch &amp; Time — one-shot ops (research 18's Clip View row); each is a normal diff, nothing is stored as clip state">
+      <span className="pitch-time-title">Pitch &amp; Time</span>
+      <span className="pitch-time-scope">{scopeLabel}</span>
+
+      <label className="pitch-time-field" title="shift pitch by N semitones, clamped to MIDI 0-127">
+        <input
+          type="number"
+          step={1}
+          value={semitones}
+          onChange={(e) => setSemitones(Number(e.target.value))}
+          data-pitch-time-input="semitones"
+        />
+        <button disabled={busy} data-pitch-time-op="transpose" onClick={() => run({ op: 'transpose', track: track.id, semitones, noteIds: scoped })}>
+          Transpose
+        </button>
+      </label>
+
+      <button
+        disabled={busy}
+        data-pitch-time-op="time-scale-2"
+        title="double every scoped note's start/duration, anchored at the earliest note"
+        onClick={() => run({ op: 'timeScale', track: track.id, factor: 2, noteIds: scoped })}
+      >
+        ×2
+      </button>
+      <button
+        disabled={busy}
+        data-pitch-time-op="time-scale-half"
+        title="halve every scoped note's start/duration, anchored at the earliest note"
+        onClick={() => run({ op: 'timeScale', track: track.id, factor: 0.5, noteIds: scoped })}
+      >
+        ÷2
+      </button>
+
+      <label className="pitch-time-field" title="snap every scoped note's pitch to the nearest tone in root/scale">
+        <select value={root} onChange={(e) => setRoot(Number(e.target.value))} data-pitch-time-input="root">
+          {PITCH_CLASSES.map((n, i) => (
+            <option key={n} value={i}>
+              {n}
+            </option>
+          ))}
+        </select>
+        <select value={scale} onChange={(e) => setScale(e.target.value)} data-pitch-time-input="scale">
+          {SCALE_NAMES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <button disabled={busy} data-pitch-time-op="fit-scale" onClick={() => run({ op: 'fitToScale', track: track.id, root, scale, noteIds: scoped })}>
+          Fit to Scale
+        </button>
+      </label>
+
+      <button
+        disabled={busy}
+        data-pitch-time-op="invert"
+        title="mirror pitch around the scoped notes' own mean pitch"
+        onClick={() => run({ op: 'invert', track: track.id, noteIds: scoped })}
+      >
+        Invert
+      </button>
+      <button
+        disabled={busy}
+        data-pitch-time-op="reverse"
+        title="tape-reverse the scoped notes' time span (playback order flips, durations unchanged)"
+        onClick={() => run({ op: 'reverse', track: track.id, noteIds: scoped })}
+      >
+        Reverse
+      </button>
+
+      <label className="pitch-time-field" title="extend/shorten each scoped note to the next note's start; gap leaves a small silence instead">
+        <input type="number" min={0} step={1} value={gap} onChange={(e) => setGap(Number(e.target.value))} data-pitch-time-input="gap" />
+        <button disabled={busy} data-pitch-time-op="legato" onClick={() => run({ op: 'legato', track: track.id, gap, noteIds: scoped })}>
+          Legato
+        </button>
+      </label>
+
+      <button
+        disabled={busy}
+        data-pitch-time-op="consolidate"
+        title="bake ratcheted notes (ratchetCount>1) back into discrete notes"
+        onClick={() => run({ op: 'consolidate', track: track.id, noteIds: scoped })}
+      >
+        Consolidate
+      </button>
+
+      {msg && (
+        <span className="pitch-time-msg" data-pitch-time-msg>
+          {msg}
+        </span>
       )}
     </div>
   )
@@ -723,25 +1018,25 @@ function NoteInspector({ note, trackId }: { note: BeatNote | undefined; trackId:
       <span className="note-inspector-title">note {note.id}</span>
       <label className="note-inspector-field">
         chance
-        <input type="number" min={0} max={100} step={1} defaultValue={note.chance} onChange={field('chance')} title="0-100: probability this note fires on any given playback pass (100 = always)" />
+        <input type="number" min={0} max={100} step={1} defaultValue={note.chance} onChange={field('chance')} title="0-100: probability this note fires on any given playback pass (100 = always)" data-note-field="chance" />
       </label>
       <label className="note-inspector-field">
         cent
-        <input type="number" min={-50} max={50} step={0.5} defaultValue={note.cent} onChange={field('cent')} title="-50..50: micro-tuning offset in cents, independent of semitone pitch" />
+        <input type="number" min={-50} max={50} step={0.5} defaultValue={note.cent} onChange={field('cent')} title="-50..50: micro-tuning offset in cents, independent of semitone pitch" data-note-field="cent" />
       </label>
       <label className="note-inspector-field">
         ratchet
-        <input type="number" min={1} max={16} step={1} defaultValue={note.ratchetCount} onChange={field('ratchetCount')} title="1-16: repeat this note N times within its own duration (1 = no ratchet)" />
+        <input type="number" min={1} max={16} step={1} defaultValue={note.ratchetCount} onChange={field('ratchetCount')} title="1-16: repeat this note N times within its own duration (1 = no ratchet)" data-note-field="ratchetCount" />
       </label>
       {note.ratchetCount > 1 && (
         <>
           <label className="note-inspector-field">
             curve
-            <input type="number" min={-1} max={1} step={0.1} defaultValue={note.ratchetCurve} onChange={field('ratchetCurve')} title="-1..1: shapes the spacing between ratchet repeats (0 = even)" />
+            <input type="number" min={-1} max={1} step={0.1} defaultValue={note.ratchetCurve} onChange={field('ratchetCurve')} title="-1..1: shapes the spacing between ratchet repeats (0 = even)" data-note-field="ratchetCurve" />
           </label>
           <label className="note-inspector-field">
             gate
-            <input type="number" min={0.01} max={1} step={0.05} defaultValue={note.ratchetLength} onChange={field('ratchetLength')} title="0..1: each repeat's sounding length as a fraction of its own slot (1 = fills it)" />
+            <input type="number" min={0.01} max={1} step={0.05} defaultValue={note.ratchetLength} onChange={field('ratchetLength')} title="0..1: each repeat's sounding length as a fraction of its own slot (1 = fills it)" data-note-field="ratchetLength" />
           </label>
         </>
       )}
