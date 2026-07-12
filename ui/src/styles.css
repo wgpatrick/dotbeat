@@ -2714,6 +2714,45 @@ body {
   color: var(--text-dim);
   font-size: 10px;
 }
+
+/* Phase 27 Stream EJ (research/73 §4 item 1) — a distinct per-content-type glyph, ahead of the
+   preview button, so a scan of the rail no longer relies on the identical preview-circle as its
+   only "icon." Sized to sit quietly next to the 20px preview button, colored to match dim row
+   text at rest and pick up the accent on hover/preview, same as the row's other chrome. */
+.lib-type-icon {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  color: var(--text-dim);
+  display: block;
+}
+.lib-row:hover .lib-type-icon,
+.lib-row-previewing .lib-type-icon {
+  color: var(--accent);
+}
+
+/* Phase 27 Stream EJ (research/73 §4 item 2) — a real in-place "currently previewing" indicator on
+   the ROW itself, not just the button: a soft pulsing amber wash (reusing the drop-target-hover
+   accent tint already established at styles.css:2779) plus an accent-colored name, so scanning the
+   list shows which item is playing without having to focus on the tiny 20px button. Cleared by
+   ContentBrowser's playingKey state — either the row's own preview duration elapses, or another
+   row starts previewing and takes over playingKey first. */
+@keyframes lib-row-pulse {
+  0%,
+  100% {
+    background: rgba(224, 161, 60, 0.09);
+  }
+  50% {
+    background: rgba(224, 161, 60, 0.24);
+  }
+}
+.lib-row-previewing {
+  animation: lib-row-pulse 1.1s ease-in-out infinite;
+}
+.lib-row-previewing .lib-row-name {
+  color: var(--accent);
+  font-weight: 600;
+}
 .lib-preview-btn {
   appearance: none;
   flex: 0 0 auto;
@@ -2737,6 +2776,11 @@ body {
 .lib-preview-btn:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+.lib-preview-btn-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(224, 161, 60, 0.22);
 }
 .lib-add-track-btn {
   appearance: none;

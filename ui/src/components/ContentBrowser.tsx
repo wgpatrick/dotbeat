@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import {
@@ -52,6 +52,93 @@ function groupByCategory(presets: LibraryPreset[], order: readonly string[]): [s
   return order.filter((c) => byCat.has(c)).map((c) => [c, byCat.get(c)!.sort((a, b) => a.name.localeCompare(b.name))])
 }
 
+// Phase 27 Stream EJ (docs/research/73-ux-browser.md §4 item 1) — every row used to render the
+// identical round preview-circle as its only "icon," with zero visual differentiation between a
+// synth preset, a drum preset, a whole kit, a single kit lane, and a soundfont bank. `TypeIcon`
+// gives each of those five content types its own small monochrome glyph, rendered ahead of the
+// (still-functional) preview button rather than replacing it — the preview button keeps doing its
+// one job (audition), the type icon does the new one (say what this row IS at a glance).
+type LibraryItemType = 'preset-synth' | 'preset-drums' | 'kit' | 'kit-lane' | 'soundfont'
+
+const TYPE_ICON_LABEL: Record<LibraryItemType, string> = {
+  'preset-synth': 'synth preset',
+  'preset-drums': 'drum preset',
+  kit: 'drum kit',
+  'kit-lane': 'one-shot sample',
+  soundfont: 'soundfont bank',
+}
+
+function TypeIcon({ type }: { type: LibraryItemType }) {
+  return (
+    <svg
+      className={`lib-type-icon lib-type-icon-${type}`}
+      width="12"
+      height="12"
+      viewBox="0 0 14 14"
+      aria-hidden="true"
+      role="img"
+      data-type-icon={type}
+    >
+      <title>{TYPE_ICON_LABEL[type]}</title>
+      {type === 'preset-synth' && (
+        // a wavy oscillator line — the one glyph in the set that reads as "synthesized tone"
+        <path
+          d="M1 7c1.2 0 1.2-4 2.4-4s1.2 8 2.4 8 1.2-8 2.4-8 1.2 4 2.4 4h1.4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+      {type === 'preset-drums' && (
+        // a small drum/cylinder shape
+        <>
+          <ellipse cx="7" cy="4.2" rx="4.6" ry="2" fill="none" stroke="currentColor" strokeWidth="1.2" />
+          <path
+            d="M2.4 4.2v4.6c0 1.1 2.06 2 4.6 2s4.6-.9 4.6-2V4.2"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.2"
+          />
+        </>
+      )}
+      {type === 'kit' && (
+        // a 2x2 grid — a bundle of lanes, distinct from the single-lane bar-chart glyph
+        <>
+          <rect x="1.5" y="1.5" width="4.2" height="4.2" rx="0.6" fill="none" stroke="currentColor" strokeWidth="1.1" />
+          <rect x="8.3" y="1.5" width="4.2" height="4.2" rx="0.6" fill="none" stroke="currentColor" strokeWidth="1.1" />
+          <rect x="1.5" y="8.3" width="4.2" height="4.2" rx="0.6" fill="none" stroke="currentColor" strokeWidth="1.1" />
+          <rect x="8.3" y="8.3" width="4.2" height="4.2" rx="0.6" fill="none" stroke="currentColor" strokeWidth="1.1" />
+        </>
+      )}
+      {type === 'kit-lane' && (
+        // three solid bars — a miniature one-shot waveform, not a continuous synth curve
+        <>
+          <rect x="2" y="7.5" width="2" height="4.5" rx="0.4" fill="currentColor" />
+          <rect x="6" y="3.5" width="2" height="8.5" rx="0.4" fill="currentColor" />
+          <rect x="10" y="5.5" width="2" height="6.5" rx="0.4" fill="currentColor" />
+        </>
+      )}
+      {type === 'soundfont' && (
+        // a beamed note pair — the conventional "instrument bank" glyph
+        <>
+          <circle cx="4" cy="10.5" r="2.1" fill="currentColor" />
+          <circle cx="10.4" cy="9.3" r="2.1" fill="currentColor" />
+          <path
+            d="M6 10.5V2.2l6.4-1.4v7.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </>
+      )}
+    </svg>
+  )
+}
+
 /** A collapsible top-level section (Synth Presets / Drum Presets / Kits / SoundFonts). Local open
  * state only — this is browse-UI state, not document/session state, so it doesn't belong in the
  * shared store. */
@@ -69,38 +156,81 @@ function Section({ title, count, children }: { title: string; count: number; chi
   )
 }
 
-function PreviewButton({ onPreview, title }: { onPreview: () => Promise<void>; title: string }) {
+// Phase 27 Stream EJ (research/73 §4 item 2) — `busy` alone was never a real "playing" signal: for
+// three of the four preview paths (previewSynthPreset/previewDrumPreset/previewSoundfont) the
+// returned promise resolves as soon as the note/voice is FIRED, not when it finishes sounding
+// (engine.ts schedules its own teardown via setTimeout well after the promise already settled), so
+// the old `busy ? '…' : '▶'` swap was visible for a few milliseconds at most. `durationMs` is a
+// deliberate approximation of each preview path's actual audible length (matched to the teardown
+// timers in `ui/src/audio/engine.ts`: previewSynthPreset ~1800ms, previewDrumPreset ~1400ms,
+// previewSoundfont ~1200ms; kit-lane one-shots don't expose a length up front, so ~900ms — a
+// typical kick/snare/hat sample — is used) so the row can show a real in-place "currently playing"
+// window instead of a flash. `onStart`/`onEnd` let the ROW (not just this button) carry the visual
+// state — see `lib-row-previewing` in ContentBrowser's row components below.
+function PreviewButton({
+  onPreview,
+  title,
+  active,
+  durationMs,
+  onStart,
+  onEnd,
+}: {
+  onPreview: () => Promise<void>
+  title: string
+  active: boolean
+  durationMs: number
+  onStart: () => void
+  onEnd: () => void
+}) {
   const [busy, setBusy] = useState(false)
   return (
     <button
-      className="lib-preview-btn"
+      className={`lib-preview-btn${active ? ' lib-preview-btn-active' : ''}`}
       data-action="preview"
       disabled={busy}
       title={title}
       onClick={(e) => {
         e.stopPropagation()
         setBusy(true)
+        onStart()
         onPreview()
           .catch((err) => console.warn('[library] preview failed:', err))
           .finally(() => setBusy(false))
+        window.setTimeout(onEnd, durationMs)
       }}
     >
-      {busy ? '…' : '▶'}
+      {busy ? '…' : active ? '❚❚' : '▶'}
     </button>
   )
 }
 
-function PresetRow({ preset }: { preset: LibraryPreset }) {
+function PresetRow({
+  preset,
+  playingKey,
+  setPlayingKey,
+}: {
+  preset: LibraryPreset
+  playingKey: string | null
+  setPlayingKey: Dispatch<SetStateAction<string | null>>
+}) {
+  const previewKey = `preset:${preset.name}`
+  const isPlaying = playingKey === previewKey
   return (
     <div
-      className="lib-row"
+      className={`lib-row${isPlaying ? ' lib-row-previewing' : ''}`}
       draggable
       data-preset={preset.name}
+      data-previewing={isPlaying || undefined}
       onDragStart={(e) => setDragPayload(e.dataTransfer, { type: 'preset', name: preset.name, kind: preset.kind })}
       title={preset.description}
     >
+      <TypeIcon type={preset.kind === 'drums' ? 'preset-drums' : 'preset-synth'} />
       <PreviewButton
         title={`preview ${preset.name}`}
+        active={isPlaying}
+        durationMs={preset.kind === 'drums' ? 1400 : 1800}
+        onStart={() => setPlayingKey(previewKey)}
+        onEnd={() => setPlayingKey((cur) => (cur === previewKey ? null : cur))}
         onPreview={() => (preset.kind === 'drums' ? engine.previewDrumPreset(preset.params) : engine.previewSynthPreset(preset.params))}
       />
       <span className="lib-row-name">{preset.name}</span>
@@ -109,18 +239,36 @@ function PresetRow({ preset }: { preset: LibraryPreset }) {
   )
 }
 
-function KitLaneRow({ kit, lane }: { kit: string; lane: LibraryKitLane }) {
+function KitLaneRow({
+  kit,
+  lane,
+  playingKey,
+  setPlayingKey,
+}: {
+  kit: string
+  lane: LibraryKitLane
+  playingKey: string | null
+  setPlayingKey: Dispatch<SetStateAction<string | null>>
+}) {
+  const previewKey = `kit-lane:${kit}/${lane.lane}`
+  const isPlaying = playingKey === previewKey
   return (
     <div
-      className="lib-row lib-kit-lane"
+      className={`lib-row lib-kit-lane${isPlaying ? ' lib-row-previewing' : ''}`}
       draggable
       data-kit={kit}
       data-lane={lane.lane}
+      data-previewing={isPlaying || undefined}
       onDragStart={(e) => setDragPayload(e.dataTransfer, { type: 'kit-lane', kit, lane: lane.lane })}
       title={`${kit}/${lane.file} — drag onto a drum lane, or onto an audio track to create a clip`}
     >
+      <TypeIcon type="kit-lane" />
       <PreviewButton
         title={`preview ${kit}/${lane.file}`}
+        active={isPlaying}
+        durationMs={900}
+        onStart={() => setPlayingKey(previewKey)}
+        onEnd={() => setPlayingKey((cur) => (cur === previewKey ? null : cur))}
         onPreview={async () => {
           const bytes = await fetchLibraryFile(`${kit}/${lane.file}`)
           await engine.previewBuffer(bytes)
@@ -131,7 +279,15 @@ function KitLaneRow({ kit, lane }: { kit: string; lane: LibraryKitLane }) {
   )
 }
 
-function KitGroup({ kit }: { kit: LibraryKit }) {
+function KitGroup({
+  kit,
+  playingKey,
+  setPlayingKey,
+}: {
+  kit: LibraryKit
+  playingKey: string | null
+  setPlayingKey: Dispatch<SetStateAction<string | null>>
+}) {
   return (
     <div className="lib-kit">
       <div
@@ -141,28 +297,45 @@ function KitGroup({ kit }: { kit: LibraryKit }) {
         onDragStart={(e) => setDragPayload(e.dataTransfer, { type: 'kit-lane', kit: kit.id })}
         title={`drag onto a drum track to load all ${kit.lanes.length} lanes at once`}
       >
+        <TypeIcon type="kit" />
         <span className="lib-row-name">{kit.id}</span>
         <span className="lib-row-meta">{kit.lanes.length} lanes</span>
       </div>
       {kit.lanes.map((l) => (
-        <KitLaneRow key={l.lane} kit={kit.id} lane={l} />
+        <KitLaneRow key={l.lane} kit={kit.id} lane={l} playingKey={playingKey} setPlayingKey={setPlayingKey} />
       ))}
     </div>
   )
 }
 
-function SoundfontRow({ sf }: { sf: LibrarySoundfont }) {
+function SoundfontRow({
+  sf,
+  playingKey,
+  setPlayingKey,
+}: {
+  sf: LibrarySoundfont
+  playingKey: string | null
+  setPlayingKey: Dispatch<SetStateAction<string | null>>
+}) {
   const [adding, setAdding] = useState(false)
+  const previewKey = `soundfont:${sf.file}`
+  const isPlaying = playingKey === previewKey
   return (
     <div
-      className="lib-row"
+      className={`lib-row${isPlaying ? ' lib-row-previewing' : ''}`}
       draggable
       data-soundfont={sf.file}
+      data-previewing={isPlaying || undefined}
       onDragStart={(e) => setDragPayload(e.dataTransfer, { type: 'soundfont', file: sf.file })}
       title={[sf.file, sf.license, sf.source].filter(Boolean).join(' — ')}
     >
+      <TypeIcon type="soundfont" />
       <PreviewButton
         title={`preview ${sf.file}`}
+        active={isPlaying}
+        durationMs={1200}
+        onStart={() => setPlayingKey(previewKey)}
+        onEnd={() => setPlayingKey((cur) => (cur === previewKey ? null : cur))}
         onPreview={async () => {
           const bytes = await fetchLibraryFile(`sf2/${sf.file}`)
           await engine.previewSoundfont(bytes, 0)
@@ -196,6 +369,11 @@ export function ContentBrowser() {
   const toggleLibrary = useStore((s) => s.toggleLibrary)
   const [catalog, setCatalog] = useState<LibraryCatalog | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Phase 27 Stream EJ: which row is currently previewing, keyed by a type-prefixed id
+  // (`preset:foo`, `kit-lane:kit/lane`, `soundfont:file.sf2`) so a preset and a kit lane that
+  // happen to share a name can't collide. Local browse-UI state, same rationale as `Section`'s
+  // own `open` state above — never written to the document/store.
+  const [playingKey, setPlayingKey] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
@@ -247,7 +425,7 @@ export function ContentBrowser() {
                 <div key={cat} className="lib-category">
                   <div className="lib-category-label">{cat}</div>
                   {ps.map((p) => (
-                    <PresetRow key={p.name} preset={p} />
+                    <PresetRow key={p.name} preset={p} playingKey={playingKey} setPlayingKey={setPlayingKey} />
                   ))}
                 </div>
               ))}
@@ -257,19 +435,19 @@ export function ContentBrowser() {
                 <div key={cat} className="lib-category">
                   <div className="lib-category-label">{cat}</div>
                   {ps.map((p) => (
-                    <PresetRow key={p.name} preset={p} />
+                    <PresetRow key={p.name} preset={p} playingKey={playingKey} setPlayingKey={setPlayingKey} />
                   ))}
                 </div>
               ))}
             </Section>
             <Section title="Kits" count={catalog.kits.length}>
               {catalog.kits.map((k) => (
-                <KitGroup key={k.id} kit={k} />
+                <KitGroup key={k.id} kit={k} playingKey={playingKey} setPlayingKey={setPlayingKey} />
               ))}
             </Section>
             <Section title="SoundFonts" count={catalog.soundfonts.length}>
               {catalog.soundfonts.map((s) => (
-                <SoundfontRow key={s.file} sf={s} />
+                <SoundfontRow key={s.file} sf={s} playingKey={playingKey} setPlayingKey={setPlayingKey} />
               ))}
             </Section>
           </>
