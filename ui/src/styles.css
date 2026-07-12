@@ -319,6 +319,38 @@ body {
 }
 
 /* ---- editor sections ---- */
+/* Phase 27 Stream ED (docs/research/71-ux-clip-view-midi-editing.md §3 P0 item 1): a real colored
+   title bar for the Clip View, matching Ableton's own clip title strip — "the single strongest
+   'what am I editing' visual anchor in the whole view." Background is the track's own color
+   (track.color, painted inline via style={{background}} in NoteView.tsx since it's per-track
+   data, not a class). The negative margin cancels .noteview's own 14px padding so the bar bleeds
+   flush to .noteview's border edge on all sides, and the matching top-only border-radius keeps the
+   rounded corners consistent with .noteview's own 8px radius. `position: sticky; top: 0` pins it
+   to the top of the nearest scrolling ancestor's viewport (.bottom-pane-body, which is the actual
+   `overflow: auto` container — .noteview itself has no overflow of its own) for as long as
+   .noteview, its containing block, is still in view — i.e. it stays visible for the entire time
+   any part of this clip's editor is scrolled into the bottom pane, only scrolling away once the
+   whole editor does. z-index keeps it above the grid/panels stacked below during that overlap. */
+.noteview-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: -14px -14px 10px -14px;
+  padding: 10px 14px;
+  border-radius: 8px 8px 0 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+}
+.noteview-titlebar-name {
+  font-weight: 700;
+  font-size: 15px;
+}
+.noteview-titlebar-clip {
+  font-size: 11px;
+  opacity: 0.85;
+}
 .editor-toolbar {
   display: flex;
   align-items: baseline;
