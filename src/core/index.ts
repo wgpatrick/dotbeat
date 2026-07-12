@@ -31,6 +31,7 @@ export {
   saveClip,
   setScene,
   setSong,
+  songMove,
   setMediaSample,
   setLaneSample,
   addAutomationPoint,

@@ -45,6 +45,7 @@ import {
   saveClip,
   setScene,
   setSong,
+  songMove,
   addTrack,
   removeTrack,
   setMediaSample,
@@ -754,16 +755,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     // call into core's setSong/setScene/saveClip (see the helpers above), written the same
     // canonical-to-canonical way /edit is. The GUI re-pulls /document afterward (the daemon doesn't
     // echo its own writes). loop_bars (loop-mode length) still rides the ordinary /edit path.
+    // Phase 24 Stream CB: 'move' reorders a section (core's songMove) — same shape as the other
+    // three ops, just a straight pass-through since songMove needs no daemon-side composition
+    // (unlike append's scene-from-live-content bootstrap or resize's overlap-policy branching).
     if (req.method === 'POST' && url.pathname === '/song') {
       readBody(req)
         .then((body) => {
-          const b = JSON.parse(body) as { op?: unknown; index?: unknown; bars?: unknown; policy?: unknown }
+          const b = JSON.parse(body) as { op?: unknown; index?: unknown; bars?: unknown; policy?: unknown; from?: unknown; to?: unknown }
           let next: BeatDocument
           if (b.op === 'append') next = songAppend(doc, Number(b.bars))
           else if (b.op === 'resize') next = songResize(doc, Number(b.index), Number(b.bars), typeof b.policy === 'string' ? (b.policy as OverlapPolicy) : undefined)
           else if (b.op === 'delete') next = songDelete(doc, Number(b.index))
+          else if (b.op === 'move') next = songMove(doc, Number(b.from), Number(b.to)).doc
           else {
-            json(res, 400, { error: `unknown song op "${String(b.op)}" (expected append|resize|delete)` })
+            json(res, 400, { error: `unknown song op "${String(b.op)}" (expected append|resize|delete|move)` })
             return
           }
           const written = writeIfChanged(next)

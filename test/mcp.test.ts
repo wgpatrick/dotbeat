@@ -165,6 +165,45 @@ test('tools/call: beat_group folds tracks, beat_group_set edits it, beat_rm_grou
   }
 })
 
+// Phase 24 Stream CB: beat_song_move — reorder the arrangement timeline over MCP, the agent-facing
+// face on the same core songMove primitive the daemon's POST /song {op:'move'} route and the GUI's
+// section-chip drag both wrap.
+test('tools/call: beat_song_move reorders a section end-to-end', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-song-move-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // set up a 3-section song via beat_song first
+    await mcp.request('tools/call', {
+      name: 'beat_song',
+      arguments: {
+        file,
+        clips: [{ track: 'drums', clip: 'a' }],
+        scenes: [{ id: 'intro', slots: { drums: 'a' } }, { id: 'main', slots: { drums: 'a' } }, { id: 'outro', slots: { drums: 'a' } }],
+        song: [{ scene: 'intro', bars: 2 }, { scene: 'main', bars: 8 }, { scene: 'outro', bars: 2 }],
+      },
+    })
+    assert.match(readFileSync(file, 'utf8'), /section intro 2\n {2}section main 8\n {2}section outro 2/)
+
+    // move the last section (index 2) to the front — a genuine reorder, not a delete+insert.
+    const moved = await mcp.request('tools/call', { name: 'beat_song_move', arguments: { file, from_index: 2, to_index: 0 } })
+    assert.match(moved.content[0].text, /^song: intro\(2\) main\(8\) outro\(2\) -> outro\(2\) intro\(2\) main\(8\)$/m)
+    assert.match(readFileSync(file, 'utf8'), /section outro 2\n {2}section intro 2\n {2}section main 8/)
+
+    // tool-level failure (out-of-range index) comes back as isError, not a protocol error
+    const bad = await mcp.request('tools/call', { name: 'beat_song_move', arguments: { file, from_index: 99, to_index: 0 } })
+    assert.equal(bad.isError, true)
+    assert.match(bad.content[0].text, /out of range/)
+  } finally {
+    mcp.close()
+  }
+})
+
 // Phase 22 Stream AE: audio-region clip tools (format v0.10). No beat_sample MCP tool exists yet
 // (media registration is CLI-only — a pre-existing gap, not this stream's to close), so the
 // fixture below writes its own media block directly; format-level edits don't verify the bytes

@@ -12,6 +12,7 @@ import {
   saveClip,
   setScene,
   setSong,
+  songMove,
   removeTrack,
   BeatParseError,
   BeatEditError,
@@ -208,6 +209,71 @@ test('semantic diff reports clip/scene/song changes musically', () => {
   assert.match(text, /lead: clip added "extra"/)
   assert.match(text, /scene main: lead busy -> quiet/)
   assert.match(text, /song: intro\(2\) main\(4\) intro\(2\) -> main\(8\)/)
+})
+
+// Phase 24 Stream CB: songMove reorders a section in the arrangement timeline. Sections carry no
+// stable id (BeatSongSection is just {scene, bars}, and duplicate scene/bars pairs are legal — the
+// SONG_EXAMPLE fixture itself has two "intro 2" sections), so identity is purely positional (the
+// index passed in), same as effect/lane chains identify entries by id but reorder by index.
+test('songMove reorders a section by index, clamped to list bounds', () => {
+  const doc = parse(SONG_EXAMPLE) // sections: intro(2) main(4) intro(2)
+  // move the last section (index 2) to the front
+  const { doc: moved, section, before, after } = songMove(doc, 2, 0)
+  assert.deepEqual(moved.song, [
+    { scene: 'intro', bars: 2 },
+    { scene: 'intro', bars: 2 },
+    { scene: 'main', bars: 4 },
+  ])
+  assert.deepEqual(section, { scene: 'intro', bars: 2 })
+  assert.equal(before, 2)
+  assert.equal(after, 0)
+  // moving to an out-of-range index clamps rather than throwing
+  const { doc: clamped, after: clampedAfter } = songMove(doc, 0, 999)
+  assert.equal(clampedAfter, 2)
+  assert.deepEqual(clamped.song, [
+    { scene: 'main', bars: 4 },
+    { scene: 'intro', bars: 2 },
+    { scene: 'intro', bars: 2 },
+  ])
+  // a no-op move (same index) is a harmless identity
+  assert.deepEqual(songMove(doc, 1, 1).doc.song, doc.song)
+})
+
+test('songMove refuses out-of-range fromIndex and refuses outside song mode', () => {
+  const doc = parse(SONG_EXAMPLE)
+  assert.throws(() => songMove(doc, -1, 0), BeatEditError)
+  assert.throws(() => songMove(doc, 3, 0), BeatEditError)
+  assert.throws(() => songMove(doc, 1.5, 0), BeatEditError)
+  const plain = `format_version 0.3
+bpm 120
+loop_bars 1
+selected_track a
+
+track a A #ffffff synth
+${CORE_SYNTH}
+`
+  assert.throws(() => songMove(parse(plain), 0, 0), /not in song mode/)
+})
+
+test('songMove round-trips cleanly and diffs as a genuine reorder, not a delete+insert pair', () => {
+  const a = parse(SONG_EXAMPLE)
+  const { doc: b } = songMove(a, 0, 2) // move the first "intro" section to the end
+  // canonical round trip: serialize -> parse -> serialize is stable
+  assert.equal(serialize(parse(serialize(b))), serialize(b))
+  assert.deepEqual(b.song, [
+    { scene: 'main', bars: 4 },
+    { scene: 'intro', bars: 2 },
+    { scene: 'intro', bars: 2 },
+  ])
+  // the semantic diff is exactly one entry: the song statement moved as a whole (order IS the
+  // data for a flat, unindexed section list — see diff.ts's songKey comment). Not a pair of
+  // clip-removed/clip-added or scene-removed/scene-added entries, which would misreport a pure
+  // reorder as content being deleted and re-created.
+  const entries = diffDocuments(a, b)
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0]!.kind, 'song-changed')
+  const text = formatDiff(entries)
+  assert.match(text, /^song: intro\(2\) main\(4\) intro\(2\) -> main\(4\) intro\(2\) intro\(2\)$/m)
 })
 
 test('a slot re-map is a one-line text diff', () => {

@@ -21,6 +21,7 @@ import {
   saveClip,
   setScene,
   setSong,
+  songMove,
   setMediaSample,
   setLaneSample,
   addEffect,
@@ -136,6 +137,7 @@ const USAGE = `usage:
   beat clip <file> <track> <clip-id>                      snapshot the track's live content into a clip
   beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
   beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
+  beat song-move <file> <from-index> <to-index>           reorder a section — a two-line diff, not a rewrite
   beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)
   beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample
   beat effect-add <file> <track> <eq3|comp|distortion|bitcrush|eq7|autoFilter|autoPan|tremolo|utility|grainDelay|vinylDistortion|resonator> [--id id] [--index n] [--bypassed]
@@ -893,6 +895,16 @@ function songCmd(argv) {
   writeDoc(file, before, setSong(before, sections))
 }
 
+// Phase 24 Stream CB: reorder a section in place — a two-line diff, not a whole-timeline rewrite,
+// same shape as effect-move/lane move.
+function songMoveCmd(argv) {
+  const [file, fromIndex, toIndex] = argv
+  if (!file || fromIndex === undefined || toIndex === undefined) throw new BeatEditError('song-move needs <file> <from-index> <to-index>')
+  const before = readDoc(file)
+  const { doc } = songMove(before, Number(fromIndex), Number(toIndex))
+  writeDoc(file, before, doc)
+}
+
 // v0.9 clip automation (docs/phase-9-automation-plan.md)
 function automateCmd(argv) {
   const idIdx = argv.indexOf('--id')
@@ -1329,6 +1341,9 @@ async function main() {
       break
     case 'song':
       songCmd(rest)
+      break
+    case 'song-move':
+      songMoveCmd(rest)
       break
     case 'sample':
       await sampleCmd(rest)

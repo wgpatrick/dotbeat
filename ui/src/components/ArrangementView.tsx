@@ -75,8 +75,10 @@ function previewResizeSections(sections: Section[], index: number, bars: number,
 }
 
 /** Issue one arrangement-length op to the daemon's /song route, then re-pull /document so the UI
- * reflects the new sections/scenes/clips (the daemon doesn't echo its own writes). */
-async function postSong(body: { op: 'append' | 'resize' | 'delete'; index?: number; bars?: number; policy?: OverlapPolicy }): Promise<void> {
+ * reflects the new sections/scenes/clips (the daemon doesn't echo its own writes). Phase 24 Stream
+ * CB adds 'move' (reorder a section — {from, to}), same route, same op-dispatch shape as append/
+ * resize/delete. */
+async function postSong(body: { op: 'append' | 'resize' | 'delete' | 'move'; index?: number; bars?: number; policy?: OverlapPolicy; from?: number; to?: number }): Promise<void> {
   const base = daemonBase()
   try {
     const res = await fetch(`${base}/song`, {
@@ -1162,6 +1164,12 @@ export function ArrangementView() {
   // below), and the bar delta must account for that scroll, not just raw pointer movement.
   const [resize, setResize] = useState<{ index: number; startBar: number; startBars: number; startX: number; startScrollLeft: number; bars: number } | null>(null)
   const resizePxPerBar = useRef(1)
+  // Phase 24 Stream CB: section-chip reorder drag. Same native-HTML5-DnD + {draggingIndex, overIndex}
+  // shape SynthPanel.tsx's effect-chain drag already establishes (EffectRow's dragState) — sections
+  // have no stable id (BeatSongSection is just {scene, bars}, and duplicates are legal), so identity
+  // here is the chip's index at drag-start, which is safe because nothing reorders the array mid-drag
+  // (the move only commits on drop).
+  const [sectionDrag, setSectionDrag] = useState<{ draggingIndex: number | null; overIndex: number | null }>({ draggingIndex: null, overIndex: null })
   // Automation UI state (Phase 20 Stream Z): which track headers have the add-a-lane picker open,
   // and which params the user has explicitly added (a lane can be shown before it has any points).
   // Lanes that already carry points always show regardless — see visibleParamsFor.
@@ -1743,9 +1751,57 @@ export function ArrangementView() {
         {songMode ? (
           <>
             <span className="arr-length-label">sections</span>
-            {doc.song!.map((s, i) => (
-              <span className="arr-section-chip" key={i}>
+            {doc.song!.map((s, i) => {
+              const isDragging = sectionDrag.draggingIndex === i
+              const isDropTarget = sectionDrag.overIndex === i && sectionDrag.draggingIndex !== null && sectionDrag.draggingIndex !== i
+              const chipClasses = ['arr-section-chip', isDragging && 'dragging', isDropTarget && 'drop-target'].filter(Boolean).join(' ')
+              return (
+              <span
+                className={chipClasses}
+                data-section-chip={i}
+                key={i}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData('text/plain', String(i))
+                  setSectionDrag({ draggingIndex: i, overIndex: null })
+                }}
+                onDragOver={(e) => {
+                  if (sectionDrag.draggingIndex === null) return
+                  e.preventDefault()
+                  if (sectionDrag.draggingIndex !== i) setSectionDrag((d) => ({ ...d, overIndex: i }))
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  const from = sectionDrag.draggingIndex
+                  setSectionDrag({ draggingIndex: null, overIndex: null })
+                  if (from === null || from === i) return
+                  void postSong({ op: 'move', from, to: i })
+                }}
+                onDragEnd={() => setSectionDrag({ draggingIndex: null, overIndex: null })}
+              >
+                <span className="arr-chip-drag-handle" data-section-drag-handle={i} title="drag to reorder">
+                  ⠿
+                </span>
                 <span className="arr-chip-name" title={`scene "${s.scene}"`}>{s.scene}</span>
+                <button
+                  className="arr-chip-btn"
+                  data-section-move-left={i}
+                  title="move left (earlier in the song)"
+                  disabled={i === 0}
+                  onClick={() => postSong({ op: 'move', from: i, to: i - 1 })}
+                >
+                  ◀
+                </button>
+                <button
+                  className="arr-chip-btn"
+                  data-section-move-right={i}
+                  title="move right (later in the song)"
+                  disabled={i === doc.song!.length - 1}
+                  onClick={() => postSong({ op: 'move', from: i, to: i + 1 })}
+                >
+                  ▶
+                </button>
                 <button
                   className="arr-chip-btn"
                   data-section-minus={i}
@@ -1779,7 +1835,8 @@ export function ArrangementView() {
                   ×
                 </button>
               </span>
-            ))}
+              )
+            })}
             <button
               className="arr-add-section"
               data-add-section="1"

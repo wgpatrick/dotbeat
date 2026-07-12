@@ -3,7 +3,7 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind, WarpMode } from './document.js'
+import type { BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind, WarpMode } from './document.js'
 import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -1002,6 +1002,25 @@ export function setSong(doc: BeatDocument, sections: { scene: string; bars: numb
     if (!Number.isInteger(s.bars) || s.bars < 1 || s.bars > 64) throw new BeatEditError(`section bars must be an integer 1-64, got ${s.bars}`)
   }
   return { ...doc, song: sections.length === 0 ? null : sections.map((s) => ({ ...s })) }
+}
+
+/** Phase 24 Stream CB: moves a song section to a new position in the timeline (0-based, clamped to
+ * the list bounds) — same reorder discipline as `moveEffect`/`moveLane`: splice out, splice back in
+ * at the new index, one genuine "this section moved" fact rather than a delete+insert pair. Section
+ * order IS the arrangement timeline — a section's start bar is the sum of every earlier section's
+ * `bars` (there's no stored offset field, see `BeatSongSection`'s doc comment), so reordering the
+ * array is the WHOLE operation; every later section's effective start just falls out of the new
+ * order, nothing else needs updating. */
+export function songMove(doc: BeatDocument, fromIndex: number, toIndex: number): { doc: BeatDocument; section: BeatSongSection; before: number; after: number } {
+  if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no section to move')
+  if (!Number.isInteger(fromIndex) || fromIndex < 0 || fromIndex >= doc.song.length) {
+    throw new BeatEditError(`section index ${fromIndex} out of range (0-${doc.song.length - 1})`)
+  }
+  const after = Math.max(0, Math.min(Math.trunc(toIndex), doc.song.length - 1))
+  const sections = doc.song.map((s) => ({ ...s }))
+  const [item] = sections.splice(fromIndex, 1)
+  sections.splice(after, 0, item!)
+  return { doc: setSong(doc, sections), section: item!, before: fromIndex, after }
 }
 
 /** v0.9 clip automation primitives (docs/phase-9-automation-plan.md). Automation is clip-scoped

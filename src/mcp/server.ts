@@ -55,6 +55,7 @@ import {
   saveClip,
   setScene,
   setSong,
+  songMove,
   parsePresetLibrary,
   applyPreset,
   formatPresetList,
@@ -883,6 +884,23 @@ const TOOLS: ToolDef[] = [
       for (const c of (args.clips as { track: string; clip: string }[] | undefined) ?? []) doc = saveClip(doc, c.track, c.clip).doc
       for (const s of (args.scenes as { id: string; slots: Record<string, string> }[] | undefined) ?? []) doc = setScene(doc, s.id, s.slots)
       if (args.song !== undefined) doc = setSong(doc, args.song as { scene: string; bars: number }[])
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_song_move',
+    description:
+      'Reorder the arrangement timeline: move one song section to a new 0-based position (clamped to the list bounds). This IS the reorder primitive — a section\'s start bar is the sum of every earlier section\'s bars, not a stored offset, so moving one entry in the list is the whole operation. The resulting diff reports the reorder as a single musical fact (the whole song statement changing), not a delete+insert pair.',
+    inputSchema: {
+      type: 'object',
+      properties: { file: { type: 'string' }, from_index: { type: 'number' }, to_index: { type: 'number' } },
+      required: ['file', 'from_index', 'to_index'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = songMove(before, num(args, 'from_index'), num(args, 'to_index'))
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
     },

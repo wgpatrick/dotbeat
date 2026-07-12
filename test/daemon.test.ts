@@ -218,6 +218,39 @@ test('POST /song resize and delete edit the section list; delete refuses the las
   })
 })
 
+// Phase 24 Stream CB: POST /song move — reorder a section without deleting/re-adding it, verified
+// end-to-end through the daemon route (the unit-level splice logic itself is covered by
+// songMove's own tests in test/format-v04.test.ts).
+test('POST /song move reorders a section; the file on disk reflects the new order', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    await postSong(daemon.port, { op: 'append', bars: 6 }) // -> 2 sections (loop + 6)
+    await postSong(daemon.port, { op: 'append', bars: 8 }) // -> 3 sections
+    const before = daemon.getDoc()
+    assert.equal(before.song!.length, 3)
+    const [s0, s1, s2] = before.song!
+
+    // move the last section to the front.
+    const res = await postSong(daemon.port, { op: 'move', from: 2, to: 0 })
+    assert.equal(res.status, 200)
+    const after = daemon.getDoc()
+    assert.deepEqual(after.song, [s2, s0, s1])
+    // no scene was created/destroyed — same three scenes, just reordered sections referencing them.
+    assert.equal(after.scenes.length, before.scenes.length)
+    // in-memory === disk invariant.
+    assert.deepEqual(parse(readFileSync(filePath, 'utf8')), after)
+  })
+})
+
+test('POST /song move rejects an out-of-range fromIndex (400), doc unchanged', async () => {
+  await withDaemon(async (daemon) => {
+    await postSong(daemon.port, { op: 'append', bars: 6 })
+    const before = daemon.getDoc()
+    const res = await postSong(daemon.port, { op: 'move', from: 99, to: 0 })
+    assert.equal(res.status, 400)
+    assert.deepEqual(daemon.getDoc().song, before.song)
+  })
+})
+
 test('POST /song rejects a bad op and an out-of-range bar count', async () => {
   await withDaemon(async (daemon) => {
     assert.equal((await postSong(daemon.port, { op: 'frobnicate' })).status, 400)
