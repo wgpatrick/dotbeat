@@ -842,6 +842,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
         </div>
       </div>
       {!isDrums && <PitchTimePanel track={track} noteIds={sel} />}
+      {!isDrums && <NoteNameReadout track={track} noteIds={sel} />}
       {editable && eventKind === 'note' && sel.length === 1 && (
         <NoteInspector key={sel[0]} note={track.notes.find((n) => n.id === sel[0])} trackId={track.id} />
       )}
@@ -995,6 +996,32 @@ function PitchTimePanel({ track, noteIds }: { track: BeatTrack; noteIds: string[
           {msg}
         </span>
       )}
+    </div>
+  )
+}
+
+// ---- note-name readout (Phase 24 Stream CF) ---------------------------------------------------
+// The piano-roll grid only shows notes as ROW POSITIONS on the keyboard strip — reading actual
+// pitches back off it means eyeballing key labels one row at a time. This gives an at-a-glance
+// text readout of the real note NAMES (e.g. "C4, E4, G4"), reusing the SAME `pitchName` scientific-
+// pitch-notation formatter the keyboard strip's own key labels already use (line ~72) rather than
+// inventing a second pitch->name mapping. Scoped to the current selection when one exists (mirrors
+// PitchTimePanel's own scopeLabel convention just below — "N selected" vs "whole track"); falls back
+// to the whole visible clip's distinct pitches when nothing's selected, so the readout is always
+// showing something useful. Always visible for melodic (non-drum) tracks — drum lanes are named, not
+// pitched, so there's nothing for this readout to show there (DrumLanePanel already covers lanes).
+function NoteNameReadout({ track, noteIds }: { track: BeatTrack; noteIds: string[] }) {
+  const scoped = noteIds.length > 0 ? track.notes.filter((n) => noteIds.includes(n.id)) : track.notes
+  const scopeLabel = noteIds.length > 0 ? `${noteIds.length} selected` : 'whole clip'
+  const distinctPitches = Array.from(new Set(scoped.map((n) => n.pitch))).sort((a, b) => a - b)
+  const names = distinctPitches.map(pitchName)
+  return (
+    <div className="note-name-readout" data-testid="note-name-readout" title="the actual note names present — not just grid position">
+      <span className="note-inspector-title">notes</span>
+      <span className="pitch-time-scope">({scopeLabel})</span>
+      <span className="note-name-readout-names" data-note-names={names.join(',')}>
+        {names.length ? names.join(', ') : '—'}
+      </span>
     </div>
   )
 }

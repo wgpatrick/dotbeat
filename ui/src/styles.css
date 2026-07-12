@@ -889,6 +889,25 @@ body {
   padding: 2px 4px;
 }
 
+/* ---- note-name readout (Phase 24 Stream CF): at-a-glance "C4, E4, G4" for selection/whole clip --- */
+.note-name-readout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #14151a;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--muted, #9aa0ab);
+}
+.note-name-readout-names {
+  color: var(--text, #e6e8ec);
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
 /* ---- Pitch & Time operations panel (Phase 23 Stream BA) ---------------------------------------- */
 .pitch-time-panel {
   display: flex;
