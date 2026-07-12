@@ -1023,6 +1023,58 @@ export function songMove(doc: BeatDocument, fromIndex: number, toIndex: number):
   return { doc: setSong(doc, sections), section: item!, before: fromIndex, after }
 }
 
+/** Next free `sN` scene id — the same "next free numbered id" idiom `addTrack`'s color cycling and
+ * the daemon's `nextFreeClipId` use, just scoped to scene ids. Exported so both halves of Phase 26
+ * Stream DJ (insertScene here, and daemon.ts's capture-and-insert route, which needs the identical
+ * fresh id before it can snapshot INTO it) share one scan instead of two independently-maintained
+ * copies. */
+export function nextSceneId(doc: BeatDocument): string {
+  let max = 0
+  for (const s of doc.scenes) {
+    const m = /^s(\d+)$/.exec(s.id)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return `s${max + 1}`
+}
+
+/** Splices a NEW song section referencing `sceneId` into `doc.song` at `index` (0-based, clamped to
+ * 0..song.length — inserting AT song.length appends after the last section, the same clamp
+ * discipline `songMove`'s `toIndex` already uses). The scene itself must already exist (callers
+ * mint/populate it first via `setScene`/`saveClip` — see `insertScene` below for the empty-scene
+ * case, and `src/daemon/daemon.ts`'s `captureAndInsertScene` for the live-content-snapshot case);
+ * this primitive's whole job is the section-LIST splice, the one piece both flavors share
+ * identically. Requires song mode already (mirrors `songMove`/`songDelete`/`songResize`'s "not in
+ * song mode" refusal) — there's no section list to insert a position into in loop mode; append a
+ * section first to start song mode. */
+export function songInsert(doc: BeatDocument, index: number, sceneId: string, bars: number): { doc: BeatDocument; section: BeatSongSection; index: number } {
+  if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no section list to insert into (append a section first to start song mode)')
+  if (!doc.scenes.some((s) => s.id === sceneId)) throw new BeatEditError(`no scene "${sceneId}" (have: ${doc.scenes.map((x) => x.id).join(', ') || 'none'})`)
+  if (!Number.isInteger(bars) || bars < 1 || bars > 64) throw new BeatEditError(`section bars must be an integer 1-64, got ${bars}`)
+  const at = Math.max(0, Math.min(Math.trunc(index), doc.song.length))
+  const sections = doc.song.map((s) => ({ ...s }))
+  const section: BeatSongSection = { scene: sceneId, bars }
+  sections.splice(at, 0, section)
+  return { doc: setSong(doc, sections), section, index: at }
+}
+
+/** Phase 26 Stream DJ ("Insert Scene"): mints a fresh, genuinely independent `BeatScene` with EMPTY
+ * slots (no clips assigned — every track silent there until clips are placed into it, e.g. via the
+ * existing "Place in Arrangement" flow) and splices a new song section referencing it into
+ * `doc.song` at `index` (`songInsert` above).
+ *
+ * This is the fix for the shared-scene gap `docs/product-roadmap.md`'s Arrangement row names: today
+ * `songAppend` (`src/daemon/daemon.ts`) always reuses an existing scene id (the last section's, or a
+ * loop-conversion bootstrap), so editing one section's clips silently edits every OTHER section that
+ * happens to reference the same scene. Insert Scene is the first GUI/API-reachable way to land a
+ * section whose scene was never shared with anything — genuinely independent from the moment it's
+ * created, not just from the moment its first clip diverges. */
+export function insertScene(doc: BeatDocument, index: number, bars: number): { doc: BeatDocument; section: BeatSongSection; index: number; sceneId: string } {
+  const sceneId = nextSceneId(doc)
+  const withScene = setScene(doc, sceneId, {})
+  const { doc: next, section, index: at } = songInsert(withScene, index, sceneId, bars)
+  return { doc: next, section, index: at, sceneId }
+}
+
 /** v0.9 clip automation primitives (docs/phase-9-automation-plan.md). Automation is clip-scoped
  * only (no live/non-clip automation — see format-spec.md's v0.9 section for why); every function
  * here targets `<track>.<clip>` and one automatable synth param. */
