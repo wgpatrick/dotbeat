@@ -72,31 +72,31 @@ export const rows = [
   {
     area: 'Note editing (piano roll)', feature: 'Pitch & Time operations (transpose, ×2/÷2, fit-to-scale, invert, humanize, reverse, legato)',
     description: 'One-shot edit primitives (src/core/pitchtime.ts) that rewrite note lines and produce a normal diff — same pattern as quantize. beat_humanize already covered the Humanize row; this phase added transpose/time-scale/fit-scale/invert/reverse/legato as CLI verbs + MCP tools (beat_transpose etc.), no daemon route (matching quantize\'s own precedent). GUI is deliberately CLI/MCP-only this pass — no piano-roll buttons/menu yet.',
-    core: 'done', cli: 'done', gui: 'missing', status: 'done',
+    core: 'done', cli: 'done', gui: 'missing', status: 'progress',
     research: 'research/18-ableton-ui-architecture.md', plan: 'phase-22-stream-ad.md',
   },
   {
     area: 'Note editing (piano roll)', feature: 'Groove / shuffle as a reversible time-warp',
     description: 'Two literal track-level fields (shuffleAmount, shuffleGrid — src/core/document.ts) applied at read/playback time via warpStep()/unwarpStep() (src/core/groove.ts, a Möbius-ease curve; exact-inverse round-trip unit-tested), never baked into stored note/hit start. Wired into ui/src/audio/engine.ts\'s note scheduling (synth + instrument tracks; drum-hit scheduling is sibling stream AB\'s territory this phase, left as a follow-on). Set via the existing `beat set <track>.shuffleAmount/<track>.shuffleGrid` grammar — no new CLI verb or daemon route needed. No GUI knob yet.',
-    core: 'done', cli: 'done', gui: 'missing', status: 'done',
+    core: 'done', cli: 'done', gui: 'missing', status: 'progress',
     research: 'research/22-opendaw-editing-workflow.md', plan: 'phase-22-stream-ad.md',
   },
   {
     area: 'Note editing (piano roll)', feature: 'Per-note probability (chance)',
     description: 'A 0-100 int field (default 100 = today\'s always-fires behavior), re-rolled via a seeded RNG (src/core/chance.ts\'s chanceFires — mulberry32 + FNV-1a seed fold) once per playback pass in the scheduler, verified directly against the seeded sequence (statistical unit tests) rather than by rendering audio repeatedly. GUI: editable via a small per-note inspector panel in NoteView.tsx when one note is selected (no piano-roll visual indicator or draw-across-notes gesture yet).',
-    core: 'done', cli: 'done', gui: 'partial', status: 'done',
+    core: 'done', cli: 'done', gui: 'partial', status: 'progress',
     research: 'research/22-opendaw-editing-workflow.md', plan: 'phase-22-stream-ad.md',
   },
   {
     area: 'Note editing (piano roll)', feature: 'Note ratchet / repeat (play-count + curve)',
     description: 'The richer 3-field shape (ratchetCount + ratchetCurve + ratchetLength) research 22 recommends over openDAW\'s own 2-field version (their team is mid-refactor away from it). src/core/pitchtime.ts\'s ratchetSlots is the one spacing function both live playback (engine.ts, hand-mirrored) and `beat consolidate`/`beat_consolidate` (bakes a ratchet back into exact discrete notes) agree on. GUI: ratchetCount/Curve/Length editable in the same per-note inspector panel as chance/cent; no visual ratchet indicator on the note itself and Consolidate is CLI/MCP-only.',
-    core: 'done', cli: 'done', gui: 'partial', status: 'done',
+    core: 'done', cli: 'done', gui: 'partial', status: 'progress',
     research: 'research/22-opendaw-editing-workflow.md', plan: 'phase-22-stream-ad.md',
   },
   {
     area: 'Note editing (piano roll)', feature: 'Per-note micro-tuning (cent offset)',
     description: 'A ±50-cent float field independent of semitone pitch, applied as a frequency offset at playback for synth-track notes (ui/src/audio/engine.ts); NOT yet wired for instrument/SoundFont-track notes (WorkletSynthesizer\'s pitch-bend is channel-wide, a bigger lift than this pass\'s scope — see phase-22-stream-ad.md\'s Result section). GUI: editable via the per-note inspector panel.',
-    core: 'done', cli: 'done', gui: 'partial', status: 'done',
+    core: 'partial', cli: 'done', gui: 'done', status: 'progress',
     research: 'research/22-opendaw-editing-workflow.md', plan: 'phase-22-stream-ad.md',
   },
 
@@ -104,7 +104,7 @@ export const rows = [
   {
     area: 'Drum programming', feature: 'Open per-track lane model + 12-lane GM-aligned default kit',
     description: 'v0.10: an open, declared, ordered lane list per drum track (synth:<voice>/sample/sf backings), layered additively alongside the legacy closed-5-lane mechanism so every pre-v0.10 file parses and re-serializes byte-identically. kit-808/kit-909 (synth) + kit-acoustic (SoundFont, MuldjordKit) ship in presets/drum-kits.json; `beat add-track --kind drums` defaults to the 12-lane kit going forward. No dedicated GUI knob surface for per-lane synth params yet (author via a kit preset or hand-edit) — the honest gap this leaves open.',
-    core: 'done', cli: 'done', gui: 'partial', status: 'done',
+    core: 'done', cli: 'done', gui: 'partial', status: 'progress',
     research: 'research/19-drum-voice-expansion.md', plan: 'phase-22-stream-ab.md',
   },
   {
@@ -466,7 +466,7 @@ export const rows = [
   {
     area: 'Audio-region clip editing', feature: 'Audio-region clip format',
     description: 'Media reference + in-point + out-point + gain + a warp enum + optional markers (v0.10). Clip-only (no live/non-clip audio content this stream); one clip = one region, all six fields on one bundled `audio` line (note/hit discipline, no elision).',
-    core: 'done', cli: 'done', gui: 'partial', status: 'done',
+    core: 'done', cli: 'done', gui: 'partial', status: 'progress',
     research: 'research/16-audio-clip-editing.md', plan: 'phase-22-stream-ae.md',
   },
   {
