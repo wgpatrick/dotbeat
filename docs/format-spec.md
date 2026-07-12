@@ -770,6 +770,47 @@ track lead Lead #c678dd synth
   all stamp new documents `0.10`); `0.9` files parse unchanged (every v0.10 addition is
   elided-by-default or additive).
 
+### v0.10 additions — eq7, a 7-band parametric EQ (Phase 23 Stream BD, docs/phase-23-stream-bd.md)
+
+An ADDITIVE fifth member of Phase 22 Stream AA's `EffectType` enum (`eq3|comp|distortion|
+bitcrush` -> `eq3|comp|distortion|bitcrush|eq7`) — a track's `effect` chain may now include an
+`eq7` insert exactly like any other type (`effect <id> eq7 [bypassed]`), reorderable/addable/
+removable/bypassable through the same machinery, no new grammar line. Research 17 §2 rated EQ3
+"Full" for its own scope but noted it can't do a real parametric bell cut — eq7 is the natural
+next tier: HP + low-shelf + 3 parametric bell bands + high-shelf + LP, each of the 7 bands
+independently enabled.
+
+- **26 new `SYNTH_FIELDS`, all `eq7`-prefixed**, canonical elision as usual (a field at its
+  default emits no line). Fixed low-to-high field/signal order: `eq7HpOn/Freq/Slope/Q`,
+  `eq7LowShelfOn/Freq/Gain`, `eq7Bell{1,2,3}On/Freq/Gain/Q`, `eq7HighShelfOn/Freq/Gain`,
+  `eq7LpOn/Freq/Slope/Q`. `EqFilterSlope` (`'12'|'24'|'48'|'96'`, dB/octave) is a new small enum,
+  used only by the HP/LP bands — matches Tone.Filter's `rolloff` option exactly (see
+  `ui/src/audio/engine.ts`'s `buildEq7`); the 5 bell/shelf bands have no slope control (real
+  parametric EQs don't put one on a bell/shelf band either — cascading sections would multiply
+  the gain, not steepen anything).
+- **Each band's own `*On` flag is the enable/disable mechanism, not a "0 = neutral" value trick.**
+  Every other `*Mix`-style insert in this format (comp/distortion/bitcrush/saturator/etc.) uses
+  "0 = off" canonical elision because 0 IS a genuine no-op for a wet/dry mix; HP/LP have no
+  frequency that's a true no-op filter, so eq7 needed a real per-band flag regardless — the bell/
+  shelf bands get the same flag for symmetry (and so a disabled band's freq/gain/Q can be dialed
+  in without it being heard until re-enabled, matching the "params stay live, the flag/route
+  gates audibility" convention every other insert already follows).
+- **`EFFECT_TYPES` (the validity set) and the canonical migration/default chain are now two
+  separate constants** in `src/core/document.ts` (`EFFECT_TYPES` vs. the new, non-exported
+  `DEFAULT_EFFECT_CHAIN_TYPES`) — a load-bearing split, not a refactor for its own sake. Before
+  this stream the two were identical (`defaultEffectChain()` just mapped `EFFECT_TYPES`), which
+  worked because there was only ever one migration target. Adding `eq7` to `EFFECT_TYPES` without
+  this split would have made `defaultEffectChain()` silently include an `eq7` insert in EVERY
+  synth track's canonical chain — a phantom insert on every pre-existing `.beat` file the moment
+  it's next loaded and saved, breaking the byte-identical round-trip guarantee the whole v0.10
+  effect-chain design exists to protect. `defaultEffectChain()` still means exactly what it meant
+  before this stream; `eq7` (and any future new type) is opt-in only, via `effect-add` / a
+  hand-written `effect` line / the GUI's add-effect picker.
+- Everything else — parsing, serialization, `beat set`/MCP `beat_set`, clip automation
+  (`AUTOMATABLE_SYNTH_PARAMS` auto-derives from the 18 numeric fields, same as every prior v0.3
+  addition), diff, `beat inspect` — needed ZERO special-casing: `eq7` is table-driven through the
+  same `SYNTH_FIELDS`/`EFFECT_TYPES` machinery every other type already uses.
+
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
 Clips/scenes (shipped v0.4), arrangement (shipped v0.4), multi-device chains beyond the

@@ -192,10 +192,23 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
   }
 
   // synth param. String-valued fields (osc + the enums, and duckSource's 'none'->null) stay
-  // strings; everything else is a canonical number. A non-numeric value means a string field.
+  // strings; 'true'/'false' (bool-kind SYNTH_FIELDS — lfoSync/lfo2Sync, and Phase 23 Stream BD's
+  // seven eq7*On flags) become a REAL boolean, not the literal string; everything else is a
+  // canonical number. A non-numeric, non-bool value means a string field.
+  //
+  // This distinction is load-bearing, not cosmetic: the daemon deliberately never SSE-echoes a
+  // page's own /edit writes back to it (daemon.ts's "echo of our own write" guard), so THIS
+  // optimistic local mirror is the only copy of the edit a page that made it will ever see — a
+  // bool field left as the string "true" would stay wrong forever, not just briefly. The live
+  // engine's SYNTH_FIELDS coercion (ui/src/audio/engine.ts's coerce()) requires `typeof v ===
+  // 'boolean'` for every bool field and silently falls back to that field's default otherwise —
+  // before this fix, checking a bool checkbox in the GUI (lfoSync/lfo2Sync, or any of eq7's seven
+  // *On flags) never actually took effect in the live audio graph, only in the displayed doc.
   const num = Number(value)
-  let nextVal: number | string | null
+  let nextVal: number | string | boolean | null
   if (rest === 'duckSource') nextVal = value === 'none' ? null : value
+  else if (value === 'true') nextVal = true
+  else if (value === 'false') nextVal = false
   else if (value.trim() === '' || Number.isNaN(num)) nextVal = value
   else nextVal = canon(num)
   const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, synth: { ...t.synth, [rest]: nextVal } } : t))

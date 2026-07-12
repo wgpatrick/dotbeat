@@ -131,6 +131,10 @@ const RESONATOR_CHORD_OFFSETS: Record<ResonatorChord, readonly number[]> = {
   octaves: [0, 12, 24, 36, 48],
   harmonic: [0, 12, 19, 24, 28],
 }
+// Phase 23 Stream BD: mirrors document.ts's EqFilterSlope/EQ_FILTER_SLOPES (same hand-kept-mirror
+// convention as above) — eq7's HP/LP slope, in dB/octave, matching Tone.Filter's `rolloff` values.
+type EqFilterSlope = '12' | '24' | '48' | '96'
+const EQ_FILTER_SLOPES: readonly EqFilterSlope[] = ['12', '24', '48', '96']
 
 // Tempo-sync (Phase 18 Stream R): mirrors src/core/document.ts's LfoSyncRate/LFO_SYNC_RATES/
 // lfoSyncRateHz exactly (same hand-kept-mirror convention as LFO_DESTS above).
@@ -264,6 +268,32 @@ interface EngineSynth {
   resonatorChord: ResonatorChord
   resonatorQ: number
   resonatorMix: number
+  eq7HpOn: boolean
+  eq7HpFreq: number
+  eq7HpSlope: EqFilterSlope
+  eq7HpQ: number
+  eq7LowShelfOn: boolean
+  eq7LowShelfFreq: number
+  eq7LowShelfGain: number
+  eq7Bell1On: boolean
+  eq7Bell1Freq: number
+  eq7Bell1Gain: number
+  eq7Bell1Q: number
+  eq7Bell2On: boolean
+  eq7Bell2Freq: number
+  eq7Bell2Gain: number
+  eq7Bell2Q: number
+  eq7Bell3On: boolean
+  eq7Bell3Freq: number
+  eq7Bell3Gain: number
+  eq7Bell3Q: number
+  eq7HighShelfOn: boolean
+  eq7HighShelfFreq: number
+  eq7HighShelfGain: number
+  eq7LpOn: boolean
+  eq7LpFreq: number
+  eq7LpSlope: EqFilterSlope
+  eq7LpQ: number
   sendReverb: number
   sendDelay: number
   duckSource: string | null
@@ -292,6 +322,7 @@ function coerce(p: BeatSynth): EngineSynth {
   const chorusMode = (v: unknown, d: ChorusMode): ChorusMode => (typeof v === 'string' && CHORUS_MODES.includes(v as ChorusMode) ? (v as ChorusMode) : d)
   const saturatorCurve = (v: unknown, d: SaturatorCurve): SaturatorCurve => (typeof v === 'string' && SATURATOR_CURVES.includes(v as SaturatorCurve) ? (v as SaturatorCurve) : d)
   const resonatorChord = (v: unknown, d: ResonatorChord): ResonatorChord => (typeof v === 'string' && RESONATOR_CHORDS.includes(v as ResonatorChord) ? (v as ResonatorChord) : d)
+  const eqSlope = (v: unknown, d: EqFilterSlope): EqFilterSlope => (typeof v === 'string' && EQ_FILTER_SLOPES.includes(v as EqFilterSlope) ? (v as EqFilterSlope) : d)
   return {
     osc: osc(p.osc, 'sawtooth'),
     volume: num(p.volume, -10),
@@ -392,6 +423,32 @@ function coerce(p: BeatSynth): EngineSynth {
     resonatorChord: resonatorChord(p.resonatorChord, 'fifths'),
     resonatorQ: num(p.resonatorQ, 20),
     resonatorMix: num(p.resonatorMix, 0),
+    eq7HpOn: bool(p.eq7HpOn, false),
+    eq7HpFreq: num(p.eq7HpFreq, 80),
+    eq7HpSlope: eqSlope(p.eq7HpSlope, '24'),
+    eq7HpQ: num(p.eq7HpQ, 0.707),
+    eq7LowShelfOn: bool(p.eq7LowShelfOn, false),
+    eq7LowShelfFreq: num(p.eq7LowShelfFreq, 120),
+    eq7LowShelfGain: num(p.eq7LowShelfGain, 0),
+    eq7Bell1On: bool(p.eq7Bell1On, false),
+    eq7Bell1Freq: num(p.eq7Bell1Freq, 250),
+    eq7Bell1Gain: num(p.eq7Bell1Gain, 0),
+    eq7Bell1Q: num(p.eq7Bell1Q, 1),
+    eq7Bell2On: bool(p.eq7Bell2On, false),
+    eq7Bell2Freq: num(p.eq7Bell2Freq, 1000),
+    eq7Bell2Gain: num(p.eq7Bell2Gain, 0),
+    eq7Bell2Q: num(p.eq7Bell2Q, 1),
+    eq7Bell3On: bool(p.eq7Bell3On, false),
+    eq7Bell3Freq: num(p.eq7Bell3Freq, 4000),
+    eq7Bell3Gain: num(p.eq7Bell3Gain, 0),
+    eq7Bell3Q: num(p.eq7Bell3Q, 1),
+    eq7HighShelfOn: bool(p.eq7HighShelfOn, false),
+    eq7HighShelfFreq: num(p.eq7HighShelfFreq, 8000),
+    eq7HighShelfGain: num(p.eq7HighShelfGain, 0),
+    eq7LpOn: bool(p.eq7LpOn, false),
+    eq7LpFreq: num(p.eq7LpFreq, 12000),
+    eq7LpSlope: eqSlope(p.eq7LpSlope, '24'),
+    eq7LpQ: num(p.eq7LpQ, 0.707),
     sendReverb: num(p.sendReverb, 0),
     sendDelay: num(p.sendDelay, 0),
     duckSource: typeof p.duckSource === 'string' && p.duckSource && p.duckSource !== 'none' ? p.duckSource : null,
@@ -443,16 +500,17 @@ function interpolateAutomation(points: { time: number; value: number }[], posSte
 // convention as LFO_DESTS/LFO_SYNC_RATES above). Replaces the old fixed
 // EQ3->comp->distortion->bitcrush insert order this file's header comment used to list as "NOT
 // ported" — the chain is now built by iterating the track's declared, ordered `effects` list.
-// Phase 23 Streams BE and BF widened this to eleven types: BE added autoFilter/autoPan/tremolo/
-// utility, BF added grainDelay/vinylDistortion/resonator — all seven ADDED to the same reorderable
-// mechanism, not a parallel one (see EffectRuntime/buildEffectRuntime below and document.ts's
-// EffectType comment for why these are real chain members, unlike Stream AC's fixed saturator/
-// chorus/phaser/pingPong inserts below).
+// Phase 23 Streams BD, BE, and BF widened this to twelve types: BD added 'eq7' (7-band parametric
+// EQ), BE added autoFilter/autoPan/tremolo/utility, BF added grainDelay/vinylDistortion/resonator
+// — all eight ADDED to the same reorderable mechanism, not a parallel one (see EffectRuntime/
+// buildEffectRuntime below and document.ts's EffectType comment for why these are real chain
+// members, unlike Stream AC's fixed saturator/chorus/phaser/pingPong inserts below).
 type EffectType =
   | 'eq3'
   | 'comp'
   | 'distortion'
   | 'bitcrush'
+  | 'eq7'
   | 'autoFilter'
   | 'autoPan'
   | 'tremolo'
@@ -464,10 +522,10 @@ type EffectType =
 // One live effect instance's Tone nodes. `entry`/`exit` are the two nodes the chain SPINE
 // connects to (upstream -> entry, exit -> downstream); everything else is that effect's own
 // internal wiring, built once and never touched by reordering. Each type also exposes its OWN
-// param nodes (eq3/compressor/compDry/compWet/distortion/bitcrush/grainDelay/vinylDistortion/
-// resonator) so applyEffectParams and the LFO/clip-automation destinations below can reach them
-// directly, keyed by TYPE (not id) — see findEffect. `nodes` is every Tone node this instance
-// owns, for disposeChain/disposeEffect.
+// param nodes (eq3/compressor/compDry/compWet/distortion/bitcrush/eq7/autoFilter/autoPan/tremolo/
+// utility/grainDelay/vinylDistortion/resonator) so applyEffectParams and the LFO/clip-automation
+// destinations below can reach them directly, keyed by TYPE (not id) — see findEffect. `nodes` is
+// every Tone node this instance owns, for disposeChain/disposeEffect.
 interface EffectRuntime {
   id: string
   type: EffectType
@@ -497,6 +555,7 @@ interface EffectRuntime {
   grainDelay?: GrainDelayNodes
   vinylDistortion?: VinylNodes
   resonator?: ResonatorNodes
+  eq7?: EQ7Nodes
 }
 
 // Phase 23 Stream BE — Redux's downsampling half (research 17 §5.6: "Tone.js has no built-in
@@ -628,6 +687,10 @@ function buildEffectRuntime(id: string, type: EffectType, trackId: string): Effe
       const r = buildResonatorBank()
       return { id, type, entry: r.in, exit: r.out, nodes: resonatorNodeList(r), resonator: r }
     }
+    case 'eq7': {
+      const eq7 = buildEq7()
+      return { id, type, entry: eq7.in, exit: eq7.out, nodes: eq7NodeList(eq7), eq7 }
+    }
   }
 }
 
@@ -700,6 +763,120 @@ function applyEffectParams(e: EffectRuntime, p: EngineSynth): void {
   if (e.resonator) {
     applyResonatorBank(e.resonator, p.resonatorFreq, p.resonatorChord, p.resonatorQ, p.resonatorMix)
   }
+  if (e.eq7) applyEq7(e.eq7, p)
+}
+
+// Phase 23 Stream BD — eq7's node group: 7 Tone.Filter instances (HP, Low Shelf, 3 Bell/peaking,
+// High Shelf, LP). Tone.Filter exposes every native BiquadFilterNode type (lowpass/highpass/
+// lowshelf/highshelf/peaking/...) plus a selectable `rolloff` (-12/-24/-48/-96 dB/oct, implemented
+// as N cascaded biquad sections) — exactly the "Tone.Filter covers HP/LP with selectable slope+Q;
+// Web Audio's native BiquadFilterNode peaking/shelving types cover the bell/shelf bands" split
+// research 17 flagged (docs/research/17-track-fx-arsenal.md §3) — Tone.Filter turns out to be a
+// single primitive that covers BOTH halves (it's a thin wrapper around cascaded BiquadFilterNodes
+// exposing every native type), so no raw AudioContext.createBiquadFilter() calls were needed after
+// all. HP/LP get the real rolloff cascade (eq7HpSlope/eq7LpSlope, EQ7_ROLLOFF below); the 5 bell/
+// shelf bands are always pinned to rolloff -12 (Tone.Filter's minimum, i.e. exactly ONE biquad
+// section) — rolloff has no meaningful "slope" concept for a peaking/shelving filter (cascading N
+// of them multiplies the gain N times rather than steepening anything; a real parametric EQ's
+// bell/shelf bands don't have a slope control either).
+//
+// Each band is independently enabled (the 7 *On flags in SYNTH_FIELDS). Rather than a wet/dry
+// illusion (no clean "neutral" HP/LP frequency exists that's a true no-op filter), a disabled band
+// is spliced OUT of the internal chain entirely by reconcileEq7Bands below — the same "real
+// bypass" discipline the whole-device `effect ... bypassed` token already uses (see
+// reconcileEffectChain). Internal signal order is fixed, low-to-high: HP -> LowShelf -> Bell1 ->
+// Bell2 -> Bell3 -> HighShelf -> LP, regardless of which bands are actually enabled — mirrors
+// BeatSynth's eq7* field order in src/core/document.ts exactly.
+interface EQ7Nodes {
+  in: Tone.Gain
+  hp: Tone.Filter
+  lowShelf: Tone.Filter
+  bell1: Tone.Filter
+  bell2: Tone.Filter
+  bell3: Tone.Filter
+  highShelf: Tone.Filter
+  lp: Tone.Filter
+  out: Tone.Gain
+  activeSig: string // last-wired "which bands are on" signature — internal rewiring only on change
+}
+
+const EQ7_ROLLOFF: Record<EqFilterSlope, -12 | -24 | -48 | -96> = { '12': -12, '24': -24, '48': -48, '96': -96 }
+
+/** Build one fully-internally-wired eq7 node group (Phase 23 Stream BD). Callers connect an
+ * upstream node to `.in` and take `.out` onward — internal band wiring is established by the
+ * first applyEq7/reconcileEq7Bands call (activeSig starts at EFFECTS_SIG_UNSET, the same sentinel
+ * pattern SynthChain.effectsSig uses, so that first call always wires something, even "nothing"). */
+function buildEq7(): EQ7Nodes {
+  const inN = new Tone.Gain(1)
+  const hp = new Tone.Filter({ type: 'highpass', frequency: 80, Q: 0.707, rolloff: -24 })
+  const lowShelf = new Tone.Filter({ type: 'lowshelf', frequency: 120, gain: 0, rolloff: -12 })
+  const bell1 = new Tone.Filter({ type: 'peaking', frequency: 250, gain: 0, Q: 1, rolloff: -12 })
+  const bell2 = new Tone.Filter({ type: 'peaking', frequency: 1000, gain: 0, Q: 1, rolloff: -12 })
+  const bell3 = new Tone.Filter({ type: 'peaking', frequency: 4000, gain: 0, Q: 1, rolloff: -12 })
+  const highShelf = new Tone.Filter({ type: 'highshelf', frequency: 8000, gain: 0, rolloff: -12 })
+  const lp = new Tone.Filter({ type: 'lowpass', frequency: 12000, Q: 0.707, rolloff: -24 })
+  const out = new Tone.Gain()
+  return { in: inN, hp, lowShelf, bell1, bell2, bell3, highShelf, lp, out, activeSig: EFFECTS_SIG_UNSET }
+}
+
+/** Splices the enabled bands, in fixed low-to-high order, between `.in` and `.out` — a disabled
+ * band is fully out of the graph (a true bypass; see EQ7Nodes' doc comment above), not merely at a
+ * neutral value. Only re-wires when the ON/OFF combination actually changed since the last call
+ * (cheap signature compare), the same discipline reconcileEffectChain uses one level up. */
+function reconcileEq7Bands(nodes: EQ7Nodes, p: EngineSynth): void {
+  const bands: { on: boolean; node: Tone.Filter }[] = [
+    { on: p.eq7HpOn, node: nodes.hp },
+    { on: p.eq7LowShelfOn, node: nodes.lowShelf },
+    { on: p.eq7Bell1On, node: nodes.bell1 },
+    { on: p.eq7Bell2On, node: nodes.bell2 },
+    { on: p.eq7Bell3On, node: nodes.bell3 },
+    { on: p.eq7HighShelfOn, node: nodes.highShelf },
+    { on: p.eq7LpOn, node: nodes.lp },
+  ]
+  const sig = bands.map((b) => (b.on ? '1' : '0')).join('')
+  if (sig === nodes.activeSig) return
+  nodes.in.disconnect()
+  for (const b of bands) b.node.disconnect()
+  let upstream: Tone.ToneAudioNode = nodes.in
+  for (const b of bands) {
+    if (!b.on) continue
+    upstream.connect(b.node)
+    upstream = b.node
+  }
+  upstream.connect(nodes.out)
+  nodes.activeSig = sig
+}
+
+/** Apply live params to an eq7 node group — always keeps every band's freq/Q/gain/slope current
+ * (even a disabled one), so re-enabling it never "jumps"; reconcileEq7Bands (called last) is what
+ * actually gates whether a band's processing is heard, same "params stay live, the flag/route
+ * gates audibility" split every other insert in this file follows. */
+function applyEq7(nodes: EQ7Nodes, p: EngineSynth): void {
+  nodes.hp.frequency.value = p.eq7HpFreq
+  nodes.hp.Q.value = p.eq7HpQ
+  nodes.hp.rolloff = EQ7_ROLLOFF[p.eq7HpSlope]
+  nodes.lowShelf.frequency.value = p.eq7LowShelfFreq
+  nodes.lowShelf.gain.value = p.eq7LowShelfGain
+  nodes.bell1.frequency.value = p.eq7Bell1Freq
+  nodes.bell1.gain.value = p.eq7Bell1Gain
+  nodes.bell1.Q.value = p.eq7Bell1Q
+  nodes.bell2.frequency.value = p.eq7Bell2Freq
+  nodes.bell2.gain.value = p.eq7Bell2Gain
+  nodes.bell2.Q.value = p.eq7Bell2Q
+  nodes.bell3.frequency.value = p.eq7Bell3Freq
+  nodes.bell3.gain.value = p.eq7Bell3Gain
+  nodes.bell3.Q.value = p.eq7Bell3Q
+  nodes.highShelf.frequency.value = p.eq7HighShelfFreq
+  nodes.highShelf.gain.value = p.eq7HighShelfGain
+  nodes.lp.frequency.value = p.eq7LpFreq
+  nodes.lp.Q.value = p.eq7LpQ
+  nodes.lp.rolloff = EQ7_ROLLOFF[p.eq7LpSlope]
+  reconcileEq7Bands(nodes, p)
+}
+
+/** Every node in an eq7 group, for disposeChain()'s flat node list (via EffectRuntime.nodes). */
+function eq7NodeList(e: EQ7Nodes): Tone.ToneAudioNode[] {
+  return [e.in, e.hp, e.lowShelf, e.bell1, e.bell2, e.bell3, e.highShelf, e.lp, e.out]
 }
 
 // Phase 22 Stream AC — Beat Repeat's chance roll: a PER-NOTE-POSITION-SEEDED RNG, not a global
@@ -1282,9 +1459,10 @@ interface SynthChain {
   // reorder/add/remove/bypass in the document reconciles here (reconcileEffectChain) rather than
   // through hardcoded fields. `effectOrder` is the live chain order (ids); `effectsSig` is
   // the last-wired signature (id:type:enabled joined) so param-only ticks skip re-wiring. Covers
-  // the EIGHT effect types the format grammar declares (`EffectType` in document.ts:
-  // eq3/comp/distortion/bitcrush, plus Phase 23 Stream BE's autoFilter/autoPan/tremolo/utility) —
-  // the only ones a `.beat` file can list/reorder today.
+  // the TWELVE effect types the format grammar declares (`EffectType` in document.ts:
+  // eq3/comp/distortion/bitcrush, plus Phase 23 Stream BD's eq7, Stream BE's autoFilter/autoPan/
+  // tremolo/utility, and Stream BF's grainDelay/vinylDistortion/resonator) — the only ones a
+  // `.beat` file can list/reorder today.
   effects: Map<string, EffectRuntime>
   effectOrder: string[]
   effectsSig: string

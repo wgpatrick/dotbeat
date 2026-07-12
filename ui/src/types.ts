@@ -178,15 +178,18 @@ export interface BeatSongSection {
 // v0.10 (Phase 22 Stream AA): the ordered, reorderable per-track effect chain — mirrors
 // src/core/document.ts's EffectType/BeatEffect exactly. Synth tracks only (drum/instrument tracks
 // carry []); array order IS chain order (see ui/src/audio/engine.ts's buildSynthChain).
-// Phase 23 Streams BE and BF each widened this additively — see src/core/document.ts's EffectType
-// comment for why defaultEffectChain (engine.ts side: the migration target) stays the original
-// four regardless of this widened list, and why all seven new types are real chain members
-// (unlike Stream AC's fixed saturator/chorus/phaser/pingPong inserts).
+// Phase 23 Streams BD, BE, and BF each widened this additively — see src/core/document.ts's
+// EffectType comment for why defaultEffectChain (engine.ts side: the migration target) stays the
+// original four regardless of this widened list, and why all eight new types are real chain
+// members (unlike Stream AC's fixed saturator/chorus/phaser/pingPong inserts). The EffectChain
+// add-picker in SynthPanel.tsx maps over EFFECT_TYPES generically, so widening this list is the
+// only types.ts change any of these streams needs for that component.
 export type EffectType =
   | 'eq3'
   | 'comp'
   | 'distortion'
   | 'bitcrush'
+  | 'eq7'
   | 'autoFilter'
   | 'autoPan'
   | 'tremolo'
@@ -199,6 +202,7 @@ export const EFFECT_TYPES: readonly EffectType[] = [
   'comp',
   'distortion',
   'bitcrush',
+  'eq7',
   'autoFilter',
   'autoPan',
   'tremolo',
@@ -212,6 +216,7 @@ export const EFFECT_LABELS: Record<EffectType, string> = {
   comp: 'Compressor',
   distortion: 'Distortion',
   bitcrush: 'Bitcrush',
+  eq7: 'EQ7 (Parametric)',
   autoFilter: 'Auto Filter',
   autoPan: 'Auto Pan',
   tremolo: 'Tremolo',

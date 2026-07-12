@@ -261,9 +261,9 @@ export const rows = [
   },
   {
     area: 'Extended FX arsenal', feature: '7-band parametric EQ',
-    description: 'HP/LP with selectable slope + Q, 3 bell bands, 2 shelf bands, each independently enabled — same field-set-device shape as EQ3/compressor, just more bands. EQ3 can\'t do a real parametric bell cut; natural next tier after the research-17 build-next-four.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/21-opendaw-devices-effects.md', plan: null,
+    description: 'HP/LP (selectable slope 12/24/48/96 dB/oct + Q) + 2 shelf bands + 3 parametric bell bands (freq/gain/Q each), each of the 7 independently enabled via its own on flag (no shared "neutral value = off" trick — HP/LP have no true no-op frequency). New EffectType \'eq7\', additive to Phase 22 Stream AA\'s reorderable per-track chain; built entirely on Tone.Filter (covers both the HP/LP rolloff-cascade half and the native peaking/lowshelf/highshelf types research 17 flagged as two separate halves).',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/17-track-fx-arsenal.md', plan: 'phase-23-stream-bd.md',
   },
   {
     area: 'Extended FX arsenal', feature: 'Auto Filter / Auto Pan / Tremolo',

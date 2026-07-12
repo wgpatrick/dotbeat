@@ -157,6 +157,16 @@ const FX_BADGES: { key: string; label: string; active: (p: Record<string, unknow
   { key: 'graindelay', label: 'GrD', active: (p) => num(p.grainDelayMix) > 0 },
   { key: 'vinyldistortion', label: 'Vny', active: (p) => num(p.vinylMix) > 0 },
   { key: 'resonator', label: 'Rez', active: (p) => num(p.resonatorMix) > 0 },
+  // Phase 23 Stream BD: eq7 has no single *Mix knob (each of its 7 bands has its own *On flag
+  // instead — see document.ts's eq7* comment) — active iff ANY band is enabled, same "glance-able
+  // summary, not per-track state" honesty level as every badge above (doesn't check whether an
+  // 'eq7' entry actually exists in the track's effect chain, same simplification the eq/comp/dist/
+  // crush badges already make).
+  {
+    key: 'eq7',
+    label: 'EQ7',
+    active: (p) => [p.eq7HpOn, p.eq7LowShelfOn, p.eq7Bell1On, p.eq7Bell2On, p.eq7Bell3On, p.eq7HighShelfOn, p.eq7LpOn].some((v) => v === true),
+  },
 ]
 
 function num(v: unknown): number {
@@ -169,9 +179,12 @@ function FxBadges({ track }: { track: BeatTrack }) {
   // honest to show, so render an empty row (keeps every strip's layout aligned) rather than a row
   // of always-inactive/misleading badges.
   if (track.kind === 'instrument') return <div className="mixer-strip-fx" />
-  const active = FX_BADGES.filter((b) => b.active(track.synth))
+  // eq7 (Phase 23 Stream BD) is reachable only via the synth-tracks-only reorderable effect chain
+  // (see synthParams.ts's eq7 group comment) — the drum bus never wires it, so excluded here even
+  // if a drum track's synth block happens to carry nonzero eq7* fields (inert on drums).
+  const active = FX_BADGES.filter((b) => b.active(track.synth) && !(b.key === 'eq7' && track.kind === 'drums'))
   return (
-    <div className="mixer-strip-fx" title="active insert-chain processing (EQ / comp / distortion / bitcrush / saturator / chorus / phaser / ping pong / beat repeat)">
+    <div className="mixer-strip-fx" title="active insert-chain processing (EQ / comp / distortion / bitcrush / saturator / chorus / phaser / ping pong / beat repeat / eq7)">
       {active.length === 0 ? (
         <span className="mixer-fx-badge mixer-fx-none">—</span>
       ) : (

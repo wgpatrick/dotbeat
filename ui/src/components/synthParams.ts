@@ -79,6 +79,8 @@ const CHORUS_MODES = ['off', 'chorus', 'ensemble', 'vibrato'] as const
 const SATURATOR_CURVES = ['analog', 'warm', 'clip', 'fold'] as const
 // Phase 23 Stream BF: mirrors document.ts's RESONATOR_CHORDS.
 const RESONATOR_CHORDS = ['fifths', 'major', 'minor', 'octaves', 'harmonic'] as const
+// Phase 23 Stream BD: mirrors document.ts's EQ_FILTER_SLOPES (eq7HpSlope/eq7LpSlope).
+const EQ_FILTER_SLOPES = ['12', '24', '48', '96'] as const
 // Tempo-sync note divisions (lfoSyncRate/lfo2SyncRate) — mirrors document.ts's LFO_SYNC_RATES.
 const LFO_SYNC_RATES = ['1/1', '1/2', '1/4', '1/8', '1/16', '1/32', '1/4t', '1/8t', '1/16t', '1/4d', '1/8d', '1/16d'] as const
 
@@ -313,6 +315,44 @@ export const PARAM_GROUPS: ParamGroup[] = [
     kinds: ['synth'],
     open: false,
     params: [k('resonatorFreq', 'Freq', 40, 4000, fmt.hz, true), e('resonatorChord', 'Chord', RESONATOR_CHORDS), k('resonatorQ', 'Q', 0.5, 200, fmt.num1, true), k('resonatorMix', 'Mix', 0, 1, fmt.pct)],
+  },
+  {
+    // Phase 23 Stream BD: 7-band parametric EQ. 'synth' ONLY (not 'drums', unlike every other
+    // insert group above) — eq7 is reachable only through the v0.10 reorderable `effects` chain,
+    // which is synth-tracks-only by format-spec.md's own rule; the drum bus (getDrumBus in
+    // engine.ts) is untouched by this stream, so these fields would be inert on a drum track.
+    id: 'eq7',
+    title: 'EQ7 (Parametric)',
+    kinds: ['synth'],
+    open: false,
+    params: [
+      b('eq7HpOn', 'HP On', 'enable the high-pass band'),
+      k('eq7HpFreq', 'HP Freq', 20, 2000, fmt.hz, true),
+      e('eq7HpSlope', 'HP Slope', EQ_FILTER_SLOPES),
+      k('eq7HpQ', 'HP Q', 0.1, 10, fmt.num2, true),
+      b('eq7LowShelfOn', 'LoShelf On', 'enable the low-shelf band'),
+      k('eq7LowShelfFreq', 'LoShelf Freq', 20, 2000, fmt.hz, true),
+      k('eq7LowShelfGain', 'LoShelf Gain', -18, 18, fmt.db),
+      b('eq7Bell1On', 'Bell1 On', 'enable parametric bell band 1'),
+      k('eq7Bell1Freq', 'Bell1 Freq', 20, 20000, fmt.hz, true),
+      k('eq7Bell1Gain', 'Bell1 Gain', -18, 18, fmt.db),
+      k('eq7Bell1Q', 'Bell1 Q', 0.1, 10, fmt.num2, true),
+      b('eq7Bell2On', 'Bell2 On', 'enable parametric bell band 2'),
+      k('eq7Bell2Freq', 'Bell2 Freq', 20, 20000, fmt.hz, true),
+      k('eq7Bell2Gain', 'Bell2 Gain', -18, 18, fmt.db),
+      k('eq7Bell2Q', 'Bell2 Q', 0.1, 10, fmt.num2, true),
+      b('eq7Bell3On', 'Bell3 On', 'enable parametric bell band 3'),
+      k('eq7Bell3Freq', 'Bell3 Freq', 20, 20000, fmt.hz, true),
+      k('eq7Bell3Gain', 'Bell3 Gain', -18, 18, fmt.db),
+      k('eq7Bell3Q', 'Bell3 Q', 0.1, 10, fmt.num2, true),
+      b('eq7HighShelfOn', 'HiShelf On', 'enable the high-shelf band'),
+      k('eq7HighShelfFreq', 'HiShelf Freq', 200, 20000, fmt.hz, true),
+      k('eq7HighShelfGain', 'HiShelf Gain', -18, 18, fmt.db),
+      b('eq7LpOn', 'LP On', 'enable the low-pass band'),
+      k('eq7LpFreq', 'LP Freq', 200, 20000, fmt.hz, true),
+      e('eq7LpSlope', 'LP Slope', EQ_FILTER_SLOPES),
+      k('eq7LpQ', 'LP Q', 0.1, 10, fmt.num2, true),
+    ],
   },
   {
     id: 'sends',

@@ -62,6 +62,17 @@ export type SaturatorCurve = 'analog' | 'warm' | 'clip' | 'fold'
  * ui/src/audio/engine.ts's RESONATOR_CHORD_OFFSETS for the actual semitone-offset tables. */
 export type ResonatorChord = 'fifths' | 'major' | 'minor' | 'octaves' | 'harmonic'
 
+/** Phase 23 Stream BD: eq7's HP/LP filter slope, in dB/octave — matches Tone.Filter's `rolloff`
+ * option exactly (a cascade of 1/2/4/8 biquad sections respectively; see ui/src/audio/engine.ts's
+ * buildEq7). Stored as a string enum (not a bare number) to match every other enumerated
+ * SYNTH_FIELDS convention (BeatRepeatMode/ChorusMode/SaturatorCurve above) rather than adding a
+ * numeric field with an implicit, undocumented allowed-value set. Only HP/LP get a selectable
+ * slope — the bell/shelf bands are always a single biquad section (cascading peaking/shelving
+ * sections would multiply their gain, not steepen a "slope" — there's no such control on a real
+ * parametric EQ's bell/shelf bands either). */
+export type EqFilterSlope = '12' | '24' | '48' | '96'
+export const EQ_FILTER_SLOPES: readonly EqFilterSlope[] = ['12', '24', '48', '96']
+
 // BeatLab's own lane set and order (DRUM_LANES in beatlab/src/types.ts). Order is canonical for
 // serialization: all five lanes are always emitted, in this order, so toggling any drum step is
 // always a one-line diff and never inserts or deletes lines (the Humdrum fixed-grid discipline —
@@ -332,6 +343,46 @@ export interface BeatSynth {
   resonatorChord: ResonatorChord // which interval set the (up to 5) filters sit at, relative to resonatorFreq
   resonatorQ: number // filter Q — higher = narrower bandwidth = longer, more pitched ringing (the bank's "decay" proxy)
   resonatorMix: number // 0..1; 0 = insert bypassed
+  // ---- Phase 23 Stream BD: eq7 — 7-band parametric EQ (research 17 §1/§2's "EQ3 can't do a real
+  // parametric bell cut" gap). Slots into the v0.10 reorderable effect chain (EffectType 'eq7') as
+  // an ADDITIVE new insert type alongside eq3/comp/distortion/bitcrush — a track may carry BOTH an
+  // eq3 and an eq7 (no exclusivity; see docs/phase-23-stream-bd.md). Each of the 7 bands is
+  // independently enabled via its own *On flag rather than a "neutral value = off" convention:
+  // HP/LP have no frequency that's a true no-op filter, so a real per-band bypass (spliced out of
+  // eq7's internal signal path in engine.ts, not merely a value reset) was the only honest design;
+  // the bell/shelf bands get the same *On flag for symmetry, so a disabled band's freq/gain/Q can
+  // be dialed in the GUI without it being heard until re-enabled — same "params stay live, the
+  // flag gates whether they're heard" discipline every other insert's *Mix=0 convention already
+  // uses. Fixed internal signal order, low to high: HP -> LowShelf -> Bell1 -> Bell2 -> Bell3 ->
+  // HighShelf -> LP (see engine.ts's EQ7Nodes). All 18 freq/gain/Q fields are plain numbers, so
+  // AUTOMATABLE_SYNTH_PARAMS picks them up for free (clip automation), same as every other v0.3
+  // insert field; the 2 slope enums and 7 *On bools are excluded, same as every other enum/bool.
+  eq7HpOn: boolean
+  eq7HpFreq: number // Hz
+  eq7HpSlope: EqFilterSlope // dB/octave
+  eq7HpQ: number // filter Q; 0.707 = Butterworth (no resonant peak at the cutoff)
+  eq7LowShelfOn: boolean
+  eq7LowShelfFreq: number // Hz, shelf midpoint
+  eq7LowShelfGain: number // dB
+  eq7Bell1On: boolean
+  eq7Bell1Freq: number // Hz
+  eq7Bell1Gain: number // dB
+  eq7Bell1Q: number
+  eq7Bell2On: boolean
+  eq7Bell2Freq: number // Hz
+  eq7Bell2Gain: number // dB
+  eq7Bell2Q: number
+  eq7Bell3On: boolean
+  eq7Bell3Freq: number // Hz
+  eq7Bell3Gain: number // dB
+  eq7Bell3Q: number
+  eq7HighShelfOn: boolean
+  eq7HighShelfFreq: number // Hz, shelf midpoint
+  eq7HighShelfGain: number // dB
+  eq7LpOn: boolean
+  eq7LpFreq: number // Hz
+  eq7LpSlope: EqFilterSlope
+  eq7LpQ: number
   sendReverb: number // 0..1
   sendDelay: number // 0..1
   duckSource: string | null // track id whose kick ducks this track; null = off ("none" in text)
@@ -562,23 +613,25 @@ export interface BeatInstrument {
 // SAME type with different params (both would read the one shared eqLow etc.) — a documented scope
 // cut, not an oversight; see docs/phase-22-stream-aa.md.
 //
-// Phase 23 Streams BE and BF each widened this enum additively: BE added Auto Filter, Auto Pan,
-// Tremolo, and Utility (research 17 §5.5/§5.6 — Redux does NOT get a fifth new type here, its
-// downsampling half rides on the existing `bitcrush` type as a new field, bitcrushRate above; see
-// docs/phase-23-stream-be.md); BF added three real-DSP types — grainDelay/vinylDistortion/
-// resonator (research 17 §5's "meaningfully bigger lifts" list; see docs/phase-23-stream-bf.md).
-// All seven new types are plain additive members of this same enum, exactly like every other
-// insert: an agent adds one with `effect-add`, and it takes its params from the matching
-// SYNTH_FIELDS groups below. Unlike Stream AC's four (saturator/chorus/phaser/pingPong), which are
-// FIXED, always-wired inserts outside this list (ui/src/audio/engine.ts's SynthChain.saturator
-// etc. — see that interface's comment for why), all seven of BE's and BF's new types are genuinely
-// PART of the reorderable chain: they only exist in a live track's audio graph when its `effects`
-// list actually contains one, same as eq3/comp/distortion/bitcrush.
+// Phase 23 Streams BD, BE, and BF each widened this enum additively: BD added 'eq7' (the 7-band
+// parametric EQ, below); BE added Auto Filter, Auto Pan, Tremolo, and Utility (research 17
+// §5.5/§5.6 — Redux does NOT get a new type here, its downsampling half rides on the existing
+// `bitcrush` type as a new field, bitcrushRate above; see docs/phase-23-stream-be.md); BF added
+// three real-DSP types — grainDelay/vinylDistortion/resonator (research 17 §5's "meaningfully
+// bigger lifts" list; see docs/phase-23-stream-bf.md). All eight new types are plain additive
+// members of this same enum, exactly like every other insert: an agent adds one with
+// `effect-add`, and it takes its params from the matching SYNTH_FIELDS groups below. Unlike Stream
+// AC's four (saturator/chorus/phaser/pingPong), which are FIXED, always-wired inserts outside this
+// list (ui/src/audio/engine.ts's SynthChain.saturator etc. — see that interface's comment for
+// why), all eight of BD's/BE's/BF's new types are genuinely PART of the reorderable chain: they
+// only exist in a live track's audio graph when its `effects` list actually contains one, same as
+// eq3/comp/distortion/bitcrush.
 export type EffectType =
   | 'eq3'
   | 'comp'
   | 'distortion'
   | 'bitcrush'
+  | 'eq7'
   | 'autoFilter'
   | 'autoPan'
   | 'tremolo'
@@ -591,6 +644,7 @@ export const EFFECT_TYPES: readonly EffectType[] = [
   'comp',
   'distortion',
   'bitcrush',
+  'eq7',
   'autoFilter',
   'autoPan',
   'tremolo',
@@ -601,12 +655,12 @@ export const EFFECT_TYPES: readonly EffectType[] = [
 ]
 
 // The ORIGINAL four types only — the sole migration/canonical-default target defaultEffectChain()
-// below builds. Kept as its own list (rather than reusing EFFECT_TYPES, which now has eleven
+// below builds. Kept as its own list (rather than reusing EFFECT_TYPES, which now has twelve
 // members) so adding new effect types can NEVER silently change what "a synth track that never
 // mentions effects" means: every pre-v0.10 file, and every fresh track, must keep migrating to
 // exactly eq3->comp->distortion->bitcrush (Stream AA's frozen contract, test/format-v10-
-// effects.test.ts's very first test) — not the four original types plus seven new, always-on,
-// silently-added ones. A track picks up any of BE's/BF's new types only via an explicit
+// effects.test.ts's very first test) — not the four original types plus eight new, always-on,
+// silently-added ones. A track picks up any of BD's/BE's/BF's new types only via an explicit
 // `effect-add` (or a hand-written `effect` line), never by default.
 const LEGACY_DEFAULT_EFFECT_TYPES: readonly EffectType[] = ['eq3', 'comp', 'distortion', 'bitcrush']
 
@@ -883,6 +937,34 @@ export const SYNTH_FIELDS: readonly SynthFieldDef[] = [
   { key: 'resonatorChord', kind: 'enum', default: 'fifths', values: RESONATOR_CHORDS },
   { key: 'resonatorQ', kind: 'number', default: 20 },
   { key: 'resonatorMix', kind: 'number', default: 0 },
+  // ---- Phase 23 Stream BD: eq7 (7-band parametric EQ) — table order matches the fixed internal
+  // signal order (HP -> LowShelf -> Bell1-3 -> HighShelf -> LP, see BeatSynth's eq7* comment) ----
+  { key: 'eq7HpOn', kind: 'bool', default: false },
+  { key: 'eq7HpFreq', kind: 'number', default: 80 },
+  { key: 'eq7HpSlope', kind: 'enum', default: '24', values: EQ_FILTER_SLOPES },
+  { key: 'eq7HpQ', kind: 'number', default: 0.707 },
+  { key: 'eq7LowShelfOn', kind: 'bool', default: false },
+  { key: 'eq7LowShelfFreq', kind: 'number', default: 120 },
+  { key: 'eq7LowShelfGain', kind: 'number', default: 0 },
+  { key: 'eq7Bell1On', kind: 'bool', default: false },
+  { key: 'eq7Bell1Freq', kind: 'number', default: 250 },
+  { key: 'eq7Bell1Gain', kind: 'number', default: 0 },
+  { key: 'eq7Bell1Q', kind: 'number', default: 1 },
+  { key: 'eq7Bell2On', kind: 'bool', default: false },
+  { key: 'eq7Bell2Freq', kind: 'number', default: 1000 },
+  { key: 'eq7Bell2Gain', kind: 'number', default: 0 },
+  { key: 'eq7Bell2Q', kind: 'number', default: 1 },
+  { key: 'eq7Bell3On', kind: 'bool', default: false },
+  { key: 'eq7Bell3Freq', kind: 'number', default: 4000 },
+  { key: 'eq7Bell3Gain', kind: 'number', default: 0 },
+  { key: 'eq7Bell3Q', kind: 'number', default: 1 },
+  { key: 'eq7HighShelfOn', kind: 'bool', default: false },
+  { key: 'eq7HighShelfFreq', kind: 'number', default: 8000 },
+  { key: 'eq7HighShelfGain', kind: 'number', default: 0 },
+  { key: 'eq7LpOn', kind: 'bool', default: false },
+  { key: 'eq7LpFreq', kind: 'number', default: 12000 },
+  { key: 'eq7LpSlope', kind: 'enum', default: '24', values: EQ_FILTER_SLOPES },
+  { key: 'eq7LpQ', kind: 'number', default: 0.707 },
   { key: 'sendReverb', kind: 'number', default: 0 },
   { key: 'sendDelay', kind: 'number', default: 0 },
   { key: 'duckSource', kind: 'trackref', default: null },
