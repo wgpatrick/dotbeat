@@ -5,6 +5,7 @@ import { engine } from '../audio/engine'
 import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, postClipMove, daemonBase } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, installAudioClip, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
+import { useDropTarget } from '../dragDrop'
 import { declaredLaneNames, WARP_MODES, type AutomationInterpolation, type BeatAutomationPoint, type BeatClip, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind, type WarpMode } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 import { loadWaveform, getCachedWaveform, drawWaveform, type WaveformData } from '../audio/waveform'
@@ -563,11 +564,9 @@ function TrackRow({
   // otherwise mint a new clip and slot it into the FIRST song section's scene (sections[0]) so it's
   // immediately visible — refused with a clear message in loop mode, where there's no scene to slot
   // into yet (add a song section first).
-  const [dropHover, setDropHover] = useState(false)
   const handleLibraryDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
-      setDropHover(false)
       const payload = readDragPayload(e.dataTransfer)
       if (!payload) return
       if (payload.type === 'preset') {
@@ -608,6 +607,13 @@ function TrackRow({
     },
     [track.id, track.kind, track.name, occurrences, sections],
   )
+  // Phase 27 Stream EB: shared drop-target primitive (ui/src/dragDrop.ts) — fixes the real bug
+  // research/74 §3.1 found (`onDragLeave={() => setDropHover(false)}` was a bare boolean with no
+  // `relatedTarget` check, so crossing from the header's background onto ANY of its densely packed
+  // interactive children — checkbox, swatch, rename/delete buttons, the InlineStrip's mute/solo/
+  // volume/pan controls — re-fired `dragleave` on the header and cancelled the highlight across
+  // ~98% of its own surface area).
+  const dropTarget = useDropTarget<HTMLDivElement>(LIBRARY_DND_MIME, handleLibraryDrop)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -743,17 +749,12 @@ function TrackRow({
   return (
     <div className={`arr-row ${dimmed ? 'dimmed' : ''}`} style={{ height: ROW_H }}>
       <div
-        className={`arr-track-header ${selected ? 'selected' : ''} ${dropHover ? 'drop-target-hover' : ''}`}
+        className={`arr-track-header ${selected ? 'selected' : ''} ${dropTarget.className}`}
         style={{ width: HEADER_W }}
         data-drop-target="track-header"
-        onDragOver={(e) => {
-          if (!e.dataTransfer.types.includes(LIBRARY_DND_MIME)) return
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'copy'
-          setDropHover(true)
-        }}
-        onDragLeave={() => setDropHover(false)}
-        onDrop={handleLibraryDrop}
+        onDragOver={dropTarget.onDragOver}
+        onDragLeave={dropTarget.onDragLeave}
+        onDrop={dropTarget.onDrop}
       >
         <div className="arr-track-titlebar">
           {/* Phase 22 Stream AF: pick this track for the next "+ group" action. Hidden once the track

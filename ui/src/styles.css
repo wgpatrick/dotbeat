@@ -11,6 +11,35 @@
   color-scheme: dark;
 }
 
+/* ---- Shared drag-and-drop state (Phase 27 Stream EB, ui/src/dragDrop.ts) ----------------------
+   One canonical answer, reused by every drag surface in the app, to the two questions "is this the
+   thing currently being dragged" and "is this a valid place to drop what's being dragged right
+   now." Before this, dotbeat had four independent, inconsistent answers (research/74 §3): opacity
+   0.4 + solid accent border (effect-chain reorder, section-chip reorder) vs. opacity 0.65 + dashed
+   border (arrangement clip-block move) vs. a hardcoded `#2f5d3a` fill (piano-roll drum-lane drop
+   target) vs. no visual at all (piano-roll note move/resize). Every drag source/drop target below
+   now sets ONE of these two class names; component-specific extras (z-index, cursor, an extra
+   dashed border) may still layer on top via a compound selector (e.g. `.arr-clip-block.dragging`),
+   but the base opacity/box-shadow is defined once, here.
+   `.dragging` deliberately signals via `box-shadow`, not `outline` or `background`: the piano-roll
+   note already uses inline `opacity` (velocity) and a plain `outline` for `.selected` (#fff) — and
+   a note being dragged is, in the common case, ALSO selected (starting a drag on an unselected note
+   selects it first), so an `outline`-based signal would just get silently masked by `.selected`'s
+   higher-specificity `.noteview-note.selected` rule, leaving a dragged-and-selected note with NO
+   visible dragging cue at all. `box-shadow` is untouched by every other rule in this file, so it
+   composes cleanly everywhere: it renders ALONGSIDE `.selected`'s white outline on a note, and
+   simply matches `.arr-clip-block.selected`'s own accent box-shadow when a clip block is both
+   selected and dragging (same color, no visible clash). */
+.dragging {
+  opacity: 0.4;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.drop-target-hover {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  background: rgba(224, 161, 60, 0.12);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -760,9 +789,8 @@ body {
   padding: 4px 6px;
   cursor: grab;
 }
-.effect-row.dragging {
-  opacity: 0.4;
-}
+/* Base opacity/outline for .dragging comes from the shared rule near the top of this file (Phase
+   27 Stream EB) — nothing extra needed here. */
 .effect-row.drop-target {
   border-color: var(--accent);
 }
@@ -1963,7 +1991,11 @@ body {
   background: rgba(224, 161, 60, 0.16);
 }
 .arr-clip-block.dragging {
-  opacity: 0.65;
+  /* Base opacity/outline from the shared .dragging rule (Phase 27 Stream EB) — used to be its own
+     independently-invented opacity 0.65; unified to the same 0.4 every other drag source in the
+     app uses. The dashed border/grabbing cursor/elevated z-index below are genuinely specific to
+     this surface (a pointer-dragged clip needs to visually lift above sibling clip blocks), so
+     they stay as an addition on top of the shared rule rather than being folded into it. */
   border-style: dashed;
   cursor: grabbing;
   z-index: 4;
@@ -2641,10 +2673,8 @@ body {
 }
 /* Phase 24 Stream CB: section-chip reorder drag — same dragging/drop-target treatment as the
    effect-chain's .effect-row above, so the two reorderable-list affordances in this app read the
-   same way. */
-.arr-section-chip.dragging {
-  opacity: 0.4;
-}
+   same way. Base opacity/outline for .dragging comes from the shared rule near the top of this
+   file (Phase 27 Stream EB); the box-shadow below is this surface's own extra. */
 .arr-section-chip.drop-target {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
@@ -2990,13 +3020,8 @@ body {
   padding-left: 26px;
 }
 
-/* Drop targets — ArrangementView.tsx's track header and StepSequencer.tsx's lane rows light up
-   while a library item is dragged over them (dragover-only class, toggled imperatively). */
-.drop-target-hover {
-  outline: 2px dashed var(--accent);
-  outline-offset: -2px;
-  background: rgba(224, 161, 60, 0.12);
-}
+/* .drop-target-hover (ArrangementView.tsx's track header, NoteView.tsx's drum-lane rows) is now the
+   shared rule near the top of this file (Phase 27 Stream EB). */
 
 /* ---- Phase 22 Stream AG: clip-level loop/signature properties panel (Clip View) ---- */
 /* Phase 27 Stream EG: amber accent (var(--accent) itself — this is the FIRST, "primary properties"
