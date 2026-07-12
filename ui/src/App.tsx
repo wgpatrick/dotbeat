@@ -12,6 +12,7 @@ import { HistoryPanel } from './components/HistoryPanel'
 import { VaryAffordance } from './components/VaryAffordance'
 import { ExportButton } from './components/ExportButton'
 import { ContentBrowser } from './components/ContentBrowser'
+import { ShortcutHelp } from './components/ShortcutHelp'
 
 // Phase 18 — the Ableton-shaped recomposition (docs/phase-18-layout.md, driven by
 // docs/research/18-ableton-ui-architecture.md). The old four-tab switcher (Editor / Arrangement /
@@ -170,6 +171,11 @@ export function App() {
   const toggleMixer = useStore((s) => s.toggleMixer)
   const libraryOpen = useStore((s) => s.libraryOpen)
   const toggleLibrary = useStore((s) => s.toggleLibrary)
+  // Phase 28 Stream FC: the keyboard-shortcut reference panel. Purely local UI state, unlike
+  // mixerOpen/historyOpen/libraryOpen — nothing else in the app needs to read "is the shortcut
+  // panel open," so it doesn't need to live in the shared store, same reasoning ExportButton's own
+  // local `status` state already uses for a self-contained topbar affordance.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
 
   useEffect(() => {
     initBridge()
@@ -260,6 +266,14 @@ export function App() {
           >
             History
           </button>
+          <button
+            className={`topbar-btn ${shortcutsOpen ? 'active' : ''}`}
+            data-action="toggle-shortcuts"
+            onClick={() => setShortcutsOpen((o) => !o)}
+            title="keyboard shortcuts reference"
+          >
+            Shortcuts
+          </button>
         </div>
       </header>
       {parseError && <div className="parse-error">file did not parse: {parseError} (still playing last good version)</div>}
@@ -313,6 +327,11 @@ export function App() {
           <HistoryPanel />
         </aside>
       )}
+
+      {/* Phase 28 Stream FC: the keyboard-shortcut reference — one canonical place to see the
+          app's whole real shortcut surface, replacing "hover this button / read this one
+          sentence / spot this on-canvas label" as the only ways to discover it. */}
+      {shortcutsOpen && <ShortcutHelp onClose={() => setShortcutsOpen(false)} />}
     </div>
   )
 }
