@@ -48,6 +48,22 @@ const CHANCE_LANE_H = 24 // px — the chance-paint strip below the velocity lan
 const DRAG_THRESHOLD = 3 // px a pointer must move before a grid press counts as a marquee (vs. a tap-to-add)
 const MARKER_W = 7 // px — a durationless hit's fixed-width marker (a diamond)
 
+// ---- local time-zoom (Phase 28 Stream FD, follow-through 2, research/76 §2.5/§3 P1 item 4) -------
+// `--note-step-w` used to be a single fixed 14px CSS custom property with no gesture anywhere in the
+// component able to change it (confirmed by research 76 reading the whole file) — a materially bigger
+// gap than "row height is a hardcoded constant" (research 71's original framing): Ableton treats
+// MIDI-editor time-zoom as its single most load-bearing navigation primitive (research 76 §1.5).
+// This is a per-NoteView-instance zoom, deliberately NOT touching the global `--note-step-w` default
+// in :root (styles.css:10) or ArrangementView's own independent `zoomPxPerBar` — mirrors that same
+// "null = default, number = explicit override" shape (ArrangementView.tsx's `zoomPxPerBar`) and the
+// same button/wheel idiom (`zoomIn`/`zoomOut`, Cmd/Ctrl+scroll, `ZOOM_FACTOR` step), scoped locally by
+// setting the CSS var inline on `.noteview-scroll` (which every step-w consumer in this file is a
+// descendant of) instead of promoting it to a shared/global token.
+const DEFAULT_STEP_W = 14 // px — matches --note-step-w's own :root default (styles.css:10)
+const MIN_STEP_W = 4
+const MAX_STEP_W = 56
+const STEP_ZOOM_FACTOR = 1.4 // same step size ArrangementView.tsx's own ZOOM_FACTOR uses
+
 // ---- ratchet visual glyph (Phase 23 Stream BA) --------------------------------------------------
 // A lightweight, DISPLAY-ONLY mirror of src/core/pitchtime.ts's ratchetSlots edge math (ui/ has no
 // build-time dependency on src/core — see engine.ts's own hand-mirror of the exact same formula for
@@ -207,7 +223,12 @@ let noteClipboard: NoteClipboard | null = null
 type Marquee = { rect: DOMRect; stepW: number; downX: number; downY: number; curX: number; curY: number; base: string[]; additive: boolean; moved: boolean }
 
 type Preview = { start: number; row: number; duration: number | undefined }
-type VelGesture = { id: string; rect: DOMRect }
+// Phase 28 Stream FD, follow-through 1 (research/76 §1.1/§3 P1 item 3): the velocity lane used to
+// anchor its drag gesture to the single note pressed (`{ id, rect }`). It's now a paint-ACROSS-notes
+// gesture, the same mechanism the chance lane already shipped (`chanceGesture`/`paintChanceAt`) — so
+// it only needs the lane's own rect, not a captured note id; which note(s) are under the pointer is
+// re-evaluated every move, same as chance's.
+type VelGesture = { rect: DOMRect }
 
 /** Map a pointer's clientY within the velocity lane's rect to a 0..1 velocity (top = loudest,
  * bottom = softest — same convention as a DAW velocity lane). Floored at 0.05, not 0: a note at
@@ -315,7 +336,9 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const [marquee, setMarquee] = useState<Marquee | null>(null)
   const marqueeRef = useRef<Marquee | null>(null)
   const gridRef = useRef<HTMLDivElement | null>(null)
-  const [velPreview, setVelPreview] = useState<{ id: string; velocity: number } | null>(null)
+  // Phase 28 Stream FD, follow-through 1: keyed by event id (like `chancePreview` below), not a
+  // single `{ id, velocity }` — a paint-across-notes drag can touch more than one bar per gesture.
+  const [velPreview, setVelPreview] = useState<Record<string, number> | null>(null)
   // Phase 27 Stream EE: live floating value labels while dragging a velocity/chance marker, the same
   // "small pill near the cursor, imperative viewport-relative positioning" pattern ArrangementView.tsx's
   // automation-lane drag already established (its `dragLabelRef`/`showLabel` next to `.arr-auto-drag-label`)
@@ -332,12 +355,33 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const [dropHoverRow, setDropHoverRow] = useState<number | null>(null)
   const velGesture = useRef<VelGesture | null>(null)
   // Chance-paint lane (Phase 23 Stream BA, research 22 §1.4's PropertyDrawModifier reference): a
-  // draw-ACROSS-notes gesture, unlike the velocity lane above (which anchors to the one note
-  // pressed). `chancePreview` accumulates every note the pointer has painted so far this drag, keyed
-  // by note id, so multiple notes update live as the pointer sweeps across them; commit fans out one
-  // postEdit per touched note on release. Note-only (drum hits carry no chance field).
+  // draw-ACROSS-notes gesture — Phase 28 Stream FD generalized the same mechanism onto the velocity
+  // lane above (`velPreview`/`velGesture`/`paintVelocityAt`), so the two are now symmetric. `chancePreview`
+  // accumulates every note the pointer has painted so far this drag, keyed by note id, so multiple
+  // notes update live as the pointer sweeps across them; commit fans out one postEdit per touched
+  // note on release. Note-only (drum hits carry no chance field) — the velocity lane's own version
+  // below has no such restriction since both notes and drum hits carry a velocity.
   const [chancePreview, setChancePreview] = useState<Record<string, number> | null>(null)
   const chanceGesture = useRef<{ rect: DOMRect } | null>(null)
+
+  // Local time-zoom (Phase 28 Stream FD, follow-through 2): null = the global --note-step-w default
+  // (DEFAULT_STEP_W, 14px); a number pins an explicit override, same "null = default" shape as
+  // ArrangementView.tsx's own `zoomPxPerBar`. Session-only — never written to the .beat file, same
+  // treatment as that component's zoom state.
+  const [stepZoom, setStepZoom] = useState<number | null>(null)
+  const stepW = stepZoom ?? DEFAULT_STEP_W
+  const zoomIn = () => setStepZoom((z) => Math.min(MAX_STEP_W, (z ?? DEFAULT_STEP_W) * STEP_ZOOM_FACTOR))
+  const zoomOut = () => setStepZoom((z) => Math.max(MIN_STEP_W, (z ?? DEFAULT_STEP_W) / STEP_ZOOM_FACTOR))
+  const zoomReset = () => setStepZoom(null)
+  // Cmd/Ctrl+scroll over the note grid zooms, same modifier ArrangementView.tsx's own `onWheelZoom`
+  // uses for its timeline (plain wheel still scrolls normally — only the modified case is intercepted).
+  function onNoteGridWheelZoom(e: React.WheelEvent<HTMLDivElement>) {
+    if (!(e.ctrlKey || e.metaKey)) return
+    e.preventDefault()
+    const cur = stepZoom ?? DEFAULT_STEP_W
+    const next = Math.max(MIN_STEP_W, Math.min(MAX_STEP_W, cur * (e.deltaY < 0 ? STEP_ZOOM_FACTOR : 1 / STEP_ZOOM_FACTOR)))
+    setStepZoom(next)
+  }
 
   const rows = axis.rowCount
   const gridH = rows * ROW_H
@@ -745,38 +789,61 @@ export function NoteView({ track }: { track: BeatTrack }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [editable, track.id, setSel, isDrums, eventKind, axis, rows])
 
-  // ---- velocity (pointer-down-and-drag on an event's bar in the velocity lane) ----
-  function startVelocityGesture(ev: EditorEvent, e: React.PointerEvent) {
+  // ---- velocity (draw-across-notes paint gesture on the velocity lane, Phase 28 Stream FD) ----
+  // Follow-through 1 (research/76 §1.1/§3 P1 item 3): this used to be a single-note-anchored drag —
+  // pointer-down on ONE bar captured that note's id for the whole gesture, so dragging sideways onto
+  // other bars had no effect on them. Generalized onto the exact same paint-across-notes shape the
+  // chance lane already shipped (`paintChanceAt`/`onChanceLanePointerDown/Move/Up` below): re-evaluate
+  // which note(s) the pointer's x-position is over on every move, same convention as Ableton's own
+  // "Draw Mode in the Velocity Editor" (research/76 §1.1) — the drag now paints a run of velocities
+  // across every note under the pointer's path, not just the one under the initial press.
+  /** Paints every event (note OR hit — unlike chance, velocity applies to both) whose x-range the
+   * pointer is currently over into `acc` (mutated in place) at the current Y's velocity. */
+  function paintVelocityAt(rect: DOMRect, clientX: number, clientY: number, acc: Record<string, number>) {
+    const stepW = rect.width / totalSteps
+    const value = velocityFromY(rect, clientY)
+    const x = clientX - rect.left
+    for (const ev of events) {
+      const w = ev.duration ?? 0
+      const x0 = ev.start * stepW
+      const x1 = x0 + Math.max(w * stepW, MARKER_W)
+      if (x >= x0 && x <= x1) acc[ev.id] = value
+    }
+  }
+
+  function onVelLanePointerDown(e: React.PointerEvent) {
     if (!editable) return
     e.preventDefault()
     e.stopPropagation()
-    const laneEl = e.currentTarget.closest('.noteview-vel-lane') as HTMLElement
-    const rect = laneEl.getBoundingClientRect()
+    const rect = e.currentTarget.getBoundingClientRect()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    velGesture.current = { id: ev.id, rect }
-    setSel([ev.id])
-    // Set immediately from the down position too, so a plain click (no drag) still commits a value.
-    const velocity = velocityFromY(rect, e.clientY)
-    setVelPreview({ id: ev.id, velocity })
-    setVelDragLabel({ x: e.clientX, y: e.clientY, value: velocity })
+    velGesture.current = { rect }
+    const acc: Record<string, number> = {}
+    paintVelocityAt(rect, e.clientX, e.clientY, acc)
+    setVelPreview(acc)
+    setSel(Object.keys(acc))
+    setVelDragLabel({ x: e.clientX, y: e.clientY, value: velocityFromY(rect, e.clientY) })
   }
 
-  function onVelPointerMove(e: React.PointerEvent) {
+  function onVelLanePointerMove(e: React.PointerEvent) {
     const g = velGesture.current
     if (!g) return
-    const velocity = velocityFromY(g.rect, e.clientY)
-    setVelPreview({ id: g.id, velocity })
-    setVelDragLabel({ x: e.clientX, y: e.clientY, value: velocity })
+    setVelPreview((prev) => {
+      const acc = { ...(prev ?? {}) }
+      paintVelocityAt(g.rect, e.clientX, e.clientY, acc)
+      return acc
+    })
+    setVelDragLabel({ x: e.clientX, y: e.clientY, value: velocityFromY(g.rect, e.clientY) })
   }
 
-  function onVelPointerUp() {
+  function onVelLanePointerUp() {
     const g = velGesture.current
     const p = velPreview
     velGesture.current = null
     setVelPreview(null)
     setVelDragLabel(null)
     if (!g || !p) return
-    postEdit(`${track.id}.${editPrefix}.${g.id}.velocity`, String(p.velocity))
+    for (const [id, value] of Object.entries(p)) postEdit(`${track.id}.${editPrefix}.${id}.velocity`, String(value))
   }
 
   // ---- chance (draw-across-notes paint gesture, Phase 23 Stream BA) ----
@@ -887,9 +954,6 @@ export function NoteView({ track }: { track: BeatTrack }) {
         </div>
       )}
       <div className="editor-toolbar">
-        <span className="editor-title" style={{ color: track.color }}>
-          {track.name}
-        </span>
         {editable && (
           <button
             className={`clip-audition-btn ${auditioning ? 'active' : ''}`}
@@ -907,6 +971,43 @@ export function NoteView({ track }: { track: BeatTrack }) {
             {auditioning ? '■ Stop' : '▶ Preview clip'}
           </button>
         )}
+        {/* Phase 28 Stream FD, follow-through 2 (research/76 §2.5/§3 P1 item 4): a local time-zoom
+            control for the note grid — same button/readout/reset shape and Cmd/Ctrl+scroll idiom as
+            ArrangementView.tsx's own `.arr-zoom-controls` (ArrangementView.tsx:2592-2605), just scoped
+            to `--note-step-w` instead of `zoomPxPerBar`. Freed real width in this row by deleting the
+            redundant .editor-title span this same stream also removed (bug 3). */}
+        <div className="noteview-zoom-controls" title="note grid zoom (or Cmd/Ctrl+scroll over the grid)">
+          <button
+            className="noteview-zoom-btn"
+            data-action="note-zoom-out"
+            disabled={stepW <= MIN_STEP_W + 0.01}
+            title="zoom out"
+            onClick={zoomOut}
+          >
+            −
+          </button>
+          <span className="noteview-zoom-readout" data-stepw={stepW.toFixed(2)}>
+            {Math.round(stepW)}px/step
+          </span>
+          <button
+            className="noteview-zoom-btn"
+            data-action="note-zoom-in"
+            disabled={stepW >= MAX_STEP_W - 0.01}
+            title="zoom in"
+            onClick={zoomIn}
+          >
+            +
+          </button>
+          <button
+            className="noteview-zoom-btn"
+            data-action="note-zoom-reset"
+            disabled={stepZoom === null}
+            title="reset zoom"
+            onClick={zoomReset}
+          >
+            reset
+          </button>
+        </div>
         <span className="toolbar-tip">
           {events.length} {eventKind === 'note' ? 'note' : 'hit'}
           {events.length === 1 ? '' : 's'}
@@ -941,7 +1042,16 @@ export function NoteView({ track }: { track: BeatTrack }) {
       </div>
       <ClipPropertiesPanel track={track} />
       {isDrums && <DrumLanePanel track={track} />}
-      <div className="noteview-scroll">
+      {/* Phase 28 Stream FD, follow-through 2: `--note-step-w` is set INLINE here, overriding the
+          global :root default (styles.css:10) only within this subtree — every `var(--note-step-w)`
+          consumer below (grid, vel/chance lanes, clip-loop strip, playhead, barlines) is a descendant
+          of this div, so this one override point is the whole of the zoom feature's plumbing, same
+          "decouple one variable" shape ArrangementView.tsx's own zoomPxPerBar uses for pxPerBar. */}
+      <div
+        className="noteview-scroll"
+        style={{ '--note-step-w': `${stepW}px` } as React.CSSProperties}
+        onWheel={onNoteGridWheelZoom}
+      >
         <div className="noteview-body" style={{ display: 'flex', alignItems: 'flex-start' }}>
           {/* Left gutter: one row per pitch (piano keys) or one row per declared drum lane (name
               labels) — sticky to the left edge so it stays pinned while the grid scrolls
@@ -1180,15 +1290,28 @@ export function NoteView({ track }: { track: BeatTrack }) {
             <div className="noteview-playhead" style={{ left: `calc(${playheadStep} * var(--note-step-w))` }} />
           )}
             </div>
-            {/* Velocity lane (Phase 16 Stream J): one bar per event, aligned under it. Drag (or click)
-                vertically on a bar to set that event's velocity — writes through the existing
-                `<track>.note.<id>.velocity` / `<track>.hit.<id>.velocity` edit paths. */}
-            <div className="noteview-vel-lane" style={{ height: VEL_LANE_H, width: `calc(${totalSteps} * var(--note-step-w))` }}>
+            {/* Velocity lane (Phase 16 Stream J): one bar per event, aligned under it. Phase 28
+                Stream FD, follow-through 1: drag ACROSS the lane and every event the pointer sweeps
+                over gets painted to the current Y's velocity (top = loudest, bottom = softest) — the
+                same paint-across-notes shape the chance lane below already established, just
+                generalized to notes AND hits. Handlers live on the lane container (not per-bar) so a
+                drag that starts on one bar and sweeps onto neighboring bars keeps painting them, the
+                same "re-evaluate what's under the pointer every move" mechanism `paintChanceAt` uses
+                — writes through the existing `<track>.note.<id>.velocity` / `<track>.hit.<id>.velocity`
+                edit paths, one postEdit per touched event on release. */}
+            <div
+              className="noteview-vel-lane"
+              style={{ height: VEL_LANE_H, width: `calc(${totalSteps} * var(--note-step-w))` }}
+              onPointerDown={onVelLanePointerDown}
+              onPointerMove={onVelLanePointerMove}
+              onPointerUp={onVelLanePointerUp}
+              title="drag across notes/hits to paint their velocity — top = loudest, bottom = softest"
+            >
               {Array.from({ length: loopBars }, (_, b) => (
                 <div key={b} className="noteview-barline" style={{ left: `calc(${b * 16} * var(--note-step-w))` }} />
               ))}
               {events.map((ev) => {
-                const velocity = velPreview && velPreview.id === ev.id ? velPreview.velocity : ev.velocity
+                const velocity = velPreview?.[ev.id] ?? ev.velocity
                 const barH = Math.max(2, Math.round(velocity * VEL_LANE_H))
                 const w = ev.duration !== undefined ? ev.duration : 0
                 return (
@@ -1203,18 +1326,15 @@ export function NoteView({ track }: { track: BeatTrack }) {
                     }}
                     title={`velocity ${velocity}`}
                     data-vel-note-id={ev.id}
-                    onPointerDown={(e) => startVelocityGesture(ev, e)}
-                    onPointerMove={onVelPointerMove}
-                    onPointerUp={onVelPointerUp}
                   />
                 )
               })}
             </div>
             {/* Chance lane (Phase 23 Stream BA, research 22 §1.4's PropertyDrawModifier reference):
                 the draw-across-notes gesture — drag horizontally and every note the pointer sweeps
-                over gets painted to the current Y's chance value (top = 100%, bottom = 0%), unlike
-                the velocity lane above which only ever edits the one bar originally pressed. Note-
-                only (drum hits carry no chance field). */}
+                over gets painted to the current Y's chance value (top = 100%, bottom = 0%), the same
+                mechanism the velocity lane above uses (Phase 28 Stream FD generalized it there too).
+                Note-only (drum hits carry no chance field). */}
             {!isDrums && (
               <div
                 className="noteview-chance-lane"

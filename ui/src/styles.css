@@ -429,7 +429,15 @@ body {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+  /* Phase 28 Stream FD bug 4 (research/76 §2.5, P0 item 1): the 1px 30%-black box-shadow this used
+     to rely on alone reads as essentially invisible when a full-opacity, full-width, same-hue note
+     (Phase 27 EE's flat-opacity fix) sits directly beneath the title bar — the two fuse into one
+     block with no visible seam. A real 3px solid dark bottom border, using the same near-black
+     (#05060a) already used for the octave-gridline separator elsewhere in this file, gives a hard
+     seam that reads regardless of the track color underneath; the shadow is widened/darkened too so
+     there's still a soft falloff below the hard line. */
+  border-bottom: 3px solid #05060a;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.55);
 }
 .noteview-titlebar-name {
   font-weight: 700;
@@ -445,8 +453,53 @@ body {
   gap: 14px;
   margin-bottom: 10px;
 }
-/* Typography (font-size/weight/case/tracking/color) lives in the shared `.section-heading` rule
-   above (Phase 28 Stream FB) — `.editor-title` no longer needs its own block. */
+/* NOTE: `.editor-title` is a SHARED class — MixerView.tsx (:326), SynthPanel.tsx's own top-level
+   track-name title (:569, distinct from the four sub-panel titles Stream FB did migrate onto
+   `.section-heading`), and InstrumentPanel.tsx (:175) all still render their own panel-title span
+   with PLAIN `.editor-title`, not `.section-heading` — Stream FB's own migration was incomplete for
+   these three (confirmed by grep during Stream FD's merge; FB's report claimed a full fold-in but
+   missed them). Deleting this block, as FB intended, would have silently dropped their font-size/
+   weight to the browser default. Phase 28 Stream FD bug 3 only deleted NoteView.tsx's own redundant
+   use of the class (superseded by Phase 27 ED's `.noteview-titlebar`) — this rule stays until
+   MixerView/SynthPanel's own top title/InstrumentPanel are also migrated onto `.section-heading` in
+   a follow-up pass. */
+.editor-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+/* Phase 28 Stream FD, follow-through 2: NoteView's own local time-zoom control, same visual language
+   as ArrangementView.tsx's `.arr-zoom-controls`/`.arr-toolbtn` (styles.css:3367+) but namespaced to
+   this component since `.arr-*` is that view's own naming convention, not a shared class today. */
+.noteview-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.noteview-zoom-btn {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.noteview-zoom-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.noteview-zoom-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.noteview-zoom-readout {
+  min-width: 54px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 .toolbar-tip {
   color: var(--text-dim);
   font-size: 11px;
@@ -1074,14 +1127,21 @@ body {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   min-width: min-content;
+  /* Phase 28 Stream FD, follow-through 1: the paint-across-notes gesture now lives on the LANE
+     (matching .noteview-chance-lane's own cursor/touch-action below), not per-bar, since a drag can
+     sweep across more than one bar's worth of x-range in one gesture. */
+  cursor: ns-resize;
+  touch-action: none;
 }
 .noteview-vel-bar {
   position: absolute;
   bottom: 0;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   opacity: 0.75;
-  cursor: ns-resize;
-  touch-action: none;
+  /* pointer-events: none — the gesture now lives on .noteview-vel-lane itself (see above), same
+     precedent as .noteview-chance-bar; painting has to keep working when the pointer is over the
+     GAP between two bars too, not just while directly over one. */
+  pointer-events: none;
 }
 .noteview-vel-bar:hover,
 .noteview-vel-bar.selected {
@@ -1154,19 +1214,33 @@ body {
    cap so the strip reads as draggable AT REST — not just discoverable by accidentally hovering the
    9px invisible zone the old end-only handle used (research/71 §2.6/§3.4 item 4, matching Ableton's
    loop brace being visibly grabbable at both edges without a drag in progress). */
+/* Phase 28 Stream FD, follow-through 3 (research/76 §2.5/§3 P1 item 5): the clip-loop range/handles
+   used to reuse `var(--accent)` (amber), which by this point in the view already means four OTHER
+   things (Preview-clip button, Place-in-Arrangement button, ClipPropertiesPanel's own EG left-border
+   accent, every chance<100 bar) — one hue meaning five unrelated things works against EG's own
+   "hue = role" convention. Moved to a violet not reused anywhere else in NoteView (#c678dd, already
+   part of the app's established Atom-One-Dark-inspired palette — same family as .kind-synth,
+   styles.css:341 — just not yet used inside this view). NOTE for whoever lands Streams FA/FB's
+   shared design-token pass: this is a literal hex, not a token, since FA/FB hadn't merged when this
+   landed — reconcile onto a real `--cliploop-accent`-style token once that layer exists.
+   `--cliploop-*` custom props (not `--accent`) are scoped to this block only, so the two constants
+   below are the single place this hue would need to change. */
 .noteview-cliploop-strip {
   position: relative;
   height: 14px;
   margin-bottom: 2px;
   min-width: min-content;
+  --cliploop-accent: #c678dd;
+  --cliploop-accent-dim: rgba(198, 120, 221, 0.35);
+  --cliploop-accent-mid: rgba(198, 120, 221, 0.8);
 }
 .noteview-cliploop-range {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(224, 161, 60, 0.35);
-  border-top: 1px solid rgba(224, 161, 60, 0.8);
-  border-bottom: 1px solid rgba(224, 161, 60, 0.8);
+  background: var(--cliploop-accent-dim);
+  border-top: 1px solid var(--cliploop-accent-mid);
+  border-bottom: 1px solid var(--cliploop-accent-mid);
   pointer-events: none;
 }
 .noteview-cliploop-handle {
@@ -1188,7 +1262,7 @@ body {
   left: 6px;
   width: 4px;
   border-radius: var(--radius-sm);
-  background: var(--accent);
+  background: var(--cliploop-accent);
 }
 /* the triangular cap — a small inward-pointing nub at the strip's vertical center, evoking
    Ableton's brace-handle convention; the start handle's triangle points right (into the loop
@@ -1205,11 +1279,11 @@ body {
 }
 .noteview-cliploop-handle-start::before {
   left: 1px;
-  border-left: 7px solid var(--accent);
+  border-left: 7px solid var(--cliploop-accent);
 }
 .noteview-cliploop-handle-end::before {
   right: 1px;
-  border-right: 7px solid var(--accent);
+  border-right: 7px solid var(--cliploop-accent);
 }
 .noteview-cliploop-handle:hover::after {
   background: #fff;
@@ -1225,7 +1299,7 @@ body {
   top: -1px;
   transform: translateX(2px);
   padding: 0 4px;
-  background: var(--accent);
+  background: var(--cliploop-accent);
   color: var(--bg);
   border-radius: var(--radius-sm);
   font-size: 10px;
