@@ -139,7 +139,8 @@ async function main() {
     await page.waitForFunction(() => window.__store && window.__store.getState().doc, { timeout: 10000 })
     await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 })
 
-    await page.click('.view-tab[data-view="arrangement"]')
+    // Phase 18 made the arrangement the permanent main view (no tab switcher to click into) --
+    // it's already showing once the app is ready.
     await page.waitForSelector('.arr-canvas', { timeout: 5000 })
     await sleep(300)
 
