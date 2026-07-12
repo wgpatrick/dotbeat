@@ -110,7 +110,6 @@ async function main() {
     await page.goto(`http://localhost:${PREVIEW_PORT}/?daw=${daemon.port}`, { waitUntil: 'load' })
     await page.waitForFunction(() => window.__store && window.__store.getState().doc, { timeout: 10000 })
     await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 })
-    await page.click('.view-tab[data-view="arrangement"]')
     await page.waitForSelector('.arr-canvas', { timeout: 5000 })
     await sleep(300) // let ResizeObserver settle the lane/ruler widths
 
