@@ -26,7 +26,7 @@ stream to pick up — not guesswork, a decision away from being built.
 
 ## Snapshot — 220 features tracked
 
-**64** Done · **3** In progress · **153** Not started
+**65** Done · **3** In progress · **152** Not started
 
 ---
 
@@ -317,7 +317,7 @@ stream to pick up — not guesswork, a decision away from being built.
 
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
-| Multi-level in-session undo/redo | Distinct from checkpoint/history versioning. Stripped from the original BeatLab port and never rebuilt — Ctrl+Z currently does nothing anywhere in the GUI (confirmed this pass: zero undo/redo implementation anywhere in `src/daemon`, `src/core`, `cli/beat.mjs`, or `src/mcp/server.ts`). Phase 23 research stream RD scoped the design: keep it a SEPARATE mechanism from git checkpoints (not merged), a session-only full-document-snapshot stack (per-primitive inverses do not cleanly cover every edit, e.g. splitAudioClip has no inverse) living in the daemon, coalesced by user gesture (drag-end) rather than raw write so one knob-drag does not need dozens of undos — see research/28. Independently named a live blocker by three separate chapter comparisons (57, 58, 65) and Ableton's own Undo History screenshot (manual ch.5 pp.130-131) independently confirms the same "flat, clickable list, jump to any point" UX research 28 already recommends reusing from the History panel — build the daemon-side snapshot stack (real, currently entirely absent) plus wire it to `Ctrl+Z`/`Ctrl+Shift+Z` in the GUI. | ❌ missing | — | ❌ missing | ⬜ Not started | [`28-undo-redo-vs-checkpoint-history.md`](research/28-undo-redo-vs-checkpoint-history.md) | — |
+| Multi-level in-session undo/redo | Distinct from checkpoint/history versioning. Stripped from the original BeatLab port and never rebuilt for 25 phases — Ctrl+Z did nothing anywhere in the GUI. Phase 26 Stream DB built research/28's design exactly as scoped: a SEPARATE, session-only, in-memory undo/redo stack of full BeatDocument snapshots in `src/daemon/daemon.ts` (not merged into the git-checkpoint system), living behind the one choke point every mutating route already shares (`writeIfChanged`) rather than instrumenting all 15+ routes individually. Gesture coalescing is real: a knob drag firing several debounced `POST /edit` calls for the same path within a 700ms window collapses into ONE undo step (verified live — a 4-tick drag produced exactly one undo entry, not four), while the bare `<track>.note`/`<track>.hit` ADD grammar is deliberately excluded from coalescing (each call mints a new entity, so two quick adds must stay two steps). `GET /undo-state` + a broadcast `undo-state` SSE event keep every connected client's Undo/Redo buttons (TransportBar, greyed out per research/28 §5.6's own recommendation — no History-panel-style flat list, by that same section's explicit reasoning) in sync without polling. An external file change (a hand-edit/CLI call landing on disk) clears both stacks per research/28 §3's named edge case, verified live. `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` (+ `Ctrl/Cmd+Y`) wired globally in `App.tsx`, same guarded-global-listener shape as the existing Shift+Tab handler. No CLI/MCP verb — this is a GUI-session mechanism only, `beat undo` was never in scope (the durable equivalent is `beat restore`). | ✅ done | — | ✅ done | ✅ Done | [`28-undo-redo-vs-checkpoint-history.md`](research/28-undo-redo-vs-checkpoint-history.md) | [`phase-26-plan.md`](phase-26-plan.md) |
 
 ## Project / folder management
 

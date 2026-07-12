@@ -84,6 +84,29 @@ body {
   background: #e0564c;
   color: #fff;
 }
+/* Phase 26 Stream DB: session-only undo/redo (research/28) — deliberately small, TransportBar-
+   level buttons rather than a History-panel-style flat list (research/28 §5.6/§1(c)): this is the
+   cheap, ephemeral, in-session mechanism, visually distinct from the git-backed History drawer. */
+.undo-redo-group {
+  display: flex;
+  gap: 4px;
+}
+.undo-btn {
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.undo-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.undo-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .transport-field {
   display: flex;
   align-items: center;

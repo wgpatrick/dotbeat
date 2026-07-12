@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { initBridge } from './daemon/bridge'
+import { initBridge, postUndo, postRedo } from './daemon/bridge'
 import { useStore, selectedTrackId } from './state/store'
 import { TransportBar } from './components/TransportBar'
 import { SynthPanel } from './components/SynthPanel'
@@ -186,6 +186,32 @@ export function App() {
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || el?.isContentEditable) return
       e.preventDefault()
       useStore.getState().toggleBottomPane()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Phase 26 Stream DB (research/28 §5.5): Ctrl/Cmd+Z (undo) and Ctrl/Cmd+Shift+Z (redo) — the
+  // session-only, ephemeral document-snapshot stack, deliberately separate from the git-backed
+  // History drawer (POST /restore). Same global-listener-with-form-control-guard shape as the
+  // Shift+Tab handler above, extended per research/28's own note ("extending the exact pattern
+  // already established for Shift+Tab"). Every edit already goes through the daemon rather than
+  // mutating client state directly (bridge.ts's file↔GUI model), so this POSTs /undo or /redo
+  // instead of touching the store — postUndo/postRedo apply the daemon's returned document.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const key = e.key.toLowerCase()
+      // Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z (redo), plus Ctrl/Cmd+Y as the common Windows redo alt.
+      const isUndo = key === 'z' && !e.shiftKey
+      const isRedo = (key === 'z' && e.shiftKey) || key === 'y'
+      if (!isUndo && !isRedo) return
+      const el = document.activeElement as HTMLElement | null
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || el?.isContentEditable) return
+      e.preventDefault()
+      if (isRedo) void postRedo()
+      else void postUndo()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
