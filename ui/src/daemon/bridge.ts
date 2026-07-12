@@ -95,6 +95,16 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
     return { ...doc, tracks }
   }
 
+  // track metadata (Phase 20 Stream W): name/color live on the TRACK, not the synth block — core's
+  // setValue routes them to track.name/track.color (src/core/edit.ts). Mirror them there so an inline
+  // rename / color-pick reflects instantly; without this branch they'd fall through to the synth-param
+  // path below and be written to a phantom synth.name/synth.color (the same optimistic-mirror miss
+  // class Stream Y fixed for osc2), leaving the real header name/swatch stale until the next re-pull.
+  if (rest === 'name' || rest === 'color') {
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, [rest]: value } : t))
+    return { ...doc, tracks }
+  }
+
   // synth param. String-valued fields (osc + the enums, and duckSource's 'none'->null) stay
   // strings; everything else is a canonical number. A non-numeric value means a string field.
   const num = Number(value)
@@ -237,6 +247,52 @@ export function postAutomation(e: AutomationEdit): void {
       })
       .catch((err) => console.warn('[daw] could not POST automation:', err)),
   )
+}
+
+// ─── track structure add/remove (Phase 20 Stream W) ─────────────────────────────────────────────
+// Add/remove change the whole tracks list, so they don't fit setValue's `path=value` shape and go to
+// dedicated daemon routes (/add-track, /remove-track) wrapping core's addTrack/removeTrack — the same
+// functions `beat add-track`/`beat rm-track` call. The daemon never SSE-echoes its own writes, so
+// both routes RETURN the resulting raw document and we apply it straight to the store (no optimistic
+// local mirror needed — the authoritative post-edit doc comes back in the response). Errors (dup id,
+// removing the last track, an instrument track with no soundfont) surface with the daemon's message.
+
+export interface AddTrackOpts {
+  id: string
+  kind: 'synth' | 'drums' | 'instrument'
+  name?: string
+  color?: string
+  soundfont?: { sample: string; program: number }
+}
+
+export async function postAddTrack(opts: AddTrackOpts): Promise<void> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/add-track`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(opts),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc } = (await res.json()) as { written: boolean; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
+}
+
+export async function postRemoveTrack(id: string): Promise<void> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/remove-track`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id }),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc } = (await res.json()) as { written: boolean; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
 }
 
 // ─── vary-and-audition (Phase 15 Stream I) ──────────────────────────────────────────────────────

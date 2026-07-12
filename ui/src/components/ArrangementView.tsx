@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
-import { postEdit, postSelection, postAutomation, daemonBase } from '../daemon/bridge'
+import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, daemonBase } from '../daemon/bridge'
+import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { DRUM_LANES, type BeatAutomationPoint, type BeatDocument, type BeatTrack, type DrumLane, type TrackKind } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
+
+// Phase 20 Stream W — track add/delete/rename/recolor + project-folder controls. There is no BeatLab
+// component to port these from (BeatLab's tracks are lesson-defined; its store has no track
+// add/remove/rename/color action — verified by direct source read), so the UI is built fresh here,
+// reusing BeatLab's UI *patterns*: the controlled inline `<input>` edit (its TrackLab section-note
+// field), the `style={{ background: color }}` swatch (its TrackStrip track-dot), and a header delete
+// button (its SceneLauncher scene-del). Rename/color write the existing `<track>.name`/`<track>.color`
+// setValue paths via postEdit; add/remove go through the new /add-track /remove-track daemon routes
+// (postAddTrack/postRemoveTrack) wrapping core's addTrack/removeTrack.
+const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument']
 
 // ── Arrangement length (Phase 19 Stream V) ───────────────────────────────────────────────────────
 // Two length surfaces, matching the two document modes. Loop mode (doc.song === null) is a single
@@ -343,6 +354,18 @@ function TrackRow({
   // soloed) — the same signal the engine's real audio gate reads (Phase 14 Stream E).
   const dimmed = useStore((s) => isEffectivelyMuted(s, track.id))
 
+  // Inline rename (Phase 20 Stream W): double-click the track name to edit it in place, Enter/blur
+  // commits, Escape cancels. Names are single tokens in the format (no whitespace — src/core/edit.ts),
+  // so whitespace is filtered out as typed. Commit writes the existing `<track>.name` setValue path.
+  const [renaming, setRenaming] = useState(false)
+  const [draft, setDraft] = useState(track.name)
+  const commitRename = useCallback(() => {
+    setRenaming(false)
+    const name = draft.trim()
+    if (name && name !== track.name) postEdit(`${track.id}.name`, name)
+    else setDraft(track.name)
+  }, [draft, track.id, track.name])
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -441,11 +464,62 @@ function TrackRow({
   return (
     <div className={`arr-row ${dimmed ? 'dimmed' : ''}`} style={{ height: ROW_H }}>
       <div className={`arr-track-header ${selected ? 'selected' : ''}`} style={{ width: HEADER_W }}>
-        <button className="arr-track-select" onClick={onHeaderClick} title={`select track ${track.name}`}>
-          <span className="arr-track-swatch" style={{ background: track.color }} />
-          <span className="arr-track-name">{track.name}</span>
-          <span className={`arr-track-kind kind-${track.kind}`}>{track.kind[0]}</span>
-        </button>
+        <div className="arr-track-titlebar">
+          {/* color: a hidden native color input behind the visible swatch (the swatch always renders
+              regardless of native color-input chrome). Writes the <track>.color setValue path. */}
+          <label className="arr-track-color" title="track color" onClick={(e) => e.stopPropagation()}>
+            <span className="arr-track-swatch" style={{ background: track.color }} />
+            <input
+              type="color"
+              className="arr-track-color-input"
+              value={track.color}
+              data-color={track.id}
+              onChange={(e) => postEdit(`${track.id}.color`, e.target.value.toLowerCase())}
+            />
+          </label>
+          {renaming ? (
+            <input
+              className="arr-track-rename"
+              autoFocus
+              value={draft}
+              data-rename={track.id}
+              onChange={(e) => setDraft(e.target.value.replace(/\s/g, ''))}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename()
+                else if (e.key === 'Escape') {
+                  setDraft(track.name)
+                  setRenaming(false)
+                }
+              }}
+            />
+          ) : (
+            <button
+              className="arr-track-select"
+              onClick={onHeaderClick}
+              onDoubleClick={() => {
+                setDraft(track.name)
+                setRenaming(true)
+              }}
+              title={`select track ${track.name} (double-click to rename)`}
+            >
+              <span className="arr-track-name">{track.name}</span>
+              <span className={`arr-track-kind kind-${track.kind}`}>{track.kind[0]}</span>
+            </button>
+          )}
+          <button
+            className="arr-track-del"
+            data-del={track.id}
+            title={`delete track ${track.name}`}
+            onClick={() => {
+              if (window.confirm(`Delete track "${track.name}"? This removes its clips, notes, and mixer settings and cannot be undone from here.`)) {
+                postRemoveTrack(track.id).catch((err) => window.alert(`Could not delete track: ${(err as Error).message}`))
+              }
+            }}
+          >
+            ×
+          </button>
+        </div>
         <InlineStrip track={track} />
         {headerExtra}
       </div>
@@ -736,6 +810,9 @@ export function ArrangementView() {
   // Lanes that already carry points always show regardless — see visibleParamsFor.
   const [autoOpen, setAutoOpen] = useState<Record<string, boolean>>({})
   const [addedLanes, setAddedLanes] = useState<Record<string, string[]>>({})
+  // Add-track control (Phase 20 Stream W): a small kind-chooser menu in the toolbar.
+  const [addOpen, setAddOpen] = useState(false)
+  const [addBusy, setAddBusy] = useState(false)
 
   // Track the width available to the timeline lanes (total minus the fixed header column).
   useLayoutEffect(() => {
@@ -922,6 +999,43 @@ export function ArrangementView() {
     [setSelectedTrack, setBottomPaneOpen],
   )
 
+  // Add a track of a chosen kind (Phase 20 Stream W). Mints a unique id from the kind (synth,
+  // synth2, …), defers name/color to core's defaults (color cycles TRACK_COLORS by index), then
+  // selects the new track. Instrument tracks need a registered SoundFont sample — the GUI has no
+  // sample-registration surface, so it reuses the first media sample if one exists, else the option
+  // is disabled with a tooltip pointing at `beat sample` (honest: the GUI can't register samples).
+  const addTrackOfKind = useCallback(
+    async (kind: TrackKind) => {
+      const d = useStore.getState().doc
+      if (!d) return
+      setAddOpen(false)
+      const ids = new Set(d.tracks.map((t) => t.id))
+      let id: string = kind
+      for (let i = 2; ids.has(id); i++) id = `${kind}${i}`
+      const opts: Parameters<typeof postAddTrack>[0] = { id, kind }
+      if (kind === 'instrument') {
+        const sample = (d.media as { id?: string }[])[0]?.id
+        if (!sample) {
+          window.alert('Instrument tracks need a registered SoundFont sample. Register one with `beat sample` first.')
+          return
+        }
+        opts.soundfont = { sample, program: 0 }
+      }
+      setAddBusy(true)
+      try {
+        await postAddTrack(opts)
+        setSelectedTrack(id)
+        postEdit('selected_track', id)
+        postSelection({ tracks: [id] })
+      } catch (err) {
+        window.alert(`Could not add track: ${(err as Error).message}`)
+      } finally {
+        setAddBusy(false)
+      }
+    },
+    [setSelectedTrack],
+  )
+
   if (!doc) return null
 
   // Resolve the band to show per axis: an in-progress drag wins; otherwise the committed selection.
@@ -959,8 +1073,49 @@ export function ArrangementView() {
       <div className="editor-toolbar">
         <span className="editor-title">arrangement</span>
         <span className="toolbar-tip">
-          {totalBars} bars · {sections.length} section{sections.length === 1 ? '' : 's'} · {modeLabel} · drag the ruler or a track to select bars · click a track name to select it
+          {totalBars} bars · {sections.length} section{sections.length === 1 ? '' : 's'} · {modeLabel} · drag the ruler or a track to select bars · click a track name to select it · double-click a name to rename
         </span>
+        <div className="arr-project-controls">
+          <div className="arr-addtrack">
+            <button
+              className="arr-toolbtn"
+              data-action="add-track"
+              onClick={() => setAddOpen((o) => !o)}
+              disabled={addBusy}
+              title="add a track"
+            >
+              + track
+            </button>
+            {addOpen && (
+              <div className="arr-addtrack-menu">
+                {TRACK_KINDS.map((k) => {
+                  const needsSample = k === 'instrument' && (doc.media as unknown[]).length === 0
+                  return (
+                    <button
+                      key={k}
+                      className="arr-addtrack-item"
+                      data-add-kind={k}
+                      disabled={needsSample}
+                      title={needsSample ? 'needs a registered SoundFont sample (beat sample)' : `add a ${k} track`}
+                      onClick={() => void addTrackOfKind(k)}
+                    >
+                      {k}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          <button
+            className="arr-toolbtn"
+            data-action="open-folder"
+            disabled={!isTauri()}
+            title={isTauri() ? 'open a different project folder' : 'available in the desktop app — switches the daemon to another project folder'}
+            onClick={() => void openProjectFolder()}
+          >
+            open folder…
+          </button>
+        </div>
       </div>
 
       {/* Length controls (Phase 19). Loop mode: shrink/grow loop_bars, or split into sections. Song
