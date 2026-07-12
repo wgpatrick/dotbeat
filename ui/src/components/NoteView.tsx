@@ -1102,11 +1102,30 @@ const SCALE_NAMES = [
 ] as const
 const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
 
+// Phase 26 Stream DF: the grid-step vocabulary quantizeNotes (src/core/edit.ts:390-466) actually
+// takes — a plain "16th steps per grid cell" number (1 = 16ths, 2 = 8ths, 4 = quarters, 0.5 =
+// 32nds), same units `beat quantize --grid` already accepts. Named options here are purely a GUI
+// convenience over that one numeric knob, not a new vocabulary.
+const QUANTIZE_GRID_OPTIONS = [
+  { label: '32nds', value: 0.5 },
+  { label: '16ths', value: 1 },
+  { label: '8ths', value: 2 },
+  { label: 'quarters', value: 4 },
+] as const
+
 function PitchTimePanel({ track, noteIds }: { track: BeatTrack; noteIds: string[] }) {
   const [semitones, setSemitones] = useState(1)
   const [gap, setGap] = useState(0)
   const [root, setRoot] = useState(0)
   const [scale, setScale] = useState<string>('major')
+  // Phase 26 Stream DF: Quantize control state — grid in 16th-step units (default 1 = 16ths,
+  // matching quantizeNotes' own default), amount as a 0-100 percent for the slider (converted to
+  // quantizeNotes' 0..1 `amount` on submit), starts/ends mirroring the CLI's `--no-starts`/`--ends`
+  // scoping (defaults match: starts on, ends off).
+  const [grid, setGrid] = useState(1)
+  const [amount, setAmount] = useState(100)
+  const [qStarts, setQStarts] = useState(true)
+  const [qEnds, setQEnds] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const scoped = noteIds.length > 0 ? noteIds : undefined
@@ -1203,6 +1222,50 @@ function PitchTimePanel({ track, noteIds }: { track: BeatTrack; noteIds: string[
           Legato
         </button>
       </label>
+
+      {/* Phase 26 Stream DF (research 57 §2 item 1, "the single cheapest, highest-value item"):
+          quantizeNotes (src/core/edit.ts:390-466) was fully wired through CLI/MCP but had zero GUI
+          affordance — this is that affordance, over the same /pitch-time route as the ops above. */}
+      <div
+        className="pitch-time-field pitch-time-quantize"
+        title="snap note starts and/or ends toward a grid; amount blends how far toward the grid each note moves (100% = full snap)"
+      >
+        <select value={grid} onChange={(e) => setGrid(Number(e.target.value))} data-pitch-time-input="quantize-grid">
+          {QUANTIZE_GRID_OPTIONS.map((g) => (
+            <option key={g.label} value={g.value}>
+              {g.label}
+            </option>
+          ))}
+        </select>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={amount}
+          onChange={(e) => setAmount(Number(e.target.value))}
+          data-pitch-time-input="quantize-amount"
+          title={`amount: ${amount}%`}
+        />
+        <span className="pitch-time-amount-readout" data-pitch-time-amount-readout>
+          {amount}%
+        </span>
+        <label className="pitch-time-checkbox" title="snap note starts to the grid">
+          <input type="checkbox" checked={qStarts} onChange={(e) => setQStarts(e.target.checked)} data-pitch-time-input="quantize-starts" />
+          starts
+        </label>
+        <label className="pitch-time-checkbox" title="also snap note ends (adjusts duration so the end lands on the grid)">
+          <input type="checkbox" checked={qEnds} onChange={(e) => setQEnds(e.target.checked)} data-pitch-time-input="quantize-ends" />
+          ends
+        </label>
+        <button
+          disabled={busy}
+          data-pitch-time-op="quantize"
+          onClick={() => run({ op: 'quantize', track: track.id, grid, amount: amount / 100, starts: qStarts, ends: qEnds, noteIds: scoped })}
+        >
+          Quantize
+        </button>
+      </div>
 
       <button
         disabled={busy}

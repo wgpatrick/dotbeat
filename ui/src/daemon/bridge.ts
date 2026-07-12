@@ -562,6 +562,11 @@ export type PitchTimeOp =
   | { op: 'reverse'; track: string; noteIds?: string[] }
   | { op: 'legato'; track: string; gap?: number; noteIds?: string[] }
   | { op: 'consolidate'; track: string; noteIds?: string[] }
+  // Phase 26 Stream DF: GUI affordance for the already-shipped quantizeNotes (src/core/edit.ts) —
+  // grid in 16th-step units (1=16ths, 0.5=32nds, 2=8ths, 4=quarters), amount 0..1 (partial-strength
+  // snap), starts/ends independently scope which note edges get snapped. Same {op,track,noteIds?}
+  // shape as every other op above.
+  | { op: 'quantize'; track: string; grid?: number; amount?: number; starts?: boolean; ends?: boolean; noteIds?: string[] }
 
 /** Issue one Pitch & Time / Consolidate op. Throws with the daemon's error message on a 4xx (e.g.
  * an unknown scale name or a track that isn't a note track). Returns how many notes changed, so
