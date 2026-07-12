@@ -287,6 +287,8 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     selectedTrack,
     media: [], // browser payloads carry no media yet — lane samples arrive via the file side
     tracks,
+    groups: [], // v0.10: browser payloads carry no groups — the daemon's /state route carries the
+    // CURRENT document's groups over (see src/daemon/daemon.ts), same never-erase rule as media.
     scenes,
     song,
   }

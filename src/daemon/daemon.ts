@@ -28,9 +28,9 @@
 // and a one-directional push channel is genuinely all the file→GUI direction needs.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { readFileSync, writeFileSync, watch, existsSync, mkdirSync, copyFileSync, readdirSync, type FSWatcher } from 'node:fs'
+import { readFileSync, writeFileSync, watch, existsSync, mkdirSync, copyFileSync, readdirSync, statSync, type FSWatcher } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { basename, dirname, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { BeatDocument, BeatSelection, DrumLane } from '../core/index.js'
 import {
@@ -58,8 +58,15 @@ import {
   removeEffect,
   moveEffect,
   setEffectEnabled,
+  addGroup,
+  removeGroup,
+  renameGroup,
+  setGroupColor,
+  setGroupTracks,
+  initDocument,
   BeatEditError,
   BeatPresetError,
+  BeatParseError,
   type ExternalSandboxPayload,
   type TrackKind,
   type BeatPreset,
@@ -569,10 +576,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           for (const [i, t] of doc.tracks.entries()) {
             if (t.kind === 'instrument') carried.splice(Math.min(i, carried.length), 0, t)
           }
+          // v0.10: the GUI's whole-document push has no group-editing surface (groups are edited
+          // through the dedicated POST /group route below), so a /state push must never erase them —
+          // same never-erase rule as media/instrument tracks above. Defensively drop any member track
+          // the payload didn't carry over (same "a group left with zero members is dropped entirely"
+          // cleanup removeTrack does — see src/core/edit.ts) so the written file always stays
+          // internally consistent even if the browser payload silently omitted a track.
+          const carriedIds = new Set(carried.map((t) => t.id))
+          const groups = doc.groups.map((g) => ({ ...g, tracks: g.tracks.filter((tid) => carriedIds.has(tid)) })).filter((g) => g.tracks.length > 0)
           const nextDoc = {
             ...converted,
             media: doc.media,
             tracks: carried,
+            groups,
           }
           const nextText = serialize(nextDoc)
           // Canonical-to-canonical comparison: identical music → identical bytes → no write.
@@ -754,12 +770,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       return
     }
 
-    // Phase 22 Stream AA: the effect-chain structural channel — add/remove/move/bypass all change
-    // the ordered `effects` LIST (shape or order), so like /add-track and /automate they don't fit
-    // setValue's single `path=value` shape (bypass alone DOES fit it — <track>.effect.<id>.enabled
-    // is a real /edit path too, see core's setValue — these routes exist for the same
-    // structural-edit reasons /add-track does: RETURN the full raw doc, since the daemon never
-    // SSE-echoes its own writes, so the GUI applies the response directly instead of re-pulling.
     if (req.method === 'POST' && url.pathname === '/effect-add') {
       readBody(req)
         .then((body) => {
@@ -836,6 +846,157 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
           json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/group') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { op?: unknown; id?: unknown; name?: unknown; color?: unknown; trackIds?: unknown }
+          const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string')
+          let next: BeatDocument
+          if (b.op === 'create') {
+            if (!isStringArray(b.trackIds)) {
+              json(res, 400, { error: "op 'create' needs a string[] trackIds" })
+              return
+            }
+            const opts: Parameters<typeof addGroup>[1] = { trackIds: b.trackIds }
+            if (typeof b.id === 'string') opts.id = b.id
+            if (typeof b.name === 'string') opts.name = b.name
+            if (typeof b.color === 'string') opts.color = b.color
+            next = addGroup(doc, opts).doc
+          } else if (b.op === 'delete') {
+            if (typeof b.id !== 'string') {
+              json(res, 400, { error: "op 'delete' needs a string id" })
+              return
+            }
+            next = removeGroup(doc, b.id).doc
+          } else if (b.op === 'rename') {
+            if (typeof b.id !== 'string' || typeof b.name !== 'string') {
+              json(res, 400, { error: "op 'rename' needs a string id and name" })
+              return
+            }
+            next = renameGroup(doc, b.id, b.name)
+          } else if (b.op === 'recolor') {
+            if (typeof b.id !== 'string' || typeof b.color !== 'string') {
+              json(res, 400, { error: "op 'recolor' needs a string id and color" })
+              return
+            }
+            next = setGroupColor(doc, b.id, b.color)
+          } else if (b.op === 'set-tracks') {
+            if (typeof b.id !== 'string' || !isStringArray(b.trackIds)) {
+              json(res, 400, { error: "op 'set-tracks' needs a string id and string[] trackIds" })
+              return
+            }
+            next = setGroupTracks(doc, b.id, b.trackIds)
+          } else {
+            json(res, 400, { error: `unknown group op "${String(b.op)}" (expected create|delete|rename|recolor|set-tracks)` })
+            return
+          }
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // New-project-from-scratch, GUI-reachable (Phase 22 Stream AF). `beat init` has always been able
+    // to do this from the CLI (cli/beat.mjs's initCmd, wrapping core's initDocument); this is the
+    // same wrap over HTTP so the GUI can reach it too — same "add a route, call the real core
+    // function" pattern /add-track and /remove-track follow. Deliberately usable from ANY running
+    // daemon, not just via the Tauri folder-repoint dance (docs/phase-20-track-project-management.md's
+    // "open folder…" boundary): this is a pure filesystem write to an arbitrary target path, unrelated
+    // to the calling daemon's OWN file, so it works — and is verifiable live — in a plain browser too
+    // (see ui/verify-phase22-af.mjs). `from` (an existing .beat file's path) makes this double as "new
+    // project FROM A TEMPLATE" (Stream AF's third feature) instead of a blank `initDocument()` start —
+    // the exact reuse the phase plan calls for. Refuses to overwrite an existing file at the resolved
+    // target, matching `beat init`'s own "already exists — refusing to overwrite" stance.
+    if (req.method === 'POST' && url.pathname === '/new-project') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { path?: unknown; name?: unknown; bpm?: unknown; loopBars?: unknown; from?: unknown }
+          if (typeof b.path !== 'string' || b.path.trim() === '') {
+            json(res, 400, { error: 'body must include a non-empty string path (a folder, or a path ending in .beat)' })
+            return
+          }
+          const defaultName = typeof b.name === 'string' && b.name.trim() !== '' ? `${b.name.trim()}.beat` : 'project.beat'
+          const pathAbs = resolve(b.path)
+          const targetAbs = pathAbs.endsWith('.beat') ? pathAbs : join(pathAbs, defaultName)
+          if (existsSync(targetAbs)) {
+            json(res, 400, { error: `${targetAbs} already exists — refusing to overwrite` })
+            return
+          }
+          if (b.from !== undefined) {
+            if (typeof b.from !== 'string' || b.from.trim() === '') {
+              json(res, 400, { error: 'from must be a non-empty string path to an existing .beat template' })
+              return
+            }
+            const fromAbs = resolve(b.from)
+            if (!existsSync(fromAbs) || !statSync(fromAbs).isFile()) {
+              json(res, 400, { error: `template "${b.from}" does not exist or is not a file` })
+              return
+            }
+            // Fail loudly on a corrupt/foreign template rather than silently duplicating garbage —
+            // the same "the file states everything, and it must be TRUE" discipline the parser itself
+            // enforces on every read.
+            try {
+              parse(readFileSync(fromAbs, 'utf8'))
+            } catch (err) {
+              json(res, 400, { error: `template "${b.from}" is not a valid .beat file: ${err instanceof Error ? err.message : String(err)}` })
+              return
+            }
+            mkdirSync(dirname(targetAbs), { recursive: true })
+            copyFileSync(fromAbs, targetAbs)
+            json(res, 200, { filePath: targetAbs, created: true, fromTemplate: fromAbs })
+            return
+          }
+          const init: Parameters<typeof initDocument>[0] = {}
+          if (typeof b.bpm === 'number') init.bpm = b.bpm
+          if (typeof b.loopBars === 'number') init.loopBars = b.loopBars
+          mkdirSync(dirname(targetAbs), { recursive: true })
+          writeFileSync(targetAbs, serialize(initDocument(init)))
+          json(res, 200, { filePath: targetAbs, created: true })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof BeatParseError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // Save project as template (Phase 22 Stream AF): duplicate THIS project's CURRENT on-disk bytes
+    // to a new path — a literal file copy (docs/research/24-opendaw-roadmap-positioning.md's "copy
+    // this project's file/folder as a new project"), not a re-serialize, so a template is exactly what
+    // was on disk at save time, comments and all. Copies the file the daemon itself owns (`filePath`,
+    // closed over from startDaemon's argument), so the client doesn't need to know it. Opening a
+    // template is just POST /new-project with `from` set to the saved template's path (above) — it
+    // reads the template file, never writes it, so the original is untouched by construction.
+    if (req.method === 'POST' && url.pathname === '/save-as-template') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { path?: unknown; name?: unknown }
+          if (typeof b.path !== 'string' || b.path.trim() === '') {
+            json(res, 400, { error: 'body must include a non-empty string path (a folder, or a path ending in .beat)' })
+            return
+          }
+          const defaultName = typeof b.name === 'string' && b.name.trim() !== '' ? `${b.name.trim()}.beat` : 'template.beat'
+          const pathAbs = resolve(b.path)
+          const targetAbs = pathAbs.endsWith('.beat') ? pathAbs : join(pathAbs, defaultName)
+          if (existsSync(targetAbs)) {
+            json(res, 400, { error: `${targetAbs} already exists — refusing to overwrite` })
+            return
+          }
+          mkdirSync(dirname(targetAbs), { recursive: true })
+          copyFileSync(filePath, targetAbs)
+          json(res, 200, { filePath: targetAbs, source: filePath })
+        })
+        .catch((err) => {
+          json(res, 500, { error: err instanceof Error ? err.message : String(err) })
         })
       return
     }

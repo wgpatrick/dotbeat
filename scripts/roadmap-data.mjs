@@ -45,9 +45,9 @@ export const rows = [
   },
   {
     area: 'Track management', feature: 'Group tracks',
-    description: 'Fold N tracks into one collapsible group header, the way Ableton groups do.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/18-ableton-ui-architecture.md', plan: null,
+    description: 'Fold N tracks into one collapsible group header. A group is a flat, named, colored membership list (`group <id> <name> <color> <track-id>...`, v0.10) — a track belongs to at most one group, no nesting. Collapsed/expanded is deliberately UI-only session state (like mute/solo), never written to the file.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/18-ableton-ui-architecture.md', plan: 'phase-22-stream-af.md',
   },
 
   // ── Note editing (piano roll) ───────────────────────────────────────────
@@ -437,15 +437,15 @@ export const rows = [
   },
   {
     area: 'Project / folder management', feature: 'New-project-from-scratch, GUI-reachable',
-    description: 'Create a brand new project without dropping to the CLI first.',
-    core: 'na', cli: 'done', gui: 'missing', status: 'not-started',
-    research: null, plan: null,
+    description: 'Create a brand new project without dropping to the CLI first: a "new project…" toolbar action (next to "open folder…") prompts for a destination and POSTs the daemon\'s new POST /new-project route, which wraps the same initDocument() `beat init` uses. Works from ANY running daemon, not just the Tauri folder-repoint flow — verifiable live in a plain browser.',
+    core: 'na', cli: 'done', gui: 'done', status: 'done',
+    research: null, plan: 'phase-22-stream-af.md',
   },
   {
     area: 'Project / folder management', feature: 'Save project as template',
-    description: '"Save as Template" opens as a fresh unsaved copy, never mutating the original — a natural fit for dotbeat\'s git-native model as "copy this file/folder as a new project," arguably cleaner than a browser-storage version.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/24-opendaw-roadmap-positioning.md', plan: null,
+    description: '"Save as Template" opens as a fresh unsaved copy, never mutating the original — a natural fit for dotbeat\'s git-native model as "copy this file/folder as a new project," arguably cleaner than a browser-storage version. POST /save-as-template copies the CURRENT on-disk project bytes to a new path; starting a new project from a saved template reuses POST /new-project with a `from` template path (a byte copy, read-only against the template). No new core/CLI surface needed — a .beat file is a plain text file, so "save as template" is already just `cp project.beat template.beat` from a shell or agent; the GUI route exists for discoverability, not because the CLI/agent couldn\'t already do this.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/24-opendaw-roadmap-positioning.md', plan: 'phase-22-stream-af.md',
   },
   {
     area: 'Project / folder management', feature: 'Optional cloud-folder sync (BYO storage)',

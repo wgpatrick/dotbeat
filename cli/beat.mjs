@@ -38,6 +38,11 @@ import {
   quantizeNotes,
   addTrack,
   removeTrack,
+  addGroup,
+  removeGroup,
+  renameGroup,
+  setGroupColor,
+  setGroupTracks,
   initDocument,
   diffDocuments,
   formatDiff,
@@ -61,6 +66,13 @@ const USAGE = `usage:
   beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track
   beat add-track <file> <id> <synth|drums|instrument> [--name N] [--color #hex] [--soundfont <sample-id> --program N]
   beat rm-track <file> <id>
+  beat group <file> <id> <track-id> [<track-id> ...] [--name N] [--color #hex]
+                                                          fold N existing tracks into one named, colored
+                                                          group (a track belongs to at most one group)
+  beat rm-group <file> <id>                                ungroup (member tracks are kept, untouched)
+  beat group-set <file> <id> [--name N] [--color #hex] [--tracks id,id,...]
+                                                          rename/recolor a group or replace its whole
+                                                          membership list (add/remove/reorder members)
   beat inspect <file> [--json]
   beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
   beat add-note <file> <track> <pitch> <start> <duration> <velocity>
@@ -176,6 +188,59 @@ function rmTrackCmd(argv) {
   if (!file || !id) throw new BeatEditError('rm-track needs <file> <id>')
   const before = readDoc(file)
   const { doc } = removeTrack(before, id)
+  writeDoc(file, before, doc)
+}
+
+// Track grouping (Phase 22 Stream AF): fold N existing tracks into one named, colored group — the
+// CLI/agent face on the same addGroup/removeGroup/renameGroup/setGroupColor/setGroupTracks core
+// primitives the daemon's POST /group route and the GUI's "+ group" affordance wrap. `--name`/
+// `--color` follow add-track's own flag convention; track ids are the remaining positional args.
+function groupCmd(argv) {
+  const [file, id, ...rest] = argv
+  if (!file || !id) throw new BeatEditError('group needs <file> <id> <track-id> [<track-id> ...] [--name N] [--color #hex]')
+  const nameIdx = rest.indexOf('--name')
+  const colorIdx = rest.indexOf('--color')
+  const flagTokens = new Set()
+  if (nameIdx !== -1) {
+    flagTokens.add(nameIdx)
+    flagTokens.add(nameIdx + 1)
+  }
+  if (colorIdx !== -1) {
+    flagTokens.add(colorIdx)
+    flagTokens.add(colorIdx + 1)
+  }
+  const trackIds = rest.filter((_, i) => !flagTokens.has(i))
+  if (trackIds.length === 0) throw new BeatEditError('group needs at least 1 track id')
+  const before = readDoc(file)
+  const { doc } = addGroup(before, {
+    id,
+    trackIds,
+    ...(nameIdx !== -1 ? { name: rest[nameIdx + 1] } : {}),
+    ...(colorIdx !== -1 ? { color: rest[colorIdx + 1] } : {}),
+  })
+  writeDoc(file, before, doc)
+}
+
+function rmGroupCmd(argv) {
+  const [file, id] = argv
+  if (!file || !id) throw new BeatEditError('rm-group needs <file> <id>')
+  const before = readDoc(file)
+  const { doc } = removeGroup(before, id)
+  writeDoc(file, before, doc)
+}
+
+function groupSetCmd(argv) {
+  const [file, id, ...rest] = argv
+  if (!file || !id) throw new BeatEditError('group-set needs <file> <id> [--name N] [--color #hex] [--tracks id,id,...]')
+  const nameIdx = rest.indexOf('--name')
+  const colorIdx = rest.indexOf('--color')
+  const tracksIdx = rest.indexOf('--tracks')
+  if (nameIdx === -1 && colorIdx === -1 && tracksIdx === -1) throw new BeatEditError('group-set needs at least one of --name/--color/--tracks')
+  const before = readDoc(file)
+  let doc = before
+  if (nameIdx !== -1) doc = renameGroup(doc, id, rest[nameIdx + 1])
+  if (colorIdx !== -1) doc = setGroupColor(doc, id, rest[colorIdx + 1])
+  if (tracksIdx !== -1) doc = setGroupTracks(doc, id, rest[tracksIdx + 1].split(',').filter(Boolean))
   writeDoc(file, before, doc)
 }
 
@@ -979,6 +1044,15 @@ async function main() {
       break
     case 'rm-track':
       rmTrackCmd(rest)
+      break
+    case 'group':
+      groupCmd(rest)
+      break
+    case 'rm-group':
+      rmGroupCmd(rest)
+      break
+    case 'group-set':
+      groupSetCmd(rest)
       break
     case 'inspect':
       await inspectCmd(rest)

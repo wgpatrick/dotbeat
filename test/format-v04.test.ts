@@ -164,7 +164,7 @@ scene s1
 track b B #ffffff synth
 ${CORE_SYNTH}
 `
-  assert.throws(() => parse(trackAfterScene), /track blocks must come before scene\/song blocks/)
+  assert.throws(() => parse(trackAfterScene), /track blocks must come before group\/scene\/song blocks/)
   // a scene after the song
   const sceneAfterSong = SONG_EXAMPLE + '\nscene late\n'
   assert.throws(() => parse(sceneAfterSong), /scene blocks must come before the song block/)

@@ -26,7 +26,7 @@ stream to pick up — not guesswork, a decision away from being built.
 
 ## Snapshot — 82 features tracked
 
-**24** Done · **0** In progress · **58** Not started
+**27** Done · **0** In progress · **55** Not started
 
 ---
 
@@ -45,7 +45,7 @@ stream to pick up — not guesswork, a decision away from being built.
 |---|---|---|---|---|---|---|---|
 | Add / delete tracks | Create a new synth/drums/instrument track or remove one, from the GUI or CLI. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-20-track-project-management.md`](phase-20-track-project-management.md) |
 | Rename / recolor tracks | Inline double-click rename and a color picker on each track header. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-20-track-project-management.md`](phase-20-track-project-management.md) |
-| Group tracks | Fold N tracks into one collapsible group header, the way Ableton groups do. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | — |
+| Group tracks | Fold N tracks into one collapsible group header. A group is a flat, named, colored membership list (`group <id> <name> <color> <track-id>...`, v0.10) — a track belongs to at most one group, no nesting. Collapsed/expanded is deliberately UI-only session state (like mute/solo), never written to the file. | ✅ done | ✅ done | ✅ done | ✅ Done | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | [`phase-22-stream-af.md`](phase-22-stream-af.md) |
 
 ## Note editing (piano roll)
 
@@ -199,8 +199,8 @@ stream to pick up — not guesswork, a decision away from being built.
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
 | beat init + "Open Folder" re-pointing | Initialize a new .beat project and re-point the desktop app at a different project folder. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-20-track-project-management.md`](phase-20-track-project-management.md) |
-| New-project-from-scratch, GUI-reachable | Create a brand new project without dropping to the CLI first. | — | ✅ done | ❌ missing | ⬜ Not started | — | — |
-| Save project as template | "Save as Template" opens as a fresh unsaved copy, never mutating the original — a natural fit for dotbeat's git-native model as "copy this file/folder as a new project," arguably cleaner than a browser-storage version. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`24-opendaw-roadmap-positioning.md`](research/24-opendaw-roadmap-positioning.md) | — |
+| New-project-from-scratch, GUI-reachable | Create a brand new project without dropping to the CLI first: a "new project…" toolbar action (next to "open folder…") prompts for a destination and POSTs the daemon's new POST /new-project route, which wraps the same initDocument() `beat init` uses. Works from ANY running daemon, not just the Tauri folder-repoint flow — verifiable live in a plain browser. | — | ✅ done | ✅ done | ✅ Done | — | [`phase-22-stream-af.md`](phase-22-stream-af.md) |
+| Save project as template | "Save as Template" opens as a fresh unsaved copy, never mutating the original — a natural fit for dotbeat's git-native model as "copy this file/folder as a new project," arguably cleaner than a browser-storage version. POST /save-as-template copies the CURRENT on-disk project bytes to a new path; starting a new project from a saved template reuses POST /new-project with a `from` template path (a byte copy, read-only against the template). No new core/CLI surface needed — a .beat file is a plain text file, so "save as template" is already just `cp project.beat template.beat` from a shell or agent; the GUI route exists for discoverability, not because the CLI/agent couldn't already do this. | — | — | ✅ done | ✅ Done | [`24-opendaw-roadmap-positioning.md`](research/24-opendaw-roadmap-positioning.md) | [`phase-22-stream-af.md`](phase-22-stream-af.md) |
 | Optional cloud-folder sync (BYO storage) | Sync a project folder to a drive the user already has (Nextcloud/Dropbox/GDrive via one storage-agnostic interface) for multi-machine convenience — explicitly not live collaboration; git still owns history/versioning. Not scoped or requested yet, noted as the right shape if/when it is. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`23-opendaw-collaboration-storage.md`](research/23-opendaw-collaboration-storage.md) | — |
 
 ## Desktop app / packaging

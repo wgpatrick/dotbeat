@@ -286,6 +286,20 @@ export interface BeatTrack {
   effects: BeatEffect[]
 }
 
+/** v0.10: a named, colored fold of N tracks into one collapsible group header (Phase 22 Stream AF —
+ * "Track & project polish bundle"). Deliberately flat, no nesting/group-of-groups: a track belongs to
+ * at most one group. `tracks` is this group's own membership order (independent of the document's own
+ * track order — the GUI renders a group's header at its first member's position and indents every
+ * member wherever it sits). Collapsed/expanded is UI-only session state (like mute/solo — see
+ * ui/src/state/store.ts), deliberately NOT part of this type: folding a group is a view convenience,
+ * not a musical fact, so it doesn't round-trip through the file (docs/format-spec.md's v0.10 section). */
+export interface BeatGroup {
+  id: string
+  name: string
+  color: string // lowercase hex, e.g. "#c678dd"
+  tracks: string[] // member track ids; a track belongs to at most one group (enforced at edit/parse time)
+}
+
 export interface BeatDocument {
   formatVersion: string
   bpm: number
@@ -293,6 +307,7 @@ export interface BeatDocument {
   selectedTrack: string
   media: BeatMediaSample[] // v0.5; [] when none. Canonical position: before tracks.
   tracks: BeatTrack[]
+  groups: BeatGroup[] // v0.10; [] when none. Canonical position: after tracks, before scenes.
   scenes: BeatScene[] // v0.4; [] when none
   song: BeatSongSection[] | null // v0.4; null = no song block = loop mode (today's behavior)
 }

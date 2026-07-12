@@ -52,6 +52,11 @@ export type DiffEntry =
   | { kind: 'effect-removed'; trackId: string; effect: BeatEffect }
   | { kind: 'effect-moved'; trackId: string; effectId: string; before: number; after: number }
   | { kind: 'effect-enabled'; trackId: string; effectId: string; before: boolean; after: boolean }
+  // v0.10 track groups (matched by id, like scenes/media)
+  | { kind: 'group-added'; groupId: string; name: string; tracks: string[] }
+  | { kind: 'group-removed'; groupId: string; name: string }
+  | { kind: 'group-meta'; groupId: string; field: 'name' | 'color'; before: string; after: string }
+  | { kind: 'group-tracks'; groupId: string; before: string[]; after: string[] }
 
 // v0.9: diffs one clip's automation lanes. Lanes match by param name; points within a lane match
 // by id (like notes/hits) — a point moved in time or re-valued reports as one changed entry, not
@@ -277,6 +282,22 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
     }
   }
 
+  // v0.10 groups: match by id; membership compared whole-list (order is this group's own data,
+  // like a scene's slot map or the song's section list — see those comments above).
+  const aGroups = new Map(a.groups.map((g) => [g.id, g]))
+  const bGroups = new Map(b.groups.map((g) => [g.id, g]))
+  for (const [gid, g] of aGroups) if (!bGroups.has(gid)) out.push({ kind: 'group-removed', groupId: gid, name: g.name })
+  for (const [gid, gb] of bGroups) {
+    const ga = aGroups.get(gid)
+    if (!ga) {
+      out.push({ kind: 'group-added', groupId: gid, name: gb.name, tracks: gb.tracks })
+      continue
+    }
+    if (ga.name !== gb.name) out.push({ kind: 'group-meta', groupId: gid, field: 'name', before: ga.name, after: gb.name })
+    if (ga.color !== gb.color) out.push({ kind: 'group-meta', groupId: gid, field: 'color', before: ga.color, after: gb.color })
+    if (ga.tracks.join(',') !== gb.tracks.join(',')) out.push({ kind: 'group-tracks', groupId: gid, before: ga.tracks, after: gb.tracks })
+  }
+
   // The song is one ordered statement — compare whole (order IS the data; per-index diffs of a
   // reordered section list would read as noise).
   const songKey = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}:${x.bars}`).join(',') : '')
@@ -393,6 +414,18 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'effect-enabled':
         lines.push(`${e.trackId}: effect ${e.effectId} ${e.after ? 'enabled' : 'bypassed'}`)
+        break
+      case 'group-added':
+        lines.push(`group added "${e.groupId}" ("${e.name}": ${e.tracks.join(', ')})`)
+        break
+      case 'group-removed':
+        lines.push(`group removed "${e.groupId}" ("${e.name}")`)
+        break
+      case 'group-meta':
+        lines.push(`group ${e.groupId}: ${e.field} "${e.before}" -> "${e.after}"`)
+        break
+      case 'group-tracks':
+        lines.push(`group ${e.groupId}: tracks ${e.before.join(',') || '(none)'} -> ${e.after.join(',') || '(none)'}`)
         break
       case 'song-changed': {
         const fmt = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}(${x.bars})`).join(' ') : '(no song)')

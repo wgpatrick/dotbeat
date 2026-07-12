@@ -3,7 +3,7 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatEffect, BeatNote, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
+import type { BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
 import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS, defaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -465,8 +465,98 @@ export function removeTrack(doc: BeatDocument, trackId: string): { doc: BeatDocu
     delete slots[trackId]
     return { ...s, slots }
   })
+  // v0.10: drop the removed track from whatever group it was in; a group that's left with zero
+  // members has no canonical serialized form (same elision discipline as an empty automation lane),
+  // so it's dropped entirely rather than persisted as an empty shell.
+  const groups = doc.groups.map((g) => ({ ...g, tracks: g.tracks.filter((t) => t !== trackId) })).filter((g) => g.tracks.length > 0)
   const selectedTrack = doc.selectedTrack === trackId ? tracks[0]!.id : doc.selectedTrack
-  return { doc: { ...doc, tracks, scenes, selectedTrack }, track }
+  return { doc: { ...doc, tracks, groups, scenes, selectedTrack }, track }
+}
+
+/** v0.10: single-token identity rules for a group — same discipline as `validateTrackIdentity`
+ * (ids are slugs, names are single tokens because the grammar has no quoting, colors are lowercase
+ * hex). */
+function validateGroupIdentity(id: string, name: string, color: string) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new BeatEditError(`group ids are single alphanumeric/_/- tokens, got "${id}"`)
+  if (/\s/.test(name)) throw new BeatEditError('group names are single tokens (no whitespace)')
+  if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatEditError(`color must be a lowercase hex color like #c678dd, got "${color}"`)
+}
+
+function findGroup(doc: BeatDocument, groupId: string): BeatGroup {
+  const g = doc.groups.find((x) => x.id === groupId)
+  if (!g) throw new BeatEditError(`no group "${groupId}" (have: ${doc.groups.map((x) => x.id).join(', ') || 'none'})`)
+  return g
+}
+
+/** v0.10: folds N existing tracks into one named, colored group (Phase 22 Stream AF). Deliberately
+ * flat — a track belongs to at most one group, so grouping an already-grouped track is refused
+ * rather than silently moving it (the caller should ungroup it first, an explicit act). Mints
+ * `group<n>` when `id` is omitted (same convention as `addHit`'s `h<n>`); color cycles TRACK_COLORS
+ * like `addTrack`'s default; name defaults to the id like `addTrack`'s default. */
+export function addGroup(doc: BeatDocument, opts: { id?: string; name?: string; color?: string; trackIds: string[] }): { doc: BeatDocument; group: BeatGroup } {
+  if (opts.trackIds.length < 1) throw new BeatEditError('a group needs at least 1 track')
+  const seen = new Set<string>()
+  for (const tid of opts.trackIds) {
+    findTrack(doc, tid) // throws if the track doesn't exist
+    if (seen.has(tid)) throw new BeatEditError(`track "${tid}" listed twice in the same group`)
+    seen.add(tid)
+    const already = doc.groups.find((g) => g.tracks.includes(tid))
+    if (already) throw new BeatEditError(`track "${tid}" is already in group "${already.id}" — ungroup it first`)
+  }
+  let id = opts.id
+  if (id === undefined) {
+    let max = 0
+    for (const g of doc.groups) {
+      const m = g.id.match(/^group(\d+)$/)
+      if (m) max = Math.max(max, Number(m[1]))
+    }
+    id = `group${max + 1}`
+  } else if (doc.groups.some((g) => g.id === id)) {
+    throw new BeatEditError(`group id "${id}" already exists`)
+  }
+  const name = opts.name ?? id
+  const color = opts.color ?? TRACK_COLORS[doc.groups.length % TRACK_COLORS.length]!
+  validateGroupIdentity(id, name, color)
+  const group: BeatGroup = { id, name, color, tracks: [...opts.trackIds] }
+  return { doc: { ...doc, groups: [...doc.groups, group] }, group }
+}
+
+/** Ungroups: deletes the group. Member tracks are untouched — they simply stop being grouped. */
+export function removeGroup(doc: BeatDocument, groupId: string): { doc: BeatDocument; group: BeatGroup } {
+  const group = findGroup(doc, groupId)
+  return { doc: { ...doc, groups: doc.groups.filter((g) => g.id !== groupId) }, group }
+}
+
+/** Renames a group (the GUI's double-click-to-rename affordance, mirroring track rename). */
+export function renameGroup(doc: BeatDocument, groupId: string, name: string): BeatDocument {
+  const group = findGroup(doc, groupId)
+  validateGroupIdentity(group.id, name, group.color)
+  return { ...doc, groups: doc.groups.map((g) => (g.id === groupId ? { ...g, name } : g)) }
+}
+
+/** Recolors a group. */
+export function setGroupColor(doc: BeatDocument, groupId: string, color: string): BeatDocument {
+  const group = findGroup(doc, groupId)
+  validateGroupIdentity(group.id, group.name, color)
+  return { ...doc, groups: doc.groups.map((g) => (g.id === groupId ? { ...g, color } : g)) }
+}
+
+/** Replaces a group's whole membership list — add, remove, or reorder members in one statement
+ * (same "whole-list edit" shape as `setSong`/`setScene`: membership is few-entries data where order
+ * can matter, so replace-not-patch is the honest edit). Same at-most-one-group-per-track rule as
+ * `addGroup`. */
+export function setGroupTracks(doc: BeatDocument, groupId: string, trackIds: string[]): BeatDocument {
+  const group = findGroup(doc, groupId)
+  if (trackIds.length < 1) throw new BeatEditError('a group needs at least 1 track')
+  const seen = new Set<string>()
+  for (const tid of trackIds) {
+    findTrack(doc, tid)
+    if (seen.has(tid)) throw new BeatEditError(`track "${tid}" listed twice in the same group`)
+    seen.add(tid)
+    const already = doc.groups.find((g) => g.id !== groupId && g.tracks.includes(tid))
+    if (already) throw new BeatEditError(`track "${tid}" is already in group "${already.id}" — ungroup it first`)
+  }
+  return { ...doc, groups: doc.groups.map((g) => (g.id === groupId ? { ...g, tracks: [...trackIds] } : g)) }
 }
 
 /** v0.5 media primitives. Registers (or re-pins) a content-addressed sample. Hash computation
@@ -508,7 +598,7 @@ export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: 
   const loopBars = opts.loopBars ?? 2
   if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
   if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
-  const base: BeatDocument = { formatVersion: '0.10', bpm, loopBars, selectedTrack: '', media: [], tracks: [], scenes: [], song: null }
+  const base: BeatDocument = { formatVersion: '0.10', bpm, loopBars, selectedTrack: '', media: [], tracks: [], groups: [], scenes: [], song: null }
   const { doc } = addTrack(base, { id: opts.trackId ?? 'lead', kind: 'synth' })
   return { ...doc, selectedTrack: doc.tracks[0]!.id }
 }

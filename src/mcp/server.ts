@@ -33,6 +33,11 @@ import {
   quantizeNotes,
   addTrack,
   removeTrack,
+  addGroup,
+  removeGroup,
+  renameGroup,
+  setGroupColor,
+  setGroupTracks,
   initDocument,
   diffDocuments,
   formatDiff,
@@ -214,6 +219,87 @@ const TOOLS: ToolDef[] = [
       const file = str(args, 'file')
       const before = parse(readFileSync(file, 'utf8'))
       const { doc } = removeTrack(before, str(args, 'id'))
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_group',
+    description:
+      'Fold N existing tracks into one named, colored group (Phase 22 "track & project polish" — the same fold a DAW group-track UI does). A track belongs to at most one group; grouping an already-grouped track is refused. Returns the edit list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        id: { type: 'string', description: 'single alphanumeric token, e.g. "keys"' },
+        track_ids: { type: 'array', items: { type: 'string' }, description: 'the tracks to fold into this group, at least 1' },
+        name: { type: 'string', description: 'single token; defaults to id' },
+        color: { type: 'string', description: 'lowercase #rrggbb; defaults to a palette cycle' },
+      },
+      required: ['file', 'id', 'track_ids'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const trackIds = args.track_ids
+      if (!Array.isArray(trackIds) || trackIds.length === 0 || !trackIds.every((t) => typeof t === 'string')) {
+        throw new Error('track_ids must be a non-empty array of strings')
+      }
+      const { doc } = addGroup(before, {
+        id: str(args, 'id'),
+        trackIds,
+        ...(typeof args.name === 'string' ? { name: args.name } : {}),
+        ...(typeof args.color === 'string' ? { color: args.color } : {}),
+      })
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_rm_group',
+    description: 'Ungroup: deletes a group. Member tracks are kept, untouched.',
+    inputSchema: {
+      type: 'object',
+      properties: { file: { type: 'string' }, id: { type: 'string' } },
+      required: ['file', 'id'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = removeGroup(before, str(args, 'id'))
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_group_set',
+    description: 'Rename/recolor a group, or replace its whole membership list (add/remove/reorder members) — pass any combination of name/color/track_ids.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        id: { type: 'string' },
+        name: { type: 'string' },
+        color: { type: 'string', description: 'lowercase #rrggbb' },
+        track_ids: { type: 'array', items: { type: 'string' }, description: 'replaces the group\'s whole membership list' },
+      },
+      required: ['file', 'id'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const id = str(args, 'id')
+      if (args.name === undefined && args.color === undefined && args.track_ids === undefined) {
+        throw new Error('pass at least one of name/color/track_ids')
+      }
+      let doc: BeatDocument = before
+      if (typeof args.name === 'string') doc = renameGroup(doc, id, args.name)
+      if (typeof args.color === 'string') doc = setGroupColor(doc, id, args.color)
+      if (args.track_ids !== undefined) {
+        const trackIds = args.track_ids
+        if (!Array.isArray(trackIds) || !trackIds.every((t) => typeof t === 'string')) throw new Error('track_ids must be an array of strings')
+        doc = setGroupTracks(doc, id, trackIds)
+      }
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
     },

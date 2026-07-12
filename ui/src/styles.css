@@ -1253,6 +1253,98 @@ body {
   border-radius: 2px;
   flex: 0 0 auto;
 }
+
+/* ---- Phase 22 Stream AF: track grouping ---- */
+.arr-group-pick {
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.arr-grouped-track .arr-track-header {
+  box-shadow: inset 3px 0 0 var(--line);
+  padding-left: 12px;
+}
+.arr-group-row {
+  background: var(--panel-2);
+}
+.arr-group-header {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 5px;
+}
+.arr-group-toggle {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+  padding: 0;
+}
+.arr-group-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.arr-group-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+.arr-group-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.arr-group-name:hover {
+  color: var(--accent);
+}
+.arr-group-count {
+  font-weight: 400;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.arr-group-ungroup {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+.arr-group-ungroup:hover {
+  background: #c0503c;
+  border-color: #c0503c;
+  color: #fff;
+}
+.arr-group-lane {
+  background: var(--panel-2);
+}
 .arr-track-name {
   flex: 1;
   overflow: hidden;

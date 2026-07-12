@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -273,5 +273,160 @@ test('POST /remove-track drops a track, cleans up disk, and returns the fresh do
     assert.ok(!body.doc.tracks.some((t) => t.id === 'chords'))
     assert.equal(daemon.getDoc().tracks.length, before - 1)
     assert.ok(!readFileSync(filePath, 'utf8').split('\n').some((l) => l.startsWith('track chords ')))
+  })
+})
+
+// ─── Phase 22 Stream AF: track grouping (POST /group) ──────────────────────────────────────────────
+const postGroup = (port: number, body: unknown) =>
+  fetch(`http://127.0.0.1:${port}/group`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
+test('POST /group create folds tracks into a group, writes a `group` line, and returns the fresh document', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const res = await postGroup(daemon.port, { op: 'create', trackIds: ['lead', 'chords'], name: 'Keys' })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { written: boolean; doc: { groups: { id: string; name: string; tracks: string[] }[] } }
+    assert.equal(body.written, true)
+    assert.equal(body.doc.groups.length, 1)
+    assert.deepEqual(body.doc.groups[0]!.tracks, ['lead', 'chords'])
+    assert.equal(daemon.getDoc().groups[0]!.name, 'Keys')
+    const line = readFileSync(filePath, 'utf8').split('\n').find((l) => l.startsWith('group '))
+    assert.match(line!, /^group group1 Keys #[0-9a-f]{6} lead chords$/)
+  })
+})
+
+test('POST /group refuses to double-group a track (400, no write) and rename/recolor/set-tracks/delete round-trip', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const create = await postGroup(daemon.port, { op: 'create', trackIds: ['lead', 'chords'] })
+    const { doc: created } = (await create.json()) as { doc: { groups: { id: string }[] } }
+    const groupId = created.groups[0]!.id
+
+    // a third track can't join by creating ANOTHER group containing an already-grouped track
+    const dup = await postGroup(daemon.port, { op: 'create', trackIds: ['lead', 'drums'] })
+    assert.equal(dup.status, 400)
+    assert.match(((await dup.json()) as { error: string }).error, /already in group/)
+
+    const rename = await postGroup(daemon.port, { op: 'rename', id: groupId, name: 'Synths' })
+    assert.equal((((await rename.json()) as { doc: { groups: { name: string }[] } }).doc.groups[0]!).name, 'Synths')
+
+    const recolor = await postGroup(daemon.port, { op: 'recolor', id: groupId, color: '#123456' })
+    assert.equal((((await recolor.json()) as { doc: { groups: { color: string }[] } }).doc.groups[0]!).color, '#123456')
+
+    const setTracks = await postGroup(daemon.port, { op: 'set-tracks', id: groupId, trackIds: ['lead', 'chords', 'drums'] })
+    assert.deepEqual((((await setTracks.json()) as { doc: { groups: { tracks: string[] }[] } }).doc.groups[0]!).tracks, ['lead', 'chords', 'drums'])
+
+    const del = await postGroup(daemon.port, { op: 'delete', id: groupId })
+    const afterDelete = (await del.json()) as { doc: { groups: unknown[]; tracks: { id: string }[] } }
+    assert.equal(afterDelete.doc.groups.length, 0)
+    assert.equal(afterDelete.doc.tracks.length, daemon.getDoc().tracks.length) // ungrouping never removes tracks
+
+    // final on-disk state has no group line at all (elided, same discipline as an empty automation lane)
+    assert.ok(!readFileSync(filePath, 'utf8').split('\n').some((l) => l.startsWith('group ')))
+  })
+})
+
+// ─── Phase 22 Stream AF: new-project-from-scratch + save-as-template ───────────────────────────────
+
+test('POST /new-project (blank) creates project.beat in a folder with the requested bpm', async () => {
+  await withDaemon(async (daemon) => {
+    const dir = mkdtempSync(join(tmpdir(), 'beat-new-project-'))
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/new-project`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: dir, bpm: 140 }),
+    })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { filePath: string; created: boolean }
+    assert.equal(body.filePath, join(dir, 'project.beat'))
+    assert.ok(existsSync(body.filePath))
+    const created = parse(readFileSync(body.filePath, 'utf8'))
+    assert.equal(created.bpm, 140)
+    assert.equal(created.tracks.length, 1) // the format's standard init patch: one starter track
+  })
+})
+
+test('POST /new-project refuses to overwrite an existing file', async () => {
+  await withDaemon(async (daemon) => {
+    const dir = mkdtempSync(join(tmpdir(), 'beat-new-project-'))
+    const target = join(dir, 'song.beat')
+    writeFileSync(target, 'not touched\n')
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/new-project`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: target }),
+    })
+    assert.equal(res.status, 400)
+    assert.match(((await res.json()) as { error: string }).error, /already exists/)
+    assert.equal(readFileSync(target, 'utf8'), 'not touched\n')
+  })
+})
+
+test('POST /save-as-template copies the CURRENT on-disk project bytes to a new path, unmodified', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const dir = mkdtempSync(join(tmpdir(), 'beat-template-'))
+    const before = readFileSync(filePath, 'utf8')
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/save-as-template`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: dir, name: 'my-template' }),
+    })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { filePath: string; source: string }
+    assert.equal(body.filePath, join(dir, 'my-template.beat'))
+    assert.equal(readFileSync(body.filePath, 'utf8'), before)
+    assert.equal(readFileSync(filePath, 'utf8'), before, 'the source project is untouched')
+  })
+})
+
+test('POST /new-project with `from` starts a new project as a fresh copy of a saved template, never touching it', async () => {
+  await withDaemon(async (daemon) => {
+    // Save a template, then edit the ORIGINAL project (add a track) — the template must not follow.
+    const templateDir = mkdtempSync(join(tmpdir(), 'beat-template-'))
+    const saveRes = await fetch(`http://127.0.0.1:${daemon.port}/save-as-template`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: templateDir }),
+    })
+    const { filePath: templatePath } = (await saveRes.json()) as { filePath: string }
+    const templateBytesBefore = readFileSync(templatePath, 'utf8')
+
+    await fetch(`http://127.0.0.1:${daemon.port}/add-track`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'extra', kind: 'synth' }),
+    })
+    assert.equal(readFileSync(templatePath, 'utf8'), templateBytesBefore, 'editing the live project did not touch the saved template')
+
+    // Now start a brand-new project FROM that template.
+    const newProjectDir = mkdtempSync(join(tmpdir(), 'beat-from-template-'))
+    const newRes = await fetch(`http://127.0.0.1:${daemon.port}/new-project`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: newProjectDir, from: templatePath }),
+    })
+    assert.equal(newRes.status, 200)
+    const { filePath: newProjectPath } = (await newRes.json()) as { filePath: string }
+    assert.equal(readFileSync(newProjectPath, 'utf8'), templateBytesBefore, 'the new project starts as an exact copy of the template')
+
+    // Editing the NEW project must not touch the template either (independent files, not a reference).
+    writeFileSync(newProjectPath, readFileSync(newProjectPath, 'utf8').replace('bpm 126', 'bpm 200'))
+    assert.equal(readFileSync(templatePath, 'utf8'), templateBytesBefore, 'editing the new project left the template byte-identical')
+    assert.notEqual(readFileSync(newProjectPath, 'utf8'), templateBytesBefore)
+  })
+})
+
+test('POST /new-project with a `from` that is not a valid .beat file is rejected (400)', async () => {
+  await withDaemon(async (daemon) => {
+    const badTemplateDir = mkdtempSync(join(tmpdir(), 'beat-bad-template-'))
+    const badTemplate = join(badTemplateDir, 'nope.beat')
+    writeFileSync(badTemplate, 'this is not a beat file\n')
+    const dir = mkdtempSync(join(tmpdir(), 'beat-new-project-'))
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/new-project`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: dir, from: badTemplate }),
+    })
+    assert.equal(res.status, 400)
+    assert.match(((await res.json()) as { error: string }).error, /not a valid \.beat file/)
+    assert.ok(!existsSync(join(dir, 'project.beat')))
   })
 })

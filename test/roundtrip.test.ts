@@ -180,6 +180,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
       },
     ],
     media: [],
+    groups: [],
     scenes: [],
     song: null,
   }
@@ -219,6 +220,7 @@ test('formatNumber stabilizes floating-point noise so round-tripping is idempote
       },
     ],
     media: [],
+    groups: [],
     scenes: [],
     song: null,
   }

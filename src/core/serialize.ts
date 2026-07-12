@@ -1,4 +1,4 @@
-import type { BeatAutomationLane, BeatAutomationPoint, BeatDrumHit, BeatDocument, BeatEffect, BeatNote, BeatScene, BeatTrack } from './document.js'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatDrumHit, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
 import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, isDefaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -109,6 +109,14 @@ function serializeTrack(t: BeatTrack): string[] {
   return lines
 }
 
+// v0.10: one `group <id> <name> <color> <track-id>...` line per group — flat, no nesting. Member
+// track ids serialize in the group's OWN order (its own membership list), not the document's track
+// order; the color/name tokens are single tokens by construction (same whitespace-free rule as track
+// names, enforced at edit time — see validateGroupIdentity in edit.ts).
+function serializeGroup(g: BeatGroup): string[] {
+  return [`group ${g.id} ${g.name} ${g.color} ${g.tracks.join(' ')}`]
+}
+
 // v0.4: scene slots serialize in TRACK order (not insertion order) — one canonical form, and a
 // re-mapped slot is a one-line diff.
 function serializeScene(scene: BeatScene, trackOrder: string[]): string[] {
@@ -140,6 +148,11 @@ export function serialize(doc: BeatDocument): string {
   }
   for (const t of doc.tracks) {
     lines.push('', ...serializeTrack(t))
+  }
+  // v0.10 groups: source order (creation order is meaningful, like clips/scenes), after tracks and
+  // before scenes (canonical order — parse.ts enforces the same).
+  for (const g of doc.groups) {
+    lines.push('', ...serializeGroup(g))
   }
   const trackOrder = doc.tracks.map((t) => t.id)
   for (const scene of doc.scenes) {

@@ -71,6 +71,9 @@ test('beat mcp speaks the MCP handshake and serves the tool suite', async () => 
       'beat_set',
       'beat_add_note',
       'beat_rm_note',
+      'beat_group',
+      'beat_rm_group',
+      'beat_group_set',
       'beat_diff',
       'beat_metrics',
       'beat_lint',
@@ -118,6 +121,43 @@ test('tools/call: inspect and set work end-to-end on a real file, edits report a
 
     // unknown tool IS a protocol error
     await assert.rejects(() => mcp.request('tools/call', { name: 'beat_explode', arguments: {} }), /unknown tool/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Phase 22 Stream AF: track grouping over MCP (beat_group / beat_group_set / beat_rm_group), the
+// agent-facing face on the same core primitives the daemon's POST /group route and the GUI's
+// "+ group" affordance wrap.
+test('tools/call: beat_group folds tracks, beat_group_set edits it, beat_rm_group ungroups', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-group-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    const grouped = await mcp.request('tools/call', {
+      name: 'beat_group',
+      arguments: { file, id: 'keys', track_ids: ['bass', 'chords'], name: 'Keys' },
+    })
+    assert.match(grouped.content[0].text, /group added "keys" \("Keys": bass, chords\)/)
+    assert.match(readFileSync(file, 'utf8'), /^group keys Keys #[0-9a-f]{6} bass chords$/m)
+
+    const renamed = await mcp.request('tools/call', { name: 'beat_group_set', arguments: { file, id: 'keys', name: 'Synths' } })
+    assert.match(renamed.content[0].text, /group keys: name "Keys" -> "Synths"/)
+
+    const ungrouped = await mcp.request('tools/call', { name: 'beat_rm_group', arguments: { file, id: 'keys' } })
+    assert.match(ungrouped.content[0].text, /group removed "keys"/)
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /^group /m)
+
+    // tool-level failure (double-grouping a track) comes back as isError, not a protocol error
+    await mcp.request('tools/call', { name: 'beat_group', arguments: { file, id: 'g1', track_ids: ['bass'] } })
+    const dup = await mcp.request('tools/call', { name: 'beat_group', arguments: { file, id: 'g2', track_ids: ['bass', 'lead'] } })
+    assert.equal(dup.isError, true)
+    assert.match(dup.content[0].text, /already in group/)
   } finally {
     mcp.close()
   }

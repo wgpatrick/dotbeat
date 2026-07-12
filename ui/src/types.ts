@@ -103,6 +103,18 @@ export interface BeatEffect {
   enabled: boolean
 }
 
+// v0.10 track groups (Phase 22 Stream AF): a flat, named, colored fold of N existing tracks — no
+// nesting/group-of-groups, a track belongs to at most one group (mirrors src/core/document.ts's
+// BeatGroup). Collapsed/expanded is deliberately NOT here — it's UI-only session state, kept as
+// local component state in ArrangementView (the same "not in the .beat file" treatment mute/solo get
+// in ui/src/state/store.ts), so it doesn't round-trip through the daemon at all.
+export interface BeatGroup {
+  id: string
+  name: string
+  color: string
+  tracks: string[]
+}
+
 export interface BeatTrack {
   id: string
   name: string
@@ -124,6 +136,7 @@ export interface BeatDocument {
   selectedTrack: string
   media: unknown[]
   tracks: BeatTrack[]
+  groups: BeatGroup[]
   scenes: BeatScene[]
   song: BeatSongSection[] | null
 }

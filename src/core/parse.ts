@@ -1,4 +1,4 @@
-import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumPattern, BeatEffect, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
 import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultEffectChain, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
@@ -64,6 +64,10 @@ export function parse(text: string): BeatDocument {
   const media: BeatMediaSample[] = []
   const mediaIds = new Set<string>()
   let inMedia = false
+  // v0.10 track groups: parsed after all tracks (canonical order), before scene/song blocks.
+  const groups: BeatGroup[] = []
+  const groupIds = new Set<string>()
+  const groupedTrackIds = new Set<string>() // a track belongs to at most one group
 
   let currentTrack: BeatTrack | null = null
   let currentClip: BeatClip | null = null
@@ -267,7 +271,7 @@ export function parse(text: string): BeatDocument {
         inMedia = true
       } else if (keyword === 'track') {
         inMedia = false
-        if (scenes.length > 0 || song !== null) throw new BeatParseError('track blocks must come before scene/song blocks (canonical order)', lineNo)
+        if (groups.length > 0 || scenes.length > 0 || song !== null) throw new BeatParseError('track blocks must come before group/scene/song blocks (canonical order)', lineNo)
         closeTrackIfOpen(lineNo)
         if (tokens.length !== 5) throw new BeatParseError('track expects exactly 4 values: <id> <name> <color> <kind>', lineNo)
         const [, id, name, color, kind] = tokens as [string, string, string, string, string]
@@ -296,6 +300,27 @@ export function parse(text: string): BeatDocument {
           effects: [],
         }
         tracks.push(currentTrack)
+      } else if (keyword === 'group') {
+        closeTrackIfOpen(lineNo)
+        currentTrack = null
+        if (scenes.length > 0 || song !== null) throw new BeatParseError('group blocks must come before scene/song blocks (canonical order)', lineNo)
+        if (tokens.length < 5) throw new BeatParseError('group expects at least 4 values: <id> <name> <color> <track-id> [<track-id> ...]', lineNo)
+        const [, id, name, color] = tokens as [string, string, string, string, string]
+        if (!SLUG_RE.test(id)) throw new BeatParseError(`group ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
+        if (groupIds.has(id)) throw new BeatParseError(`duplicate group id "${id}"`, lineNo)
+        if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatParseError(`group color must be a lowercase hex color like #c678dd, got "${color}"`, lineNo)
+        const memberIds = tokens.slice(4)
+        const seenHere = new Set<string>()
+        for (const tid of memberIds) {
+          if (!trackIds.has(tid)) throw new BeatParseError(`group "${id}": unknown track "${tid}" (have: ${[...trackIds].join(', ')})`, lineNo)
+          if (seenHere.has(tid)) throw new BeatParseError(`group "${id}": track "${tid}" listed twice`, lineNo)
+          seenHere.add(tid)
+          if (groupedTrackIds.has(tid)) throw new BeatParseError(`track "${tid}" is in more than one group — a track belongs to at most one group`, lineNo)
+          groupedTrackIds.add(tid)
+        }
+        groupIds.add(id)
+        groups.push({ id, name, color, tracks: memberIds })
+        continue
       } else if (keyword === 'scene') {
         closeTrackIfOpen(lineNo)
         currentTrack = null
@@ -593,5 +618,5 @@ export function parse(text: string): BeatDocument {
   if (loopBars === null) throw new BeatParseError('missing loop_bars', 1)
   if (selectedTrack === null) throw new BeatParseError('missing selected_track', 1)
 
-  return { formatVersion, bpm, loopBars, selectedTrack, media, tracks, scenes, song }
+  return { formatVersion, bpm, loopBars, selectedTrack, media, tracks, groups, scenes, song }
 }

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
-import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, daemonBase } from '../daemon/bridge'
+import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, daemonBase } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
-import { DRUM_LANES, type BeatAutomationPoint, type BeatDocument, type BeatTrack, type DrumLane, type TrackKind } from '../types'
+import { DRUM_LANES, type BeatAutomationPoint, type BeatDocument, type BeatGroup, type BeatTrack, type DrumLane, type TrackKind } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 
 // Phase 20 Stream W — track add/delete/rename/recolor + project-folder controls. There is no BeatLab
@@ -70,6 +70,7 @@ const HEADER_W = 264 // wide enough for the inline channel strip (mute/solo/volu
 const RULER_H = 26
 const DETAIL_PX_PER_BAR = 32 // at or above this, draw real ticks; below, density blocks
 const DENSITY_REF = 6 // events/bar that reads as full-opacity (soft normalization, not a hard cap)
+const GROUP_HEADER_H = 34 // Phase 22 Stream AF: one collapsible fold-header row per track group
 
 // ── Inline channel-strip helpers (Phase 18): the arrangement track header carries a compact subset
 // of the full mixer, reusing MixerView's exact data-flow — volume/pan write `<id>.volume`/`<id>.pan`
@@ -337,6 +338,9 @@ function TrackRow({
   onHeaderClick,
   onRowPointerDown,
   headerExtra,
+  groupPickChecked,
+  onToggleGroupPick,
+  alreadyGrouped,
 }: {
   flat: TrackFlat
   totalBars: number
@@ -348,6 +352,13 @@ function TrackRow({
   onHeaderClick: () => void
   onRowPointerDown: (e: React.PointerEvent) => void
   headerExtra?: ReactNode
+  /** Phase 22 Stream AF: whether this track is currently picked (checkbox) for the next "+ group"
+   * action. Undefined/omitted when grouping isn't wired up by the caller. */
+  groupPickChecked?: boolean
+  onToggleGroupPick?: () => void
+  /** True when this track already belongs to a group — a track can only be in one, so the pick
+   * checkbox is hidden rather than offered-and-refused. */
+  alreadyGrouped?: boolean
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { track } = flat
@@ -515,6 +526,20 @@ function TrackRow({
         onDrop={handleLibraryDrop}
       >
         <div className="arr-track-titlebar">
+          {/* Phase 22 Stream AF: pick this track for the next "+ group" action. Hidden once the track
+              is already in a group — a track belongs to at most one group in this format, so the
+              affordance is to ungroup first, not to silently re-home it. */}
+          {!alreadyGrouped && onToggleGroupPick && (
+            <input
+              type="checkbox"
+              className="arr-group-pick"
+              data-group-pick={track.id}
+              checked={!!groupPickChecked}
+              onChange={onToggleGroupPick}
+              onClick={(e) => e.stopPropagation()}
+              title="pick for grouping"
+            />
+          )}
           {/* color: a hidden native color input behind the visible swatch (the swatch always renders
               regardless of native color-input chrome). Writes the <track>.color setValue path. */}
           <label className="arr-track-color" title="track color" onClick={(e) => e.stopPropagation()}>
@@ -835,6 +860,72 @@ function AutomationPicker({ track, available, onAdd }: { track: BeatTrack; avail
   )
 }
 
+// ── Track grouping (Phase 22 Stream AF) ─────────────────────────────────────────────────────────
+// Fold N tracks into one collapsible group header. Deliberately flat (no nested/group-of-groups):
+// group MEMBERSHIP/name/color persists to the .beat file (a `group <id> <name> <color> <track-id>…`
+// line, src/core/document.ts's BeatGroup); collapsed/expanded is UI-only session state, kept as a
+// plain Record in ArrangementView's own component state — the same "not in the file" treatment
+// mute/solo already get (ui/src/state/store.ts) — so it does not round-trip through a reload. Group
+// members can sit anywhere in the document's own track order (grouping never reorders tracks); the
+// header renders once, at the position of the group's first member in doc order, and every member
+// row is visually indented via the `arr-grouped-track` wrapper class.
+
+/** One collapsible group header row: swatch, member count, double-click-to-rename, collapse toggle,
+ * ungroup ×. Rename posts through the same daemon /group route create/delete use. */
+function GroupHeaderRow({ group, collapsed, onToggleCollapse, onUngroup }: { group: BeatGroup; collapsed: boolean; onToggleCollapse: () => void; onUngroup: () => void }) {
+  const [renaming, setRenaming] = useState(false)
+  const [draft, setDraft] = useState(group.name)
+  const commitRename = useCallback(() => {
+    setRenaming(false)
+    const name = draft.trim()
+    if (name && name !== group.name) postGroupOp({ op: 'rename', id: group.id, name }).catch((err) => window.alert(`Could not rename group: ${(err as Error).message}`))
+    else setDraft(group.name)
+  }, [draft, group.id, group.name])
+
+  return (
+    <div className="arr-row arr-group-row" style={{ height: GROUP_HEADER_H }} data-group={group.id}>
+      <div className="arr-track-header arr-group-header" style={{ width: HEADER_W }}>
+        <button className="arr-group-toggle" data-group-toggle={group.id} onClick={onToggleCollapse} title={collapsed ? 'expand group' : 'collapse group'}>
+          {collapsed ? '▸' : '▾'}
+        </button>
+        <span className="arr-group-swatch" style={{ background: group.color }} />
+        {renaming ? (
+          <input
+            className="arr-track-rename"
+            autoFocus
+            value={draft}
+            data-group-rename={group.id}
+            onChange={(e) => setDraft(e.target.value.replace(/\s/g, ''))}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename()
+              else if (e.key === 'Escape') {
+                setDraft(group.name)
+                setRenaming(false)
+              }
+            }}
+          />
+        ) : (
+          <button
+            className="arr-group-name"
+            onDoubleClick={() => {
+              setDraft(group.name)
+              setRenaming(true)
+            }}
+            title={`${group.tracks.length} tracks in this group (double-click to rename)`}
+          >
+            {group.name} <span className="arr-group-count">({group.tracks.length})</span>
+          </button>
+        )}
+        <button className="arr-group-ungroup" data-ungroup={group.id} title="ungroup (tracks are kept)" onClick={onUngroup}>
+          ×
+        </button>
+      </div>
+      <div className="arr-lane arr-group-lane" />
+    </div>
+  )
+}
+
 export function ArrangementView() {
   const doc = useStore((s) => s.doc)
   const selection = useStore((s) => s.selection)
@@ -863,6 +954,16 @@ export function ArrangementView() {
   // Add-track control (Phase 20 Stream W): a small kind-chooser menu in the toolbar.
   const [addOpen, setAddOpen] = useState(false)
   const [addBusy, setAddBusy] = useState(false)
+  // Track grouping (Phase 22 Stream AF): tracks checked (via each header's pick checkbox) for the
+  // next "+ group" action, which group in the tracks list are folded (session-only — see the
+  // GroupHeaderRow comment above for why collapse never touches the file), and a busy flag for the
+  // group create/delete round-trip.
+  const [groupPick, setGroupPick] = useState<Set<string>>(new Set())
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
+  const [groupBusy, setGroupBusy] = useState(false)
+  // New-project / save-as-template (Phase 22 Stream AF): one busy flag shared by all three prompts
+  // below (they're mutually exclusive user actions).
+  const [projectBusy, setProjectBusy] = useState(false)
 
   // Track the width available to the timeline lanes (total minus the fixed header column).
   useLayoutEffect(() => {
@@ -898,6 +999,36 @@ export function ArrangementView() {
     if (!doc) return []
     return doc.tracks.map((t) => flattenTrack(t, sections, doc))
   }, [doc, sections])
+
+  // Track grouping (Phase 22 Stream AF): trackId -> its group (a track is in at most one), and the
+  // render plan — one "group-header" row the first time a group's members are encountered in doc
+  // order, then each member's own "track" row (only when the group isn't collapsed). Ungrouped
+  // tracks render exactly as before. Collapsing hides the member rows entirely; the header always
+  // shows so the fold can be reopened.
+  const groupByTrack = useMemo(() => {
+    const m = new Map<string, BeatGroup>()
+    if (doc) for (const g of doc.groups) for (const tid of g.tracks) m.set(tid, g)
+    return m
+  }, [doc])
+  type RowPlanTrackRow = { kind: 'track'; flat: TrackFlat; grouped: BeatGroup | null }
+  type RowPlanRow = { kind: 'group-header'; group: BeatGroup } | RowPlanTrackRow
+  const rowPlan: RowPlanRow[] = useMemo(() => {
+    const rows: RowPlanRow[] = []
+    const seenGroups = new Set<string>()
+    for (const flat of flats) {
+      const g = groupByTrack.get(flat.track.id) ?? null
+      if (g) {
+        if (!seenGroups.has(g.id)) {
+          seenGroups.add(g.id)
+          rows.push({ kind: 'group-header', group: g })
+        }
+        if (!collapsedGroups[g.id]) rows.push({ kind: 'track', flat, grouped: g })
+      } else {
+        rows.push({ kind: 'track', flat, grouped: null })
+      }
+    }
+    return rows
+  }, [flats, groupByTrack, collapsedGroups])
 
   // Automation: where each track's clip plays (song-time occurrences), and the clip loop length the
   // engine uses to tile automation (loopBars*16 — ui/src/audio/engine.ts contentFor).
@@ -1086,6 +1217,115 @@ export function ArrangementView() {
     [setSelectedTrack],
   )
 
+  // ── Track grouping (Phase 22 Stream AF) ─────────────────────────────────────────────────────
+  const toggleGroupPick = useCallback((id: string) => {
+    setGroupPick((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const createGroup = useCallback(async () => {
+    const trackIds = [...groupPick]
+    if (trackIds.length < 2) return
+    setGroupBusy(true)
+    try {
+      await postGroupOp({ op: 'create', trackIds })
+      setGroupPick(new Set())
+    } catch (err) {
+      window.alert(`Could not group tracks: ${(err as Error).message}`)
+    } finally {
+      setGroupBusy(false)
+    }
+  }, [groupPick])
+
+  const ungroup = useCallback(async (groupId: string) => {
+    try {
+      await postGroupOp({ op: 'delete', id: groupId })
+    } catch (err) {
+      window.alert(`Could not ungroup: ${(err as Error).message}`)
+    }
+  }, [])
+
+  // Collapse/expand is local-only (never posts anywhere) — see the GroupHeaderRow comment above.
+  const toggleGroupCollapsed = useCallback((groupId: string) => {
+    setCollapsedGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }))
+  }, [])
+
+  // ── New-project-from-scratch + save-as-template (Phase 22 Stream AF) ───────────────────────────
+  // Plain browser `window.prompt`s, not a native file picker: unlike "open folder…" (Tauri-only,
+  // disabled outside the desktop shell — see tauri.ts), these three hit the daemon's own HTTP routes
+  // directly (POST /new-project, POST /save-as-template — src/daemon/daemon.ts) and so work, and are
+  // verifiable live, in ANY browser the GUI runs in, desktop shell or plain `vite dev`. A single
+  // prompt captures "a folder, or a path ending in .beat" — typing `myproj/mysong.beat` picks both
+  // the destination and the file name in one go, so there's no separate name prompt to chain.
+  const createNewProject = useCallback(async () => {
+    const path = window.prompt('New project — destination folder (or a path ending in .beat):')
+    if (!path) return
+    setProjectBusy(true)
+    try {
+      const base = daemonBase()
+      const res = await fetch(`${base}/new-project`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path }),
+      })
+      const body = (await res.json()) as { filePath?: string; error?: string }
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
+      window.alert(`Created ${body.filePath}.\n\n${isTauri() ? 'Use "open folder…" to switch to it.' : 'Point a beat daemon at it to open it.'}`)
+    } catch (err) {
+      window.alert(`Could not create project: ${(err as Error).message}`)
+    } finally {
+      setProjectBusy(false)
+    }
+  }, [])
+
+  const newProjectFromTemplate = useCallback(async () => {
+    const from = window.prompt('Start a new project from a template — path to the template .beat file:')
+    if (!from) return
+    const path = window.prompt('New project — destination folder (or a path ending in .beat):')
+    if (!path) return
+    setProjectBusy(true)
+    try {
+      const base = daemonBase()
+      const res = await fetch(`${base}/new-project`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path, from }),
+      })
+      const body = (await res.json()) as { filePath?: string; error?: string }
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
+      window.alert(`Created ${body.filePath} from template ${from}.\n\n${isTauri() ? 'Use "open folder…" to switch to it.' : 'Point a beat daemon at it to open it.'}`)
+    } catch (err) {
+      window.alert(`Could not create project from template: ${(err as Error).message}`)
+    } finally {
+      setProjectBusy(false)
+    }
+  }, [])
+
+  const saveAsTemplate = useCallback(async () => {
+    const path = window.prompt('Save this project as a template — destination folder (or a path ending in .beat):')
+    if (!path) return
+    setProjectBusy(true)
+    try {
+      const base = daemonBase()
+      const res = await fetch(`${base}/save-as-template`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path }),
+      })
+      const body = (await res.json()) as { filePath?: string; error?: string }
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
+      window.alert(`Saved template to ${body.filePath}. This project's file is untouched.`)
+    } catch (err) {
+      window.alert(`Could not save template: ${(err as Error).message}`)
+    } finally {
+      setProjectBusy(false)
+    }
+  }, [])
+
   if (!doc) return null
 
   // Resolve the band to show per axis: an in-progress drag wins; otherwise the committed selection.
@@ -1110,13 +1350,18 @@ export function ArrangementView() {
   const playheadLeft = HEADER_W + (currentStep / 16) * pxPerBar
 
   // Extra vertical space the automation sub-lanes + open pickers add below the plain track rows, so
-  // the playhead spans the whole (taller) stack.
-  const autoExtra = doc.tracks.reduce((sum, t) => {
+  // the playhead spans the whole (taller) stack. Only counts rows that actually render — a collapsed
+  // group's members (and their automation) contribute nothing (rowPlan already omits them).
+  const visibleTrackRows = rowPlan.filter((r): r is RowPlanTrackRow => r.kind === 'track')
+  const groupHeaderRows = rowPlan.filter((r) => r.kind === 'group-header').length
+  const autoExtra = visibleTrackRows.reduce((sum, r) => {
+    const t = r.flat.track
     const lanes = visibleParamsFor(t).length
     const occ = occurrencesByTrack.get(t.id) ?? []
     const pickerOpen = autoOpen[t.id] && occ.length > 0 && AUTO_OPTIONS_BY_KIND[t.kind].length > 0
     return sum + lanes * AUTO_H + (pickerOpen ? PICKER_H : 0)
   }, 0)
+  const contentRowsHeight = visibleTrackRows.length * ROW_H + groupHeaderRows * GROUP_HEADER_H
 
   return (
     <div className="arrangement">
@@ -1158,12 +1403,48 @@ export function ArrangementView() {
           </div>
           <button
             className="arr-toolbtn"
+            data-action="group-tracks"
+            disabled={groupPick.size < 2 || groupBusy}
+            title={groupPick.size < 2 ? 'pick at least 2 tracks (checkbox in each track header) to group' : `fold ${groupPick.size} picked tracks into a group`}
+            onClick={() => void createGroup()}
+          >
+            + group{groupPick.size >= 2 ? ` (${groupPick.size})` : ''}
+          </button>
+          <button
+            className="arr-toolbtn"
             data-action="open-folder"
             disabled={!isTauri()}
             title={isTauri() ? 'open a different project folder' : 'available in the desktop app — switches the daemon to another project folder'}
             onClick={() => void openProjectFolder()}
           >
             open folder…
+          </button>
+          <button
+            className="arr-toolbtn"
+            data-action="new-project"
+            disabled={projectBusy}
+            title="create a brand new .beat project from scratch"
+            onClick={() => void createNewProject()}
+          >
+            new project…
+          </button>
+          <button
+            className="arr-toolbtn"
+            data-action="new-from-template"
+            disabled={projectBusy}
+            title="start a new project as a fresh copy of a saved template"
+            onClick={() => void newProjectFromTemplate()}
+          >
+            new from template…
+          </button>
+          <button
+            className="arr-toolbtn"
+            data-action="save-template"
+            disabled={projectBusy}
+            title="save a copy of THIS project as a template (never mutates this project)"
+            onClick={() => void saveAsTemplate()}
+          >
+            save as template…
           </button>
         </div>
       </div>
@@ -1300,14 +1581,26 @@ export function ArrangementView() {
           </div>
         </div>
 
-        {flats.map((flat) => {
+        {rowPlan.map((row) => {
+          if (row.kind === 'group-header') {
+            return (
+              <GroupHeaderRow
+                key={`group-${row.group.id}`}
+                group={row.group}
+                collapsed={!!collapsedGroups[row.group.id]}
+                onToggleCollapse={() => toggleGroupCollapsed(row.group.id)}
+                onUngroup={() => void ungroup(row.group.id)}
+              />
+            )
+          }
+          const flat = row.flat
           const occ = occurrencesByTrack.get(flat.track.id) ?? []
           const canAutomate = occ.length > 0 && AUTO_OPTIONS_BY_KIND[flat.track.kind].length > 0
           const visible = visibleParamsFor(flat.track)
           const primaryClip = occ[0]?.clipId
           const open = !!autoOpen[flat.track.id]
           return (
-            <div key={flat.track.id}>
+            <div key={flat.track.id} className={row.grouped ? 'arr-grouped-track' : undefined}>
               <TrackRow
                 flat={flat}
                 totalBars={totalBars}
@@ -1318,6 +1611,9 @@ export function ArrangementView() {
                 selected={!!selTracks && selTracks.includes(flat.track.id)}
                 onHeaderClick={() => clickHeader(flat.track)}
                 onRowPointerDown={(e) => beginDrag(flat.track.id, e)}
+                groupPickChecked={groupPick.has(flat.track.id)}
+                onToggleGroupPick={() => toggleGroupPick(flat.track.id)}
+                alreadyGrouped={!!row.grouped}
                 headerExtra={
                   <button
                     className={`arr-auto-toggle ${open ? 'on' : ''}`}
@@ -1358,7 +1654,7 @@ export function ArrangementView() {
         {showPlayhead && (
           <div
             className="arr-playhead"
-            style={{ left: playheadLeft, top: RULER_H, height: flats.length * ROW_H + autoExtra }}
+            style={{ left: playheadLeft, top: RULER_H, height: contentRowsHeight + autoExtra }}
           />
         )}
       </div>

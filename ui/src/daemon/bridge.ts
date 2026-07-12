@@ -331,6 +331,34 @@ export function postEffectEnabled(track: string, id: string, enabled: boolean): 
   return postEffectOp('effect-enabled', { track, id, enabled })
 }
 
+// ─── track grouping (Phase 22 Stream AF) ────────────────────────────────────────────────────────
+// One route, five ops (mirrors /song's "whole-statement op" shape — a group's membership list isn't
+// a single scalar, so it doesn't fit postEdit's {path,value} grammar). Like postAddTrack/
+// postRemoveTrack, the daemon RETURNS the full raw document and we apply it directly (no optimistic
+// local mirror — the daemon never SSE-echoes its own writes).
+
+export type GroupOp =
+  | { op: 'create'; trackIds: string[]; id?: string; name?: string; color?: string }
+  | { op: 'delete'; id: string }
+  | { op: 'rename'; id: string; name: string }
+  | { op: 'recolor'; id: string; color: string }
+  | { op: 'set-tracks'; id: string; trackIds: string[] }
+
+export async function postGroupOp(body: GroupOp): Promise<void> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/group`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc } = (await res.json()) as { written: boolean; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
+}
+
 // ─── vary-and-audition (Phase 15 Stream I) ──────────────────────────────────────────────────────
 // The daemon's POST /vary returns a batch of param-variants, each a list of {path,value} edits in
 // the SAME grammar postEdit already commits. Auditioning a variant = applying its edits to a base
