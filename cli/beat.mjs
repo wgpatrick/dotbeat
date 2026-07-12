@@ -22,6 +22,7 @@ import {
   setScene,
   setSong,
   songMove,
+  insertScene,
   setMediaSample,
   setLaneSample,
   addEffect,
@@ -138,6 +139,12 @@ const USAGE = `usage:
   beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
   beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
   beat song-move <file> <from-index> <to-index>           reorder a section — a two-line diff, not a rewrite
+  beat song-insert <file> <index> <bars>                  insert a NEW section with a fresh, empty, independent scene at
+                                                          <index> (0-based; song.length appends) — unlike song-move/song,
+                                                          never reuses an existing scene id, so it can't share content with
+                                                          any other section (docs/product-roadmap.md's "Independent
+                                                          per-section scene editing" row); place clips into it afterward
+                                                          via beat scene/beat_song. Requires song mode already.
   beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)
   beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample
   beat effect-add <file> <track> <eq3|comp|distortion|bitcrush|eq7|autoFilter|autoPan|tremolo|utility|grainDelay|vinylDistortion|resonator> [--id id] [--index n] [--bypassed]
@@ -905,6 +912,21 @@ function songMoveCmd(argv) {
   writeDoc(file, before, doc)
 }
 
+// Phase 26 Stream DJ: insert a brand-new, empty, genuinely independent scene as a new section —
+// the CLI/MCP half of "Insert Scene" (docs/research/54-...md's P0 recommendation). Unlike `beat
+// song` (whole-list replace, always references EXISTING scenes) this mints a scene id that has
+// never appeared in the document before, so the new section can never inherit another section's
+// content by construction. Capture-and-Insert Scene (the live-content-snapshot half) is daemon/GUI-
+// only for now — see src/daemon/daemon.ts's captureAndInsertScene and POST /song {op:'captureInsert'}.
+function songInsertCmd(argv) {
+  const [file, index, bars] = argv
+  if (!file || index === undefined || bars === undefined) throw new BeatEditError('song-insert needs <file> <index> <bars>')
+  const before = readDoc(file)
+  const { doc, sceneId } = insertScene(before, Number(index), Number(bars))
+  writeDoc(file, before, doc)
+  process.stdout.write(`inserted section at index ${Number(index)} with new empty scene "${sceneId}"\n`)
+}
+
 // v0.9 clip automation (docs/phase-9-automation-plan.md)
 function automateCmd(argv) {
   const idIdx = argv.indexOf('--id')
@@ -1344,6 +1366,9 @@ async function main() {
       break
     case 'song-move':
       songMoveCmd(rest)
+      break
+    case 'song-insert':
+      songInsertCmd(rest)
       break
     case 'sample':
       await sampleCmd(rest)

@@ -56,6 +56,7 @@ import {
   setScene,
   setSong,
   songMove,
+  insertScene,
   parsePresetLibrary,
   applyPreset,
   formatPresetList,
@@ -903,6 +904,27 @@ const TOOLS: ToolDef[] = [
       const { doc } = songMove(before, num(args, 'from_index'), num(args, 'to_index'))
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_song_insert',
+    description:
+      'Phase 26 ("Insert Scene"): insert a brand-new song section referencing a FRESHLY MINTED, EMPTY scene at a 0-based index (index === current section count appends). Unlike beat_song (which only ever references existing scenes, so a duplicated/appended section silently shares state with whatever else references that scene id), this scene has never appeared in the document before — editing its clips (via beat_song\'s clips/scenes args, or beat_place equivalents) can never bleed into any other section. Place clips into it afterward. The other half of this feature, Capture-and-Insert Scene (snapshot every track\'s current live content into the new scene instead of leaving it empty), is daemon/GUI-only for now — no CLI/MCP verb yet.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        index: { type: 'number', description: '0-based position to insert at; equal to the current section count to append' },
+        bars: { type: 'number', description: 'length of the new section in bars (1-64)' },
+      },
+      required: ['file', 'index', 'bars'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, sceneId } = insertScene(before, num(args, 'index'), num(args, 'bars'))
+      writeFileSync(file, serialize(doc))
+      return `${formatDiff(diffDocuments(before, doc))}\n(new scene: "${sceneId}")\n`
     },
   },
   {

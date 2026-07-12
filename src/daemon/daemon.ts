@@ -32,7 +32,7 @@ import { readFileSync, writeFileSync, watch, existsSync, mkdirSync, copyFileSync
 import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { BeatDocument, BeatSelection, DrumLane } from '../core/index.js'
+import type { BeatDocument, BeatSelection, BeatSongSection, DrumLane } from '../core/index.js'
 import {
   parse,
   serialize,
@@ -46,6 +46,9 @@ import {
   setScene,
   setSong,
   songMove,
+  nextSceneId,
+  songInsert,
+  insertScene,
   addTrack,
   removeTrack,
   setMediaSample,
@@ -174,16 +177,6 @@ export function resolveVaryTarget(sel: BeatSelection, doc: BeatDocument, body: V
 // face on core's setSong/setScene/saveClip, the same "reuse the real core verb" pattern /vary and
 // /history follow — no arrangement logic lives here, just the three high-level ops the GUI needs.
 
-/** Next free `sN` scene id (loop→song conversion mints one). */
-function nextSceneId(doc: BeatDocument): string {
-  let max = 0
-  for (const s of doc.scenes) {
-    const m = /^s(\d+)$/.exec(s.id)
-    if (m) max = Math.max(max, Number(m[1]))
-  }
-  return `s${max + 1}`
-}
-
 /** Build a scene from every track's LIVE content: snapshot each track into a clip named `sceneId`
  * (core's saveClip) and map every track to it (core's setScene). This is how loop mode becomes song
  * mode without discarding what's there — the existing loop content becomes a real, playable scene.
@@ -207,6 +200,22 @@ function sceneFromLiveContent(doc: BeatDocument, sceneId: string): BeatDocument 
     slots[t.id] = sceneId
   }
   return setScene(d, sceneId, slots)
+}
+
+/** Phase 26 Stream DJ ("Capture and Insert Scene"): generalizes `sceneFromLiveContent` above — until
+ * now invoked only INTERNALLY, exactly once, at loop→song conversion (`songAppend`'s bootstrap
+ * branch) — into a repeatable, user-triggered action. Mints a brand-new scene id, snapshots every
+ * track's CURRENT LIVE content (notes/hits — whatever's playing right now, unsaved or not) into
+ * fresh clips bundled into that scene (same `sceneFromLiveContent` machinery), then splices a new
+ * song section referencing it into `doc.song` at `index` (core's `songInsert` — same insertion-
+ * position mechanic `insertScene` uses for the empty-scene case; the two differ only in what's IN
+ * the scene when it's minted). Requires song mode already, same as `insertScene`. */
+export function captureAndInsertScene(doc: BeatDocument, index: number, bars: number): { doc: BeatDocument; section: BeatSongSection; index: number; sceneId: string } {
+  if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no section list to insert into (append a section first to start song mode)')
+  const sceneId = nextSceneId(doc)
+  const withScene = sceneFromLiveContent(doc, sceneId)
+  const { doc: next, section, index: at } = songInsert(withScene, index, sceneId, bars)
+  return { doc: next, section, index: at, sceneId }
 }
 
 /** Append a section. In song mode the new section reuses the last section's scene (its slot map is
@@ -839,22 +848,37 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     // Phase 24 Stream CB: 'move' reorders a section (core's songMove) — same shape as the other
     // three ops, just a straight pass-through since songMove needs no daemon-side composition
     // (unlike append's scene-from-live-content bootstrap or resize's overlap-policy branching).
+    // Phase 26 Stream DJ: 'insert' (core's insertScene — a brand-new EMPTY scene at a chosen
+    // position) and 'captureInsert' (this file's captureAndInsertScene — a brand-new scene
+    // pre-populated from every track's current live content, same position mechanic) close the
+    // shared-scene gap `docs/product-roadmap.md`'s Arrangement row names: unlike 'append', neither
+    // ever reuses an existing scene id, so the resulting section is genuinely independent from
+    // creation, not just from whenever its clips first happen to diverge from a sibling's.
     if (req.method === 'POST' && url.pathname === '/song') {
       readBody(req)
         .then((body) => {
           const b = JSON.parse(body) as { op?: unknown; index?: unknown; bars?: unknown; policy?: unknown; from?: unknown; to?: unknown }
           let next: BeatDocument
+          let sceneId: string | undefined
           if (b.op === 'append') next = songAppend(doc, Number(b.bars))
           else if (b.op === 'resize') next = songResize(doc, Number(b.index), Number(b.bars), typeof b.policy === 'string' ? (b.policy as OverlapPolicy) : undefined)
           else if (b.op === 'delete') next = songDelete(doc, Number(b.index))
           else if (b.op === 'move') next = songMove(doc, Number(b.from), Number(b.to)).doc
-          else {
-            json(res, 400, { error: `unknown song op "${String(b.op)}" (expected append|resize|delete|move)` })
+          else if (b.op === 'insert') {
+            const r = insertScene(doc, Number(b.index), Number(b.bars))
+            next = r.doc
+            sceneId = r.sceneId
+          } else if (b.op === 'captureInsert') {
+            const r = captureAndInsertScene(doc, Number(b.index), Number(b.bars))
+            next = r.doc
+            sceneId = r.sceneId
+          } else {
+            json(res, 400, { error: `unknown song op "${String(b.op)}" (expected append|resize|delete|move|insert|captureInsert)` })
             return
           }
           const written = writeIfChanged(next)
           revalidateSelection()
-          json(res, 200, { written, song: doc.song })
+          json(res, 200, { written, song: doc.song, ...(sceneId ? { sceneId } : {}) })
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500

@@ -82,8 +82,18 @@ function previewResizeSections(sections: Section[], index: number, bars: number,
 /** Issue one arrangement-length op to the daemon's /song route, then re-pull /document so the UI
  * reflects the new sections/scenes/clips (the daemon doesn't echo its own writes). Phase 24 Stream
  * CB adds 'move' (reorder a section — {from, to}), same route, same op-dispatch shape as append/
- * resize/delete. */
-async function postSong(body: { op: 'append' | 'resize' | 'delete' | 'move'; index?: number; bars?: number; policy?: OverlapPolicy; from?: number; to?: number }): Promise<void> {
+ * resize/delete. Phase 26 Stream DJ adds 'insert' (a brand-new EMPTY scene spliced in at `index`)
+ * and 'captureInsert' (a brand-new scene pre-populated by snapshotting every track's current live
+ * content, same position) — unlike 'append', neither ever reuses an existing scene id, so the
+ * resulting section starts genuinely independent rather than sharing state with a sibling. */
+async function postSong(body: {
+  op: 'append' | 'resize' | 'delete' | 'move' | 'insert' | 'captureInsert'
+  index?: number
+  bars?: number
+  policy?: OverlapPolicy
+  from?: number
+  to?: number
+}): Promise<void> {
   const base = daemonBase()
   try {
     const res = await fetch(`${base}/song`, {
@@ -2226,6 +2236,30 @@ export function ArrangementView() {
               onClick={() => postSong({ op: 'append', bars: doc.song![doc.song!.length - 1]!.bars })}
             >
               + section
+            </button>
+            {/* Phase 26 Stream DJ: unlike "+ section" (which always REUSES the last section's scene
+                — the exact behavior that lets editing one section's clips silently edit every other
+                section sharing that scene), these two mint a genuinely NEW, independent scene id
+                before inserting. "insert scene" starts it empty (place clips via the piano roll's
+                own "Place in Arrangement" flow afterward); "capture scene" starts it pre-populated
+                by snapshotting every track's current live (on-screen, possibly unsaved) content.
+                Both land at the end of the timeline, same default position "+ section" itself uses
+                — the daemon route accepts an arbitrary index for scripted/future callers. */}
+            <button
+              className="arr-add-section"
+              data-insert-scene="1"
+              title="insert a new, empty, fully independent scene as a new section at the end of the song — no clips shared with any other section"
+              onClick={() => postSong({ op: 'insert', index: doc.song!.length, bars: doc.song![doc.song!.length - 1]!.bars })}
+            >
+              + insert scene
+            </button>
+            <button
+              className="arr-add-section"
+              data-capture-insert-scene="1"
+              title="snapshot every track's current live content into a new, independent scene, inserted as a new section at the end of the song"
+              onClick={() => postSong({ op: 'captureInsert', index: doc.song!.length, bars: doc.song![doc.song!.length - 1]!.bars })}
+            >
+              + capture scene
             </button>
           </>
         ) : (
