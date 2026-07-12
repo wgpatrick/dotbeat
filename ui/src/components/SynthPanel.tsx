@@ -3,7 +3,7 @@ import { Knob } from './Knob'
 import { PARAM_GROUPS, type ParamGroup, type ParamSpec, type TrackKind } from './synthParams'
 import { EFFECT_TYPES, EFFECT_LABELS, type BeatEffect, type BeatTrack, type EffectType } from '../types'
 import { postEdit, postEffectAdd, postEffectRemove, postEffectMove, postEffectEnabled } from '../daemon/bridge'
-import { fetchLibrary, applyPresetToTrack, type LibraryPreset } from '../daemon/library'
+import { fetchLibrary, applyPresetToTrack, resolveMacro, inverseResolveMacroTarget, type LibraryPreset, type LibraryMacro } from '../daemon/library'
 import { useStore } from '../state/store'
 
 // The device panel for one track's FULL synth surface — the core 9 plus every optional
@@ -308,6 +308,83 @@ function PresetPicker({ track }: { track: BeatTrack }) {
   )
 }
 
+// Phase 26 Stream DD (docs/research/27-macro-tooling-layer.md): "a macro is a preset with a
+// continuous input" — one knob resolving to 2-4 real target params moving together. Deliberately a
+// row of ordinary Knob instances placed in Device View (research 27 §6: co-located with the knobs
+// it drives, not a separate overlay), one per factory macro whose `kind` matches this track
+// (`kind === track.kind || kind === 'any'`). Dragging computes resolveMacro() CLIENT-SIDE
+// (../daemon/library.ts's small duplicate of src/core/macro.ts's pure math) and posts each
+// resolved target through the SAME postEdit path every other knob uses — no new daemon route is
+// needed for this interactive case (POST /library/apply-macro exists only for the one-shot
+// CLI/agent apply, `beat macro apply`). Because the file only ever stores resolved values, never
+// "this came from macro X at position N," a macro's own knob position has no ground truth — see
+// MacroKnob's own comment for the best-effort display estimate this uses instead.
+function MacroKnob({ track, macro }: { track: BeatTrack; macro: LibraryMacro }) {
+  const firstTarget = macro.targets[0]!
+  const liveValue = (): number => Number(track.synth[firstTarget.param] ?? firstTarget.min)
+  const [knob, setKnob] = useState(() => inverseResolveMacroTarget(firstTarget, liveValue()))
+
+  // Re-estimate the knob's visual position whenever the SELECTED TRACK changes (a best-effort
+  // display estimate re-derived from the first target's live value, never a stored truth —
+  // research 27 §6's "knob-position display problem, stated honestly"). Deliberately NOT
+  // re-estimated on every param tick — once the human starts turning this knob, its own local
+  // state is authoritative until they select a different track.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => setKnob(inverseResolveMacroTarget(firstTarget, liveValue())), [track.id])
+
+  return (
+    <div className="macro-knob" data-macro-knob={macro.name} title={`${macro.description} (${macro.targets.map((t) => t.param).join(', ')})`}>
+      <Knob
+        label={macro.name}
+        value={knob}
+        min={0}
+        max={100}
+        format={(v) => `${Math.round(v)}`}
+        onChange={(v) => {
+          setKnob(v)
+          for (const { param, value } of resolveMacro(macro, v)) postEdit(`${track.id}.${param}`, String(value))
+        }}
+      />
+    </div>
+  )
+}
+
+function MacroRow({ track }: { track: BeatTrack }) {
+  const [macros, setMacros] = useState<LibraryMacro[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchLibrary()
+      .then((lib) => {
+        if (!cancelled) setMacros(lib.macros ?? [])
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Same kind restriction PresetPicker uses above: 'audio' tracks carry a synth block but nothing
+  // wires it into the live graph, so an 'any'-kind macro (e.g. Space) would be decorative there.
+  if (track.kind !== 'synth' && track.kind !== 'drums') return null
+  if (error) return <div className="macro-row macro-row-error">macros: {error}</div>
+  if (!macros) return null
+  const applicable = macros.filter((m) => m.kind === track.kind || m.kind === 'any')
+  if (applicable.length === 0) return null
+
+  return (
+    <div className="macro-row" data-testid="macro-row">
+      <span className="macro-row-label">macros</span>
+      {applicable.map((m) => (
+        <MacroKnob key={m.name} track={track} macro={m} />
+      ))}
+    </div>
+  )
+}
+
 // `highlight` is true for exactly one render right after this group's effect type was added via
 // the Effect Chain panel above (SynthPanel's `justAdded` state) — force the <details> open (it may
 // default closed, e.g. eq7/autoFilter/grainDelay) and scroll it into view, so "I added eq7" and "I
@@ -372,6 +449,7 @@ export function SynthPanel({ track }: { track: BeatTrack }) {
         </span>
       </div>
       <PresetPicker track={track} />
+      <MacroRow track={track} />
       {kind === 'synth' && <EffectChain track={track} onAdded={setJustAdded} />}
       <div className="param-groups">
         {groups.map((g) => (

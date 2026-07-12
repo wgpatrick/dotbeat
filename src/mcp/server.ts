@@ -62,6 +62,9 @@ import {
   formatPresetList,
   filterPresetsByCategory,
   PRESET_CATEGORIES,
+  parseMacroLibrary,
+  applyMacro,
+  formatMacroList,
   parseDrumKitLibrary,
   applyDrumKit,
   formatDrumKitList,
@@ -964,6 +967,42 @@ const TOOLS: ToolDef[] = [
       if (!preset) throw new Error(`no preset "${name}" (have: ${presets.map((p) => p.name).join(', ')})`)
       const before = parse(readFileSync(file, 'utf8'))
       const doc = applyPreset(before, str(args, 'track'), preset)
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_macro_list',
+    description:
+      'List the macro library: a macro is "a preset with a continuous input" (docs/research/27-macro-tooling-layer.md) — one named knob (0-100) that resolves to 2-4 real synth params moving together (e.g. "Filter Sweep" turns cutoff+resonance up together). Applying one writes plain resolved params into the file, exactly like a preset — no macro reference is ever stored. Use before beat_macro_apply to see what exists and which params each one targets.',
+    inputSchema: { type: 'object', properties: {} },
+    handler: () => {
+      const macros = parseMacroLibrary(readFileSync(join(repoRoot, 'presets', 'macros.json'), 'utf8'))
+      return formatMacroList(macros)
+    },
+  },
+  {
+    name: 'beat_macro_apply',
+    description:
+      'Apply a named macro to a track at a knob position (0-100) — resolves every target to a literal value and sets each exactly as beat_set would, returning the resulting edit list. min>max on a target is a deliberate inverted range (e.g. a decay that gets SHORTER as the knob rises), not an error. Use beat_macro_list to find a name first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        macro: { type: 'string', description: 'a name from beat_macro_list, e.g. "filter-sweep"' },
+        value: { type: 'number', description: 'knob position, 0..100' },
+      },
+      required: ['file', 'track', 'macro', 'value'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const macros = parseMacroLibrary(readFileSync(join(repoRoot, 'presets', 'macros.json'), 'utf8'))
+      const name = str(args, 'macro')
+      const macro = macros.find((m) => m.name === name)
+      if (!macro) throw new Error(`no macro "${name}" (have: ${macros.map((m) => m.name).join(', ')})`)
+      const before = parse(readFileSync(file, 'utf8'))
+      const doc = applyMacro(before, str(args, 'track'), macro, num(args, 'value'))
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
     },

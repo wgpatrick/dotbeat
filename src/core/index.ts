@@ -99,6 +99,19 @@ export {
   type BeatDrumKit,
 } from './drumkit.js'
 export {
+  parseMacroLibrary,
+  resolveMacro,
+  applyMacro,
+  formatMacroList,
+  inverseResolveTarget,
+  BeatMacroError,
+  type BeatMacro,
+  type MacroTarget,
+  type MacroCurve,
+  type MacroCategory,
+  MACRO_CATEGORIES,
+} from './macro.js'
+export {
   parseSelection,
   serializeSelection,
   validateSelection,

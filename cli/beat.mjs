@@ -65,6 +65,10 @@ import {
   formatPresetList,
   filterPresetsByCategory,
   PRESET_CATEGORIES,
+  parseMacroLibrary,
+  applyMacro,
+  formatMacroList,
+  BeatMacroError,
   parseDrumKitLibrary,
   applyDrumKit,
   formatDrumKitList,
@@ -121,6 +125,9 @@ const USAGE = `usage:
                                                           --list-categories for the enumerated set)
   beat presets --list-categories                          list the valid --category values
   beat preset <file> <track> <name>                       apply a preset to a track (a bag of set edits)
+  beat macro list [--json]                                 list the factory macro library (a knob -> N target params)
+  beat macro apply <file> <track> <name> <value>           apply a macro to a track at knob position 0..100
+                                                          (resolves to literal set edits, same discipline as presets)
   beat drum-kits [--json]                                  list the factory drum-kit library (kit-808/kit-909/kit-acoustic)
   beat drum-kit <file> <track> <name>                      apply a drum kit to a track (replaces its whole lane list)
   beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render]
@@ -597,6 +604,46 @@ function presetCmd(argv) {
   if (!preset) throw new BeatEditError(`no preset "${name}" (have: ${presets.map((p) => p.name).join(', ')})`)
   const before = readDoc(file)
   writeDoc(file, before, applyPreset(before, track, preset))
+}
+
+// Phase 26 Stream DD (docs/research/27-macro-tooling-layer.md): macros are tooling, exactly like
+// presets above — "a macro is a preset with a continuous input" (research 18 §6). BEAT_MACROS
+// overrides for a user library, same convention as BEAT_PRESETS/BEAT_DRUM_KITS.
+function loadMacros() {
+  const path = process.env.BEAT_MACROS ?? resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets', 'macros.json')
+  return parseMacroLibrary(readFileSync(path, 'utf8'))
+}
+
+function macroListCmd(argv) {
+  const macros = loadMacros()
+  process.stdout.write(argv.includes('--json') ? JSON.stringify(macros, null, 2) + '\n' : formatMacroList(macros))
+}
+
+function macroApplyCmd(argv) {
+  const [file, track, name, valueStr] = argv
+  if (!file || !track || !name || valueStr === undefined) {
+    throw new BeatEditError('macro apply needs <file> <track> <macro-name> <value 0..100> (see `beat macro list`)')
+  }
+  const value = Number(valueStr)
+  if (!Number.isFinite(value)) throw new BeatEditError(`macro apply: value must be a number, got "${valueStr}"`)
+  const macros = loadMacros()
+  const macro = macros.find((m) => m.name === name)
+  if (!macro) throw new BeatEditError(`no macro "${name}" (have: ${macros.map((m) => m.name).join(', ')})`)
+  const before = readDoc(file)
+  writeDoc(file, before, applyMacro(before, track, macro, value))
+}
+
+function macroCmd(argv) {
+  const [sub, ...rest] = argv
+  if (sub === 'list') {
+    macroListCmd(rest)
+    return
+  }
+  if (sub === 'apply') {
+    macroApplyCmd(rest)
+    return
+  }
+  throw new BeatEditError('macro needs a subcommand: `beat macro list` or `beat macro apply <file> <track> <name> <value>`')
 }
 
 // Phase 22 Stream AB: drum kits (kit-808/kit-909/kit-acoustic) — a separate small library from
@@ -1403,6 +1450,9 @@ async function main() {
     case 'preset':
       presetCmd(rest)
       break
+    case 'macro':
+      macroCmd(rest)
+      break
     case 'drum-kits':
       drumKitsCmd(rest)
       break
@@ -1451,7 +1501,14 @@ async function main() {
 }
 
 main().catch((err) => {
-  if (err instanceof BeatEditError || err instanceof BeatParseError || err instanceof BeatPresetError || err instanceof BeatPitchTimeError || err.name === 'HistoryError') {
+  if (
+    err instanceof BeatEditError ||
+    err instanceof BeatParseError ||
+    err instanceof BeatPresetError ||
+    err instanceof BeatMacroError ||
+    err instanceof BeatPitchTimeError ||
+    err.name === 'HistoryError'
+  ) {
     console.error(`error: ${err.message}`)
     process.exitCode = 2
   } else {
