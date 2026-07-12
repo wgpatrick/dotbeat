@@ -178,6 +178,25 @@ export const PARAM_GROUPS: ParamGroup[] = [
       k('velToFilterAmount', 'Vel→F', 0, 1, fmt.pct),
     ],
   },
+  // Phase 26 Stream DL: generalized per-parameter velocity/key modulation — the SAME "flat enum of
+  // named destinations + one amount slider" pattern already proven twice for lfoDest/lfo2Dest just
+  // above (and once more below), reusing LFO_DESTS itself rather than a parallel destination list
+  // (docs/phase-26-plan.md Stream DL, research/68 §11). Additive to, not a replacement for, the
+  // legacy velToFilterAmount/keytrackAmount cutoff-only knobs above — both keep working. synth-only:
+  // ui/src/audio/engine.ts's fireSynthNote (where this dispatches) only runs for kind==='synth'
+  // tracks, same scope as the LFO group below.
+  {
+    id: 'velkeymod',
+    title: 'Vel/Key Mod',
+    kinds: ['synth'],
+    open: false,
+    params: [
+      e('velDest', 'VelDest', LFO_DESTS),
+      k('velAmount', 'VelAmt', -1, 1, fmt.num2),
+      e('keyDest', 'KeyDest', LFO_DESTS),
+      k('keyAmount', 'KeyAmt', -1, 1, fmt.num2),
+    ],
+  },
   {
     id: 'lfo',
     title: 'LFO',
