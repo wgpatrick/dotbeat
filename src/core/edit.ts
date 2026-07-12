@@ -473,6 +473,64 @@ export function removeNote(doc: BeatDocument, trackId: string, noteId: string): 
   return { doc: replaceTrack(doc, { ...track, notes: track.notes.filter((n) => n.id !== noteId) }), note }
 }
 
+export interface DuplicateNotesOptions {
+  /** Restrict to these note ids (a selection). Omitted = every note on the track. */
+  noteIds?: string[]
+  /** Steps added to every copy's `start` (a single uniform delta — a rigid-body duplicate of the
+   * whole scoped group, matching Ableton's Ctrl/Option-drag-to-copy and NoteView.tsx's own
+   * rigid-body group-move gesture). Default 0 (copies land exactly on top of the originals). */
+  offsetStart?: number
+  /** Semitones added to every copy's `pitch`, clamped to MIDI 0-127 (same clamp-not-error stance
+   * transposeNotes takes). Default 0. */
+  offsetPitch?: number
+}
+
+/** Copies the scoped notes onto the SAME track, offsetting each by `offsetStart` steps and
+ * `offsetPitch` semitones, minting a fresh id for every copy (addNote's own `u<n>` minting
+ * scheme) — a thin wrapper on addNote, one call per copied note, so the result is exactly what
+ * that many manual `addNote` calls would produce. Originals are left untouched; this is add-only
+ * (research 57 item #2: "no primitive exists in edit.ts AND no GUI affordance"). Two calling
+ * conventions share this one primitive (research 57's own recommendation, "reuse the same
+ * primitive"): a drag-to-duplicate commit passes the drag's own (offsetStart, offsetPitch) delta
+ * so the copy lands where the user dropped it; a clipboard paste passes an offsetStart computed
+ * at paste time (paste position minus the copied selection's own earliest start) and
+ * offsetPitch=0 (paste keeps the copied pitches). `added` — one entry per scoped note, in scoped
+ * order — lets a caller select the fresh copies immediately (the drag/paste UX both do). */
+export function duplicateNotes(doc: BeatDocument, trackId: string, opts: DuplicateNotesOptions = {}): { doc: BeatDocument; added: BeatNote[] } {
+  const track = findTrack(doc, trackId)
+  if (track.kind === 'drums') throw new BeatEditError(`track "${trackId}" is a drums track — duplicateNotes works on notes, not hits`)
+  if (opts.noteIds) {
+    const have = new Set(track.notes.map((n) => n.id))
+    const missing = opts.noteIds.filter((id) => !have.has(id))
+    if (missing.length) throw new BeatEditError(`no note(s) ${missing.map((m) => `"${m}"`).join(', ')} on track "${trackId}"`)
+  }
+  const wanted = opts.noteIds ? new Set(opts.noteIds) : null
+  const offsetStart = opts.offsetStart ?? 0
+  const offsetPitch = opts.offsetPitch ?? 0
+  if (!Number.isFinite(offsetStart)) throw new BeatEditError(`offsetStart must be a finite number of steps, got ${offsetStart}`)
+  if (!Number.isFinite(offsetPitch)) throw new BeatEditError(`offsetPitch must be a finite number of semitones, got ${offsetPitch}`)
+  const scoped = wanted ? track.notes.filter((n) => wanted.has(n.id)) : track.notes
+
+  let cur = doc
+  const added: BeatNote[] = []
+  for (const n of scoped) {
+    const { doc: next, note } = addNote(cur, trackId, {
+      pitch: Math.max(0, Math.min(127, n.pitch + offsetPitch)),
+      start: Math.max(0, canon(n.start + offsetStart)),
+      duration: n.duration,
+      velocity: n.velocity,
+      chance: n.chance,
+      cent: n.cent,
+      ratchetCount: n.ratchetCount,
+      ratchetCurve: n.ratchetCurve,
+      ratchetLength: n.ratchetLength,
+    })
+    cur = next
+    added.push(note)
+  }
+  return { doc: cur, added }
+}
+
 /** v0.10 effect-chain primitives (docs/phase-22-stream-aa.md). A track's `effects` array IS the
  * insert chain's order — these are the only ways to change it, so every mutation stays a small,
  * explicit list edit (add one entry, drop one entry, move one entry, flip one flag) rather than a

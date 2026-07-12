@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { declaredLaneNames, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
-import { postEdit, postSelection, postPitchTime, postPlaceClip, type PitchTimeOp } from '../daemon/bridge'
+import { postEdit, postSelection, postPitchTime, postPlaceClip, postDuplicateNotes, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
@@ -164,7 +164,24 @@ type Gesture = {
   downX: number
   downY: number
   group: GroupEv[]
+  // Phase 26 Stream DG: Alt/Option held at the START of a 'move' drag (captured once, here, not
+  // read continuously like the freehand-snap-bypass check below) — Ableton's own "hold the
+  // modifier, drag copies instead of moves" model [research 57 item #2]. Cmd/Ctrl can't serve this
+  // role: holding it at press-time already means "toggle selection, don't start a drag" (see
+  // startGesture's early-return above this flag's own assignment), so Alt is the only modifier
+  // free to mean "duplicate" at gesture-start. Notes only (eventKind — drum hits have no
+  // duplicateNotes equivalent yet); always false for a 'resize' gesture.
+  duplicate: boolean
 }
+
+// Phase 26 Stream DG: a basic clipboard — remembers WHICH notes (by id, on which track) were last
+// copied, not a snapshot of their data. Paste re-resolves those ids against the live track and
+// calls the SAME duplicateNotes primitive the Alt-drag gesture uses, so "copy then paste" and
+// "Alt-drag" are two call sites sharing one core operation, per research 57 item #2's own
+// recommendation. Module-level (not component state): the clipboard is GUI/daemon-local, never
+// written to the .beat file, and should survive switching which track's NoteView is mounted.
+type NoteClipboard = { trackId: string; noteIds: string[]; anchorStart: number }
+let noteClipboard: NoteClipboard | null = null
 
 // A live marquee (rubber-band) drag on empty grid space. `base` is the selection captured at
 // pointer-down so a shift-drag adds to it; without a modifier the enclosed notes replace it.
@@ -406,7 +423,10 @@ export function NoteView({ track }: { track: BeatTrack }) {
       setSel([ev.id])
     }
     const group: GroupEv[] = events.filter((e2) => groupIds.has(e2.id)).map((e2) => ({ id: e2.id, origStart: e2.start, origRow: e2.row, origDur: e2.duration }))
-    gesture.current = { kind, primaryId: ev.id, rect, stepW: rect.width / totalSteps, downX: e.clientX, downY: e.clientY, group }
+    // Alt/Option held right now (gesture-start only — see the Gesture type's own doc comment for
+    // why Cmd/Ctrl can't play this role) turns this into a duplicate-drag instead of a move.
+    const duplicate = kind === 'move' && eventKind === 'note' && e.altKey
+    gesture.current = { kind, primaryId: ev.id, rect, stepW: rect.width / totalSteps, downX: e.clientX, downY: e.clientY, group, duplicate }
   }
 
   function onPointerMove(e: React.PointerEvent) {
@@ -440,6 +460,30 @@ export function NoteView({ track }: { track: BeatTrack }) {
     gesture.current = null
     setPreview(null)
     if (!g || !p) return
+    if (g.duplicate) {
+      // Alt-drag: commit via duplicateNotes instead of commitMove — the ORIGINALS stay exactly
+      // where they were, a fresh copy of the whole group lands wherever the pointer released. The
+      // group moves as one rigid body (clampGroupMove), so every event shares the same delta —
+      // read it once off the primary event rather than per-event.
+      const primary = g.group.find((x) => x.id === g.primaryId)!
+      const pv = p[primary.id]
+      if (pv) {
+        const offsetStart = Math.round((pv.start - primary.origStart) * 10000) / 10000
+        const dRow = pv.row - primary.origRow
+        const offsetPitch = dRow === 0 ? 0 : Number(axis.valueOfRow(primary.origRow + dRow)) - Number(axis.valueOfRow(primary.origRow))
+        if (offsetStart !== 0 || offsetPitch !== 0) {
+          void postDuplicateNotes(
+            track.id,
+            g.group.map((gn) => gn.id),
+            offsetStart,
+            offsetPitch,
+          )
+            .then((addedIds) => setSel(addedIds))
+            .catch((err) => window.alert(`Could not duplicate: ${(err as Error).message}`))
+        }
+      }
+      return
+    }
     for (const gn of g.group) {
       const pv = p[gn.id]
       if (!pv) continue
@@ -578,6 +622,34 @@ export function NoteView({ track }: { track: BeatTrack }) {
         return
       }
       const chosen = liveEvents.filter((ev) => ids.has(ev.id))
+
+      // Phase 26 Stream DG: a basic clipboard, notes only (mirrors the Alt-drag duplicate gesture
+      // above — drum hits have no duplicateNotes equivalent yet). Copy just remembers WHICH ids
+      // were selected (module-level `noteClipboard`, not written to the .beat file); paste
+      // re-resolves those ids against the LIVE track and calls the same duplicateNotes primitive,
+      // offset so the earliest copied note lands at the current playhead (clip-relative, wrapped
+      // to this clip's own step space) — or, when transport is stopped (`currentStep === -1`),
+      // right on top of the originals (offsetStart 0), same "duplicate in place" fallback the
+      // Alt-drag gesture's own zero-delta case already leaves as a no-op-safe default.
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'C')) {
+        if (!isDrums && chosen.length) {
+          e.preventDefault()
+          noteClipboard = { trackId: track.id, noteIds: chosen.map((ev) => ev.id), anchorStart: Math.min(...chosen.map((ev) => ev.start)) }
+        }
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'v' || e.key === 'V')) {
+        if (!isDrums && noteClipboard && noteClipboard.trackId === track.id) {
+          e.preventDefault()
+          const pasteStep = st.currentStep >= 0 ? st.currentStep % steps : noteClipboard.anchorStart
+          const offsetStart = pasteStep - noteClipboard.anchorStart
+          void postDuplicateNotes(track.id, noteClipboard.noteIds, offsetStart, 0)
+            .then((addedIds) => setSel(addedIds))
+            .catch((err) => window.alert(`Could not paste: ${(err as Error).message}`))
+        }
+        return
+      }
+
       if (!chosen.length) return
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -713,7 +785,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const tip = editable
     ? isDrums
       ? 'click a lane label to preview + select · click empty grid to add a hit (a marker — no duration) · drag to marquee-select · shift/cmd-click to multi-select · drag a hit (or group) to move · drag its right edge to gate/sustain it (marker -> bar) · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand (off-grid) placement'
-      : 'click a key to preview · click empty grid to add · drag to marquee-select · shift/cmd-click to multi-select · drag a note (or group) to move · drag its right edge to resize · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand placement · dashed/dim = chance<100 · ticks = ratchet · drag the chance lane across notes to paint probability'
+      : 'click a key to preview · click empty grid to add · drag to marquee-select · shift/cmd-click to multi-select · drag a note (or group) to move · drag its right edge to resize · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand placement · hold Alt/Option at the START of a drag to duplicate instead of move · cmd/ctrl+c / cmd/ctrl+v to copy/paste at the playhead · dashed/dim = chance<100 · ticks = ratchet · drag the chance lane across notes to paint probability'
     : ''
 
   // Rubber-band overlay geometry (grid-relative px), only while an actual drag is in progress.

@@ -75,6 +75,7 @@ import {
   defaultDrumKitLanes,
   splitAudioClip,
   addAudioClip,
+  duplicateNotes,
   BeatEditError,
   BeatPresetError,
   BeatParseError,
@@ -983,6 +984,40 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatPitchTimeError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // Phase 26 Stream DG: copy/duplicate notes + clipboard (research 57 item #2 — "no primitive
+    // exists in edit.ts AND no GUI affordance"). One route, reused by both NoteView.tsx flows:
+    // Alt-drag-to-duplicate passes the drag's own uniform (offsetStart, offsetPitch) delta;
+    // Cmd/Ctrl+V paste passes an offsetStart computed at paste time (playhead - copied selection's
+    // own earliest start) and no offsetPitch. Mirrors /pitch-time's own shape (one op, whole track +
+    // noteIds scoping) but gets its own route rather than folding into the pitch-time op union
+    // since it needs to hand back the fresh copies' ids (so the GUI can select them), the same
+    // reason /audio-split and /place-clip are their own routes instead of /edit.
+    //   { track, noteIds?, offsetStart?, offsetPitch? } -> { written, addedIds, doc }
+    if (req.method === 'POST' && url.pathname === '/duplicate-notes') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; noteIds?: unknown; offsetStart?: unknown; offsetPitch?: unknown }
+          if (typeof b.track !== 'string') {
+            json(res, 400, { error: 'body must include track: string' })
+            return
+          }
+          const opts = {
+            ...(Array.isArray(b.noteIds) ? { noteIds: (b.noteIds as unknown[]).map(String) } : {}),
+            ...(typeof b.offsetStart === 'number' ? { offsetStart: b.offsetStart } : {}),
+            ...(typeof b.offsetPitch === 'number' ? { offsetPitch: b.offsetPitch } : {}),
+          }
+          const { doc: next, added } = duplicateNotes(doc, b.track, opts)
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, addedIds: added.map((n) => n.id), doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
           json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return
