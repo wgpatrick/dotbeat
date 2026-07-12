@@ -123,7 +123,7 @@ async function main() {
   const results = {}
   try {
     const page = await browser.newPage()
-    await page.setViewportSize({ width: 1600, height: 980 })
+    await page.setViewportSize({ width: 1600, height: 1300 })
     const pageErrors = []
     page.on('pageerror', (e) => pageErrors.push(String(e)))
 
@@ -177,10 +177,15 @@ async function main() {
     await page.waitForFunction(() => window.__store && window.__store.getState().doc, { timeout: 10000 })
     await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 })
 
+    // examples/night-shift-song.beat is BOTH this test's shared fixture AND the owner's own live
+    // GUI-editing project (a running dev daemon points at it), so its exact section/scene layout
+    // drifts over time as they edit — assert the SHAPE this test actually needs (song mode, and at
+    // least one scene backing 2+ sections, the shared-scene aliasing case), not an exact section
+    // count or exact "intro" backing count, which would be re-broken by the next live edit.
     let doc = await docNow()
-    if (!doc.song || doc.song.length !== 6) throw new Error(`[setup] expected the song fixture to have exactly 6 sections, got ${doc.song?.length}`)
+    if (!doc.song || doc.song.length < 2) throw new Error(`[setup] expected the song fixture to have multiple sections, got ${doc.song?.length}`)
     const introIndices = doc.song.map((s, i) => (s.scene === 'intro' ? i : -1)).filter((i) => i >= 0)
-    if (introIndices.length !== 4) throw new Error(`[setup] expected "intro" to back 4 sections (the shared-scene fixture case), got ${introIndices.length}`)
+    if (introIndices.length < 2) throw new Error(`[setup] expected "intro" to back 2+ sections (the shared-scene fixture case), got ${introIndices.length}`)
     const originalSceneIds = new Set(doc.scenes.map((s) => s.id))
     const introSlotsBefore = JSON.stringify(doc.scenes.find((s) => s.id === 'intro').slots)
     const buildSlotsBefore = JSON.stringify(doc.scenes.find((s) => s.id === 'build').slots)
@@ -254,7 +259,12 @@ async function main() {
     doc = await docNow()
     const drumsLiveCountBefore = doc.tracks.find((t) => t.id === 'drums').hits.length
     // hats live in the axis row for the "hat" lane — row 3 in DRUM_LANES order (kick, snare, clap,
-    // hat, openhat), an on-grid step (step 1) with nothing already there.
+    // hat, openhat), an on-grid step (step 1) with nothing already there. The drums grid is short
+    // (5 lanes * ROW_H) and, depending on how much UI chrome sits above the note-view pane at this
+    // point in the flow, can render partially or fully below a merely-960-980px-tall viewport —
+    // confirmed via elementFromPoint at the exact click coordinates landing off-screen (null) at
+    // the default viewport height this test used to use. Viewport is now tall enough (see
+    // setViewportSize above) that this isn't a risk regardless of prior UI state.
     await clickGridCell('drums', 1, 3, 'hits', drumsLiveCountBefore + 1)
 
     doc = await daemonDocNow()
