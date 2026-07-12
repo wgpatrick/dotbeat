@@ -724,6 +724,14 @@ body {
   color: var(--text-dim);
   font-size: 10px;
 }
+.effect-meter {
+  width: 34px;
+  height: 8px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  display: block;
+  flex-shrink: 0;
+}
 .effect-row button {
   background: var(--panel-2);
   color: var(--text);
@@ -2104,6 +2112,12 @@ body {
   align-items: stretch;
   gap: 4px;
 }
+.mixer-meter-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
 .mixer-meter {
   width: 8px;
   height: 150px;
@@ -2111,6 +2125,23 @@ body {
   box-shadow: inset 0 0 0 1px var(--line);
   display: block;
   align-self: center;
+}
+/* Peak-hold LED (Phase 26 Stream DE) — a small hardware-style "went over 0dB" clip indicator,
+   sticky until clicked. Off = dim; on = lit red, same red as the meter's own >0dB peak segment. */
+.mixer-meter-clip {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.mixer-meter-clip.on {
+  background: #ff3b30;
+  border-color: #ff3b30;
+  box-shadow: 0 0 4px #ff3b30;
 }
 .mixer-strip-db {
   font-size: 11px;
