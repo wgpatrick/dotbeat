@@ -71,6 +71,24 @@ const isBlackKey = (pitch: number) => BLACK_PCS.has(pc(pitch))
 /** Scientific pitch notation: MIDI 60 = C4 (middle C), 0 = C-1. Used for the key labels. */
 const pitchName = (pitch: number) => `${NOTE_NAMES[pc(pitch)]}${Math.floor(pitch / 12) - 1}`
 
+// ---- Clip View title bar (Phase 27 Stream ED, docs/research/71-ux-clip-view-midi-editing.md §3
+// P0 item 1) — Ableton's colored clip title strip is "the single strongest 'what am I editing'
+// visual anchor in the whole view" (research 71 §1.1); dotbeat had no colored anchor at all, just
+// small colored text buried in .editor-title. Picks readable text (near-black or near-white)
+// against the track's own color rather than hardcoding one, since track.color is user-set and can
+// land anywhere on the lightness scale.
+function readableTextOn(hex: string): string {
+  const h = hex.replace('#', '')
+  if (h.length !== 6) return '#0b0c10'
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  if ([r, g, b].some((n) => Number.isNaN(n))) return '#0b0c10'
+  // perceptual luminance (ITU-R BT.601 weights) — good enough for a binary light/dark text pick
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  return luminance > 0.6 ? '#0b0c10' : '#f5f6f8'
+}
+
 // ---- the row axis (research 20 Part 5) ------------------------------------------------------
 // `row` is always TOP-TO-BOTTOM visual order (row 0 = the top row, `top: row * ROW_H`) — this is
 // the one abstraction every pointer/keyboard computation below is written against, so the melodic
@@ -801,6 +819,20 @@ export function NoteView({ track }: { track: BeatTrack }) {
 
   return (
     <div className="noteview" data-event-kind={eventKind}>
+      {/* Clip View title bar (Phase 27 Stream ED) — a real colored anchor tying this editor back
+          to its track, mirroring Ableton's own clip title strip (research 71 §1.1/§3 P0 item 1).
+          Sticky to the top of .noteview so it survives scrolling the panel stack below (the actual
+          scroll container is .bottom-pane-body — .noteview itself has no overflow of its own — but
+          sticky positioning still pins correctly against that ancestor scrollport as long as this
+          stays inside .noteview's own box, which it does since it never leaves the DOM). */}
+      <div
+        className="noteview-titlebar"
+        data-testid="noteview-titlebar"
+        style={{ background: track.color, color: readableTextOn(track.color) }}
+      >
+        <span className="noteview-titlebar-name">{track.name}</span>
+        {existing && <span className="noteview-titlebar-clip">clip &quot;{existing.id}&quot;</span>}
+      </div>
       <div className="editor-toolbar">
         <span className="editor-title" style={{ color: track.color }}>
           {track.name}
