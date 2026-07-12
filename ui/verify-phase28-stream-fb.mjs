@@ -154,9 +154,17 @@ async function main() {
     // Four elements, four different component files, four different conventions before this stream
     // (research/79 §3.7): App.tsx's Mixer overlay title, ArrangementView.tsx's own header,
     // SynthPanel.tsx's macro-row label, NoteView.tsx's Pitch & Time panel title.
-    const arrTitle = await page.evaluate(titleStyle('.editor-title.section-heading'))
-    if (!arrTitle) throw new Error('[FB2] ArrangementView\'s "arrangement" header (.editor-title.section-heading) not found')
-    console.log(`[FB2] ArrangementView .editor-title.section-heading: ${JSON.stringify(arrTitle)}`)
+    // Post-Phase-28-Stream-FD merge fix: ArrangementView's header used to carry BOTH classes
+    // ("editor-title section-heading"), but Stream FD's merge restored .editor-title's own
+    // font-size/weight block (still needed by MixerView/SynthPanel's top title/InstrumentPanel,
+    // none of which carry .section-heading) — which then collided with .section-heading on this
+    // one dual-class element, since both rules set the same properties and .editor-title's
+    // (later in the cascade) won. Fixed by dropping the now-redundant "editor-title" class from
+    // this specific element (.section-heading alone already provides everything it needs), so the
+    // selector here no longer needs `.editor-title` in the chain.
+    const arrTitle = await page.evaluate(titleStyle('.arrangement .section-heading'))
+    if (!arrTitle) throw new Error('[FB2] ArrangementView\'s "arrangement" header (.arrangement .section-heading) not found')
+    console.log(`[FB2] ArrangementView .arrangement .section-heading: ${JSON.stringify(arrTitle)}`)
 
     await page.click('[data-action="toggle-mixer"]')
     await page.waitForSelector('[data-testid="mixer-overlay"]', { timeout: 5000 })
@@ -222,7 +230,12 @@ async function main() {
     const cssAudit = await page.evaluate(() => {
       const sectionHeadingRule = { selectors: null, decl: null }
       const staleDecls = []
-      const checkSelectors = ['.editor-title', '.library-rail-title', '.overlay-title', '.effect-chain-title', '.macro-row-label', '.param-group-title', '.preset-picker-label', '.note-inspector-title', '.pitch-time-title']
+      // .editor-title is deliberately excluded here: Stream FD's merge found it's a SHARED class
+      // still needed standalone by MixerView.tsx, SynthPanel.tsx's own top-level title, and
+      // InstrumentPanel.tsx (none of which carry .section-heading) — only the ONE dual-class use
+      // (ArrangementView's header) was folded onto .section-heading alone, which is the correct,
+      // intentional end state, not a stale leftover to flag.
+      const checkSelectors = ['.library-rail-title', '.overlay-title', '.effect-chain-title', '.macro-row-label', '.param-group-title', '.preset-picker-label', '.note-inspector-title', '.pitch-time-title']
       for (const sheet of document.styleSheets) {
         let list
         try {

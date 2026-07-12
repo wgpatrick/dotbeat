@@ -2310,7 +2310,7 @@ export function ArrangementView() {
   return (
     <div className="arrangement">
       <div className="editor-toolbar">
-        <span className="editor-title section-heading">arrangement</span>
+        <span className="section-heading">arrangement</span>
         <span className="toolbar-tip">
           {totalBars} bars · {sections.length} section{sections.length === 1 ? '' : 's'} · {modeLabel} · drag the ruler or a track to select bars · click a track name to select it · double-click a name to rename
         </span>
