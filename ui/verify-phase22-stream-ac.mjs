@@ -201,8 +201,8 @@ async function pingPongDoc() {
     tracks: [{
       id: 't1', name: 't1', color: '#e06c75', kind: 'synth',
       synth: { ...base },
-      notes: [{ id: 'n1', pitch: 69, start: 8, duration: 1, velocity: 0.95 }],
-      clips: [], laneSamples: {}, hits: [], effects: defaultEffectChain(), lanes: [],
+      notes: [{ id: 'n1', pitch: 69, start: 8, duration: 1, velocity: 0.95, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1 }],
+      clips: [], laneSamples: {}, hits: [], effects: defaultEffectChain(), lanes: [], shuffleAmount: 0, shuffleGrid: 1,
     }],
   }
 }
@@ -221,7 +221,7 @@ async function beatRepeatDoc() {
       // that beatRepeatGate=4 opens at the end of the bar (see resolveBeatRepeat's doc comment in
       // engine.ts: gate window = the last `gate` steps of the bar). Captured slice = [11,12).
       hits: [{ id: 'h1', lane: 'kick', start: 11, velocity: 0.95 }],
-      clips: [], laneSamples: {}, notes: [], effects: defaultEffectChain(), lanes: [],
+      clips: [], laneSamples: {}, notes: [], effects: defaultEffectChain(), lanes: [], shuffleAmount: 0, shuffleGrid: 1,
     }],
   }
 }
@@ -233,8 +233,8 @@ async function modDoc() {
     tracks: [{
       id: 't1', name: 't1', color: '#61afef', kind: 'synth',
       synth: { ...base, osc: 'sawtooth', volume: -6, cutoff: 6000, attack: 0.01, decay: 0.05, sustain: 1, release: 0.1 },
-      notes: [{ id: 'n1', pitch: 57, start: 0, duration: 62, velocity: 0.85 }], // holds the whole 4-bar loop
-      clips: [], laneSamples: {}, hits: [], effects: defaultEffectChain(), lanes: [],
+      notes: [{ id: 'n1', pitch: 57, start: 0, duration: 62, velocity: 0.85, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1 }], // holds the whole 4-bar loop
+      clips: [], laneSamples: {}, hits: [], effects: defaultEffectChain(), lanes: [], shuffleAmount: 0, shuffleGrid: 1,
     }],
   }
 }
@@ -250,8 +250,8 @@ async function saturatorDoc() {
       // harmonic content — so any harmonic energy the high-drive take shows is genuinely the
       // saturator's added nonlinearity, not the oscillator's or a level difference.
       synth: { ...base, osc: 'sine', volume: -34, cutoff: 18000, resonance: 0.1, attack: 0.02, decay: 0.05, sustain: 1, release: 0.1, saturatorCurve: 'analog', saturatorMix: 1 },
-      notes: [{ id: 'n1', pitch: 57, start: 0, duration: 62, velocity: 0.6 }], // A3 = 220 Hz
-      clips: [], laneSamples: {}, hits: [], effects: defaultEffectChain(), lanes: [],
+      notes: [{ id: 'n1', pitch: 57, start: 0, duration: 62, velocity: 0.6, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1 }], // A3 = 220 Hz
+      clips: [], laneSamples: {}, hits: [], effects: defaultEffectChain(), lanes: [], shuffleAmount: 0, shuffleGrid: 1,
     }],
   }
 }
