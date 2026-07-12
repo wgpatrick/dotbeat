@@ -305,7 +305,7 @@ export function App() {
         <div className="overlay-scrim" onClick={toggleMixer}>
           <div className="mixer-overlay" data-testid="mixer-overlay" onClick={(e) => e.stopPropagation()}>
             <div className="overlay-head">
-              <span className="overlay-title">Mixer — all channel strips</span>
+              <span className="overlay-title section-heading">Mixer — all channel strips</span>
               <button className="topbar-btn" data-action="close-mixer" onClick={toggleMixer} title="close mixer">
                 Close
               </button>
@@ -319,7 +319,7 @@ export function App() {
       {historyOpen && (
         <aside className="history-drawer" data-testid="history-drawer">
           <div className="overlay-head">
-            <span className="overlay-title">Version history</span>
+            <span className="overlay-title section-heading">Version history</span>
             <button className="topbar-btn" data-action="close-history" onClick={toggleHistory} title="close history">
               Close
             </button>

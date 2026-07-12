@@ -8,6 +8,14 @@
   --accent: #e0a13c;
   --lane-w: 52px;
   --note-step-w: 14px;
+  /* Phase 28 Stream FB: one tracking value for every uppercase group/section label in the app,
+     replacing eight mixed em/px letter-spacing values (0.02em/0.03em/0.04em/0.05em/0.3px/0.5px/1px)
+     that had drifted call-site by call-site with no shared source of truth (research/79 §3.6). */
+  --label-tracking: 0.05em;
+  /* Phase 28 Stream FB: one monospace stack for every "tabular/technical data" readout, replacing
+     two independently-typed stacks (`ui-monospace, SFMono-Regular, Menlo, monospace` vs. the
+     shorter `ui-monospace, monospace`) that did the identical job (research/79 §3.8). */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   color-scheme: dark;
 }
 
@@ -38,6 +46,35 @@
   outline: 2px dashed var(--accent);
   outline-offset: -2px;
   background: rgba(224, 161, 60, 0.12);
+}
+
+/* ---- Shared panel/section title convention (Phase 28 Stream FB) ------------------------------
+   One canonical answer to "this is a panel's title," reused by every panel/subpanel header in the
+   app. Before this, four independently-invented conventions did the same job with four different
+   size/weight/case combinations (research/79 §3.7): `.editor-title` (14px/700/no text-transform,
+   hand-typed lowercase text), `.library-rail-title` (12px/700/uppercase via CSS), `.overlay-title`
+   (inherited body size/600, hand-typed Title Case with no CSS transform at all — so a future rename
+   could silently drift the casing), and `.effect-chain-title`/`.macro-row-label`/
+   `.param-group-title` (10px/700/uppercase). `.section-heading` is the one shared answer: case and
+   tracking are driven by CSS, never by how the label happens to be typed in JSX. The component-
+   specific classes below share this same selector list (structural rules — cursor, padding, hover
+   state — stay in their own block further down) so every existing call site, touched or not this
+   pass, resolves to the identical computed style. */
+.section-heading,
+.editor-title,
+.library-rail-title,
+.overlay-title,
+.effect-chain-title,
+.param-group-title,
+.macro-row-label,
+.preset-picker-label,
+.note-inspector-title,
+.pitch-time-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+  color: var(--text-dim);
 }
 
 * {
@@ -75,7 +112,7 @@ body {
 
 .brand {
   font-weight: 700;
-  letter-spacing: 0.5px;
+  letter-spacing: var(--label-tracking);
   font-size: 15px;
 }
 .brand::before {
@@ -145,7 +182,7 @@ body {
   color: var(--text-dim);
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: var(--label-tracking);
 }
 .transport-field input {
   width: 58px;
@@ -215,7 +252,7 @@ body {
 }
 .vary-label {
   color: var(--text-dim);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -294,7 +331,7 @@ body {
 .scope-title {
   color: var(--text-dim);
   font-size: 10px;
-  letter-spacing: 1px;
+  letter-spacing: var(--label-tracking);
   padding: 4px 6px;
   font-weight: 600;
 }
@@ -332,7 +369,7 @@ body {
   font-size: 10px;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: var(--label-tracking);
 }
 .kind-drums {
   color: #56b6c2;
@@ -386,10 +423,8 @@ body {
   gap: 14px;
   margin-bottom: 10px;
 }
-.editor-title {
-  font-weight: 700;
-  font-size: 14px;
-}
+/* Typography (font-size/weight/case/tracking/color) lives in the shared `.section-heading` rule
+   above (Phase 28 Stream FB) — `.editor-title` no longer needs its own block. */
 .toolbar-tip {
   color: var(--text-dim);
   font-size: 11px;
@@ -678,7 +713,7 @@ body {
   font-size: 10px;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.3px;
+  letter-spacing: var(--label-tracking);
 }
 .osc-select {
   display: flex;
@@ -707,12 +742,9 @@ body {
   border-radius: 6px;
   padding: 6px 10px 10px;
 }
+/* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB) — only
+   structural/interactive properties stay here. */
 .param-group-title {
-  font-size: 10px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  font-weight: 700;
   cursor: pointer;
   padding: 4px 0;
   user-select: none;
@@ -766,12 +798,8 @@ body {
   padding: 8px 10px 10px;
   margin-bottom: 8px;
 }
+/* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB). */
 .effect-chain-title {
-  font-size: 10px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  font-weight: 700;
   padding: 2px 0 6px;
 }
 .effect-chain-list {
@@ -1203,10 +1231,8 @@ body {
   font-size: 11px;
   color: var(--muted, #9aa0ab);
 }
-.note-inspector-title {
-  font-weight: 600;
-  color: var(--text, #e6e8ec);
-}
+/* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB) —
+   `.note-inspector-title` no longer needs its own block. */
 .note-inspector-field {
   display: flex;
   align-items: center;
@@ -1242,7 +1268,7 @@ body {
 }
 .note-name-readout-names {
   color: var(--text, #e6e8ec);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -1264,10 +1290,8 @@ body {
   font-size: 11px;
   color: var(--muted, #9aa0ab);
 }
-.pitch-time-title {
-  font-weight: 600;
-  color: var(--text, #e6e8ec);
-}
+/* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB) —
+   `.pitch-time-title` no longer needs its own block. */
 .pitch-time-scope {
   color: var(--muted, #9aa0ab);
   font-style: italic;
@@ -1320,7 +1344,7 @@ body {
 }
 .pitch-time-amount-readout {
   min-width: 32px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   color: var(--text, #e6e8ec);
 }
 .pitch-time-checkbox {
@@ -1575,9 +1599,9 @@ body {
   background: var(--panel);
   flex: 0 0 auto;
 }
-.overlay-title {
-  font-weight: 600;
-}
+/* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB) —
+   `.overlay-title` no longer needs its own block (was: inherited body size, weight 600, hand-typed
+   Title Case — the one convention with no CSS transform at all, research/79 §3.7 item 3). */
 .mixer-overlay {
   margin: auto;
   width: min(96vw, 1100px);
@@ -2237,7 +2261,7 @@ body {
   font: inherit;
   font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: var(--label-tracking);
   background: var(--panel-2);
   color: var(--text-dim);
   border: 1px solid var(--line);
@@ -2270,7 +2294,7 @@ body {
   font-size: 10px;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--label-tracking);
 }
 .arr-auto-picker-body {
   flex: 1;
@@ -2427,7 +2451,7 @@ body {
 .mixer-fx-badge {
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--label-tracking);
   text-transform: uppercase;
   padding: 1px 4px;
   border-radius: 3px;
@@ -2666,7 +2690,7 @@ body {
 .history-ref {
   color: var(--text-dim);
   font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 .history-intent {
   color: var(--text-dim);
@@ -2734,7 +2758,7 @@ body {
 .arr-length-label {
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--label-tracking);
   font-size: 10px;
   margin-right: 2px;
 }
@@ -2896,13 +2920,8 @@ body {
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
-.library-rail-title {
-  font-weight: 700;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-}
+/* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB) —
+   `.library-rail-title` no longer needs its own block. */
 .library-rail-body {
   flex: 1;
   min-height: 0;
@@ -2965,7 +2984,7 @@ body {
   padding: 6px 10px 2px;
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--label-tracking);
   color: var(--text-dim);
 }
 .lib-row {
@@ -3200,13 +3219,8 @@ body {
   background: var(--panel-2);
   font-size: 11px;
 }
-.preset-picker-label {
-  font-weight: 700;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  font-size: 10px;
-  letter-spacing: 0.5px;
-}
+/* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB) —
+   `.preset-picker-label` no longer needs its own block. */
 .preset-picker button {
   background: var(--panel);
   color: var(--text);
@@ -3252,13 +3266,8 @@ body {
   border-radius: 6px;
   background: var(--panel-2);
 }
-.macro-row-label {
-  font-weight: 700;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  font-size: 10px;
-  letter-spacing: 0.5px;
-}
+/* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB) —
+   `.macro-row-label` no longer needs its own block. */
 .macro-row-error {
   font-size: 11px;
   color: var(--danger, #e06c75);

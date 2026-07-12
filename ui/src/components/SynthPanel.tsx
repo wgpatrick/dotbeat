@@ -242,7 +242,7 @@ export function EffectChain({ track, onAdded }: { track: BeatTrack; onAdded: (ty
   const effects = track.effects ?? []
   return (
     <div className="effect-chain" data-testid="effect-chain">
-      <div className="effect-chain-title">Effect Chain — order is chain order</div>
+      <div className="effect-chain-title section-heading">Effect Chain — order is chain order</div>
       <div className="effect-chain-list">
         {effects.map((e, i) => (
           <EffectRow key={e.id} track={track} effect={e} index={i} count={effects.length} dragState={dragState} setDragState={setDragState} />
@@ -332,7 +332,7 @@ function PresetPicker({ track }: { track: BeatTrack }) {
 
   return (
     <div className="preset-picker" data-testid="preset-picker">
-      <span className="preset-picker-label">preset</span>
+      <span className="preset-picker-label section-heading">preset</span>
       <button
         type="button"
         data-preset-prev
@@ -486,7 +486,7 @@ export function MacroRow({ track }: { track: BeatTrack }) {
 
   return (
     <div className="macro-row" data-testid="macro-row">
-      <span className="macro-row-label">macros</span>
+      <span className="macro-row-label section-heading">macros</span>
       {applicable.map((m) => (
         <MacroKnob key={m.name} track={track} macro={m} />
       ))}
@@ -511,7 +511,7 @@ export function Group({ track, group, trackIds, highlight }: { track: BeatTrack;
   }, [highlight])
   return (
     <details ref={ref} className={`param-group${highlight ? ' param-group-flash' : ''}`} open={group.open} data-param-group={group.id}>
-      <summary className="param-group-title">{group.title}</summary>
+      <summary className="param-group-title section-heading">{group.title}</summary>
       <div className="knob-row">
         {group.params.map((spec) => (
           <Control key={spec.key} track={track} spec={spec} trackIds={trackIds} />
