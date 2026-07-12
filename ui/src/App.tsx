@@ -12,6 +12,7 @@ import { MixerView } from './components/MixerView'
 import { HistoryPanel } from './components/HistoryPanel'
 import { VaryAffordance } from './components/VaryAffordance'
 import { ExportButton } from './components/ExportButton'
+import { ContentBrowser } from './components/ContentBrowser'
 
 // Phase 18 — the Ableton-shaped recomposition (docs/phase-18-layout.md, driven by
 // docs/research/18-ableton-ui-architecture.md). The old four-tab switcher (Editor / Arrangement /
@@ -29,6 +30,10 @@ import { ExportButton } from './components/ExportButton'
 //     not competing with the bottom pane for screen space.
 //   • VaryAffordance unchanged — it's already selection-triggered, not tab-bound (verified: it reads
 //     the store's D2 selection and renders a contextual bar regardless of any layout state).
+//   • Phase 22 Stream AH ADDED a collapsible LEFT rail (ContentBrowser — presets/kits/soundfonts,
+//     research 18 §8 "Browser/sidebar") alongside the arrangement, toggled by a topbar button next
+//     to Mixer/History. Purely additive: `.app-body` is a new flex ROW wrapping the rail + the
+//     existing `.workspace` column unchanged — nothing inside ArrangementView/BottomPane moved.
 
 /** The bottom detail pane — Ableton's Clip View / Device View for the selected track. Clip View is
  * the note/hit editor for the track's kind (StepSequencer for drums, NoteView/piano-roll otherwise);
@@ -101,6 +106,8 @@ export function App() {
   const toggleHistory = useStore((s) => s.toggleHistory)
   const mixerOpen = useStore((s) => s.mixerOpen)
   const toggleMixer = useStore((s) => s.toggleMixer)
+  const libraryOpen = useStore((s) => s.libraryOpen)
+  const toggleLibrary = useStore((s) => s.toggleLibrary)
 
   useEffect(() => {
     initBridge()
@@ -142,6 +149,14 @@ export function App() {
         <div className="topbar-actions">
           <ExportButton />
           <button
+            className={`topbar-btn ${libraryOpen ? 'active' : ''}`}
+            data-action="toggle-library"
+            onClick={toggleLibrary}
+            title="browse presets, kits, and soundfonts"
+          >
+            Browser
+          </button>
+          <button
             className={`topbar-btn ${mixerOpen ? 'active' : ''}`}
             data-action="toggle-mixer"
             onClick={toggleMixer}
@@ -165,12 +180,17 @@ export function App() {
           not tab-bound, so it rides above the whole workspace unchanged by the Phase 18 recomposition. */}
       <VaryAffordance />
 
-      {/* The one window: arrangement on top (always), the selection-following detail pane below. */}
-      <div className="workspace">
-        <main className="main-area">
-          <ArrangementView />
-        </main>
-        {selected && <BottomPane />}
+      {/* Phase 22 Stream AH: a new flex ROW wrapping the optional content-browser rail + the
+          existing workspace column — additive, the workspace's own internals are unchanged. */}
+      <div className="app-body">
+        {libraryOpen && <ContentBrowser />}
+        {/* The one window: arrangement on top (always), the selection-following detail pane below. */}
+        <div className="workspace">
+          <main className="main-area">
+            <ArrangementView />
+          </main>
+          {selected && <BottomPane />}
+        </div>
       </div>
 
       {/* Full mixer — an on-demand overlay, not a peer screen (research 18 Q3). */}

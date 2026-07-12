@@ -26,7 +26,7 @@ stream to pick up — not guesswork, a decision away from being built.
 
 ## Snapshot — 82 features tracked
 
-**21** Done · **0** In progress · **61** Not started
+**23** Done · **0** In progress · **59** Not started
 
 ---
 
@@ -178,9 +178,9 @@ stream to pick up — not guesswork, a decision away from being built.
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
 | 36 presets + content taxonomy | Presets are tooling (never in-file indirection); categorized following Ableton’s browsable-kind logic. | ✅ done | ✅ done | — | ✅ Done | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | [`phase-18-content-taxonomy.md`](phase-18-content-taxonomy.md) |
-| Content browser sidebar | A left-sidebar browser over presets/samples/kits, drag-drop onto a track — the data layer is ready, nothing to browse from yet. | — | — | ❌ missing | ⬜ Not started | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | — |
-| Hot-swap preset browser in Device View | Apply a named preset’s literal param edits from inside the synth panel, not just via CLI. | — | ✅ done | ❌ missing | ⬜ Not started | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | — |
-| Preview-before-load | Audition a preset/sample before applying it, consistent with the existing Freesound-preview tooling. | — | — | ❌ missing | ⬜ Not started | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | — |
+| Content browser sidebar | A collapsible left-sidebar browser (ContentBrowser.tsx) over the real presets/factory.json + presets/kit-*/ + presets/sf2/*.sf2, grouped by Phase 18 Stream S's taxonomy. Drag a preset onto a track (core's applyPreset — a literal edit list) or a kit sample onto a drum lane (registers into the project's own media/ + setLaneSample); a soundfont can also be dropped onto an instrument track or added as a brand-new one. | — | — | ✅ done | ✅ Done | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | [`phase-22-stream-ah.md`](phase-22-stream-ah.md) |
+| Hot-swap preset browser in Device View | A preset picker/prev-next control living INSIDE SynthPanel/InstrumentPanel itself (Device View), distinct from the sidebar: swap a track's preset without leaving the panel. The sidebar (drag a preset onto a track header from outside Device View) does not cover this — SynthPanel.tsx/InstrumentPanel.tsx are untouched. | — | ✅ done | ❌ missing | ⬜ Not started | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | — |
+| Preview-before-load | Audition a preset/sample/soundfont before applying it — an ephemeral engine voice or a raw fetch-decode-play, real audio through the master bus, with zero writes to the .beat file (engine.previewSynthPreset/previewDrumPreset/previewBuffer/previewSoundfont). | — | — | ✅ done | ✅ Done | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | [`phase-22-stream-ah.md`](phase-22-stream-ah.md) |
 
 ## Macros
 

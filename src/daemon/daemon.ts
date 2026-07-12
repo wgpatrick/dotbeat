@@ -28,11 +28,38 @@
 // and a one-directional push channel is genuinely all the file→GUI direction needs.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { readFileSync, writeFileSync, watch, existsSync, type FSWatcher } from 'node:fs'
+import { readFileSync, writeFileSync, watch, existsSync, mkdirSync, copyFileSync, readdirSync, type FSWatcher } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { basename, dirname, resolve } from 'node:path'
-import type { BeatDocument, BeatSelection } from '../core/index.js'
-import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, setValue, setAutomationPoint, removeAutomationPoint, validateSelection, saveClip, setScene, setSong, addTrack, removeTrack, BeatEditError, type ExternalSandboxPayload, type TrackKind } from '../core/index.js'
+import { basename, dirname, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import type { BeatDocument, BeatSelection, DrumLane } from '../core/index.js'
+import {
+  parse,
+  serialize,
+  sandboxPayloadToBeatDocument,
+  beatDocumentToPartialTracks,
+  setValue,
+  setAutomationPoint,
+  removeAutomationPoint,
+  validateSelection,
+  saveClip,
+  setScene,
+  setSong,
+  addTrack,
+  removeTrack,
+  setMediaSample,
+  setLaneSample,
+  parsePresetLibrary,
+  applyPreset,
+  filterPresetsByCategory,
+  PRESET_CATEGORIES,
+  DRUM_LANES,
+  BeatEditError,
+  BeatPresetError,
+  type ExternalSandboxPayload,
+  type TrackKind,
+  type BeatPreset,
+} from '../core/index.js'
 // D3/D10 versioning surface over HTTP: the GUI's history panel (Phase 15 Stream H) reads the
 // checkpoint list and issues "go back" through these. All of it reuses src/history's real git-backed
 // functions — the daemon adds no versioning logic, just an HTTP face on the same verbs `beat
@@ -209,6 +236,108 @@ function readBody(req: IncomingMessage, maxBytes = 10 * 1024 * 1024): Promise<st
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { 'content-type': 'application/json', ...CORS_HEADERS })
   res.end(JSON.stringify(body))
+}
+
+// ─── Phase 22 Stream AH: the content-browser library surface ────────────────────────────────────
+// Read-only catalog over the repo's bundled, un-project-scoped content (presets/factory.json,
+// presets/kit-*/, presets/sf2/*.sf2) — the same data `beat presets`/`beat presets --category`
+// already reads (src/core/preset.ts's parsePresetLibrary/PRESET_CATEGORIES), plus the kit/soundfont
+// directories no CLI/MCP surface lists today (docs/phase-18-content-taxonomy.md flagged this as
+// real follow-up work, out of that stream's file-ownership boundary). Three write routes "install"
+// a browsed item into the CURRENT project:
+//   - apply-preset: literal param edits via core's applyPreset — no reference, no indirection
+//     (format-spec.md: presets are tooling, not grammar). Same function `beat preset` calls.
+//   - install-kit: copies the kit's one-shot wav(s) into this project's OWN media/ directory,
+//     registers them via setMediaSample (content-addressed, same as `beat sample`), and assigns
+//     via setLaneSample — the same two primitives `beat sample` + `beat lane` chain together.
+//   - install-soundfont: same copy+register, then either reassigns an existing instrument track's
+//     bank (the already-existing `<track>.soundfont` setValue path) or mints a brand new instrument
+//     track carrying it (core's addTrack) — closing the real gap ArrangementView.tsx's addTrackOfKind
+//     documents ("the GUI has no sample-registration surface" — Phase 20 Stream W's honest comment).
+// Presets are pure text edits; kits/soundfonts are the one place this stream touches bytes, and it
+// always copies into the PROJECT's media/ (never references presets/ by path — the file must still
+// stand alone, D1).
+
+const presetsRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'presets')
+
+function loadFactoryPresets(): BeatPreset[] {
+  const path = process.env.BEAT_PRESETS ?? resolve(presetsRoot, 'factory.json')
+  return parsePresetLibrary(readFileSync(path, 'utf8'))
+}
+
+interface KitLane {
+  lane: DrumLane
+  file: string
+}
+interface KitEntry {
+  id: string
+  lanes: KitLane[]
+}
+
+/** Every `presets/kit-<name>` directory that has at least one of the five recognized lane one-shots
+ * (`<lane>.wav`, DRUM_LANES' own names — the same convention docs/phase-7-plan.md established for
+ * kit-init/kit-audiophob). Missing lanes are just omitted, not an error — a kit need not be
+ * complete. */
+function listKits(): KitEntry[] {
+  let entries: string[]
+  try {
+    entries = readdirSync(presetsRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name.startsWith('kit-'))
+      .map((d) => d.name)
+  } catch {
+    return []
+  }
+  return entries
+    .map((id) => ({
+      id,
+      lanes: (DRUM_LANES as readonly DrumLane[])
+        .filter((lane) => existsSync(resolve(presetsRoot, id, `${lane}.wav`)))
+        .map((lane) => ({ lane, file: `${lane}.wav` })),
+    }))
+    .filter((k) => k.lanes.length > 0)
+    .sort((a, b) => a.id.localeCompare(b.id))
+}
+
+interface SoundfontEntry {
+  file: string
+  license?: string
+  source?: string
+}
+
+/** Every `presets/sf2/*.sf2` bank. License/source come best-effort from the `<file>.json`
+ * provenance sidecar (docs/phase-7-plan.md's convention) — a missing/unparseable sidecar just
+ * omits that metadata, it doesn't hide the bank (the sidecar is documentation, never grammar). */
+function listSoundfonts(): SoundfontEntry[] {
+  const dir = resolve(presetsRoot, 'sf2')
+  let files: string[]
+  try {
+    files = readdirSync(dir).filter((f) => f.endsWith('.sf2') || f.endsWith('.sf3'))
+  } catch {
+    return []
+  }
+  return files
+    .map((file) => {
+      let meta: { license?: string; source?: string } = {}
+      try {
+        const raw = JSON.parse(readFileSync(resolve(dir, `${file}.json`), 'utf8')) as { license?: unknown; source?: unknown }
+        meta = {
+          ...(typeof raw.license === 'string' ? { license: raw.license } : {}),
+          ...(typeof raw.source === 'string' ? { source: raw.source } : {}),
+        }
+      } catch {
+        // sidecar optional
+      }
+      return { file, ...meta }
+    })
+    .sort((a, b) => a.file.localeCompare(b.file))
+}
+
+/** Resolves a library-relative path to bytes under `presetsRoot`, refusing anything that escapes
+ * it (traversal-safe, same discipline the `/media/<path>` route uses for the project's own media). */
+function resolveLibraryPath(rel: string): string | null {
+  const abs = resolve(presetsRoot, rel)
+  if (abs !== presetsRoot && !abs.startsWith(presetsRoot + sep)) return null
+  return abs
 }
 
 export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
@@ -738,6 +867,191 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatVaryError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // ─── Phase 22 Stream AH: content-browser library routes ───────────────────────────────────────
+    // GET /library — the whole catalog in one call (small: 36 presets, 2 kits, 3 banks today):
+    // presets (with an optional ?category= filter, the same taxonomy `beat presets --category`
+    // filters on), the enumerated category list, kit lane manifests, and soundfont banks. Read-only,
+    // no document dependency — this is repo content, not project content.
+    if (req.method === 'GET' && url.pathname === '/library') {
+      try {
+        let presets = loadFactoryPresets()
+        const category = url.searchParams.get('category')
+        if (category) presets = filterPresetsByCategory(presets, category)
+        json(res, 200, { presets, categories: PRESET_CATEGORIES, kits: listKits(), soundfonts: listSoundfonts() })
+      } catch (err) {
+        const status = err instanceof BeatPresetError ? 400 : 500
+        json(res, status, { error: err instanceof Error ? err.message : String(err) })
+      }
+      return
+    }
+
+    // GET /library/file?path=<relative> — raw bytes of one library file (a kit one-shot or a
+    // soundfont bank), for the browser to fetch-and-decode as a preview — the same "fetch the real
+    // bytes, play them locally, never write anything" idiom scripts/freesound-cc0.mjs's preview tier
+    // uses for Freesound candidates, applied to dotbeat's own already-bundled content. Path-traversal
+    // safe (resolveLibraryPath refuses anything outside presetsRoot), mirroring GET /media/<path>'s
+    // declared-paths discipline for the project's own media.
+    if (req.method === 'GET' && url.pathname === '/library/file') {
+      const rel = url.searchParams.get('path')
+      if (!rel) {
+        json(res, 400, { error: 'missing ?path=' })
+        return
+      }
+      const abs = resolveLibraryPath(rel)
+      if (!abs) {
+        json(res, 400, { error: `path "${rel}" escapes the content library` })
+        return
+      }
+      if (!existsSync(abs)) {
+        json(res, 404, { error: `no library file at "${rel}"` })
+        return
+      }
+      try {
+        const bytes = readFileSync(abs)
+        const ct = abs.endsWith('.wav') ? 'audio/wav' : 'application/octet-stream'
+        res.writeHead(200, { 'content-type': ct, 'content-length': bytes.length, ...CORS_HEADERS })
+        res.end(bytes)
+      } catch {
+        json(res, 404, { error: `library file unreadable: ${rel}` })
+      }
+      return
+    }
+
+    // POST /library/apply-preset {track, name} — the drag-a-preset-onto-a-track interaction. Wraps
+    // core's applyPreset (the exact function `beat preset <file> <track> <name>` calls): a literal
+    // param bag applied through setValue, so the result is a normal edit list, never a reference.
+    // RETURNS the fresh document (same convention as /add-track) since the daemon never SSE-echoes
+    // its own writes.
+    if (req.method === 'POST' && url.pathname === '/library/apply-preset') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; name?: unknown }
+          if (typeof b.track !== 'string' || typeof b.name !== 'string') {
+            json(res, 400, { error: 'body must be {track: string, name: string}' })
+            return
+          }
+          const presets = loadFactoryPresets()
+          const preset = presets.find((p) => p.name === b.name)
+          if (!preset) {
+            json(res, 404, { error: `no preset "${b.name}" (see GET /library)` })
+            return
+          }
+          const written = writeIfChanged(applyPreset(doc, b.track, preset))
+          revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof BeatPresetError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // POST /library/install-kit {track, kit, lane?, targetLane?} — the drag-a-sample-onto-a-drum-
+    // lane interaction (lane+targetLane given: one one-shot onto one lane, which may differ from its
+    // own — e.g. drop kit-audiophob's clap onto the snare lane) and the drag-a-kit-onto-a-track
+    // interaction (lane omitted: every lane the kit has). Copies each wav into THIS project's own
+    // media/ (content-addressed, never referenced by presets/ path — the file must stand alone),
+    // registers it via setMediaSample, and assigns it via setLaneSample — the same two primitives
+    // `beat sample` + `beat lane` chain together by hand. One atomic write for the whole drop.
+    if (req.method === 'POST' && url.pathname === '/library/install-kit') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; kit?: unknown; lane?: unknown; targetLane?: unknown }
+          if (typeof b.track !== 'string' || typeof b.kit !== 'string') {
+            json(res, 400, { error: 'body must be {track: string, kit: string, lane?: string, targetLane?: string}' })
+            return
+          }
+          const kit = listKits().find((k) => k.id === b.kit)
+          if (!kit) {
+            json(res, 404, { error: `no kit "${b.kit}" (see GET /library)` })
+            return
+          }
+          let wanted = kit.lanes
+          if (typeof b.lane === 'string') {
+            const found = kit.lanes.find((l) => l.lane === b.lane)
+            if (!found) {
+              json(res, 404, { error: `kit "${b.kit}" has no "${b.lane}" lane (have: ${kit.lanes.map((l) => l.lane).join(', ')})` })
+              return
+            }
+            wanted = [found]
+          }
+          if (typeof b.targetLane === 'string' && wanted.length !== 1) {
+            json(res, 400, { error: 'targetLane only applies when dropping a single lane (pass lane too)' })
+            return
+          }
+          const mediaDir = resolve(dirname(filePath), 'media')
+          mkdirSync(mediaDir, { recursive: true })
+          let next = doc
+          for (const { lane, file } of wanted) {
+            const destLane = (typeof b.targetLane === 'string' ? b.targetLane : lane) as DrumLane
+            const destName = `${kit.id}-${lane}.wav`
+            const destAbs = resolve(mediaDir, destName)
+            copyFileSync(resolve(presetsRoot, kit.id, file), destAbs)
+            const sha256 = createHash('sha256').update(readFileSync(destAbs)).digest('hex')
+            const id = `${kit.id}-${lane}`
+            next = setMediaSample(next, id, sha256, `media/${destName}`)
+            next = setLaneSample(next, b.track as string, destLane, { sample: id, gainDb: 0, tune: 0 })
+          }
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // POST /library/install-soundfont {file, track?, program?, newTrackId?} — drag a bank from the
+    // Samples/SoundFonts section onto an existing instrument track (reassigns its bank via the
+    // already-existing `<track>.soundfont`/`<track>.program` setValue paths) or, with `track`
+    // omitted, mints a brand new instrument track carrying it. That second form closes a real,
+    // documented gap: ArrangementView.tsx's addTrackOfKind (Phase 20 Stream W) can only reuse an
+    // ALREADY-registered media sample for a new instrument track and says so ("the GUI has no
+    // sample-registration surface... register one with `beat sample` first") — this route IS that
+    // surface, for the bundled banks at least.
+    if (req.method === 'POST' && url.pathname === '/library/install-soundfont') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { file?: unknown; track?: unknown; program?: unknown; newTrackId?: unknown }
+          if (typeof b.file !== 'string') {
+            json(res, 400, { error: 'body must include string file' })
+            return
+          }
+          if (!listSoundfonts().some((s) => s.file === b.file)) {
+            json(res, 404, { error: `no soundfont "${b.file}" (see GET /library)` })
+            return
+          }
+          const mediaDir = resolve(dirname(filePath), 'media')
+          mkdirSync(mediaDir, { recursive: true })
+          const destAbs = resolve(mediaDir, b.file)
+          copyFileSync(resolve(presetsRoot, 'sf2', b.file), destAbs)
+          const sha256 = createHash('sha256').update(readFileSync(destAbs)).digest('hex')
+          const id = b.file.replace(/\.sf2$/, '').replace(/[^a-zA-Z0-9_-]/g, '-')
+          let next = setMediaSample(doc, id, sha256, `media/${b.file}`)
+          const program = typeof b.program === 'number' && Number.isInteger(b.program) && b.program >= 0 && b.program <= 127 ? b.program : 0
+          if (typeof b.track === 'string') {
+            next = setValue(next, `${b.track}.soundfont`, id)
+            next = setValue(next, `${b.track}.program`, String(program))
+          } else {
+            const ids = new Set(next.tracks.map((t) => t.id))
+            let newId = typeof b.newTrackId === 'string' && b.newTrackId ? b.newTrackId : 'instrument'
+            for (let i = 2; ids.has(newId); i++) newId = `instrument${i}`
+            next = addTrack(next, { id: newId, kind: 'instrument', soundfont: { sample: id, program } }).doc
+          }
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
           json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
 import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, daemonBase } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
+import { applyPresetToTrack, installKitLane, installSoundfont, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
 import { DRUM_LANES, type BeatAutomationPoint, type BeatDocument, type BeatTrack, type DrumLane, type TrackKind } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 
@@ -366,6 +367,43 @@ function TrackRow({
     else setDraft(track.name)
   }, [draft, track.id, track.name])
 
+  // Phase 22 Stream AH: the track header is a drop target for the content browser (ContentBrowser.tsx)
+  // — a preset onto a matching-kind track (applyPresetToTrack), a kit onto a drum track (every lane
+  // it has, via installKitLane with no `lane`), or a soundfont onto an instrument track
+  // (installSoundfont). A single kit ONE-SHOT (payload.lane set) also lands here if dropped on the
+  // header rather than a specific lane row (StepSequencer.tsx) — it just installs to its own lane.
+  const [dropHover, setDropHover] = useState(false)
+  const handleLibraryDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      setDropHover(false)
+      const payload = readDragPayload(e.dataTransfer)
+      if (!payload) return
+      if (payload.type === 'preset') {
+        if (payload.kind !== 'any' && payload.kind !== track.kind) {
+          window.alert(`"${payload.name}" is a ${payload.kind} preset — "${track.name}" is a ${track.kind} track.`)
+          return
+        }
+        applyPresetToTrack(track.id, payload.name).catch((err) => window.alert(`Could not apply preset: ${(err as Error).message}`))
+      } else if (payload.type === 'kit-lane') {
+        if (track.kind !== 'drums') {
+          window.alert(`"${track.name}" is not a drum track — drop kit samples onto a drum track.`)
+          return
+        }
+        installKitLane(track.id, payload.kit, payload.lane ? { lane: payload.lane } : {}).catch((err) =>
+          window.alert(`Could not install sample: ${(err as Error).message}`),
+        )
+      } else if (payload.type === 'soundfont') {
+        if (track.kind !== 'instrument') {
+          window.alert(`"${track.name}" is not an instrument track — drop a soundfont onto an instrument track.`)
+          return
+        }
+        installSoundfont(payload.file, { track: track.id }).catch((err) => window.alert(`Could not install soundfont: ${(err as Error).message}`))
+      }
+    },
+    [track.id, track.kind, track.name],
+  )
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -463,7 +501,19 @@ function TrackRow({
 
   return (
     <div className={`arr-row ${dimmed ? 'dimmed' : ''}`} style={{ height: ROW_H }}>
-      <div className={`arr-track-header ${selected ? 'selected' : ''}`} style={{ width: HEADER_W }}>
+      <div
+        className={`arr-track-header ${selected ? 'selected' : ''} ${dropHover ? 'drop-target-hover' : ''}`}
+        style={{ width: HEADER_W }}
+        data-drop-target="track-header"
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes(LIBRARY_DND_MIME)) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'copy'
+          setDropHover(true)
+        }}
+        onDragLeave={() => setDropHover(false)}
+        onDrop={handleLibraryDrop}
+      >
         <div className="arr-track-titlebar">
           {/* color: a hidden native color input behind the visible swatch (the swatch always renders
               regardless of native color-input chrome). Writes the <track>.color setValue path. */}

@@ -33,6 +33,10 @@ interface DawState {
   historyOpen: boolean
   /** Whether the full all-strips Mixer overlay is open (was the 3rd tab; now an on-demand overlay). */
   mixerOpen: boolean
+  /** Phase 22 Stream AH: whether the content-browser sidebar (presets/kits/soundfonts, research
+   * 18 §8 "Browser/sidebar") is docked open as a collapsible LEFT rail, alongside the permanent
+   * Arrangement main area — additive to the Phase 18 layout, not a replacement for any of it. */
+  libraryOpen: boolean
   /** The daemon's current pointing selection (the D2 channel), mirrored locally. {} = unset. It is
    * ephemeral and never in the .beat file — the daemon owns it; we read it via SSE + GET /selection
    * and write it via POST /selection (see bridge.ts). */
@@ -61,6 +65,7 @@ interface DawState {
   setBottomPaneOpen: (open: boolean) => void
   toggleHistory: () => void
   toggleMixer: () => void
+  toggleLibrary: () => void
   setSelection: (s: BeatSelection) => void
   setEditNoteIds: (ids: string[]) => void
   toggleMute: (id: string) => void
@@ -79,6 +84,7 @@ export const useStore = create<DawState>((set) => ({
   bottomPaneOpen: true,
   historyOpen: false,
   mixerOpen: false,
+  libraryOpen: false,
   selection: {},
   editNoteIds: [],
   mutes: {},
@@ -100,6 +106,7 @@ export const useStore = create<DawState>((set) => ({
   setBottomPaneOpen: (bottomPaneOpen) => set({ bottomPaneOpen }),
   toggleHistory: () => set((s) => ({ historyOpen: !s.historyOpen })),
   toggleMixer: () => set((s) => ({ mixerOpen: !s.mixerOpen })),
+  toggleLibrary: () => set((s) => ({ libraryOpen: !s.libraryOpen })),
   setSelection: (selection) => set({ selection }),
   setEditNoteIds: (editNoteIds) => set({ editNoteIds }),
   toggleMute: (id) => set((s) => ({ mutes: { ...s.mutes, [id]: !s.mutes[id] } })),

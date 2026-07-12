@@ -1045,6 +1045,111 @@ class Engine {
     }
   }
 
+  // ─── Phase 22 Stream AH: content-browser preview-before-load ────────────────────────────────────
+  // Audition a preset/sample from the content browser BEFORE it's ever applied to a document —
+  // "preview-before-load" per research 18 §8, extending previewDrum/previewNote's exact idiom (an
+  // ephemeral voice, fired-and-torn-down, that never touches the store's document) to content that
+  // isn't on any track yet. Nothing here reads or writes useStore's `doc`.
+
+  /** Audition a SYNTH preset's param bag on a throwaway voice. Reuses the real per-track DSP
+   * (buildSynthChain/applyParams/disposeChain — the exact chain a live synth track gets), just built
+   * standalone and disposed after one note's tail instead of kept alive and synced every tick.
+   * `coerce` already treats every field as optional (falls back to the same defaults a bare INIT_SYNTH
+   * track would use), so a preset's partial param bag previews correctly with no merging here. */
+  async previewSynthPreset(params: Partial<BeatSynth>, pitch = 60, velocity = 0.85): Promise<void> {
+    await this.ensureStarted()
+    const chain = this.buildSynthChain()
+    this.applyParams(chain, coerce(params as BeatSynth))
+    const freq = Tone.Frequency(Math.round(pitch), 'midi').toFrequency()
+    chain.synth.triggerAttackRelease(freq, 0.5, undefined, velocity)
+    setTimeout(() => this.disposeChain(chain), 1800)
+  }
+
+  /** Audition a DRUM-KIT preset's voice-shaping params (kickTune/kickPunch/kickDecay, snareDecay,
+   * hatDecay/hatTone — the same BeatSynth fields drum presets set) with a short kick/hat/snare/hat
+   * phrase. Deliberately a SEPARATE, throwaway set of voices from the live drums track's singleton
+   * DrumKit (buildDrums()/this.drums) — that one is synced every tick off the real document and
+   * shared by the whole app; previewing a not-yet-applied preset must not perturb it. Uses the same
+   * Tone.js voice types/params buildDrums() does (MembraneSynth kick, NoiseSynth snare, MetalSynth
+   * hat) wired straight to the master bus, bypassing the drum bus's EQ/comp/insert chain (a preview
+   * doesn't need that fidelity). */
+  async previewDrumPreset(params: Partial<BeatSynth>): Promise<void> {
+    await this.ensureStarted()
+    const p = coerce(params as BeatSynth)
+    const out = new Tone.Gain(0.9).connect(this.getMaster())
+    const kick = new Tone.MembraneSynth({ pitchDecay: p.kickPunch, octaves: 7, envelope: { attack: 0.001, decay: p.kickDecay, sustain: 0, release: 0.1 } }).connect(out)
+    const snare = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: p.snareDecay, sustain: 0 } }).connect(out)
+    const hat = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: p.hatDecay, release: 0.01 }, harmonicity: 5.1, modulationIndex: 32, resonance: p.hatTone, octaves: 1.5 }).connect(out)
+    const t = Tone.now() + 0.02
+    kick.triggerAttackRelease(p.kickTune, '8n', t)
+    hat.triggerAttackRelease(300, '32n', t + 0.16)
+    snare.triggerAttackRelease('8n', t + 0.32)
+    hat.triggerAttackRelease(300, '32n', t + 0.48)
+    setTimeout(() => {
+      kick.dispose()
+      snare.dispose()
+      hat.dispose()
+      out.dispose()
+    }, 1400)
+  }
+
+  /** Audition a raw one-shot sample (a kit's kick.wav/snare.wav/… fetched straight from the daemon's
+   * `GET /library/file` route) by decoding and playing it once through the shared master bus (so it
+   * shows up on the master meter/scope like everything else, and respects master volume) — but with
+   * no per-track mute/pan wiring, since this is a library browse preview with no track of its own
+   * yet. `Tone.connect` bridges the raw native AudioNode graph into Tone's node graph, the same
+   * bridging buildInstrument() uses for its WorkletSynthesizer output. */
+  async previewBuffer(bytes: ArrayBuffer): Promise<void> {
+    await this.ensureStarted()
+    const ctx = this.ensureNativeContext()
+    const audioBuffer = await ctx.decodeAudioData(bytes)
+    const src = ctx.createBufferSource()
+    src.buffer = audioBuffer
+    const gain = ctx.createGain()
+    gain.gain.value = 0.9
+    src.connect(gain)
+    Tone.connect(gain, this.getMaster())
+    src.onended = () => {
+      src.disconnect()
+      gain.disconnect()
+    }
+    src.start()
+  }
+
+  /** Audition a SoundFont bank (fetched raw bytes, not yet registered as project media) by loading
+   * it into a throwaway WorkletSynthesizer — the same synthesis path buildInstrument() uses for a
+   * live instrument track's voice, minus the mute/vol/pan bus wiring a real track needs — and firing
+   * one note on the requested program, through the shared master bus (see previewBuffer). */
+  async previewSoundfont(bytes: ArrayBuffer, program = 0, pitch = 60, velocity = 100): Promise<void> {
+    await this.ensureStarted()
+    await this.ensureWorkletModule()
+    const ctx = this.ensureNativeContext()
+    const synth = new WorkletSynthesizer(ctx)
+    await synth.soundBankManager.addSoundBank(bytes, 'preview')
+    await synth.isReady
+    const gain = ctx.createGain()
+    synth.connect(gain)
+    Tone.connect(gain, this.getMaster())
+    synth.programChange(0, program)
+    const midi = Math.round(pitch)
+    synth.noteOn(0, midi, velocity)
+    setTimeout(() => {
+      try {
+        synth.noteOff(0, midi)
+      } catch {
+        // best-effort; the preview may already be torn down
+      }
+      setTimeout(() => {
+        try {
+          synth.destroy()
+        } catch {
+          // best-effort teardown
+        }
+        gain.disconnect()
+      }, 500)
+    }, 700)
+  }
+
   async play(): Promise<void> {
     await this.ensureStarted()
     const doc = useStore.getState().doc

@@ -395,21 +395,21 @@ export const rows = [
   },
   {
     area: 'Preset / content library', feature: 'Content browser sidebar',
-    description: 'A left-sidebar browser over presets/samples/kits, drag-drop onto a track — the data layer is ready, nothing to browse from yet.',
-    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
-    research: 'research/18-ableton-ui-architecture.md', plan: null,
+    description: 'A collapsible left-sidebar browser (ContentBrowser.tsx) over the real presets/factory.json + presets/kit-*/ + presets/sf2/*.sf2, grouped by Phase 18 Stream S\'s taxonomy. Drag a preset onto a track (core\'s applyPreset — a literal edit list) or a kit sample onto a drum lane (registers into the project\'s own media/ + setLaneSample); a soundfont can also be dropped onto an instrument track or added as a brand-new one.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/18-ableton-ui-architecture.md', plan: 'phase-22-stream-ah.md',
   },
   {
     area: 'Preset / content library', feature: 'Hot-swap preset browser in Device View',
-    description: 'Apply a named preset’s literal param edits from inside the synth panel, not just via CLI.',
+    description: 'A preset picker/prev-next control living INSIDE SynthPanel/InstrumentPanel itself (Device View), distinct from the sidebar: swap a track\'s preset without leaving the panel. The sidebar (drag a preset onto a track header from outside Device View) does not cover this — SynthPanel.tsx/InstrumentPanel.tsx are untouched.',
     core: 'na', cli: 'done', gui: 'missing', status: 'not-started',
     research: 'research/18-ableton-ui-architecture.md', plan: null,
   },
   {
     area: 'Preset / content library', feature: 'Preview-before-load',
-    description: 'Audition a preset/sample before applying it, consistent with the existing Freesound-preview tooling.',
-    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
-    research: 'research/18-ableton-ui-architecture.md', plan: null,
+    description: 'Audition a preset/sample/soundfont before applying it — an ephemeral engine voice or a raw fetch-decode-play, real audio through the master bus, with zero writes to the .beat file (engine.previewSynthPreset/previewDrumPreset/previewBuffer/previewSoundfont).',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/18-ableton-ui-architecture.md', plan: 'phase-22-stream-ah.md',
   },
 
   // ── Macros ───────────────────────────────────────────────────────────────
