@@ -315,6 +315,15 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const marqueeRef = useRef<Marquee | null>(null)
   const gridRef = useRef<HTMLDivElement | null>(null)
   const [velPreview, setVelPreview] = useState<{ id: string; velocity: number } | null>(null)
+  // Phase 27 Stream EE: live floating value labels while dragging a velocity/chance marker, the same
+  // "small pill near the cursor, imperative viewport-relative positioning" pattern ArrangementView.tsx's
+  // automation-lane drag already established (its `dragLabelRef`/`showLabel` next to `.arr-auto-drag-label`)
+  // — reused here as plain conditional JSX since this component already re-renders per pointer move for
+  // the preview bars themselves, so a second imperative DOM path would just be redundant. Static `title`
+  // tooltips required a pointer-stop-and-wait; this echoes the value live, every move, like a DAW's status
+  // bar readout during a drag.
+  const [velDragLabel, setVelDragLabel] = useState<{ x: number; y: number; value: number } | null>(null)
+  const [chanceDragLabel, setChanceDragLabel] = useState<{ x: number; y: number; value: number } | null>(null)
   // Content-browser drop target for drum lanes (ported from the retired StepSequencer.tsx, Phase
   // 22 Stream AH originally, Stream AB's row-axis merge here): dropping a kit one-shot onto a
   // lane's label cell loads it onto THIS lane, even if the sample's own kit slot names a different
@@ -746,13 +755,17 @@ export function NoteView({ track }: { track: BeatTrack }) {
     velGesture.current = { id: ev.id, rect }
     setSel([ev.id])
     // Set immediately from the down position too, so a plain click (no drag) still commits a value.
-    setVelPreview({ id: ev.id, velocity: velocityFromY(rect, e.clientY) })
+    const velocity = velocityFromY(rect, e.clientY)
+    setVelPreview({ id: ev.id, velocity })
+    setVelDragLabel({ x: e.clientX, y: e.clientY, value: velocity })
   }
 
   function onVelPointerMove(e: React.PointerEvent) {
     const g = velGesture.current
     if (!g) return
-    setVelPreview({ id: g.id, velocity: velocityFromY(g.rect, e.clientY) })
+    const velocity = velocityFromY(g.rect, e.clientY)
+    setVelPreview({ id: g.id, velocity })
+    setVelDragLabel({ x: e.clientX, y: e.clientY, value: velocity })
   }
 
   function onVelPointerUp() {
@@ -760,6 +773,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
     const p = velPreview
     velGesture.current = null
     setVelPreview(null)
+    setVelDragLabel(null)
     if (!g || !p) return
     postEdit(`${track.id}.${editPrefix}.${g.id}.velocity`, String(p.velocity))
   }
@@ -796,6 +810,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
     const acc: Record<string, number> = {}
     paintChanceAt(rect, e.clientX, e.clientY, acc)
     setChancePreview(acc)
+    setChanceDragLabel({ x: e.clientX, y: e.clientY, value: chanceValueFromY(rect, e.clientY) })
   }
 
   function onChanceLanePointerMove(e: React.PointerEvent) {
@@ -806,6 +821,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
       paintChanceAt(g.rect, e.clientX, e.clientY, acc)
       return acc
     })
+    setChanceDragLabel({ x: e.clientX, y: e.clientY, value: chanceValueFromY(g.rect, e.clientY) })
   }
 
   function onChanceLanePointerUp() {
@@ -813,6 +829,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
     const p = chancePreview
     chanceGesture.current = null
     setChancePreview(null)
+    setChanceDragLabel(null)
     if (!g || !p) return
     for (const [id, value] of Object.entries(p)) postEdit(`${track.id}.note.${id}.chance`, String(value))
   }
@@ -850,6 +867,24 @@ export function NoteView({ track }: { track: BeatTrack }) {
         <span className="noteview-titlebar-name">{track.name}</span>
         {existing && <span className="noteview-titlebar-clip">clip &quot;{existing.id}&quot;</span>}
       </div>
+      {velDragLabel && (
+        <div
+          className="noteview-drag-label"
+          data-drag-label="velocity"
+          style={{ left: velDragLabel.x + 10, top: velDragLabel.y - 18 }}
+        >
+          vel {velDragLabel.value}
+        </div>
+      )}
+      {chanceDragLabel && (
+        <div
+          className="noteview-drag-label"
+          data-drag-label="chance"
+          style={{ left: chanceDragLabel.x + 10, top: chanceDragLabel.y - 18 }}
+        >
+          {chanceDragLabel.value}%
+        </div>
+      )}
       <div className="editor-toolbar">
         <span className="editor-title" style={{ color: track.color }}>
           {track.name}
@@ -1093,7 +1128,14 @@ export function NoteView({ track }: { track: BeatTrack }) {
                   top: shown.row * ROW_H,
                   height: ROW_H - 1,
                   background: track.color,
-                  opacity: (0.45 + ev.velocity * 0.55) * (isChancy ? 0.6 : 1),
+                  // Phase 27 Stream EE: velocity is READ from the dedicated velocity lane below, not
+                  // encoded redundantly here — a note's on-grid opacity used to be
+                  // `(0.45 + ev.velocity * 0.55) * (isChancy ? 0.6 : 1)`, stacking velocity opacity on
+                  // top of pitch position, duration width, AND chance dimming on one ~11px-tall
+                  // rectangle (research/71 §2.4). Base color/opacity now stays constant regardless of
+                  // velocity; the chance dim (a real "might not play" signal) is the only opacity
+                  // encoding left, and stays legible on its own now that it's not fighting velocity.
+                  opacity: isChancy ? 0.6 : 1,
                   // A marker (no duration — a one-shot trigger) is a small pill, not a bar; a bar
                   // has square corners like the melodic notes. No transform/rotation on the
                   // container itself, so the resize-handle child's pointer math stays screen-space.

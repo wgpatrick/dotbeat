@@ -1009,6 +1009,24 @@ body {
   outline-offset: -1px;
 }
 
+/* Phase 27 Stream EE: live floating value readout while dragging a velocity/chance marker — same
+   small-pill treatment as ArrangementView.tsx's automation-lane drag label (`.arr-auto-drag-label`),
+   just `position: fixed` (viewport-relative clientX/clientY) instead of `position: absolute` inside a
+   single canvas-relative container, since NoteView's velocity and chance lanes are two separate DOM
+   subtrees rather than one canvas. */
+.noteview-drag-label {
+  position: fixed;
+  z-index: 20;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
 /* ---- v0.10 at-a-glance note glyphs (Phase 23 Stream BA): chance dashed/dim, ratchet tick marks -- */
 .noteview-note.chancy {
   border: 1px dashed rgba(255, 255, 255, 0.7);
