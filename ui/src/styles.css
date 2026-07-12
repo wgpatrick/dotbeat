@@ -1064,6 +1064,13 @@ body {
 }
 
 /* ---- note inspector (Phase 22 Stream AD): chance/cent/ratchet fields for the one selected note --- */
+/* Phase 27 Stream EG: a 3px left-border accent per bottom-pane panel (research/71 §2.8/§P0-5) —
+   ClipPropertiesPanel/PitchTimePanel/NoteNameReadout/NoteInspector/DrumLanePanel used to share
+   byte-identical CSS (same #14151a bg, same 1px var(--line) border), so nothing but reading the
+   text told them apart. Reuses the SAME small hue palette the track list already color-codes track
+   KIND with (.kind-drums/.kind-synth/.kind-instrument/.kind-audio, styles.css:308-318) rather than
+   inventing new colors — one consistent "hue = role" convention across the whole app. Neutral gray
+   here (inspector = the deepest, most granular per-note detail, deliberately the quietest accent).*/
 .note-inspector {
   display: flex;
   align-items: center;
@@ -1072,6 +1079,7 @@ body {
   padding: 6px 10px;
   background: #14151a;
   border: 1px solid var(--line);
+  border-left: 3px solid #6b7280;
   border-radius: 4px;
   font-size: 11px;
   color: var(--muted, #9aa0ab);
@@ -1097,6 +1105,9 @@ body {
 }
 
 /* ---- note-name readout (Phase 24 Stream CF): at-a-glance "C4, E4, G4" for selection/whole clip --- */
+/* Phase 27 Stream EG: green accent — a read-only info readout, distinct from the operations panel
+   (blue, below) and the per-note editor (gray, above). See .note-inspector's comment for the
+   palette-reuse rationale. */
 .note-name-readout {
   display: flex;
   align-items: center;
@@ -1105,6 +1116,7 @@ body {
   padding: 6px 10px;
   background: #14151a;
   border: 1px solid var(--line);
+  border-left: 3px solid #98c379;
   border-radius: 4px;
   font-size: 11px;
   color: var(--muted, #9aa0ab);
@@ -1116,6 +1128,9 @@ body {
 }
 
 /* ---- Pitch & Time operations panel (Phase 23 Stream BA) ---------------------------------------- */
+/* Phase 27 Stream EG: blue accent — a one-shot operations panel, distinct from the read-only
+   readout (green, below) and the per-note editor (gray, further below). See .note-inspector's
+   comment for the palette-reuse rationale. */
 .pitch-time-panel {
   display: flex;
   align-items: center;
@@ -1125,6 +1140,7 @@ body {
   padding: 6px 10px;
   background: #14151a;
   border: 1px solid var(--line);
+  border-left: 3px solid #61afef;
   border-radius: 4px;
   font-size: 11px;
   color: var(--muted, #9aa0ab);
@@ -2848,6 +2864,10 @@ body {
 }
 
 /* ---- Phase 22 Stream AG: clip-level loop/signature properties panel (Clip View) ---- */
+/* Phase 27 Stream EG: amber accent (var(--accent) itself — this is the FIRST, "primary properties"
+   panel of the clip-editing stack, so it gets the app's own accent color rather than a new hue).
+   See .note-inspector's comment (styles.css ~1002) for the full palette-reuse rationale across all
+   five bottom-pane panels this stream touches. */
 .clip-props {
   display: flex;
   align-items: center;
@@ -2855,6 +2875,7 @@ body {
   padding: 6px 10px;
   margin-bottom: 8px;
   border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
   border-radius: 6px;
   background: var(--panel-2);
   font-size: 11px;
@@ -2999,9 +3020,15 @@ body {
 }
 
 /* ---- Phase 23 Stream BB: drum-lane management panel (Clip View, drum tracks only) ---- */
+/* Phase 27 Stream EG: cyan accent — the SAME hue as .kind-drums (styles.css:308-310) elsewhere in
+   the app, since this panel only ever appears on drum tracks. Ties into the existing five-panel
+   accent set (.clip-props/.pitch-time-panel/.note-name-readout/.note-inspector, see
+   .note-inspector's comment) so the whole Clip View bottom-pane stack reads as one consistent
+   "hue = role" system, not just the four flat strips. */
 .lane-panel {
   margin-bottom: 8px;
   border: 1px solid var(--line);
+  border-left: 3px solid #56b6c2;
   border-radius: 6px;
   background: var(--panel-2);
   font-size: 11px;
