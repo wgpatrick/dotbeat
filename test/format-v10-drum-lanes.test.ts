@@ -15,6 +15,7 @@ import {
   serialize,
   addTrack,
   addHit,
+  removeHit,
   setValue,
   initDocument,
   defaultDrumKitLanes,
@@ -23,6 +24,13 @@ import {
   BeatEditError,
   diffDocuments,
   formatDiff,
+  materializeLanes,
+  addLane,
+  removeLane,
+  moveLane,
+  setLaneBacking,
+  setLaneParam,
+  setMediaSample,
 } from '../src/core/index.js'
 
 const SHA = 'c'.repeat(64)
@@ -278,4 +286,122 @@ test('diff reports lane-decl changes and hit duration changes', () => {
   const laneEntries = diffDocuments(withDuration, backing)
   assert.ok(laneEntries.some((e) => e.kind === 'lane-decl' && e.lane === 'kick'))
   void retuned
+})
+
+// ---- Phase 23 Stream BB: structural lane-editing primitives (add/remove/move/retype/param) ----
+
+test('materializeLanes is a no-op on an already-open track, and opts a legacy track in using its current voice-shaping fields', () => {
+  const kitted = addTrack(initDocument({}), { id: 'd', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
+  const { doc: same, lanes: unchanged } = materializeLanes(kitted, 'd')
+  assert.equal(same, kitted) // referentially unchanged — genuinely a no-op
+  assert.equal(unchanged.length, 12)
+
+  let legacy = drumDoc()
+  legacy = setValue(legacy, 'drums.kickTune', '40')
+  legacy = setValue(legacy, 'drums.hatTone', '5000')
+  const { doc: materialized, lanes } = materializeLanes(legacy, 'drums')
+  assert.equal(lanes.length, 5)
+  assert.deepEqual(
+    lanes.map((l) => l.name),
+    ['kick', 'snare', 'clap', 'hat', 'openhat'],
+  )
+  const kick = lanes.find((l) => l.name === 'kick')!
+  assert.equal(kick.backing.type, 'synth')
+  assert.equal((kick.backing as { voice: string }).voice, 'membrane')
+  assert.equal((kick.backing as { params: Record<string, number> }).params.tune, 40) // carried the legacy field forward
+  const hat = lanes.find((l) => l.name === 'hat')!
+  assert.equal((hat.backing as { params: Record<string, number> }).params.tone, 5000)
+  // declaredLaneNames is unchanged before/after — existing hits stay valid with no migration needed
+  const beforeHit = addHit(legacy, 'drums', { lane: 'kick', start: 0, velocity: 0.9 }).doc
+  const afterHit = addHit(materialized, 'drums', { lane: 'kick', start: 0, velocity: 0.9 }).doc
+  assert.equal(beforeHit.tracks[1]!.hits[0]!.lane, afterHit.tracks[1]!.hits[0]!.lane)
+})
+
+test('addLane/removeLane/moveLane refuse to operate on a track still on the implicit 5-lane kit', () => {
+  const legacy = drumDoc()
+  assert.throws(() => addLane(legacy, 'drums', 'rim', ['synth:noise']), /materializeLanes first/)
+  assert.throws(() => removeLane(legacy, 'drums', 'kick'), /materializeLanes first/)
+  assert.throws(() => moveLane(legacy, 'drums', 'kick', 0), /materializeLanes first/)
+})
+
+test('addLane appends (or inserts at an index), validates the name and backing grammar, and round-trips', () => {
+  let doc = addTrack(initDocument({}), { id: 'd', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
+  const before = doc.tracks[1]!.lanes.length
+  doc = addLane(doc, 'd', 'rim2', ['synth:noise', 'decay=0.22']).doc
+  const t = doc.tracks[1]!
+  assert.equal(t.lanes.length, before + 1)
+  assert.equal(t.lanes[t.lanes.length - 1]!.name, 'rim2')
+  assert.deepEqual(t.lanes[t.lanes.length - 1]!.backing, { type: 'synth', voice: 'noise', params: { decay: 0.22 } })
+  assert.deepEqual(parse(serialize(doc)), doc) // round-trips
+
+  const inserted = addLane(doc, 'd', 'rim3', ['synth:noise'], { index: 0 }).doc
+  assert.equal(inserted.tracks[1]!.lanes[0]!.name, 'rim3')
+
+  assert.throws(() => addLane(doc, 'd', 'rim2', ['synth:noise']), /already exists/)
+  assert.throws(() => addLane(doc, 'd', 'bad name', ['synth:noise']), /single alphanumeric/)
+  assert.throws(() => addLane(doc, 'd', 'rim4', ['synth:bogus']), /unknown drum voice type/)
+  assert.throws(() => addLane(doc, 'd', 'rim4', ['sample', 'nope', '0', '0']), /unregistered sample/)
+})
+
+test('removeLane drops a declared lane, and refuses when a hit still references it', () => {
+  let doc = addTrack(initDocument({}), { id: 'd', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
+  doc = addHit(doc, 'd', { lane: 'cowbell', start: 0, velocity: 0.7 }).doc
+  assert.throws(() => removeLane(doc, 'd', 'cowbell'), /remove or re-lane them first/)
+  doc = removeHit(doc, 'd', doc.tracks[1]!.hits[0]!.id).doc
+  const { doc: removed } = removeLane(doc, 'd', 'cowbell')
+  assert.ok(!removed.tracks[1]!.lanes.some((l) => l.name === 'cowbell'))
+  assert.throws(() => removeLane(doc, 'd', 'nope'), /no lane "nope"/)
+})
+
+test('moveLane reorders the declared lane list, which IS row/serialization order', () => {
+  let doc = addTrack(initDocument({}), { id: 'd', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
+  const names = doc.tracks[1]!.lanes.map((l) => l.name)
+  const { doc: moved, before, after } = moveLane(doc, 'd', names[names.length - 1]!, 0)
+  assert.equal(before, names.length - 1)
+  assert.equal(after, 0)
+  assert.equal(moved.tracks[1]!.lanes[0]!.name, names[names.length - 1])
+  assert.deepEqual(parse(serialize(moved)), moved)
+})
+
+test('setLaneBacking retypes a lane wholesale; the name (and any hits on it) are untouched', () => {
+  let doc = addTrack(initDocument({}), { id: 'd', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
+  doc = addHit(doc, 'd', { lane: 'kick', start: 0, velocity: 0.9, id: 'h1' }).doc
+  const { doc: retyped } = setLaneBacking(doc, 'd', 'kick', ['synth:noise', 'decay=0.4'])
+  const kick = retyped.tracks[1]!.lanes.find((l) => l.name === 'kick')!
+  assert.deepEqual(kick.backing, { type: 'synth', voice: 'noise', params: { decay: 0.4 } })
+  assert.equal(retyped.tracks[1]!.hits.find((h) => h.id === 'h1')!.lane, 'kick') // hit is unaffected
+  assert.throws(() => setLaneBacking(doc, 'd', 'nope', ['synth:noise']), /no lane "nope"/)
+})
+
+test('setLaneBacking to a sample/sf backing requires the sample already be registered in media', () => {
+  let doc = addTrack(initDocument({}), { id: 'd', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
+  assert.throws(() => setLaneBacking(doc, 'd', 'kick', ['sample', 'boom', '-2', '0']), /unregistered sample/)
+  doc = setMediaSample(doc, 'boom', 'a'.repeat(64), 'media/boom.wav')
+  const { doc: withSample } = setLaneBacking(doc, 'd', 'kick', ['sample', 'boom', '-2', '3'])
+  assert.deepEqual(withSample.tracks[1]!.lanes.find((l) => l.name === 'kick')!.backing, { type: 'sample', sample: 'boom', gainDb: -2, tune: 3 })
+  assert.deepEqual(parse(serialize(withSample)), withSample)
+})
+
+test('setLaneParam edits one param on a synth-backed lane in place, and clears back to the voice default when given no value', () => {
+  let doc = addTrack(initDocument({}), { id: 'd', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
+  doc = setLaneParam(doc, 'd', 'kick', 'tune', 55).doc
+  let kick = doc.tracks[1]!.lanes.find((l) => l.name === 'kick')!
+  assert.equal((kick.backing as { params: Record<string, number> }).params.tune, 55)
+  // canonical elision: a param equal to the voice's default doesn't serialize
+  assert.doesNotMatch(serialize(doc), /tune=32\.7/)
+  assert.match(serialize(doc), /lane kick synth:membrane tune=55/)
+
+  doc = setLaneParam(doc, 'd', 'kick', 'tune', undefined).doc // clear -> reverts to default, elided
+  kick = doc.tracks[1]!.lanes.find((l) => l.name === 'kick')!
+  assert.equal((kick.backing as { params: Record<string, number> }).params.tune, undefined)
+  assert.match(serialize(doc), /lane kick synth:membrane\n/) // no params at all now
+
+  assert.throws(() => setLaneParam(doc, 'd', 'nope', 'tune', 1), /no lane "nope"/)
+})
+
+test('setLaneParam refuses a sample/sf-backed lane — per-param edits only make sense for synth backings', () => {
+  let doc = addTrack(initDocument({}), { id: 'd', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
+  doc = setMediaSample(doc, 'boom', 'a'.repeat(64), 'media/boom.wav')
+  doc = setLaneBacking(doc, 'd', 'kick', ['sample', 'boom', '0', '0']).doc
+  assert.throws(() => setLaneParam(doc, 'd', 'kick', 'tune', 1), /only synth-backed lanes take per-param edits/)
 })

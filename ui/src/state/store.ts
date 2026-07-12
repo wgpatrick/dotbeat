@@ -51,7 +51,17 @@ interface DawState {
   /** Mixer mute/solo — GUI-only transport state, keyed by track id. NOT persisted to the .beat file
    * (the format carries no mute/solo field, and real DAWs treat these as session state). As of
    * Phase 14 Stream E these gate real audio: the engine reads isEffectivelyMuted per tick and sets
-   * each track's mute gate accordingly, in addition to driving the mixer's visual state. */
+   * each track's mute gate accordingly, in addition to driving the mixer's visual state.
+   *
+   * Phase 23 Stream BB revisited this deliberately (docs/phase-23-stream-bb.md) and CONFIRMED
+   * transient-only is correct, not just inherited: (1) real DAWs (Ableton, Logic) keep mute/solo as
+   * session/monitoring state, not composition data; (2) dotbeat's own precedent already treats
+   * every other "how am I looking at this right now" flag the same way — BeatGroup's
+   * collapsed/expanded (src/core/document.ts) is explicitly UI-only for the identical reason, and
+   * this field's own doc comment there cross-references mute/solo; (3) the .beat format's whole
+   * premise is a diff that means something musically (decisions.md) — a solo toggled to audition one
+   * track while arranging would otherwise pollute every commit with a line that isn't a musical
+   * choice. Nothing was added to BeatTrack; this comment IS the decision record. */
   mutes: Record<string, boolean>
   solos: Record<string, boolean>
   /** Phase 22 Stream AG: the arrangement's overlapping-region resolution policy — what happens when

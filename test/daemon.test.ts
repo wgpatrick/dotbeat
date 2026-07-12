@@ -649,3 +649,128 @@ test('POST /audio-split rejects a bad request body and an out-of-range split pos
     assert.equal(daemon.getDoc().tracks.find((t) => t.id === 'atrk')!.clips.length, 1, 'the rejected split left the doc untouched')
   })
 })
+
+// ─── Phase 23 Stream BB: drum-lane structural editing + rung-2 feel vary/audition ──────────────────
+
+function postJSON(port: number, path: string, body: unknown) {
+  return fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+}
+
+test('POST /lane materialize opts a legacy drums track into the open lane model', async () => {
+  await withDaemon(async (daemon) => {
+    assert.equal(daemon.getDoc().tracks.find((t) => t.id === 'drums')!.lanes.length, 0)
+    const res = await postJSON(daemon.port, '/lane', { op: 'materialize', track: 'drums' })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { written: boolean; doc: { tracks: { id: string; lanes: { name: string }[] }[] } }
+    assert.equal(body.written, true)
+    assert.deepEqual(
+      body.doc.tracks.find((t) => t.id === 'drums')!.lanes.map((l) => l.name),
+      ['kick', 'snare', 'clap', 'hat', 'openhat'],
+    )
+    assert.equal(daemon.getDoc().tracks.find((t) => t.id === 'drums')!.lanes.length, 5)
+  })
+})
+
+test('POST /lane add/move/param/backing/remove round-trip against a real daemon+file', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    await postJSON(daemon.port, '/lane', { op: 'materialize', track: 'drums' })
+
+    const add = await postJSON(daemon.port, '/lane', { op: 'add', track: 'drums', name: 'rim', backing: 'synth:noise decay=0.2' })
+    assert.equal(add.status, 200)
+    assert.ok(daemon.getDoc().tracks.find((t) => t.id === 'drums')!.lanes.some((l) => l.name === 'rim'))
+
+    const move = await postJSON(daemon.port, '/lane', { op: 'move', track: 'drums', name: 'rim', index: 0 })
+    assert.equal(move.status, 200)
+    assert.equal(daemon.getDoc().tracks.find((t) => t.id === 'drums')!.lanes[0]!.name, 'rim')
+
+    const param = await postJSON(daemon.port, '/lane', { op: 'param', track: 'drums', name: 'rim', key: 'decay', value: 0.4 })
+    assert.equal(param.status, 200)
+    const rim = daemon.getDoc().tracks.find((t) => t.id === 'drums')!.lanes.find((l) => l.name === 'rim')!
+    assert.equal((rim.backing as { params: Record<string, number> }).params.decay, 0.4)
+
+    const backing = await postJSON(daemon.port, '/lane', { op: 'backing', track: 'drums', name: 'rim', backing: 'synth:metal tone=6000' })
+    assert.equal(backing.status, 200)
+    const retyped = daemon.getDoc().tracks.find((t) => t.id === 'drums')!.lanes.find((l) => l.name === 'rim')!
+    assert.equal((retyped.backing as { voice: string }).voice, 'metal')
+
+    const remove = await postJSON(daemon.port, '/lane', { op: 'remove', track: 'drums', name: 'rim' })
+    assert.equal(remove.status, 200)
+    assert.ok(!daemon.getDoc().tracks.find((t) => t.id === 'drums')!.lanes.some((l) => l.name === 'rim'))
+
+    assert.deepEqual(parse(readFileSync(filePath, 'utf8')), daemon.getDoc()) // in-memory === disk throughout
+  })
+})
+
+test('POST /lane rejects unknown ops and missing fields with 400, and never writes on error', async () => {
+  await withDaemon(async (daemon) => {
+    const before = daemon.getDoc()
+    assert.equal((await postJSON(daemon.port, '/lane', { op: 'bogus', track: 'drums' })).status, 400)
+    assert.equal((await postJSON(daemon.port, '/lane', { op: 'add', track: 'drums' })).status, 400) // missing name/backing
+    assert.deepEqual(daemon.getDoc(), before)
+  })
+})
+
+test('POST /vary-feel generates a reproducible batch of full-document variants, scoped by selection', async () => {
+  await withDaemon(async (daemon) => {
+    await postJSON(daemon.port, '/selection', { tracks: ['drums'] })
+    const res = await postJSON(daemon.port, '/vary-feel', { count: 3, seed: 5 })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as {
+      track: string
+      variants: { index: number; seed: number; recipe: string; doc: { tracks: { id: string; hits: { start: number }[] }[] } }[]
+    }
+    assert.equal(body.track, 'drums')
+    assert.equal(body.variants.length, 3)
+    assert.deepEqual(body.variants.map((v) => v.seed), [5, 6, 7]) // seed+i, reproducible
+    assert.match(body.variants[0]!.recipe, /seed=5/)
+    const drums0 = body.variants[0]!.doc.tracks.find((t) => t.id === 'drums')!
+    assert.ok(drums0.hits.some((h) => !Number.isInteger(h.start))) // genuinely humanized off-grid
+    // read-only: the live document's hits are still on-grid integers
+    assert.ok(daemon.getDoc().tracks.find((t) => t.id === 'drums')!.hits.every((h) => Number.isInteger(h.start)))
+  })
+})
+
+test('POST /vary-feel enforces selection scope, same guarantee /vary makes (spec §2)', async () => {
+  await withDaemon(async (daemon) => {
+    await postJSON(daemon.port, '/selection', { tracks: ['bass'] })
+    const res = await postJSON(daemon.port, '/vary-feel', { track: 'drums', count: 1 })
+    assert.equal(res.status, 400)
+    assert.match((await res.json() as { error: string }).error, /refusing to vary outside the selection/)
+  })
+})
+
+// Sorts each track's hits by id — /vary-feel's raw in-memory doc keeps humanize's original array
+// order, while a written-then-reparsed doc comes back in serialize.ts's canonical (start, lane, id)
+// order (sortedHitLines). Same hits, different array order; normalize before a content comparison.
+function withSortedHits(doc: { tracks: { hits?: { id: string }[] }[] }): unknown {
+  return { ...doc, tracks: doc.tracks.map((t) => (t.hits ? { ...t, hits: [...t.hits].sort((a, b) => a.id.localeCompare(b.id)) } : t)) }
+}
+
+test('POST /vary-feel/commit writes the exact seed a batch offered, deterministically', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const batchRes = await postJSON(daemon.port, '/vary-feel', { track: 'drums', count: 2, seed: 11 })
+    const batch = (await batchRes.json()) as { variants: { seed: number; doc: { tracks: { hits?: { id: string }[] }[] } }[] }
+    const chosen = batch.variants[1]!
+
+    const commitRes = await postJSON(daemon.port, '/vary-feel/commit', { track: 'drums', seed: chosen.seed })
+    assert.equal(commitRes.status, 200)
+    const body = (await commitRes.json()) as { written: boolean; doc: { tracks: { hits?: { id: string }[] }[] } }
+    assert.equal(body.written, true)
+    // the write matches the audition variant's actual content (deterministic seed) — array order can
+    // legitimately differ (see withSortedHits), the hit SET must not.
+    assert.deepEqual(withSortedHits(body.doc), withSortedHits(chosen.doc))
+    assert.deepEqual(parse(readFileSync(filePath, 'utf8')), daemon.getDoc())
+  })
+})
+
+test('POST /vary-feel/commit can scope to specific drum lanes, leaving every other lane byte-identical', async () => {
+  await withDaemon(async (daemon) => {
+    const before = daemon.getDoc().tracks.find((t) => t.id === 'drums')!
+    const kickBefore = before.hits.filter((h) => h.lane === 'kick').map((h) => h.start)
+    const res = await postJSON(daemon.port, '/vary-feel/commit', { track: 'drums', seed: 3, lanes: ['kick'] })
+    assert.equal(res.status, 200)
+    const after = daemon.getDoc().tracks.find((t) => t.id === 'drums')!
+    assert.deepEqual(after.hits.filter((h) => h.lane !== 'kick'), before.hits.filter((h) => h.lane !== 'kick'))
+    assert.notDeepEqual(after.hits.filter((h) => h.lane === 'kick').map((h) => h.start), kickBefore)
+  })
+})

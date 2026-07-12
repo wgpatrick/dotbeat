@@ -58,6 +58,13 @@ import {
   removeEffect,
   moveEffect,
   setEffectEnabled,
+  materializeLanes,
+  addLane,
+  removeLane,
+  moveLane,
+  setLaneBacking,
+  setLaneParam,
+  humanize,
   addGroup,
   removeGroup,
   renameGroup,
@@ -105,7 +112,7 @@ import { history, collapsedHistory, restore, pin, unpin, HistoryError } from '..
 // applying its edits provisionally in-memory (heard live off the running engine, never written), and
 // "keep" commits the chosen variant's edits through the ordinary POST /edit path — so audition is
 // revertible by construction (nothing touches disk until Keep). See docs/phase-15-vary-affordance.md.
-import { varyTrack, VARY_GROUPS, BeatVaryError } from '../vary/vary.js'
+import { varyTrack, varyFeel, VARY_GROUPS, BeatVaryError } from '../vary/vary.js'
 
 /** Drum lane -> the param group that shapes that lane's sound, so "highlight the hats, vary" mutates
  * the hats' own synth params (hatTone/hatDecay/openHatDecay) with no typing. clap rides the snare
@@ -1324,6 +1331,141 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatVaryError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // POST /vary-feel: generate a rung-2 humanized-FEEL batch scoped by the live selection — the
+    // content-variation analog of /vary (Phase 23 Stream BB). Unlike /vary's small {path,value}
+    // edit lists, `varyFeel` rewrites many note/hit timing/velocity fields per variant, so each
+    // variant is returned as a FULL raw document (reused verbatim for setDoc during audition) plus
+    // the reproducible `seed` that generated it — POST /vary-feel/commit resends that same seed to
+    // write it for real. Read-only; never writes.
+    if (req.method === 'POST' && url.pathname === '/vary-feel') {
+      readBody(req)
+        .then((body) => {
+          const b = (body.trim() ? JSON.parse(body) : {}) as VaryRequestBody & { lanes?: string[] }
+          // Reuses resolveVaryTarget purely for its track resolution + selection-scope enforcement
+          // (spec §2) — the `group` it also returns is param-vary-specific and unused here.
+          const { track } = resolveVaryTarget(selection, doc, b)
+          const count = b.count ?? 9
+          const seed = b.seed ?? (Date.now() % 2147483647 || 1)
+          const lanes = Array.isArray(b.lanes) && b.lanes.every((l) => typeof l === 'string') ? b.lanes : undefined
+          const variants = varyFeel(doc, track, { count, seed, ...(lanes ? { lanes } : {}) })
+          json(res, 200, {
+            track,
+            count: variants.length,
+            seed,
+            variants: variants.map((v, i) => ({ index: i, seed: seed + i, recipe: v.recipe, doc: v.doc })),
+          })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatVaryError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // POST /vary-feel/commit {track, seed, lanes?}: writes ONE feel variant for real — the "Keep"
+    // half of the audition/keep loop. Deterministic per (track, seed, lanes) — resending the exact
+    // seed a /vary-feel variant carried regenerates byte-identical content, so committing needs no
+    // edit-list replay (there isn't one; see /vary-feel's doc comment), just re-run + write.
+    if (req.method === 'POST' && url.pathname === '/vary-feel/commit') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; seed?: unknown; lanes?: unknown }
+          if (typeof b.track !== 'string' || typeof b.seed !== 'number') {
+            json(res, 400, { error: 'body must be {track: string, seed: number, lanes?: string[]}' })
+            return
+          }
+          const lanes = Array.isArray(b.lanes) && b.lanes.every((l) => typeof l === 'string') ? (b.lanes as string[]) : undefined
+          const track = doc.tracks.find((t) => t.id === b.track)
+          if (!track) throw new BeatVaryError(`no track "${b.track}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
+          const ids =
+            lanes && lanes.length
+              ? (() => {
+                  if (track.kind !== 'drums') throw new BeatVaryError(`lanes only applies to drum tracks; "${b.track}" is a ${track.kind} track`)
+                  const set = new Set(lanes)
+                  return track.hits.filter((h) => set.has(h.lane)).map((h) => h.id)
+                })()
+              : undefined
+          const { doc: next } = humanize(doc, b.track, { timing: 0.15, velocity: 0.06, pushLate: 0, swing: 0, seed: b.seed, ...(ids ? { ids } : {}) })
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatVaryError || err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // ─── Phase 23 Stream BB: drum-lane structural editing ───────────────────────────────────────────
+    // One route, six ops — same "whole-statement op" shape as /group (a lane list's shape/order
+    // isn't a single scalar, so it doesn't fit /edit's {path,value} grammar). Wraps core's
+    // materializeLanes/addLane/removeLane/moveLane/setLaneBacking/setLaneParam verbatim; RETURNS the
+    // fresh document (the daemon never SSE-echoes its own writes — same convention /effect-* and
+    // /group already use).
+    if (req.method === 'POST' && url.pathname === '/lane') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { op?: unknown; track?: unknown; name?: unknown; backing?: unknown; index?: unknown; key?: unknown; value?: unknown }
+          if (typeof b.track !== 'string') {
+            json(res, 400, { error: 'body must include a string track' })
+            return
+          }
+          let next: BeatDocument
+          if (b.op === 'materialize') {
+            next = materializeLanes(doc, b.track).doc
+          } else if (b.op === 'add') {
+            if (typeof b.name !== 'string' || typeof b.backing !== 'string') {
+              json(res, 400, { error: "op 'add' needs {name: string, backing: string}" })
+              return
+            }
+            const opts: Parameters<typeof addLane>[4] = {}
+            if (typeof b.index === 'number') opts.index = b.index
+            next = addLane(doc, b.track, b.name, b.backing.trim().split(/\s+/), opts).doc
+          } else if (b.op === 'remove') {
+            if (typeof b.name !== 'string') {
+              json(res, 400, { error: "op 'remove' needs {name: string}" })
+              return
+            }
+            next = removeLane(doc, b.track, b.name).doc
+          } else if (b.op === 'move') {
+            if (typeof b.name !== 'string' || typeof b.index !== 'number') {
+              json(res, 400, { error: "op 'move' needs {name: string, index: number}" })
+              return
+            }
+            next = moveLane(doc, b.track, b.name, b.index).doc
+          } else if (b.op === 'backing') {
+            if (typeof b.name !== 'string' || typeof b.backing !== 'string') {
+              json(res, 400, { error: "op 'backing' needs {name: string, backing: string}" })
+              return
+            }
+            next = setLaneBacking(doc, b.track, b.name, b.backing.trim().split(/\s+/)).doc
+          } else if (b.op === 'param') {
+            if (typeof b.name !== 'string' || typeof b.key !== 'string') {
+              json(res, 400, { error: "op 'param' needs {name: string, key: string, value?: number}" })
+              return
+            }
+            const value = b.value === '' || b.value === undefined || b.value === null ? undefined : Number(b.value)
+            if (value !== undefined && !Number.isFinite(value)) {
+              json(res, 400, { error: `op 'param' value must be a finite number or empty, got ${JSON.stringify(b.value)}` })
+              return
+            }
+            next = setLaneParam(doc, b.track, b.name, b.key, value).doc
+          } else {
+            json(res, 400, { error: `unknown op "${String(b.op)}" (expected materialize|add|remove|move|backing|param)` })
+            return
+          }
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
           json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return

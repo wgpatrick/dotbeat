@@ -3,8 +3,8 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, EffectType, OscType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain } from './document.js'
+import type { BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind, WarpMode } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -630,6 +630,174 @@ export function removeHit(doc: BeatDocument, trackId: string, hitId: string): { 
   const hit = track.hits.find((h) => h.id === hitId)
   if (!hit) throw new BeatEditError(`no hit "${hitId}" on track "${trackId}"`)
   return { doc: replaceTrack(doc, { ...track, hits: track.hits.filter((h) => h.id !== hitId) }), hit }
+}
+
+/** Phase 23 Stream BB: fine-grained, structural drum-lane editing primitives — the GUI-facing
+ * counterpart to `applyDrumKit`'s whole-list replace (drumkit.ts). Same split as the v0.10
+ * effect-chain primitives just above `addLane`/etc. in this file: add/remove/move change the
+ * LIST's shape or order, so each gets its own primitive rather than a setValue path=value entry.
+ * `setLaneBacking`/`setLaneParam` retype/tune a SINGLE existing lane in place. Every one of these
+ * requires the track to already be on the OPEN lane model (`lanes.length > 0`) — see
+ * `materializeLanes` below for the one-time, explicit opt-in a legacy/migrated track needs first
+ * (docs/phase-22-stream-ab.md §5 flagged exactly this gap: "no dedicated setValue path for
+ * lanes[].backing.params was added ... future work"). */
+
+const LANE_NAME_RE = /^[a-zA-Z0-9_-]+$/
+
+/** Parses the SAME backing grammar the file's own `lane <name> <backing>` line uses (see
+ * parse.ts's `tryParseLaneDecl`), from tokens already split off the name — e.g.
+ * `['synth:membrane', 'tune=30']`, `['sample', 'crash-1', '-3', '0']`, `['sf', 'gm-kit', '0',
+ * '37']`. A parallel implementation (not a shared import) is deliberate: parse.ts's version
+ * throws BeatParseError with a line number, drumkit.ts's parseBacking works off an already-parsed
+ * JSON object, and this one throws BeatEditError with no line number — three different error
+ * shapes for three different callers, same discipline the codebase already applies elsewhere
+ * (drumkit.ts's own header comment: "a different shape of edit ... gets its own ... trio"). */
+function parseLaneBackingTokens(name: string, tokens: string[]): BeatDrumLaneDecl['backing'] {
+  const sel = tokens[0]
+  if (sel === undefined) throw new BeatEditError(`lane "${name}": backing must be "synth:<voice> [key=value ...]" | "sample <id> <gainDb> <tune>" | "sf <id> <program> <note>"`)
+  if (sel.startsWith('synth:')) {
+    const voice = sel.slice('synth:'.length)
+    if (!(DRUM_VOICE_TYPES as readonly string[]).includes(voice)) {
+      throw new BeatEditError(`lane "${name}": unknown drum voice type "${voice}" (expected one of ${DRUM_VOICE_TYPES.join('|')})`)
+    }
+    const params: Record<string, number> = {}
+    for (const kv of tokens.slice(1)) {
+      const eq = kv.indexOf('=')
+      if (eq === -1) throw new BeatEditError(`lane "${name}": synth param must be "key=value", got "${kv}"`)
+      const key = kv.slice(0, eq)
+      params[key] = canon(parseNum(kv.slice(eq + 1), `lane ${name} ${key}`))
+    }
+    return { type: 'synth', voice: voice as DrumVoiceType, params }
+  }
+  if (sel === 'sample') {
+    if (tokens.length !== 4) throw new BeatEditError(`lane "${name}": sample backing expects "sample <sample-id> <gain dB> <tune semitones>", got "${tokens.join(' ')}"`)
+    const gainDb = canon(parseNum(tokens[2]!, `lane ${name} gain`))
+    const tune = canon(parseNum(tokens[3]!, `lane ${name} tune`))
+    if (tune < -24 || tune > 24) throw new BeatEditError(`lane "${name}": tune must be -24..24 semitones, got ${tune}`)
+    return { type: 'sample', sample: tokens[1]!, gainDb, tune }
+  }
+  if (sel === 'sf') {
+    if (tokens.length !== 4) throw new BeatEditError(`lane "${name}": sf backing expects "sf <sample-id> <program> <note>", got "${tokens.join(' ')}"`)
+    const program = Math.trunc(parseNum(tokens[2]!, `lane ${name} sf program`))
+    const note = Math.trunc(parseNum(tokens[3]!, `lane ${name} sf note`))
+    if (program < 0 || program > 127) throw new BeatEditError(`lane "${name}": sf program must be 0-127, got ${program}`)
+    if (note < 0 || note > 127) throw new BeatEditError(`lane "${name}": sf note must be 0-127, got ${note}`)
+    return { type: 'sf', sample: tokens[1]!, program, note }
+  }
+  throw new BeatEditError(`lane "${name}": backing must start with synth:<voice>|sample|sf, got "${sel}"`)
+}
+
+function requireDrumsWithOpenLanes(doc: BeatDocument, trackId: string): BeatTrack {
+  const track = findTrack(doc, trackId)
+  if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — lanes only belong on drum tracks`)
+  if (track.lanes.length === 0) {
+    throw new BeatEditError(`track "${trackId}" is still on the implicit 5-lane kit — call materializeLanes first (POST /lane {op:"materialize"}) to opt into per-lane editing`)
+  }
+  return track
+}
+
+/** One-time, explicit opt-in for a legacy/migrated drum track (declares no `lanes`, so it plays
+ * through the untouched 5-lane switch — see DRUM_LANES's doc comment) into the open lane model,
+ * so its lanes become individually addable/reorderable/retypeable. No-op (returns doc unchanged)
+ * if the track already declares lanes. Maps the OLD track-wide voice-shaping fields
+ * (kickTune/kickPunch/kickDecay, snareTone/snareDecay, hatDecay/hatTone/openHatDecay) onto the 5
+ * new per-lane synth backings so the migrated kit sounds the same as before the switch (clap has
+ * no legacy field — the engine hard-wires a fixed pink-noise voice for it — so it lands on the new
+ * model's plain noise defaults, the closest honest equivalent). Existing hits are untouched: they
+ * already reference these same 5 lane names, and `declaredLaneNames` returns the identical set
+ * before and after, so nothing about hit validation changes — only the ENGINE's dispatch flips
+ * from the legacy switch to the declared-lane table for this track going forward. */
+export function materializeLanes(doc: BeatDocument, trackId: string): { doc: BeatDocument; lanes: BeatDrumLaneDecl[] } {
+  const track = findTrack(doc, trackId)
+  if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — lanes only belong on drum tracks`)
+  if (track.lanes.length > 0) return { doc, lanes: track.lanes }
+  const p = track.synth
+  const lanes: BeatDrumLaneDecl[] = [
+    { name: 'kick', backing: { type: 'synth', voice: 'membrane', params: { tune: p.kickTune, punch: p.kickPunch, decay: p.kickDecay } } },
+    { name: 'snare', backing: { type: 'synth', voice: 'noise', params: { tone: p.snareTone, decay: p.snareDecay } } },
+    { name: 'clap', backing: { type: 'synth', voice: 'noise', params: {} } },
+    { name: 'hat', backing: { type: 'synth', voice: 'metal', params: { decay: p.hatDecay, tone: p.hatTone } } },
+    { name: 'openhat', backing: { type: 'synth', voice: 'metal', params: { decay: p.openHatDecay, tone: p.hatTone } } },
+  ]
+  return { doc: replaceTrack(doc, { ...track, lanes }), lanes }
+}
+
+/** Appends a new declared lane (`index` inserts at that position, clamped; omitted = end — same
+ * convention as `addEffect`). `backingTokens` is the backing grammar's tokens AFTER the name
+ * (e.g. `['synth:noise', 'decay=0.2']`). Requires the track already be on the open lane model
+ * (see `materializeLanes`). */
+export function addLane(doc: BeatDocument, trackId: string, name: string, backingTokens: string[], opts: { index?: number } = {}): { doc: BeatDocument; lane: BeatDrumLaneDecl } {
+  const track = requireDrumsWithOpenLanes(doc, trackId)
+  if (!LANE_NAME_RE.test(name)) throw new BeatEditError(`lane names are single alphanumeric/_/- tokens, got "${name}"`)
+  if (track.lanes.some((l) => l.name === name)) throw new BeatEditError(`lane "${name}" already exists on track "${trackId}"`)
+  const backing = parseLaneBackingTokens(name, backingTokens)
+  if ((backing.type === 'sample' || backing.type === 'sf') && !doc.media.some((m) => m.id === backing.sample)) {
+    throw new BeatEditError(`lane "${name}": references unregistered sample "${backing.sample}" — register it with beat sample first`)
+  }
+  const added: BeatDrumLaneDecl = { name, backing }
+  const index = opts.index === undefined ? track.lanes.length : Math.max(0, Math.min(Math.trunc(opts.index), track.lanes.length))
+  const lanes = [...track.lanes.slice(0, index), added, ...track.lanes.slice(index)]
+  return { doc: replaceTrack(doc, { ...track, lanes }), lane: added }
+}
+
+/** Removes a declared lane. Refuses if any hit still references it (same "re-lane them first"
+ * discipline `applyDrumKit`'s orphan check uses) — a lane can't be silently dropped out from
+ * under existing hits. */
+export function removeLane(doc: BeatDocument, trackId: string, name: string): { doc: BeatDocument; lane: BeatDrumLaneDecl } {
+  const track = requireDrumsWithOpenLanes(doc, trackId)
+  const lane = track.lanes.find((l) => l.name === name)
+  if (!lane) throw new BeatEditError(`no lane "${name}" on track "${trackId}" (have: ${track.lanes.map((l) => l.name).join(', ')})`)
+  if (track.hits.some((h) => h.lane === name)) {
+    throw new BeatEditError(`track "${trackId}" has hits on lane "${name}" — remove or re-lane them first`)
+  }
+  return { doc: replaceTrack(doc, { ...track, lanes: track.lanes.filter((l) => l.name !== name) }), lane }
+}
+
+/** Moves a declared lane to a new position (0-based, clamped) — array order IS row order (the
+ * editor's row axis and the engine's dispatch both iterate `lanes` in declaration order), so this
+ * is the whole reorder operation, same shape as `moveEffect`. */
+export function moveLane(doc: BeatDocument, trackId: string, name: string, toIndex: number): { doc: BeatDocument; lane: BeatDrumLaneDecl; before: number; after: number } {
+  const track = requireDrumsWithOpenLanes(doc, trackId)
+  const from = track.lanes.findIndex((l) => l.name === name)
+  if (from === -1) throw new BeatEditError(`no lane "${name}" on track "${trackId}" (have: ${track.lanes.map((l) => l.name).join(', ')})`)
+  const after = Math.max(0, Math.min(Math.trunc(toIndex), track.lanes.length - 1))
+  const lanes = [...track.lanes]
+  const [item] = lanes.splice(from, 1)
+  lanes.splice(after, 0, item!)
+  return { doc: replaceTrack(doc, { ...track, lanes }), lane: item!, before: from, after }
+}
+
+/** Retypes/replaces one lane's WHOLE backing (e.g. synth:membrane -> sample, or a fresh synth
+ * voice with a fresh param bag) — the lane-level analog of `applyDrumKit`'s whole-list replace,
+ * scoped to one lane. The lane's NAME (and therefore every hit referencing it) is untouched. */
+export function setLaneBacking(doc: BeatDocument, trackId: string, name: string, backingTokens: string[]): { doc: BeatDocument; lane: BeatDrumLaneDecl } {
+  const track = requireDrumsWithOpenLanes(doc, trackId)
+  const idx = track.lanes.findIndex((l) => l.name === name)
+  if (idx === -1) throw new BeatEditError(`no lane "${name}" on track "${trackId}" (have: ${track.lanes.map((l) => l.name).join(', ')})`)
+  const backing = parseLaneBackingTokens(name, backingTokens)
+  if ((backing.type === 'sample' || backing.type === 'sf') && !doc.media.some((m) => m.id === backing.sample)) {
+    throw new BeatEditError(`lane "${name}": references unregistered sample "${backing.sample}" — register it with beat sample first`)
+  }
+  const lanes = track.lanes.map((l, i) => (i === idx ? { name, backing } : l))
+  return { doc: replaceTrack(doc, { ...track, lanes }), lane: lanes[idx]! }
+}
+
+/** Fine-grained single-param edit on a synth-backed lane — the exact gap
+ * docs/phase-22-stream-ab.md §5 flagged ("no dedicated setValue path for lanes[].backing.params
+ * was added"). `value === undefined` clears the override back to that voice type's default
+ * (DRUM_VOICE_PARAM_DEFAULTS), matching the format's own canonical-elision discipline for these
+ * params (serialize.ts's `serializeLaneBacking` already omits a param equal to its default). */
+export function setLaneParam(doc: BeatDocument, trackId: string, name: string, key: string, value: number | undefined): { doc: BeatDocument; lane: BeatDrumLaneDecl } {
+  const track = requireDrumsWithOpenLanes(doc, trackId)
+  const idx = track.lanes.findIndex((l) => l.name === name)
+  if (idx === -1) throw new BeatEditError(`no lane "${name}" on track "${trackId}" (have: ${track.lanes.map((l) => l.name).join(', ')})`)
+  const lane = track.lanes[idx]!
+  if (lane.backing.type !== 'synth') throw new BeatEditError(`lane "${name}" is ${lane.backing.type}-backed — only synth-backed lanes take per-param edits`)
+  const params = { ...lane.backing.params }
+  if (value === undefined) delete params[key]
+  else params[key] = canon(value)
+  const lanes = track.lanes.map((l, i) => (i === idx ? { ...l, backing: { ...l.backing, params } as BeatLaneBacking } : l))
+  return { doc: replaceTrack(doc, { ...track, lanes }), lane: lanes[idx]! }
 }
 
 /** Removes a track. A document keeps at least one track (the grammar's selected_track needs a

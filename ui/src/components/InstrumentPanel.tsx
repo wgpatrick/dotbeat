@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Knob } from './Knob'
 import { type BeatTrack } from '../types'
 import { postEdit, daemonBase } from '../daemon/bridge'
+import { fetchLibrary, installSoundfont, type LibrarySoundfont } from '../daemon/library'
 
 // Phase 14 Stream F: the device panel for an instrument (SoundFont) track. Instrument tracks carry
 // a tiny param set (BeatInstrument: sample/program/volume/pan) rather than the 55-field synth block,
@@ -15,6 +16,104 @@ interface Preset {
   bankMSB: number
   bankLSB: number
   name: string
+}
+
+// Phase 23 Stream BB: the hot-swap SOUNDFONT browser inside Device View — the instrument-track
+// analog of SynthPanel's PresetPicker. Swaps which bank this track plays (reassigns via
+// installSoundfont, the same daemon route Phase 22 Stream AH's sidebar drag/+ button uses) without
+// leaving the panel. A real, persisted write (not a preview) — same distinction AH's own honest-gap
+// note draws between the sidebar's outside-the-panel drop and this inside-the-panel swap.
+function SoundfontPicker({ track }: { track: BeatTrack }) {
+  const [fonts, setFonts] = useState<LibrarySoundfont[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [cursor, setCursor] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [applied, setApplied] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchLibrary()
+      .then((lib) => {
+        if (!cancelled) setFonts(lib.soundfonts)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function swap(file: string) {
+    setBusy(true)
+    setError(null)
+    setApplied(null)
+    try {
+      await installSoundfont(file, { track: track.id })
+      setApplied(file)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (error && !fonts) return <div className="preset-picker preset-picker-error">soundfont browser: {error}</div>
+  if (!fonts) return <div className="preset-picker">loading soundfonts…</div>
+  if (fonts.length === 0) return null
+
+  const current = fonts[cursor]
+
+  return (
+    <div className="preset-picker" data-testid="soundfont-picker">
+      <span className="preset-picker-label">soundfont</span>
+      <button
+        type="button"
+        data-soundfont-prev
+        disabled={busy}
+        onClick={() => {
+          const next = (cursor - 1 + fonts.length) % fonts.length
+          setCursor(next)
+          void swap(fonts[next]!.file)
+        }}
+        title="previous soundfont"
+      >
+        {'◀'}
+      </button>
+      <select
+        data-soundfont-select
+        value={current?.file ?? ''}
+        disabled={busy}
+        onChange={(e) => {
+          const i = fonts.findIndex((f) => f.file === e.target.value)
+          if (i === -1) return
+          setCursor(i)
+          void swap(fonts[i]!.file)
+        }}
+      >
+        {fonts.map((f) => (
+          <option key={f.file} value={f.file}>
+            {f.file}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        data-soundfont-next
+        disabled={busy}
+        onClick={() => {
+          const next = (cursor + 1) % fonts.length
+          setCursor(next)
+          void swap(fonts[next]!.file)
+        }}
+        title="next soundfont"
+      >
+        {'▶'}
+      </button>
+      {applied && <span className="preset-picker-applied">swapped in &quot;{applied}&quot;</span>}
+      {error && <span className="preset-picker-error">{error}</span>}
+    </div>
+  )
 }
 
 export function InstrumentPanel({ track }: { track: BeatTrack }) {
@@ -53,6 +152,7 @@ export function InstrumentPanel({ track }: { track: BeatTrack }) {
         </span>
         <span className="toolbar-tip">instrument (SoundFont) track · pick a program · set level/pan · each edit is one line in the .beat file</span>
       </div>
+      <SoundfontPicker track={track} />
       <div className="param-groups">
         <div className="param-group" style={{ display: 'block' }}>
           <div className="param-group-title">soundfont</div>

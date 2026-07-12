@@ -21,6 +21,7 @@ export const DRUM_LABELS: Record<DrumLane, string> = {
 // synth-backed) or a fully-declared, ordered list that's authoritative for that track's lane
 // identity — see declaredLaneNames() below.
 export type DrumVoiceType = 'membrane' | 'noise' | 'metal'
+export const DRUM_VOICE_TYPES: readonly DrumVoiceType[] = ['membrane', 'noise', 'metal']
 export interface BeatLaneSynthBacking {
   type: 'synth'
   voice: DrumVoiceType
@@ -218,12 +219,18 @@ export interface BeatTrack {
   shuffleGrid: number
 }
 
+export interface BeatMediaSample {
+  id: string
+  sha256: string
+  path: string
+}
+
 export interface BeatDocument {
   formatVersion: string
   bpm: number
   loopBars: number
   selectedTrack: string
-  media: unknown[]
+  media: BeatMediaSample[]
   tracks: BeatTrack[]
   groups: BeatGroup[]
   scenes: BeatScene[]

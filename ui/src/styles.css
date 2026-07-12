@@ -2422,6 +2422,205 @@ body {
   color: var(--accent);
 }
 
+/* ---- Phase 23 Stream BB: hot-swap preset/soundfont picker (Device View, inside SynthPanel/
+   InstrumentPanel) — distinct from the Phase 22 Stream AH sidebar's drag-from-outside gesture. */
+.preset-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-size: 11px;
+}
+.preset-picker-label {
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+.preset-picker button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.preset-picker button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.preset-picker select {
+  flex: 1;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+}
+.preset-picker-applied {
+  color: var(--accent);
+}
+.preset-picker-error {
+  color: var(--danger, #e06c75);
+}
+
+/* ---- Phase 23 Stream BB: drum-lane management panel (Clip View, drum tracks only) ---- */
+.lane-panel {
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-size: 11px;
+}
+.lane-panel-title {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  user-select: none;
+}
+.lane-panel-materialize {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 8px;
+}
+.lane-panel-hint {
+  color: var(--text-dim);
+  flex: 1;
+}
+.lane-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 10px 8px;
+}
+.lane-row {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+}
+.lane-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+}
+.lane-row-name {
+  font-weight: 700;
+  min-width: 70px;
+}
+.lane-row-backing {
+  flex: 1;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lane-row-head button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  cursor: pointer;
+}
+.lane-row-head button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.lane-row-head button.lane-row-remove {
+  color: var(--text-dim);
+}
+.lane-row-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 8px;
+  border-top: 1px solid var(--line);
+}
+.lane-edit-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+}
+.lane-edit-field input,
+.lane-edit-field select {
+  font: inherit;
+  font-size: 11px;
+  width: 64px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+}
+.lane-edit-field select {
+  width: auto;
+}
+.lane-row-error {
+  padding: 2px 8px 6px;
+  color: var(--danger, #e06c75);
+}
+.lane-add-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+.lane-add-form input {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  flex: 1;
+}
+.lane-add-form select {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+}
+.lane-add-form button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.lane-add-form button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ---- Phase 22 Stream AG: overlap-resolution policy selector (arrangement toolbar) ---- */
 .arr-overlap-policy {
   display: flex;

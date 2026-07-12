@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Knob } from './Knob'
 import { PARAM_GROUPS, type ParamGroup, type ParamSpec, type TrackKind } from './synthParams'
 import { EFFECT_TYPES, EFFECT_LABELS, type BeatEffect, type BeatTrack, type EffectType } from '../types'
 import { postEdit, postEffectAdd, postEffectRemove, postEffectMove, postEffectEnabled } from '../daemon/bridge'
+import { fetchLibrary, applyPresetToTrack, type LibraryPreset } from '../daemon/library'
 import { useStore } from '../state/store'
 
 // The device panel for one track's FULL synth surface — the core 9 plus every optional
@@ -190,6 +191,112 @@ function EffectChain({ track }: { track: BeatTrack }) {
   )
 }
 
+// Phase 23 Stream BB: the hot-swap preset browser INSIDE Device View — swap a track's preset
+// without leaving the panel. Distinct from Phase 22 Stream AH's ContentBrowser sidebar (dragging a
+// preset onto a track header from OUTSIDE Device View, docs/phase-22-stream-ah.md's own honest-gap
+// note): this lives in the panel itself, with Prev/Next for quick auditioning-by-browsing.
+// `applyPreset` (core's real mechanism, same one the sidebar drop and `beat preset` both call) is a
+// literal one-shot param application — "presets are tooling, never in-file indirection"
+// (format-spec.md) — so there is no "currently applied preset" to read back from the document; the
+// browsing cursor below is local UI state only (which list entry Prev/Next currently points at),
+// not a claim about what's live until the human actually picks one.
+function PresetPicker({ track }: { track: BeatTrack }) {
+  const [presets, setPresets] = useState<LibraryPreset[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [cursor, setCursor] = useState(0)
+  const [applying, setApplying] = useState(false)
+  const [applied, setApplied] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchLibrary()
+      .then((lib) => {
+        if (cancelled) return
+        const kind = track.kind === 'drums' ? 'drums' : 'synth'
+        setPresets(lib.presets.filter((p) => p.kind === kind || p.kind === 'any'))
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [track.kind])
+
+  if (track.kind !== 'synth' && track.kind !== 'drums') return null
+
+  async function apply(name: string) {
+    setApplying(true)
+    setError(null)
+    setApplied(null)
+    try {
+      await applyPresetToTrack(track.id, name)
+      setApplied(name)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  if (error && !presets) return <div className="preset-picker preset-picker-error">preset browser: {error}</div>
+  if (!presets) return <div className="preset-picker">loading presets…</div>
+  if (presets.length === 0) return null
+
+  const current = presets[cursor]
+
+  return (
+    <div className="preset-picker" data-testid="preset-picker">
+      <span className="preset-picker-label">preset</span>
+      <button
+        type="button"
+        data-preset-prev
+        disabled={applying}
+        onClick={() => {
+          const next = (cursor - 1 + presets.length) % presets.length
+          setCursor(next)
+          void apply(presets[next]!.name)
+        }}
+        title="previous preset"
+      >
+        {'◀'}
+      </button>
+      <select
+        data-preset-select
+        value={current?.name ?? ''}
+        disabled={applying}
+        onChange={(e) => {
+          const i = presets.findIndex((p) => p.name === e.target.value)
+          if (i === -1) return
+          setCursor(i)
+          void apply(presets[i]!.name)
+        }}
+      >
+        {presets.map((p) => (
+          <option key={p.name} value={p.name}>
+            {p.name} — {p.category}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        data-preset-next
+        disabled={applying}
+        onClick={() => {
+          const next = (cursor + 1) % presets.length
+          setCursor(next)
+          void apply(presets[next]!.name)
+        }}
+        title="next preset"
+      >
+        {'▶'}
+      </button>
+      {applied && <span className="preset-picker-applied">applied &quot;{applied}&quot;</span>}
+      {error && <span className="preset-picker-error">{error}</span>}
+    </div>
+  )
+}
+
 function Group({ track, group, trackIds }: { track: BeatTrack; group: ParamGroup; trackIds: string[] }) {
   return (
     <details className="param-group" open={group.open}>
@@ -221,6 +328,7 @@ export function SynthPanel({ track }: { track: BeatTrack }) {
           {kind === 'drums' ? 'drum bus + voice params' : 'full synth surface'} · drag a knob · every edit is one line in the .beat file
         </span>
       </div>
+      <PresetPicker track={track} />
       {kind === 'synth' && <EffectChain track={track} />}
       <div className="param-groups">
         {groups.map((g) => (

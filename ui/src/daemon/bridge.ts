@@ -566,6 +566,95 @@ export async function requestVary(body: { track?: string; group?: string; count?
   return (await res.json()) as VaryBatch
 }
 
+// ─── rung-2 "feel" vary-and-audition (Phase 23 Stream BB) ───────────────────────────────────────
+// The content-variation analog of requestVary/Keep above. `varyFeel` rewrites many note/hit
+// fields per variant (not a small edit list), so each variant carries a FULL document (applied
+// straight to the store for audition — no applyEdits mirror needed) plus the reproducible seed
+// that produced it. "Keep" resends that seed to POST /vary-feel/commit, which regenerates the
+// SAME content deterministically and writes it — see daemon.ts's route comment.
+
+export interface FeelVariantDto {
+  index: number
+  seed: number
+  recipe: string
+  doc: BeatDocument
+}
+export interface FeelBatch {
+  track: string
+  count: number
+  seed: number
+  variants: FeelVariantDto[]
+}
+
+export async function requestVaryFeel(body: { track?: string; count?: number; seed?: number; lanes?: string[] } = {}): Promise<FeelBatch> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/vary-feel`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const msg = await res
+      .json()
+      .then((b) => (b as { error?: string }).error)
+      .catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  return (await res.json()) as FeelBatch
+}
+
+/** Commits one feel variant for real (writes to disk), by resending the exact seed a batch
+ * offered. RETURNS the fresh document (no SSE echo of the daemon's own write) — applied straight
+ * to the store, same convention as postAddTrack/postEffectOp. */
+export async function commitVaryFeel(track: string, seed: number, lanes?: string[]): Promise<void> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/vary-feel/commit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ track, seed, ...(lanes ? { lanes } : {}) }),
+  })
+  if (!res.ok) {
+    const msg = await res
+      .json()
+      .then((b) => (b as { error?: string }).error)
+      .catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc } = (await res.json()) as { written: boolean; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
+}
+
+// ─── drum-lane structural editing (Phase 23 Stream BB) ──────────────────────────────────────────
+// One route, six ops — same "whole-statement op" shape as postGroupOp (a lane list's shape/order
+// isn't a single {path,value} scalar). RETURNS the fresh document (no SSE echo of the daemon's own
+// write), applied straight to the store — same convention as postEffectOp/postGroupOp.
+
+export type LaneOp =
+  | { op: 'materialize'; track: string }
+  | { op: 'add'; track: string; name: string; backing: string; index?: number }
+  | { op: 'remove'; track: string; name: string }
+  | { op: 'move'; track: string; name: string; index: number }
+  | { op: 'backing'; track: string; name: string; backing: string }
+  | { op: 'param'; track: string; name: string; key: string; value?: number | '' }
+
+export async function postLaneOp(body: LaneOp): Promise<void> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/lane`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const msg = await res
+      .json()
+      .then((b) => (b as { error?: string }).error)
+      .catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc } = (await res.json()) as { written: boolean; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
+}
+
 async function pullDocument(base: string): Promise<void> {
   try {
     const res = await fetch(`${base}/document`)

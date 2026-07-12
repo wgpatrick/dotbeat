@@ -12,7 +12,7 @@
 
 import { useRef, useState } from 'react'
 import { useStore } from '../state/store'
-import { applyEdits, requestVary, postEdit, type VaryBatch } from '../daemon/bridge'
+import { applyEdits, requestVary, requestVaryFeel, commitVaryFeel, postEdit, type VaryBatch, type FeelBatch } from '../daemon/bridge'
 import type { BeatDocument, BeatSelection } from '../types'
 
 // Mirror of the daemon's DRUM_LANE_GROUP + kind default, for the trigger LABEL only — the daemon is
@@ -36,6 +36,16 @@ function previewScope(sel: BeatSelection, doc: BeatDocument | null): { track?: s
   return { track, group }
 }
 
+/** Drum lanes selected on `track` (the exact "lane click narrows vary-scope" gesture NoteView.tsx's
+ * `buildLaneAxis.preview` already posts) — feed straight into /vary-feel's optional `lanes` scope, so
+ * selecting the hats and running "vary feel" humanizes just the hats, mirroring param-vary's own
+ * lane-inferred group. Undefined (whole track) when nothing lane-specific is selected. */
+function feelLaneScope(sel: BeatSelection, track: string | undefined): string[] | undefined {
+  if (!track) return undefined
+  const lanes = sel.lanes?.filter((l) => l.track === track).map((l) => l.lane)
+  return lanes && lanes.length ? lanes : undefined
+}
+
 function selectionSummary(sel: BeatSelection): string {
   const parts: string[] = []
   if (sel.lanes?.length) parts.push(sel.lanes.map((l) => `${l.track}.${l.lane}`).join(' '))
@@ -57,9 +67,20 @@ export function VaryAffordance() {
   // Keep, implicitly) return here. Held in a ref so it survives re-renders without re-triggering.
   const baseDoc = useRef<BeatDocument | null>(null)
 
+  // ── Phase 23 Stream BB: rung-2 "feel" (humanized content) audition — the same trigger/audition/
+  // Keep/Undo shape as the rung-1 param-vary state above, but each variant is a FULL document (not
+  // a small edit list — humanize rewrites many note/hit fields), and Keep resends the variant's
+  // reproducible seed to POST /vary-feel/commit rather than replaying edits (see bridge.ts).
+  const [feelBatch, setFeelBatch] = useState<FeelBatch | null>(null)
+  const [feelIndex, setFeelIndex] = useState(0)
+  const [feelBusy, setFeelBusy] = useState(false)
+  const [feelError, setFeelError] = useState<string | null>(null)
+  const [feelKept, setFeelKept] = useState<string | null>(null)
+  const feelBaseDoc = useRef<BeatDocument | null>(null)
+
   const hasSelection = Object.keys(selection).length > 0
-  // Show whenever there's a selection to act on, or an audition is in flight.
-  if (!doc || (!hasSelection && !batch)) return null
+  // Show whenever there's a selection to act on, or either kind of audition is in flight.
+  if (!doc || (!hasSelection && !batch && !feelBatch)) return null
 
   const scope = previewScope(selection, doc)
   const triggerLabel = scope.group ? `vary ${scope.group}` : 'vary'
@@ -107,7 +128,57 @@ export function VaryAffordance() {
     setError(null)
   }
 
-  // ── Audition strip ──────────────────────────────────────────────────────────────────────────
+  async function triggerFeel() {
+    const current = useStore.getState().doc
+    if (!current) return
+    setFeelBusy(true)
+    setFeelError(null)
+    setFeelKept(null)
+    try {
+      const lanes = feelLaneScope(selection, scope.track)
+      const b = await requestVaryFeel(lanes ? { lanes } : {}) // track resolved server-side from selection
+      if (!b.variants.length) throw new Error('no variants returned')
+      feelBaseDoc.current = current
+      setFeelBatch(b)
+      setFeelIndex(0)
+      useStore.getState().setDoc(b.variants[0]!.doc) // a FULL document, applied directly (no edit list to replay)
+    } catch (e) {
+      setFeelError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setFeelBusy(false)
+    }
+  }
+
+  function showFeel(i: number) {
+    if (!feelBatch) return
+    const clamped = Math.max(0, Math.min(feelBatch.variants.length - 1, i))
+    setFeelIndex(clamped)
+    useStore.getState().setDoc(feelBatch.variants[clamped]!.doc)
+  }
+
+  async function keepFeel() {
+    if (!feelBatch) return
+    const chosen = feelBatch.variants[feelIndex]!
+    try {
+      // Resend the exact seed the audition offered — /vary-feel/commit regenerates the identical
+      // content deterministically and writes it (no edit-list replay; see bridge.ts's doc comment).
+      await commitVaryFeel(feelBatch.track, chosen.seed, feelLaneScope(selection, feelBatch.track))
+      setFeelKept(`kept feel variant ${feelIndex + 1}: ${chosen.recipe}`)
+    } catch (e) {
+      setFeelError(e instanceof Error ? e.message : String(e))
+    }
+    setFeelBatch(null)
+    feelBaseDoc.current = null
+  }
+
+  function cancelFeel() {
+    if (feelBaseDoc.current) useStore.getState().setDoc(feelBaseDoc.current)
+    setFeelBatch(null)
+    feelBaseDoc.current = null
+    setFeelError(null)
+  }
+
+  // ── Audition strip: rung-1 param vary ───────────────────────────────────────────────────────
   if (batch) {
     const v = batch.variants[index]!
     return (
@@ -139,15 +210,50 @@ export function VaryAffordance() {
     )
   }
 
+  // ── Audition strip: rung-2 "feel" content vary ──────────────────────────────────────────────
+  if (feelBatch) {
+    const v = feelBatch.variants[feelIndex]!
+    return (
+      <div className="vary-bar auditioning" role="group" aria-label="vary feel audition">
+        <span className="vary-scope">feel on {feelBatch.track}</span>
+        <span className="vary-count">
+          variant {feelIndex + 1} of {feelBatch.variants.length}
+        </span>
+        <span className="vary-label" title={v.recipe}>
+          {v.recipe}
+        </span>
+        <div className="vary-actions">
+          <button className="vary-btn" onClick={() => showFeel(feelIndex - 1)} disabled={feelIndex === 0} title="previous variant">
+            {'◀'} Prev
+          </button>
+          <button className="vary-btn" onClick={() => showFeel(feelIndex + 1)} disabled={feelIndex === feelBatch.variants.length - 1} title="next variant">
+            Next {'▶'}
+          </button>
+          <button className="vary-btn keep" onClick={() => void keepFeel()} title="commit this humanized feel to the file">
+            Keep
+          </button>
+          <button className="vary-btn undo" onClick={cancelFeel} title="discard all variants, restore the original">
+            Undo
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   // ── Idle trigger ────────────────────────────────────────────────────────────────────────────
   return (
     <div className="vary-bar" role="group" aria-label="vary selection">
       <span className="vary-scope-hint">selection: {selectionSummary(selection)}</span>
-      <button className="vary-btn trigger" onClick={trigger} disabled={busy} title="generate variations of the selection">
+      <button className="vary-btn trigger" onClick={trigger} disabled={busy} title="generate parameter variations of the selection (rung 1)">
         {busy ? 'varying…' : `≈ ${triggerLabel}`}
+      </button>
+      <button className="vary-btn trigger" onClick={() => void triggerFeel()} disabled={feelBusy} title="generate humanized timing/velocity feels of the selection (rung 2)">
+        {feelBusy ? 'varying…' : '≈ vary feel'}
       </button>
       {kept && <span className="vary-kept">{kept}</span>}
       {error && <span className="vary-error">{error}</span>}
+      {feelKept && <span className="vary-kept">{feelKept}</span>}
+      {feelError && <span className="vary-error">{feelError}</span>}
     </div>
   )
 }
