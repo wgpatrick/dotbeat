@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Knob } from './Knob'
 import { engine } from '../audio/engine'
 import { onAnimationFrame } from '../audio/animationFrame'
@@ -86,12 +86,30 @@ function Fader({ value, onChange }: { value: number; onChange: (v: number) => vo
 // (engine.getTrackLevel). It never routes continuous per-frame data through Zustand — the level is a
 // direct engine tap, not React state (docs/research/15 §2). A muted track's post-mute meter reads
 // silent, so this doubles as visual confirmation the mute gate is real.
+//
+// Phase 26 Stream DE adds two things research 61 §1b item 1 flagged as the single most bug-
+// relevant metering gap (an RMS-only meter made docs/volume-fader-bugfix.md's own 8.1dB->1.3dB
+// crest-factor collapse invisible during development): (1) a peak segment — a short (PEAK_HOLD_MS)
+// rolling max of engine.getTrackPeak's instantaneous per-frame readings, drawn as a thin cap above
+// the RMS fill, same levelTap the RMS bar already reads (no new audio-graph node); (2) a sticky
+// "went over 0dB" peak-hold LED, exactly like a real hardware meter's — latches on the first over,
+// stays lit (independent of the rolling window's own decay) until clicked to clear. Session-only
+// state (not a `.beat` field), same treatment as mute/solo.
 const METER_W = 8
 const METER_H = 150
 const METER_MIN_DB = -60
+const PEAK_HOLD_MS = 250
 
 function TrackMeter({ trackId }: { trackId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  // A plain ref, not React state — the rolling peak window is per-frame data, same "direct engine
+  // tap, never through Zustand/setState" discipline the RMS bar already follows. `clipped` is the
+  // one exception: it drives a separate DOM element (the peak-hold LED button below) that a click
+  // handler also needs to reach, so it has to be real state — but it's only ever flipped false->true
+  // once per over (repeat writes of `true` are no-ops to React) and true->false on an explicit click,
+  // never on every animation frame.
+  const peakWindowRef = useRef<{ t: number; db: number }[]>([])
+  const [clipped, setClipped] = useState(false)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -114,12 +132,48 @@ function TrackMeter({ trackId }: { trackId: string }) {
         ctx.fillStyle = color
         ctx.fillRect(0, h - barH, w, barH)
       }
+
+      // Peak segment: a short-window max-hold of the SAME tap's instantaneous peak reading (see
+      // engine.ts's getTrackPeak/peakDb), so a fast transient that the RMS fill's own averaging
+      // would smear out still shows up as a distinct cap for ~PEAK_HOLD_MS after it happens.
+      const now = performance.now()
+      const peakNow = engine.getTrackPeak(trackId)
+      if (peakNow !== null && Number.isFinite(peakNow)) peakWindowRef.current.push({ t: now, db: peakNow })
+      while (peakWindowRef.current.length && now - peakWindowRef.current[0]!.t > PEAK_HOLD_MS) peakWindowRef.current.shift()
+      let windowPeak = -Infinity
+      for (const p of peakWindowRef.current) if (p.db > windowPeak) windowPeak = p.db
+
+      if (Number.isFinite(windowPeak) && windowPeak > METER_MIN_DB) {
+        const norm = Math.max(0, Math.min(1, (windowPeak - METER_MIN_DB) / (0 - METER_MIN_DB)))
+        const y = Math.max(0, h - norm * h - 1)
+        ctx.fillStyle = windowPeak > 0 ? '#ff3b30' : '#f0f0f0'
+        ctx.fillRect(0, y, w, 2)
+      }
+      if (windowPeak > 0) setClipped(true) // sticky peak-hold LED — cleared only by the click handler below
     }
 
     return onAnimationFrame(draw)
   }, [trackId])
 
-  return <canvas ref={canvasRef} width={METER_W} height={METER_H} className="mixer-meter" title="live level (post-fader, post-mute)" />
+  return (
+    <div className="mixer-meter-wrap">
+      <canvas
+        ref={canvasRef}
+        width={METER_W}
+        height={METER_H}
+        className="mixer-meter"
+        data-track-meter={trackId}
+        title="live level (post-fader, post-mute) — RMS fill + peak segment"
+      />
+      <button
+        type="button"
+        className={`mixer-meter-clip ${clipped ? 'on' : ''}`}
+        data-clip-indicator={trackId}
+        title={clipped ? 'went over 0dB — click to clear' : 'peak-hold: clean since last clear'}
+        onClick={() => setClipped(false)}
+      />
+    </div>
+  )
 }
 
 // ---- FX-chain indicator (Phase 16 Stream K) ------------------------------------------------
@@ -272,7 +326,8 @@ export function MixerView() {
         <span className="editor-title">mixer</span>
         <span className="toolbar-tip">
           level + pan write to the .beat (one-line diff) · mute/solo are session-only but now gate audio (incl. instrument tracks) · live per-track
-          meters (incl. instrument tracks) · badges show each strip's active insert chain · shuffle/grid knobs write groove
+          meters (incl. instrument tracks) with a peak segment + click-to-clear "went over 0dB" LED · badges show each strip's active insert chain ·
+          shuffle/grid knobs write groove
         </span>
       </div>
       <div className="mixer-strips">

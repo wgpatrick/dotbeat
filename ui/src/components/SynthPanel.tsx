@@ -5,6 +5,8 @@ import { EFFECT_TYPES, EFFECT_LABELS, type BeatEffect, type BeatTrack, type Effe
 import { postEdit, postEffectAdd, postEffectRemove, postEffectMove, postEffectEnabled } from '../daemon/bridge'
 import { fetchLibrary, applyPresetToTrack, type LibraryPreset } from '../daemon/library'
 import { useStore } from '../state/store'
+import { engine } from '../audio/engine'
+import { onAnimationFrame } from '../audio/animationFrame'
 
 // The device panel for one track's FULL synth surface — the core 9 plus every optional
 // SYNTH_FIELD (~54), organized into collapsible musical groups (osc / filter+env / LFO / amp /
@@ -82,6 +84,63 @@ function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec;
   )
 }
 
+// Per-effect level meter (Phase 26 Stream DE — closes research 63 §2 item 1, "not clear if [an
+// effect is] actually doing anything," the sharpest gap both research 61 and research 63
+// independently flagged). Same canvas-off-the-shared-rAF-driver discipline as MixerView's
+// TrackMeter (never routes continuous per-frame data through Zustand, docs/research/15 §2), but
+// reads engine.getEffectLevel(trackId, effect.id) — a tap on THIS specific effect instance's own
+// `exit` node (engine.ts's EffectRuntime.levelTap), not the whole track's post-fader output. A
+// BYPASSED effect (unchecked "on") is spliced fully out of the audio graph by reconcileEffectChain
+// — nothing connects into its `entry` at all — so this meter reads true silence for a bypassed row,
+// making the enabled/bypassed distinction visible here, not just inferable from the checkbox state.
+// (A live-but-`mix: 0` insert still passes its dry signal through unprocessed by design — same
+// "real bypass, not a wet-knob illusion" distinction research 63 §1a already documents — so this
+// meter answers "is anything reaching/leaving this device," which is the complaint it targets; it
+// is not a wet-only/processing-amount meter.)
+const EFFECT_METER_W = 34
+const EFFECT_METER_H = 8
+const EFFECT_METER_MIN_DB = -60
+
+function EffectMeter({ trackId, effectId }: { trackId: string; effectId: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const draw = () => {
+      const w = canvas.width
+      const h = canvas.height
+      ctx.fillStyle = '#151515'
+      ctx.fillRect(0, 0, w, h)
+
+      const level = engine.getEffectLevel(trackId, effectId)
+      if (level !== null && Number.isFinite(level) && level > EFFECT_METER_MIN_DB) {
+        const norm = Math.max(0, Math.min(1, (level - EFFECT_METER_MIN_DB) / (0 - EFFECT_METER_MIN_DB)))
+        const barW = norm * w
+        const color = level > -3 ? '#e05a3c' : level > -12 ? '#e0a13c' : '#4caf6a'
+        ctx.fillStyle = color
+        ctx.fillRect(0, 0, barW, h)
+      }
+    }
+
+    return onAnimationFrame(draw)
+  }, [trackId, effectId])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={EFFECT_METER_W}
+      height={EFFECT_METER_H}
+      className="effect-meter"
+      data-effect-meter={effectId}
+      title="live per-effect level (post-effect tap) — reads silent when this device is bypassed"
+    />
+  )
+}
+
 // Phase 22 Stream AA: the ordered, reorderable per-track effect chain. Array order in the file IS
 // chain order (src/core/document.ts's BeatEffect) — so drag-to-reorder here is literally "move
 // this entry to a new array index," the whole operation, no separate index field to keep in sync.
@@ -140,6 +199,7 @@ function EffectRow({
       </span>
       <span className="effect-type">{EFFECT_LABELS[effect.type]}</span>
       <span className="effect-id">{effect.id}</span>
+      <EffectMeter trackId={track.id} effectId={effect.id} />
       <button type="button" data-effect-move-up={effect.id} disabled={index === 0} title="move up" onClick={() => void postEffectMove(track.id, effect.id, index - 1)}>
         ▲
       </button>

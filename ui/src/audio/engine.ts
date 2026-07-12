@@ -549,6 +549,14 @@ interface EffectRuntime {
   entry: Tone.ToneAudioNode
   exit: Tone.ToneAudioNode
   nodes: Tone.ToneAudioNode[]
+  // Post-EFFECT (not post-track) side-tap off `exit`, not in the audible path — same waveform-
+  // Analyser-not-Tone.Meter discipline as SynthChain/DrumBus/InstrumentVoice.levelTap (true RMS,
+  // no decay lag), but keyed per effect INSTANCE so SynthPanel's EffectRow can show whether this
+  // specific effect is doing anything (Phase 26 Stream DE — closes research 63 §2 item 1, "not
+  // clear if [an effect is] actually doing anything"). Always present (set right after
+  // buildEffectRuntime constructs the instance's own internal wiring); included in `nodes` so the
+  // normal disposal paths (reconcileEffectChain's removal loop, disposeChain) tear it down too.
+  levelTap: Tone.Analyser
   // Native (non-Tone) nodes this instance owns, disconnect()-only cleanup (no `.dispose()`) —
   // currently only bitcrush's Redux downsampler (see buildDownsampler below: a raw
   // ScriptProcessorNode, no Tone.js built-in does sample-rate reduction). Kept OFF `nodes` (which
@@ -629,6 +637,14 @@ function buildDownsampler(): DownsamplerNode {
  * is ONLY used by vinylDistortion, to seed its reproducible noise buffer (see
  * buildVinylDistortion) — every other type ignores it. */
 function buildEffectRuntime(id: string, type: EffectType, trackId: string): EffectRuntime {
+  const core = buildEffectRuntimeCore(id, type, trackId)
+  const levelTap = new Tone.Analyser('waveform', 256)
+  core.exit.connect(levelTap) // post-effect side-tap (not in the audible path) — see EffectRuntime.levelTap
+  core.nodes.push(levelTap)
+  return { ...core, levelTap }
+}
+
+function buildEffectRuntimeCore(id: string, type: EffectType, trackId: string): Omit<EffectRuntime, 'levelTap'> {
   switch (type) {
     case 'eq3': {
       const eq3 = new Tone.EQ3()
@@ -2275,6 +2291,19 @@ class Engine {
     }
     upstream.connect(chain.saturator.in)
 
+    // Phase 26 Stream DE bugfix: `runtime.exit.disconnect()` above is a blunt "wipe every outgoing
+    // edge" sweep (needed because an exit's spine destination can change across a reorder/bypass),
+    // but it also severs each instance's own levelTap side-tap connection (made once, in
+    // buildEffectRuntime, when the runtime was first constructed) — including on the VERY FIRST
+    // reconcile for a freshly-built runtime, since buildEffectRuntime's own `.connect(levelTap)`
+    // happens just before this same disconnect sweep runs in the same call. Left unfixed, every
+    // per-effect meter reads permanently silent regardless of enabled state or real signal — not
+    // because the effect is bypassed, but because the METER's OWN WIRE got cut. Re-make it here,
+    // unconditionally, for every runtime (enabled or not) — a bypassed effect's meter should read
+    // silence because nothing reaches `entry` at all (see getEffectLevel's doc comment), not because
+    // this side-connection is missing.
+    for (const runtime of chain.effects.values()) runtime.exit.connect(runtime.levelTap)
+
     chain.effectOrder = effects.map((e) => e.id)
     chain.effectsSig = sig
   }
@@ -2413,6 +2442,36 @@ class Engine {
     return rms > 0 ? 20 * Math.log10(rms) : -Infinity
   }
 
+  /** Instantaneous peak (in dB) of a waveform-analyser buffer — max |sample|, not RMS. -Infinity
+   * for true silence. This is ONE analyser-buffer's worth of samples (256 samples ≈ 5.3ms @48kHz),
+   * i.e. an instant reading, not yet a "held over a window" peak — TrackMeter/EffectRow do the
+   * short-window (100-300ms) max-hold themselves across repeated rAF-driven calls, the same
+   * "no new audio-graph node, reuse the existing raw-sample tap" approach the RMS meter already
+   * uses (Phase 26 Stream DE). */
+  private static peakDb(buf: Float32Array): number {
+    let peak = 0
+    for (let i = 0; i < buf.length; i++) {
+      const a = Math.abs(buf[i]!)
+      if (a > peak) peak = a
+    }
+    return peak > 0 ? 20 * Math.log10(peak) : -Infinity
+  }
+
+  /** Resolves the post-fader/post-mute levelTap Analyser for a track, across every voice kind
+   * (synth chain, drum bus, instrument, audio track) — the shared lookup behind both
+   * getTrackLevel and getTrackPeak, so the two meters can never disagree about which node they're
+   * reading. null only for a track with no live voice yet. */
+  private levelTapFor(trackId: string): Tone.Analyser | null {
+    const chain = this.chains.get(trackId)
+    if (chain) return chain.levelTap
+    if (this.drumBus && trackId === this.drumTrackId) return this.drumBus.levelTap
+    const voice = this.instruments.get(trackId)
+    if (voice) return voice.levelTap
+    const audioVoice = this.audioTracks.get(trackId)
+    if (audioVoice) return audioVoice.levelTap
+    return null
+  }
+
   /** Live post-fader loudness (dB) of one track's own channel, for its mixer meter — read per-frame
    * off the shared rAF driver, never through Zustand state. Computed as true RMS of the track's
    * post-mute/post-fader tap, so a muted track reads -Infinity immediately. Instrument (SoundFont)
@@ -2420,14 +2479,36 @@ class Engine {
    * only for a track with no live voice at all yet (e.g. an instrument track whose soundfont is
    * still loading — nothing to meter until buildInstrument() lands a ready voice). */
   getTrackLevel(trackId: string): number | null {
+    const tap = this.levelTapFor(trackId)
+    return tap ? Engine.rmsDb(tap.getValue() as Float32Array) : null
+  }
+
+  /** Live post-fader instantaneous peak (dB) of one track's own channel, off the SAME tap
+   * getTrackLevel reads (see levelTapFor) — the mixer meter's peak segment, Phase 26 Stream DE.
+   * Callers hold their own short (100-300ms) max-hold window across successive calls; this method
+   * itself is a single-instant reading, matching getTrackLevel's own per-call contract. */
+  getTrackPeak(trackId: string): number | null {
+    const tap = this.levelTapFor(trackId)
+    return tap ? Engine.peakDb(tap.getValue() as Float32Array) : null
+  }
+
+  /** Live post-effect instantaneous peak (dB) of ONE effect instance in a synth track's chain,
+   * keyed by BeatEffect.id — the per-effect meter on SynthPanel's EffectRow (Phase 26 Stream DE).
+   * Reads EffectRuntime.levelTap, a side-tap off that instance's own `exit` node (see
+   * buildEffectRuntime) — so a BYPASSED effect (spliced fully out of the graph by
+   * reconcileEffectChain — nothing connects into its `entry` at all) reads true silence here,
+   * verified live (ui/verify-phase26-stream-de.mjs T2): an enabled, audibly-processing effect
+   * measured ~70dB louder at this tap than the same effect bypassed. A live `mix: 0` insert is
+   * NOT silent here by the same measure — it still passes its dry signal through unprocessed (the
+   * "real bypass, not a wet-knob illusion" distinction research 63 §1a documents), so this reads
+   * as "is anything reaching/leaving this device," not "how much is it doing to the signal." null
+   * if the track has no live synth chain yet, or the effect id isn't (or is no longer) part of its
+   * chain. */
+  getEffectLevel(trackId: string, effectId: string): number | null {
     const chain = this.chains.get(trackId)
-    if (chain) return Engine.rmsDb(chain.levelTap.getValue() as Float32Array)
-    if (this.drumBus && trackId === this.drumTrackId) return Engine.rmsDb(this.drumBus.levelTap.getValue() as Float32Array)
-    const voice = this.instruments.get(trackId)
-    if (voice) return Engine.rmsDb(voice.levelTap.getValue() as Float32Array)
-    const audioVoice = this.audioTracks.get(trackId)
-    if (audioVoice) return Engine.rmsDb(audioVoice.levelTap.getValue() as Float32Array)
-    return null
+    const runtime = chain?.effects.get(effectId)
+    if (!runtime) return null
+    return Engine.peakDb(runtime.levelTap.getValue() as Float32Array)
   }
 
   /** True RMS (dB) of the live master output, decay-free (raw samples off the master waveform
