@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { parse, serialize, setValue, BeatParseError, defaultSynthFields, type BeatDocument } from '../src/core/index.js'
+import { parse, serialize, setValue, BeatParseError, defaultSynthFields, defaultEffectChain, type BeatDocument } from '../src/core/index.js'
 
 const WORKED_EXAMPLE = `format_version 0.2
 bpm 124
@@ -159,6 +159,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
           { id: 'u2', pitch: 33, start: 4, duration: 2, velocity: 0.8 },
         ],
         hits: [],
+        effects: defaultEffectChain(),
       },
       {
         id: 'drums',
@@ -175,6 +176,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
           { id: 's1', lane: 'snare', start: 4, velocity: 0.8 },
           { id: 'k1', lane: 'kick', start: 8.5, velocity: 0.7 },
         ],
+        effects: [],
       },
     ],
     media: [],
@@ -213,6 +215,7 @@ test('formatNumber stabilizes floating-point noise so round-tripping is idempote
         clips: [],
         notes: [],
         hits: [],
+        effects: defaultEffectChain(),
       },
     ],
     media: [],

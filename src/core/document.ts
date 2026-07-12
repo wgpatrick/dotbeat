@@ -226,6 +226,48 @@ export interface BeatInstrument {
   pan: number // -1..1
 }
 
+// v0.10 (Phase 22 Stream AA): the per-track insert-effect chain, promoted out of
+// DELIBERATELY_UNMODELED's 'insertOrder' entry (src/core/convert.ts) now that it has a real
+// grammar. Replaces the old hardcoded EQ3->compressor->distortion->bitcrush order
+// (ui/src/audio/engine.ts's buildSynthChain) with a literal, ordered, per-track list: the file
+// states the chain directly, and array order in `BeatTrack.effects` IS chain order (same
+// discipline as note/clip/track order elsewhere — see format-spec.md's canonical-ordering
+// section). Deliberately flat text, no box/pointer graph (research/21-opendaw-devices-effects.md
+// #1's "adapt, not adopt" verdict): reordering two effects is a two-line move, not a numeric
+// `index` field edit.
+//
+// Each entry names WHICH built-in effect type it is and whether it's active; the effect's own
+// knobs stay right where they already lived (eqLow/eqMid/eqHigh, comp*, distortion*, bitcrush* in
+// SYNTH_FIELDS below) — unchanged, so LFO destinations/clip automation targeting those params keep
+// working unmodified. This means dotbeat does not yet support two independent instances of the
+// SAME type with different params (both would read the one shared eqLow etc.) — a documented scope
+// cut, not an oversight; see docs/phase-22-stream-aa.md.
+export type EffectType = 'eq3' | 'comp' | 'distortion' | 'bitcrush'
+export const EFFECT_TYPES: readonly EffectType[] = ['eq3', 'comp', 'distortion', 'bitcrush']
+
+export interface BeatEffect {
+  id: string // track-scoped stable id (D6) — what makes a reorder a MOVE, not a delete+insert
+  type: EffectType
+  enabled: boolean // default true (elided as a bare line); false serializes as a trailing "bypassed" token
+}
+
+/** The canonical migration target for every pre-v0.10 file (and any synth track that never
+ * declares an explicit `effect`/`effects` line): the exact old hardcoded order, all enabled. A
+ * synth track whose `effects` deep-equals this (same ids/types/enabled, same order) elides all
+ * effect lines entirely — one canonical form per state, and every existing .beat file keeps
+ * serializing byte-identically. Returns a fresh array (never share one array instance). */
+export function defaultEffectChain(): BeatEffect[] {
+  return EFFECT_TYPES.map((type) => ({ id: type, type, enabled: true }))
+}
+
+/** True iff `effects` is exactly the default chain (same length, same id/type/enabled per index,
+ * in order) — the serializer's canonical-elision test for the whole effect chain. */
+export function isDefaultEffectChain(effects: readonly BeatEffect[]): boolean {
+  const def = defaultEffectChain()
+  if (effects.length !== def.length) return false
+  return effects.every((e, i) => e.id === def[i]!.id && e.type === def[i]!.type && e.enabled === def[i]!.enabled)
+}
+
 export interface BeatTrack {
   id: string
   name: string
@@ -237,6 +279,11 @@ export interface BeatTrack {
   clips: BeatClip[] // v0.4; [] when the track has none (serialized only when present)
   notes: BeatNote[] // synth tracks only; always [] for drums
   hits: BeatDrumHit[] // v0.8; drum tracks only, always [] for synth/instrument
+  // v0.10: the ordered insert-effect chain — synth tracks only (drum/instrument tracks carry []
+  // and never serialize effect lines; drum-bus insert ordering is out of this stream's scope, see
+  // docs/phase-22-stream-aa.md). A synth track always has SOME chain in memory (the default when
+  // the file has no explicit declaration); [] here means "explicitly emptied" (`effects none`).
+  effects: BeatEffect[]
 }
 
 export interface BeatDocument {

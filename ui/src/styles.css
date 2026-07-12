@@ -610,6 +610,111 @@ body {
   max-width: 74px;
 }
 
+/* ---- effect chain (Phase 22 Stream AA: ordered, reorderable per-track effect chain) ---- */
+.effect-chain {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px 10px;
+  margin-bottom: 8px;
+}
+.effect-chain-title {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 700;
+  padding: 2px 0 6px;
+}
+.effect-chain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.effect-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: grab;
+}
+.effect-row.dragging {
+  opacity: 0.4;
+}
+.effect-row.drop-target {
+  border-color: var(--accent);
+}
+.effect-row.bypassed {
+  opacity: 0.55;
+}
+.effect-drag-handle {
+  color: var(--text-dim);
+  font-size: 12px;
+  user-select: none;
+  cursor: grab;
+}
+.effect-type {
+  font-weight: 600;
+  font-size: 12px;
+  flex: 1;
+}
+.effect-id {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.effect-row button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  cursor: pointer;
+}
+.effect-row button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.effect-row button.effect-remove {
+  color: var(--text-dim);
+}
+.effect-row label.effect-bypass {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.effect-chain-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.effect-chain-add select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 4px;
+  font: inherit;
+  font-size: 11px;
+}
+.effect-chain-add button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 /* ---- note view ---- */
 .noteview-scroll {
   overflow-x: auto;

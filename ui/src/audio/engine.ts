@@ -59,7 +59,7 @@ import spessaWorkletUrl from 'spessasynth_lib/dist/spessasynth_processor.min.js?
 import { useStore, isEffectivelyMuted } from '../state/store'
 import { daemonBase } from '../daemon/bridge'
 import { audioBufferToWav } from './wavEncode'
-import type { BeatDocument, BeatDrumHit, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType } from '../types'
+import type { BeatDocument, BeatDrumHit, BeatEffect, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType } from '../types'
 
 // Phase 18 Stream R: ONE shared, widened destination set for both LFO1 and LFO2 — mirrors
 // src/core/document.ts's LFO_DESTS/LfoDestination exactly (ui/ is a standalone Vite app with no
@@ -312,6 +312,101 @@ function interpolateAutomation(points: { time: number; value: number }[], posSte
   return pts[pts.length - 1].value
 }
 
+// Phase 22 Stream AA: the ordered, reorderable per-track effect chain — mirrors
+// src/core/document.ts's EffectType/BeatEffect exactly (ui/ hand-mirrors core constants, same
+// convention as LFO_DESTS/LFO_SYNC_RATES above). Replaces the old fixed
+// EQ3->comp->distortion->bitcrush insert order this file's header comment used to list as "NOT
+// ported" — the chain is now built by iterating the track's declared, ordered `effects` list.
+type EffectType = 'eq3' | 'comp' | 'distortion' | 'bitcrush'
+
+// One live effect instance's Tone nodes. `entry`/`exit` are the two nodes the chain SPINE
+// connects to (upstream -> entry, exit -> downstream); everything else is that effect's own
+// internal wiring, built once and never touched by reordering. Each type also exposes its OWN
+// param nodes (eq3/compressor/compDry/compWet/distortion/bitcrush) so applyEffectParams and the
+// LFO/clip-automation destinations below can reach them directly, keyed by TYPE (not id) — see
+// findEffect. `nodes` is every Tone node this instance owns, for disposeChain/disposeEffect.
+interface EffectRuntime {
+  id: string
+  type: EffectType
+  entry: Tone.ToneAudioNode
+  exit: Tone.ToneAudioNode
+  nodes: Tone.ToneAudioNode[]
+  eq3?: Tone.EQ3
+  compressor?: Tone.Compressor
+  compDry?: Tone.Gain
+  compWet?: Tone.Gain
+  distortion?: Tone.Distortion
+  bitcrush?: Tone.BitCrusher
+}
+
+/** Builds one effect instance's Tone subgraph (internal wiring only — NOT connected to anything
+ * upstream/downstream yet, that's the chain-spine's job in reconcileEffectChain). Mirrors what
+ * buildSynthChain used to wire unconditionally for all four; now built lazily, one instance per
+ * declared chain entry. eq3/distortion/bitcrush are single nodes (entry === exit); comp keeps its
+ * existing dry/wet fan-in shape (entry = a Gain that fans into dry+compressor, exit = the Gain
+ * that sums them back — unchanged internal shape from the old hardcoded chain, just no longer
+ * spliced into a fixed position). */
+function buildEffectRuntime(id: string, type: EffectType): EffectRuntime {
+  switch (type) {
+    case 'eq3': {
+      const eq3 = new Tone.EQ3()
+      return { id, type, entry: eq3, exit: eq3, nodes: [eq3], eq3 }
+    }
+    case 'comp': {
+      const compIn = new Tone.Gain()
+      const compDry = new Tone.Gain(1)
+      const compressor = new Tone.Compressor()
+      const compWet = new Tone.Gain(0)
+      const compOut = new Tone.Gain()
+      compIn.fan(compDry, compressor)
+      compressor.connect(compWet)
+      compDry.connect(compOut)
+      compWet.connect(compOut)
+      return { id, type, entry: compIn, exit: compOut, nodes: [compIn, compDry, compressor, compWet, compOut], compressor, compDry, compWet }
+    }
+    case 'distortion': {
+      const distortion = new Tone.Distortion({ distortion: 0, wet: 0 })
+      return { id, type, entry: distortion, exit: distortion, nodes: [distortion], distortion }
+    }
+    case 'bitcrush': {
+      const bitcrush = new Tone.BitCrusher(8)
+      return { id, type, entry: bitcrush, exit: bitcrush, nodes: [bitcrush], bitcrush }
+    }
+  }
+}
+
+// A signature no REAL effect-list signature can ever equal (effect ids are restricted to
+// alphanumeric/_/- by the format's SLUG_RE, so a NUL character can't appear in one) — including
+// the empty-array case (`[].join('|') === ''`, which IS a real, reachable signature: an explicitly
+// emptied chain, "effects none" in the file). Used to seed SynthChain.effectsSig so a freshly built
+// chain's very first reconcileEffectChain call always runs, even when the track's first-ever
+// effects list happens to be empty.
+const EFFECTS_SIG_UNSET = ' '
+
+function applyEffectParams(e: EffectRuntime, p: EngineSynth): void {
+  if (e.eq3) {
+    e.eq3.low.value = p.eqLow
+    e.eq3.mid.value = p.eqMid
+    e.eq3.high.value = p.eqHigh
+  }
+  if (e.compressor) {
+    e.compressor.threshold.value = p.compThreshold
+    e.compressor.ratio.value = p.compRatio
+    e.compressor.attack.value = p.compAttack
+    e.compressor.release.value = p.compRelease
+    e.compDry!.gain.value = 1 - p.compMix
+    e.compWet!.gain.value = p.compMix
+  }
+  if (e.distortion) {
+    e.distortion.distortion = p.distortionAmount
+    e.distortion.wet.value = p.distortionMix
+  }
+  if (e.bitcrush) {
+    e.bitcrush.bits.value = Math.round(p.bitcrushBits)
+    e.bitcrush.wet.value = p.bitcrushMix
+  }
+}
+
 interface SynthChain {
   synth: Tone.PolySynth<Tone.Synth>
   osc2: Tone.PolySynth<Tone.Synth>
@@ -328,14 +423,13 @@ interface SynthChain {
   fm: Tone.PolySynth<Tone.FMSynth>
   fmGain: Tone.Gain
   filter: Tone.Filter
-  eq3: Tone.EQ3
-  compIn: Tone.Gain
-  compDry: Tone.Gain
-  compressor: Tone.Compressor
-  compWet: Tone.Gain
-  compOut: Tone.Gain
-  distortion: Tone.Distortion
-  bitcrush: Tone.BitCrusher
+  // Phase 22 Stream AA: the ordered, reorderable effect chain, keyed by stable effect id — a
+  // reorder/add/remove/bypass in the document reconciles here (reconcileEffectChain) rather than
+  // through four hardcoded fields. `effectOrder` is the live chain order (ids); `effectsSig` is
+  // the last-wired signature (id:type:enabled joined) so param-only ticks skip re-wiring.
+  effects: Map<string, EffectRuntime>
+  effectOrder: string[]
+  effectsSig: string
   // muteGain sits BEFORE the panner fan-out, so gating it to 0 silences both the dry path
   // (panner->vol->master) AND the reverb/delay/mod sends (panner->*Send->return bus) — a mute that
   // only touched vol would leave the wet sends audible. It's a dedicated gate, separate from vol, so
@@ -353,6 +447,17 @@ interface SynthChain {
   delaySend: Tone.Gain
   modSend: Tone.Gain
   lastOsc: OscType | null
+}
+
+/** Finds the live effect runtime of a given TYPE in a chain (used by LFO/clip-automation
+ * destinations, which target eqLow/compMix/distortionMix/bitcrushMix — type-addressed params, same
+ * as before this stream). Returns undefined if no instance of that type is currently in the
+ * track's declared chain (removed entirely) — callers treat that as a silent no-op, which is
+ * correct: there is nothing to modulate. Does NOT check `enabled` — a bypassed effect's params
+ * still update/ramp (so re-enabling it doesn't jump), it's just not wired into the audio path. */
+function findEffect(chain: SynthChain, type: EffectType): EffectRuntime | undefined {
+  for (const e of chain.effects.values()) if (e.type === type) return e
+  return undefined
 }
 
 interface DrumBus {
@@ -687,14 +792,6 @@ class Engine {
     const fm = new Tone.PolySynth(Tone.FMSynth)
     const fmGain = new Tone.Gain(0)
 
-    const eq3 = new Tone.EQ3()
-    const compIn = new Tone.Gain()
-    const compDry = new Tone.Gain(1)
-    const compressor = new Tone.Compressor()
-    const compWet = new Tone.Gain(0)
-    const compOut = new Tone.Gain()
-    const distortion = new Tone.Distortion({ distortion: 0, wet: 0 })
-    const bitcrush = new Tone.BitCrusher(8)
     const muteGain = new Tone.Gain(1)
     const levelTap = new Tone.Analyser('waveform', 256)
 
@@ -706,12 +803,14 @@ class Engine {
     noise.chain(noiseGain, filter)
     fm.chain(fmGain, filter)
 
-    compIn.fan(compDry, compressor)
-    compressor.connect(compWet)
-    compDry.connect(compOut)
-    compWet.connect(compOut)
-    // ...bitcrush -> muteGain -> panner: gate before the fan-out so mute silences the sends too.
-    this.wireInsertChain(filter, eq3, compIn, compOut, distortion, bitcrush, muteGain)
+    // Phase 22 Stream AA: filter->...effects...->muteGain is NOT wired here — reconcileEffectChain
+    // (called from applyParams, below) owns that whole link, driven by the track's own declared,
+    // ordered `effects` list. effectsSig starts at a sentinel no real signature can ever equal
+    // (see the comment there), so the very first applyParams call always reconciles and makes the
+    // filter->muteGain connection, even for a track whose chain is explicitly empty. An unedited
+    // track's first reconcile lands on the exact old fixed order (eq3->comp->distortion->bitcrush,
+    // all enabled — defaultEffectChain's default), so a freshly built chain sounds identical to
+    // before this stream. muteGain->panner IS static (unaffected by the effect list) and wired now.
     muteGain.connect(panner)
 
     panner.chain(vol, this.getMaster())
@@ -725,11 +824,55 @@ class Engine {
 
     return {
       synth, osc2, osc2Gain, osc2Pan, osc3, osc3Gain, osc3Pan, uniPairs, sub, subGain, noise, noiseGain, fm, fmGain,
-      filter, eq3, compIn, compDry, compressor, compWet, compOut, distortion, bitcrush, muteGain, levelTap, panner, vol, reverbSend, delaySend, modSend, lastOsc: null,
+      filter, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET, muteGain, levelTap, panner, vol, reverbSend, delaySend, modSend, lastOsc: null,
     }
   }
 
-  private applyParams(chain: SynthChain, p: EngineSynth): void {
+  /** Rebuilds the chain's SPINE (filter -> ...ordered, enabled effects... -> muteGain) whenever
+   * the track's declared effect list's shape changed (add/remove/reorder/bypass) since the last
+   * reconcile — never on an unrelated param tick (cheap: a plain string compare against
+   * `effectsSig`). Disposes runtimes for ids no longer declared, builds runtimes for new ids,
+   * reuses (and re-parents) everything else — so a live-playing voice's comp/eq3/etc. nodes
+   * survive a reorder, only their position in the graph changes. A disabled effect's node is
+   * built and kept current (still receives applyEffectParams below) but is NOT spliced into the
+   * spine at all — a real routing bypass, not a wet/dry illusion (see BeatEffect.enabled's own
+   * comment in src/core/document.ts; this is the one place that "real bypass" choice is
+   * implemented). */
+  private reconcileEffectChain(chain: SynthChain, effects: BeatEffect[]): void {
+    const sig = effects.map((e) => `${e.id}:${e.type}:${e.enabled}`).join('|')
+    if (sig === chain.effectsSig) return
+
+    const wanted = new Set(effects.map((e) => e.id))
+    for (const [id, runtime] of [...chain.effects]) {
+      if (!wanted.has(id)) {
+        for (const n of runtime.nodes) n.dispose()
+        chain.effects.delete(id)
+      }
+    }
+    for (const e of effects) {
+      if (!chain.effects.has(e.id)) chain.effects.set(e.id, buildEffectRuntime(e.id, e.type))
+    }
+
+    // Re-wire the spine: filter -> [enabled effects, in file order] -> muteGain. Disconnecting
+    // each boundary node's OWN outgoing connection is safe and precise — it only removes the
+    // spine link this function itself created (an effect's internal wiring, e.g. comp's
+    // dry/wet fan-in, was never touched and stays intact).
+    chain.filter.disconnect()
+    for (const runtime of chain.effects.values()) runtime.exit.disconnect()
+    let upstream: Tone.ToneAudioNode = chain.filter
+    for (const e of effects) {
+      if (!e.enabled) continue
+      const runtime = chain.effects.get(e.id)!
+      upstream.connect(runtime.entry)
+      upstream = runtime.exit
+    }
+    upstream.connect(chain.muteGain)
+
+    chain.effectOrder = effects.map((e) => e.id)
+    chain.effectsSig = sig
+  }
+
+  private applyParams(chain: SynthChain, p: EngineSynth, effects: BeatEffect[]): void {
     const env = { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release }
     chain.synth.set({ envelope: env, portamento: p.glide })
     if (chain.lastOsc !== p.osc) {
@@ -762,29 +905,18 @@ class Engine {
     chain.reverbSend.gain.value = p.sendReverb
     chain.delaySend.gain.value = p.sendDelay
     chain.modSend.gain.value = p.sendMod
-    chain.eq3.low.value = p.eqLow
-    chain.eq3.mid.value = p.eqMid
-    chain.eq3.high.value = p.eqHigh
-    chain.compressor.threshold.value = p.compThreshold
-    chain.compressor.ratio.value = p.compRatio
-    chain.compressor.attack.value = p.compAttack
-    chain.compressor.release.value = p.compRelease
-    chain.compDry.gain.value = 1 - p.compMix
-    chain.compWet.gain.value = p.compMix
-    chain.distortion.distortion = p.distortionAmount
-    chain.distortion.wet.value = p.distortionMix
-    chain.bitcrush.bits.value = Math.round(p.bitcrushBits)
-    chain.bitcrush.wet.value = p.bitcrushMix
+    this.reconcileEffectChain(chain, effects)
+    for (const runtime of chain.effects.values()) applyEffectParams(runtime, p)
   }
 
   private disposeChain(chain: SynthChain): void {
     const nodes: Tone.ToneAudioNode[] = [
       chain.synth, chain.osc2, chain.osc2Gain, chain.osc2Pan, chain.osc3, chain.osc3Gain, chain.osc3Pan,
-      chain.sub, chain.subGain, chain.noise, chain.noiseGain, chain.fm, chain.fmGain, chain.filter, chain.eq3,
-      chain.compIn, chain.compDry, chain.compressor, chain.compWet, chain.compOut, chain.distortion, chain.bitcrush,
+      chain.sub, chain.subGain, chain.noise, chain.noiseGain, chain.fm, chain.fmGain, chain.filter,
       chain.muteGain, chain.levelTap, chain.panner, chain.vol, chain.reverbSend, chain.delaySend, chain.modSend,
     ]
     for (const u of chain.uniPairs) nodes.push(u.poly, u.pan, u.gain)
+    for (const runtime of chain.effects.values()) nodes.push(...runtime.nodes)
     for (const n of nodes) n.dispose()
   }
 
@@ -805,7 +937,7 @@ class Engine {
         chain = this.buildSynthChain()
         this.chains.set(track.id, chain)
       }
-      this.applyParams(chain, coerce(track.synth))
+      this.applyParams(chain, coerce(track.synth), track.effects ?? [])
     }
     const drumsTrack = doc.tracks.find((t) => t.kind === 'drums')
     this.drumTrackId = drumsTrack?.id ?? null
@@ -1337,7 +1469,11 @@ class Engine {
 
       // Generic clip automation for the remaining live-rampable params (cutoff handled above,
       // duckAmount handled with the duck below). Last write wins within a tick if a param is also
-      // driven by an LFO — a documented step-resolution tradeoff, same as BeatLab.
+      // driven by an LFO — a documented step-resolution tradeoff, same as BeatLab. eq3/comp/
+      // distortion/bitcrush destinations are TYPE-addressed (findEffect), same as before this
+      // stream — if the track's chain no longer includes that effect type at all, the ramp is a
+      // silent no-op (there's nothing to modulate); a merely-bypassed instance still ramps (see
+      // findEffect's comment) so re-enabling it doesn't jump.
       for (const [key, points] of content.automation) {
         if (key === 'cutoff' || key === 'duckAmount' || !points.length) continue
         const val = interpolateAutomation(points, content.contentStep, false)
@@ -1348,15 +1484,19 @@ class Engine {
           case 'sendReverb': chain.reverbSend.gain.linearRampToValueAtTime(val, rampTime); break
           case 'sendDelay': chain.delaySend.gain.linearRampToValueAtTime(val, rampTime); break
           case 'sendMod': chain.modSend.gain.linearRampToValueAtTime(val, rampTime); break
-          case 'eqLow': chain.eq3.low.linearRampToValueAtTime(val, rampTime); break
-          case 'eqMid': chain.eq3.mid.linearRampToValueAtTime(val, rampTime); break
-          case 'eqHigh': chain.eq3.high.linearRampToValueAtTime(val, rampTime); break
-          case 'compMix':
-            chain.compDry.gain.linearRampToValueAtTime(1 - val, rampTime)
-            chain.compWet.gain.linearRampToValueAtTime(val, rampTime)
+          case 'eqLow': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.low.linearRampToValueAtTime(val, rampTime); break }
+          case 'eqMid': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.mid.linearRampToValueAtTime(val, rampTime); break }
+          case 'eqHigh': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.high.linearRampToValueAtTime(val, rampTime); break }
+          case 'compMix': {
+            const e = findEffect(chain, 'comp')
+            if (e) {
+              e.compDry!.gain.linearRampToValueAtTime(1 - val, rampTime)
+              e.compWet!.gain.linearRampToValueAtTime(val, rampTime)
+            }
             break
-          case 'distortionMix': chain.distortion.wet.linearRampToValueAtTime(val, rampTime); break
-          case 'bitcrushMix': chain.bitcrush.wet.linearRampToValueAtTime(val, rampTime); break
+          }
+          case 'distortionMix': { const e = findEffect(chain, 'distortion'); if (e) e.distortion!.wet.linearRampToValueAtTime(val, rampTime); break }
+          case 'bitcrushMix': { const e = findEffect(chain, 'bitcrush'); if (e) e.bitcrush!.wet.linearRampToValueAtTime(val, rampTime); break }
         }
       }
 
@@ -1377,17 +1517,20 @@ class Engine {
           case 'sendReverb': chain.reverbSend.gain.linearRampToValueAtTime(clamp01(p.sendReverb + d * 0.5), rampTime); break
           case 'sendDelay': chain.delaySend.gain.linearRampToValueAtTime(clamp01(p.sendDelay + d * 0.5), rampTime); break
           case 'sendMod': chain.modSend.gain.linearRampToValueAtTime(clamp01(p.sendMod + d * 0.5), rampTime); break
-          case 'eqLow': chain.eq3.low.linearRampToValueAtTime(p.eqLow + d * 12, rampTime); break
-          case 'eqMid': chain.eq3.mid.linearRampToValueAtTime(p.eqMid + d * 12, rampTime); break
-          case 'eqHigh': chain.eq3.high.linearRampToValueAtTime(p.eqHigh + d * 12, rampTime); break
+          case 'eqLow': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.low.linearRampToValueAtTime(p.eqLow + d * 12, rampTime); break }
+          case 'eqMid': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.mid.linearRampToValueAtTime(p.eqMid + d * 12, rampTime); break }
+          case 'eqHigh': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.high.linearRampToValueAtTime(p.eqHigh + d * 12, rampTime); break }
           case 'compMix': {
-            const v = clamp01(p.compMix + d * 0.5)
-            chain.compDry.gain.linearRampToValueAtTime(1 - v, rampTime)
-            chain.compWet.gain.linearRampToValueAtTime(v, rampTime)
+            const e = findEffect(chain, 'comp')
+            if (e) {
+              const v = clamp01(p.compMix + d * 0.5)
+              e.compDry!.gain.linearRampToValueAtTime(1 - v, rampTime)
+              e.compWet!.gain.linearRampToValueAtTime(v, rampTime)
+            }
             break
           }
-          case 'distortionMix': chain.distortion.wet.linearRampToValueAtTime(clamp01(p.distortionMix + d * 0.5), rampTime); break
-          case 'bitcrushMix': chain.bitcrush.wet.linearRampToValueAtTime(clamp01(p.bitcrushMix + d * 0.5), rampTime); break
+          case 'distortionMix': { const e = findEffect(chain, 'distortion'); if (e) e.distortion!.wet.linearRampToValueAtTime(clamp01(p.distortionMix + d * 0.5), rampTime); break }
+          case 'bitcrushMix': { const e = findEffect(chain, 'bitcrush'); if (e) e.bitcrush!.wet.linearRampToValueAtTime(clamp01(p.bitcrushMix + d * 0.5), rampTime); break }
         }
       }
       if (lfoOn) applyLfoAdditive(p.lfoDest, p.lfoDepth, lfo)

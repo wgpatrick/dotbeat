@@ -25,6 +25,10 @@ import {
   addHit,
   removeHit,
   setAutomationPoint,
+  addEffect,
+  removeEffect,
+  moveEffect,
+  setEffectEnabled,
   humanize,
   quantizeNotes,
   addTrack,
@@ -367,6 +371,85 @@ const TOOLS: ToolDef[] = [
         value: num(args, 'value'),
         ...(typeof args.id === 'string' ? { id: args.id } : {}),
       })
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_effect_add',
+    description:
+      "Add an insert to a synth track's effect chain (format v0.10). Array order in the file IS chain order — no separate index field — so this is dotbeat's answer to \"reorder/add/remove effects,\" built as flat ordered text rather than a box/pointer graph (docs/research/21-opendaw-devices-effects.md #1). type is one of eq3|comp|distortion|bitcrush (the same four built-in inserts every synth track already has knobs for — see beat_set's eqLow/compMix/distortionMix/bitcrushMix etc.; this tool only changes whether/where/in-what-order they run, not their own params). Omit id to mint one (the type name, or type_2/_3... on collision); omit index to append. Returns the musical edit list.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        type: { type: 'string', description: 'eq3 | comp | distortion | bitcrush' },
+        id: { type: 'string', description: 'a stable id for this instance; omit to mint one' },
+        index: { type: 'number', description: '0-based insert position; omit to append at the end of the chain' },
+        bypassed: { type: 'boolean', description: 'add it already bypassed; default false (active)' },
+      },
+      required: ['file', 'track', 'type'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const opts: { id?: string; index?: number; enabled?: boolean } = {}
+      if (typeof args.id === 'string') opts.id = args.id
+      if (typeof args.index === 'number') opts.index = args.index
+      if (typeof args.bypassed === 'boolean') opts.enabled = !args.bypassed
+      const { doc } = addEffect(before, str(args, 'track'), str(args, 'type') as never, opts)
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_effect_rm',
+    description: 'Remove an effect instance (by its id, as shown in the file / beat_inspect / diffs) from a synth track\'s effect chain.',
+    inputSchema: {
+      type: 'object',
+      properties: { file: { type: 'string' }, track: { type: 'string' }, effect_id: { type: 'string' } },
+      required: ['file', 'track', 'effect_id'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = removeEffect(before, str(args, 'track'), str(args, 'effect_id'))
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_effect_move',
+    description:
+      'Reorder a synth track\'s effect chain: move one effect instance to a new 0-based position (clamped to the list bounds). This IS the reorder primitive — chain order is exactly the array order, so moving one entry is the whole operation, and the resulting file diff is a small, local change (the moved lines), not a full rewrite.',
+    inputSchema: {
+      type: 'object',
+      properties: { file: { type: 'string' }, track: { type: 'string' }, effect_id: { type: 'string' }, index: { type: 'number' } },
+      required: ['file', 'track', 'effect_id', 'index'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = moveEffect(before, str(args, 'track'), str(args, 'effect_id'), num(args, 'index'))
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_effect_bypass',
+    description:
+      "Bypass or re-enable one effect instance on a synth track. This is a REAL routing bypass (the effect is wired out of the audio graph entirely, ui/src/audio/engine.ts), not just its own mix knob set to 0 — the only meaningful way to bypass eq3, which has no mix control of its own. Equivalent to beat_set's <track>.effect.<id>.enabled path.",
+    inputSchema: {
+      type: 'object',
+      properties: { file: { type: 'string' }, track: { type: 'string' }, effect_id: { type: 'string' }, enabled: { type: 'boolean' } },
+      required: ['file', 'track', 'effect_id', 'enabled'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      if (typeof args.enabled !== 'boolean') throw new Error('missing required boolean argument "enabled"')
+      const { doc } = setEffectEnabled(before, str(args, 'track'), str(args, 'effect_id'), args.enabled)
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
     },

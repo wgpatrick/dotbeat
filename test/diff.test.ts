@@ -219,7 +219,7 @@ test('setValue note grammar rejects malformed adds, unknown note ids, and non-em
 
 test('describeDocument gives a compact, exact overview of the real project', () => {
   const text = describeDocument(realDoc())
-  assert.match(text, /^format 0\.9 \| 126 bpm \| 4 bars \(64 steps\) \| selected: drums\n/)
+  assert.match(text, /^format 0\.10 \| 126 bpm \| 4 bars \(64 steps\) \| selected: drums\n/)
   assert.match(text, /tracks: 4\n/)
   assert.match(text, /^lead {2}"Lead" {2}synth/m)
   assert.match(text, /cutoff 3200 Hz/)

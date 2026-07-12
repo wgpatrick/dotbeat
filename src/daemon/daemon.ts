@@ -54,11 +54,16 @@ import {
   filterPresetsByCategory,
   PRESET_CATEGORIES,
   DRUM_LANES,
+  addEffect,
+  removeEffect,
+  moveEffect,
+  setEffectEnabled,
   BeatEditError,
   BeatPresetError,
   type ExternalSandboxPayload,
   type TrackKind,
   type BeatPreset,
+  type EffectType,
 } from '../core/index.js'
 // D3/D10 versioning surface over HTTP: the GUI's history panel (Phase 15 Stream H) reads the
 // checkpoint list and issues "go back" through these. All of it reuses src/history's real git-backed
@@ -740,6 +745,92 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           const { doc: next } = removeTrack(doc, id)
           const written = writeIfChanged(next)
           revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // Phase 22 Stream AA: the effect-chain structural channel — add/remove/move/bypass all change
+    // the ordered `effects` LIST (shape or order), so like /add-track and /automate they don't fit
+    // setValue's single `path=value` shape (bypass alone DOES fit it — <track>.effect.<id>.enabled
+    // is a real /edit path too, see core's setValue — these routes exist for the same
+    // structural-edit reasons /add-track does: RETURN the full raw doc, since the daemon never
+    // SSE-echoes its own writes, so the GUI applies the response directly instead of re-pulling.
+    if (req.method === 'POST' && url.pathname === '/effect-add') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; type?: unknown; id?: unknown; index?: unknown; bypassed?: unknown }
+          if (typeof b.track !== 'string' || typeof b.type !== 'string') {
+            json(res, 400, { error: 'body must include string track and type (eq3|comp|distortion|bitcrush)' })
+            return
+          }
+          const opts: Parameters<typeof addEffect>[3] = {}
+          if (typeof b.id === 'string') opts.id = b.id
+          if (typeof b.index === 'number') opts.index = b.index
+          if (typeof b.bypassed === 'boolean') opts.enabled = !b.bypassed
+          const { doc: next } = addEffect(doc, b.track, b.type as EffectType, opts)
+          const written = writeIfChanged(next)
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/effect-remove') {
+      readBody(req)
+        .then((body) => {
+          const { track, id } = JSON.parse(body) as { track?: unknown; id?: unknown }
+          if (typeof track !== 'string' || typeof id !== 'string') {
+            json(res, 400, { error: 'body must be {track: string, id: string}' })
+            return
+          }
+          const { doc: next } = removeEffect(doc, track, id)
+          const written = writeIfChanged(next)
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/effect-move') {
+      readBody(req)
+        .then((body) => {
+          const { track, id, index } = JSON.parse(body) as { track?: unknown; id?: unknown; index?: unknown }
+          if (typeof track !== 'string' || typeof id !== 'string' || typeof index !== 'number') {
+            json(res, 400, { error: 'body must be {track: string, id: string, index: number}' })
+            return
+          }
+          const { doc: next } = moveEffect(doc, track, id, index)
+          const written = writeIfChanged(next)
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/effect-enabled') {
+      readBody(req)
+        .then((body) => {
+          const { track, id, enabled } = JSON.parse(body) as { track?: unknown; id?: unknown; enabled?: unknown }
+          if (typeof track !== 'string' || typeof id !== 'string' || typeof enabled !== 'boolean') {
+            json(res, 400, { error: 'body must be {track: string, id: string, enabled: boolean}' })
+            return
+          }
+          const { doc: next } = setEffectEnabled(doc, track, id, enabled)
+          const written = writeIfChanged(next)
           json(res, 200, { written, doc })
         })
         .catch((err) => {

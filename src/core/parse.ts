@@ -1,5 +1,5 @@
-import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumPattern, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultSynthFields } from './document.js'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumPattern, BeatEffect, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultEffectChain, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -26,6 +26,10 @@ function isTrackKind(s: string): s is TrackKind {
 
 function isDrumLane(s: string): s is DrumLane {
   return (DRUM_LANES as readonly string[]).includes(s)
+}
+
+function isEffectType(s: string): s is EffectType {
+  return (EFFECT_TYPES as readonly string[]).includes(s)
 }
 
 function parseFloatStrict(tok: string, lineNo: number, field: string): number {
@@ -74,6 +78,13 @@ export function parse(text: string): BeatDocument {
   // at close (grammar-level patterns are gone; v<=0.7 files still parse into the new event model).
   const legacyTrackPatterns = new Map<BeatTrack, Partial<BeatDrumPattern>>()
   const legacyClipPatterns = new Map<BeatClip, Partial<BeatDrumPattern>>()
+  // v0.10 migration: a synth track with NO explicit `effect`/`effects` line gets the canonical
+  // default chain at close (see defaultEffectChain) — this is what makes every pre-v0.10 file (and
+  // any hand-written file that never mentions effects) parse into exactly the old hardcoded
+  // EQ3->comp->distortion->bitcrush order, losslessly. `effectsNoneSeen` distinguishes an
+  // explicit `effects none` (stay empty) from "never declared" (apply the default).
+  const effectsSeen = new Set<BeatTrack>()
+  const effectsNoneSeen = new Set<BeatTrack>()
 
   // v0.9: closes any open automation lane, validating it has >= 1 point (a lane with zero
   // points has no canonical serialized form — see BeatAutomationLane) and unique point ids.
@@ -134,6 +145,10 @@ export function parse(text: string): BeatDocument {
     if (currentTrack.kind === 'drums') assertUniqueHitIds(currentTrack.hits, `drum track "${currentTrack.id}"`, lineNo)
     if (currentTrack.kind === 'instrument' && !currentTrack.instrument) {
       throw new BeatParseError(`instrument track "${currentTrack.id}" is missing its soundfont line`, lineNo)
+    }
+    // v0.10: no explicit effect declaration at all -> the canonical default chain (see above).
+    if (currentTrack.kind === 'synth' && !effectsSeen.has(currentTrack)) {
+      currentTrack.effects = defaultEffectChain()
     }
   }
 
@@ -276,6 +291,9 @@ export function parse(text: string): BeatDocument {
           clips: [],
           notes: [],
           hits: [],
+          // v0.10: filled with the default chain at track-close if no explicit effect/effects
+          // line was seen (migration); stays [] as-is for drum/instrument tracks.
+          effects: [],
         }
         tracks.push(currentTrack)
       } else if (keyword === 'scene') {
@@ -360,6 +378,32 @@ export function parse(text: string): BeatDocument {
         continue
       }
       closeSynthIfOpen(lineNo)
+      // v0.10: `effect <id> <type> [bypassed]` — one insert-chain entry, in file order (order IS
+      // chain order). `effects none` is the explicit-empty-chain sentinel (distinguishes "the
+      // user emptied the chain" from "the file never mentions effects" — see defaultEffectChain's
+      // comment). Both are synth-track-only; see BeatTrack.effects.
+      if (keyword === 'effect' || keyword === 'effects') {
+        closeClipIfOpen(lineNo)
+        if (currentTrack.kind !== 'synth') throw new BeatParseError(`"${keyword}" lines only belong on synth tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+        if (keyword === 'effects') {
+          if (tokens.length !== 2 || tokens[1] !== 'none') throw new BeatParseError('effects takes exactly one value: none', lineNo)
+          if (effectsSeen.has(currentTrack)) throw new BeatParseError(`track "${currentTrack.id}" already has an effect chain declaration`, lineNo)
+          effectsSeen.add(currentTrack)
+          effectsNoneSeen.add(currentTrack)
+          continue
+        }
+        if (effectsNoneSeen.has(currentTrack)) throw new BeatParseError(`track "${currentTrack.id}": cannot mix "effect" lines with "effects none"`, lineNo)
+        if (tokens.length !== 3 && tokens.length !== 4) throw new BeatParseError('effect expects <id> <type> [bypassed]', lineNo)
+        const [, id, type, bypassTok] = tokens as [string, string, string, string?]
+        if (!SLUG_RE.test(id)) throw new BeatParseError(`effect ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
+        if (!isEffectType(type)) throw new BeatParseError(`unknown effect type "${type}" (expected one of ${EFFECT_TYPES.join('|')})`, lineNo)
+        if (bypassTok !== undefined && bypassTok !== 'bypassed') throw new BeatParseError(`unexpected token "${bypassTok}" after effect type (expected "bypassed" or nothing)`, lineNo)
+        if (currentTrack.effects.some((e) => e.id === id)) throw new BeatParseError(`duplicate effect id "${id}" on track "${currentTrack.id}"`, lineNo)
+        effectsSeen.add(currentTrack)
+        const added: BeatEffect = { id, type, enabled: bypassTok === undefined }
+        currentTrack.effects.push(added)
+        continue
+      }
       if (keyword === 'lane') {
         closeClipIfOpen(lineNo)
         if (currentTrack.kind !== 'drums') throw new BeatParseError(`lane lines only belong in drum tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)

@@ -3,8 +3,8 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS } from './document.js'
+import type { BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatEffect, BeatNote, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS, defaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -75,6 +75,17 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     const rest2 = track.hits.filter((h) => h.id !== id && !(h.lane === lane && h.start === step))
     const nextHits = vel > 0 ? [...rest2, { id, lane: lane as DrumLane, start: step, velocity: canon(vel) }] : rest2
     return replaceTrack(doc, { ...track, hits: nextHits })
+  }
+
+  // v0.10 effect bypass toggle: <track>.effect.<id>.enabled = true|false — the one effect-chain
+  // edit that fits setValue's flat path=value shape (a boolean flip on an existing entry, same
+  // convention as lfoSync's bool SYNTH_FIELD). Add/remove/reorder change the LIST's shape/order,
+  // so they get their own primitives below (addEffect/removeEffect/moveEffect) — same split as
+  // v0.9 automation (setAutomationPoint via setValue-adjacent vs. the structural clip/scene calls).
+  const effectEnabledMatch = rest.match(/^effect\.([A-Za-z0-9_-]+)\.enabled$/)
+  if (effectEnabledMatch) {
+    if (value !== 'true' && value !== 'false') throw new BeatEditError(`effect enabled must be true or false, got "${value}"`)
+    return setEffectEnabled(doc, trackId, effectEnabledMatch[1]!, value === 'true').doc
   }
 
   // note grammar (synth/instrument tracks) — the piano-roll edit primitive, the note-side analog
@@ -298,6 +309,70 @@ export function removeNote(doc: BeatDocument, trackId: string, noteId: string): 
   return { doc: replaceTrack(doc, { ...track, notes: track.notes.filter((n) => n.id !== noteId) }), note }
 }
 
+/** v0.10 effect-chain primitives (docs/phase-22-stream-aa.md). A track's `effects` array IS the
+ * insert chain's order — these are the only ways to change it, so every mutation stays a small,
+ * explicit list edit (add one entry, drop one entry, move one entry, flip one flag) rather than a
+ * hand-rolled array splice at each call site. Synth tracks only — see BeatTrack.effects. */
+
+/** Adds a new effect instance. Mints `<type>` (or `<type>_2`, `_3`, ... on collision) when `id` is
+ * omitted; errors if a given id already exists on the track. `index` inserts at that position
+ * (clamped to the list bounds); omitted = appended (the end of the chain, the least surprising
+ * default for "add a new insert"). */
+export function addEffect(doc: BeatDocument, trackId: string, type: EffectType, opts: { id?: string; index?: number; enabled?: boolean } = {}): { doc: BeatDocument; effect: BeatEffect } {
+  const track = findTrack(doc, trackId)
+  if (track.kind !== 'synth') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — effect chains only belong on synth tracks`)
+  if (!(EFFECT_TYPES as readonly string[]).includes(type)) throw new BeatEditError(`effect type must be one of ${EFFECT_TYPES.join('|')}, got "${type}"`)
+  let id = opts.id
+  if (id === undefined) {
+    id = type
+    let n = 2
+    while (track.effects.some((e) => e.id === id)) {
+      id = `${type}_${n}`
+      n++
+    }
+  } else {
+    if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new BeatEditError(`effect ids are single alphanumeric/_/- tokens, got "${id}"`)
+    if (track.effects.some((e) => e.id === id)) throw new BeatEditError(`effect id "${id}" already exists on track "${trackId}"`)
+  }
+  const added: BeatEffect = { id, type, enabled: opts.enabled ?? true }
+  const index = opts.index === undefined ? track.effects.length : Math.max(0, Math.min(Math.trunc(opts.index), track.effects.length))
+  const effects = [...track.effects.slice(0, index), added, ...track.effects.slice(index)]
+  return { doc: replaceTrack(doc, { ...track, effects }), effect: added }
+}
+
+/** Removes an effect instance by id. */
+export function removeEffect(doc: BeatDocument, trackId: string, effectId: string): { doc: BeatDocument; effect: BeatEffect } {
+  const track = findTrack(doc, trackId)
+  const effect = track.effects.find((e) => e.id === effectId)
+  if (!effect) throw new BeatEditError(`no effect "${effectId}" on track "${trackId}" (have: ${track.effects.map((e) => e.id).join(', ') || 'none'})`)
+  return { doc: replaceTrack(doc, { ...track, effects: track.effects.filter((e) => e.id !== effectId) }), effect }
+}
+
+/** Moves an effect to a new position in the chain (0-based, clamped to the list bounds) — this is
+ * THE reorder primitive: array order is chain order, so this is the whole operation. */
+export function moveEffect(doc: BeatDocument, trackId: string, effectId: string, toIndex: number): { doc: BeatDocument; effect: BeatEffect; before: number; after: number } {
+  const track = findTrack(doc, trackId)
+  const from = track.effects.findIndex((e) => e.id === effectId)
+  if (from === -1) throw new BeatEditError(`no effect "${effectId}" on track "${trackId}" (have: ${track.effects.map((e) => e.id).join(', ') || 'none'})`)
+  const after = Math.max(0, Math.min(Math.trunc(toIndex), track.effects.length - 1))
+  const effects = [...track.effects]
+  const [item] = effects.splice(from, 1)
+  effects.splice(after, 0, item!)
+  return { doc: replaceTrack(doc, { ...track, effects }), effect: item!, before: from, after }
+}
+
+/** Sets an effect instance's enabled/bypassed state. This is dotbeat's bypass mechanism: a
+ * disabled effect is routed OUT of the audio graph entirely (ui/src/audio/engine.ts), not just
+ * silenced via its own *Mix param — a real bypass, not a wet/dry illusion, and the only way to
+ * meaningfully bypass eq3 (which has no mix knob of its own). */
+export function setEffectEnabled(doc: BeatDocument, trackId: string, effectId: string, enabled: boolean): { doc: BeatDocument; effect: BeatEffect } {
+  const track = findTrack(doc, trackId)
+  const idx = track.effects.findIndex((e) => e.id === effectId)
+  if (idx === -1) throw new BeatEditError(`no effect "${effectId}" on track "${trackId}" (have: ${track.effects.map((e) => e.id).join(', ') || 'none'})`)
+  const effects = track.effects.map((e, i) => (i === idx ? { ...e, enabled } : e))
+  return { doc: replaceTrack(doc, { ...track, effects }), effect: effects[idx]! }
+}
+
 function validateTrackIdentity(id: string, name: string, color: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new BeatEditError(`track ids are single alphanumeric/_/- tokens, got "${id}"`)
   if (/\s/.test(name)) throw new BeatEditError('track names are single tokens in v0.2 (no whitespace)')
@@ -335,6 +410,9 @@ export function addTrack(
     clips: [],
     notes: [],
     hits: [],
+    // v0.10: a fresh synth track starts on the format's default chain (elided on serialize, same
+    // as every other init-patch default); drum/instrument tracks carry none.
+    effects: kind === 'synth' ? defaultEffectChain() : [],
   }
   return { doc: { ...doc, tracks: [...doc.tracks, track] }, track }
 }
@@ -430,7 +508,7 @@ export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: 
   const loopBars = opts.loopBars ?? 2
   if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
   if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
-  const base: BeatDocument = { formatVersion: '0.9', bpm, loopBars, selectedTrack: '', media: [], tracks: [], scenes: [], song: null }
+  const base: BeatDocument = { formatVersion: '0.10', bpm, loopBars, selectedTrack: '', media: [], tracks: [], scenes: [], song: null }
   const { doc } = addTrack(base, { id: opts.trackId ?? 'lead', kind: 'synth' })
   return { ...doc, selectedTrack: doc.tracks[0]!.id }
 }

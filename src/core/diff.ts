@@ -10,7 +10,7 @@
 // machine-applicable changeset, and — later — the natural undo / --dry-run representation. Each
 // entry carries `before`/`after`, so inverting a diff is structurally trivial when we need it.
 
-import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatNote, BeatTrack, DrumLane } from './document.js'
+import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatEffect, BeatNote, BeatTrack, DrumLane } from './document.js'
 import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -47,6 +47,11 @@ export type DiffEntry =
   | { kind: 'automation-point-added'; trackId: string; clipId: string; param: string; point: { id: string; time: number; value: number } }
   | { kind: 'automation-point-removed'; trackId: string; clipId: string; param: string; point: { id: string; time: number; value: number } }
   | { kind: 'automation-point-changed'; trackId: string; clipId: string; param: string; pointId: string; changes: { field: 'time' | 'value'; before: number; after: number }[] }
+  // v0.10 effect chain (matched by id, like notes/hits — a reorder reads as "moved", not remove+add)
+  | { kind: 'effect-added'; trackId: string; effect: BeatEffect }
+  | { kind: 'effect-removed'; trackId: string; effect: BeatEffect }
+  | { kind: 'effect-moved'; trackId: string; effectId: string; before: number; after: number }
+  | { kind: 'effect-enabled'; trackId: string; effectId: string; before: boolean; after: boolean }
 
 // v0.9: diffs one clip's automation lanes. Lanes match by param name; points within a lane match
 // by id (like notes/hits) — a point moved in time or re-valued reports as one changed entry, not
@@ -73,6 +78,34 @@ function diffClipAutomation(trackId: string, clipId: string, aLanes: BeatAutomat
       if (before.value !== p.value) changes.push({ field: 'value', before: before.value, after: p.value })
       if (changes.length) out.push({ kind: 'automation-point-changed', trackId, clipId, param, pointId: pid, changes })
     }
+  }
+}
+
+// v0.10: diffs one track's effect chain. Entries match by id (like notes/hits/automation points),
+// never by position — so a reorder reads as "effect X moved from position i to j," not a
+// remove-and-re-add pair (the alsdiff lesson, same as track-moved above). Order comparison runs
+// only over ids present on BOTH sides, for the same reason track order comparison does: adding or
+// removing one entry shouldn't make every later entry look like it "moved."
+function diffEffects(trackId: string, aEffects: BeatEffect[], bEffects: BeatEffect[], out: DiffEntry[]) {
+  const aById = new Map(aEffects.map((e) => [e.id, e]))
+  const bById = new Map(bEffects.map((e) => [e.id, e]))
+  for (const [id, e] of aById) if (!bById.has(id)) out.push({ kind: 'effect-removed', trackId, effect: e })
+  for (const [id, e] of bById) if (!aById.has(id)) out.push({ kind: 'effect-added', trackId, effect: e })
+
+  const commonIds = [...aById.keys()].filter((id) => bById.has(id))
+  const aOrder = aEffects.filter((e) => bById.has(e.id)).map((e) => e.id)
+  const bOrder = bEffects.filter((e) => aById.has(e.id)).map((e) => e.id)
+  if (aOrder.join('\n') !== bOrder.join('\n')) {
+    for (const id of commonIds) {
+      const ai = aOrder.indexOf(id)
+      const bi = bOrder.indexOf(id)
+      if (ai !== bi) out.push({ kind: 'effect-moved', trackId, effectId: id, before: ai, after: bi })
+    }
+  }
+  for (const id of commonIds) {
+    const before = aById.get(id)!.enabled
+    const after = bById.get(id)!.enabled
+    if (before !== after) out.push({ kind: 'effect-enabled', trackId, effectId: id, before, after })
   }
 }
 
@@ -126,6 +159,9 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
         }
       }
     }
+
+    // v0.10 effect chain: match/order-compare by id (alsdiff lesson again).
+    diffEffects(id, ta.effects, tb.effects, out)
 
     // Notes match by ID — never by position (the alsdiff lesson).
     const aNotes = new Map(ta.notes.map((n) => [n.id, n]))
@@ -345,6 +381,18 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'automation-point-changed':
         lines.push(`${e.trackId}: clip "${e.clipId}" ${e.param} automation point ${e.pointId} ${e.changes.map((c) => `${c.field} ${formatNumber(c.before)} -> ${formatNumber(c.after)}`).join(', ')}`)
+        break
+      case 'effect-added':
+        lines.push(`${e.trackId}: effect added ${e.effect.id} (${e.effect.type}${e.effect.enabled ? '' : ', bypassed'})`)
+        break
+      case 'effect-removed':
+        lines.push(`${e.trackId}: effect removed ${e.effect.id} (${e.effect.type})`)
+        break
+      case 'effect-moved':
+        lines.push(`${e.trackId}: effect ${e.effectId} moved from position ${e.before} to ${e.after}`)
+        break
+      case 'effect-enabled':
+        lines.push(`${e.trackId}: effect ${e.effectId} ${e.after ? 'enabled' : 'bypassed'}`)
         break
       case 'song-changed': {
         const fmt = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}(${x.bars})`).join(' ') : '(no song)')

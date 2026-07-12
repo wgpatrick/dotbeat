@@ -91,6 +91,18 @@ export interface BeatSongSection {
   bars: number
 }
 
+// v0.10 (Phase 22 Stream AA): the ordered, reorderable per-track effect chain — mirrors
+// src/core/document.ts's EffectType/BeatEffect exactly. Synth tracks only (drum/instrument tracks
+// carry []); array order IS chain order (see ui/src/audio/engine.ts's buildSynthChain).
+export type EffectType = 'eq3' | 'comp' | 'distortion' | 'bitcrush'
+export const EFFECT_TYPES: readonly EffectType[] = ['eq3', 'comp', 'distortion', 'bitcrush']
+export const EFFECT_LABELS: Record<EffectType, string> = { eq3: 'EQ3', comp: 'Compressor', distortion: 'Distortion', bitcrush: 'Bitcrush' }
+export interface BeatEffect {
+  id: string
+  type: EffectType
+  enabled: boolean
+}
+
 export interface BeatTrack {
   id: string
   name: string
@@ -102,6 +114,7 @@ export interface BeatTrack {
   hits: BeatDrumHit[]
   clips: BeatClip[]
   laneSamples: Record<string, unknown>
+  effects: BeatEffect[]
 }
 
 export interface BeatDocument {

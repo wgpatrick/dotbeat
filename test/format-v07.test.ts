@@ -79,6 +79,6 @@ test('addNote still rejects bad timing', () => {
   assert.throws(() => addNote(doc, 'lead', { pitch: 60, start: 0, duration: 0.00004, velocity: 0.5 }), /canonical precision/)
 })
 
-test('new documents are stamped v0.9', () => {
-  assert.equal(initDocument({}).formatVersion, '0.9')
+test('new documents are stamped v0.10 (Phase 22 Stream AA: the effect-chain grammar)', () => {
+  assert.equal(initDocument({}).formatVersion, '0.10')
 })

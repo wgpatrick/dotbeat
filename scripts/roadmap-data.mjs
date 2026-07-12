@@ -229,9 +229,9 @@ export const rows = [
   },
   {
     area: 'Core effects', feature: 'Ordered, reorderable per-track effect chain',
-    description: 'Replace the fixed EQ→comp→dist→bitcrush insert order with an explicit ordered list of effect blocks — as flat literal text (order = line order), never a pointer/index indirection like openDAW\'s box graph uses.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/21-opendaw-devices-effects.md', plan: null,
+    description: 'Replaced the fixed EQ→comp→dist→bitcrush insert order with an explicit ordered list of effect lines (format v0.10) — flat literal text (order = line order, stable per-instance ids), never a pointer/index indirection like openDAW\'s box graph uses. Add/remove/reorder/bypass a built-in insert per track; bypass is a real routing bypass, not a mix-knob illusion. Two independently-parameterized instances of the SAME type remain out of scope (documented) — new effect TYPES (Ping Pong Delay/Beat Repeat/Chorus/Saturator) are a separate stream to reconcile at merge time.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/21-opendaw-devices-effects.md', plan: 'phase-22-stream-aa.md',
   },
 
   // ── Extended FX arsenal ──────────────────────────────────────────────────

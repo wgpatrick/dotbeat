@@ -295,6 +295,42 @@ export async function postRemoveTrack(id: string): Promise<void> {
   useStore.getState().setDoc(doc)
 }
 
+// ─── effect-chain add/remove/move/bypass (Phase 22 Stream AA) ───────────────────────────────────
+// Same reasoning as track add/remove above: these change the ordered `effects` LIST's shape or
+// order, so they don't fit setValue's single `path=value` shape (bypass alone DOES — see
+// postEdit's `<track>.effect.<id>.enabled` path, an alternative for that one case). Dedicated
+// daemon routes (/effect-add, /effect-remove, /effect-move, /effect-enabled) wrap the same core
+// primitives `beat effect-add`/`-rm`/`-move`/`-bypass` call, and RETURN the full raw document
+// (no SSE echo of the daemon's own writes) — applied straight to the store, no optimistic mirror.
+
+async function postEffectOp<T extends Record<string, unknown>>(route: string, body: T): Promise<void> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/${route}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc } = (await res.json()) as { written: boolean; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
+}
+
+export function postEffectAdd(track: string, type: string, opts: { id?: string; index?: number; bypassed?: boolean } = {}): Promise<void> {
+  return postEffectOp('effect-add', { track, type, ...opts })
+}
+export function postEffectRemove(track: string, id: string): Promise<void> {
+  return postEffectOp('effect-remove', { track, id })
+}
+export function postEffectMove(track: string, id: string, index: number): Promise<void> {
+  return postEffectOp('effect-move', { track, id, index })
+}
+export function postEffectEnabled(track: string, id: string, enabled: boolean): Promise<void> {
+  return postEffectOp('effect-enabled', { track, id, enabled })
+}
+
 // ─── vary-and-audition (Phase 15 Stream I) ──────────────────────────────────────────────────────
 // The daemon's POST /vary returns a batch of param-variants, each a list of {path,value} edits in
 // the SAME grammar postEdit already commits. Auditioning a variant = applying its edits to a base

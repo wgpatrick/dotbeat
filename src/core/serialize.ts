@@ -1,6 +1,18 @@
-import type { BeatAutomationLane, BeatAutomationPoint, BeatDrumHit, BeatDocument, BeatNote, BeatScene, BeatTrack } from './document.js'
-import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatDrumHit, BeatDocument, BeatEffect, BeatNote, BeatScene, BeatTrack } from './document.js'
+import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, isDefaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
+
+// v0.10: the effect chain serializes iff it differs from the canonical default (isDefaultEffectChain)
+// — same canonical-elision discipline as v0.3's synth fields. An unmodified (or pre-v0.10) track
+// emits ZERO effect lines and round-trips byte-identically; an explicitly emptied chain emits the
+// `effects none` sentinel (there'd otherwise be no way to tell "emptied" from "never declared"
+// apart on the next parse); anything else emits one `effect <id> <type>[ bypassed]` line per
+// entry, IN LIST ORDER — the file's order IS the chain order, no re-sorting.
+function serializeEffectLines(effects: BeatEffect[], indent: string): string[] {
+  if (isDefaultEffectChain(effects)) return []
+  if (effects.length === 0) return [`${indent}effects none`]
+  return effects.map((e) => `${indent}effect ${e.id} ${e.type}${e.enabled ? '' : ' bypassed'}`)
+}
 
 // Canonical note order: (start, pitch, id) ascending — see format-spec.md's "canonical ordering".
 function sortedNoteLines(notes: BeatNote[], indent: string): string[] {
@@ -71,6 +83,10 @@ function serializeTrack(t: BeatTrack): string[] {
     const text = def.kind === 'number' ? formatNumber(value as number) : def.kind === 'trackref' ? (value === null ? 'none' : String(value)) : String(value)
     lines.push(`    ${def.key} ${text}`)
   }
+  // v0.10: the ordered insert-effect chain (synth tracks only — drums/instrument never serialize
+  // effect lines; their `effects` field stays [] and is not this feature's concern, see
+  // BeatTrack.effects).
+  if (t.kind === 'synth') lines.push(...serializeEffectLines(t.effects, '  '))
   // v0.5 lane samples: DRUM_LANES order (canonical), one line per assigned lane.
   if (t.kind === 'drums') {
     for (const lane of DRUM_LANES) {

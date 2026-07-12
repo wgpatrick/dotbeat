@@ -23,6 +23,10 @@ import {
   setSong,
   setMediaSample,
   setLaneSample,
+  addEffect,
+  removeEffect,
+  moveEffect,
+  setEffectEnabled,
   serialize,
   setValue,
   addNote,
@@ -93,6 +97,14 @@ const USAGE = `usage:
   beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
   beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)
   beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample
+  beat effect-add <file> <track> <eq3|comp|distortion|bitcrush> [--id id] [--index n] [--bypassed]
+                                                          add an insert to a synth track's effect chain
+                                                          (default: appended, enabled; order in the file IS chain order)
+  beat effect-rm <file> <track> <effect-id>               remove an insert by id
+  beat effect-move <file> <track> <effect-id> <new-index>  reorder — a two-line diff, not a rewrite
+  beat effect-bypass <file> <track> <effect-id> <true|false>  bypass/re-enable one insert (real routing
+                                                          bypass, not just its own mix knob — see beat_set's
+                                                          <track>.effect.<id>.enabled path for the same edit)
   beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
   beat suggest <file> <track> [--target <lane-or-id>] [--log f]
                                                           read the scores log and propose the next beat-vary round
@@ -693,6 +705,56 @@ function laneCmd(argv) {
   writeDoc(file, before, setLaneSample(before, track, lane, ref))
 }
 
+// v0.10 effect-chain commands (docs/phase-22-stream-aa.md). Add/remove/move change the chain's
+// LIST shape/order, same reason clip/scene/song get their own commands instead of overloading
+// `beat set`; bypass fits set's plain path=value grammar too (also usable as
+// `beat set <file> <track>.effect.<id>.enabled <true|false>`), but gets its own friendlier verb
+// here for discoverability, same as `beat lane`.
+function effectAddCmd(argv) {
+  const idIdx = argv.indexOf('--id')
+  const id = idIdx !== -1 ? argv[idIdx + 1] : undefined
+  const indexIdx = argv.indexOf('--index')
+  const index = indexIdx !== -1 ? Number(argv[indexIdx + 1]) : undefined
+  const bypassed = argv.includes('--bypassed')
+  const positional = argv.filter((a, i) => {
+    if (a.startsWith('--')) return false
+    const prev = argv[i - 1]
+    return prev !== '--id' && prev !== '--index'
+  })
+  const [file, track, type] = positional
+  if (!file || !track || !type) throw new BeatEditError('effect-add needs <file> <track> <eq3|comp|distortion|bitcrush> [--id id] [--index n] [--bypassed]')
+  const before = readDoc(file)
+  const { doc } = addEffect(before, track, type, { ...(id !== undefined ? { id } : {}), ...(index !== undefined ? { index } : {}), enabled: !bypassed })
+  writeDoc(file, before, doc)
+}
+
+function effectRmCmd(argv) {
+  const [file, track, effectId] = argv
+  if (!file || !track || !effectId) throw new BeatEditError('effect-rm needs <file> <track> <effect-id>')
+  const before = readDoc(file)
+  const { doc } = removeEffect(before, track, effectId)
+  writeDoc(file, before, doc)
+}
+
+function effectMoveCmd(argv) {
+  const [file, track, effectId, index] = argv
+  if (!file || !track || !effectId || index === undefined) throw new BeatEditError('effect-move needs <file> <track> <effect-id> <new-index>')
+  const before = readDoc(file)
+  const { doc } = moveEffect(before, track, effectId, Number(index))
+  writeDoc(file, before, doc)
+}
+
+function effectBypassCmd(argv) {
+  const [file, track, effectId, state] = argv
+  if (!file || !track || !effectId || state === undefined) throw new BeatEditError('effect-bypass needs <file> <track> <effect-id> <true|false>')
+  if (state !== 'true' && state !== 'false') throw new BeatEditError('effect-bypass state must be true or false')
+  const before = readDoc(file)
+  // the CLI arg is "bypassed?" (true = silence this insert); setEffectEnabled wants "enabled?" —
+  // the two are inverses.
+  const { doc } = setEffectEnabled(before, track, effectId, state === 'false')
+  writeDoc(file, before, doc)
+}
+
 function fmtDb(x, unit = '') {
   return Number.isFinite(x) ? `${x.toFixed(1)}${unit}` : String(x)
 }
@@ -986,6 +1048,18 @@ async function main() {
       break
     case 'lane':
       laneCmd(rest)
+      break
+    case 'effect-add':
+      effectAddCmd(rest)
+      break
+    case 'effect-rm':
+      effectRmCmd(rest)
+      break
+    case 'effect-move':
+      effectMoveCmd(rest)
+      break
+    case 'effect-bypass':
+      effectBypassCmd(rest)
       break
     case 'score':
       await scoreCmd(rest)

@@ -441,10 +441,69 @@ phase: a named synth param, inside one clip, gets a lane of (time, value) points
   local checkout available this phase) — see phase-9-automation-plan.md's Result section for
   what's assumed vs. confirmed.
 
+### v0.10 additions — ordered, reorderable per-track effect chain (Phase 22 Stream AA)
+
+Every synth track's insert chain used to be fixed in engine code: EQ3 -> compressor -> distortion
+-> bitcrush, in that order, always, with no way to reorder, drop, or duplicate an insert
+(`ui/src/audio/engine.ts`'s old `buildSynthChain()`). v0.10 makes the chain a literal, ordered list
+in the file itself — flat text, no box/pointer graph (`docs/research/21-opendaw-devices-effects.md`
+§3 row 1's "adapt, not adopt" verdict: get openDAW's *outcome* — arbitrary order, addable/
+removable, reorderable — without its indirection mechanism).
+
+```
+  effect <id> <type> [bypassed]     # one line per insert, in FILE order = CHAIN order
+```
+
+- **`type`** is one of `eq3|comp|distortion|bitcrush` — the same four built-in inserts every synth
+  track already has knobs for (`eqLow`/`eqMid`/`eqHigh`, `comp*`, `distortion*`, `bitcrush*` in
+  `SYNTH_FIELDS`, unchanged). An `effect` line only says WHETHER, WHERE, and IN WHAT ORDER a type
+  runs — the type's own params still live in the synth block, exactly as before. (This means
+  dotbeat does not yet support two independently-parameterized instances of the same type — both
+  would read the one shared `eqLow` etc. — a deliberate, documented scope cut, not an oversight;
+  see `docs/phase-22-stream-aa.md`.)
+- **`id`** is a stable, track-scoped human slug (D6) — what makes a reorder read as a MOVE (a line
+  changes position) rather than a delete-and-reinsert-different-content pair (the alsdiff lesson,
+  same discipline as note/hit/clip ids). Defaults (below) use the type name as the id (`eq3`,
+  `comp`, `distortion`, `bitcrush`); `beat effect-add` mints `<type>_2`, `_3`, ... on collision.
+- **`bypassed`** is the enabled/disabled token, styled after `SYNTH_FIELDS`'s own elision
+  convention: enabled is the default and is elided (a bare `effect <id> <type>` line); only a
+  disabled instance carries the trailing `bypassed` token. Bypass is a REAL routing bypass — the
+  engine splices a disabled effect out of the audio graph entirely (`reconcileEffectChain` in
+  `ui/src/audio/engine.ts`), not a wet/dry illusion — the only way to meaningfully bypass `eq3`,
+  which has no mix knob of its own.
+- **Canonical elision, at the whole-chain level**: `effect` lines are serialized iff the track's
+  chain differs from the canonical default (`eq3`, `comp`, `distortion`, `bitcrush`, all enabled,
+  in that order — `defaultEffectChain()` in `src/core/document.ts`). An untouched track — old or
+  new — emits ZERO effect lines. If a track's chain is explicitly emptied (every insert removed),
+  a single `effects none` sentinel line is emitted instead (there would otherwise be no way to
+  tell "the user removed everything" from "this file predates the effect-chain grammar" on the
+  next parse — the same one-canonical-form-per-state discipline as every other elision rule here).
+- **Migration is on-load, automatic, lossless**: any synth track with zero `effect`/`effects`
+  lines — every pre-v0.10 file, and any hand-written file that never mentions effects — parses
+  into exactly the old hardcoded chain. Since that's also the canonical default, such a file
+  re-serializes byte-identical to what it started as; `beat render`/the GUI sound identical to
+  before this stream for every existing project. Proven by round-trip tests
+  (`test/format-v10-effects.test.ts`).
+- **Position in the track block**: right after the `synth` block, before `lane`/`clip`/`note`/`hit`
+  lines. Synth tracks only — drum tracks (which also carry a `synth` block, driving the drum bus)
+  and instrument tracks never carry `effect` lines; the drum-bus insert chain is untouched by this
+  stream (a sibling stream owns drum tracks/kits).
+- **Diff**: matched by id, like notes/hits/automation points — `diffDocuments` reports
+  `effect-added`/`effect-removed`/`effect-moved`/`effect-enabled` as musical facts
+  (`src/core/diff.ts`). A pure reorder's order-comparison runs over ids common to both sides only
+  (the same discipline `track-moved` already uses), so an add/remove elsewhere in the list doesn't
+  make unrelated entries look like they moved.
+- **Edit primitives** (`src/core/edit.ts`): `addEffect`/`removeEffect`/`moveEffect` (structural —
+  own CLI commands `beat effect-add`/`-rm`/`-move`, own MCP tools `beat_effect_add`/`_rm`/`_move`,
+  same reasoning clip/scene/song get dedicated verbs instead of overloading `beat set`) and
+  `setEffectEnabled` (fits `beat set`'s plain `path=value` grammar too, as
+  `<track>.effect.<id>.enabled`, alongside its own `beat effect-bypass`/`beat_effect_bypass`).
+
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
 Clips/scenes (shipped v0.4), swing, arrangement (shipped v0.4), multi-device chains beyond the
-built-in insert set, multi-token track names, and the `DELIBERATELY_UNMODELED` fields above. See
+built-in insert set (shipped v0.10, above — multiple INSTANCES of the same type sharing params
+remains out of scope), multi-token track names, and the `DELIBERATELY_UNMODELED` fields above. See
 `phase-1-plan.md`'s "explicitly deferred" section — these come as the milestones that need them
 land (`ROADMAP.md` §8). Clip automation shipped v0.9 (above); automation *curve shape* (linear vs
 hold between points) and live/non-clip automation remain deferred.

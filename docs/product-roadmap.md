@@ -26,7 +26,7 @@ stream to pick up — not guesswork, a decision away from being built.
 
 ## Snapshot — 82 features tracked
 
-**23** Done · **0** In progress · **59** Not started
+**24** Done · **0** In progress · **58** Not started
 
 ---
 
@@ -113,7 +113,7 @@ stream to pick up — not guesswork, a decision away from being built.
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
 | EQ3 / comp / distortion / bitcrush / reverb+delay sends / sidechain | The built-in insert set every synth and drum bus already carries. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-13-editing.md`](phase-13-editing.md) |
-| Ordered, reorderable per-track effect chain | Replace the fixed EQ→comp→dist→bitcrush insert order with an explicit ordered list of effect blocks — as flat literal text (order = line order), never a pointer/index indirection like openDAW's box graph uses. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`21-opendaw-devices-effects.md`](research/21-opendaw-devices-effects.md) | — |
+| Ordered, reorderable per-track effect chain | Replaced the fixed EQ→comp→dist→bitcrush insert order with an explicit ordered list of effect lines (format v0.10) — flat literal text (order = line order, stable per-instance ids), never a pointer/index indirection like openDAW's box graph uses. Add/remove/reorder/bypass a built-in insert per track; bypass is a real routing bypass, not a mix-knob illusion. Two independently-parameterized instances of the SAME type remain out of scope (documented) — new effect TYPES (Ping Pong Delay/Beat Repeat/Chorus/Saturator) are a separate stream to reconcile at merge time. | ✅ done | ✅ done | ✅ done | ✅ Done | [`21-opendaw-devices-effects.md`](research/21-opendaw-devices-effects.md) | [`phase-22-stream-aa.md`](phase-22-stream-aa.md) |
 
 ## Extended FX arsenal
 

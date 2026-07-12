@@ -1,5 +1,5 @@
 import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultSynthFields } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultEffectChain, defaultSynthFields } from './document.js'
 
 /** v0.9: the assumed shape of beatlab's per-clip automation engine state — a param name mapped
  * to its list of (time, value) points, UNORDERED and WITHOUT stable ids (beatlab's live clip
@@ -87,7 +87,7 @@ export interface ExternalSandboxPayload {
   arrangement?: { enabled?: boolean; mode?: string | null; timeline?: { sceneId: string; bars: number }[] }
 }
 
-const BEAT_FORMAT_VERSION = '0.9'
+const BEAT_FORMAT_VERSION = '0.10'
 
 /** SynthParams fields the format deliberately does NOT model (each needs grammar design of its
  * own — large arrays, ordered lists, or redundant pairs; see docs/phase-5-plan.md). These are
@@ -96,6 +96,12 @@ const BEAT_FORMAT_VERSION = '0.9'
  * well-bounded bool+enum pair, not the open-ended arrays/orderings the rest of this list is),
  * so a conversion carries them across instead of dropping them (see toBeatSynth's generic
  * SYNTH_FIELDS loop, which now covers all four automatically). */
+// Phase 22 Stream AA note: 'insertOrder' here is BeatLab's own external SynthParams field (this
+// converter's source shape) — still unconverted, since its exact external shape was never
+// confirmed against a live BeatLab checkout (see format-spec.md's v0.9 automation section for the
+// same caveat pattern). dotbeat's OWN document format gained a real, independent per-track effect
+// ordering in v0.10 (BeatTrack.effects, src/core/document.ts) — the format-level gap this list
+// entry used to describe is closed; only the BeatLab-import mapping remains unmodeled.
 export const DELIBERATELY_UNMODELED = [
   'wtCustomA',
   'wtCustomB',
@@ -229,6 +235,10 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     }),
     notes: t.kind === 'synth' ? t.notes.map(toBeatNote) : [],
     hits: t.kind === 'drums' ? patternToHits(toBeatPattern(t.pattern, t.id), loopSteps) : [],
+    // v0.10: BeatLab's own insertOrder isn't converted (see DELIBERATELY_UNMODELED's comment
+    // above) — every imported synth track lands on dotbeat's default chain, same as any other
+    // file that never declares one explicitly.
+    effects: t.kind === 'synth' ? defaultEffectChain() : [],
   }))
 
   let selectedTrack = payload.selectedTrackId

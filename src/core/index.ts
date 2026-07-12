@@ -32,6 +32,10 @@ export {
   moveAutomationPoint,
   removeAutomationPoint,
   setAutomationPoint,
+  addEffect,
+  removeEffect,
+  moveEffect,
+  setEffectEnabled,
   BeatEditError,
   type QuantizeOptions,
 } from './edit.js'
