@@ -17,6 +17,7 @@ export {
   setValue,
   addNote,
   removeNote,
+  duplicateNotes,
   addHit,
   removeHit,
   quantizeNotes,
@@ -58,6 +59,7 @@ export {
   splitAudioClip,
   BeatEditError,
   type QuantizeOptions,
+  type DuplicateNotesOptions,
 } from './edit.js'
 export { humanize, BeatHumanizeError, type HumanizeOptions } from './humanize.js'
 export { moebiusEase, warpStep, unwarpStep } from './groove.js'

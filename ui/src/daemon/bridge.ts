@@ -587,6 +587,39 @@ export async function postPitchTime(body: PitchTimeOp): Promise<number> {
   return changed
 }
 
+// ─── copy/duplicate notes + clipboard (Phase 26 Stream DG) ──────────────────────────────────────
+// research 57 item #2: "no duplicate-in-place or clipboard concept anywhere" in edit.ts/NoteView.
+// One daemon route (POST /duplicate-notes, wrapping core's duplicateNotes), reused by both
+// NoteView.tsx flows — Alt-drag-to-duplicate and Cmd/Ctrl+C / Cmd/Ctrl+V — each just computes a
+// different (offsetStart, offsetPitch) delta before calling this. Same shape as postPitchTime: the
+// daemon returns the full document (no SSE echo of its own write), applied straight to the store;
+// unlike postPitchTime this also hands back the fresh copies' ids so the caller can select them.
+
+/** Duplicates `noteIds` (omitted = every note on `track`) onto the same track, offset by
+ * `offsetStart` steps / `offsetPitch` semitones (both default 0 — an exact on-top copy). Throws
+ * with the daemon's error message on a 4xx (e.g. an unknown note id, or a drums track). Returns
+ * the fresh copies' ids in scoped order. */
+export async function postDuplicateNotes(track: string, noteIds?: string[], offsetStart?: number, offsetPitch?: number): Promise<string[]> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/duplicate-notes`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      track,
+      ...(noteIds !== undefined ? { noteIds } : {}),
+      ...(offsetStart !== undefined ? { offsetStart } : {}),
+      ...(offsetPitch !== undefined ? { offsetPitch } : {}),
+    }),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { addedIds, doc } = (await res.json()) as { written: boolean; addedIds: string[]; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
+  return addedIds
+}
+
 // ─── vary-and-audition (Phase 15 Stream I) ──────────────────────────────────────────────────────
 // The daemon's POST /vary returns a batch of param-variants, each a list of {path,value} edits in
 // the SAME grammar postEdit already commits. Auditioning a variant = applying its edits to a base
