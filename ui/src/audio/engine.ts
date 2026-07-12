@@ -1577,13 +1577,20 @@ const DRUM_CHANNEL = 9 // GM channel 10 (0-indexed) — research 19 Part IV/V.2,
 // instrument-track path's hardcoded channel 0.
 
 /** Resolved playable content for one track this tick (loop vs. song mode). contentStep is the step
- * WITHIN that content (absolute in loop mode; section-relative, cycling every loopBars, in song
- * mode). In song mode a track unmapped by the active scene is silent (contentOf returns null). */
+ * WITHIN that content (absolute in loop mode; section-relative, cycling every loopBars in song mode
+ * — or, Phase 24 Stream CJ, cycling within the active clip's own `loop` range when it has one,
+ * clip-local bars overriding the document-wide loopBars just for that clip's tiling). In song mode a
+ * track unmapped by the active scene is silent (contentOf returns null). */
 interface Content {
   notes: BeatNote[]
   hits: BeatDrumHit[]
   automation: Map<string, { time: number; value: number }[]>
   contentStep: number
+  // Phase 24 Stream CJ: the step contentStep WRAPS BACK TO at the start of each tiling pass — 0
+  // except when a clip's own `loop` override has a non-zero `start` (in which case the cycle starts
+  // at loop.start*16, not 0). The audio-region retrigger check below reads this instead of a
+  // hardcoded 0 so a clip-loop-shifted audio region still retriggers on schedule.
+  cycleStart: number
   // Phase 22 Stream AE: the active audio-region clip's content, only ever non-null for 'audio'-
   // kind tracks in song mode (audio-region clips have no live/non-clip form this stream — see
   // docs/phase-22-stream-ae.md — so loop mode and every other track kind always gets null here).
@@ -2908,7 +2915,7 @@ class Engine {
       // Phase 22 Stream AE: audio-region clips have no live/non-clip form this stream (see
       // docs/phase-22-stream-ae.md), so loop mode is always silent for 'audio'-kind tracks —
       // audio: null unconditionally here, populated only from a clip below.
-      return { notes: track.notes, hits: track.hits, automation: new Map(), contentStep: step, audio: null }
+      return { notes: track.notes, hits: track.hits, automation: new Map(), contentStep: step, cycleStart: 0, audio: null }
     }
     // Resolve (bar -> section -> scene -> this track's clip).
     let cursor = 0
@@ -2927,16 +2934,34 @@ class Engine {
     const clipId = scene?.slots?.[track.id]
     if (!clipId) return null
     const clip = (
-      track.clips as { id: string; notes: BeatNote[]; hits: BeatDrumHit[]; automation: { param: string; points: { time: number; value: number }[] }[]; audio?: BeatAudioRegion }[]
+      track.clips as {
+        id: string
+        notes: BeatNote[]
+        hits: BeatDrumHit[]
+        automation: { param: string; points: { time: number; value: number }[] }[]
+        audio?: BeatAudioRegion
+        loop?: { start: number; end: number } | null
+      }[]
     ).find((c) => c.id === clipId)
     if (!clip) return null
     const rel = step - sectionStartBar * 16
-    const loopSteps = loopBars * 16
+    // Phase 24 Stream CJ: a clip's own `loop` range (BeatClipLoop, Phase 22 Stream AG's
+    // src/core/document.ts model — `{start, end}`, clip-local bars, `end` exclusive) overrides the
+    // document-wide loopBars tiling for just THIS clip. When present, contentStep cycles WITHIN
+    // [loop.start*16, loop.end*16) instead of [0, loopBars*16) — the clip repeats only that sub-
+    // window of its own authored content, starting right at the section boundary (rel=0 ->
+    // contentStep = loop.start*16). Falls back to the pre-existing loopBars-wide tiling (starting at
+    // step 0) when clip.loop is null — the exact same formula this replaced, byte-for-byte, so a
+    // clip that never set `loop` behaves identically to before this stream (canonical elision's
+    // "no override = today's behavior, unchanged" default — see BeatClipLoop's own doc comment).
+    const loopStartSteps = clip.loop ? clip.loop.start * 16 : 0
+    const loopSteps = clip.loop ? (clip.loop.end - clip.loop.start) * 16 : loopBars * 16
     return {
       notes: clip.notes,
       hits: clip.hits,
       automation: autoOf(clip.automation ?? []),
-      contentStep: ((rel % loopSteps) + loopSteps) % loopSteps,
+      contentStep: loopStartSteps + (((rel % loopSteps) + loopSteps) % loopSteps),
+      cycleStart: loopStartSteps,
       audio: clip.audio ?? null,
     }
   }
@@ -3044,9 +3069,11 @@ class Engine {
         if (voice && region) {
           const buf = this.audioBuffers.get(region.media)
           const gainAuto = content.automation.get('gain')
-          if (content.contentStep === 0 && buf) {
+          if (content.contentStep === content.cycleStart && buf) {
             // A clip re-triggers at the start of every pass through its own content (contentStep
-            // wraps to 0 — the same tiling `contentOf` already gives notes/hits, reused as-is).
+            // wraps back to cycleStart — 0, or Phase 24 Stream CJ's loop.start*16 when the clip has
+            // its own loop override — the same tiling `contentOf` already gives notes/hits, reused
+            // as-is).
             if (voice.player.buffer !== buf) voice.player.buffer = buf
             const rate = region.warp === 'repitch' ? region.rate : 1
             voice.player.playbackRate = rate

@@ -339,10 +339,32 @@ function clipStepLen(maxEnd: number): number {
   return Math.max(16, Math.ceil(maxEnd / 16) * 16)
 }
 
+/** Phase 24 Stream CJ: tile `off` across one section at period `len`, but when `clipLoop` is set,
+ * restrict to events whose own (clip-local) `start` falls within [loop.start*16, loop.end*16) and
+ * tile at THAT period instead — mirrors engine.ts's contentOf's exact same clip.loop interpretation
+ * (loopStartSteps/loopSteps, first occurrence at `start - loopStartSteps`), so the arrangement's
+ * visual note/hit density matches what actually plays once a clip has its own loop override. `len`
+ * is only used in the no-override branch (today's content-max-extent tiling, unchanged). */
+function tileOffsets(clipLoop: { start: number; end: number } | null, len: number, sectionSteps: number, eventStart: number): number[] {
+  if (!clipLoop) {
+    const offs: number[] = []
+    for (let off = 0; off < sectionSteps; off += len) offs.push(off)
+    return offs
+  }
+  const loopStartSteps = clipLoop.start * 16
+  const loopSteps = Math.max(16, (clipLoop.end - clipLoop.start) * 16)
+  if (eventStart < loopStartSteps || eventStart >= loopStartSteps + loopSteps) return [] // outside the loop window — never plays
+  const offs: number[] = []
+  for (let off = eventStart - loopStartSteps; off < sectionSteps; off += loopSteps) offs.push(off)
+  return offs
+}
+
 /** Flatten one track's playable content across the whole song timeline into absolute-step events.
  * Song mode: each section's scene maps this track to a clip (or not — an unmapped track is silent
- * in that section); the clip's events tile across the section's bars. Loop mode (no song block):
- * the track's live notes/hits play across loop_bars as a single section. */
+ * in that section); the clip's events tile across the section's bars — at the clip's OWN `loop`
+ * range when it has one (Phase 24 Stream CJ), else at today's content-max-extent tiling (unchanged).
+ * Loop mode (no song block): the track's live notes/hits play across loop_bars as a single section
+ * (no clip, so no clip.loop — unaffected by this stream). */
 function flattenTrack(track: BeatTrack, sections: Section[], doc: BeatDocument): TrackFlat {
   const notes: FlatNote[] = []
   const hits: FlatHit[] = []
@@ -355,6 +377,7 @@ function flattenTrack(track: BeatTrack, sections: Section[], doc: BeatDocument):
     // Resolve this section's content for this track.
     let srcNotes = track.notes
     let srcHits = track.hits
+    let clipLoop: { start: number; end: number } | null = null
     if (doc.song) {
       const scene = doc.scenes.find((s) => s.id === section.scene)
       const clipId = scene?.slots[track.id]
@@ -363,14 +386,15 @@ function flattenTrack(track: BeatTrack, sections: Section[], doc: BeatDocument):
       if (!clip) continue
       srcNotes = clip.notes
       srcHits = clip.hits
+      clipLoop = clip.loop ?? null
     }
 
     if (track.kind === 'drums') {
       const maxEnd = srcHits.reduce((m, h) => Math.max(m, h.start + 1), 0)
       const len = clipStepLen(maxEnd)
-      for (let off = 0; off < sectionSteps; off += len) {
-        for (const h of srcHits) {
-          const abs = sectionStartStep + off + h.start
+      for (const h of srcHits) {
+        for (const off of tileOffsets(clipLoop, len, sectionSteps, h.start)) {
+          const abs = sectionStartStep + off
           if (abs >= sectionEndStep) continue
           hits.push({ start: abs, lane: h.lane })
         }
@@ -378,9 +402,9 @@ function flattenTrack(track: BeatTrack, sections: Section[], doc: BeatDocument):
     } else {
       const maxEnd = srcNotes.reduce((m, n) => Math.max(m, n.start + n.duration), 0)
       const len = clipStepLen(maxEnd)
-      for (let off = 0; off < sectionSteps; off += len) {
-        for (const n of srcNotes) {
-          const abs = sectionStartStep + off + n.start
+      for (const n of srcNotes) {
+        for (const off of tileOffsets(clipLoop, len, sectionSteps, n.start)) {
+          const abs = sectionStartStep + off
           if (abs >= sectionEndStep) continue
           notes.push({ start: abs, duration: n.duration, pitch: n.pitch })
         }

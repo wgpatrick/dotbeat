@@ -147,9 +147,9 @@ export const rows = [
   },
   {
     area: 'Arrangement / song structure', feature: 'Clip-level loop/length/time-signature properties',
-    description: 'Ableton’s Start/End/Loop/Position/Length/Signature clip panel. v0.10 format addition (BeatClipLoop/BeatTimeSignature — a clip-local bar-range override + metadata-only time signature; the engine is still constant-tempo 4/4), a small properties strip in the Clip View, and free CLI/MCP access via the existing generic beat set / beat_set path.',
+    description: 'Ableton’s Start/End/Loop/Position/Length/Signature clip panel. v0.10 format addition (BeatClipLoop/BeatTimeSignature — a clip-local bar-range override + metadata-only time signature). Phase 22 Stream AG shipped the format/GUI (a properties strip in the Clip View, free CLI/MCP access via the existing generic beat set / beat_set path) but left the loop range engine-unwired — every clip still tiled at the document-wide loop_bars period regardless. Phase 24 Stream CJ wired the loop range into actual playback (ui/src/audio/engine.ts’s contentOf now tiles within a clip’s own [loop.start, loop.end) when set) and added a drag-handle resize affordance in the Clip View. Time signature remains metadata-only — the engine is still constant-tempo 4/4.',
     core: 'done', cli: 'done', gui: 'done', status: 'done',
-    research: 'research/18-ableton-ui-architecture.md', plan: 'phase-22-stream-ag.md',
+    research: 'research/18-ableton-ui-architecture.md', plan: 'phase-24-stream-cj.md',
   },
   {
     area: 'Arrangement / song structure', feature: 'Overlapping-region resolution policy (clip / push / keep-existing)',

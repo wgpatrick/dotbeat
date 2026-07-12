@@ -856,6 +856,59 @@ body {
   outline-offset: -1px;
 }
 
+/* ---- clip-loop resize strip (Phase 24 Stream CJ): drags the primary clip's own loop.end --------- */
+.noteview-cliploop-strip {
+  position: relative;
+  height: 10px;
+  margin-bottom: 2px;
+  min-width: min-content;
+}
+.noteview-cliploop-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(224, 161, 60, 0.35);
+  border-top: 1px solid rgba(224, 161, 60, 0.8);
+  border-bottom: 1px solid rgba(224, 161, 60, 0.8);
+  pointer-events: none;
+}
+.noteview-cliploop-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  margin-left: -4px;
+  cursor: ew-resize;
+  z-index: 4;
+  touch-action: none;
+}
+.noteview-cliploop-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+  background: var(--accent);
+}
+.noteview-cliploop-handle:hover::after {
+  background: #fff;
+}
+.noteview-cliploop-label {
+  position: absolute;
+  top: -1px;
+  transform: translateX(2px);
+  padding: 0 4px;
+  background: var(--accent);
+  color: #16171b;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  z-index: 5;
+  pointer-events: none;
+}
+
 /* ---- note inspector (Phase 22 Stream AD): chance/cent/ratchet fields for the one selected note --- */
 .note-inspector {
   display: flex;

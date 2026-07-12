@@ -246,6 +246,12 @@ properties panel all visible together).
 - **Time signature is metadata-only.** No playback effect yet; the engine remains constant-tempo 4/4
   (`docs/phase-6-plan.md`'s exclusion, unchanged by this stream). Wiring it into the tick/renderer is
   a distinct, larger engine-side project.
+- **`clip.loop` itself was ALSO metadata-only at the time this stream shipped** — modeled,
+  round-tripped, and editable via this panel's numeric fields, but `ui/src/audio/engine.ts`'s
+  `contentOf` never read it; every clip still tiled at the document-wide `loop_bars` period
+  regardless. Closed by Phase 24 Stream CJ (`docs/phase-24-stream-cj.md`), which wires `contentOf` to
+  tile within `[loop.start, loop.end)` when set and adds a drag-handle resize affordance in
+  `NoteView.tsx`. Signature remains metadata-only (the bullet above, still true).
 - **One editable clip per track** in the GUI properties panel (same v1 scope cut Phase 20 Stream Z's
   automation lanes already made) — a track playing different clips across multiple sections can only
   edit the first-occurrence clip's properties from the GUI today. The format itself has no such
