@@ -812,6 +812,39 @@ body {
   outline-offset: -1px;
 }
 
+/* ---- note inspector (Phase 22 Stream AD): chance/cent/ratchet fields for the one selected note --- */
+.note-inspector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #14151a;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--muted, #9aa0ab);
+}
+.note-inspector-title {
+  font-weight: 600;
+  color: var(--text, #e6e8ec);
+}
+.note-inspector-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.note-inspector-field input {
+  width: 56px;
+  font: inherit;
+  font-size: 11px;
+  background: #0f1014;
+  color: var(--text, #e6e8ec);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+
 /* ---- scope ---- */
 .scope-section {
   padding: 10px 14px;

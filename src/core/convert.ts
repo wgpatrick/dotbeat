@@ -1,5 +1,5 @@
 import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultEffectChain, defaultSynthFields } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultEffectChain, defaultSynthFields } from './document.js'
 
 /** v0.9: the assumed shape of beatlab's per-clip automation engine state — a param name mapped
  * to its list of (time, value) points, UNORDERED and WITHOUT stable ids (beatlab's live clip
@@ -199,8 +199,11 @@ function toBeatSynth(source: Record<string, unknown>, trackId: string, report: C
   return synth as unknown as BeatSynth
 }
 
+// v0.10: the external (BeatLab-bridge) payload has no chance/cent/ratchet* concept, so a
+// converted note always gets NOTE_FIELD_DEFAULTS (always-fires, no detune, no ratchet) — the
+// same "missing = today's behavior" contract the rest of the format uses.
 function toBeatNote(n: ExternalTrack['notes'][number]): BeatNote {
-  return { id: n.id, pitch: n.pitch, start: n.start, duration: n.duration, velocity: n.velocity }
+  return { id: n.id, pitch: n.pitch, start: n.start, duration: n.duration, velocity: n.velocity, ...NOTE_FIELD_DEFAULTS }
 }
 
 function toBeatPattern(source: Record<string, number[]> | undefined, trackId: string): BeatDrumPattern {
@@ -252,6 +255,11 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     // above) — every imported synth track lands on dotbeat's default chain, same as any other
     // file that never declares one explicitly.
     effects: t.kind === 'synth' ? defaultEffectChain() : [],
+    // v0.10 groove: no external-payload concept either (see toBeatNote above) — default "off".
+    // daemon.ts's POST /state carries the CURRENT document's groove across (same never-erase
+    // rule as laneSamples), so this default only matters for a track that's genuinely new.
+    shuffleAmount: 0,
+    shuffleGrid: 1,
   }))
 
   let selectedTrack = payload.selectedTrackId

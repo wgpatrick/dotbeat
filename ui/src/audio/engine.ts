@@ -705,6 +705,79 @@ function resolveBeatRepeat(p: { beatRepeatGrid: number; beatRepeatGate: number; 
   return { engaged, active, suppressOriginal, repeatNow, sliceStart, grid }
 }
 
+// ---- v0.10 note-scheduling additions (Phase 22 Stream AD) — hand-mirrored from src/core (groove.
+// ts, chance.ts, pitchtime.ts's ratchetSlots) per the same "ui/ has no build-time dependency on
+// src/core" convention as lfoSyncRateHz/LFO_DESTS above. Keep these three in sync with core BY
+// INSPECTION if the math ever changes; core's own test suite (test/groove.test.ts,
+// test/chance.test.ts, test/pitchtime.test.ts) is the source of truth for the math itself. ------
+
+/** Groove/shuffle warp — mirrors src/core/groove.ts's moebiusEase/warpStep exactly. Applied to a
+ * note/hit's `start` at SCHEDULING time only (never written back to the document): the format's
+ * shuffleAmount/shuffleGrid fields are a reversible playback property, not stored timing. */
+function moebiusEase(x: number, h: number): number {
+  if (h <= 0 || h >= 1) return x
+  return (x * h) / ((2 * h - 1) * (x - 1) + h)
+}
+function shuffleH(amount: number): number {
+  const a = Math.max(0, Math.min(1, amount))
+  return Math.min(0.5 + a / 2, 0.999)
+}
+function warpStep(step: number, amount: number, grid: number): number {
+  if (!(amount > 0) || !(grid > 0)) return step
+  const cell = grid * 2
+  const cellIndex = Math.floor(step / cell)
+  const x = (step - cellIndex * cell) / cell
+  return cellIndex * cell + moebiusEase(x, shuffleH(amount)) * cell
+}
+
+/** Per-note trigger probability — mirrors src/core/chance.ts's chanceFires exactly (mulberry32 +
+ * an FNV-1a seed fold over (pass, trackId, noteId)). `pass` is a per-loop-cycle counter the
+ * scheduler advances once per traversal (computeLoopPass, below) so the SAME note re-rolls
+ * independently every time the loop comes back around — "re-rolled per playback pass," not baked
+ * once — while staying reproducible for the exact same (pass, track, note) triple. */
+function mulberry32(seed: number): number {
+  let a = seed >>> 0
+  a |= 0
+  a = (a + 0x6d2b79f5) | 0
+  let t = Math.imul(a ^ (a >>> 15), 1 | a)
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+}
+function hashSeed(...parts: (string | number)[]): number {
+  let h = 2166136261
+  for (const part of parts) {
+    const s = String(part)
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i)
+      h = Math.imul(h, 16777619)
+    }
+    h ^= 0x1f
+  }
+  return h >>> 0
+}
+function chanceFires(chance: number, pass: number, trackId: string, noteId: string): boolean {
+  if (chance >= 100) return true
+  if (chance <= 0) return false
+  return mulberry32(hashSeed(pass, trackId, noteId)) * 100 < chance
+}
+
+/** Ratchet repeat slots — mirrors src/core/pitchtime.ts's ratchetSlots exactly (the SAME shape
+ * consolidateRatchet uses, so live playback of a ratcheted note sounds like what Consolidate would
+ * bake it into). count<=1 is a single full-length "slot" (no ratchet — the common case). */
+function ratchetSlots(count: number, curve: number, repeatLength: number, noteDuration: number): { start: number; duration: number }[] {
+  if (count <= 1) return [{ start: 0, duration: noteDuration }]
+  const k = curve >= 0 ? 1 + curve * 3 : 1 / (1 - curve * 3)
+  const edges: number[] = []
+  for (let i = 0; i <= count; i++) edges.push(Math.pow(i / count, k) * noteDuration)
+  const slots: { start: number; duration: number }[] = []
+  for (let i = 0; i < count; i++) {
+    const slotStart = edges[i]!
+    const slotSpan = edges[i + 1]! - slotStart
+    slots.push({ start: slotStart, duration: Math.max(0.001, slotSpan * repeatLength) })
+  }
+  return slots
+}
+
 interface SynthChain {
   synth: Tone.PolySynth<Tone.Synth>
   osc2: Tone.PolySynth<Tone.Synth>
@@ -1994,34 +2067,43 @@ class Engine {
    * velToFilterAmount are active. Factored out of tick()'s main note loop so Beat Repeat (Phase 22
    * Stream AC) can fire a repeated note through the exact same full-bank path as a normal one,
    * just at a different `noteTime` — a repeat should sound like a real repeat of the note, not a
-   * thin single-oscillator blip. */
+   * thin single-oscillator blip. v0.10 (Phase 22 Stream AD): also applies the note's own `cent`
+   * micro-tuning once (folded into freq before any ratchet slot, so every repeat shares the same
+   * detune) and loops over `ratchetSlots` — count<=1 is a single full-length slot, so this reduces
+   * to exactly one trigger per call when nothing is ratcheted, same as before this stream. A
+   * Beat-Repeat-triggered call ratchets too: a repeated ratcheted note repeats its whole ratchet
+   * pattern, which is the correct compounded behavior, not a special case. */
   private fireSynthNote(chain: SynthChain, p: EngineSynth, n: BeatNote, noteTime: number, stepSeconds: number, baseCutoff: number, lfoOn: boolean, lfo: number, lfo2On: boolean, lfo2: number): void {
-    const dur = Math.max(n.duration * stepSeconds * 0.9, 0.05)
-    let freq = Tone.Frequency(n.pitch, 'midi').toFrequency()
+    let freq = Tone.Frequency(n.pitch, 'midi').toFrequency() * Math.pow(2, n.cent / 1200)
     if (p.lfoDest === 'pitch' && lfoOn) freq *= Math.pow(2, (p.lfoDepth * lfo * 100) / 1200)
     if (p.lfo2Dest === 'pitch' && lfo2On) freq *= Math.pow(2, (p.lfo2Depth * lfo2 * 100) / 1200)
-    chain.synth.triggerAttackRelease(freq, dur, noteTime, n.velocity)
-    if (p.osc2Level > 0) chain.osc2.triggerAttackRelease(freq * Math.pow(2, p.osc2Detune / 1200), dur, noteTime, n.velocity)
-    if (p.unisonVoices >= 3 && p.osc2Level > 0) chain.osc3.triggerAttackRelease(freq * Math.pow(2, -p.osc2Detune / 1200), dur, noteTime, n.velocity)
-    for (const u of chain.uniPairs) {
-      if (p.unisonVoices >= u.minVoices && p.osc2Level > 0) u.poly.triggerAttackRelease(freq * Math.pow(2, (u.mul * p.osc2Detune) / 1200), dur, noteTime, n.velocity)
-    }
-    if (p.subLevel > 0) chain.sub.triggerAttackRelease(freq / 2, dur, noteTime, n.velocity)
-    if (p.noiseLevel > 0) chain.noise.triggerAttackRelease(dur, noteTime, n.velocity)
-    if (p.fmLevel > 0) chain.fm.triggerAttackRelease(freq, dur, noteTime, n.velocity)
-    if (p.filterEnvAmount > 0 || p.keytrackAmount > 0 || p.velToFilterAmount > 0) {
-      // Keytracking/velocity shift this note's cutoff at note-on; the filter envelope then
-      // sweeps relative to that shifted value.
-      const keytrackMult = Math.pow(2, (p.keytrackAmount * (n.pitch - 60)) / 12)
-      const velMult = Math.pow(2, p.velToFilterAmount * (n.velocity - 0.5) * 4)
-      const noteCutoff = Math.max(baseCutoff * keytrackMult * velMult, 20)
-      const peak = Math.max(noteCutoff * Math.pow(2, p.filterEnvAmount * 4), 20)
-      const sustainHz = Math.max(noteCutoff * Math.pow(2, p.filterEnvAmount * 4 * p.filterEnvSustain), 20)
-      chain.filter.frequency.cancelScheduledValues(noteTime)
-      chain.filter.frequency.setValueAtTime(noteCutoff, noteTime)
-      chain.filter.frequency.exponentialRampToValueAtTime(peak, noteTime + Math.max(p.filterEnvAttack, 0.001))
-      chain.filter.frequency.exponentialRampToValueAtTime(sustainHz, noteTime + Math.max(p.filterEnvAttack, 0.001) + Math.max(p.filterEnvDecay, 0.001))
-      chain.filter.frequency.exponentialRampToValueAtTime(noteCutoff, noteTime + dur + Math.max(p.filterEnvRelease, 0.001))
+    for (const slot of ratchetSlots(n.ratchetCount, n.ratchetCurve, n.ratchetLength, n.duration)) {
+      const slotTime = noteTime + slot.start * stepSeconds
+      const dur = Math.max(slot.duration * stepSeconds * 0.9, 0.05)
+      chain.synth.triggerAttackRelease(freq, dur, slotTime, n.velocity)
+      if (p.osc2Level > 0) chain.osc2.triggerAttackRelease(freq * Math.pow(2, p.osc2Detune / 1200), dur, slotTime, n.velocity)
+      if (p.unisonVoices >= 3 && p.osc2Level > 0) chain.osc3.triggerAttackRelease(freq * Math.pow(2, -p.osc2Detune / 1200), dur, slotTime, n.velocity)
+      for (const u of chain.uniPairs) {
+        if (p.unisonVoices >= u.minVoices && p.osc2Level > 0) u.poly.triggerAttackRelease(freq * Math.pow(2, (u.mul * p.osc2Detune) / 1200), dur, slotTime, n.velocity)
+      }
+      if (p.subLevel > 0) chain.sub.triggerAttackRelease(freq / 2, dur, slotTime, n.velocity)
+      if (p.noiseLevel > 0) chain.noise.triggerAttackRelease(dur, slotTime, n.velocity)
+      if (p.fmLevel > 0) chain.fm.triggerAttackRelease(freq, dur, slotTime, n.velocity)
+      if (p.filterEnvAmount > 0 || p.keytrackAmount > 0 || p.velToFilterAmount > 0) {
+        // Keytracking/velocity shift this note's cutoff at note-on; the filter envelope then
+        // sweeps relative to that shifted value. Each ratchet repeat re-triggers its own envelope
+        // pluck (count<=1 matches today's single-trigger behavior exactly).
+        const keytrackMult = Math.pow(2, (p.keytrackAmount * (n.pitch - 60)) / 12)
+        const velMult = Math.pow(2, p.velToFilterAmount * (n.velocity - 0.5) * 4)
+        const noteCutoff = Math.max(baseCutoff * keytrackMult * velMult, 20)
+        const peak = Math.max(noteCutoff * Math.pow(2, p.filterEnvAmount * 4), 20)
+        const sustainHz = Math.max(noteCutoff * Math.pow(2, p.filterEnvAmount * 4 * p.filterEnvSustain), 20)
+        chain.filter.frequency.cancelScheduledValues(slotTime)
+        chain.filter.frequency.setValueAtTime(noteCutoff, slotTime)
+        chain.filter.frequency.exponentialRampToValueAtTime(peak, slotTime + Math.max(p.filterEnvAttack, 0.001))
+        chain.filter.frequency.exponentialRampToValueAtTime(sustainHz, slotTime + Math.max(p.filterEnvAttack, 0.001) + Math.max(p.filterEnvDecay, 0.001))
+        chain.filter.frequency.exponentialRampToValueAtTime(noteCutoff, slotTime + dur + Math.max(p.filterEnvRelease, 0.001))
+      }
     }
   }
 
@@ -2074,8 +2156,13 @@ class Engine {
     const songBars = song ? song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
     const totalSteps = songBars * 16
     const ticksPerStep = transport.PPQ / 4
-    const step = Math.round(transport.getTicksAtTime(time) / ticksPerStep) % totalSteps
+    const rawStep = Math.round(transport.getTicksAtTime(time) / ticksPerStep)
+    const step = rawStep % totalSteps
     const bar = Math.floor(step / 16)
+    // v0.10 chance (Phase 22 Stream AD): a per-loop-cycle counter, incremented once per full
+    // traversal of the loop/song — chanceFires re-rolls per (pass, track, note), so the same note
+    // is re-evaluated fresh every time the loop comes back around rather than a single fixed draw.
+    const pass = Math.floor(rawStep / totalSteps)
     const stepSeconds = Tone.Time('16n').toSeconds()
 
     for (const track of doc.tracks) {
@@ -2125,13 +2212,27 @@ class Engine {
         const voice = this.instruments.get(track.id)
         if (!voice) continue // still loading, or sample unresolved
         for (const n of content.notes) {
-          if (Math.floor(n.start) !== content.contentStep) continue
-          const noteTime = time + (n.start - content.contentStep) * stepSeconds
-          const dur = Math.max(n.duration * stepSeconds * 0.9, 0.05)
+          // v0.10 groove (Phase 22 Stream AD): warp the note's effective start before the
+          // due-this-step check, so a shuffled track's notes actually land off their raw grid step.
+          const warpedStart = warpStep(n.start, track.shuffleAmount, track.shuffleGrid)
+          if (Math.floor(warpedStart) !== content.contentStep) continue
+          // v0.10 chance: skip this pass entirely (no noteOn at all) rather than a silent/zero-vel
+          // trigger — a chance miss is "the note wasn't there this time," not "played silently."
+          if (!chanceFires(n.chance, pass, track.id, n.id)) continue
+          const noteTime = time + (warpedStart - content.contentStep) * stepSeconds
           const midi = Math.round(n.pitch)
           const vel = Math.max(1, Math.min(127, Math.round(n.velocity * 127)))
-          voice.synth.noteOn(0, midi, vel, { time: noteTime })
-          voice.synth.noteOff(0, midi, { time: noteTime + dur })
+          // v0.10 ratchet: count<=1 (the common case) is a single full-length slot, so this loop
+          // reduces to exactly today's one noteOn/noteOff when nothing is ratcheted. cent micro-
+          // tuning isn't wired for instrument (SoundFont) voices yet — see the file's own note on
+          // WorkletSynthesizer's channel-wide pitch-bend making a clean per-note implementation a
+          // bigger lift than this pass's scope; synth-track notes (below) DO apply cent.
+          for (const slot of ratchetSlots(n.ratchetCount, n.ratchetCurve, n.ratchetLength, n.duration)) {
+            const slotTime = noteTime + slot.start * stepSeconds
+            const slotDur = Math.max(slot.duration * stepSeconds * 0.9, 0.02)
+            voice.synth.noteOn(0, midi, vel, { time: slotTime })
+            voice.synth.noteOff(0, midi, { time: slotTime + slotDur })
+          }
         }
         continue
       }
@@ -2272,11 +2373,22 @@ class Engine {
       // notes on top — see resolveBeatRepeat's doc comment for the full design.
       const synthRep = resolveBeatRepeat(p, content.contentStep)
       for (const n of content.notes) {
-        if (Math.floor(n.start) !== content.contentStep || synthRep.suppressOriginal) continue
-        const noteTime = time + (n.start - content.contentStep) * stepSeconds
+        // v0.10 groove (Phase 22 Stream AD): warp the note's effective start before the
+        // due-this-step check — see the instrument-track branch above for the same pattern.
+        const warpedStart = warpStep(n.start, track.shuffleAmount, track.shuffleGrid)
+        if (Math.floor(warpedStart) !== content.contentStep || synthRep.suppressOriginal) continue
+        // v0.10 chance: a miss means the note truly doesn't sound this pass (not a silent voice).
+        if (!chanceFires(n.chance, pass, track.id, n.id)) continue
+        const noteTime = time + (warpedStart - content.contentStep) * stepSeconds
         this.fireSynthNote(chain, p, n, noteTime, stepSeconds, baseCutoff, lfoOn, lfo, lfo2On, lfo2)
       }
       if (synthRep.repeatNow) {
+        // Beat Repeat's window match stays on the note's RAW (un-grooved) start — grid position is
+        // what the grid-aligned repeat window is defined against; groove only shifts when a note
+        // sounds, not which grid cell a hit belongs to. Its own seededRoll gate is a separate,
+        // independent probability from chance — not stacked on top of it (this stream's own
+        // per-pass chance check is skipped for repeats, matching how Beat Repeat already used to
+        // fire every note in its slice unconditionally before this stream landed).
         for (const n of content.notes) {
           if (n.start < synthRep.sliceStart || n.start >= synthRep.sliceStart + synthRep.grid) continue
           if (seededRoll(track.id, content.contentStep, n.id) >= p.beatRepeatChance) continue

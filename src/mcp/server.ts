@@ -31,6 +31,14 @@ import {
   setEffectEnabled,
   humanize,
   quantizeNotes,
+  transposeNotes,
+  timeScaleNotes,
+  fitToScaleNotes,
+  invertNotes,
+  reverseNotes,
+  legatoNotes,
+  consolidateRatchet,
+  SCALE_NAMES,
   addTrack,
   removeTrack,
   addGroup,
@@ -326,7 +334,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_set',
     description:
-      'Apply one or more surgical edits to a .beat file and write it back canonically. Paths use the file\'s own field names: "bpm", "loop_bars", "selected_track", "<track>.<param>", "<track>.name", "<track>.color", "<track>.pattern.<lane>[<step>]" (lanes: kick, snare, clap, hat, openhat). Params: the core 9 (osc, volume, cutoff, resonance, attack, decay, sustain, release, pan) plus the full v0.3 shaped surface — osc2Type/osc2Level/osc2Detune, subLevel, noiseLevel, fm*, unisonVoices/unisonWidth, filterType, filterEnv*, lfo*/lfo2*, glide, eq*, comp*, distortion*, bitcrush*, pingPong* (ping pong delay), beatRepeat* (grid/gate/chance/mode scheduling-layer stutter), chorus*/phaser* (per-track chorus-ensemble and phaser-flanger inserts), saturator* (curve/drive/mix), sendReverb/sendDelay, duckSource (a track id or "none") + duckAmount, and drum-voice shaping (kickTune/kickPunch/kickDecay, snareTone/snareDecay, hatTone/hatDecay/openHatDecay). Fields at their default are elided from the file. Returns the musical edit list of what changed.',
+      'Apply one or more surgical edits to a .beat file and write it back canonically. Paths use the file\'s own field names: "bpm", "loop_bars", "selected_track", "<track>.<param>", "<track>.name", "<track>.color", "<track>.pattern.<lane>[<step>]" (lanes: kick, snare, clap, hat, openhat), "<track>.shuffleAmount"/"<track>.shuffleGrid" (v0.10 groove — a reversible time-warp applied at playback, 0 amount = off), "<track>.note.<id>.chance" (0-100, v0.10 per-note trigger probability, default 100 = always fires), "<track>.note.<id>.cent" (-50..50, v0.10 per-note micro-tuning independent of pitch), "<track>.note.<id>.ratchetCount"/"ratchetCurve"/"ratchetLength" (v0.10 note ratchet/repeat — see beat_consolidate to bake a ratchet back into discrete notes). Params: the core 9 (osc, volume, cutoff, resonance, attack, decay, sustain, release, pan) plus the full v0.3 shaped surface — osc2Type/osc2Level/osc2Detune, subLevel, noiseLevel, fm*, unisonVoices/unisonWidth, filterType, filterEnv*, lfo*/lfo2*, glide, eq*, comp*, distortion*, bitcrush*, pingPong* (ping pong delay), beatRepeat* (grid/gate/chance/mode scheduling-layer stutter), chorus*/phaser* (per-track chorus-ensemble and phaser-flanger inserts), saturator* (curve/drive/mix), sendReverb/sendDelay, duckSource (a track id or "none") + duckAmount, and drum-voice shaping (kickTune/kickPunch/kickDecay, snareTone/snareDecay, hatTone/hatDecay/openHatDecay). Fields at their default are elided from the file. Returns the musical edit list of what changed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -610,6 +618,165 @@ const TOOLS: ToolDef[] = [
       writeFileSync(file, serialize(doc))
       const diff = formatDiff(diffDocuments(before, doc))
       return changed === 0 ? 'already on the grid — no notes moved\n' : diff
+    },
+  },
+  // ---- Pitch & Time operations (Phase 22 Stream AD) — one-shot edit primitives, same shape as
+  // beat_quantize/beat_humanize above: pure core function, canonical write, musical-edit-list
+  // return value. Every op takes an optional note_ids scope (a resolved selection).
+  {
+    name: 'beat_transpose',
+    description: 'Shift every scoped note\'s pitch by semitones (+/-), clamped to MIDI 0-127 (out-of-range notes clamp rather than erroring). note_ids restricts to a selection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        semitones: { type: 'number', description: 'integer, positive or negative' },
+        note_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track', 'semitones'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = transposeNotes(before, str(args, 'track'), num(args, 'semitones'), Array.isArray(args.note_ids) ? { noteIds: (args.note_ids as unknown[]).map(String) } : {})
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'no notes moved (already clamped, or nothing in scope)\n' : diff
+    },
+  },
+  {
+    name: 'beat_time_scale',
+    description: 'Stretch every scoped note\'s start/duration by factor (2 = Ableton\'s x2 Stretch button, 0.5 = ÷2, or any positive factor), anchored at the EARLIEST scoped note so a selected phrase stretches in place rather than sliding. note_ids restricts to a selection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        factor: { type: 'number', description: '> 0; 2 = double length, 0.5 = half length' },
+        note_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track', 'factor'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = timeScaleNotes(before, str(args, 'track'), num(args, 'factor'), Array.isArray(args.note_ids) ? { noteIds: (args.note_ids as unknown[]).map(String) } : {})
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'no notes changed\n' : diff
+    },
+  },
+  {
+    name: 'beat_fit_scale',
+    description: `Snap every scoped note's pitch to the nearest tone in root/scale (Ableton's "Fit to Scale"). root is a pitch class 0-11 (0=C, 1=C#, ... 11=B). Ties (equidistant up/down) resolve to the lower pitch. Valid scale names: ${SCALE_NAMES.join(', ')}. note_ids restricts to a selection.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        root: { type: 'number', description: 'pitch class 0-11 (0=C)' },
+        scale: { type: 'string', description: `one of: ${SCALE_NAMES.join(', ')}` },
+        note_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track', 'root', 'scale'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = fitToScaleNotes(before, str(args, 'track'), num(args, 'root'), str(args, 'scale'), Array.isArray(args.note_ids) ? { noteIds: (args.note_ids as unknown[]).map(String) } : {})
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'already in scale — no notes moved\n' : diff
+    },
+  },
+  {
+    name: 'beat_invert',
+    description: 'Mirrors every scoped note\'s pitch around axis (newPitch = 2*axis - pitch, clamped to 0-127). Omit axis to mirror around the scoped notes\' own mean pitch (Ableton\'s Invert has no separate axis control; this defaults the same way). note_ids restricts to a selection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        axis: { type: 'number', description: 'a MIDI pitch to mirror around; omit for the selection\'s own mean pitch' },
+        note_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = invertNotes(before, str(args, 'track'), typeof args.axis === 'number' ? args.axis : undefined, Array.isArray(args.note_ids) ? { noteIds: (args.note_ids as unknown[]).map(String) } : {})
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'no notes moved\n' : diff
+    },
+  },
+  {
+    name: 'beat_reverse',
+    description: 'Tape-reverses the scoped notes\' own time span: each note\'s [start, start+duration) interval reflects around the span\'s midpoint (playback order flips; durations are unchanged). note_ids restricts to a selection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        note_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = reverseNotes(before, str(args, 'track'), Array.isArray(args.note_ids) ? { noteIds: (args.note_ids as unknown[]).map(String) } : {})
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'no notes moved (a single note has no span to reverse)\n' : diff
+    },
+  },
+  {
+    name: 'beat_legato',
+    description: 'Extends (or shortens) each scoped note\'s duration to reach the NEXT scoped note\'s start, time-ordered regardless of pitch (Ableton\'s Legato) — closes gaps and removes overlaps. gap (steps, default 0) leaves a small silence before the next note instead of touching it exactly. The last scoped note is left alone. note_ids restricts to a selection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        gap: { type: 'number', description: 'steps of silence to leave before the next note, default 0' },
+        note_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = legatoNotes(before, str(args, 'track'), {
+        ...(typeof args.gap === 'number' ? { gap: args.gap } : {}),
+        ...(Array.isArray(args.note_ids) ? { noteIds: (args.note_ids as unknown[]).map(String) } : {}),
+      })
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'no notes resized\n' : diff
+    },
+  },
+  {
+    name: 'beat_consolidate',
+    description: 'Bakes every scoped ratcheted note (ratchetCount > 1 — see beat_set\'s note.<id>.ratchetCount) back into ratchetCount discrete, plain notes (research 22\'s "Consolidate" action, the inverse of setting a ratchet). Notes that aren\'t ratcheted are left alone. note_ids restricts to a selection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        note_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = consolidateRatchet(before, str(args, 'track'), Array.isArray(args.note_ids) ? { noteIds: (args.note_ids as unknown[]).map(String) } : {})
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'no ratcheted notes in scope — nothing to consolidate\n' : diff
     },
   },
   {

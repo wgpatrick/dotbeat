@@ -33,7 +33,10 @@ export type DiffEntry =
   | { kind: 'synth-param'; trackId: string; param: string; before: string | number | boolean | null; after: string | number | boolean | null }
   | { kind: 'note-added'; trackId: string; note: BeatNote }
   | { kind: 'note-removed'; trackId: string; note: BeatNote }
-  | { kind: 'note-changed'; trackId: string; noteId: string; changes: { field: 'pitch' | 'start' | 'duration' | 'velocity'; before: number; after: number }[] }
+  | { kind: 'note-changed'; trackId: string; noteId: string; changes: { field: 'pitch' | 'start' | 'duration' | 'velocity' | 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength'; before: number; after: number }[] }
+  // v0.10 groove/shuffle: a track-level playback field, so it diffs alongside track-meta rather
+  // than per-note.
+  | { kind: 'track-groove'; trackId: string; field: 'shuffleAmount' | 'shuffleGrid'; before: number; after: number }
   // v0.8 drum hits (match by id, like notes)
   | { kind: 'hit-added'; trackId: string; hit: BeatDrumHit }
   | { kind: 'hit-removed'; trackId: string; hit: BeatDrumHit }
@@ -162,6 +165,8 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
     const tb = bTracks.get(id)!.t
     if (ta.name !== tb.name) out.push({ kind: 'track-meta', trackId: id, field: 'name', before: ta.name, after: tb.name })
     if (ta.color !== tb.color) out.push({ kind: 'track-meta', trackId: id, field: 'color', before: ta.color, after: tb.color })
+    if (ta.shuffleAmount !== tb.shuffleAmount) out.push({ kind: 'track-groove', trackId: id, field: 'shuffleAmount', before: ta.shuffleAmount, after: tb.shuffleAmount })
+    if (ta.shuffleGrid !== tb.shuffleGrid) out.push({ kind: 'track-groove', trackId: id, field: 'shuffleGrid', before: ta.shuffleGrid, after: tb.shuffleGrid })
 
     if (ta.kind === 'instrument' && tb.kind === 'instrument' && ta.instrument && tb.instrument) {
       if (ta.instrument.sample !== tb.instrument.sample) out.push({ kind: 'instrument-param', trackId: id, param: 'soundfont', before: ta.instrument.sample, after: tb.instrument.sample })
@@ -192,8 +197,8 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
         continue
       }
       const before = aNotes.get(nid)!
-      const changes: { field: 'pitch' | 'start' | 'duration' | 'velocity'; before: number; after: number }[] = []
-      for (const field of ['pitch', 'start', 'duration', 'velocity'] as const) {
+      const changes: { field: 'pitch' | 'start' | 'duration' | 'velocity' | 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength'; before: number; after: number }[] = []
+      for (const field of ['pitch', 'start', 'duration', 'velocity', 'chance', 'cent', 'ratchetCount', 'ratchetCurve', 'ratchetLength'] as const) {
         if (before[field] !== n[field]) changes.push({ field, before: before[field], after: n[field] })
       }
       if (changes.length) out.push({ kind: 'note-changed', trackId: id, noteId: nid, changes })
@@ -367,6 +372,9 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'track-moved':
         lines.push(`${e.trackId}: moved from position ${e.before} to ${e.after}`)
+        break
+      case 'track-groove':
+        lines.push(`${e.trackId}: ${e.field} ${formatNumber(e.before)} -> ${formatNumber(e.after)}`)
         break
       case 'synth-param':
         lines.push(`${e.trackId}: ${e.param} ${fmtVal(e.before)} -> ${fmtVal(e.after)}`)

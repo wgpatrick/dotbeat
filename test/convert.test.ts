@@ -74,7 +74,20 @@ test('every note on every real synth track survives the conversion exactly', () 
     for (const srcNote of srcTrack.notes) {
       const got = byId.get(srcNote.id)
       assert.ok(got, `${srcTrack.id}: note ${srcNote.id} must survive conversion`)
-      assert.deepEqual(got, { id: srcNote.id, pitch: srcNote.pitch, start: srcNote.start, duration: srcNote.duration, velocity: srcNote.velocity })
+      // v0.10: a converted note always gets NOTE_FIELD_DEFAULTS (chance/cent/ratchet*) — the
+      // external payload has no such concept (see convert.ts's toBeatNote).
+      assert.deepEqual(got, {
+        id: srcNote.id,
+        pitch: srcNote.pitch,
+        start: srcNote.start,
+        duration: srcNote.duration,
+        velocity: srcNote.velocity,
+        chance: 100,
+        cent: 0,
+        ratchetCount: 1,
+        ratchetCurve: 0,
+        ratchetLength: 1,
+      })
     }
   }
 })

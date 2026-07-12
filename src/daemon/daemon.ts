@@ -570,7 +570,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           // resolve, which it does because media is carried wholesale).
           const carried = converted.tracks.map((t) => {
             const prev = doc.tracks.find((p) => p.id === t.id)
-            return prev && Object.keys(prev.laneSamples).length > 0 ? { ...t, laneSamples: prev.laneSamples } : t
+            let next = prev && Object.keys(prev.laneSamples).length > 0 ? { ...t, laneSamples: prev.laneSamples } : t
+            // v0.10: groove/shuffle has no external-payload concept either (see convert.ts's
+            // sandboxPayloadToBeatDocument) — carry it across the same never-erase way, so a GUI
+            // knob-turn push never silently un-shuffles a track that CLI/MCP set groove on.
+            if (prev && prev.shuffleAmount !== 0) next = { ...next, shuffleAmount: prev.shuffleAmount, shuffleGrid: prev.shuffleGrid }
+            return next
           })
           // v0.6: instrument tracks never reach the GUI, so they never come back in a GUI push —
           // reinsert them at their original positions (same never-erase rule as media).

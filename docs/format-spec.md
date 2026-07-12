@@ -567,9 +567,85 @@ the format-spec-level summary.
 Clips/scenes (shipped v0.4), swing, arrangement (shipped v0.4), multi-device chains beyond the
 built-in insert set (shipped v0.10, above — multiple INSTANCES of the same type sharing params
 remains out of scope), multi-token track names, and the `DELIBERATELY_UNMODELED` fields above. See
+### v0.10 additions — Pitch & Time operations, groove/shuffle, per-note chance/ratchet/micro-tuning (Phase 22 Stream AD)
+
+Two format additions, plus a batch of one-shot CLI/MCP operations that add NO new grammar at all
+(they rewrite existing `note` lines and are documented here only for completeness).
+
+```
+track lead Lead #c678dd synth
+  synth
+    ...
+  groove 0.6 1                          # shuffleAmount shuffleGrid — elided entirely at amount=0
+  note n1 60 0 2 0.8 chance=70 cent=12.5 ratchetCount=3 ratchetCurve=0.5 ratchetLength=0.6
+```
+
+- **`groove <shuffleAmount> <shuffleGrid>`** — a track-level line, one per track, elided entirely
+  while `shuffleAmount` is 0 (the canonical default: every pre-v0.10 file parses unchanged).
+  `shuffleAmount` is 0..1; `shuffleGrid` is a positive 16th-step subdivision (1 = swung 16ths, 2 =
+  swung 8ths, the same "grid" vocabulary `beat quantize`'s own `--grid` uses). **Deliberately NOT
+  baked into stored note/hit `start`** — docs/research/22-opendaw-editing-workflow.md §3.2 found
+  openDAW models groove as a pluggable MIDI-effect device applying a reversible `warp()`/`unwarp()`
+  time-warp at playback, never touching stored positions; that fits dotbeat's own
+  "quantize-is-an-operation, not grid-lock" philosophy better than a destructive per-note swing
+  offset would. `src/core/groove.ts`'s `warpStep`/`unwarpStep` (a Möbius-ease curve, openDAW's own
+  math, reimplemented) is the pure warp function; `ui/src/audio/engine.ts` applies it at
+  note-scheduling time only (hand-mirrored — see that file's header note on why ui/ can't import
+  src/core directly). **Track-scoped**, not per-clip/per-note: openDAW's own model allows "per-track
+  or even per-chain-position" groove; dotbeat has no effect-chain-position concept yet, so track is
+  the smallest addressable unit that's still a real per-part musical choice (drums shuffle, bass
+  stays straight). Set via the ordinary `beat set <track>.shuffleAmount <v>` /
+  `<track>.shuffleGrid <v>` grammar — no new CLI verb or daemon route needed.
+- **Per-note optional fields** (`chance`, `cent`, `ratchetCount`, `ratchetCurve`, `ratchetLength`)
+  — five more trailing `key=value` tokens on a `note` line, each independently canonical-elided
+  (present iff != default) and always re-emitted in this fixed order regardless of the order they
+  were typed in (liberal on parse, strict on serialize — same discipline the rest of the grammar
+  uses). A `note` line with none of them present is byte-identical to a pre-v0.10 line.
+  - **`chance`** (int 0-100, default 100 = always fires): docs/research/22-opendaw-editing-
+    workflow.md §3.3's per-note probabilistic trigger — re-rolled via a seeded RNG (`src/core/
+    chance.ts`'s `chanceFires`) at EVERY playback pass (never baked once), so a `chance: 70` note
+    fires on roughly 70% of loop traversals. Reading `chance` never changes what's stored; only
+    playback (and each fresh render) samples it.
+  - **`cent`** (float -50..50, default 0): per-note micro-tuning independent of the semitone
+    `pitch` field, applied as a small frequency offset at trigger time (synth-track notes only
+    this phase — see the phase doc's Result section for the instrument/SoundFont-track gap).
+  - **`ratchetCount`/`ratchetCurve`/`ratchetLength`**: note-repeat/ratchet, deliberately the
+    RICHER 3-field shape research 22 recommends over openDAW's own 2-field `play-count`/
+    `play-curve` (their own team is mid-refactor away from that shape toward one with a length
+    ratio — see the research doc). `ratchetCount` (int 1-16, default 1 = no ratchet) repeats the
+    note within its own duration; `ratchetCurve` (-1..1, default 0 = even) shapes the spacing
+    between repeats; `ratchetLength` (0 exclusive..1, default 1 = fills its slot) is each repeat's
+    sounding length as a fraction of its own slot. `src/core/pitchtime.ts`'s `ratchetSlots` is the
+    one place that turns (count, curve, length, noteDuration) into concrete repeat offsets — both
+    `consolidateRatchet` (below) and the live engine call it (the engine's copy hand-mirrored, same
+    convention as groove) so playback and consolidate always agree.
+- **Pitch & Time operations** (docs/research/18-ableton-ui-architecture.md's Clip View table) —
+  **no new grammar**: `transposeNotes`/`timeScaleNotes`/`fitToScaleNotes`/`invertNotes`/
+  `reverseNotes`/`legatoNotes` (`src/core/pitchtime.ts`) are one-shot document->document rewrites
+  of plain `note` lines, exactly `quantizeNotes`'s shape (scoped to a track, optionally narrowed
+  to a `noteIds` selection) — never persisted as clip/track state. `beat humanize` already covers
+  the Ableton panel's "Humanize Amount" row. Exposed as CLI verbs (`beat transpose`/`time-scale`/
+  `fit-scale`/`invert`/`reverse`/`legato`) and matching MCP tools (`beat_transpose` etc.) — no new
+  daemon route, matching `beat quantize`'s own precedent (it has none either; the generic
+  `POST /edit` `{path,value}` channel already covers everything grammar-level these operations
+  touch).
+- **`consolidateRatchet`** (`beat consolidate` / `beat_consolidate`): research 22 §3.3's
+  "Consolidate" menu action — bakes a ratcheted note (`ratchetCount > 1`) back into `ratchetCount`
+  discrete, plain notes using the exact same `ratchetSlots` spacing the live engine plays, then
+  removes the source note. A scoped note that isn't ratcheted is left alone (a no-op, same
+  "already at rest" stance `beat quantize` takes for on-grid notes).
+- **Format version bumped to `0.10`** (`beat init` / `initDocument` / the BeatLab-bridge converter
+  all stamp new documents `0.10`); `0.9` files parse unchanged (every v0.10 addition is
+  elided-by-default or additive).
+
+### Deferred past v0.3 (explicitly out of scope, not forgotten)
+
+Clips/scenes (shipped v0.4), arrangement (shipped v0.4), multi-device chains beyond the
+built-in insert set, multi-token track names, and the `DELIBERATELY_UNMODELED` fields above. See
 `phase-1-plan.md`'s "explicitly deferred" section — these come as the milestones that need them
-land (`ROADMAP.md` §8). Clip automation shipped v0.9 (above); automation *curve shape* (linear vs
-hold between points) and live/non-clip automation remain deferred.
+land (`ROADMAP.md` §8). Clip automation shipped v0.9; groove/shuffle and per-note chance/ratchet/
+micro-tuning shipped v0.10 (above). Automation *curve shape* (linear vs hold between points) and
+live/non-clip automation remain deferred.
 
 ---
 

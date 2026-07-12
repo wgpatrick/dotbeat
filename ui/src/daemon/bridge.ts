@@ -103,21 +103,36 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
   // note grammar (piano-roll edits) — mirrors core setValue's note paths (src/core/edit.ts).
   if (rest === 'note') {
     // ADD "<pitch> <start> <duration> <velocity>" — replicate addNote's u-id minting exactly so
-    // the optimistic note carries the same id the daemon will write.
+    // the optimistic note carries the same id the daemon will write. v0.10 fields default the
+    // same way addNote does (chance 100/cent 0/ratchetCount 1/ratchetCurve 0/ratchetLength 1).
     const [pitch, start, duration, velocity] = value.trim().split(/\s+/).map(Number)
     let max = 100000
     for (const t of doc.tracks) for (const n of t.notes) {
       const m = n.id.match(/^u(\d+)$/)
       if (m) max = Math.max(max, Number(m[1]))
     }
-    const note = { id: `u${max + 1}`, pitch: pitch!, start: canon(start!), duration: canon(duration!), velocity: canon(velocity!) }
+    const note = {
+      id: `u${max + 1}`,
+      pitch: pitch!,
+      start: canon(start!),
+      duration: canon(duration!),
+      velocity: canon(velocity!),
+      chance: 100,
+      cent: 0,
+      ratchetCount: 1,
+      ratchetCurve: 0,
+      ratchetLength: 1,
+    }
     const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, notes: [...t.notes, note] } : t))
     return { ...doc, tracks }
   }
-  const noteFieldMatch = rest.match(/^note\.([A-Za-z0-9_-]+)\.(pitch|start|duration|velocity)$/)
+  // v0.10: chance/cent/ratchet* ride the same <track>.note.<id>.<field> path as pitch/start/
+  // duration/velocity (see src/core/edit.ts's setValue). chance/ratchetCount are integers (no
+  // canon() 4-decimal snap needed, but harmless); the rest snap like every other note field.
+  const noteFieldMatch = rest.match(/^note\.([A-Za-z0-9_-]+)\.(pitch|start|duration|velocity|chance|cent|ratchetCount|ratchetCurve|ratchetLength)$/)
   if (noteFieldMatch) {
     const [, noteId, field] = noteFieldMatch
-    const n = field === 'pitch' ? Number(value) : canon(Number(value))
+    const n = field === 'pitch' || field === 'chance' || field === 'ratchetCount' ? Number(value) : canon(Number(value))
     const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, notes: t.notes.map((no) => (no.id === noteId ? { ...no, [field!]: n } : no)) } : t))
     return { ...doc, tracks }
   }
@@ -135,6 +150,14 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
   // class Stream Y fixed for osc2), leaving the real header name/swatch stale until the next re-pull.
   if (rest === 'name' || rest === 'color') {
     const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, [rest]: value } : t))
+    return { ...doc, tracks }
+  }
+
+  // v0.10 groove/shuffle (Phase 22 Stream AD): TRACK fields, not synth params — mirror them here
+  // (same reason name/color get their own branch above) so they don't fall through to the synth-
+  // param branch below and land on a phantom synth.shuffleAmount.
+  if (rest === 'shuffleAmount' || rest === 'shuffleGrid') {
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, [rest]: canon(Number(value)) } : t))
     return { ...doc, tracks }
   }
 

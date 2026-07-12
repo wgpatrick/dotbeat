@@ -66,6 +66,14 @@ export interface BeatNote {
   start: number // 16th steps from loop start
   duration: number // steps
   velocity: number // 0..1
+  // v0.10 (Phase 22 Stream AD; mirrors src/core/document.ts's BeatNote exactly — see that file
+  // for the full rationale). Always present on a note the daemon serves (defaults filled by
+  // core's addNote/parse); canonical elision only affects the ON-DISK text, not this shape.
+  chance: number // 0-100 int; per-playback-pass trigger probability. 100 = always fires (default).
+  cent: number // -50..50; micro-tuning offset, independent of semitone `pitch`. 0 = none (default).
+  ratchetCount: number // 1-16 int; repeat the note this many times within its own duration. 1 = no ratchet (default).
+  ratchetCurve: number // -1..1; shapes ratchet repeat spacing (0 = even). Default 0.
+  ratchetLength: number // 0..1 (exclusive of 0); each repeat's sounding length as a fraction of its slot. 1 = fills the slot (default).
 }
 
 export interface BeatDrumHit {
@@ -169,6 +177,11 @@ export interface BeatTrack {
   laneSamples: Record<string, unknown>
   effects: BeatEffect[]
   lanes: BeatDrumLaneDecl[]
+  // v0.10 groove/shuffle (Phase 22 Stream AD) — mirrors src/core/document.ts's BeatTrack exactly.
+  // A reversible playback-time warp (see ui/src/audio/engine.ts's warpStep), never baked into
+  // stored note/hit start. 0 = off (default).
+  shuffleAmount: number
+  shuffleGrid: number
 }
 
 export interface BeatDocument {

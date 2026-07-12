@@ -1,5 +1,5 @@
 import type { BeatAutomationLane, BeatAutomationPoint, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
-import { DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
+import { DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, NOTE_FIELD_DEFAULTS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 // v0.10: the effect chain serializes iff it differs from the canonical default (isDefaultEffectChain)
@@ -14,11 +14,24 @@ function serializeEffectLines(effects: BeatEffect[], indent: string): string[] {
   return effects.map((e) => `${indent}effect ${e.id} ${e.type}${e.enabled ? '' : ' bypassed'}`)
 }
 
+// v0.10: the optional per-note fields, canonical-elided (iff != NOTE_FIELD_DEFAULTS) and always
+// emitted in THIS fixed order — one `key=value` token per field, so changing just one (e.g. a
+// chance tweak) is a one-token diff on an otherwise-unchanged note line.
+function noteOptionalTokens(n: BeatNote): string {
+  const parts: string[] = []
+  if (n.chance !== NOTE_FIELD_DEFAULTS.chance) parts.push(`chance=${n.chance}`)
+  if (formatNumber(n.cent) !== formatNumber(NOTE_FIELD_DEFAULTS.cent)) parts.push(`cent=${formatNumber(n.cent)}`)
+  if (n.ratchetCount !== NOTE_FIELD_DEFAULTS.ratchetCount) parts.push(`ratchetCount=${n.ratchetCount}`)
+  if (formatNumber(n.ratchetCurve) !== formatNumber(NOTE_FIELD_DEFAULTS.ratchetCurve)) parts.push(`ratchetCurve=${formatNumber(n.ratchetCurve)}`)
+  if (formatNumber(n.ratchetLength) !== formatNumber(NOTE_FIELD_DEFAULTS.ratchetLength)) parts.push(`ratchetLength=${formatNumber(n.ratchetLength)}`)
+  return parts.length ? ` ${parts.join(' ')}` : ''
+}
+
 // Canonical note order: (start, pitch, id) ascending — see format-spec.md's "canonical ordering".
 function sortedNoteLines(notes: BeatNote[], indent: string): string[] {
   return [...notes]
     .sort((a, b) => a.start - b.start || a.pitch - b.pitch || a.id.localeCompare(b.id))
-    .map((n) => `${indent}note ${n.id} ${n.pitch} ${formatNumber(n.start)} ${formatNumber(n.duration)} ${formatNumber(n.velocity)}`)
+    .map((n) => `${indent}note ${n.id} ${n.pitch} ${formatNumber(n.start)} ${formatNumber(n.duration)} ${formatNumber(n.velocity)}${noteOptionalTokens(n)}`)
 }
 
 // v0.8: canonical drum-hit order is (start, lane-in-declared-order, id) ascending — one hit per
@@ -71,6 +84,13 @@ function serializeAutomationLanes(trackId: string, lanes: BeatAutomationLane[], 
   return lines
 }
 
+// v0.10 groove/shuffle: a single `groove <amount> <grid>` line, entirely absent while amount is
+// 0 (the canonical default — see BeatTrack.shuffleAmount). Shared by both the instrument and the
+// synth/drums branches below so there's exactly one place that knows the line's shape.
+function grooveLine(t: BeatTrack): string[] {
+  return t.shuffleAmount !== 0 ? [`  groove ${formatNumber(t.shuffleAmount)} ${formatNumber(t.shuffleGrid)}`] : []
+}
+
 function serializeTrack(t: BeatTrack): string[] {
   const lines: string[] = []
   lines.push(`track ${t.id} ${t.name} ${t.color} ${t.kind}`)
@@ -81,6 +101,7 @@ function serializeTrack(t: BeatTrack): string[] {
     lines.push(`  soundfont ${inst.sample} ${formatNumber(inst.program)}`)
     if (formatNumber(inst.volume) !== '-10') lines.push(`  volume ${formatNumber(inst.volume)}`)
     if (formatNumber(inst.pan) !== '0') lines.push(`  pan ${formatNumber(inst.pan)}`)
+    lines.push(...grooveLine(t))
     // v0.8+: instrument clips carry notes only (same grammar as synth-track clips)
     for (const clip of t.clips) {
       lines.push(`  clip ${clip.id}`)
@@ -108,6 +129,7 @@ function serializeTrack(t: BeatTrack): string[] {
   // effect lines; their `effects` field stays [] and is not this feature's concern, see
   // BeatTrack.effects).
   if (t.kind === 'synth') lines.push(...serializeEffectLines(t.effects, '  '))
+  lines.push(...grooveLine(t))
   // Phase 22 Stream AB: the OPEN lane list, declared order, one line per lane — only for tracks
   // that opted in (t.lanes.length > 0); a legacy/migrated track (t.lanes === []) emits none of
   // these, exactly as before. Comes before the legacy v0.5 lane-sample lines below so a track's

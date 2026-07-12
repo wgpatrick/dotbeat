@@ -1,5 +1,5 @@
 import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, declaredLaneNames, defaultEffectChain, defaultSynthFields } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, declaredLaneNames, defaultEffectChain, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -160,8 +160,61 @@ export function parse(text: string): BeatDocument {
     }
   }
 
+  // v0.10: trailing `key=value` tokens carry the optional per-note fields (chance/cent/ratchet*)
+  // — canonical elision at note-line granularity (see NOTE_FIELD_DEFAULTS). Accepted in ANY order
+  // on parse (a hand edit shouldn't have to remember the canonical order), but always re-emitted
+  // in canonical order on serialize — same "liberal in, strict out" discipline the rest of the
+  // grammar uses for e.g. clip content.
+  function parseNoteOptionalFields(tokens: string[], lineNo: number): Pick<BeatNote, 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength'> {
+    const out: Pick<BeatNote, 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength'> = { ...NOTE_FIELD_DEFAULTS }
+    const seen = new Set<string>()
+    for (const tok of tokens) {
+      const eq = tok.indexOf('=')
+      if (eq === -1) throw new BeatParseError(`note field must be key=value, got "${tok}"`, lineNo)
+      const key = tok.slice(0, eq)
+      const valTok = tok.slice(eq + 1)
+      if (seen.has(key)) throw new BeatParseError(`duplicate note field "${key}"`, lineNo)
+      seen.add(key)
+      switch (key) {
+        case 'chance': {
+          const v = parseIntStrict(valTok, lineNo, 'note chance')
+          if (v < 0 || v > 100) throw new BeatParseError(`note chance must be 0-100, got ${v}`, lineNo)
+          out.chance = v
+          break
+        }
+        case 'cent': {
+          const v = parseFloatStrict(valTok, lineNo, 'note cent')
+          if (v < -50 || v > 50) throw new BeatParseError(`note cent must be -50..50, got ${v}`, lineNo)
+          out.cent = v
+          break
+        }
+        case 'ratchetCount': {
+          const v = parseIntStrict(valTok, lineNo, 'note ratchetCount')
+          if (v < 1 || v > 16) throw new BeatParseError(`note ratchetCount must be 1-16, got ${v}`, lineNo)
+          out.ratchetCount = v
+          break
+        }
+        case 'ratchetCurve': {
+          const v = parseFloatStrict(valTok, lineNo, 'note ratchetCurve')
+          if (v < -1 || v > 1) throw new BeatParseError(`note ratchetCurve must be -1..1, got ${v}`, lineNo)
+          out.ratchetCurve = v
+          break
+        }
+        case 'ratchetLength': {
+          const v = parseFloatStrict(valTok, lineNo, 'note ratchetLength')
+          if (v <= 0 || v > 1) throw new BeatParseError(`note ratchetLength must be >0..1, got ${v}`, lineNo)
+          out.ratchetLength = v
+          break
+        }
+        default:
+          throw new BeatParseError(`unknown note field "${key}" (expected chance, cent, ratchetCount, ratchetCurve, ratchetLength)`, lineNo)
+      }
+    }
+    return out
+  }
+
   function parseNoteLine(tokens: string[], lineNo: number): BeatNote {
-    if (tokens.length !== 6) throw new BeatParseError('note expects exactly 5 values: <id> <pitch> <start> <duration> <velocity>', lineNo)
+    if (tokens.length < 6) throw new BeatParseError('note expects at least 5 values: <id> <pitch> <start> <duration> <velocity> [chance=N] [cent=N] [ratchetCount=N] [ratchetCurve=N] [ratchetLength=N]', lineNo)
     const [, id, pitchTok, startTok, durTok, velTok] = tokens as [string, string, string, string, string, string]
     const pitch = parseIntStrict(pitchTok, lineNo, 'note pitch')
     if (pitch < 0 || pitch > 127) throw new BeatParseError(`note pitch must be 0-127, got ${pitch}`, lineNo)
@@ -173,7 +226,8 @@ export function parse(text: string): BeatDocument {
     const duration = parseFloatStrict(durTok, lineNo, 'note duration')
     if (duration <= 0) throw new BeatParseError(`note duration must be > 0 steps, got ${duration}`, lineNo)
     const velocity = parseFloatStrict(velTok, lineNo, 'note velocity')
-    return { id, pitch, start, duration, velocity }
+    const optional = parseNoteOptionalFields(tokens.slice(6), lineNo)
+    return { id, pitch, start, duration, velocity, ...optional }
   }
 
   function parsePatternLine(tokens: string[], existing: Partial<BeatDrumPattern> | undefined, lineNo: number): { lane: DrumLane; steps: number[] } {
@@ -353,6 +407,10 @@ export function parse(text: string): BeatDocument {
           // v0.10: filled with the default chain at track-close if no explicit effect/effects
           // line was seen (migration); stays [] as-is for drum/instrument tracks.
           effects: [],
+          // v0.10 groove/shuffle: canonical default is "off" (0 amount, neutral 1-step grid) until
+          // an optional `groove` line (below) overrides it.
+          shuffleAmount: 0,
+          shuffleGrid: 1,
         }
         tracks.push(currentTrack)
       } else if (keyword === 'group') {
@@ -500,6 +558,22 @@ export function parse(text: string): BeatDocument {
         const tune = parseFloatStrict(tuneTok, lineNo, 'lane tune')
         if (tune < -24 || tune > 24) throw new BeatParseError(`lane tune must be -24..24 semitones, got ${tune}`, lineNo)
         currentTrack.laneSamples[laneTok] = { sample: sampleId, gainDb, tune }
+        continue
+      }
+      // v0.10 groove/shuffle: `groove <amount> <grid>` — a track-level playback WARP (see
+      // document.ts's BeatTrack.shuffleAmount/shuffleGrid and groove.ts's warpStep/unwarpStep),
+      // never a note edit. Canonical elision: the line is entirely absent while amount is 0 (the
+      // default), so pre-v0.10 files are untouched; present, both fields are always given
+      // together (there's no meaningful "grid without amount").
+      if (keyword === 'groove') {
+        closeClipIfOpen(lineNo)
+        if (tokens.length !== 3) throw new BeatParseError('groove expects exactly 2 values: <shuffleAmount 0..1> <shuffleGrid steps>', lineNo)
+        const amount = parseFloatStrict(tokens[1]!, lineNo, 'groove shuffleAmount')
+        if (amount < 0 || amount > 1) throw new BeatParseError(`groove shuffleAmount must be 0..1, got ${amount}`, lineNo)
+        const grid = parseFloatStrict(tokens[2]!, lineNo, 'groove shuffleGrid')
+        if (grid <= 0) throw new BeatParseError(`groove shuffleGrid must be > 0, got ${grid}`, lineNo)
+        currentTrack.shuffleAmount = amount
+        currentTrack.shuffleGrid = grid
         continue
       }
       if (keyword === 'clip') {

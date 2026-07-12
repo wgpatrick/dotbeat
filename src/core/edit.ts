@@ -4,7 +4,7 @@
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
 import type { BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS, declaredLaneNames, defaultEffectChain } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS, declaredLaneNames, defaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -147,16 +147,20 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     const [pitch, start, duration, velocity] = parts.map((p, i) => parseNum(p, ['pitch', 'start', 'duration', 'velocity'][i]!))
     return addNote(doc, trackId, { pitch: pitch!, start: start!, duration: duration!, velocity: velocity! }).doc
   }
-  const noteFieldMatch = rest.match(/^note\.([A-Za-z0-9_-]+)\.(pitch|start|duration|velocity)$/)
+  // v0.10: chance/cent/ratchet* ride the SAME `<track>.note.<id>.<field>` path as the original
+  // four (pitch/start/duration/velocity) — one more row each, not a second vocabulary.
+  const noteFieldMatch = rest.match(/^note\.([A-Za-z0-9_-]+)\.(pitch|start|duration|velocity|chance|cent|ratchetCount|ratchetCurve|ratchetLength)$/)
   if (noteFieldMatch) {
     const noteId = noteFieldMatch[1]!
-    const field = noteFieldMatch[2]! as 'pitch' | 'start' | 'duration' | 'velocity'
+    const field = noteFieldMatch[2]! as 'pitch' | 'start' | 'duration' | 'velocity' | 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength'
     const existing = track.notes.find((n) => n.id === noteId)
     if (!existing) throw new BeatEditError(`no note "${noteId}" on track "${trackId}"`)
     const n = parseNum(value, `note.${noteId}.${field}`)
     // Round-trip through remove+add so addNote's own range/precision invariants apply and the id
     // is preserved (canonical serialization re-sorts either way, so a moved note reads as a moved
-    // line — the same diff `beat set` would produce).
+    // line — the same diff `beat set` would produce). Every field not being edited carries over
+    // from `existing` — including chance/cent/ratchet* — so e.g. moving a note's start never
+    // silently resets its chance back to 100.
     const removed = removeNote(doc, trackId, noteId).doc
     return addNote(removed, trackId, {
       id: noteId,
@@ -164,6 +168,11 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
       start: field === 'start' ? n : existing.start,
       duration: field === 'duration' ? n : existing.duration,
       velocity: field === 'velocity' ? n : existing.velocity,
+      chance: field === 'chance' ? n : existing.chance,
+      cent: field === 'cent' ? n : existing.cent,
+      ratchetCount: field === 'ratchetCount' ? n : existing.ratchetCount,
+      ratchetCurve: field === 'ratchetCurve' ? n : existing.ratchetCurve,
+      ratchetLength: field === 'ratchetLength' ? n : existing.ratchetLength,
     }).doc
   }
   const noteDeleteMatch = rest.match(/^note\.([A-Za-z0-9_-]+)$/)
@@ -180,6 +189,19 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   if (rest === 'color') {
     if (!/^#[0-9a-f]{6}$/.test(value)) throw new BeatEditError(`color must be a lowercase hex color like #c678dd, got "${value}"`)
     return replaceTrack(doc, { ...track, color: value })
+  }
+  // v0.10 groove/shuffle: track-level playback fields, not synth params (see document.ts's
+  // BeatTrack.shuffleAmount/shuffleGrid) — same `beat set <track>.<field> <value>` grammar as
+  // name/color, so no new CLI verb or daemon route is needed to dial groove in.
+  if (rest === 'shuffleAmount') {
+    const amount = parseNum(value, 'shuffleAmount')
+    if (amount < 0 || amount > 1) throw new BeatEditError(`shuffleAmount must be 0..1, got ${amount}`)
+    return replaceTrack(doc, { ...track, shuffleAmount: canon(amount) })
+  }
+  if (rest === 'shuffleGrid') {
+    const grid = parseNum(value, 'shuffleGrid')
+    if (grid <= 0) throw new BeatEditError(`shuffleGrid must be > 0, got ${grid}`)
+    return replaceTrack(doc, { ...track, shuffleGrid: canon(grid) })
   }
 
   // v0.6 instrument tracks: their small field set, validated in place
@@ -234,13 +256,31 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   }
 
   throw new BeatEditError(
-    `unknown field "${rest}" on track "${trackId}" (core: ${SYNTH_PARAM_ORDER.join(', ')}; shaped: ${SYNTH_FIELDS.map((f) => f.key).join(', ')}; also name, color, pattern.<lane>[i])`,
+    `unknown field "${rest}" on track "${trackId}" (core: ${SYNTH_PARAM_ORDER.join(', ')}; shaped: ${SYNTH_FIELDS.map((f) => f.key).join(', ')}; also name, color, shuffleAmount, shuffleGrid, pattern.<lane>[i])`,
   )
 }
 
 /** Adds a note to a synth track. If `id` is omitted, mints the next free `u<n>` id (the same
- * prefix BeatLab's own recordNote uses, chosen above the current max so it can't collide). */
-export function addNote(doc: BeatDocument, trackId: string, note: { pitch: number; start: number; duration: number; velocity: number; id?: string }): { doc: BeatDocument; note: BeatNote } {
+ * prefix BeatLab's own recordNote uses, chosen above the current max so it can't collide).
+ * v0.10's chance/cent/ratchet* are optional and default to NOTE_FIELD_DEFAULTS (today's implicit
+ * behavior — always-fires, no detune, no ratchet) so every existing caller keeps working
+ * unchanged. */
+export function addNote(
+  doc: BeatDocument,
+  trackId: string,
+  note: {
+    pitch: number
+    start: number
+    duration: number
+    velocity: number
+    id?: string
+    chance?: number
+    cent?: number
+    ratchetCount?: number
+    ratchetCurve?: number
+    ratchetLength?: number
+  },
+): { doc: BeatDocument; note: BeatNote } {
   const track = findTrack(doc, trackId)
   if (track.kind === 'drums') throw new BeatEditError(`track "${trackId}" is a drums track — notes only belong on synth/instrument tracks`)
   if (note.pitch < 0 || note.pitch > 127 || !Number.isInteger(note.pitch)) throw new BeatEditError(`pitch must be an integer 0-127, got ${note.pitch}`)
@@ -250,6 +290,16 @@ export function addNote(doc: BeatDocument, trackId: string, note: { pitch: numbe
   if (!Number.isFinite(note.start) || note.start < 0) throw new BeatEditError(`start must be a step position >= 0, got ${note.start}`)
   if (!Number.isFinite(note.duration) || note.duration <= 0) throw new BeatEditError(`duration must be > 0 steps, got ${note.duration}`)
   if (note.velocity < 0 || note.velocity > 1) throw new BeatEditError(`velocity must be 0..1, got ${note.velocity}`)
+  const chance = note.chance ?? NOTE_FIELD_DEFAULTS.chance
+  if (!Number.isInteger(chance) || chance < 0 || chance > 100) throw new BeatEditError(`chance must be an integer 0-100, got ${note.chance}`)
+  const cent = note.cent ?? NOTE_FIELD_DEFAULTS.cent
+  if (!Number.isFinite(cent) || cent < -50 || cent > 50) throw new BeatEditError(`cent must be -50..50, got ${note.cent}`)
+  const ratchetCount = note.ratchetCount ?? NOTE_FIELD_DEFAULTS.ratchetCount
+  if (!Number.isInteger(ratchetCount) || ratchetCount < 1 || ratchetCount > 16) throw new BeatEditError(`ratchetCount must be an integer 1-16, got ${note.ratchetCount}`)
+  const ratchetCurve = note.ratchetCurve ?? NOTE_FIELD_DEFAULTS.ratchetCurve
+  if (!Number.isFinite(ratchetCurve) || ratchetCurve < -1 || ratchetCurve > 1) throw new BeatEditError(`ratchetCurve must be -1..1, got ${note.ratchetCurve}`)
+  const ratchetLength = note.ratchetLength ?? NOTE_FIELD_DEFAULTS.ratchetLength
+  if (!Number.isFinite(ratchetLength) || ratchetLength <= 0 || ratchetLength > 1) throw new BeatEditError(`ratchetLength must be >0..1, got ${note.ratchetLength}`)
 
   let id = note.id
   if (id === undefined) {
@@ -265,7 +315,18 @@ export function addNote(doc: BeatDocument, trackId: string, note: { pitch: numbe
 
   const duration = canon(note.duration)
   if (duration <= 0) throw new BeatEditError(`duration must be > 0 steps at canonical precision (4 decimals), got ${note.duration}`)
-  const added: BeatNote = { id, pitch: note.pitch, start: canon(note.start), duration, velocity: canon(note.velocity) }
+  const added: BeatNote = {
+    id,
+    pitch: note.pitch,
+    start: canon(note.start),
+    duration,
+    velocity: canon(note.velocity),
+    chance,
+    cent: canon(cent),
+    ratchetCount,
+    ratchetCurve: canon(ratchetCurve),
+    ratchetLength: canon(ratchetLength),
+  }
   return { doc: replaceTrack(doc, { ...track, notes: [...track.notes, added] }), note: added }
 }
 
@@ -466,6 +527,8 @@ export function addTrack(
     // v0.10: a fresh synth track starts on the format's default chain (elided on serialize, same
     // as every other init-patch default); drum/instrument tracks carry none.
     effects: kind === 'synth' ? defaultEffectChain() : [],
+    shuffleAmount: 0,
+    shuffleGrid: 1,
   }
   return { doc: { ...doc, tracks: [...doc.tracks, track] }, track }
 }

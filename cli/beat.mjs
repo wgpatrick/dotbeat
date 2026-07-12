@@ -36,6 +36,14 @@ import {
   setAutomationPoint,
   humanize,
   quantizeNotes,
+  transposeNotes,
+  timeScaleNotes,
+  fitToScaleNotes,
+  invertNotes,
+  reverseNotes,
+  legatoNotes,
+  consolidateRatchet,
+  SCALE_NAMES,
   addTrack,
   removeTrack,
   addGroup,
@@ -63,6 +71,7 @@ import {
   BeatEditError,
   BeatParseError,
   BeatPresetError,
+  BeatPitchTimeError,
 } from '../dist/src/core/index.js'
 import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.js'
 
@@ -90,6 +99,17 @@ const USAGE = `usage:
   beat humanize <file> <track> [--timing 0.15] [--velocity 0.06] [--push-late 0] [--swing 0] [--seed N] [--lanes hat,oh | --ids a,b]
                                                           make a stiff part feel played: seeded timing/velocity
                                                           jitter, behind-the-beat drag, offbeat swing; scope by lane/id
+  beat transpose <file> <track> <semitones> [--notes id,id]      shift pitch (clamped to MIDI 0-127)
+  beat time-scale <file> <track> <factor> [--notes id,id]        stretch time (2 = x2, 0.5 = ÷2), anchored at the
+                                                          earliest scoped note so a selection stretches in place
+  beat fit-scale <file> <track> <root 0-11> <scale> [--notes id,id]   snap pitches to the nearest tone in a scale
+                                                          (root: 0=C..11=B; see --list-scales)
+  beat fit-scale --list-scales                            list the valid <scale> names
+  beat invert <file> <track> [axis-pitch] [--notes id,id]  mirror pitch around axis (default: selection's own mean)
+  beat reverse <file> <track> [--notes id,id]              tape-reverse the scoped notes' time span
+  beat legato <file> <track> [--gap 0] [--notes id,id]     extend each note to the next note's start
+  beat consolidate <file> <track> [--notes id,id]          bake ratcheted notes (ratchetCount>1) back into
+                                                          discrete notes (the ratchet "consolidate" action)
   beat diff <a.beat> <b.beat>
   beat diff --git <rev1> <rev2> <file>
   beat presets [--json] [--category <cat>]                list the factory preset library (optionally
@@ -433,6 +453,98 @@ function quantizeCmd(argv) {
   })
   writeDoc(file, before, doc)
   if (changed === 0) process.stdout.write('already on the grid — no notes moved\n')
+}
+
+// ---- Pitch & Time operations (Phase 22 Stream AD) — one-shot rewrites, same shape as quantize:
+// pure core function, canonical write, musical-edit-list output. All six share the --notes id,id
+// scoping flag quantize/humanize already use.
+
+function notesFlag(argv) {
+  const i = argv.indexOf('--notes')
+  return i === -1 ? undefined : argv[i + 1].split(',').filter(Boolean)
+}
+
+function transposeCmd(argv) {
+  const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--notes')
+  const [file, track, semitones] = positional
+  if (!file || !track || semitones === undefined) throw new BeatEditError('transpose needs <file> <track> <semitones> [--notes id,id]')
+  const before = readDoc(file)
+  const noteIds = notesFlag(argv)
+  const { doc, changed } = transposeNotes(before, track, Number(semitones), noteIds ? { noteIds } : {})
+  writeDoc(file, before, doc)
+  if (changed === 0) process.stdout.write('no notes moved (already clamped, or nothing in scope)\n')
+}
+
+function timeScaleCmd(argv) {
+  const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--notes')
+  const [file, track, factor] = positional
+  if (!file || !track || factor === undefined) throw new BeatEditError('time-scale needs <file> <track> <factor> [--notes id,id] (2 = x2, 0.5 = ÷2)')
+  const before = readDoc(file)
+  const noteIds = notesFlag(argv)
+  const { doc, changed } = timeScaleNotes(before, track, Number(factor), noteIds ? { noteIds } : {})
+  writeDoc(file, before, doc)
+  if (changed === 0) process.stdout.write('no notes changed\n')
+}
+
+function fitScaleCmd(argv) {
+  if (argv.includes('--list-scales')) {
+    process.stdout.write(SCALE_NAMES.join('\n') + '\n')
+    return
+  }
+  const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--notes')
+  const [file, track, root, scale] = positional
+  if (!file || !track || root === undefined || !scale) throw new BeatEditError('fit-scale needs <file> <track> <root 0-11> <scale> [--notes id,id] (see --list-scales)')
+  const before = readDoc(file)
+  const noteIds = notesFlag(argv)
+  const { doc, changed } = fitToScaleNotes(before, track, Number(root), scale, noteIds ? { noteIds } : {})
+  writeDoc(file, before, doc)
+  if (changed === 0) process.stdout.write('already in scale — no notes moved\n')
+}
+
+function invertCmd(argv) {
+  const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--notes')
+  const [file, track, axis] = positional
+  if (!file || !track) throw new BeatEditError('invert needs <file> <track> [axis-pitch] [--notes id,id]')
+  const before = readDoc(file)
+  const noteIds = notesFlag(argv)
+  const { doc, changed } = invertNotes(before, track, axis !== undefined ? Number(axis) : undefined, noteIds ? { noteIds } : {})
+  writeDoc(file, before, doc)
+  if (changed === 0) process.stdout.write('no notes moved\n')
+}
+
+function reverseCmd(argv) {
+  const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--notes')
+  const [file, track] = positional
+  if (!file || !track) throw new BeatEditError('reverse needs <file> <track> [--notes id,id]')
+  const before = readDoc(file)
+  const noteIds = notesFlag(argv)
+  const { doc, changed } = reverseNotes(before, track, noteIds ? { noteIds } : {})
+  writeDoc(file, before, doc)
+  if (changed === 0) process.stdout.write('no notes moved (a single note has no span to reverse)\n')
+}
+
+function legatoCmd(argv) {
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !['--notes', '--gap'].includes(argv[i - 1]))
+  const [file, track] = positional
+  if (!file || !track) throw new BeatEditError('legato needs <file> <track> [--gap 0] [--notes id,id]')
+  const before = readDoc(file)
+  const noteIds = notesFlag(argv)
+  const gapIdx = argv.indexOf('--gap')
+  const opts = { ...(noteIds ? { noteIds } : {}), ...(gapIdx !== -1 ? { gap: Number(argv[gapIdx + 1]) } : {}) }
+  const { doc, changed } = legatoNotes(before, track, opts)
+  writeDoc(file, before, doc)
+  if (changed === 0) process.stdout.write('no notes resized\n')
+}
+
+function consolidateCmd(argv) {
+  const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--notes')
+  const [file, track] = positional
+  if (!file || !track) throw new BeatEditError('consolidate needs <file> <track> [--notes id,id]')
+  const before = readDoc(file)
+  const noteIds = notesFlag(argv)
+  const { doc, changed } = consolidateRatchet(before, track, noteIds ? { noteIds } : {})
+  writeDoc(file, before, doc)
+  if (changed === 0) process.stdout.write('no ratcheted notes in scope — nothing to consolidate\n')
 }
 
 // The factory library ships with the package; BEAT_PRESETS overrides for a user library.
@@ -1113,6 +1225,27 @@ async function main() {
     case 'quantize':
       quantizeCmd(rest)
       break
+    case 'transpose':
+      transposeCmd(rest)
+      break
+    case 'time-scale':
+      timeScaleCmd(rest)
+      break
+    case 'fit-scale':
+      fitScaleCmd(rest)
+      break
+    case 'invert':
+      invertCmd(rest)
+      break
+    case 'reverse':
+      reverseCmd(rest)
+      break
+    case 'legato':
+      legatoCmd(rest)
+      break
+    case 'consolidate':
+      consolidateCmd(rest)
+      break
     case 'diff':
       diffCmd(rest)
       break
@@ -1227,7 +1360,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  if (err instanceof BeatEditError || err instanceof BeatParseError || err instanceof BeatPresetError || err.name === 'HistoryError') {
+  if (err instanceof BeatEditError || err instanceof BeatParseError || err instanceof BeatPresetError || err instanceof BeatPitchTimeError || err.name === 'HistoryError') {
     console.error(`error: ${err.message}`)
     process.exitCode = 2
   } else {

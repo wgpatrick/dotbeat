@@ -297,7 +297,27 @@ export interface BeatNote {
   start: number // 16th-note steps from the loop start
   duration: number // steps
   velocity: number // 0..1
+  // ---- v0.10: per-note generative/expressive fields (research 22 §3.3) — each an independent,
+  // individually-elided scalar, same discipline as v0.3's synth fields. Always present in memory
+  // (canonical defaults filled by addNote/parseNoteLine); elided from text iff at default, so
+  // every pre-v0.10 file parses unchanged (canonical elision = today's behavior is preserved).
+  chance: number // 0-100 int; probability this note fires on any given playback pass. 100 = always (default).
+  cent: number // -50..50; micro-tuning offset in cents, independent of semitone `pitch`. 0 = none (default).
+  ratchetCount: number // 1-16 int; repeat the note this many times within its own duration. 1 = no ratchet (default).
+  ratchetCurve: number // -1..1; shapes the spacing between ratchet repeats (0 = even, see src/core/groove.ts-adjacent pitchtime.ts). Default 0.
+  ratchetLength: number // 0..1 (exclusive of 0); each repeat's sounding length as a fraction of its own slot. 1 = fills the slot (default).
 }
+
+/** v0.10 note-field canonical defaults — the elision contract's other half (see BeatNote above):
+ * a field is serialized iff it differs from its entry here. Exported so parse/serialize/edit all
+ * read the same numbers rather than three hand-copied literals drifting apart. */
+export const NOTE_FIELD_DEFAULTS = {
+  chance: 100,
+  cent: 0,
+  ratchetCount: 1,
+  ratchetCurve: 0,
+  ratchetLength: 1,
+} as const satisfies Pick<BeatNote, 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength'>
 
 /** v0.9: one automation point — a (time, value) pair on a clip's automation lane for one synth
  * param. `time` is in 16th steps from the CLIP's own start (v0.7 fractional-number rules, same
@@ -436,6 +456,16 @@ export interface BeatTrack {
   // docs/phase-22-stream-aa.md). A synth track always has SOME chain in memory (the default when
   // the file has no explicit declaration); [] here means "explicitly emptied" (`effects none`).
   effects: BeatEffect[]
+  // v0.10: groove/shuffle — a reversible time-WARP applied at read/playback time (src/core/
+  // groove.ts's warpStep/unwarpStep), never baked into stored note/hit `start` (research 22
+  // §3.2, openDAW's ZeitgeistDeviceBox precedent). Track-scoped (not per-clip/per-note): a
+  // groove device in openDAW's own model is "per-track or even per-chain-position" — dotbeat has
+  // no effect-chain-position concept yet, so track is the natural, smallest addressable unit
+  // that's still a real musical choice (one track can shuffle, another stay straight). Applies
+  // to a track's own notes/hits AND every clip it plays (the warp is a track-level PLAYBACK
+  // property, like the synth chain, not clip-stored content).
+  shuffleAmount: number // 0..1; 0 = no groove (default, elided). See groove.ts for the warp math.
+  shuffleGrid: number // 16th-step subdivision the shuffle pairs against (1 = swung 16ths, 2 = swung 8ths, ...). Default 1; meaningless (and elided) while shuffleAmount is 0.
 }
 
 /** v0.10: a named, colored fold of N tracks into one collapsible group header (Phase 22 Stream AF —

@@ -107,7 +107,7 @@ function docWithPianoTrack() {
 
 test('saveClip/setScene/setSong (the generic edit primitives beat_song uses) work on instrument tracks', () => {
   let doc = docWithPianoTrack()
-  const withNote = { ...doc, tracks: doc.tracks.map((t) => (t.id === 'keys' ? { ...t, notes: [{ id: 'u1', pitch: 60, start: 0, duration: 4, velocity: 0.8 }] } : t)) }
+  const withNote = { ...doc, tracks: doc.tracks.map((t) => (t.id === 'keys' ? { ...t, notes: [{ id: 'u1', pitch: 60, start: 0, duration: 4, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1 }] } : t)) }
   doc = withNote
 
   const saved = saveClip(doc, 'keys', 'take-1')

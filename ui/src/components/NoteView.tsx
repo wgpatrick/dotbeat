@@ -693,6 +693,56 @@ export function NoteView({ track }: { track: BeatTrack }) {
           </div>
         </div>
       </div>
+      {editable && eventKind === 'note' && sel.length === 1 && (
+        <NoteInspector key={sel[0]} note={track.notes.find((n) => n.id === sel[0])} trackId={track.id} />
+      )}
+    </div>
+  )
+}
+
+// ---- per-note inspector (Phase 22 Stream AD) --------------------------------------------------
+// A small panel for the v0.10 per-note fields that don't have a natural piano-roll gesture yet
+// (chance/cent/ratchet* — see docs/phase-22-stream-ad.md's GUI section for what's deliberately
+// CLI/MCP-only this pass: the six Pitch & Time operations and ratchet's Consolidate action).
+// Shown only when exactly one note is selected (these are single-note controls, not a multi-select
+// batch gesture). Uncontrolled inputs keyed by note id: `defaultValue` seeds from the current
+// document, `onChange` commits straight through the existing `<track>.note.<id>.<field>` postEdit
+// path (src/core/edit.ts's note grammar) — the same channel drag/resize/velocity already use — so
+// typing a value is a one-line diff, same as everything else in this file.
+
+function NoteInspector({ note, trackId }: { note: BeatNote | undefined; trackId: string }) {
+  if (!note) return null
+  const field = (name: 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength') => (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.value.trim() === '') return
+    postEdit(`${trackId}.note.${note.id}.${name}`, e.target.value)
+  }
+  return (
+    <div className="note-inspector" title="per-note fields (Phase 22): chance/cent/ratchet apply at playback, never baked into the stored note">
+      <span className="note-inspector-title">note {note.id}</span>
+      <label className="note-inspector-field">
+        chance
+        <input type="number" min={0} max={100} step={1} defaultValue={note.chance} onChange={field('chance')} title="0-100: probability this note fires on any given playback pass (100 = always)" />
+      </label>
+      <label className="note-inspector-field">
+        cent
+        <input type="number" min={-50} max={50} step={0.5} defaultValue={note.cent} onChange={field('cent')} title="-50..50: micro-tuning offset in cents, independent of semitone pitch" />
+      </label>
+      <label className="note-inspector-field">
+        ratchet
+        <input type="number" min={1} max={16} step={1} defaultValue={note.ratchetCount} onChange={field('ratchetCount')} title="1-16: repeat this note N times within its own duration (1 = no ratchet)" />
+      </label>
+      {note.ratchetCount > 1 && (
+        <>
+          <label className="note-inspector-field">
+            curve
+            <input type="number" min={-1} max={1} step={0.1} defaultValue={note.ratchetCurve} onChange={field('ratchetCurve')} title="-1..1: shapes the spacing between ratchet repeats (0 = even)" />
+          </label>
+          <label className="note-inspector-field">
+            gate
+            <input type="number" min={0.01} max={1} step={0.05} defaultValue={note.ratchetLength} onChange={field('ratchetLength')} title="0..1: each repeat's sounding length as a fraction of its own slot (1 = fills it)" />
+          </label>
+        </>
+      )}
     </div>
   )
 }

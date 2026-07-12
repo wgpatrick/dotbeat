@@ -163,7 +163,7 @@ test('setValue note-add grammar mints the same note addNote would, byte-for-byte
   assert.deepEqual(viaGrammar, viaAddNote)
   const added = viaGrammar.tracks.find((t) => t.id === 'lead')!.notes.find((n) => !a.tracks.find((t) => t.id === 'lead')!.notes.some((orig) => orig.id === n.id))!
   assert.match(added.id, /^u\d+$/)
-  assert.deepEqual(added, { id: added.id, pitch: 76, start: 12, duration: 2, velocity: 0.9 })
+  assert.deepEqual(added, { id: added.id, pitch: 76, start: 12, duration: 2, velocity: 0.9, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1 })
 })
 
 test('setValue note.<id>.<field> moves/resizes exactly one field, leaving the rest untouched', () => {

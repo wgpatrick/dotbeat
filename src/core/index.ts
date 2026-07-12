@@ -45,6 +45,22 @@ export {
   type QuantizeOptions,
 } from './edit.js'
 export { humanize, BeatHumanizeError, type HumanizeOptions } from './humanize.js'
+export { moebiusEase, warpStep, unwarpStep } from './groove.js'
+export { chanceFires } from './chance.js'
+export {
+  transposeNotes,
+  timeScaleNotes,
+  fitToScaleNotes,
+  invertNotes,
+  reverseNotes,
+  legatoNotes,
+  consolidateRatchet,
+  ratchetSlots,
+  SCALES,
+  SCALE_NAMES,
+  BeatPitchTimeError,
+  type NoteScopeOptions,
+} from './pitchtime.js'
 export { describeDocument } from './inspect.js'
 export {
   parsePresetLibrary,
