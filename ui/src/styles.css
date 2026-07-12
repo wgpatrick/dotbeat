@@ -775,6 +775,59 @@ body {
   user-select: none;
   cursor: grab;
 }
+/* Activator toggle (research 72 §1.2 item 1 / phase-27-plan Stream EH): leading circle glyph,
+   filled = enabled, hollow = bypassed — Ableton's own Activator convention. `.effect-bypass` is
+   the visible hit target; `.effect-bypass-input` is a real, natively-keyboard-toggleable checkbox
+   sized/positioned to exactly cover the glyph but rendered invisible (opacity: 0, not
+   display:none/visibility:hidden, so it stays in the accessibility tree and stays clickable) —
+   `.effect-bypass-dot` is purely decorative (`pointer-events: none`, `aria-hidden`) and reflects
+   state via the `:checked` sibling selector. A right border + padding on the label (rather than
+   just flex `gap`) visually groups the toggle as its own zone, separate from the drag
+   handle/type/id/meter/move cluster that follows — and because `.effect-type` still carries
+   `flex: 1`, the toggle and the destructive `.effect-remove` button at the row's far end are
+   already maximally separated (opposite ends of the row), not adjacent the way the old
+   fifth-of-six-element checkbox was.
+*/
+.effect-row label.effect-bypass {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  padding-right: 6px;
+  border-right: 1px solid var(--line);
+  cursor: pointer;
+}
+.effect-bypass-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.effect-bypass-dot {
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-dim);
+  background: transparent;
+  pointer-events: none;
+  transition: background-color 0.1s ease, border-color 0.1s ease;
+}
+.effect-bypass-input:checked ~ .effect-bypass-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.effect-bypass-input:focus-visible ~ .effect-bypass-dot {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .effect-type {
   font-weight: 600;
   font-size: 12px;
@@ -808,14 +861,6 @@ body {
 }
 .effect-row button.effect-remove {
   color: var(--text-dim);
-}
-.effect-row label.effect-bypass {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  color: var(--text-dim);
-  cursor: pointer;
 }
 .effect-chain-add {
   display: flex;

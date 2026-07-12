@@ -194,6 +194,27 @@ function EffectRow({
       }}
       onDragEnd={() => setDragState({ draggingId: null, overId: null })}
     >
+      {/* Activator toggle (research 72 §1.2 item 1 / phase-27-plan Stream EH): leading, filled/hollow
+          circle glyph — the leftmost, highest-priority control on the row, matching Ableton's own
+          Activator convention (a filled circle = on, hollow = bypassed), not a mid-row checkbox
+          buried next to the destructive remove button. Still a real <input type=checkbox> under the
+          hood (visually hidden, sized/positioned to exactly cover the glyph) so it stays natively
+          keyboard-toggleable (Tab + Space) and wired through the exact same postEffectEnabled path —
+          only the visual presentation changed. */}
+      <label
+        className="effect-bypass"
+        title={effect.enabled ? 'bypass this effect' : 'enable this effect'}
+      >
+        <input
+          type="checkbox"
+          className="effect-bypass-input"
+          data-effect-bypass={effect.id}
+          checked={effect.enabled}
+          aria-label={`${EFFECT_LABELS[effect.type]} ${effect.enabled ? 'enabled — click to bypass' : 'bypassed — click to enable'}`}
+          onChange={(ev) => void postEffectEnabled(track.id, effect.id, ev.target.checked)}
+        />
+        <span className="effect-bypass-dot" data-effect-bypass-dot={effect.id} aria-hidden="true" />
+      </label>
       <span className="effect-drag-handle" title="drag to reorder">
         ⠿
       </span>
@@ -206,15 +227,6 @@ function EffectRow({
       <button type="button" data-effect-move-down={effect.id} disabled={index === count - 1} title="move down" onClick={() => void postEffectMove(track.id, effect.id, index + 1)}>
         ▼
       </button>
-      <label className="effect-bypass">
-        <input
-          type="checkbox"
-          data-effect-bypass={effect.id}
-          checked={effect.enabled}
-          onChange={(ev) => void postEffectEnabled(track.id, effect.id, ev.target.checked)}
-        />
-        on
-      </label>
       <button type="button" className="effect-remove" data-effect-remove={effect.id} title="remove" onClick={() => void postEffectRemove(track.id, effect.id)}>
         ✕
       </button>
