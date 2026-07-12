@@ -9,16 +9,16 @@ this doc exists to prevent is a feature being fully real in the CLI/core and inv
 
 **Process, starting now**: every stream/phase that ships a feature updates this table as part of
 its own completion checklist, alongside its `docs/phase-N-*.md` result doc — don't let it drift
-stale. Status snapshot below is as of 2026-07-11, ~9pm — seven streams are running in the
-background right now (Phase 20/21) and will move several "gap" rows to "done" shortly; those are
-marked "in progress" rather than guessed at.
+stale. Status snapshot below is as of 2026-07-12 — all seven Phase 19/20/21 streams (piano roll
+pitch reference, arrangement length, track/project management, render/export, the Osc2
+investigation, automation lanes, and drum-editor research) are merged and verified live.
 
 **Legend**: ✅ done and verified · 🔶 partial · 🚧 in progress right now · ❌ missing · 🔬 researched, not built · — not applicable
 
 | Feature area | Core (format/engine) | CLI / MCP | GUI | Notes |
 |---|---|---|---|---|
 | **File format itself** | ✅ v0.9, diff-friendly, canonical ordering | ✅ full parse/serialize/diff | — | Mature since early sessions; the project's strongest layer |
-| **Track management** (add/delete/rename/recolor) | ✅ `addTrack`/`removeTrack` | ✅ `beat add-track`/`rm-track` | 🚧 Stream W | Confirmed via direct audit tonight: zero GUI support until Stream W lands |
+| **Track management** (add/delete/rename/recolor) | ✅ `addTrack`/`removeTrack` | ✅ `beat add-track`/`rm-track` | ✅ add (kind chooser)/delete/inline rename/color picker | Phase 20 Stream W. Built fresh — BeatLab had no track add/delete/rename/color UI to port from |
 | **Note editing** (piano roll) | ✅ free-timed `BeatNote` | ✅ `beat add-note`/MCP | ✅ add/move/resize/multi-select/marquee, keyboard strip + octave gridlines, pitch-aligned within 1px | Phase 19 Stream U. Fold mode and scale-tone highlighting deferred (highlighting needs a per-clip scale field the format doesn't have yet — real gap, not faked) |
 | **Drum programming** | 🔶 free-timed hits (v0.8) but closed 5-lane enum, no duration | ✅ for the 5 existing lanes | ❌ needs redesign | Research 19 (voice taxonomy) + research 20 (editing model) both complete with a concrete, compatible build plan: one optional `duration` field, extend `NoteView` with a row-axis adapter rather than forking. Recommended to land together with 19, not yet built |
 | **Arrangement / song structure** | ✅ scenes/song (v0.4), `loopBars` | ✅ `beat scene`/`beat song` | ✅ viewing + extend/shrink loop, append/resize/delete sections, loop→song conversion | Phase 19 Stream V. Deferred: dragging the rightmost boundary directly, independent per-section scene editing (appended sections share the source scene) |
@@ -38,7 +38,7 @@ marked "in progress" rather than guessed at.
 | **Preset / content library** | ✅ 36 presets, taxonomy (Ph. 18 S) | ✅ `beat preset(s) --category` | ❌ no browser sidebar | Data layer is ready; nothing to drag/browse from yet |
 | **Macros** | 🔬 researched — "tooling that resolves to literal values," never in-file indirection | ❌ | ❌ | Research 18. Design is ready; genuinely new subsystem, not started |
 | **Undo / redo** (in-session) | — | — | ❌ | Backlogged 2026-07-11. Stripped from the original BeatLab port (Phase 12), never rebuilt. Distinct from checkpoint/history versioning |
-| **Project / folder management** | ✅ `beat init`, Tauri folder re-pointing (Ph. 10/13) | ✅ | 🚧 Stream W (partial) | New-project/switch-folder not reachable from `ui/`'s own UI yet |
+| **Project / folder management** | ✅ `beat init`, Tauri folder re-pointing (Ph. 10/13) | ✅ | 🔶 "Open Folder" wired (Stream W) | Open-folder reachable from `ui/`; new-project-from-scratch still not reachable from the GUI |
 | **Desktop app / packaging** | ✅ | — | ✅ real Tauri shell, compiled sidecar, bundled starter, force-quit-safe | Phase 13/17. Local-machine distribution only (D13) |
 | **Audio-region clip editing** (warp, split, clip gain, "velocity") | ❌ no audio-region-clip format concept at all | ❌ | ❌ | Research 16 (M4 scoping). Real format gap identified — most of what's wanted is web-tier-buildable once the format models a region, doesn't need the full native M4 tier |
 | **Agent onboarding** (Claude Code skill) | — | ✅ `beat mcp-init`, live-verified skill | — | Phase 10/17 |
@@ -53,11 +53,11 @@ surface before it causes another round of "wait, does this even work?"
 
 ## Immediate priority order (owner's own tiering, 2026-07-11)
 
-1. **Tier 1 — table stakes**: track management, render/export, project management (Stream W/X,
-   in progress).
+1. **Tier 1 — table stakes**: track management, render/export, project management — done
+   (Streams W/X).
 2. **Tier 2 — real editing gaps**: piano roll pitch reference, arrangement length, automation-lane
-   UI, drum programming redesign, Osc2 fix (Streams U/V/Y/Z in progress; drum redesign researched,
-   build next).
+   UI — done (Streams U/V/Z); Osc2 investigated, no bug found (Stream Y). Drum programming redesign
+   researched (19/20), not yet built — next up.
 3. **Tier 3 — sound-design completeness**: extended FX arsenal, macros, content browser sidebar,
    instrument-track FX chain (all researched/scoped, not yet built).
 4. **Backlog, not blocking**: undo/redo, real wavetable synthesis, audio-region clip editing (M4
