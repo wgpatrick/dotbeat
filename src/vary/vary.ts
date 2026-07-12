@@ -81,11 +81,16 @@ export const VARY_GROUPS: Readonly<Record<string, readonly VaryParamDef[]>> = {
     { key: 'compMix', min: 0, max: 1, scale: 'linear' },
     { key: 'compThreshold', min: -38, max: -8, scale: 'linear' },
     { key: 'compRatio', min: 1.5, max: 10, scale: 'log' },
+    // Phase 22 Stream AC: the four new insert Mix knobs, same "bounded bypassable insert" shape
+    // as distortionMix/bitcrushMix/compMix above.
+    { key: 'pingPongMix', min: 0, max: 0.6, scale: 'linear' },
+    { key: 'chorusMix', min: 0, max: 0.7, scale: 'linear' },
+    { key: 'phaserMix', min: 0, max: 0.6, scale: 'linear' },
+    { key: 'saturatorMix', min: 0, max: 0.7, scale: 'linear' },
   ],
   sends: [
     { key: 'sendReverb', min: 0, max: 0.8, scale: 'linear' },
     { key: 'sendDelay', min: 0, max: 0.7, scale: 'linear' },
-    { key: 'sendMod', min: 0, max: 0.6, scale: 'linear' },
   ],
   mix: [
     { key: 'volume', min: -20, max: 4, scale: 'linear' },

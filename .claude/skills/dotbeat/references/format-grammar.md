@@ -38,8 +38,10 @@ set`'s edit-list output still shows every change you make regardless of elision)
   unisonWidth, wtTable, wtPos`
 - Filter/motion: `filterType, filterEnv*, lfo*, lfo2*, glide, keytrackAmount, velToFilterAmount,
   macroValue`
-- Inserts: `eq*, comp*, distortion*, bitcrush*`
-- Sends/routing: `sendReverb, sendDelay, sendMod, duckSource` (a track id, or `none` to clear),
+- Inserts: `eq*, comp*, distortion*, bitcrush*, pingPong*, chorus*, phaser*, saturator*`
+- Beat repeat (scheduling-layer stutter, not an audio insert): `beatRepeatGrid, beatRepeatGate,
+  beatRepeatChance, beatRepeatMode`
+- Sends/routing: `sendReverb, sendDelay, duckSource` (a track id, or `none` to clear),
   `duckAmount`
 - Drum-voice shaping (audible on drum tracks): `kickTune, kickPunch, kickDecay, snareTone,
   snareDecay, hatTone, hatDecay, openHatDecay`

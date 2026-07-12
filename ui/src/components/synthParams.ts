@@ -66,7 +66,6 @@ const LFO_DESTS = [
   'wtPos',
   'sendReverb',
   'sendDelay',
-  'sendMod',
   'eqLow',
   'eqMid',
   'eqHigh',
@@ -74,6 +73,10 @@ const LFO_DESTS = [
   'distortionMix',
   'bitcrushMix',
 ] as const
+// Phase 22 Stream AC: mirrors document.ts's BEAT_REPEAT_MODES/CHORUS_MODES/SATURATOR_CURVES.
+const BEAT_REPEAT_MODES = ['mix', 'insert', 'gate'] as const
+const CHORUS_MODES = ['off', 'chorus', 'ensemble', 'vibrato'] as const
+const SATURATOR_CURVES = ['analog', 'warm', 'clip', 'fold'] as const
 // Tempo-sync note divisions (lfoSyncRate/lfo2SyncRate) — mirrors document.ts's LFO_SYNC_RATES.
 const LFO_SYNC_RATES = ['1/1', '1/2', '1/4', '1/8', '1/16', '1/32', '1/4t', '1/8t', '1/16t', '1/4d', '1/8d', '1/16d'] as const
 
@@ -181,11 +184,59 @@ export const PARAM_GROUPS: ParamGroup[] = [
     ],
   },
   {
+    id: 'pingpong',
+    title: 'Ping Pong Delay',
+    kinds: ['synth', 'drums'],
+    open: false,
+    params: [
+      k('pingPongTime', 'Time', 0.02, 1.4, fmt.sec, true),
+      k('pingPongFeedback', 'Fdbk', 0, 1, fmt.pct),
+      k('pingPongCrossFeed', 'Cross', 0, 1, fmt.pct),
+      k('pingPongWobbleRate', 'WobRate', 0.05, 8, fmt.hz, true),
+      k('pingPongWobbleDepth', 'WobDepth', 0, 1, fmt.pct),
+      k('pingPongMix', 'Mix', 0, 1, fmt.pct),
+    ],
+  },
+  {
+    id: 'beatrepeat',
+    title: 'Beat Repeat',
+    kinds: ['synth', 'drums'],
+    open: false,
+    params: [
+      k('beatRepeatGrid', 'Grid', 0.25, 4, fmt.num2),
+      k('beatRepeatGate', 'Gate', 0, 16, fmt.num1),
+      k('beatRepeatChance', 'Chance', 0, 1, fmt.pct),
+      e('beatRepeatMode', 'Mode', BEAT_REPEAT_MODES),
+    ],
+  },
+  {
+    id: 'chorusphaser',
+    title: 'Chorus / Phaser',
+    kinds: ['synth', 'drums'],
+    open: false,
+    params: [
+      e('chorusMode', 'ChMode', CHORUS_MODES),
+      k('chorusRate', 'ChRate', 0.05, 8, fmt.hz, true),
+      k('chorusDepth', 'ChDepth', 0, 1, fmt.pct),
+      k('chorusMix', 'ChMix', 0, 1, fmt.pct),
+      k('phaserRate', 'PhRate', 0.02, 8, fmt.hz, true),
+      k('phaserDepth', 'PhOct', 0, 8, fmt.num1),
+      k('phaserMix', 'PhMix', 0, 1, fmt.pct),
+    ],
+  },
+  {
+    id: 'saturator',
+    title: 'Saturator',
+    kinds: ['synth', 'drums'],
+    open: false,
+    params: [e('saturatorCurve', 'Curve', SATURATOR_CURVES), k('saturatorDrive', 'Drive', 0, 1, fmt.pct), k('saturatorMix', 'Mix', 0, 1, fmt.pct)],
+  },
+  {
     id: 'sends',
     title: 'Sends',
     kinds: ['synth', 'drums'],
     open: false,
-    params: [k('sendReverb', 'Reverb', 0, 1, fmt.pct), k('sendDelay', 'Delay', 0, 1, fmt.pct), k('sendMod', 'Mod', 0, 1, fmt.pct)],
+    params: [k('sendReverb', 'Reverb', 0, 1, fmt.pct), k('sendDelay', 'Delay', 0, 1, fmt.pct)],
   },
   {
     id: 'sidechain',

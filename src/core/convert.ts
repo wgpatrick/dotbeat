@@ -101,7 +101,12 @@ const BEAT_FORMAT_VERSION = '0.10'
  * `lfoSyncRate`/`lfo2Sync`/`lfo2SyncRate` OUT of this list — they're real SYNTH_FIELDS now (a
  * well-bounded bool+enum pair, not the open-ended arrays/orderings the rest of this list is),
  * so a conversion carries them across instead of dropping them (see toBeatSynth's generic
- * SYNTH_FIELDS loop, which now covers all four automatically). */
+ * SYNTH_FIELDS loop, which now covers all four automatically). Phase 22 Stream AC ADDED
+ * `sendMod` here (the reverse direction — a field the format used to model and has now retired):
+ * the old shared, invisible, un-configurable mod-send bus (chorusBus/phaserBus/sendMod in
+ * engine.ts) is gone, replaced by real per-track chorusMode/chorusMix/phaserMix inserts, so a
+ * beatlab payload's `sendMod` value has nowhere left to land — reported as dropped like any
+ * other unmodeled field rather than silently discarded. */
 // Phase 22 Stream AA note: 'insertOrder' here is BeatLab's own external SynthParams field (this
 // converter's source shape) — still unconverted, since its exact external shape was never
 // confirmed against a live BeatLab checkout (see format-spec.md's v0.9 automation section for the
@@ -116,6 +121,7 @@ export const DELIBERATELY_UNMODELED = [
   'arpOn',
   'arpRate',
   'arpPattern',
+  'sendMod',
 ] as const
 
 export interface ConversionReport {

@@ -26,7 +26,7 @@ stream to pick up — not guesswork, a decision away from being built.
 
 ## Snapshot — 82 features tracked
 
-**31** Done · **0** In progress · **51** Not started
+**35** Done · **0** In progress · **47** Not started
 
 ---
 
@@ -119,10 +119,10 @@ stream to pick up — not guesswork, a decision away from being built.
 
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
-| Ping Pong Delay | Tone.PingPongDelay as a per-track insert — the cheapest of the two owner-named asks. Fold in continuously-variable cross-feedback + delay-time LFO wobble (research 21) rather than a binary ping-pong toggle. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
-| Beat Repeat | Grid/gate/chance/mode stutter-repeat effect, genre-signature for EDM/hip-hop/glitch. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
-| Expose Chorus-Ensemble / Phaser-Flanger as a per-track insert | The DSP already runs on a shared mod-send bus; convert it into a proper configurable insert. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
-| Saturator | Tone.WaveShaper-based character saturation with an analog/warm/clip/fold curve family. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
+| Ping Pong Delay | A hand-built two-delay-line network (not the plain Tone.PingPongDelay built-in, which hardwires 100% cross-feedback with no dial) as a per-track insert — pingPongTime/Feedback/Mix plus continuously-variable pingPongCrossFeed and delay-time LFO wobble (pingPongWobbleRate/Depth, research 21 row 4) rather than a binary ping-pong toggle. | ✅ done | ✅ done | ✅ done | ✅ Done | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | [`phase-22-stream-ac.md`](phase-22-stream-ac.md) |
+| Beat Repeat | Grid/gate/chance/mode stutter-repeat — scheduling-layer note/hit re-triggering in engine.ts's tick() (not a Tone.js audio node, per research 17 §4.3), with a per-note-position-seeded RNG for the chance roll (research 21 row 5) so re-renders are bit-for-bit reproducible. | ✅ done | ✅ done | ✅ done | ✅ Done | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | [`phase-22-stream-ac.md`](phase-22-stream-ac.md) |
+| Expose Chorus-Ensemble / Phaser-Flanger as a per-track insert | Retired the old shared, un-configurable chorusBus/phaserBus/sendMod mod-send machinery; chorusMode (off/chorus/ensemble/vibrato)/chorusRate/Depth/Mix and phaserRate/Depth/Mix are now real per-track inserts, same one-instance-per-track precedent as EQ3/compressor. | ✅ done | ✅ done | ✅ done | ✅ Done | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | [`phase-22-stream-ac.md`](phase-22-stream-ac.md) |
+| Saturator | Tone.WaveShaper-based character saturation with an analog/warm/clip/fold curve family (authored once per curve CHANGE, not per sample) and a drive-controlled pre-gain into the shaper. | ✅ done | ✅ done | ✅ done | ✅ Done | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | [`phase-22-stream-ac.md`](phase-22-stream-ac.md) |
 | 7-band parametric EQ | HP/LP with selectable slope + Q, 3 bell bands, 2 shelf bands, each independently enabled — same field-set-device shape as EQ3/compressor, just more bands. EQ3 can't do a real parametric bell cut; natural next tier after the research-17 build-next-four. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`21-opendaw-devices-effects.md`](research/21-opendaw-devices-effects.md) | — |
 | Auto Filter / Auto Pan / Tremolo | Dedicated Ableton-named devices — deferred since the shared LFO destination matrix already covers the sonic capability. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
 | Redux (downsampling half) | Bit-reduction already ships; sample-rate downsampling needs a small custom node (no Tone.js built-in). Consider folding bits+downsample into one "Crusher"-style field group with a shared enable/mix, per research 21, rather than two independently-toggled devices. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |

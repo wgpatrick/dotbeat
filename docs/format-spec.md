@@ -242,10 +242,15 @@ the ~50 store-level params the format couldn't express. v0.3 exposes them:
   `unisonVoices/unisonWidth`, `wtTable/wtPos`), filter (`filterType`, `filterEnv*`), motion
   (`lfo*`, `lfo2*` — including tempo-sync `lfoSync/lfoSyncRate`/`lfo2Sync/lfo2SyncRate`, Phase 18 —
   plus `glide`, `keytrackAmount`, `velToFilterAmount`, `macroValue`), inserts
-  (`eq*`, `comp*`, `distortion*`, `bitcrush*`), sends (`sendReverb/sendDelay/sendMod`),
-  sidechain (`duckSource` — a track id or `none` — plus `duckAmount`), and drum-voice shaping
-  (`kickTune/kickPunch/kickDecay`, `snareTone/snareDecay`, `hatTone/hatDecay/openHatDecay`,
-  audible on drum tracks). The full table, with types, enum values, and frozen defaults, is
+  (`eq*`, `comp*`, `distortion*`, `bitcrush*`, `pingPong*`, `chorus*`, `phaser*`, `saturator*` —
+  the last four added Phase 22 Stream AC, `research/17-track-fx-arsenal.md` §5; Chorus/Phaser
+  retired the old shared, un-configurable `sendMod` bus in favor of real per-track inserts),
+  scheduling-layer beat-repeat stutter (`beatRepeat*` — grid/gate/chance/mode; note/hit
+  re-scheduling in the engine's tick loop, not an audio-graph insert), sends
+  (`sendReverb/sendDelay`), sidechain (`duckSource` — a track id or `none` — plus `duckAmount`),
+  and drum-voice shaping (`kickTune/kickPunch/kickDecay`, `snareTone/snareDecay`,
+  `hatTone/hatDecay/openHatDecay`, audible on drum tracks). The full table, with types, enum
+  values, and frozen defaults, is
   `SYNTH_FIELDS` in `src/core/document.ts` — the single source of truth that drives the parser,
   serializer, editor, differ, and converter. `lfoDest`/`lfo2Dest` share one enumerated destination
   set (`LFO_DESTS`, also in `document.ts`) — kept literal (one canonical token, no free-routing

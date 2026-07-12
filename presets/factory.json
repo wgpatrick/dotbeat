@@ -571,7 +571,7 @@
       "name": "e-piano",
       "kind": "synth",
       "category": "keys",
-      "description": "Keys — FM electric piano: a moderate FM modulation index gives the classic 'tine' bell-attack-into-warm-body EP timbre, light chorus send",
+      "description": "Keys — FM electric piano: a moderate FM modulation index gives the classic 'tine' bell-attack-into-warm-body EP timbre, light chorus insert",
       "params": {
         "osc": "sine",
         "fmLevel": 0.5,
@@ -582,7 +582,8 @@
         "sustain": 0.3,
         "release": 0.4,
         "cutoff": 4500,
-        "sendMod": 0.3,
+        "chorusMode": "chorus",
+        "chorusMix": 0.3,
         "eqMid": 0.5
       }
     },
@@ -608,7 +609,7 @@
       "name": "organ-keys",
       "kind": "synth",
       "category": "keys",
-      "description": "Keys — drawbar-style organ: a near-instant on/off amp envelope (no decay, full sustain — organs don't decay while held) and an octave+fifth second-oscillator layer standing in for drawbar harmonics, chorus send for a Leslie-ish width",
+      "description": "Keys — drawbar-style organ: a near-instant on/off amp envelope (no decay, full sustain — organs don't decay while held) and an octave+fifth second-oscillator layer standing in for drawbar harmonics, wide ensemble-chorus insert for a Leslie-ish width",
       "params": {
         "osc": "sine",
         "attack": 0.005,
@@ -619,7 +620,8 @@
         "osc2Level": 0.35,
         "osc2Detune": 1907,
         "cutoff": 6000,
-        "sendMod": 0.4
+        "chorusMode": "ensemble",
+        "chorusMix": 0.4
       }
     },
     {

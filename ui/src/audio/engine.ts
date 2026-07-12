@@ -81,7 +81,6 @@ type LfoDest =
   | 'wtPos'
   | 'sendReverb'
   | 'sendDelay'
-  | 'sendMod'
   | 'eqLow'
   | 'eqMid'
   | 'eqHigh'
@@ -98,7 +97,6 @@ const LFO_DESTS: readonly LfoDest[] = [
   'wtPos',
   'sendReverb',
   'sendDelay',
-  'sendMod',
   'eqLow',
   'eqMid',
   'eqHigh',
@@ -106,6 +104,16 @@ const LFO_DESTS: readonly LfoDest[] = [
   'distortionMix',
   'bitcrushMix',
 ]
+
+// Phase 22 Stream AC: hand-kept mirrors of document.ts's BeatRepeatMode/ChorusMode/SaturatorCurve
+// + BEAT_REPEAT_MODES/CHORUS_MODES/SATURATOR_CURVES (same convention as LfoDest/LFO_DESTS above —
+// ui/ is a standalone Vite app with no build-time dependency on src/core).
+type BeatRepeatMode = 'mix' | 'insert' | 'gate'
+const BEAT_REPEAT_MODES: readonly BeatRepeatMode[] = ['mix', 'insert', 'gate']
+type ChorusMode = 'off' | 'chorus' | 'ensemble' | 'vibrato'
+const CHORUS_MODES: readonly ChorusMode[] = ['off', 'chorus', 'ensemble', 'vibrato']
+type SaturatorCurve = 'analog' | 'warm' | 'clip' | 'fold'
+const SATURATOR_CURVES: readonly SaturatorCurve[] = ['analog', 'warm', 'clip', 'fold']
 
 // Tempo-sync (Phase 18 Stream R): mirrors src/core/document.ts's LfoSyncRate/LFO_SYNC_RATES/
 // lfoSyncRateHz exactly (same hand-kept-mirror convention as LFO_DESTS above).
@@ -190,9 +198,28 @@ interface EngineSynth {
   distortionMix: number
   bitcrushBits: number
   bitcrushMix: number
+  pingPongTime: number
+  pingPongFeedback: number
+  pingPongCrossFeed: number
+  pingPongWobbleRate: number
+  pingPongWobbleDepth: number
+  pingPongMix: number
+  beatRepeatGrid: number
+  beatRepeatGate: number
+  beatRepeatChance: number
+  beatRepeatMode: BeatRepeatMode
+  chorusMode: ChorusMode
+  chorusRate: number
+  chorusDepth: number
+  chorusMix: number
+  phaserRate: number
+  phaserDepth: number
+  phaserMix: number
+  saturatorCurve: SaturatorCurve
+  saturatorDrive: number
+  saturatorMix: number
   sendReverb: number
   sendDelay: number
-  sendMod: number
   duckSource: string | null
   duckAmount: number
   kickTune: number
@@ -215,6 +242,9 @@ function coerce(p: BeatSynth): EngineSynth {
   const osc = (v: unknown, d: OscType): OscType => (typeof v === 'string' && OSC_SET.includes(v as OscType) ? (v as OscType) : d)
   const bool = (v: unknown, d: boolean): boolean => (typeof v === 'boolean' ? v : d)
   const syncRate = (v: unknown, d: LfoSyncRate): LfoSyncRate => (typeof v === 'string' && LFO_SYNC_RATES.includes(v as LfoSyncRate) ? (v as LfoSyncRate) : d)
+  const beatRepeatMode = (v: unknown, d: BeatRepeatMode): BeatRepeatMode => (typeof v === 'string' && BEAT_REPEAT_MODES.includes(v as BeatRepeatMode) ? (v as BeatRepeatMode) : d)
+  const chorusMode = (v: unknown, d: ChorusMode): ChorusMode => (typeof v === 'string' && CHORUS_MODES.includes(v as ChorusMode) ? (v as ChorusMode) : d)
+  const saturatorCurve = (v: unknown, d: SaturatorCurve): SaturatorCurve => (typeof v === 'string' && SATURATOR_CURVES.includes(v as SaturatorCurve) ? (v as SaturatorCurve) : d)
   return {
     osc: osc(p.osc, 'sawtooth'),
     volume: num(p.volume, -10),
@@ -266,9 +296,28 @@ function coerce(p: BeatSynth): EngineSynth {
     distortionMix: num(p.distortionMix, 0),
     bitcrushBits: num(p.bitcrushBits, 8),
     bitcrushMix: num(p.bitcrushMix, 0),
+    pingPongTime: num(p.pingPongTime, 0.19),
+    pingPongFeedback: num(p.pingPongFeedback, 0.3),
+    pingPongCrossFeed: num(p.pingPongCrossFeed, 1),
+    pingPongWobbleRate: num(p.pingPongWobbleRate, 0.5),
+    pingPongWobbleDepth: num(p.pingPongWobbleDepth, 0),
+    pingPongMix: num(p.pingPongMix, 0),
+    beatRepeatGrid: num(p.beatRepeatGrid, 1),
+    beatRepeatGate: num(p.beatRepeatGate, 0),
+    beatRepeatChance: num(p.beatRepeatChance, 1),
+    beatRepeatMode: beatRepeatMode(p.beatRepeatMode, 'insert'),
+    chorusMode: chorusMode(p.chorusMode, 'off'),
+    chorusRate: num(p.chorusRate, 1.5),
+    chorusDepth: num(p.chorusDepth, 0.7),
+    chorusMix: num(p.chorusMix, 0),
+    phaserRate: num(p.phaserRate, 0.5),
+    phaserDepth: num(p.phaserDepth, 3),
+    phaserMix: num(p.phaserMix, 0),
+    saturatorCurve: saturatorCurve(p.saturatorCurve, 'analog'),
+    saturatorDrive: num(p.saturatorDrive, 0),
+    saturatorMix: num(p.saturatorMix, 0),
     sendReverb: num(p.sendReverb, 0),
     sendDelay: num(p.sendDelay, 0),
-    sendMod: num(p.sendMod, 0),
     duckSource: typeof p.duckSource === 'string' && p.duckSource && p.duckSource !== 'none' ? p.duckSource : null,
     duckAmount: num(p.duckAmount, 0),
     kickTune: num(p.kickTune, 32.7),
@@ -408,6 +457,254 @@ function applyEffectParams(e: EffectRuntime, p: EngineSynth): void {
   }
 }
 
+// Phase 22 Stream AC — Beat Repeat's chance roll: a PER-NOTE-POSITION-SEEDED RNG, not a global
+// stream (docs/research/21-opendaw-devices-effects.md row 5, "Velocity device's random-seed +
+// note position reseed pattern"). The seed is a pure hash of (track id, repeat step, item id) —
+// no persisted RNG state, no document-level seed field needed — so the SAME document always rolls
+// the SAME outcome at the SAME repeat: re-rendering is bit-for-bit reproducible, matching
+// dotbeat's diff/determinism goals. FNV-1a string hash feeding one mulberry32-style mix step.
+function seededRoll(trackId: string, step: number, itemId: string): number {
+  const s = `${trackId}:${step}:${itemId}`
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  h >>>= 0
+  h = Math.imul(h ^ (h >>> 15), h | 1)
+  h ^= h + Math.imul(h ^ (h >>> 7), h | 61)
+  return ((h ^ (h >>> 14)) >>> 0) / 4294967296
+}
+
+// Phase 22 Stream AC — Saturator curve authoring (research 17 §5.4): each SaturatorCurve maps to
+// a small closed-form waveshaping function, sampled once into a Float32Array PER CURVE-TYPE
+// CHANGE (cached on the chain — see chain.saturator.lastCurve in applyParams), never per sample.
+// `analog`/`warm` are tanh-based soft clips (warm is asymmetric — a softer negative half biases
+// toward even harmonics, the classic "tube warmth" move); `clip` is a hard 3-segment clip (strong
+// odd harmonics, a more "digital" bite); `fold` is a sin()-based wavefolder (wraps rather than
+// clips, producing inharmonic-ish fold-back content as drive increases).
+const SATURATOR_CURVE_SIZE = 1024
+function buildSaturatorCurve(kind: SaturatorCurve): Float32Array {
+  const n = SATURATOR_CURVE_SIZE
+  const curve = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1 // -1..1
+    let y: number
+    switch (kind) {
+      case 'warm':
+        y = x >= 0 ? Math.tanh(x * 2) : Math.tanh(x * 1.4) * 0.9
+        break
+      case 'clip':
+        y = Math.max(-1, Math.min(1, x * 3))
+        break
+      case 'fold':
+        y = Math.sin(x * Math.PI * 1.5)
+        break
+      case 'analog':
+      default:
+        y = Math.tanh(x * 3)
+    }
+    curve[i] = y
+  }
+  return curve
+}
+
+// Phase 22 Stream AC — Ping Pong Delay's node group (research 17 §5.1 + research 21 row 4: a
+// continuously-variable cross-feedback control and a delay-time LFO wobble, not a plain
+// Tone.PingPongDelay — that built-in class hardwires 100% L<->R cross-feedback with no dial, per
+// its StereoXFeedbackEffect base). Built from primitives (two Tone.Delay lines + four feedback
+// Gains + a wobble LFO) rather than the built-in class so pingPongCrossFeed and the wobble fields
+// have somewhere real to land. Input taps delayL only (the classic ping-pong topology: the first
+// echo is always on the left); delayR only ever receives signal via cross-feedback from delayL,
+// so pingPongCrossFeed=0 (no bleed) leaves the right channel silent — the deliberate, documented
+// behavior of "how much L/R bleed," not a bug (see applyParams). The wobble LFO OWNS both delay
+// times entirely (see buildPingPong: delayTime's own .value is left at 0, never touched again) —
+// Tone Param connections are additive, so a non-zero base value plus an LFO output would double
+// up; driving the LFO's min/max directly (equal min/max = a static, non-wobbling delay time) is
+// the correct way to make this one control cover both the static and wobbling cases.
+interface PingPongNodes {
+  in: Tone.Gain
+  delayL: Tone.Delay
+  delayR: Tone.Delay
+  feedLL: Tone.Gain // delayL self-feedback (bleed=0 share)
+  feedLR: Tone.Gain // delayL -> delayR cross-feedback (bleed=1 share)
+  feedRR: Tone.Gain // delayR self-feedback
+  feedRL: Tone.Gain // delayR -> delayL cross-feedback
+  panL: Tone.Panner
+  panR: Tone.Panner
+  wobble: Tone.LFO
+  dry: Tone.Gain
+  wet: Tone.Gain
+  out: Tone.Gain
+}
+
+// Phase 22 Stream AC — Saturator's node group (research 17 §5.4): a pre-gain (the `saturatorDrive`
+// knob — how hard the signal hits the shaper) feeding a Tone.WaveShaper whose curve is authored by
+// buildSaturatorCurve() above, plus the usual dry/wet pair (same compDry/compWet convention
+// already used for the parallel compressor) so saturatorMix=0 is a true bypass regardless of
+// drive/curve.
+interface SaturatorNodes {
+  in: Tone.Gain
+  preGain: Tone.Gain
+  shaper: Tone.WaveShaper
+  dry: Tone.Gain
+  wet: Tone.Gain
+  out: Tone.Gain
+  lastCurve: SaturatorCurve | null // cache: recompute the curve array only when the curve TYPE changes
+}
+
+/** Build one fully-internally-wired Saturator node group (Phase 22 Stream AC). Callers connect an
+ * upstream node to `.in` and take `.out` onward — everything between is wired here once. */
+function buildSaturator(): SaturatorNodes {
+  const inN = new Tone.Gain(1)
+  const preGain = new Tone.Gain(1)
+  const shaper = new Tone.WaveShaper(buildSaturatorCurve('analog'))
+  const dry = new Tone.Gain(1)
+  const wet = new Tone.Gain(0)
+  const out = new Tone.Gain()
+  inN.connect(dry)
+  inN.connect(preGain)
+  preGain.connect(shaper)
+  shaper.connect(wet)
+  dry.connect(out)
+  wet.connect(out)
+  return { in: inN, preGain, shaper, dry, wet, out, lastCurve: 'analog' }
+}
+
+/** Build one fully-internally-wired Ping Pong Delay node group (Phase 22 Stream AC). Callers
+ * connect an upstream node to `.in` and take `.out` onward. See PingPongNodes' doc comment for the
+ * topology rationale (why this is hand-built from primitives rather than Tone.PingPongDelay). */
+function buildPingPong(): PingPongNodes {
+  const inN = new Tone.Gain(1)
+  const delayL = new Tone.Delay(0, 1.6)
+  const delayR = new Tone.Delay(0, 1.6)
+  const feedLL = new Tone.Gain(0)
+  const feedLR = new Tone.Gain(0)
+  const feedRR = new Tone.Gain(0)
+  const feedRL = new Tone.Gain(0)
+  const panL = new Tone.Panner(-1)
+  const panR = new Tone.Panner(1)
+  const dry = new Tone.Gain(1)
+  const wet = new Tone.Gain(0)
+  const out = new Tone.Gain()
+  // wobble LFO drives BOTH delay times' full value (min===max => static; min<max => wobbling) —
+  // see PingPongNodes' doc comment for why the delayTime Params themselves are never touched.
+  const wobble = new Tone.LFO(0.5, 0.19, 0.19).start()
+
+  inN.connect(delayL)
+  delayL.connect(panL)
+  delayL.connect(feedLL)
+  feedLL.connect(delayL)
+  delayL.connect(feedLR)
+  feedLR.connect(delayR)
+  delayR.connect(panR)
+  delayR.connect(feedRR)
+  feedRR.connect(delayR)
+  delayR.connect(feedRL)
+  feedRL.connect(delayL)
+  panL.connect(wet)
+  panR.connect(wet)
+  inN.connect(dry)
+  dry.connect(out)
+  wet.connect(out)
+  wobble.connect(delayL.delayTime)
+  wobble.connect(delayR.delayTime)
+
+  return { in: inN, delayL, delayR, feedLL, feedLR, feedRR, feedRL, panL, panR, wobble, dry, wet, out }
+}
+
+/** Apply live params to a Saturator node group (shared by SynthChain and DrumBus). The curve
+ * array is only rebuilt when `curve` actually changes type (cached via `.lastCurve`) — authored
+ * once per curve CHANGE, never per sample, per research 17 §5.4. */
+function applySaturator(nodes: SaturatorNodes, curve: SaturatorCurve, drive: number, mix: number): void {
+  if (nodes.lastCurve !== curve) {
+    nodes.shaper.curve = buildSaturatorCurve(curve)
+    nodes.lastCurve = curve
+  }
+  nodes.preGain.gain.value = 1 + drive * 9
+  nodes.dry.gain.value = 1 - mix
+  nodes.wet.gain.value = mix
+}
+
+/** Apply live params to a Ping Pong Delay node group (shared by SynthChain and DrumBus).
+ * crossFeed splits `feedback` between each delay's self-feedback and its cross-feedback into the
+ * OTHER channel — 1 = classic full alternation (all energy crosses, matching Tone.PingPongDelay's
+ * hardwired behavior), 0 = each channel's tail feeds only itself (no bleed; since only delayL is
+ * ever fed from the input, delayR then never sounds at all — the honest result of "zero bleed",
+ * not a bug). The wobble LFO's min/max are recomputed from the current time/depth every call — see
+ * PingPongNodes' doc comment for why delayTime.value itself is never touched. */
+function applyPingPong(nodes: PingPongNodes, time: number, feedback: number, crossFeed: number, wobbleRate: number, wobbleDepth: number, mix: number): void {
+  const cross = Math.max(0, Math.min(1, crossFeed))
+  nodes.feedLR.gain.value = feedback * cross
+  nodes.feedLL.gain.value = feedback * (1 - cross)
+  nodes.feedRL.gain.value = feedback * cross
+  nodes.feedRR.gain.value = feedback * (1 - cross)
+  const center = Math.max(0.001, Math.min(1.45, time))
+  const wobbleFrac = 0.3 * Math.max(0, Math.min(1, wobbleDepth))
+  const lo = Math.max(0.001, center * (1 - wobbleFrac))
+  const hi = Math.min(1.5, center * (1 + wobbleFrac))
+  nodes.wobble.min = lo
+  nodes.wobble.max = hi
+  nodes.wobble.frequency.value = Math.max(0.01, wobbleRate)
+  nodes.dry.gain.value = 1 - mix
+  nodes.wet.gain.value = mix
+}
+
+/** Every node in a Saturator/PingPong group, for disposeChain()'s flat node list. */
+function saturatorNodeList(s: SaturatorNodes): Tone.ToneAudioNode[] {
+  return [s.in, s.preGain, s.shaper, s.dry, s.wet, s.out]
+}
+function pingPongNodeList(pp: PingPongNodes): Tone.ToneAudioNode[] {
+  return [pp.in, pp.delayL, pp.delayR, pp.feedLL, pp.feedLR, pp.feedRR, pp.feedRL, pp.panL, pp.panR, pp.wobble, pp.dry, pp.wet, pp.out]
+}
+
+// Phase 22 Stream AC — Beat Repeat (research 17 §5.2 + §4.3): scheduling-layer stutter, NOT a
+// Tone.js audio node. dotbeat already knows every note/hit ahead of the audio callback (it's a
+// fully sequenced engine, not a live-input processor), so "repeat the last captured slice" is
+// literal note/hit re-scheduling inside tick(), not live buffer-capture DSP.
+//
+// Design decisions the format sketch left open (documented here, not guessed silently):
+//   - GATE WINDOW placement: once per BAR, as the LAST beatRepeatGate 16th-steps of the bar — the
+//     classic "stutter/fill into the next bar" placement Beat Repeat is reached for in practice.
+//   - REPEAT CADENCE: fires on ABSOLUTE grid-aligned 16th-step boundaries (contentStep % grid ===
+//     0) while the gate window is active — Grid is a fixed clock division, not relative to when
+//     the gate happens to start, so it doesn't always land exactly on the window's first step.
+//   - GRID ROUNDING: tick() itself only runs once per 16th-step (Tone's scheduleRepeat('16n', 0)
+//     in play()), so repeats can never fire faster than that regardless of beatRepeatGrid — grid
+//     values below 1 (e.g. 0.5 for a 32nd-note slice) still shrink the CAPTURED slice's size (and
+//     therefore how tightly-packed the repeated content is) but the repeat TRIGGER cadence itself
+//     floors to whole 16th-steps, same quantization every other note trigger in tick() already
+//     uses (`Math.floor(n.start) === contentStep`).
+//   - CAPTURE: the repeated slice is grabbed ONCE per gate-window engagement (immediately
+//     preceding the window, `sliceStart = gateStart - grid`) and held for every repeat within that
+//     window — matching real Beat Repeat's "capture on engage, then loop that buffer" behavior,
+//     not a fresh capture per repeat.
+//   - Ableton's own no-op rule carries over unchanged: Gate < Grid disables the effect entirely.
+interface BeatRepeatState {
+  engaged: boolean
+  active: boolean // this contentStep falls inside an active gate window
+  suppressOriginal: boolean // per beatRepeatMode: should the NORMAL note/hit at this step be muted?
+  repeatNow: boolean // this contentStep is a grid-aligned repeat trigger inside an active window
+  sliceStart: number // captured grid-sized slice's start (immediately before the gate engaged)
+  grid: number // effective grid size in 16th-steps, floored to >= 1 (see GRID ROUNDING above)
+}
+function resolveBeatRepeat(p: { beatRepeatGrid: number; beatRepeatGate: number; beatRepeatMode: BeatRepeatMode }, contentStep: number): BeatRepeatState {
+  const grid = Math.max(1, Math.round(p.beatRepeatGrid))
+  const engaged = p.beatRepeatGate > 0 && p.beatRepeatGate >= p.beatRepeatGrid // Ableton's no-op rule
+  if (!engaged) return { engaged: false, active: false, suppressOriginal: false, repeatNow: false, sliceStart: 0, grid }
+  const bar = Math.floor(contentStep / 16)
+  const gateLen = Math.min(16, Math.round(p.beatRepeatGate))
+  const gateStart = bar * 16 + (16 - gateLen)
+  const active = contentStep >= gateStart
+  const sliceStart = gateStart - grid
+  const repeatNow = active && contentStep % grid === 0
+  // 'gate': original NEVER passes, engaged or not — an intentional, extreme mode (matches
+  // Ableton's Gate mode exactly: "only repeats ever play, original never passes"). 'insert':
+  // original muted only while a repeat is active. 'mix': original always passes; repeats layer on.
+  const suppressOriginal = p.beatRepeatMode === 'gate' || (p.beatRepeatMode === 'insert' && active)
+  return { engaged, active, suppressOriginal, repeatNow, sliceStart, grid }
+}
+
 interface SynthChain {
   synth: Tone.PolySynth<Tone.Synth>
   osc2: Tone.PolySynth<Tone.Synth>
@@ -427,12 +724,26 @@ interface SynthChain {
   // Phase 22 Stream AA: the ordered, reorderable effect chain, keyed by stable effect id — a
   // reorder/add/remove/bypass in the document reconciles here (reconcileEffectChain) rather than
   // through four hardcoded fields. `effectOrder` is the live chain order (ids); `effectsSig` is
-  // the last-wired signature (id:type:enabled joined) so param-only ticks skip re-wiring.
+  // the last-wired signature (id:type:enabled joined) so param-only ticks skip re-wiring. Covers
+  // the FOUR effect types the format grammar currently declares (`EffectType` in document.ts:
+  // eq3/comp/distortion/bitcrush) — the only ones a `.beat` file can list/reorder today.
   effects: Map<string, EffectRuntime>
   effectOrder: string[]
   effectsSig: string
+  // Phase 22 Stream AC: saturator -> chorus -> phaser -> pingPong, inserted after the reorderable
+  // chain's exit and before muteGain (research 17 §5's build order). Fixed inserts, NOT part of
+  // the reorderable `effects` list above — the format's EffectType enum doesn't cover these four
+  // yet (a real follow-up: extending EffectType would let them join the reorderable chain too),
+  // and they're wired identically on DrumBus below, which has no reorderable-list concept at all
+  // (v0.10's `effects` field is synth-tracks-only, format-spec.md's serialize note). Scoping them
+  // as fixed-after-the-list keeps synth and drum tracks consistent rather than fixing this
+  // asymmetry only on one track kind.
+  saturator: SaturatorNodes
+  chorus: Tone.Chorus
+  phaser: Tone.Phaser
+  pingPong: PingPongNodes
   // muteGain sits BEFORE the panner fan-out, so gating it to 0 silences both the dry path
-  // (panner->vol->master) AND the reverb/delay/mod sends (panner->*Send->return bus) — a mute that
+  // (panner->vol->master) AND the reverb/delay sends (panner->*Send->return bus) — a mute that
   // only touched vol would leave the wet sends audible. It's a dedicated gate, separate from vol, so
   // the per-tick volume/duck ramps that write chain.vol never fight the mute state.
   muteGain: Tone.Gain
@@ -446,7 +757,6 @@ interface SynthChain {
   vol: Tone.Volume
   reverbSend: Tone.Gain
   delaySend: Tone.Gain
-  modSend: Tone.Gain
   lastOsc: OscType | null
 }
 
@@ -471,13 +781,16 @@ interface DrumBus {
   compOut: Tone.Gain
   distortion: Tone.Distortion
   bitcrush: Tone.BitCrusher
+  saturator: SaturatorNodes
+  chorus: Tone.Chorus
+  phaser: Tone.Phaser
+  pingPong: PingPongNodes
   muteGain: Tone.Gain // gate before the panner fan-out (see SynthChain.muteGain)
   levelTap: Tone.Analyser // post-fader waveform tap for the drums track's channel strip (see SynthChain.levelTap)
   panner: Tone.Panner
   vol: Tone.Volume
   reverbSend: Tone.Gain
   delaySend: Tone.Gain
-  modSend: Tone.Gain
 }
 
 interface DrumKit {
@@ -601,8 +914,6 @@ class Engine {
 
   private reverbBus: Tone.Reverb | null = null
   private delayBus: Tone.FeedbackDelay | null = null
-  private chorusBus: Tone.Chorus | null = null
-  private phaserBus: Tone.Phaser | null = null
   private drumBus: DrumBus | null = null
 
   private masterBus: Tone.Gain | null = null
@@ -651,17 +962,17 @@ class Engine {
   }
 
   // ---- shared return buses (lazy: Tone nodes can be built before the context starts) ----
+  // Phase 22 Stream AC retired the third shared bus this used to build here (chorusBus/phaserBus,
+  // reachable only via the generic project-global `sendMod` field) — Chorus-Ensemble and
+  // Phaser-Flanger are now real per-track inserts (see buildSynthChain()/getDrumBus()), consistent
+  // with every other configurable effect in dotbeat (EQ3, compressor, distortion, bitcrush all
+  // already live one-instance-per-track — research 17 §4.2). reverb/delay stay shared sends.
   private getBuses() {
     if (!this.reverbBus) {
       this.reverbBus = new Tone.Reverb({ decay: 2.2, wet: 1 }).connect(this.getMaster())
       this.delayBus = new Tone.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 1 }).connect(this.getMaster())
-      // series: chorus -> phaser, only the phaser reaches master (a parallel split would double the
-      // dry-chorus signal alongside the phased one).
-      this.chorusBus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 1 }).start()
-      this.phaserBus = new Tone.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 1000, wet: 1 }).connect(this.getMaster())
-      this.chorusBus.connect(this.phaserBus)
     }
-    return { reverb: this.reverbBus, delay: this.delayBus!, mod: this.chorusBus! }
+    return { reverb: this.reverbBus, delay: this.delayBus! }
   }
 
   // filter -> EQ3 -> parallel comp -> distortion -> bitcrush -> (panner). dotbeat has no
@@ -675,18 +986,28 @@ class Engine {
     compOut: Tone.Gain,
     distortion: Tone.Distortion,
     bitcrush: Tone.BitCrusher,
-    panner: Tone.ToneAudioNode,
+    saturator: SaturatorNodes,
   ) {
     filter.connect(eq3)
     eq3.connect(compIn)
     compOut.connect(distortion)
     distortion.connect(bitcrush)
-    bitcrush.connect(panner)
+    bitcrush.connect(saturator.in)
+  }
+
+  /** Wire saturator -> chorus -> phaser -> pingPong -> nextStage (Phase 22 Stream AC's four new
+   * inserts, in the fixed order research 17 §5 builds them — shared by buildSynthChain() and
+   * getDrumBus() so the two chains never drift). */
+  private wireFxTail(saturator: SaturatorNodes, chorus: Tone.Chorus, phaser: Tone.Phaser, pingPong: PingPongNodes, nextStage: Tone.ToneAudioNode) {
+    saturator.out.connect(chorus)
+    chorus.connect(phaser)
+    phaser.connect(pingPong.in)
+    pingPong.out.connect(nextStage)
   }
 
   private getDrumBus(): DrumBus {
     if (!this.drumBus) {
-      const { reverb, delay, mod } = this.getBuses()
+      const { reverb, delay } = this.getBuses()
       const filter = new Tone.Filter(12000, 'lowpass')
       const eq3 = new Tone.EQ3()
       const compIn = new Tone.Gain()
@@ -696,21 +1017,25 @@ class Engine {
       const compOut = new Tone.Gain()
       const distortion = new Tone.Distortion({ distortion: 0, wet: 0 })
       const bitcrush = new Tone.BitCrusher(8)
+      const saturator = buildSaturator()
+      const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 0 }).start()
+      const phaser = new Tone.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 1000, wet: 0 })
+      const pingPong = buildPingPong()
       const muteGain = new Tone.Gain(1)
       const levelTap = new Tone.Analyser('waveform', 256)
       const panner = new Tone.Panner({ pan: 0, channelCount: 2 })
       const vol = new Tone.Volume(0)
       const reverbSend = new Tone.Gain(0)
       const delaySend = new Tone.Gain(0)
-      const modSend = new Tone.Gain(0)
 
       compIn.fan(compDry, compressor)
       compressor.connect(compWet)
       compDry.connect(compOut)
       compWet.connect(compOut)
-      // ...bitcrush -> muteGain -> panner: the mute gate is upstream of the fan-out so it catches
-      // the sends too.
-      this.wireInsertChain(filter, eq3, compIn, compOut, distortion, bitcrush, muteGain)
+      // ...bitcrush -> saturator -> chorus -> phaser -> pingPong -> muteGain -> panner: the mute
+      // gate is upstream of the fan-out so it catches the sends too.
+      this.wireInsertChain(filter, eq3, compIn, compOut, distortion, bitcrush, saturator)
+      this.wireFxTail(saturator, chorus, phaser, pingPong, muteGain)
       muteGain.connect(panner)
 
       panner.chain(vol, this.getMaster())
@@ -719,10 +1044,8 @@ class Engine {
       reverbSend.connect(reverb)
       panner.connect(delaySend)
       delaySend.connect(delay)
-      panner.connect(modSend)
-      modSend.connect(mod)
 
-      this.drumBus = { filter, eq3, compIn, compDry, compressor, compWet, compOut, distortion, bitcrush, muteGain, levelTap, panner, vol, reverbSend, delaySend, modSend }
+      this.drumBus = { filter, eq3, compIn, compDry, compressor, compWet, compOut, distortion, bitcrush, saturator, chorus, phaser, pingPong, muteGain, levelTap, panner, vol, reverbSend, delaySend }
     }
     return this.drumBus
   }
@@ -736,7 +1059,6 @@ class Engine {
     bus.vol.volume.value = p.volume
     bus.reverbSend.gain.value = p.sendReverb
     bus.delaySend.gain.value = p.sendDelay
-    bus.modSend.gain.value = p.sendMod
     bus.eq3.low.value = p.eqLow
     bus.eq3.mid.value = p.eqMid
     bus.eq3.high.value = p.eqHigh
@@ -750,6 +1072,19 @@ class Engine {
     bus.distortion.wet.value = p.distortionMix
     bus.bitcrush.bits.value = Math.round(p.bitcrushBits)
     bus.bitcrush.wet.value = p.bitcrushMix
+    applySaturator(bus.saturator, p.saturatorCurve, p.saturatorDrive, p.saturatorMix)
+    // chorusMode 'off' forces wet=0 regardless of chorusMix (mirrors the *Mix=0-bypasses
+    // convention every other insert follows); 'vibrato' forces wet=1 fixed, no dry blend —
+    // matches Ableton's Vibrato mode exactly (research 17 §5.3), so chorusMix has no audible
+    // effect in that one mode, by design.
+    bus.chorus.wet.value = p.chorusMode === 'off' ? 0 : p.chorusMode === 'vibrato' ? 1 : p.chorusMix
+    bus.chorus.frequency.value = p.chorusRate
+    bus.chorus.depth = p.chorusDepth
+    bus.chorus.spread = p.chorusMode === 'ensemble' ? 180 : p.chorusMode === 'vibrato' ? 0 : 90
+    bus.phaser.frequency.value = p.phaserRate
+    bus.phaser.octaves = p.phaserDepth
+    bus.phaser.wet.value = p.phaserMix
+    applyPingPong(bus.pingPong, p.pingPongTime, p.pingPongFeedback, p.pingPongCrossFeed, p.pingPongWobbleRate, p.pingPongWobbleDepth, p.pingPongMix)
   }
 
   private applyDrumVoiceParams(p: EngineSynth) {
@@ -1006,7 +1341,7 @@ class Engine {
   }
 
   private buildSynthChain(): SynthChain {
-    const { reverb, delay, mod } = this.getBuses()
+    const { reverb, delay } = this.getBuses()
     const filter = new Tone.Filter(2000, 'lowpass')
     // channelCount 2 so the unison stack's stereo image (osc2Pan/osc3Pan/uniPairs) survives the
     // panner instead of being folded to mono.
@@ -1014,7 +1349,6 @@ class Engine {
     const vol = new Tone.Volume(0)
     const reverbSend = new Tone.Gain(0)
     const delaySend = new Tone.Gain(0)
-    const modSend = new Tone.Gain(0)
 
     const synth = new Tone.PolySynth(Tone.Synth)
     const osc2 = new Tone.PolySynth(Tone.Synth)
@@ -1036,6 +1370,12 @@ class Engine {
     const fm = new Tone.PolySynth(Tone.FMSynth)
     const fmGain = new Tone.Gain(0)
 
+    // Phase 22 Stream AC: fixed inserts (not part of AA's reorderable `effects` list below — see
+    // SynthChain's field comment for why).
+    const saturator = buildSaturator()
+    const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 0 }).start()
+    const phaser = new Tone.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 1000, wet: 0 })
+    const pingPong = buildPingPong()
     const muteGain = new Tone.Gain(1)
     const levelTap = new Tone.Analyser('waveform', 256)
 
@@ -1047,14 +1387,16 @@ class Engine {
     noise.chain(noiseGain, filter)
     fm.chain(fmGain, filter)
 
-    // Phase 22 Stream AA: filter->...effects...->muteGain is NOT wired here — reconcileEffectChain
+    // Phase 22 Stream AA: filter->...effects...->saturator is NOT wired here — reconcileEffectChain
     // (called from applyParams, below) owns that whole link, driven by the track's own declared,
     // ordered `effects` list. effectsSig starts at a sentinel no real signature can ever equal
     // (see the comment there), so the very first applyParams call always reconciles and makes the
-    // filter->muteGain connection, even for a track whose chain is explicitly empty. An unedited
+    // filter->saturator connection, even for a track whose chain is explicitly empty. An unedited
     // track's first reconcile lands on the exact old fixed order (eq3->comp->distortion->bitcrush,
     // all enabled — defaultEffectChain's default), so a freshly built chain sounds identical to
-    // before this stream. muteGain->panner IS static (unaffected by the effect list) and wired now.
+    // before this stream. saturator->chorus->phaser->pingPong->muteGain->panner IS static (Stream
+    // AC's fixed tail, unaffected by the reorderable list) and wired now via wireFxTail.
+    this.wireFxTail(saturator, chorus, phaser, pingPong, muteGain)
     muteGain.connect(panner)
 
     panner.chain(vol, this.getMaster())
@@ -1063,12 +1405,11 @@ class Engine {
     reverbSend.connect(reverb)
     panner.connect(delaySend)
     delaySend.connect(delay)
-    panner.connect(modSend)
-    modSend.connect(mod)
 
     return {
       synth, osc2, osc2Gain, osc2Pan, osc3, osc3Gain, osc3Pan, uniPairs, sub, subGain, noise, noiseGain, fm, fmGain,
-      filter, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET, muteGain, levelTap, panner, vol, reverbSend, delaySend, modSend, lastOsc: null,
+      filter, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET, saturator, chorus, phaser, pingPong,
+      muteGain, levelTap, panner, vol, reverbSend, delaySend, lastOsc: null,
     }
   }
 
@@ -1110,7 +1451,7 @@ class Engine {
       upstream.connect(runtime.entry)
       upstream = runtime.exit
     }
-    upstream.connect(chain.muteGain)
+    upstream.connect(chain.saturator.in)
 
     chain.effectOrder = effects.map((e) => e.id)
     chain.effectsSig = sig
@@ -1148,16 +1489,26 @@ class Engine {
     chain.vol.volume.value = p.volume
     chain.reverbSend.gain.value = p.sendReverb
     chain.delaySend.gain.value = p.sendDelay
-    chain.modSend.gain.value = p.sendMod
     this.reconcileEffectChain(chain, effects)
     for (const runtime of chain.effects.values()) applyEffectParams(runtime, p)
+    applySaturator(chain.saturator, p.saturatorCurve, p.saturatorDrive, p.saturatorMix)
+    // See applyDrumBusParams for the chorusMode 'off'/'vibrato' special-casing rationale.
+    chain.chorus.wet.value = p.chorusMode === 'off' ? 0 : p.chorusMode === 'vibrato' ? 1 : p.chorusMix
+    chain.chorus.frequency.value = p.chorusRate
+    chain.chorus.depth = p.chorusDepth
+    chain.chorus.spread = p.chorusMode === 'ensemble' ? 180 : p.chorusMode === 'vibrato' ? 0 : 90
+    chain.phaser.frequency.value = p.phaserRate
+    chain.phaser.octaves = p.phaserDepth
+    chain.phaser.wet.value = p.phaserMix
+    applyPingPong(chain.pingPong, p.pingPongTime, p.pingPongFeedback, p.pingPongCrossFeed, p.pingPongWobbleRate, p.pingPongWobbleDepth, p.pingPongMix)
   }
 
   private disposeChain(chain: SynthChain): void {
     const nodes: Tone.ToneAudioNode[] = [
       chain.synth, chain.osc2, chain.osc2Gain, chain.osc2Pan, chain.osc3, chain.osc3Gain, chain.osc3Pan,
       chain.sub, chain.subGain, chain.noise, chain.noiseGain, chain.fm, chain.fmGain, chain.filter,
-      chain.muteGain, chain.levelTap, chain.panner, chain.vol, chain.reverbSend, chain.delaySend, chain.modSend,
+      ...saturatorNodeList(chain.saturator), chain.chorus, chain.phaser, ...pingPongNodeList(chain.pingPong),
+      chain.muteGain, chain.levelTap, chain.panner, chain.vol, chain.reverbSend, chain.delaySend,
     ]
     for (const u of chain.uniPairs) nodes.push(u.poly, u.pan, u.gain)
     for (const runtime of chain.effects.values()) nodes.push(...runtime.nodes)
@@ -1638,6 +1989,42 @@ class Engine {
 
   // Resolve a track's playable content this tick (loop vs. song mode). Pure read — playback never
   // mutates the document. In song mode a track unmapped by the active scene is silent (null).
+  /** Fire one note across the whole oscillator bank (main synth + osc2/osc3 + unison pairs + sub +
+   * noise + FM), plus the filter envelope if any of filterEnvAmount/keytrackAmount/
+   * velToFilterAmount are active. Factored out of tick()'s main note loop so Beat Repeat (Phase 22
+   * Stream AC) can fire a repeated note through the exact same full-bank path as a normal one,
+   * just at a different `noteTime` — a repeat should sound like a real repeat of the note, not a
+   * thin single-oscillator blip. */
+  private fireSynthNote(chain: SynthChain, p: EngineSynth, n: BeatNote, noteTime: number, stepSeconds: number, baseCutoff: number, lfoOn: boolean, lfo: number, lfo2On: boolean, lfo2: number): void {
+    const dur = Math.max(n.duration * stepSeconds * 0.9, 0.05)
+    let freq = Tone.Frequency(n.pitch, 'midi').toFrequency()
+    if (p.lfoDest === 'pitch' && lfoOn) freq *= Math.pow(2, (p.lfoDepth * lfo * 100) / 1200)
+    if (p.lfo2Dest === 'pitch' && lfo2On) freq *= Math.pow(2, (p.lfo2Depth * lfo2 * 100) / 1200)
+    chain.synth.triggerAttackRelease(freq, dur, noteTime, n.velocity)
+    if (p.osc2Level > 0) chain.osc2.triggerAttackRelease(freq * Math.pow(2, p.osc2Detune / 1200), dur, noteTime, n.velocity)
+    if (p.unisonVoices >= 3 && p.osc2Level > 0) chain.osc3.triggerAttackRelease(freq * Math.pow(2, -p.osc2Detune / 1200), dur, noteTime, n.velocity)
+    for (const u of chain.uniPairs) {
+      if (p.unisonVoices >= u.minVoices && p.osc2Level > 0) u.poly.triggerAttackRelease(freq * Math.pow(2, (u.mul * p.osc2Detune) / 1200), dur, noteTime, n.velocity)
+    }
+    if (p.subLevel > 0) chain.sub.triggerAttackRelease(freq / 2, dur, noteTime, n.velocity)
+    if (p.noiseLevel > 0) chain.noise.triggerAttackRelease(dur, noteTime, n.velocity)
+    if (p.fmLevel > 0) chain.fm.triggerAttackRelease(freq, dur, noteTime, n.velocity)
+    if (p.filterEnvAmount > 0 || p.keytrackAmount > 0 || p.velToFilterAmount > 0) {
+      // Keytracking/velocity shift this note's cutoff at note-on; the filter envelope then
+      // sweeps relative to that shifted value.
+      const keytrackMult = Math.pow(2, (p.keytrackAmount * (n.pitch - 60)) / 12)
+      const velMult = Math.pow(2, p.velToFilterAmount * (n.velocity - 0.5) * 4)
+      const noteCutoff = Math.max(baseCutoff * keytrackMult * velMult, 20)
+      const peak = Math.max(noteCutoff * Math.pow(2, p.filterEnvAmount * 4), 20)
+      const sustainHz = Math.max(noteCutoff * Math.pow(2, p.filterEnvAmount * 4 * p.filterEnvSustain), 20)
+      chain.filter.frequency.cancelScheduledValues(noteTime)
+      chain.filter.frequency.setValueAtTime(noteCutoff, noteTime)
+      chain.filter.frequency.exponentialRampToValueAtTime(peak, noteTime + Math.max(p.filterEnvAttack, 0.001))
+      chain.filter.frequency.exponentialRampToValueAtTime(sustainHz, noteTime + Math.max(p.filterEnvAttack, 0.001) + Math.max(p.filterEnvDecay, 0.001))
+      chain.filter.frequency.exponentialRampToValueAtTime(noteCutoff, noteTime + dur + Math.max(p.filterEnvRelease, 0.001))
+    }
+  }
+
   private contentOf(
     track: BeatTrack,
     step: number,
@@ -1711,10 +2098,21 @@ class Engine {
             bus.vol.volume.linearRampToValueAtTime(p.volume + p.lfoDepth * lfo * 12, time + stepSeconds)
           }
         }
+        // Beat Repeat (Phase 22 Stream AC) — see resolveBeatRepeat's doc comment for the full
+        // design (gate-window placement, grid cadence, capture semantics, mode meanings).
+        const drumRep = resolveBeatRepeat(p, content.contentStep)
         for (const h of content.hits) {
-          if (Math.floor(h.start) === content.contentStep) {
+          if (Math.floor(h.start) === content.contentStep && !drumRep.suppressOriginal) {
             const frac = h.start - Math.floor(h.start)
             this.triggerDrum(h.lane, time + frac * stepSeconds, h.velocity, h.duration)
+          }
+        }
+        if (drumRep.repeatNow) {
+          for (const h of content.hits) {
+            if (h.start < drumRep.sliceStart || h.start >= drumRep.sliceStart + drumRep.grid) continue
+            if (seededRoll(track.id, content.contentStep, h.id) >= p.beatRepeatChance) continue
+            const offset = h.start - drumRep.sliceStart
+            this.triggerDrum(h.lane, time + offset * stepSeconds, h.velocity)
           }
         }
         continue
@@ -1796,7 +2194,6 @@ class Engine {
           case 'pan': chain.panner.pan.linearRampToValueAtTime(val, rampTime); break
           case 'sendReverb': chain.reverbSend.gain.linearRampToValueAtTime(val, rampTime); break
           case 'sendDelay': chain.delaySend.gain.linearRampToValueAtTime(val, rampTime); break
-          case 'sendMod': chain.modSend.gain.linearRampToValueAtTime(val, rampTime); break
           case 'eqLow': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.low.linearRampToValueAtTime(val, rampTime); break }
           case 'eqMid': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.mid.linearRampToValueAtTime(val, rampTime); break }
           case 'eqHigh': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.high.linearRampToValueAtTime(val, rampTime); break }
@@ -1829,7 +2226,6 @@ class Engine {
           case 'pan': chain.panner.pan.linearRampToValueAtTime(Math.max(-1, Math.min(1, p.pan + d)), rampTime); break
           case 'sendReverb': chain.reverbSend.gain.linearRampToValueAtTime(clamp01(p.sendReverb + d * 0.5), rampTime); break
           case 'sendDelay': chain.delaySend.gain.linearRampToValueAtTime(clamp01(p.sendDelay + d * 0.5), rampTime); break
-          case 'sendMod': chain.modSend.gain.linearRampToValueAtTime(clamp01(p.sendMod + d * 0.5), rampTime); break
           case 'eqLow': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.low.linearRampToValueAtTime(p.eqLow + d * 12, rampTime); break }
           case 'eqMid': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.mid.linearRampToValueAtTime(p.eqMid + d * 12, rampTime); break }
           case 'eqHigh': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.high.linearRampToValueAtTime(p.eqHigh + d * 12, rampTime); break }
@@ -1871,36 +2267,21 @@ class Engine {
         }
       }
 
-      // Trigger notes due this step across the whole oscillator bank.
+      // Trigger notes due this step across the whole oscillator bank. Beat Repeat (Phase 22 Stream
+      // AC) can suppress the normal trigger (insert/gate modes) and/or layer repeat-triggered
+      // notes on top — see resolveBeatRepeat's doc comment for the full design.
+      const synthRep = resolveBeatRepeat(p, content.contentStep)
       for (const n of content.notes) {
-        if (Math.floor(n.start) !== content.contentStep) continue
+        if (Math.floor(n.start) !== content.contentStep || synthRep.suppressOriginal) continue
         const noteTime = time + (n.start - content.contentStep) * stepSeconds
-        const dur = Math.max(n.duration * stepSeconds * 0.9, 0.05)
-        let freq = Tone.Frequency(n.pitch, 'midi').toFrequency()
-        if (p.lfoDest === 'pitch' && lfoOn) freq *= Math.pow(2, (p.lfoDepth * lfo * 100) / 1200)
-        if (p.lfo2Dest === 'pitch' && lfo2On) freq *= Math.pow(2, (p.lfo2Depth * lfo2 * 100) / 1200)
-        chain.synth.triggerAttackRelease(freq, dur, noteTime, n.velocity)
-        if (p.osc2Level > 0) chain.osc2.triggerAttackRelease(freq * Math.pow(2, p.osc2Detune / 1200), dur, noteTime, n.velocity)
-        if (p.unisonVoices >= 3 && p.osc2Level > 0) chain.osc3.triggerAttackRelease(freq * Math.pow(2, -p.osc2Detune / 1200), dur, noteTime, n.velocity)
-        for (const u of chain.uniPairs) {
-          if (p.unisonVoices >= u.minVoices && p.osc2Level > 0) u.poly.triggerAttackRelease(freq * Math.pow(2, (u.mul * p.osc2Detune) / 1200), dur, noteTime, n.velocity)
-        }
-        if (p.subLevel > 0) chain.sub.triggerAttackRelease(freq / 2, dur, noteTime, n.velocity)
-        if (p.noiseLevel > 0) chain.noise.triggerAttackRelease(dur, noteTime, n.velocity)
-        if (p.fmLevel > 0) chain.fm.triggerAttackRelease(freq, dur, noteTime, n.velocity)
-        if (p.filterEnvAmount > 0 || p.keytrackAmount > 0 || p.velToFilterAmount > 0) {
-          // Keytracking/velocity shift this note's cutoff at note-on; the filter envelope then
-          // sweeps relative to that shifted value.
-          const keytrackMult = Math.pow(2, (p.keytrackAmount * (n.pitch - 60)) / 12)
-          const velMult = Math.pow(2, p.velToFilterAmount * (n.velocity - 0.5) * 4)
-          const noteCutoff = Math.max(baseCutoff * keytrackMult * velMult, 20)
-          const peak = Math.max(noteCutoff * Math.pow(2, p.filterEnvAmount * 4), 20)
-          const sustainHz = Math.max(noteCutoff * Math.pow(2, p.filterEnvAmount * 4 * p.filterEnvSustain), 20)
-          chain.filter.frequency.cancelScheduledValues(noteTime)
-          chain.filter.frequency.setValueAtTime(noteCutoff, noteTime)
-          chain.filter.frequency.exponentialRampToValueAtTime(peak, noteTime + Math.max(p.filterEnvAttack, 0.001))
-          chain.filter.frequency.exponentialRampToValueAtTime(sustainHz, noteTime + Math.max(p.filterEnvAttack, 0.001) + Math.max(p.filterEnvDecay, 0.001))
-          chain.filter.frequency.exponentialRampToValueAtTime(noteCutoff, noteTime + dur + Math.max(p.filterEnvRelease, 0.001))
+        this.fireSynthNote(chain, p, n, noteTime, stepSeconds, baseCutoff, lfoOn, lfo, lfo2On, lfo2)
+      }
+      if (synthRep.repeatNow) {
+        for (const n of content.notes) {
+          if (n.start < synthRep.sliceStart || n.start >= synthRep.sliceStart + synthRep.grid) continue
+          if (seededRoll(track.id, content.contentStep, n.id) >= p.beatRepeatChance) continue
+          const offset = n.start - synthRep.sliceStart
+          this.fireSynthNote(chain, p, n, time + offset * stepSeconds, stepSeconds, baseCutoff, lfoOn, lfo, lfo2On, lfo2)
         }
       }
     }

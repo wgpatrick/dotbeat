@@ -126,6 +126,12 @@ const FX_BADGES: { key: string; label: string; active: (p: Record<string, unknow
   { key: 'comp', label: 'Comp', active: (p) => num(p.compMix) > 0 },
   { key: 'dist', label: 'Dist', active: (p) => num(p.distortionMix) > 0 },
   { key: 'crush', label: 'Crush', active: (p) => num(p.bitcrushMix) > 0 },
+  // Phase 22 Stream AC: the four new inserts, same *Mix=0-is-bypassed heuristic.
+  { key: 'sat', label: 'Sat', active: (p) => num(p.saturatorMix) > 0 },
+  { key: 'chorus', label: 'Cho', active: (p) => p.chorusMode !== 'off' && num(p.chorusMix) > 0 },
+  { key: 'phaser', label: 'Pha', active: (p) => num(p.phaserMix) > 0 },
+  { key: 'pingpong', label: 'PP', active: (p) => num(p.pingPongMix) > 0 },
+  { key: 'beatrepeat', label: 'BR', active: (p) => num(p.beatRepeatGate) > 0 },
 ]
 
 function num(v: unknown): number {
@@ -140,7 +146,7 @@ function FxBadges({ track }: { track: BeatTrack }) {
   if (track.kind === 'instrument') return <div className="mixer-strip-fx" />
   const active = FX_BADGES.filter((b) => b.active(track.synth))
   return (
-    <div className="mixer-strip-fx" title="active insert-chain processing (EQ / comp / distortion / bitcrush)">
+    <div className="mixer-strip-fx" title="active insert-chain processing (EQ / comp / distortion / bitcrush / saturator / chorus / phaser / ping pong / beat repeat)">
       {active.length === 0 ? (
         <span className="mixer-fx-badge mixer-fx-none">—</span>
       ) : (

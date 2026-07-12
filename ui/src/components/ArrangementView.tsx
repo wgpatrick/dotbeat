@@ -95,7 +95,6 @@ const fmtPan = (v: number) => (Math.abs(v) < 0.02 ? 'C' : v < 0 ? `L${Math.round
 const SEND_KEYS: { key: string; label: string }[] = [
   { key: 'sendReverb', label: 'Rv' },
   { key: 'sendDelay', label: 'Dl' },
-  { key: 'sendMod', label: 'Md' },
 ]
 
 /** The compact inline channel strip embedded in each arrangement track header. Subscribes to the

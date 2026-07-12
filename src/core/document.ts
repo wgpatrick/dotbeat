@@ -30,13 +30,29 @@ export type LfoDestination =
   | 'wtPos'
   | 'sendReverb'
   | 'sendDelay'
-  | 'sendMod'
   | 'eqLow'
   | 'eqMid'
   | 'eqHigh'
   | 'compMix'
   | 'distortionMix'
   | 'bitcrushMix'
+
+/** Phase 22 Stream AC: Beat Repeat's mix-mode enum — matches Ableton's 3 modes exactly (research
+ * 17 §5.2). 'mix' = original + repeats both play; 'insert' = original muted only while a repeat
+ * is active, otherwise passes; 'gate' = only repeats ever play, original never passes. See
+ * ui/src/audio/engine.ts's tick() for the scheduling-layer implementation (NOT a Tone.js audio
+ * node — dotbeat already knows every note/hit ahead of time, so this is note/hit re-scheduling). */
+export type BeatRepeatMode = 'mix' | 'insert' | 'gate'
+
+/** Phase 22 Stream AC: Chorus-Ensemble's mode enum (research 17 §5.3). 'chorus' = 2-voice,
+ * 'ensemble' = 3-voice/wider, 'vibrato' = pitch modulation only, no dry blend (Tone.Chorus at
+ * wet:1 fixed regardless of chorusMix — matches Ableton's Vibrato mode; see engine.ts). */
+export type ChorusMode = 'off' | 'chorus' | 'ensemble' | 'vibrato'
+
+/** Phase 22 Stream AC: Saturator's curve-family enum (research 17 §5.4, scoped down from
+ * Ableton's full 6-curve set). tanh-based soft clip for analog/warm, hard clip for clip, a
+ * sin()-based fold for fold — authored once per curve CHANGE in engine.ts, not per sample. */
+export type SaturatorCurve = 'analog' | 'warm' | 'clip' | 'fold'
 
 // BeatLab's own lane set and order (DRUM_LANES in beatlab/src/types.ts). Order is canonical for
 // serialization: all five lanes are always emitted, in this order, so toggling any drum step is
@@ -225,9 +241,34 @@ export interface BeatSynth {
   distortionMix: number
   bitcrushBits: number
   bitcrushMix: number
+  // ---- Phase 22 Stream AC: Ping Pong Delay insert (research 17 §5.1 + research 21 row 4) ----
+  pingPongTime: number // seconds, per-side delay time
+  pingPongFeedback: number // 0..1
+  pingPongCrossFeed: number // 0..1; continuously-variable L/R bleed (not a binary ping-pong
+  // toggle) — 1 = classic full alternation, 0 = each channel's tail feeds only itself
+  pingPongWobbleRate: number // Hz, delay-time LFO wobble rate (tape-echo chorus-on-the-repeats)
+  pingPongWobbleDepth: number // 0..1; 0 = no wobble
+  pingPongMix: number // 0..1; 0 = insert bypassed
+  // ---- Phase 22 Stream AC: Beat Repeat (scheduling-layer stutter — see engine.ts's tick()) ----
+  beatRepeatGrid: number // 16th-steps per captured/repeated slice (1 = 16th, 0.5 = 32nd, 2 = 8th)
+  beatRepeatGate: number // 16th-steps the effect stays active per bar; 0 = off (canonical elision)
+  beatRepeatChance: number // 0..1, probability each individual repeat fires
+  beatRepeatMode: BeatRepeatMode
+  // ---- Phase 22 Stream AC: Chorus-Ensemble / Phaser-Flanger, now per-track inserts (research 17
+  // §5.3 — retires the old shared chorusBus/phaserBus/sendMod machinery) ----
+  chorusMode: ChorusMode
+  chorusRate: number // Hz
+  chorusDepth: number // 0..1
+  chorusMix: number // 0..1; 0 = insert bypassed
+  phaserRate: number // Hz
+  phaserDepth: number // octaves swept (Tone.Phaser's `octaves`)
+  phaserMix: number // 0..1; 0 = insert bypassed
+  // ---- Phase 22 Stream AC: Saturator (research 17 §5.4) ----
+  saturatorCurve: SaturatorCurve
+  saturatorDrive: number // 0..1, input gain into the shaper
+  saturatorMix: number // 0..1; 0 = insert bypassed
   sendReverb: number // 0..1
   sendDelay: number // 0..1
-  sendMod: number // 0..1
   duckSource: string | null // track id whose kick ducks this track; null = off ("none" in text)
   duckAmount: number // 0..1
   // drum-voice shaping (audible on drum tracks; harmless defaults on synth tracks)
@@ -428,7 +469,7 @@ export const OSC_TYPES: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 's
 /** Phase 18 Stream R: widened from the original {off,pitch,cutoff,amp,wtPos} — see LfoDestination
  * above for the rationale. Shared by lfoDest and lfo2Dest (SYNTH_FIELDS below): this ALSO fixes a
  * real pre-existing bug — ui/src/audio/engine.ts's LFO2 implementation already switched on
- * 'pan'/'sendReverb'/'sendDelay'/'sendMod'/'eqLow'/'eqMid'/'eqHigh'/'distortionMix', but the
+ * 'pan'/'sendReverb'/'sendDelay'/'eqLow'/'eqMid'/'eqHigh'/'distortionMix', but the
  * document schema only ever allowed the original 5 values for lfo2Dest too, so those engine
  * branches were unreachable dead code — no document could legally set lfo2Dest to 'pan'. Exported
  * so ui/src/audio/engine.ts's hand-maintained mirror can be kept in sync by inspection. */
@@ -442,7 +483,6 @@ export const LFO_DESTS: readonly LfoDestination[] = [
   'wtPos',
   'sendReverb',
   'sendDelay',
-  'sendMod',
   'eqLow',
   'eqMid',
   'eqHigh',
@@ -450,6 +490,13 @@ export const LFO_DESTS: readonly LfoDestination[] = [
   'distortionMix',
   'bitcrushMix',
 ]
+
+/** Phase 22 Stream AC enums, exported so ui/src/audio/engine.ts's hand-kept mirrors and
+ * ui/src/components/synthParams.ts's dropdowns can match exactly (same convention as LFO_DESTS/
+ * LFO_SYNC_RATES above). */
+export const BEAT_REPEAT_MODES: readonly BeatRepeatMode[] = ['mix', 'insert', 'gate']
+export const CHORUS_MODES: readonly ChorusMode[] = ['off', 'chorus', 'ensemble', 'vibrato']
+export const SATURATOR_CURVES: readonly SaturatorCurve[] = ['analog', 'warm', 'clip', 'fold']
 
 /** Phase 18 Stream R: the tempo-sync note-division vocabulary (lfoSyncRate/lfo2SyncRate) —
  * Ableton's convention (plain / triplet 't' / dotted 'd'). Exported so ui/src/audio/engine.ts's
@@ -543,9 +590,32 @@ export const SYNTH_FIELDS: readonly SynthFieldDef[] = [
   { key: 'distortionMix', kind: 'number', default: 0 },
   { key: 'bitcrushBits', kind: 'number', default: 8 },
   { key: 'bitcrushMix', kind: 'number', default: 0 },
+  // ---- Phase 22 Stream AC: Ping Pong Delay ----
+  { key: 'pingPongTime', kind: 'number', default: 0.19 },
+  { key: 'pingPongFeedback', kind: 'number', default: 0.3 },
+  { key: 'pingPongCrossFeed', kind: 'number', default: 1 },
+  { key: 'pingPongWobbleRate', kind: 'number', default: 0.5 },
+  { key: 'pingPongWobbleDepth', kind: 'number', default: 0 },
+  { key: 'pingPongMix', kind: 'number', default: 0 },
+  // ---- Phase 22 Stream AC: Beat Repeat ----
+  { key: 'beatRepeatGrid', kind: 'number', default: 1 },
+  { key: 'beatRepeatGate', kind: 'number', default: 0 },
+  { key: 'beatRepeatChance', kind: 'number', default: 1 },
+  { key: 'beatRepeatMode', kind: 'enum', default: 'insert', values: BEAT_REPEAT_MODES },
+  // ---- Phase 22 Stream AC: Chorus-Ensemble / Phaser-Flanger (per-track inserts) ----
+  { key: 'chorusMode', kind: 'enum', default: 'off', values: CHORUS_MODES },
+  { key: 'chorusRate', kind: 'number', default: 1.5 },
+  { key: 'chorusDepth', kind: 'number', default: 0.7 },
+  { key: 'chorusMix', kind: 'number', default: 0 },
+  { key: 'phaserRate', kind: 'number', default: 0.5 },
+  { key: 'phaserDepth', kind: 'number', default: 3 },
+  { key: 'phaserMix', kind: 'number', default: 0 },
+  // ---- Phase 22 Stream AC: Saturator ----
+  { key: 'saturatorCurve', kind: 'enum', default: 'analog', values: SATURATOR_CURVES },
+  { key: 'saturatorDrive', kind: 'number', default: 0 },
+  { key: 'saturatorMix', kind: 'number', default: 0 },
   { key: 'sendReverb', kind: 'number', default: 0 },
   { key: 'sendDelay', kind: 'number', default: 0 },
-  { key: 'sendMod', kind: 'number', default: 0 },
   { key: 'duckSource', kind: 'trackref', default: null },
   { key: 'duckAmount', kind: 'number', default: 0 },
   { key: 'kickTune', kind: 'number', default: 32.7 },
