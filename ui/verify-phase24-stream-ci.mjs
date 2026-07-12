@@ -218,20 +218,42 @@ async function main() {
       el.scrollLeft = 0
     })
     await sleep(150)
-    const gridBox = await page.locator('.noteview-grid').boundingBox()
     const loopBars = doc.loopBars
-    const stepW = gridBox.width / (loopBars * 16)
     const clickSteps = [4, 20, 40]
-    for (const step of clickSteps) {
+    // Fire one click at a time, waiting for BOTH the client's optimistic mirror AND the daemon's
+    // authoritative copy to reflect it before moving to the next — rather than firing all 3 blind
+    // and polling once at the end. Two independent reasons this matters, not just belt-and-braces:
+    //   1. `.noteview-grid`'s boundingBox can genuinely shift between clicks: buildPitchAxis()
+    //      recomputes the pitch window (hi/lo) from the track's CURRENT notes on every render, so
+    //      re-reading the box fresh before each click (instead of reusing one captured before any
+    //      note existed) tracks whatever the real layout is at click time, rather than assuming it
+    //      is frozen for the whole burst.
+    //   2. bridge.ts's postEdit() debounces the daemon POST /edit per PATH, not per edit — and every
+    //      "add a note" edit for this track shares the exact same path (`<trackId>.note`, no note id
+    //      yet). Two adds inside the same 60ms window means the second's setTimeout cancels the
+    //      first's via clearTimeout(existing), so only the LAST note in a fast burst would ever
+    //      reach the daemon — client state would still show all 3 (setDoc is synchronous/optimistic
+    //      per click) while the server silently lost one. Waiting for the DAEMON to confirm each
+    //      note before firing the next click sidesteps that debounce collision entirely, instead of
+    //      hoping a fixed sleep() is always longer than the debounce window on whatever machine CI
+    //      happens to run on.
+    for (let i = 0; i < clickSteps.length; i++) {
+      const step = clickSteps[i]
+      const gridBox = await page.locator('.noteview-grid').boundingBox()
+      const stepW = gridBox.width / (loopBars * 16)
       const x = gridBox.x + step * stepW + stepW / 2
       const y = gridBox.y + 2 * 12 + 6 // ROW_H=12, row 2 — a couple of rows down from the grid's own top, well inside the visible pane after scrollTop=0
       await page.mouse.click(x, y)
-      await sleep(80)
+      const expected = i + 1
+      await pollUntil(
+        async () => (await docNow()).tracks.find((t) => t.id === trackId).notes.length === expected,
+        `${expected} authored note(s) to land (client) after click ${expected}`,
+      )
+      await pollUntil(
+        async () => (await daemonDocNow()).tracks.find((t) => t.id === trackId).notes.length === expected,
+        `${expected} authored note(s) to land (daemon) after click ${expected}`,
+      )
     }
-    await pollUntil(async () => (await docNow()).tracks.find((t) => t.id === trackId).notes.length === clickSteps.length, `${clickSteps.length} authored notes to land (client)`)
-    // Wait for the DAEMON's own copy too (see daemonDocNow's note above) — "Place in Arrangement"
-    // reads the server's document, not the client's optimistic mirror.
-    await pollUntil(async () => (await daemonDocNow()).tracks.find((t) => t.id === trackId).notes.length === clickSteps.length, `${clickSteps.length} authored notes to land (daemon)`)
     doc = await docNow()
     const authoredNotes = doc.tracks.find((t) => t.id === trackId).notes.map((n) => ({ pitch: n.pitch, start: n.start }))
     console.log(`[T3] authored ${authoredNotes.length} real notes via grid clicks: ${JSON.stringify(authoredNotes)}`)
@@ -301,7 +323,11 @@ async function main() {
 
     // ============ T6: clicking again REUSES the same clip id (BC's "reuse an existing occurrence") ============
     // Add one more note first, so re-saving is a real, observable content change, not a no-op.
+    // Re-read the grid's box fresh (same reasoning as T3's per-click recompute — the pitch window
+    // may have moved since the last note was authored) rather than reusing a box from earlier.
     {
+      const gridBox = await page.locator('.noteview-grid').boundingBox()
+      const stepW = gridBox.width / (loopBars * 16)
       const x = gridBox.x + 56 * stepW + stepW / 2
       const y = gridBox.y + 8 * 12 + 6
       await page.mouse.click(x, y)
