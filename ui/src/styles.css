@@ -1604,6 +1604,83 @@ body {
   flex-direction: column;
 }
 
+/* ---- Phase 28 Stream FC: keyboard-shortcut reference panel — same overlay-scrim/overlay-head
+   shell the Mixer overlay already uses, own body below. ---- */
+.shortcut-help-panel {
+  margin: auto;
+  width: min(92vw, 560px);
+  max-height: 84vh;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.shortcut-help-body {
+  flex: 1;
+  overflow: auto;
+  padding: 14px 18px 18px;
+}
+.shortcut-group {
+  margin-bottom: 18px;
+}
+.shortcut-group:last-child {
+  margin-bottom: 0;
+}
+.shortcut-group-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+}
+.shortcut-row:last-child {
+  border-bottom: 0;
+}
+.shortcut-keys {
+  flex: 0 0 auto;
+  min-width: 150px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.shortcut-key-combo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.shortcut-plus {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.shortcut-desc {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.kbd {
+  display: inline-block;
+  padding: 2px 7px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+}
+
 /* ---- arrangement / song view ---- */
 .arrangement {
   display: flex;
