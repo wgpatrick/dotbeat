@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { declaredLaneNames, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
-import { postEdit, postSelection, postPitchTime, type PitchTimeOp } from '../daemon/bridge'
+import { postEdit, postSelection, postPitchTime, postPlaceClip, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
@@ -515,6 +515,36 @@ export function NoteView({ track }: { track: BeatTrack }) {
     postEdit(path, `${g.origStart} ${end}`)
   }
 
+  // ---- Place in Arrangement (Phase 24 Stream CI) ----
+  // "I can't drag it into the arrangement" — the owner's own framing. Phase 23 Stream BC already
+  // solved this for AUDIO clips (a content-browser drag onto a track header, ArrangementView.tsx's
+  // handleLibraryDrop). Synth/drum clips aren't dragged in from anywhere external — they're
+  // authored right here, in this editor — so a discoverable BUTTON that performs BC's exact same
+  // "slot this clip into a scene" operation is the natural equivalent of a drag gesture for this
+  // case (a cross-pane drag from NoteView onto ArrangementView's track rows would need a second,
+  // parallel HTML5-drag-source implementation for one button's worth of value — not worth it in
+  // dotbeat's single-page layout). See docs/phase-24-stream-ci.md.
+  //
+  // `existing` mirrors BC's own "reuse an existing occurrence if the track already has one, else
+  // mint a new clip and slot it into the FIRST song section's scene" precedent exactly:
+  // `primaryClipFor` is the SAME first-occurrence lookup ClipPropertiesPanel already uses to find
+  // "the" clip this editor's live content corresponds to once placed.
+  const [placing, setPlacing] = useState(false)
+  const existing = doc ? primaryClipFor(track, doc) : null
+  const inSongMode = !!doc?.song && doc.song.length > 0
+  function placeInArrangement() {
+    if (!doc || placing) return
+    if (!inSongMode) {
+      window.alert('Add a song section first ("+ section") — clips only play once slotted into a song-mode scene.')
+      return
+    }
+    const sceneId = doc.song![0]!.scene
+    setPlacing(true)
+    postPlaceClip(track.id, { ...(existing ? { clipId: existing.id } : {}), sceneId })
+      .catch((err) => window.alert(`Could not place clip: ${(err as Error).message}`))
+      .finally(() => setPlacing(false))
+  }
+
   // ---- keyboard: group nudge / resize / delete / select-all (Ableton Live 12 MIDI-editor keys) ----
   // Attached to window (only one NoteView renders at a time — the selected track's editor) but
   // ignored while a form control has focus, so it never hijacks the BPM box or a panel select. Reads
@@ -709,6 +739,22 @@ export function NoteView({ track }: { track: BeatTrack }) {
             }}
           >
             Delete {sel.length > 1 ? `${sel.length} ${eventKind === 'note' ? 'notes' : 'hits'}` : eventKind}
+          </button>
+        )}
+        {track.kind !== 'audio' && (
+          <button
+            className={`place-clip-btn${existing ? ' placed' : ''}`}
+            data-place-clip={track.id}
+            data-place-clip-state={existing ? 'placed' : 'unplaced'}
+            disabled={placing}
+            title={
+              existing
+                ? `already placed as clip "${existing.id}" — click to re-save this editor's current content into it`
+                : 'slot this clip into the first song section\'s scene so it plays in the arrangement'
+            }
+            onClick={placeInArrangement}
+          >
+            {placing ? 'Placing…' : existing ? `Placed (clip "${existing.id}") — update` : 'Place in Arrangement'}
           </button>
         )}
       </div>

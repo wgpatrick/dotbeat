@@ -515,6 +515,37 @@ export async function postClipMove(moves: ClipMove[]): Promise<void> {
   useStore.getState().setDoc(doc)
 }
 
+// ─── place a clip into the arrangement for the first time (Phase 24 Stream CI) ──────────────────
+// The synth/drums/instrument generalization of Phase 23 Stream BC's installAudioClip
+// (ui/src/daemon/library.ts): NoteView.tsx edits a track's LIVE content, not a saved BeatClip, so
+// "drag it into the arrangement" for these track kinds means snapshot-then-slot (core's saveClip +
+// setScene, wrapped by daemon.ts's POST /place-clip) rather than a content-browser drag payload.
+// Same additive-route shape as postAudioSplit just above — the daemon returns the full document
+// directly (no SSE echo of its own write) so this applies it straight to the store.
+
+/** Snapshot `track`'s current live notes/hits into a clip (`clipId` given: update that clip in
+ * place — the reuse-an-existing-occurrence branch BC's drop handler also takes; omitted: mint a
+ * fresh one) and, if `sceneId` is given, slot it into that scene (merged into the scene's existing
+ * slots). Throws with the daemon's message on failure (e.g. an audio-kind track, which has no live
+ * content to snapshot — use installAudioClip for those). Returns the id of the clip that was
+ * created or updated. Callers are responsible for the loop-mode refusal (no scene to slot into) —
+ * same client-side-refuses-first discipline BC's own handleLibraryDrop uses. */
+export async function postPlaceClip(track: string, opts: { clipId?: string; sceneId?: string } = {}): Promise<string> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/place-clip`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ track, ...opts }),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc, clipId } = (await res.json()) as { written: boolean; doc: BeatDocument; clipId: string }
+  useStore.getState().setDoc(doc)
+  return clipId
+}
+
 // ─── Pitch & Time operations + Consolidate (Phase 23 Stream BA) ─────────────────────────────────
 // The six Ableton-style one-shot ops (src/core/pitchtime.ts) plus ratchet's Consolidate action.
 // Phase 22 Stream AD shipped these CLI/MCP-only ("no daemon route needed"); this stream adds POST

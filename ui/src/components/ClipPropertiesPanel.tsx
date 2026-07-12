@@ -22,7 +22,11 @@ import { TIME_SIG_DENOMINATORS, type BeatClip, type BeatDocument, type BeatTrack
  * helper isn't worth the coupling — it's four lines, kept in lockstep by the shared "primary clip"
  * comment above. Exported (Phase 24 Stream CJ) so NoteView.tsx's own clip-loop drag handle resolves
  * the SAME "which clip am I editing" target as this panel's numeric loop fields — one definition,
- * two entry points (typed fields here, a drag gesture there) editing the same clip. */
+ * two entry points (typed fields here, a drag gesture there) editing the same clip. Also reused
+ * (Phase 24 Stream CI) by NoteView.tsx's "Place in Arrangement" affordance for the SAME "does this
+ * track already have an occurrence?" check this panel already makes — NoteView already imports
+ * this file for <ClipPropertiesPanel>, so importing one more helper from it doesn't add real
+ * coupling, unlike pulling from ArrangementView's much larger module. */
 export function primaryClipFor(track: BeatTrack, doc: BeatDocument): BeatClip | null {
   if (!doc.song) return null
   for (const section of doc.song) {

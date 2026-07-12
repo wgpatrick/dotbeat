@@ -1805,6 +1805,67 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       return
     }
 
+    // POST /place-clip {track, clipId?, sceneId?} — Phase 24 Stream CI: "place a clip into the
+    // arrangement for the first time" for synth/drums/instrument tracks (the note/hit editor,
+    // NoteView.tsx), generalizing Phase 23 Stream BC's install-audio-clip route just above onto
+    // dotbeat's OTHER track kinds. Those tracks have no external "file" to drag in — NoteView edits a
+    // track's LIVE content (track.notes/track.hits) directly, and that live content only becomes
+    // audible in song mode once it's snapshotted into a BeatClip (core's saveClip) and slotted into a
+    // scene (core's setScene) — see src/daemon/daemon.ts's own sceneFromLiveContent for the same
+    // snapshot step run automatically for every track the first time a project enters song mode. This
+    // route is the GUI's on-demand version of that same step for a track added (or newly authored)
+    // AFTER song mode already exists, which sceneFromLiveContent never retroactively covers.
+    //   - `clipId` given: REPLACE that existing clip's snapshot in place (re-saves the track's
+    //     CURRENT live notes/hits over it) — BC's "reuse an existing occurrence if the track already
+    //     has one" precedent, generalized: re-snapshotting a clip that's already placed elsewhere just
+    //     updates what plays there, it doesn't move or duplicate it. No scene write in this branch
+    //     unless `sceneId` is ALSO given (e.g. the existing occurrence is in a different scene).
+    //   - `clipId` omitted: MINT a new clip id on the track (nextFreeClipId) from the live content.
+    //   - `sceneId` given: slot the (new-or-reused) clip into that scene, merged into the scene's
+    //     EXISTING slots (never clobbers another track's slot in the same scene) — same merge-not-
+    //     replace pattern install-audio-clip uses. `sceneId` omitted just snapshots the clip without
+    //     slotting it anywhere (not reachable from any section yet, same "created but not yet placed"
+    //     state install-audio-clip documents for loop mode).
+    // Refusal precedent (loop mode, no song block, no scene to slot into) is enforced CLIENT-SIDE,
+    // same as BC's own audio-clip drop handler — this route itself only requires a real target track
+    // and (if slotting) a real target scene; it doesn't independently know about "loop mode."
+    if (req.method === 'POST' && url.pathname === '/place-clip') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; clipId?: unknown; sceneId?: unknown }
+          if (typeof b.track !== 'string') {
+            json(res, 400, { error: 'body must be {track: string, clipId?: string, sceneId?: string}' })
+            return
+          }
+          const track = doc.tracks.find((t) => t.id === b.track)
+          if (!track) {
+            json(res, 404, { error: `no track "${b.track}"` })
+            return
+          }
+          if (track.kind === 'audio') {
+            json(res, 400, {
+              error: `track "${b.track}" is an audio track — drag a sample from the content browser (POST /library/install-audio-clip), not /place-clip`,
+            })
+            return
+          }
+          const clipId = typeof b.clipId === 'string' && b.clipId ? b.clipId : nextFreeClipId(track)
+          const { doc: withClip } = saveClip(doc, track.id, clipId)
+          let next = withClip
+          if (typeof b.sceneId === 'string' && b.sceneId) {
+            const scene = next.scenes.find((s) => s.id === b.sceneId)
+            next = setScene(next, b.sceneId, { ...(scene?.slots ?? {}), [track.id]: clipId })
+          }
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc, clipId })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
     // POST /library/install-soundfont {file, track?, program?, newTrackId?} — drag a bank from the
     // Samples/SoundFonts section onto an existing instrument track (reassigns its bank via the
     // already-existing `<track>.soundfont`/`<track>.program` setValue paths) or, with `track`
