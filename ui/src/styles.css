@@ -585,6 +585,34 @@ body {
   font-variant-numeric: tabular-nums;
   margin-top: 2px;
 }
+/* Phase 27 Stream EI: click-to-type numeric entry (research/72 §2.3, §3 item 3). The display
+   variant is a real click/keyboard target (Ableton's boxed-numeric-readout convention); the input
+   variant reuses the same box footprint so the knob doesn't reflow when it swaps in. */
+.knob-value-display {
+  cursor: text;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.knob-value-display:hover,
+.knob-value-display:focus-visible {
+  background: var(--panel-2);
+  outline: 1px solid var(--line);
+}
+.knob-value-input {
+  width: 40px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0 2px;
+  text-align: center;
+  font: inherit;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.knob-value-input:focus {
+  outline: none;
+}
 .knob-label {
   font-size: 10px;
   color: var(--text-dim);
