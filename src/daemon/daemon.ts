@@ -54,6 +54,9 @@ import {
   applyPreset,
   filterPresetsByCategory,
   PRESET_CATEGORIES,
+  parseMacroLibrary,
+  applyMacro,
+  BeatMacroError,
   DRUM_LANES,
   addEffect,
   removeEffect,
@@ -81,6 +84,7 @@ import {
   type ExternalSandboxPayload,
   type TrackKind,
   type BeatPreset,
+  type BeatMacro,
   type EffectType,
   type BeatTrack,
 } from '../core/index.js'
@@ -456,6 +460,14 @@ const presetsRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..',
 function loadFactoryPresets(): BeatPreset[] {
   const path = process.env.BEAT_PRESETS ?? resolve(presetsRoot, 'factory.json')
   return parsePresetLibrary(readFileSync(path, 'utf8'))
+}
+
+// Phase 26 Stream DD (docs/research/27-macro-tooling-layer.md): same one-tier, git-committed
+// library discipline as presets above — presets/macros.json, loaded fresh per request (no cache),
+// BEAT_MACROS overrides for a user library, same as BEAT_PRESETS.
+function loadFactoryMacros(): BeatMacro[] {
+  const path = process.env.BEAT_MACROS ?? resolve(presetsRoot, 'macros.json')
+  return parseMacroLibrary(readFileSync(path, 'utf8'))
 }
 
 interface KitLane {
@@ -1588,18 +1600,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
 
     // ─── Phase 22 Stream AH: content-browser library routes ───────────────────────────────────────
-    // GET /library — the whole catalog in one call (small: 36 presets, 2 kits, 3 banks today):
-    // presets (with an optional ?category= filter, the same taxonomy `beat presets --category`
-    // filters on), the enumerated category list, kit lane manifests, and soundfont banks. Read-only,
-    // no document dependency — this is repo content, not project content.
+    // GET /library — the whole catalog in one call (small: 36 presets, 8 macros, 2 kits, 3 banks
+    // today): presets (with an optional ?category= filter, the same taxonomy `beat presets
+    // --category` filters on), the enumerated category list, macros (Phase 26 Stream DD —
+    // docs/research/27-macro-tooling-layer.md §4: additive to this existing catalog, no new
+    // listing endpoint), kit lane manifests, and soundfont banks. Read-only, no document
+    // dependency — this is repo content, not project content.
     if (req.method === 'GET' && url.pathname === '/library') {
       try {
         let presets = loadFactoryPresets()
         const category = url.searchParams.get('category')
         if (category) presets = filterPresetsByCategory(presets, category)
-        json(res, 200, { presets, categories: PRESET_CATEGORIES, kits: listKits(), soundfonts: listSoundfonts() })
+        json(res, 200, { presets, categories: PRESET_CATEGORIES, macros: loadFactoryMacros(), kits: listKits(), soundfonts: listSoundfonts() })
       } catch (err) {
-        const status = err instanceof BeatPresetError ? 400 : 500
+        const status = err instanceof BeatPresetError || err instanceof BeatMacroError ? 400 : 500
         json(res, status, { error: err instanceof Error ? err.message : String(err) })
       }
       return
@@ -1662,6 +1676,39 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof BeatPresetError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // POST /library/apply-macro {track, name, value} — the one-shot, non-dragging macro apply
+    // (Phase 26 Stream DD, docs/research/27-macro-tooling-layer.md §4). `value` is the knob
+    // position 0..100. Wraps core's applyMacro exactly the way apply-preset wraps applyPreset: a
+    // literal target-value bag applied through setValue, never a stored reference. The GUI's own
+    // interactive knob-drag does NOT use this route — it resolves targets client-side and posts
+    // through the existing /edit path (research 27 §4) — this route exists for `beat macro apply`
+    // and any future non-dragging "apply at a value" GUI action. Same return convention as
+    // apply-preset: the fresh document, since the daemon never SSE-echoes its own writes.
+    if (req.method === 'POST' && url.pathname === '/library/apply-macro') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; name?: unknown; value?: unknown }
+          if (typeof b.track !== 'string' || typeof b.name !== 'string' || typeof b.value !== 'number') {
+            json(res, 400, { error: 'body must be {track: string, name: string, value: number}' })
+            return
+          }
+          const macros = loadFactoryMacros()
+          const macro = macros.find((m) => m.name === b.name)
+          if (!macro) {
+            json(res, 404, { error: `no macro "${b.name}" (see GET /library)` })
+            return
+          }
+          const written = writeIfChanged(applyMacro(doc, b.track, macro, b.value))
+          revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof BeatMacroError || err instanceof SyntaxError ? 400 : 500
           json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return

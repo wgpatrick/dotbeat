@@ -19,6 +19,24 @@ export interface LibraryPreset {
   description: string
   params: Record<string, number | string | boolean>
 }
+// Phase 26 Stream DD (docs/research/27-macro-tooling-layer.md): mirrors src/core/macro.ts's
+// BeatMacro/MacroTarget exactly (hand-mirrored, not imported — ui/ is a standalone Vite app; the
+// daemon's JSON is the contract, same convention LibraryPreset above already follows).
+export type LibraryMacroCurve = 'linear' | 'exp' | 'log'
+export interface LibraryMacroTarget {
+  param: string
+  min: number
+  max: number
+  curve?: LibraryMacroCurve
+}
+export interface LibraryMacro {
+  name: string
+  kind: 'synth' | 'drums' | 'any'
+  category: string
+  description: string
+  targets: LibraryMacroTarget[]
+}
+
 export interface LibraryKitLane {
   // Phase 22 Stream AB opened the lane model to arbitrary declared names (research 19 Part VI
   // Option B) — widened from the old closed DrumLane enum so a kit one-shot can target any of a
@@ -38,6 +56,7 @@ export interface LibrarySoundfont {
 export interface LibraryCatalog {
   presets: LibraryPreset[]
   categories: string[]
+  macros: LibraryMacro[]
   kits: LibraryKit[]
   soundfonts: LibrarySoundfont[]
 }
@@ -78,6 +97,48 @@ async function postLibrary(route: string, body: Record<string, unknown>): Promis
  * with the daemon's message; the caller decides how to surface it. */
 export async function applyPresetToTrack(track: string, name: string): Promise<void> {
   const doc = await postLibrary('/library/apply-preset', { track, name })
+  useStore.getState().setDoc(doc)
+}
+
+// ─── macros (Phase 26 Stream DD) ─────────────────────────────────────────────────────────────────
+// "A macro is a preset with a continuous input" (research 18 §6, confirmed research 27 §1): no
+// in-file indirection, ever — turning a macro knob resolves directly to real target values. The
+// interactive knob drag in SynthPanel.tsx's MacroKnob computes this CLIENT-SIDE and posts each
+// target through the existing per-path-debounced /edit channel (postEdit) — research 27 §4's own
+// finding that this needs no new daemon plumbing, unlike `beat vary --scope selection`. This is a
+// deliberate, small duplication of src/core/macro.ts's resolveTarget/resolveMacro math (research
+// 27 §4: "a small pure function, safe to duplicate/share between src/core and ui/") rather than an
+// import, because ui/ is a standalone Vite app with no dependency on the Node-only core package.
+
+function resolveMacroTarget(t: LibraryMacroTarget, knob: number): number {
+  const n = Math.min(1, Math.max(0, knob / 100))
+  const shaped = t.curve === 'exp' ? n * n : t.curve === 'log' ? Math.sqrt(n) : n
+  return t.min + shaped * (t.max - t.min)
+}
+
+/** Pure: knob position (0..100) -> resolved (param, value) pairs. Mirrors src/core/macro.ts's
+ * resolveMacro exactly. */
+export function resolveMacro(macro: LibraryMacro, knob: number): Array<{ param: string; value: number }> {
+  return macro.targets.map((t) => ({ param: t.param, value: resolveMacroTarget(t, knob) }))
+}
+
+/** Best-effort inverse of resolveMacroTarget — used ONLY to estimate where a macro's knob should
+ * visually sit from a target's current live value on (re)selection. Never stored: the file only
+ * ever records resolved target values, never "this came from macro X at position N" (research 27
+ * §6). Mirrors src/core/macro.ts's inverseResolveTarget exactly. */
+export function inverseResolveMacroTarget(t: LibraryMacroTarget, value: number): number {
+  const span = t.max - t.min
+  if (span === 0) return 50
+  const n = Math.min(1, Math.max(0, (value - t.min) / span))
+  const shaped = t.curve === 'exp' ? Math.sqrt(n) : t.curve === 'log' ? n * n : n
+  return Math.round(shaped * 100)
+}
+
+/** The one-shot, non-dragging macro apply (POST /library/apply-macro) — NOT used by the
+ * interactive knob drag above (that resolves client-side and posts via /edit instead). Exposed
+ * for parity with applyPresetToTrack and any future non-dragging "apply at a value" GUI action. */
+export async function applyMacroToTrack(track: string, name: string, value: number): Promise<void> {
+  const doc = await postLibrary('/library/apply-macro', { track, name, value })
   useStore.getState().setDoc(doc)
 }
 

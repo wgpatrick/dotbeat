@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "macros": [
+    {
+      "name": "filter-sweep",
+      "kind": "synth",
+      "category": "tone",
+      "description": "The canonical one — brighter + more resonant together",
+      "targets": [
+        { "param": "cutoff", "min": 80, "max": 18000, "curve": "exp" },
+        { "param": "resonance", "min": 0.1, "max": 5 }
+      ]
+    },
+    {
+      "name": "grit",
+      "kind": "synth",
+      "category": "drive",
+      "description": "Add dirt",
+      "targets": [
+        { "param": "distortionAmount", "min": 0, "max": 0.8, "curve": "exp" },
+        { "param": "distortionMix", "min": 0, "max": 0.7 },
+        { "param": "bitcrushBits", "min": 16, "max": 4 }
+      ]
+    },
+    {
+      "name": "space",
+      "kind": "any",
+      "category": "space",
+      "description": "Room/depth, works on any track kind",
+      "targets": [
+        { "param": "sendReverb", "min": 0, "max": 0.7 },
+        { "param": "sendDelay", "min": 0, "max": 0.5 }
+      ]
+    },
+    {
+      "name": "warmth",
+      "kind": "synth",
+      "category": "tone",
+      "description": "Analog-tape-style tilt",
+      "targets": [
+        { "param": "saturatorDrive", "min": 0, "max": 0.6 },
+        { "param": "saturatorMix", "min": 0, "max": 0.6 },
+        { "param": "eqHigh", "min": 0, "max": -4 },
+        { "param": "eqLow", "min": 0, "max": 2 }
+      ]
+    },
+    {
+      "name": "motion",
+      "kind": "synth",
+      "category": "motion",
+      "description": "Adds movement without touching lfoDest/lfo2Dest — safe, non-destructive of whatever routing is already set",
+      "targets": [
+        { "param": "lfoDepth", "min": 0, "max": 1 },
+        { "param": "lfo2Depth", "min": 0, "max": 1 }
+      ]
+    },
+    {
+      "name": "width",
+      "kind": "synth",
+      "category": "tone",
+      "description": "Fatten",
+      "targets": [
+        { "param": "unisonWidth", "min": 0, "max": 1 },
+        { "param": "unisonVoices", "min": 1, "max": 6 }
+      ]
+    },
+    {
+      "name": "punch",
+      "kind": "drums",
+      "category": "dynamics",
+      "description": "Kit tightness/snap",
+      "targets": [
+        { "param": "kickPunch", "min": 0.02, "max": 0.15 },
+        { "param": "kickDecay", "min": 0.6, "max": 0.25 },
+        { "param": "compRatio", "min": 2, "max": 8 }
+      ]
+    },
+    {
+      "name": "snap",
+      "kind": "drums",
+      "category": "dynamics",
+      "description": "Hat brightness/tightness together",
+      "targets": [
+        { "param": "hatDecay", "min": 0.12, "max": 0.02 },
+        { "param": "openHatDecay", "min": 0.5, "max": 0.2 },
+        { "param": "hatTone", "min": 3000, "max": 8000, "curve": "exp" }
+      ]
+    }
+  ]
+}
