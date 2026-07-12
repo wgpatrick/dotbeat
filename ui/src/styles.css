@@ -16,6 +16,28 @@
      two independently-typed stacks (`ui-monospace, SFMono-Regular, Menlo, monospace` vs. the
      shorter `ui-monospace, monospace`) that did the identical job (research/79 §3.8). */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Phase 28 Stream FA: three semantic status colors, promoted from the values already doing this
+     job ad hoc throughout the file (research/79 §3.1) — #e06c75 was already independently reused
+     for "delete/error" in .arr-chip-btn.del:hover and InstrumentPanel.tsx's inline hardcode, and was
+     already the (previously undefined) fallback on every var(--danger, #e06c75) call site below;
+     #9aa0ab was already the fallback on every var(--muted, #9aa0ab) call site; #6ec97c was already
+     doing "success" work in .export-btn.done. Before this, --danger/--muted were referenced but
+     never defined, so every call site silently rendered its fallback instead of a real token. */
+  --danger: #e06c75;
+  --muted: #9aa0ab;
+  --good: #6ec97c;
+  /* Recessed-surface background (bottom-pane readout panels, NoteView's grid/lanes, nested inputs) —
+     one token for the four near-black literals (#14151a/#0f1014/#1b1d23, plus #1a1a1a's "dark text
+     on an accent-colored control" role folded onto --bg below) that were all independently reinvented
+     shades of "darker than --bg" (research/79 §3.1/Stream FA). */
+  --surface-recessed: #14151a;
+  /* Three-tier border-radius scale, replacing eight distinct ad hoc pixel values (research/79 §3.1/
+     Stream FA) — sm/md/lg are the three values already doing the most real work in the file (30/37/
+     12 uses respectively); the orphaned 2px/5px/7px/8px/10px outliers migrate onto their nearest
+     tier. */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
   color-scheme: dark;
 }
 
@@ -138,16 +160,16 @@ body {
 }
 .play-btn {
   background: var(--accent);
-  color: #1a1a1a;
+  color: var(--bg);
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   font-weight: 700;
   padding: 7px 16px;
   cursor: pointer;
   min-width: 84px;
 }
 .play-btn.stop {
-  background: #e0564c;
+  background: var(--danger);
   color: #fff;
 }
 /* Phase 26 Stream DB: session-only undo/redo (research/28) — deliberately small, TransportBar-
@@ -161,7 +183,7 @@ body {
   font-size: 12px;
   padding: 5px 10px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--panel-2);
   color: var(--text);
   cursor: pointer;
@@ -189,7 +211,7 @@ body {
   background: var(--panel-2);
   border: 1px solid var(--line);
   color: var(--text);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 4px 6px;
   font: inherit;
 }
@@ -208,10 +230,10 @@ body {
 .conn {
   font-size: 11px;
   padding: 3px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
 .conn.ok {
-  color: #7bd88f;
+  color: var(--good);
 }
 .conn.down {
   color: var(--text-dim);
@@ -219,7 +241,7 @@ body {
 
 .parse-error {
   background: #3a2020;
-  color: #e8a0a0;
+  color: var(--danger);
   padding: 6px 14px;
   font-size: 12px;
   border-bottom: 1px solid #4a2a2a;
@@ -268,7 +290,7 @@ body {
   font-size: 12px;
   padding: 4px 10px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
@@ -286,18 +308,18 @@ body {
 }
 .vary-btn.keep {
   background: var(--accent);
-  color: #16171b;
+  color: var(--bg);
   border-color: var(--accent);
   font-weight: 600;
 }
 .vary-btn.undo {
-  color: #e8a0a0;
+  color: var(--danger);
 }
 .vary-kept {
-  color: #9bd08a;
+  color: var(--good);
 }
 .vary-error {
-  color: #e8a0a0;
+  color: var(--danger);
 }
 
 /* ---- body layout ---- */
@@ -342,7 +364,7 @@ body {
   width: 100%;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   padding: 7px 8px;
   cursor: pointer;
   color: var(--text);
@@ -358,7 +380,7 @@ body {
 .track-swatch {
   width: 10px;
   height: 10px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   flex: none;
 }
 .track-name {
@@ -403,7 +425,7 @@ body {
   z-index: 5;
   margin: -14px -14px 10px -14px;
   padding: 10px 14px;
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -429,20 +451,23 @@ body {
   color: var(--text-dim);
   font-size: 11px;
 }
+.toolbar-tip.error {
+  color: var(--danger);
+}
 /* Phase 24 Stream CH: "preview this clip" audition toggle — same play/stop color language as
    .play-btn/.play-btn.stop (TransportBar), just sized for the editor toolbar. */
 .clip-audition-btn {
   background: var(--accent);
-  color: #1a1a1a;
+  color: var(--bg);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-weight: 700;
   font-size: 11px;
   padding: 4px 10px;
   cursor: pointer;
 }
 .clip-audition-btn.active {
-  background: #e0564c;
+  background: var(--danger);
   color: #fff;
 }
 
@@ -457,7 +482,7 @@ body {
   font: inherit;
   font-size: 11px;
   padding: 3px 9px;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text);
@@ -484,7 +509,7 @@ body {
   min-width: 110px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   padding: 4px;
   gap: 2px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
@@ -495,7 +520,7 @@ body {
   text-align: left;
   text-transform: capitalize;
   padding: 5px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 0;
   background: transparent;
   color: var(--text);
@@ -548,7 +573,7 @@ body {
   font-size: 12px;
   padding: 1px 4px;
   border: 1px solid var(--accent);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
 }
@@ -557,7 +582,7 @@ body {
   width: 16px;
   height: 16px;
   line-height: 1;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text-dim);
@@ -567,8 +592,8 @@ body {
   padding: 0;
 }
 .arr-track-del:hover {
-  background: #c0503c;
-  border-color: #c0503c;
+  background: var(--danger);
+  border-color: var(--danger);
   color: #fff;
 }
 .stepseq,
@@ -577,7 +602,7 @@ body {
 .instrument-note {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 14px;
 }
 
@@ -621,7 +646,7 @@ body {
   color: var(--text-dim);
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 6px 4px;
   cursor: pointer;
   text-align: center;
@@ -633,15 +658,15 @@ body {
   height: 22px;
   min-width: 16px;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   padding: 0;
 }
 .step.grp-a {
-  background: #23262e;
+  background: var(--panel-2);
 }
 .step.grp-b {
-  background: #1b1d23;
+  background: var(--surface-recessed);
 }
 .step.barline {
   border-left: 2px solid #3d4048;
@@ -686,7 +711,7 @@ body {
    variant reuses the same box footprint so the knob doesn't reflow when it swaps in. */
 .knob-value-display {
   cursor: text;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 0 2px;
 }
 .knob-value-display:hover,
@@ -699,7 +724,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--accent);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 0 2px;
   text-align: center;
   font: inherit;
@@ -725,7 +750,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 4px 6px;
   font: inherit;
 }
@@ -739,7 +764,7 @@ body {
 .param-group {
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   padding: 6px 10px 10px;
 }
 /* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB) — only
@@ -783,7 +808,7 @@ body {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 3px 4px;
   font: inherit;
   font-size: 11px;
@@ -794,7 +819,7 @@ body {
 .effect-chain {
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   padding: 8px 10px 10px;
   margin-bottom: 8px;
 }
@@ -813,7 +838,7 @@ body {
   gap: 6px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 4px 6px;
   cursor: grab;
 }
@@ -896,7 +921,7 @@ body {
 .effect-meter {
   width: 34px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   box-shadow: inset 0 0 0 1px var(--line);
   display: block;
   flex-shrink: 0;
@@ -905,7 +930,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font-size: 10px;
   line-height: 1;
   padding: 3px 5px;
@@ -928,7 +953,7 @@ body {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 3px 4px;
   font: inherit;
   font-size: 11px;
@@ -937,7 +962,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 3px 8px;
   font-size: 11px;
   cursor: pointer;
@@ -949,9 +974,9 @@ body {
 }
 .noteview-grid {
   position: relative;
-  background: #14151a;
+  background: var(--surface-recessed);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   min-width: min-content;
 }
 .noteview-grid {
@@ -969,7 +994,7 @@ body {
 }
 .noteview-note {
   position: absolute;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   cursor: grab;
   touch-action: none;
 }
@@ -994,10 +1019,10 @@ body {
   cursor: ew-resize;
 }
 .note-del-btn {
-  background: #e0564c;
+  background: var(--danger);
   color: #fff;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 3px 10px;
   font: inherit;
   font-size: 11px;
@@ -1010,9 +1035,9 @@ body {
    re-saves the clip in place — but visually reads as "done", not "do this"). */
 .place-clip-btn {
   background: #e0a13c;
-  color: #14151a;
+  color: var(--surface-recessed);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 3px 10px;
   font: inherit;
   font-size: 11px;
@@ -1045,15 +1070,15 @@ body {
 .noteview-vel-lane {
   position: relative;
   margin-top: 4px;
-  background: #14151a;
+  background: var(--surface-recessed);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   min-width: min-content;
 }
 .noteview-vel-bar {
   position: absolute;
   bottom: 0;
-  border-radius: 2px 2px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   opacity: 0.75;
   cursor: ns-resize;
   touch-action: none;
@@ -1079,7 +1104,7 @@ body {
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
 }
 
@@ -1100,9 +1125,9 @@ body {
 .noteview-chance-lane {
   position: relative;
   margin-top: 4px;
-  background: #14151a;
+  background: var(--surface-recessed);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   min-width: min-content;
   cursor: crosshair;
   touch-action: none;
@@ -1110,7 +1135,7 @@ body {
 .noteview-chance-bar {
   position: absolute;
   bottom: 0;
-  border-radius: 2px 2px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   background: #6d7480;
   opacity: 0.55;
   pointer-events: none;
@@ -1162,7 +1187,7 @@ body {
   bottom: 0;
   left: 6px;
   width: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   background: var(--accent);
 }
 /* the triangular cap — a small inward-pointing nub at the strip's vertical center, evoking
@@ -1201,8 +1226,8 @@ body {
   transform: translateX(2px);
   padding: 0 4px;
   background: var(--accent);
-  color: #16171b;
-  border-radius: 3px;
+  color: var(--bg);
+  border-radius: var(--radius-sm);
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
@@ -1224,10 +1249,10 @@ body {
   gap: 12px;
   margin-top: 8px;
   padding: 6px 10px;
-  background: #14151a;
+  background: var(--surface-recessed);
   border: 1px solid var(--line);
   border-left: 3px solid #6b7280;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-size: 11px;
   color: var(--muted, #9aa0ab);
 }
@@ -1242,10 +1267,10 @@ body {
   width: 56px;
   font: inherit;
   font-size: 11px;
-  background: #0f1014;
-  color: var(--text, #e6e8ec);
+  background: var(--surface-recessed);
+  color: var(--text, #d8dbe2);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 2px 4px;
 }
 
@@ -1259,15 +1284,15 @@ body {
   gap: 8px;
   margin-top: 8px;
   padding: 6px 10px;
-  background: #14151a;
+  background: var(--surface-recessed);
   border: 1px solid var(--line);
   border-left: 3px solid #98c379;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-size: 11px;
   color: var(--muted, #9aa0ab);
 }
 .note-name-readout-names {
-  color: var(--text, #e6e8ec);
+  color: var(--text, #d8dbe2);
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
@@ -1283,10 +1308,10 @@ body {
   gap: 10px;
   margin-top: 8px;
   padding: 6px 10px;
-  background: #14151a;
+  background: var(--surface-recessed);
   border: 1px solid var(--line);
   border-left: 3px solid #61afef;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-size: 11px;
   color: var(--muted, #9aa0ab);
 }
@@ -1305,20 +1330,20 @@ body {
 .pitch-time-field select {
   font: inherit;
   font-size: 11px;
-  background: #0f1014;
-  color: var(--text, #e6e8ec);
+  background: var(--surface-recessed);
+  color: var(--text, #d8dbe2);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 2px 4px;
 }
 .pitch-time-field input[type='number'] {
   width: 48px;
 }
 .pitch-time-panel button {
-  background: var(--panel-2, #232630);
-  color: var(--text, #e6e8ec);
+  background: var(--panel-2, #23262e);
+  color: var(--text, #d8dbe2);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 3px 8px;
   font: inherit;
   font-size: 11px;
@@ -1345,7 +1370,7 @@ body {
 .pitch-time-amount-readout {
   min-width: 32px;
   font-family: var(--font-mono);
-  color: var(--text, #e6e8ec);
+  color: var(--text, #d8dbe2);
 }
 .pitch-time-checkbox {
   display: flex;
@@ -1366,7 +1391,7 @@ body {
 }
 .scope-canvas {
   width: 100%;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
   display: block;
 }
@@ -1406,7 +1431,7 @@ body {
   font: inherit;
   font-size: 12px;
   padding: 5px 12px;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 .topbar-btn:hover {
@@ -1416,7 +1441,7 @@ body {
 .topbar-btn.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #16171b;
+  color: var(--bg);
   font-weight: 600;
 }
 
@@ -1431,12 +1456,12 @@ body {
   opacity: 0.85;
 }
 .export-btn.done {
-  border-color: #6ec97c;
-  color: #6ec97c;
+  border-color: var(--good);
+  color: var(--good);
 }
 .export-btn.error {
-  border-color: #e05a5a;
-  color: #e05a5a;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 .export-spinner {
   width: 9px;
@@ -1533,7 +1558,7 @@ body {
   gap: 2px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--radius-lg);
   padding: 2px;
 }
 .pane-tab {
@@ -1544,7 +1569,7 @@ body {
   font: inherit;
   font-size: 12px;
   padding: 4px 14px;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 .pane-tab:hover {
@@ -1566,7 +1591,7 @@ body {
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text-dim);
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   width: 24px;
   height: 22px;
   cursor: pointer;
@@ -1608,7 +1633,7 @@ body {
   max-height: 90vh;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1869,7 +1894,7 @@ body {
   flex: 0 0 auto;
   width: 18px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text-dim);
@@ -1880,14 +1905,14 @@ body {
   padding: 0;
 }
 .arr-strip-btn.mute.on {
-  background: #c0503c;
-  border-color: #c0503c;
+  background: var(--danger);
+  border-color: var(--danger);
   color: #fff;
 }
 .arr-strip-btn.solo.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #1a1a1a;
+  color: var(--bg);
 }
 .arr-strip-vol {
   display: flex;
@@ -1931,7 +1956,7 @@ body {
   font-size: 8px;
   font-weight: 700;
   padding: 0 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   background: var(--panel-2);
   border: 1px solid var(--line);
   color: var(--accent);
@@ -1946,7 +1971,7 @@ body {
 .arr-track-swatch {
   width: 9px;
   height: 9px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   flex: 0 0 auto;
 }
 
@@ -1974,7 +1999,7 @@ body {
   width: 16px;
   height: 16px;
   line-height: 1;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text-dim);
@@ -1990,7 +2015,7 @@ body {
 .arr-group-swatch {
   width: 9px;
   height: 9px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   flex: 0 0 auto;
 }
 .arr-group-name {
@@ -2024,7 +2049,7 @@ body {
   width: 16px;
   height: 16px;
   line-height: 1;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text-dim);
@@ -2034,8 +2059,8 @@ body {
   padding: 0;
 }
 .arr-group-ungroup:hover {
-  background: #c0503c;
-  border-color: #c0503c;
+  background: var(--danger);
+  border-color: var(--danger);
   color: #fff;
 }
 .arr-group-lane {
@@ -2053,7 +2078,7 @@ body {
   text-transform: uppercase;
   color: var(--text-dim);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 0 3px;
 }
 .arr-lane {
@@ -2077,7 +2102,7 @@ body {
   bottom: 3px;
   box-sizing: border-box;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.03);
   cursor: grab;
   overflow: hidden;
@@ -2136,7 +2161,7 @@ body {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text-dim);
@@ -2149,7 +2174,7 @@ body {
 .arr-auto-toggle.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #1a1a1a;
+  color: var(--bg);
 }
 .arr-auto-toggle:disabled {
   opacity: 0.3;
@@ -2191,7 +2216,7 @@ body {
   width: 15px;
   height: 15px;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--panel-2);
   color: var(--text-dim);
   font: inherit;
@@ -2202,8 +2227,8 @@ body {
 }
 .arr-auto-remove:hover {
   color: #fff;
-  background: #c0503c;
-  border-color: #c0503c;
+  background: var(--danger);
+  border-color: var(--danger);
 }
 .arr-auto-lane {
   position: relative;
@@ -2226,7 +2251,7 @@ body {
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
 }
 .arr-auto-popup {
@@ -2238,7 +2263,7 @@ body {
   padding: 6px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
   cursor: default;
 }
@@ -2249,7 +2274,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 2px 4px;
 }
 .arr-auto-popup-modes {
@@ -2265,7 +2290,7 @@ body {
   background: var(--panel-2);
   color: var(--text-dim);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 2px 0;
   cursor: pointer;
 }
@@ -2276,7 +2301,7 @@ body {
 .arr-auto-popup-mode.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #1a1a1a;
+  color: var(--bg);
 }
 .arr-auto-picker {
   display: flex;
@@ -2309,7 +2334,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 2px 4px;
 }
 .arr-auto-add {
@@ -2318,7 +2343,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 2px 8px;
   cursor: pointer;
 }
@@ -2351,7 +2376,7 @@ body {
   display: block;
   width: 100%;
   height: 48px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: rgba(0, 0, 0, 0.25);
 }
 .arr-audio-inspector-fields {
@@ -2379,7 +2404,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 1px 4px;
 }
 .arr-audio-inspector select {
@@ -2406,7 +2431,7 @@ body {
   width: 92px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 10px 8px 12px;
   display: flex;
   flex-direction: column;
@@ -2426,7 +2451,7 @@ body {
 .mixer-strip-swatch {
   width: 100%;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
 }
 .mixer-strip-name {
   font-size: 12px;
@@ -2454,7 +2479,7 @@ body {
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--panel-2);
   border: 1px solid var(--line);
   color: var(--accent);
@@ -2492,7 +2517,7 @@ body {
 .mixer-meter {
   width: 8px;
   height: 150px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   box-shadow: inset 0 0 0 1px var(--line);
   display: block;
   align-self: center;
@@ -2530,7 +2555,7 @@ body {
   position: relative;
   width: 6px;
   background: var(--panel-2);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   box-shadow: inset 0 0 0 1px var(--line);
 }
 .mixer-fader-fill {
@@ -2540,7 +2565,7 @@ body {
   right: 0;
   background: var(--accent);
   opacity: 0.5;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 .mixer-fader-zero {
   position: absolute;
@@ -2557,7 +2582,7 @@ body {
   height: 8px;
   margin-bottom: -4px;
   background: #dedede;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 .mixer-strip-buttons {
@@ -2567,7 +2592,7 @@ body {
 .mixer-btn {
   width: 26px;
   height: 22px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text-dim);
@@ -2577,14 +2602,14 @@ body {
   cursor: pointer;
 }
 .mixer-btn.mute.on {
-  background: #c0503c;
-  border-color: #c0503c;
+  background: var(--danger);
+  border-color: var(--danger);
   color: #fff;
 }
 .mixer-btn.solo.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #1a1a1a;
+  color: var(--bg);
 }
 
 /* ---- version history panel (Phase 15 Stream H) ---- */
@@ -2614,11 +2639,11 @@ body {
   margin-top: 2px;
 }
 .history-error {
-  color: #e08a6c;
+  color: var(--danger);
   font-size: 12px;
   padding: 8px 10px;
   border: 1px solid #5a3128;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: #2a1c18;
   margin-bottom: 12px;
 }
@@ -2640,7 +2665,7 @@ body {
   gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--radius-lg);
   background: var(--panel);
   margin-bottom: 6px;
 }
@@ -2715,7 +2740,7 @@ body {
   font: inherit;
   font-size: 12px;
   padding: 5px 12px;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 .history-btn:hover:not(:disabled) {
@@ -2738,7 +2763,7 @@ body {
 .history-pin-input {
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   color: var(--text);
   font: inherit;
   font-size: 12px;
@@ -2769,7 +2794,7 @@ body {
   padding: 2px 4px 2px 7px;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   cursor: grab;
 }
 /* Phase 24 Stream CB: section-chip reorder drag — same dragging/drop-target treatment as the
@@ -2806,7 +2831,7 @@ body {
   height: 18px;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   color: var(--text);
   font-size: 13px;
@@ -2822,15 +2847,15 @@ body {
   cursor: default;
 }
 .arr-chip-btn.del:hover:not(:disabled) {
-  border-color: #e06c75;
-  color: #e06c75;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 .arr-add-section {
   display: inline-flex;
   align-items: center;
   padding: 2px 9px;
   border: 1px dashed var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: transparent;
   color: var(--text-dim);
   font: inherit;
@@ -2868,8 +2893,8 @@ body {
   left: 3px;
   padding: 0 4px;
   background: var(--accent);
-  color: #16171b;
-  border-radius: 3px;
+  color: var(--bg);
+  border-radius: var(--radius-sm);
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
@@ -2893,7 +2918,7 @@ body {
 }
 .arr-loop-badge {
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: rgba(224, 161, 60, 0.18);
   border: 1px solid var(--accent);
   color: var(--accent);
@@ -2938,7 +2963,7 @@ body {
   align-items: flex-start;
 }
 .library-status.error {
-  color: #e0857a;
+  color: var(--danger);
 }
 .lib-section {
   border-bottom: 1px solid var(--line);
@@ -2993,7 +3018,7 @@ body {
   gap: 8px;
   padding: 4px 10px 4px 18px;
   cursor: grab;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
 .lib-row:hover {
   background: var(--panel-2);
@@ -3096,7 +3121,7 @@ body {
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text-dim);
@@ -3143,7 +3168,7 @@ body {
   margin-bottom: 8px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: var(--panel-2);
   font-size: 11px;
 }
@@ -3169,7 +3194,7 @@ body {
   font: inherit;
   font-size: 11px;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--text);
@@ -3181,7 +3206,7 @@ body {
   font: inherit;
   font-size: 11px;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--text);
@@ -3194,7 +3219,7 @@ body {
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--text-dim);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   width: 16px;
   height: 16px;
   line-height: 1;
@@ -3215,7 +3240,7 @@ body {
   padding: 6px 10px;
   margin-bottom: 8px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: var(--panel-2);
   font-size: 11px;
 }
@@ -3225,7 +3250,7 @@ body {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font-size: 10px;
   line-height: 1;
   padding: 3px 6px;
@@ -3240,7 +3265,7 @@ body {
   font: inherit;
   font-size: 11px;
   padding: 3px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--text);
@@ -3263,7 +3288,7 @@ body {
   padding: 8px 10px;
   margin-bottom: 8px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: var(--panel-2);
 }
 /* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB) —
@@ -3286,7 +3311,7 @@ body {
   margin-bottom: 8px;
   border: 1px solid var(--line);
   border-left: 3px solid #56b6c2;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: var(--panel-2);
   font-size: 11px;
 }
@@ -3322,7 +3347,7 @@ body {
 }
 .lane-row {
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--panel);
 }
 .lane-row-head {
@@ -3346,7 +3371,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font-size: 10px;
   line-height: 1;
   padding: 3px 5px;
@@ -3379,7 +3404,7 @@ body {
   font-size: 11px;
   width: 64px;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--text);
@@ -3414,7 +3439,7 @@ body {
   font: inherit;
   font-size: 11px;
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--text);
@@ -3424,7 +3449,7 @@ body {
   font: inherit;
   font-size: 11px;
   padding: 3px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--text);
@@ -3433,7 +3458,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 3px 8px;
   font-size: 11px;
   cursor: pointer;
@@ -3455,7 +3480,7 @@ body {
   font: inherit;
   font-size: 11px;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text);

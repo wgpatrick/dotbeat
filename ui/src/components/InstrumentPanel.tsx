@@ -234,7 +234,7 @@ export function InstrumentPanel({ track }: { track: BeatTrack }) {
               onChange={(v) => postEdit(`${track.id}.pan`, String(v))}
             />
           </div>
-          {error && <div className="toolbar-tip" style={{ color: '#e06c75' }}>could not list programs: {error}</div>}
+          {error && <div className="toolbar-tip error">could not list programs: {error}</div>}
           {presets && presets.length > 0 && (
             <div className="toolbar-tip">{presets.length} program{presets.length === 1 ? '' : 's'} in this bank</div>
           )}
