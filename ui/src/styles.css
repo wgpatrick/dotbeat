@@ -611,6 +611,23 @@ body {
 .param-group .knob-row {
   margin-top: 8px;
 }
+/* Phase 25: briefly flashes a param group that was JUST revealed by adding its effect type via the
+   Effect Chain panel (SynthPanel.tsx's `justAdded`) — makes "I added eq7" and "here are eq7's
+   knobs" read as one connected moment (owner feedback: "not clear if [they're] actually doing
+   anything"). Pure CSS animation, no layout shift. */
+.param-group-flash {
+  animation: param-group-flash 1.6s ease-out;
+}
+@keyframes param-group-flash {
+  0% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  100% {
+    border-color: var(--line);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
 .param-enum {
   display: flex;
   flex-direction: column;

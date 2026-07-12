@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Knob } from './Knob'
 import { PARAM_GROUPS, type ParamGroup, type ParamSpec, type TrackKind } from './synthParams'
 import { EFFECT_TYPES, EFFECT_LABELS, type BeatEffect, type BeatTrack, type EffectType } from '../types'
@@ -162,7 +162,7 @@ function EffectRow({
   )
 }
 
-function EffectChain({ track }: { track: BeatTrack }) {
+function EffectChain({ track, onAdded }: { track: BeatTrack; onAdded: (type: EffectType) => void }) {
   const [addType, setAddType] = useState<EffectType>(EFFECT_TYPES[0]!)
   const [dragState, setDragState] = useState<{ draggingId: string | null; overId: string | null }>({ draggingId: null, overId: null })
   const effects = track.effects ?? []
@@ -183,7 +183,18 @@ function EffectChain({ track }: { track: BeatTrack }) {
             </option>
           ))}
         </select>
-        <button type="button" data-effect-add onClick={() => void postEffectAdd(track.id, addType)}>
+        <button
+          type="button"
+          data-effect-add
+          onClick={() => {
+            // Owner feedback ("not clear if [the knobs are] actually doing anything"): now that a
+            // group's knobs are hidden until its type is actually in the chain (synthParams.ts's
+            // `effectType` gate), make the add action visibly reveal its own result — the newly
+            // shown group scrolls into view and briefly flashes (below) — instead of leaving the
+            // human to go hunting through the panel for what just appeared.
+            void postEffectAdd(track.id, addType).then(() => onAdded(addType))
+          }}
+        >
           + Add effect
         </button>
       </div>
@@ -297,9 +308,20 @@ function PresetPicker({ track }: { track: BeatTrack }) {
   )
 }
 
-function Group({ track, group, trackIds }: { track: BeatTrack; group: ParamGroup; trackIds: string[] }) {
+// `highlight` is true for exactly one render right after this group's effect type was added via
+// the Effect Chain panel above (SynthPanel's `justAdded` state) — force the <details> open (it may
+// default closed, e.g. eq7/autoFilter/grainDelay) and scroll it into view, so "I added eq7" and "I
+// can see eq7's knobs" are the same visible moment, not something the human has to go find.
+function Group({ track, group, trackIds, highlight }: { track: BeatTrack; group: ParamGroup; trackIds: string[]; highlight: boolean }) {
+  const ref = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    if (highlight && ref.current) {
+      ref.current.open = true
+      ref.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [highlight])
   return (
-    <details className="param-group" open={group.open}>
+    <details ref={ref} className={`param-group${highlight ? ' param-group-flash' : ''}`} open={group.open} data-param-group={group.id}>
       <summary className="param-group-title">{group.title}</summary>
       <div className="knob-row">
         {group.params.map((spec) => (
@@ -316,7 +338,28 @@ export function SynthPanel({ track }: { track: BeatTrack }) {
   const tracks = useStore((s) => s.doc?.tracks)
   const trackIds = tracks?.map((t) => t.id) ?? []
   const kind = track.kind as TrackKind
-  const groups = PARAM_GROUPS.filter((g) => g.kinds.includes(kind))
+  const effects = track.effects ?? []
+  // Phase 25 (owner feedback — see synthParams.ts's own header comment): a group whose
+  // `effectType` is set is an opt-in reorderable-chain member — only render it on a SYNTH track
+  // when that type is actually present in `track.effects`. The same field set also drives drum
+  // tracks' fixed, always-wired bus insert (engine.ts's getDrumBus), so the gate never applies for
+  // kind 'drums' — those groups (eq3/comp/distortion/bitcrush) stay unconditionally visible there,
+  // same as the truly-fixed groups (saturator/chorus/phaser/pingPong/beatRepeat, no `effectType`).
+  const groups = PARAM_GROUPS.filter((g) => {
+    if (!g.kinds.includes(kind)) return false
+    if (g.effectType && kind === 'synth') return effects.some((e) => e.type === g.effectType)
+    return true
+  })
+
+  // Tracks which effect type was JUST added via the Effect Chain panel, so the matching group can
+  // force itself open and scroll into view for one moment — see Group's own comment. Cleared after
+  // a short timer (also re-armed if a second add happens before the first flash finishes).
+  const [justAdded, setJustAdded] = useState<EffectType | null>(null)
+  useEffect(() => {
+    if (justAdded === null) return
+    const t = setTimeout(() => setJustAdded(null), 1600)
+    return () => clearTimeout(t)
+  }, [justAdded])
 
   return (
     <div className="synth-panel">
@@ -329,10 +372,10 @@ export function SynthPanel({ track }: { track: BeatTrack }) {
         </span>
       </div>
       <PresetPicker track={track} />
-      {kind === 'synth' && <EffectChain track={track} />}
+      {kind === 'synth' && <EffectChain track={track} onAdded={setJustAdded} />}
       <div className="param-groups">
         {groups.map((g) => (
-          <Group key={g.id} track={track} group={g} trackIds={trackIds} />
+          <Group key={g.id} track={track} group={g} trackIds={trackIds} highlight={g.effectType === justAdded} />
         ))}
       </div>
     </div>
