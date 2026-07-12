@@ -310,6 +310,23 @@ interface EngineSynth {
 
 const OSC_SET: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square']
 
+// The mixer fader's true minimum (bug investigation, see docs/volume-fader-bugfix.md). MixerView.
+// tsx's VOL_MIN = -60 is the lowest dB value a fader drag can WRITE, and its label displays "-∞"
+// for anything at or below that — but -60dB alone is only very quiet, not actually silent (audible
+// on a loud patch/system), so the document previously promised silence it didn't deliver. Rather
+// than persist a non-finite volume (the .beat text format's parser rejects non-finite numbers —
+// see parseFloatStrict in src/core/parse.ts — so `-Infinity` can never round-trip through the
+// document), the engine floors any volume AT OR BELOW this threshold to real silence (-Infinity
+// dB, which Tone's Decibels-unit Param converts to exactly 0 linear gain — see Tone's Param.
+// _fromType/dbToGain) at the point it's applied to the live audio graph. This also closes the
+// "override race" half of the investigation for free: every per-tick LFO-amp/automation/duck ramp
+// below reads `p.volume` (post-floor), so `-Infinity + <anything finite>` stays `-Infinity` —
+// nothing can un-silence a fader parked at its visual minimum.
+const VOLUME_SILENCE_FLOOR_DB = -60
+function applyVolumeFloor(db: number): number {
+  return db <= VOLUME_SILENCE_FLOOR_DB ? -Infinity : db
+}
+
 function coerce(p: BeatSynth): EngineSynth {
   const num = (v: unknown, d: number): number => {
     const n = typeof v === 'number' ? v : Number(v)
@@ -325,7 +342,7 @@ function coerce(p: BeatSynth): EngineSynth {
   const eqSlope = (v: unknown, d: EqFilterSlope): EqFilterSlope => (typeof v === 'string' && EQ_FILTER_SLOPES.includes(v as EqFilterSlope) ? (v as EqFilterSlope) : d)
   return {
     osc: osc(p.osc, 'sawtooth'),
-    volume: num(p.volume, -10),
+    volume: applyVolumeFloor(num(p.volume, -10)),
     cutoff: num(p.cutoff, 2000),
     resonance: num(p.resonance, 0.8),
     filterType: (['lowpass', 'bandpass', 'highpass'].includes(String(p.filterType)) ? p.filterType : 'lowpass') as FilterType,
@@ -1455,6 +1472,8 @@ interface SynthChain {
   fm: Tone.PolySynth<Tone.FMSynth>
   fmGain: Tone.Gain
   filter: Tone.Filter
+  // Fixed pre-fader headroom trim on the additive oscillator sum — see buildSynthChain's comment.
+  headroom: Tone.Gain
   // Phase 22 Stream AA: the ordered, reorderable effect chain, keyed by stable effect id — a
   // reorder/add/remove/bypass in the document reconciles here (reconcileEffectChain) rather than
   // through hardcoded fields. `effectOrder` is the live chain order (ids); `effectsSig` is
@@ -1833,7 +1852,14 @@ class Engine {
     bus.filter.Q.value = p.resonance
     bus.filter.type = p.filterType
     bus.panner.pan.value = p.pan
-    bus.vol.volume.value = p.volume
+    // A short ramp, not an instantaneous `.value =` jump — sync() calls this every tick regardless
+    // of whether volume changed, and an unramped jump on the tick a fader edit actually lands is an
+    // audible click (a step discontinuity in the gain multiplier of a live waveform; found live
+    // while verifying the volume-fader silence fix — see docs/volume-fader-bugfix.md). linearRampTo
+    // (not the dB-oriented rampTo, which goes exponential and floors at a small epsilon instead of
+    // reaching exact 0) ramps in the underlying LINEAR gain domain, so a floored -Infinity dB target
+    // still lands at true zero gain. 20ms is inaudible as a ramp but long enough to kill the zipper.
+    bus.vol.volume.linearRampTo(p.volume, 0.02)
     bus.reverbSend.gain.value = p.sendReverb
     bus.delaySend.gain.value = p.sendDelay
     bus.eq3.low.value = p.eqLow
@@ -2120,6 +2146,19 @@ class Engine {
   private buildSynthChain(): SynthChain {
     const { reverb, delay } = this.getBuses()
     const filter = new Tone.Filter(2000, 'lowpass')
+    // Fixed headroom trim (bug investigation, see docs/volume-fader-bugfix.md's Symptom 2): the
+    // additive oscillator bank below (synth + osc2/osc3 + 4 unison pairs + sub + noise + fm) sums
+    // into `filter` at UNSCALED unity gain — even a single held note on the bare `synth` voice
+    // alone (no extra layers at all) already peaks close to 0 dBFS, leaving the mixer fader's
+    // documented -60..+6 dB range almost no real headroom before the master Limiter(-1) has to
+    // slam shut (measured: crest factor collapses from ~9dB clean to ~1-3dB heavily squashed
+    // between a track's `volume` of -10dB and +6dB on a single plain voice, well before any
+    // unison/chorus stacking makes it worse). This is a fixed, headroom-only trim applied BEFORE
+    // the insert chain/fader — it does not change what the `volume` dB field means (0dB is still
+    // "no additional boost/cut"), it just gives the voice bank the same kind of sane pre-fader
+    // level the drum kit's voices already have (see kick/snare/hat's individual `.volume` trims)
+    // instead of feeding the effect chain at raw, unheadroomed unity gain.
+    const headroom = new Tone.Gain(Tone.dbToGain(-9))
     // channelCount 2 so the unison stack's stereo image (osc2Pan/osc3Pan/uniPairs) survives the
     // panner instead of being folded to mono.
     const panner = new Tone.Panner({ pan: 0, channelCount: 2 })
@@ -2163,8 +2202,9 @@ class Engine {
     sub.chain(subGain, filter)
     noise.chain(noiseGain, filter)
     fm.chain(fmGain, filter)
+    filter.connect(headroom)
 
-    // Phase 22 Stream AA: filter->...effects...->saturator is NOT wired here — reconcileEffectChain
+    // Phase 22 Stream AA: headroom->...effects...->saturator is NOT wired here — reconcileEffectChain
     // (called from applyParams, below) owns that whole link, driven by the track's own declared,
     // ordered `effects` list. effectsSig starts at a sentinel no real signature can ever equal
     // (see the comment there), so the very first applyParams call always reconciles and makes the
@@ -2185,7 +2225,7 @@ class Engine {
 
     return {
       synth, osc2, osc2Gain, osc2Pan, osc3, osc3Gain, osc3Pan, uniPairs, sub, subGain, noise, noiseGain, fm, fmGain,
-      filter, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET, saturator, chorus, phaser, pingPong,
+      filter, headroom, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET, saturator, chorus, phaser, pingPong,
       muteGain, levelTap, panner, vol, reverbSend, delaySend, lastOsc: null,
     }
   }
@@ -2218,13 +2258,15 @@ class Engine {
       if (!chain.effects.has(e.id)) chain.effects.set(e.id, buildEffectRuntime(e.id, e.type, trackId))
     }
 
-    // Re-wire the spine: filter -> [enabled effects, in file order] -> muteGain. Disconnecting
-    // each boundary node's OWN outgoing connection is safe and precise — it only removes the
-    // spine link this function itself created (an effect's internal wiring, e.g. comp's
-    // dry/wet fan-in, was never touched and stays intact).
-    chain.filter.disconnect()
+    // Re-wire the spine: headroom -> [enabled effects, in file order] -> muteGain. `filter ->
+    // headroom` itself is a FIXED connection made once in buildSynthChain (the headroom trim is
+    // pre-fader gain-staging, not part of the reorderable chain), so only headroom's own outgoing
+    // connection is ours to touch here. Disconnecting each boundary node's OWN outgoing connection
+    // is safe and precise — it only removes the spine link this function itself created (an
+    // effect's internal wiring, e.g. comp's dry/wet fan-in, was never touched and stays intact).
+    chain.headroom.disconnect()
     for (const runtime of chain.effects.values()) runtime.exit.disconnect()
-    let upstream: Tone.ToneAudioNode = chain.filter
+    let upstream: Tone.ToneAudioNode = chain.headroom
     for (const e of effects) {
       if (!e.enabled) continue
       const runtime = chain.effects.get(e.id)!
@@ -2266,7 +2308,8 @@ class Engine {
     chain.filter.frequency.rampTo(p.cutoff, 0.02)
     chain.filter.Q.value = p.resonance
     chain.panner.pan.value = p.pan
-    chain.vol.volume.value = p.volume
+    // Ramped, not an instant jump — same anti-click reasoning as applyDrumBusParams's bus.vol above.
+    chain.vol.volume.linearRampTo(p.volume, 0.02)
     chain.reverbSend.gain.value = p.sendReverb
     chain.delaySend.gain.value = p.sendDelay
     this.reconcileEffectChain(chain, effects, trackId)
@@ -2286,7 +2329,7 @@ class Engine {
   private disposeChain(chain: SynthChain): void {
     const nodes: Tone.ToneAudioNode[] = [
       chain.synth, chain.osc2, chain.osc2Gain, chain.osc2Pan, chain.osc3, chain.osc3Gain, chain.osc3Pan,
-      chain.sub, chain.subGain, chain.noise, chain.noiseGain, chain.fm, chain.fmGain, chain.filter,
+      chain.sub, chain.subGain, chain.noise, chain.noiseGain, chain.fm, chain.fmGain, chain.filter, chain.headroom,
       ...saturatorNodeList(chain.saturator), chain.chorus, chain.phaser, ...pingPongNodeList(chain.pingPong),
       chain.muteGain, chain.levelTap, chain.panner, chain.vol, chain.reverbSend, chain.delaySend,
     ]
@@ -2433,7 +2476,7 @@ class Engine {
       const entry = ctx.createGain()
       synth.connect(entry)
       const muteGain = new Tone.Gain(1)
-      const vol = new Tone.Volume(inst.volume)
+      const vol = new Tone.Volume(applyVolumeFloor(inst.volume))
       const pan = new Tone.Panner(inst.pan)
       const levelTap = new Tone.Analyser('waveform', 256)
       Tone.connect(entry, muteGain)
@@ -2498,7 +2541,8 @@ class Engine {
         voice.synth.programChange(0, inst.program)
         voice.program = inst.program
       }
-      voice.vol.volume.value = inst.volume
+      // Ramped, not an instant jump — same anti-click reasoning as applyDrumBusParams's bus.vol.
+      voice.vol.volume.linearRampTo(applyVolumeFloor(inst.volume), 0.02)
       voice.pan.pan.value = inst.pan
     }
   }
