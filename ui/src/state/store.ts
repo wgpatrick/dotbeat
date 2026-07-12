@@ -54,6 +54,15 @@ interface DawState {
    * each track's mute gate accordingly, in addition to driving the mixer's visual state. */
   mutes: Record<string, boolean>
   solos: Record<string, boolean>
+  /** Phase 22 Stream AG: the arrangement's overlapping-region resolution policy — what happens when
+   * resizing a song section grows it into the next one's space (docs/research/22-opendaw-editing-
+   * workflow.md §2.1's `clip`/`push-existing`/`keep-existing`, reimplemented for dotbeat's 1D
+   * section-list timeline in src/daemon/daemon.ts's songResize). This is a GUI editing PREFERENCE,
+   * not project content — openDAW itself keeps it in app-level `StudioSettings`, not the saved
+   * project — so it deliberately does NOT ride in the .beat file; it lives here (session-only,
+   * resets to the default on reload) and every resize call (the +/- chips and the drag handle) reads
+   * it and sends it to the daemon's POST /song resize op. */
+  overlapPolicy: 'clip' | 'push-existing' | 'keep-existing'
 
   setDoc: (doc: BeatDocument) => void
   setConnected: (c: boolean) => void
@@ -70,6 +79,7 @@ interface DawState {
   setEditNoteIds: (ids: string[]) => void
   toggleMute: (id: string) => void
   toggleSolo: (id: string) => void
+  setOverlapPolicy: (p: DawState['overlapPolicy']) => void
 }
 
 export const useStore = create<DawState>((set) => ({
@@ -89,6 +99,7 @@ export const useStore = create<DawState>((set) => ({
   editNoteIds: [],
   mutes: {},
   solos: {},
+  overlapPolicy: 'push-existing', // matches the pre-Stream-AG unconditional-shift behavior
 
   setDoc: (doc) =>
     set((s) => ({
@@ -111,6 +122,7 @@ export const useStore = create<DawState>((set) => ({
   setEditNoteIds: (editNoteIds) => set({ editNoteIds }),
   toggleMute: (id) => set((s) => ({ mutes: { ...s.mutes, [id]: !s.mutes[id] } })),
   toggleSolo: (id) => set((s) => ({ solos: { ...s.solos, [id]: !s.solos[id] } })),
+  setOverlapPolicy: (overlapPolicy) => set({ overlapPolicy }),
 }))
 
 /** A track is effectively silenced iff it is explicitly muted, OR any track is soloed and this one

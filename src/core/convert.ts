@@ -247,6 +247,12 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
         hits: t.kind === 'drums' ? patternToHits(toBeatPattern(c.pattern, `${t.id} clip ${c.id}`), 16) : [],
         // v0.9: converts (was reported as dropped through v0.8) — see toBeatClipAutomation.
         automation: toBeatClipAutomation(c.automation, t.id, c.id, report),
+        // v0.10: beatlab has no per-clip loop-range/time-signature concept at all (a dotbeat-only
+        // addition — see BeatClipLoop/BeatTimeSignature's doc comments in document.ts), so a
+        // converted clip never carries an override; nothing to report as dropped since there was
+        // never a source-side field to lose.
+        loop: null,
+        signature: null,
       }
     }),
     notes: t.kind === 'synth' ? t.notes.map(toBeatNote) : [],

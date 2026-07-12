@@ -34,9 +34,48 @@ function changeLoopBars(next: number): void {
   postEdit('loop_bars', String(clampBars(next)))
 }
 
+// ── Overlapping-region resolution policy (Phase 22 Stream AG) ───────────────────────────────────
+// docs/research/22-opendaw-editing-workflow.md §2.1: openDAW ships a user-configurable overlap
+// policy for what happens when a resized region would overlap its neighbor. dotbeat's song
+// timeline is a flat ordered list of section durations (no independently-positioned regions), so
+// the only place growth genuinely "conflicts" with something is resizing a NON-LAST section
+// larger — see src/daemon/daemon.ts's songResize for the full reasoning and the authoritative,
+// server-side implementation (this is a GUI-side FAITHFUL MIRROR of it, same "local mirror for an
+// instant live preview" discipline bridge.ts's applyLocalEdit already uses for /edit — keep the two
+// in lockstep). A GUI editing preference (like openDAW's own Preferences->Editing setting), not
+// project content, so it lives in the Zustand store (state/store.ts's overlapPolicy), not the file.
+export type OverlapPolicy = 'clip' | 'push-existing' | 'keep-existing'
+export const OVERLAP_POLICIES: readonly OverlapPolicy[] = ['clip', 'push-existing', 'keep-existing']
+
+/** Mirrors daemon.ts's songResize on the derived Section[] shape (startBar included), so the live
+ * drag preview shows exactly what committing the drag would produce under the chosen policy —
+ * not just a generic "shift everything" preview regardless of the selected policy. */
+function previewResizeSections(sections: Section[], index: number, bars: number, policy: OverlapPolicy): Section[] {
+  const cur = sections[index]!
+  const delta = bars - cur.bars
+  const isLast = index === sections.length - 1
+  const nextBars = sections.map((s) => s.bars)
+  if (delta <= 0 || isLast || policy === 'push-existing') {
+    nextBars[index] = bars
+  } else if (policy === 'clip') {
+    const next = sections[index + 1]!
+    const give = Math.min(delta, next.bars - 1)
+    nextBars[index] = cur.bars + give
+    nextBars[index + 1] = next.bars - give
+  }
+  // 'keep-existing': growth into a non-last section is refused — nextBars stays untouched.
+  let bar = 0
+  return sections.map((s, i) => {
+    const b = nextBars[i]!
+    const out = { scene: s.scene, bars: b, startBar: bar }
+    bar += b
+    return out
+  })
+}
+
 /** Issue one arrangement-length op to the daemon's /song route, then re-pull /document so the UI
  * reflects the new sections/scenes/clips (the daemon doesn't echo its own writes). */
-async function postSong(body: { op: 'append' | 'resize' | 'delete'; index?: number; bars?: number }): Promise<void> {
+async function postSong(body: { op: 'append' | 'resize' | 'delete'; index?: number; bars?: number; policy?: OverlapPolicy }): Promise<void> {
   const base = daemonBase()
   try {
     const res = await fetch(`${base}/song`, {
@@ -933,6 +972,10 @@ export function ArrangementView() {
   const selection = useStore((s) => s.selection)
   const setSelectedTrack = useStore((s) => s.setSelectedTrack)
   const setBottomPaneOpen = useStore((s) => s.setBottomPaneOpen)
+  // Phase 22 Stream AG: the overlap-resolution preference every resize (chip +/- and the drag
+  // handle) reads and sends to the daemon's POST /song resize op.
+  const overlapPolicy = useStore((s) => s.overlapPolicy)
+  const setOverlapPolicy = useStore((s) => s.setOverlapPolicy)
   // Playback position for the moving playhead. currentStep is the SAME grid-quantized song position
   // the step-sequencer/NoteView playheads already read (engine's Tone.getDraw() handoff, ported in
   // Phase 12 Stream 1) — reused here, not a second position-tracking mechanism. It ticks at most
@@ -946,7 +989,10 @@ export function ArrangementView() {
   const dragRectLeft = useRef(0)
   // Active length-resize drag on a section's right-edge handle (Phase 19). `bars` is the live,
   // previewed length; it commits on pointer-up (loop_bars for loop mode, POST /song for song mode).
-  const [resize, setResize] = useState<{ index: number; startBar: number; startBars: number; startX: number; bars: number } | null>(null)
+  // `startScrollLeft` (Phase 22 Stream AG) is the .arr-scroll container's scrollLeft at drag-start —
+  // needed because growing the LAST section now auto-scrolls the container (see the resize effect
+  // below), and the bar delta must account for that scroll, not just raw pointer movement.
+  const [resize, setResize] = useState<{ index: number; startBar: number; startBars: number; startX: number; startScrollLeft: number; bars: number } | null>(null)
   const resizePxPerBar = useRef(1)
   // Automation UI state (Phase 20 Stream Z): which track headers have the add-a-lane picker open,
   // and which params the user has explicitly added (a lane can be shown before it has any points).
@@ -996,6 +1042,30 @@ export function ArrangementView() {
   const pxPerBar = totalBars > 0 ? laneWidth / totalBars : 0
   const detail = pxPerBar >= DETAIL_PX_PER_BAR
   const songMode = !!doc?.song?.length
+
+  // ── Live resize preview (Phase 22 Stream AG) ─────────────────────────────────────────────────
+  // The timeline is normally fit-to-width (pxPerBar = laneWidth / totalBars), which is exactly why
+  // dragging the LAST section's right edge outward used to be impossible (docs/phase-19-arrangement-
+  // length.md's "Deferred" note: "the last boundary is always at the container edge"; the algebra:
+  // totalBars * pxPerBar === laneWidth always, so the right edge can never sit right of the
+  // container). While a resize drag is active, rendering switches to the FROZEN px/bar captured at
+  // drag-start (resizePxPerBar.current) and a PREVIEWED section list/total (reflecting the policy
+  // above), instead of the reactive fit-to-width values — so growing the section actually widens the
+  // rendered timeline (scrollable via .arr-scroll's existing overflow:auto) instead of being capped
+  // at the old width. On pointer-up the drag ends, doc.loopBars/song commits, and the ordinary
+  // fit-to-width layout takes back over (the arrangement "re-fits" to the new length).
+  const renderSections = resize ? previewResizeSections(sections, resize.index, resize.bars, overlapPolicy) : sections
+  // A trailing buffer of blank bars, present ONLY while a resize drag is active, added on top of
+  // the true preview total for the rendered (scrollable) width alone — section positions/handles
+  // above are unaffected (they're placed from renderSections' real bar counts). This is what makes
+  // the edge auto-scroll bootstrap-able: growth needs scrollable overflow to scroll INTO, but that
+  // overflow only exists once bars has already grown — so a fixed head-start buffer is rendered
+  // proactively the moment a drag starts (before any growth has happened yet), and it keeps
+  // reappearing ahead of the growing content on every render, so there is always somewhere to
+  // auto-scroll into. Committed values never see this — it's a render-only figure.
+  const DRAG_TAIL_BARS = 8
+  const renderTotalBars = resize ? renderSections.reduce((n, s) => n + s.bars, 0) + DRAG_TAIL_BARS : totalBars
+  const renderPxPerBar = resize ? resizePxPerBar.current || pxPerBar : pxPerBar
 
   const flats: TrackFlat[] = useMemo(() => {
     if (!doc) return []
@@ -1115,25 +1185,45 @@ export function ArrangementView() {
       e.preventDefault()
       e.stopPropagation()
       resizePxPerBar.current = pxPerBar || 1
-      setResize({ index, startBar, startBars, startX: e.clientX, bars: startBars })
+      setResize({ index, startBar, startBars, startX: e.clientX, startScrollLeft: scrollRef.current?.scrollLeft ?? 0, bars: startBars })
     },
     [pxPerBar],
   )
 
   // Window-level move/up for the resize handle: preview the new bar count while dragging, commit once
   // on release. Loop mode writes loop_bars (optimistic /edit); song mode resizes that section (/song).
+  //
+  // Auto-scroll on approach to the right edge (Phase 22 Stream AG): growing the section widens the
+  // rendered timeline past the container (renderTotalBars * renderPxPerBar > laneWidth — see the
+  // render* comment above), so there is real off-screen content to reach. Nudging .arr-scroll's
+  // scrollLeft while the pointer sits near the container's right edge is what makes that content
+  // actually reachable with a real mouse — the same edge-autoscroll idiom every DAW's arrangement
+  // view uses for exactly this reason. The bar delta folds in how far we've auto-scrolled (not just
+  // raw pointer movement), since holding the mouse still while the view scrolls under it is the same
+  // gesture as moving the mouse further right over static content.
   useEffect(() => {
     if (!resize) return
-    const onMove = (e: PointerEvent) =>
+    const EDGE_PX = 36
+    const SCROLL_STEP = 28
+    const onMove = (e: PointerEvent) => {
+      const scrollEl = scrollRef.current
+      if (scrollEl) {
+        const rect = scrollEl.getBoundingClientRect()
+        if (e.clientX > rect.right - EDGE_PX) {
+          scrollEl.scrollLeft = Math.min(scrollEl.scrollLeft + SCROLL_STEP, scrollEl.scrollWidth - scrollEl.clientWidth)
+        }
+      }
       setResize((r) => {
         if (!r) return r
-        const delta = (e.clientX - r.startX) / (resizePxPerBar.current || 1)
+        const scrollLeftNow = scrollEl?.scrollLeft ?? r.startScrollLeft
+        const delta = (e.clientX - r.startX + (scrollLeftNow - r.startScrollLeft)) / (resizePxPerBar.current || 1)
         return { ...r, bars: clampBars(r.startBars + delta) }
       })
+    }
     const onUp = () => {
       setResize((r) => {
         if (r && r.bars !== r.startBars) {
-          if (songMode) void postSong({ op: 'resize', index: r.index, bars: r.bars })
+          if (songMode) void postSong({ op: 'resize', index: r.index, bars: r.bars, policy: overlapPolicy })
           else changeLoopBars(r.bars)
         }
         return null
@@ -1145,7 +1235,7 @@ export function ArrangementView() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
-  }, [resize, songMode])
+  }, [resize, songMode, overlapPolicy])
 
   // Window-level move/up so a drag that leaves the element still tracks and always commits.
   useEffect(() => {
@@ -1348,8 +1438,8 @@ export function ArrangementView() {
   // running and the position is within the song. It scrolls horizontally with the lanes (absolutely
   // positioned inside the scroll container) and spans just the track rows, below the sticky ruler.
   const totalSteps = totalBars * 16
-  const showPlayhead = currentStep >= 0 && currentStep < totalSteps && pxPerBar > 0
-  const playheadLeft = HEADER_W + (currentStep / 16) * pxPerBar
+  const showPlayhead = currentStep >= 0 && currentStep < totalSteps && renderPxPerBar > 0
+  const playheadLeft = HEADER_W + (currentStep / 16) * renderPxPerBar
 
   // Extra vertical space the automation sub-lanes + open pickers add below the plain track rows, so
   // the playhead spans the whole (taller) stack. Only counts rows that actually render — a collapsed
@@ -1466,7 +1556,7 @@ export function ArrangementView() {
                   data-section-minus={i}
                   title="one bar shorter"
                   disabled={s.bars <= LOOP_MIN}
-                  onClick={() => postSong({ op: 'resize', index: i, bars: s.bars - 1 })}
+                  onClick={() => postSong({ op: 'resize', index: i, bars: s.bars - 1, policy: overlapPolicy })}
                 >
                   −
                 </button>
@@ -1474,9 +1564,13 @@ export function ArrangementView() {
                 <button
                   className="arr-chip-btn"
                   data-section-plus={i}
-                  title="one bar longer"
-                  disabled={s.bars >= LOOP_MAX}
-                  onClick={() => postSong({ op: 'resize', index: i, bars: s.bars + 1 })}
+                  title={
+                    overlapPolicy === 'keep-existing' && i < doc.song!.length - 1
+                      ? 'growing this section would overlap the next one, and the "keep existing" policy refuses that — switch policy or grow the last section'
+                      : 'one bar longer'
+                  }
+                  disabled={s.bars >= LOOP_MAX || (overlapPolicy === 'keep-existing' && i < doc.song!.length - 1)}
+                  onClick={() => postSong({ op: 'resize', index: i, bars: s.bars + 1, policy: overlapPolicy })}
                 >
                   +
                 </button>
@@ -1532,6 +1626,25 @@ export function ArrangementView() {
             </button>
           </>
         )}
+        {/* Phase 22 Stream AG: the overlap-resolution preference every resize (chips above + the
+            ruler's drag handle below) reads. Only ever matters in song mode with 2+ sections (a
+            single section, or growing the last one, never overlaps anything — every policy behaves
+            identically there), but it's always shown so it's discoverable/settable ahead of time. */}
+        <label className="arr-overlap-policy" title="what happens when resizing a section would grow it into the next one's space (docs/research/22-opendaw-editing-workflow.md §2.1)">
+          overlap
+          <select
+            className="arr-overlap-select"
+            data-overlap-policy=""
+            value={overlapPolicy}
+            onChange={(e) => setOverlapPolicy(e.target.value as OverlapPolicy)}
+          >
+            {OVERLAP_POLICIES.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="arr-scroll" ref={scrollRef}>
@@ -1540,14 +1653,14 @@ export function ArrangementView() {
           <div className="arr-ruler-corner" style={{ width: HEADER_W }} />
           <div
             className="arr-ruler"
-            style={{ width: totalBars * pxPerBar, touchAction: 'none' }}
+            style={{ width: renderTotalBars * renderPxPerBar, touchAction: 'none' }}
             onPointerDown={(e) => beginDrag('ruler', e)}
           >
-            {sections.map((s, i) => (
+            {renderSections.map((s, i) => (
               <div
                 key={i}
                 className="arr-section-label"
-                style={{ left: s.startBar * pxPerBar, width: s.bars * pxPerBar }}
+                style={{ left: s.startBar * renderPxPerBar, width: s.bars * renderPxPerBar }}
                 title={`${s.scene} · ${s.bars} bars`}
               >
                 <span className="arr-section-name">{s.scene}</span>
@@ -1561,23 +1674,27 @@ export function ArrangementView() {
               />
             )}
             {/* A resize handle occupying the last few px of each section (just inside its right
-                boundary) — drag to change its bar count (loop_bars in loop mode). Positioned inside
-                the boundary, not centered on it, so the rightmost section's handle stays clickable at
-                the timeline's fit-to-width right edge. Sits above the ruler's own bar-select drag; its
-                pointerdown stops propagation so a resize never also starts a selection. */}
-            {sections.map((s, i) => (
+                boundary) — drag to change its bar count (loop_bars in loop mode). Renders from
+                renderSections/renderPxPerBar so it tracks the LIVE preview (including growing the
+                last section outward — the fit-to-width gap Phase 19 deferred, see the render*
+                comment above). Sits above the ruler's own bar-select drag; its pointerdown stops
+                propagation so a resize never also starts a selection. */}
+            {renderSections.map((s, i) => (
               <div
                 key={`resize-${i}`}
                 className="arr-section-resize"
                 data-section-resize={i}
-                style={{ left: Math.max(0, (s.startBar + s.bars) * pxPerBar - 6) }}
+                style={{ left: Math.max(0, (s.startBar + s.bars) * renderPxPerBar - 6) }}
                 title={`drag to resize (${s.bars} bars)`}
-                onPointerDown={(e) => beginResize(i, s.startBar, s.bars, e)}
+                onPointerDown={(e) => beginResize(i, sections[i]!.startBar, sections[i]!.bars, e)}
               />
             ))}
             {resize && (
-              <div className="arr-resize-guide" style={{ left: (resize.startBar + resize.bars) * pxPerBar }}>
-                <span className="arr-resize-label">{resize.bars} bars</span>
+              <div
+                className="arr-resize-guide"
+                style={{ left: (renderSections[resize.index]!.startBar + renderSections[resize.index]!.bars) * renderPxPerBar }}
+              >
+                <span className="arr-resize-label">{renderSections[resize.index]!.bars} bars</span>
               </div>
             )}
           </div>
@@ -1605,10 +1722,10 @@ export function ArrangementView() {
             <div key={flat.track.id} className={row.grouped ? 'arr-grouped-track' : undefined}>
               <TrackRow
                 flat={flat}
-                totalBars={totalBars}
-                pxPerBar={pxPerBar}
+                totalBars={renderTotalBars}
+                pxPerBar={renderPxPerBar}
                 detail={detail}
-                sections={sections}
+                sections={renderSections}
                 band={bandForTrack(flat.track.id)}
                 selected={!!selTracks && selTracks.includes(flat.track.id)}
                 onHeaderClick={() => clickHeader(flat.track)}
@@ -1643,8 +1760,8 @@ export function ArrangementView() {
                     clipId={primaryClip}
                     param={param}
                     occurrences={occ.filter((o) => o.clipId === primaryClip)}
-                    totalBars={totalBars}
-                    pxPerBar={pxPerBar}
+                    totalBars={renderTotalBars}
+                    pxPerBar={renderPxPerBar}
                     loopSteps={loopSteps}
                     onRemoveLane={() => removeLane(flat.track, param)}
                   />

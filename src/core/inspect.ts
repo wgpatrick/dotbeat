@@ -13,6 +13,15 @@ function clipAutomationSummary(c: BeatClip): string {
   return `, auto: ${c.automation.map((l) => `${l.param}(${l.points.length})`).join(', ')}`
 }
 
+// v0.10 (Phase 22 Stream AG): ", loop 0-4, sig 3/4" — present only when the clip declares an
+// override; the common case (no override) prints nothing, matching clipAutomationSummary's elision.
+function clipPropsSummary(c: BeatClip): string {
+  const parts: string[] = []
+  if (c.loop) parts.push(`loop ${formatNumber(c.loop.start)}-${formatNumber(c.loop.end)}`)
+  if (c.signature) parts.push(`sig ${formatNumber(c.signature.numerator)}/${formatNumber(c.signature.denominator)}`)
+  return parts.length ? `, ${parts.join(', ')}` : ''
+}
+
 function describeTrack(t: BeatTrack, loopSteps: number): string[] {
   const lines: string[] = []
   const s = t.synth
@@ -61,7 +70,7 @@ function describeTrack(t: BeatTrack, loopSteps: number): string[] {
     }
   }
   if (t.clips.length > 0) {
-    lines.push(`  clips: ${t.clips.map((c) => `${c.id} (${t.kind === 'drums' ? `${c.hits.length} hits` : `${c.notes.length} note${c.notes.length === 1 ? '' : 's'}`}${clipAutomationSummary(c)})`).join(', ')}`)
+    lines.push(`  clips: ${t.clips.map((c) => `${c.id} (${t.kind === 'drums' ? `${c.hits.length} hits` : `${c.notes.length} note${c.notes.length === 1 ? '' : 's'}`}${clipAutomationSummary(c)}${clipPropsSummary(c)})`).join(', ')}`)
   }
   return lines
 }

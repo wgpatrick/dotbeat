@@ -135,9 +135,9 @@ export const rows = [
   },
   {
     area: 'Arrangement / song structure', feature: 'Drag the rightmost loop boundary directly',
-    description: 'Resize the loop by dragging its edge on the timeline instead of using +/- controls.',
-    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
-    research: null, plan: null,
+    description: 'Resize the loop by dragging its edge on the timeline instead of using +/- controls. Extending outward (not just shrinking) needed a render-time preview at a frozen px/bar plus edge auto-scroll, since the timeline is normally fit-to-width — the gap Phase 19 explicitly deferred.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: null, plan: 'phase-22-stream-ag.md',
   },
   {
     area: 'Arrangement / song structure', feature: 'Independent per-section scene editing',
@@ -147,15 +147,15 @@ export const rows = [
   },
   {
     area: 'Arrangement / song structure', feature: 'Clip-level loop/length/time-signature properties',
-    description: 'Ableton’s Start/End/Loop/Position/Length/Signature clip panel — not currently in the clip grammar.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/18-ableton-ui-architecture.md', plan: null,
+    description: 'Ableton’s Start/End/Loop/Position/Length/Signature clip panel. v0.10 format addition (BeatClipLoop/BeatTimeSignature — a clip-local bar-range override + metadata-only time signature; the engine is still constant-tempo 4/4), a small properties strip in the Clip View, and free CLI/MCP access via the existing generic beat set / beat_set path.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/18-ableton-ui-architecture.md', plan: 'phase-22-stream-ag.md',
   },
   {
     area: 'Arrangement / song structure', feature: 'Overlapping-region resolution policy (clip / push / keep-existing)',
-    description: 'A user-configurable preference for what happens when two regions/sections overlap, push direction always downward, never cascading. "keep-existing" ("don\'t disturb my arrangement") is a real, non-obvious default worth having once dotbeat\'s section model needs overlap semantics.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/22-opendaw-editing-workflow.md', plan: null,
+    description: 'A user-configurable preference for what happens when two regions/sections overlap, push direction always downward, never cascading. "keep-existing" ("don\'t disturb my arrangement") is a real, non-obvious default worth having once dotbeat\'s section model needs overlap semantics. Reimplemented for dotbeat\'s 1D section-list timeline (no independently-positioned regions): only growing a non-last section can conflict with anything. A GUI/session preference (like openDAW\'s own Preferences->Editing setting), not project content, so it is not a .beat format field. The CLI\'s `beat song` is whole-list replace and has no equivalent single-section-resize verb, so there is no CLI collision scenario to wire.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/22-opendaw-editing-workflow.md', plan: 'phase-22-stream-ag.md',
   },
 
   // ── Synth sound design ──────────────────────────────────────────────────

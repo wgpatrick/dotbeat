@@ -123,11 +123,27 @@ export interface BeatAutomationLane {
   param: string
   points: BeatAutomationPoint[]
 }
+// v0.10 (Phase 22 Stream AG): a clip's own loop range / time signature — Ableton's "Loop Position &
+// Length" + Signature fields (docs/research/18-ableton-ui-architecture.md's Clip View table).
+// Mirrors src/core/document.ts's BeatClipLoop/BeatTimeSignature; null = no override (canonical
+// elision — the clip tiles across whatever length the section/loopBars gives it / inherits 4/4).
+export interface BeatClipLoop {
+  start: number // bars, clip-local
+  end: number // bars, clip-local, > start
+}
+export interface BeatTimeSignature {
+  numerator: number
+  denominator: number
+}
+export const TIME_SIG_DENOMINATORS: readonly number[] = [1, 2, 4, 8, 16, 32]
+
 export interface BeatClip {
   id: string
   notes: BeatNote[]
   hits: BeatDrumHit[]
   automation: BeatAutomationLane[]
+  loop: BeatClipLoop | null
+  signature: BeatTimeSignature | null
 }
 
 export interface BeatScene {

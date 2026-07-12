@@ -1,5 +1,5 @@
 import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, declaredLaneNames, defaultEffectChain, defaultSynthFields } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, declaredLaneNames, defaultEffectChain, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -582,7 +582,7 @@ export function parse(text: string): BeatDocument {
         const id = tokens[1]!
         if (!SLUG_RE.test(id)) throw new BeatParseError(`clip ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
         if (currentTrack.clips.some((c) => c.id === id)) throw new BeatParseError(`duplicate clip id "${id}" on track "${currentTrack.id}"`, lineNo)
-        currentClip = { id, notes: [], hits: [], automation: [] }
+        currentClip = { id, notes: [], hits: [], automation: [], loop: null, signature: null }
         currentTrack.clips.push(currentClip)
         continue
       }
@@ -612,6 +612,31 @@ export function parse(text: string): BeatDocument {
         // Any level-2 line here ends a previously-open automation lane (its `point` children are
         // level 3) — close-and-validate it before handling this line, whatever it is.
         closeAutoLaneIfOpen(lineNo)
+        // v0.10 (Phase 22 Stream AG): clip-level loop range + time signature — DAWproject-style
+        // clip properties (loopStart/loopEnd, format-spec.md's "borrow the vocabulary" precedent),
+        // at most one of each per clip. Presence is the "Clip Loop" toggle (canonical elision).
+        if (keyword === 'loop') {
+          if (currentClip.loop) throw new BeatParseError(`clip "${currentClip.id}" has more than one loop line`, lineNo)
+          if (tokens.length !== 3) throw new BeatParseError('loop expects exactly 2 values: <start> <end> (bars, clip-local)', lineNo)
+          const start = parseFloatStrict(tokens[1]!, lineNo, 'loop start')
+          const end = parseFloatStrict(tokens[2]!, lineNo, 'loop end')
+          if (start < 0) throw new BeatParseError(`loop start must be >= 0, got ${start}`, lineNo)
+          if (end <= start) throw new BeatParseError(`loop end must be > start, got start ${start} end ${end}`, lineNo)
+          currentClip.loop = { start, end }
+          continue
+        }
+        if (keyword === 'signature') {
+          if (currentClip.signature) throw new BeatParseError(`clip "${currentClip.id}" has more than one signature line`, lineNo)
+          if (tokens.length !== 3) throw new BeatParseError('signature expects exactly 2 values: <numerator> <denominator>', lineNo)
+          const numerator = parseIntStrict(tokens[1]!, lineNo, 'signature numerator')
+          const denominator = parseIntStrict(tokens[2]!, lineNo, 'signature denominator')
+          if (numerator < 1 || numerator > 32) throw new BeatParseError(`signature numerator must be 1-32, got ${numerator}`, lineNo)
+          if (!(TIME_SIG_DENOMINATORS as readonly number[]).includes(denominator)) {
+            throw new BeatParseError(`signature denominator must be one of ${TIME_SIG_DENOMINATORS.join('|')}, got ${denominator}`, lineNo)
+          }
+          currentClip.signature = { numerator, denominator }
+          continue
+        }
         if (keyword === 'note') {
           if (currentTrack.kind === 'drums') throw new BeatParseError(`note lines only belong in synth/instrument-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
           currentClip.notes.push(parseNoteLine(tokens, lineNo))

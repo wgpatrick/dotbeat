@@ -41,6 +41,8 @@ export {
   removeEffect,
   moveEffect,
   setEffectEnabled,
+  setClipLoop,
+  setClipSignature,
   BeatEditError,
   type QuantizeOptions,
 } from './edit.js'

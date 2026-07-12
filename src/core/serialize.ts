@@ -1,4 +1,4 @@
-import type { BeatAutomationLane, BeatAutomationPoint, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
 import { DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, NOTE_FIELD_DEFAULTS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -91,6 +91,16 @@ function grooveLine(t: BeatTrack): string[] {
   return t.shuffleAmount !== 0 ? [`  groove ${formatNumber(t.shuffleAmount)} ${formatNumber(t.shuffleGrid)}`] : []
 }
 
+// v0.10: clip-level loop range + time signature, emitted iff set (canonical elision — no line =
+// no override, see BeatClip.loop/.signature). Ordered first, as Ableton's Clip View orders "Main
+// Clip Properties" before the note/hit content.
+function serializeClipProps(clip: BeatClip, indent: string): string[] {
+  const lines: string[] = []
+  if (clip.loop) lines.push(`${indent}loop ${formatNumber(clip.loop.start)} ${formatNumber(clip.loop.end)}`)
+  if (clip.signature) lines.push(`${indent}signature ${formatNumber(clip.signature.numerator)} ${formatNumber(clip.signature.denominator)}`)
+  return lines
+}
+
 function serializeTrack(t: BeatTrack): string[] {
   const lines: string[] = []
   lines.push(`track ${t.id} ${t.name} ${t.color} ${t.kind}`)
@@ -105,6 +115,7 @@ function serializeTrack(t: BeatTrack): string[] {
     // v0.8+: instrument clips carry notes only (same grammar as synth-track clips)
     for (const clip of t.clips) {
       lines.push(`  clip ${clip.id}`)
+      lines.push(...serializeClipProps(clip, '    '))
       lines.push(...sortedNoteLines(clip.notes, '    '))
     }
     lines.push(...sortedNoteLines(t.notes, '  '))
@@ -152,6 +163,7 @@ function serializeTrack(t: BeatTrack): string[] {
   // form (sorted notes / sorted hits) one indent level deeper than live content.
   for (const clip of t.clips) {
     lines.push(`  clip ${clip.id}`)
+    lines.push(...serializeClipProps(clip, '    '))
     if (t.kind === 'drums') lines.push(...sortedHitLines(clip.hits, laneOrder, '    '))
     lines.push(...sortedNoteLines(clip.notes, '    '))
     lines.push(...serializeAutomationLanes(t.id, clip.automation, '    '))

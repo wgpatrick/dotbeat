@@ -4,6 +4,7 @@ import { postEdit, postSelection } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
+import { ClipPropertiesPanel } from './ClipPropertiesPanel'
 
 // The editable event editor for BOTH synth/instrument notes and drum hits — Phase 22 Stream AB
 // (docs/research/20-drum-clip-editor-redesign.md Part 5) generalized what was originally a
@@ -511,6 +512,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
           </button>
         )}
       </div>
+      <ClipPropertiesPanel track={track} />
       <div className="noteview-scroll">
         <div className="noteview-body" style={{ display: 'flex', alignItems: 'flex-start' }}>
           {/* Left gutter: one row per pitch (piano keys) or one row per declared drum lane (name

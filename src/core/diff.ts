@@ -45,6 +45,10 @@ export type DiffEntry =
   | { kind: 'clip-added'; trackId: string; clipId: string }
   | { kind: 'clip-removed'; trackId: string; clipId: string }
   | { kind: 'clip-changed'; trackId: string; clipId: string; noteDelta: number; hitDelta: number }
+  // v0.10 (Phase 22 Stream AG): clip-level loop range / time signature — itemized like automation
+  // points above (a specific fact worth naming), not folded into clip-changed's delta counts.
+  | { kind: 'clip-loop'; trackId: string; clipId: string; before: { start: number; end: number } | null; after: { start: number; end: number } | null }
+  | { kind: 'clip-signature'; trackId: string; clipId: string; before: { numerator: number; denominator: number } | null; after: { numerator: number; denominator: number } | null }
   | { kind: 'scene-added'; sceneId: string }
   | { kind: 'scene-removed'; sceneId: string }
   | { kind: 'scene-slot'; sceneId: string; trackId: string; before: string | null; after: string | null }
@@ -248,6 +252,14 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
       for (const k of bHitSet) if (!aHitSet.has(k)) hitDelta++
       if (noteDelta || hitDelta) out.push({ kind: 'clip-changed', trackId: id, clipId: cid, noteDelta, hitDelta })
 
+      // v0.10: clip-level loop range / time signature — compared by value (small objects, cheap to
+      // compare field-by-field rather than pulling in a deep-equal dependency).
+      const loopEq = (x: typeof ca.loop, y: typeof cb.loop) => (x === null && y === null) || (x !== null && y !== null && x.start === y.start && x.end === y.end)
+      if (!loopEq(ca.loop, cb.loop)) out.push({ kind: 'clip-loop', trackId: id, clipId: cid, before: ca.loop, after: cb.loop })
+      const sigEq = (x: typeof ca.signature, y: typeof cb.signature) =>
+        (x === null && y === null) || (x !== null && y !== null && x.numerator === y.numerator && x.denominator === y.denominator)
+      if (!sigEq(ca.signature, cb.signature)) out.push({ kind: 'clip-signature', trackId: id, clipId: cid, before: ca.signature, after: cb.signature })
+
       // v0.9 clip automation: unlike notes/hits above (reported as a delta count — a clip is a
       // snapshot, re-snapshot noise is common), automation points are itemized per-point, matched
       // by (param, id) — a knob move mid-clip is a specific musical fact worth naming, not noise.
@@ -408,6 +420,16 @@ export function formatDiff(entries: DiffEntry[]): string {
       case 'clip-changed':
         lines.push(`${e.trackId}: clip "${e.clipId}" changed (${e.noteDelta} note change${e.noteDelta === 1 ? '' : 's'}, ${e.hitDelta} hit change${e.hitDelta === 1 ? '' : 's'})`)
         break
+      case 'clip-loop': {
+        const fmt = (l: { start: number; end: number } | null) => (l ? `${formatNumber(l.start)}-${formatNumber(l.end)}` : '(none)')
+        lines.push(`${e.trackId}: clip "${e.clipId}" loop ${fmt(e.before)} -> ${fmt(e.after)}`)
+        break
+      }
+      case 'clip-signature': {
+        const fmt = (s: { numerator: number; denominator: number } | null) => (s ? `${s.numerator}/${s.denominator}` : '(none)')
+        lines.push(`${e.trackId}: clip "${e.clipId}" signature ${fmt(e.before)} -> ${fmt(e.after)}`)
+        break
+      }
       case 'scene-added':
         lines.push(`scene added "${e.sceneId}"`)
         break

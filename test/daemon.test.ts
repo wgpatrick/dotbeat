@@ -226,6 +226,125 @@ test('POST /song rejects a bad op and an out-of-range bar count', async () => {
   })
 })
 
+// ─── Phase 22 Stream AG: overlapping-region resolution policy (POST /song resize) ─────────────────
+// docs/research/22-opendaw-editing-workflow.md §2.1's clip/push-existing/keep-existing, reimplemented
+// for dotbeat's 1D section-list timeline (src/daemon/daemon.ts's songResize doc comment has the full
+// reasoning). Only growing a NON-LAST section can conflict with anything; shrinking and growing the
+// last section behave identically under every policy (nothing sits after them to disturb).
+async function threeSections(daemon: Daemon): Promise<number> {
+  const loopBars = daemon.getDoc().loopBars
+  await postSong(daemon.port, { op: 'append', bars: 6 })
+  await postSong(daemon.port, { op: 'append', bars: 8 })
+  // -> sections [loopBars, 6, 8]
+  return loopBars
+}
+
+test('overlap policy "push-existing" (default): growing a non-last section leaves every other section untouched, total length grows', async () => {
+  await withDaemon(async (daemon) => {
+    const loopBars = await threeSections(daemon)
+    const res = await postSong(daemon.port, { op: 'resize', index: 0, bars: loopBars + 3, policy: 'push-existing' })
+    assert.equal(res.status, 200)
+    const doc = daemon.getDoc()
+    assert.equal(doc.song![0]!.bars, loopBars + 3)
+    assert.equal(doc.song![1]!.bars, 6, 'section 1 is unaffected — it just starts later')
+    assert.equal(doc.song![2]!.bars, 8, 'section 2 is unaffected')
+  })
+})
+
+test('overlap policy defaults to "push-existing" when omitted (backward-compatible with pre-Stream-AG callers)', async () => {
+  await withDaemon(async (daemon) => {
+    const loopBars = await threeSections(daemon)
+    await postSong(daemon.port, { op: 'resize', index: 0, bars: loopBars + 3 }) // no policy field
+    const doc = daemon.getDoc()
+    assert.equal(doc.song![0]!.bars, loopBars + 3)
+    assert.equal(doc.song![1]!.bars, 6)
+  })
+})
+
+test('overlap policy "clip": growing a non-last section truncates the NEXT section by the overflow, total length unchanged', async () => {
+  await withDaemon(async (daemon) => {
+    const loopBars = await threeSections(daemon)
+    const totalBefore = docTotalBars(daemon)
+    const res = await postSong(daemon.port, { op: 'resize', index: 0, bars: loopBars + 3, policy: 'clip' })
+    assert.equal(res.status, 200)
+    const doc = daemon.getDoc()
+    assert.equal(doc.song![0]!.bars, loopBars + 3, 'the resized section gets its full requested size')
+    assert.equal(doc.song![1]!.bars, 3, 'section 1 (6 bars) absorbed the 3-bar overflow, truncated to 3')
+    assert.equal(doc.song![2]!.bars, 8, 'section 2 is untouched — clip never cascades past the immediate neighbor')
+    assert.equal(docTotalBars(daemon), totalBefore, 'total song length is unchanged')
+  })
+})
+
+test('overlap policy "clip" never cascades: growth is capped at what the immediate neighbor can give up (floor of 1 bar)', async () => {
+  await withDaemon(async (daemon) => {
+    const loopBars = await threeSections(daemon)
+    // section 1 has 6 bars, so it can give up at most 5 (floor of 1) — request an 8-bar growth.
+    const res = await postSong(daemon.port, { op: 'resize', index: 0, bars: loopBars + 8, policy: 'clip' })
+    assert.equal(res.status, 200)
+    const doc = daemon.getDoc()
+    assert.equal(doc.song![1]!.bars, 1, 'section 1 gave up everything down to the 1-bar floor')
+    assert.equal(doc.song![0]!.bars, loopBars + 5, 'the resize itself is capped to what section 1 could give up (5), not the full requested 8')
+    assert.equal(doc.song![2]!.bars, 8, 'section 2 is still untouched — no cascade past section 1')
+  })
+})
+
+test('overlap policy "keep-existing": growing a non-last section is refused — the whole arrangement is byte-for-byte unchanged', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const loopBars = await threeSections(daemon)
+    const before = readFileSync(filePath, 'utf8')
+    const res = await postSong(daemon.port, { op: 'resize', index: 0, bars: loopBars + 3, policy: 'keep-existing' })
+    assert.equal(res.status, 200)
+    assert.equal(((await res.json()) as { written: boolean }).written, false, 'a refused growth writes nothing')
+    const doc = daemon.getDoc()
+    assert.equal(doc.song![0]!.bars, loopBars, 'the growth was refused — section 0 stays at its original size')
+    assert.equal(doc.song![1]!.bars, 6)
+    assert.equal(doc.song![2]!.bars, 8)
+    assert.equal(readFileSync(filePath, 'utf8'), before, 'the file is untouched by a refused resize')
+  })
+})
+
+test('every policy behaves identically for shrinking and for growing the LAST section (nothing to overlap)', async () => {
+  await withDaemon(async (daemon) => {
+    await threeSections(daemon) // [loopBars, 6, 8]
+    for (const policy of ['clip', 'push-existing', 'keep-existing'] as const) {
+      await postSong(daemon.port, { op: 'resize', index: 1, bars: 4, policy }) // shrink section 1
+      assert.equal(daemon.getDoc().song![1]!.bars, 4, `shrink succeeds under ${policy}`)
+      await postSong(daemon.port, { op: 'resize', index: 1, bars: 6, policy }) // restore
+      await postSong(daemon.port, { op: 'resize', index: 2, bars: 12, policy }) // grow the LAST section
+      assert.equal(daemon.getDoc().song![2]!.bars, 12, `growing the last section succeeds under ${policy} — nothing sits after it`)
+      await postSong(daemon.port, { op: 'resize', index: 2, bars: 8, policy }) // restore
+    }
+  })
+})
+
+test('an unknown overlap policy is rejected with a 400', async () => {
+  await withDaemon(async (daemon) => {
+    await threeSections(daemon)
+    const res = await postSong(daemon.port, { op: 'resize', index: 0, bars: 5, policy: 'frobnicate' })
+    assert.equal(res.status, 400)
+  })
+})
+
+test('an out-of-range bar count is rejected with a 400 under every policy — not just push-existing', async () => {
+  // The 'clip' and 'keep-existing' branches don't always forward the raw requested `bars` to
+  // setSong (clip caps it against the neighbor's slack; keep-existing may no-op), so validation has
+  // to happen up front in songResize itself, or an out-of-range request could silently slip through
+  // under those two policies while still correctly failing under push-existing.
+  await withDaemon(async (daemon) => {
+    await threeSections(daemon)
+    for (const policy of ['push-existing', 'clip', 'keep-existing'] as const) {
+      const before = daemon.getDoc().song!.map((s) => s.bars)
+      const res = await postSong(daemon.port, { op: 'resize', index: 0, bars: 999, policy })
+      assert.equal(res.status, 400, `policy ${policy} should reject bars 999`)
+      assert.deepEqual(daemon.getDoc().song!.map((s) => s.bars), before, `policy ${policy} must leave the arrangement untouched on a rejected request`)
+    }
+  })
+})
+
+function docTotalBars(daemon: Daemon): number {
+  return daemon.getDoc().song!.reduce((n, s) => n + s.bars, 0)
+}
+
 // Phase 20 Stream W: track structure add/remove over HTTP (the GUI's track-management surface).
 test('POST /add-track appends a track, writes it to the file, and returns the fresh document', async () => {
   await withDaemon(async (daemon, filePath) => {

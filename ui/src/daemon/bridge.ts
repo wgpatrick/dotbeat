@@ -143,6 +143,22 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
     return { ...doc, tracks }
   }
 
+  // v0.10 clip properties (Phase 22 Stream AG): <track>.clip.<clipId>.loop / .signature — mirrors
+  // core's setClipLoop/setClipSignature (src/core/edit.ts). Empty value clears the override.
+  const clipPropMatch = rest.match(/^clip\.([A-Za-z0-9_-]+)\.(loop|signature)$/)
+  if (clipPropMatch) {
+    const [, clipId, field] = clipPropMatch
+    const clips = track.clips.map((c) => {
+      if (c.id !== clipId) return c
+      if (value.trim() === '') return { ...c, [field!]: null }
+      const [a, b] = value.trim().split(/\s+/).map(Number)
+      if (field === 'loop') return { ...c, loop: { start: canon(a!), end: canon(b!) } }
+      return { ...c, signature: { numerator: Math.round(a!), denominator: Math.round(b!) } }
+    })
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, clips } : t))
+    return { ...doc, tracks }
+  }
+
   // track metadata (Phase 20 Stream W): name/color live on the TRACK, not the synth block — core's
   // setValue routes them to track.name/track.color (src/core/edit.ts). Mirror them there so an inline
   // rename / color-pick reflects instantly; without this branch they'd fall through to the synth-param

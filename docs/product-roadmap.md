@@ -26,7 +26,7 @@ stream to pick up — not guesswork, a decision away from being built.
 
 ## Snapshot — 82 features tracked
 
-**40** Done · **0** In progress · **42** Not started
+**43** Done · **0** In progress · **39** Not started
 
 ---
 
@@ -74,10 +74,10 @@ stream to pick up — not guesswork, a decision away from being built.
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
 | Section CRUD + loop→song conversion | Append/resize/delete song sections; a loop-mode project can grow into a full multi-section song. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-19-arrangement-length.md`](phase-19-arrangement-length.md) |
-| Drag the rightmost loop boundary directly | Resize the loop by dragging its edge on the timeline instead of using +/- controls. | — | — | ❌ missing | ⬜ Not started | — | — |
+| Drag the rightmost loop boundary directly | Resize the loop by dragging its edge on the timeline instead of using +/- controls. Extending outward (not just shrinking) needed a render-time preview at a frozen px/bar plus edge auto-scroll, since the timeline is normally fit-to-width — the gap Phase 19 explicitly deferred. | — | — | ✅ done | ✅ Done | — | [`phase-22-stream-ag.md`](phase-22-stream-ag.md) |
 | Independent per-section scene editing | Today, appended sections share the source scene; editing one edits them all. Give each section its own scene. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | — | — |
-| Clip-level loop/length/time-signature properties | Ableton’s Start/End/Loop/Position/Length/Signature clip panel — not currently in the clip grammar. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | — |
-| Overlapping-region resolution policy (clip / push / keep-existing) | A user-configurable preference for what happens when two regions/sections overlap, push direction always downward, never cascading. "keep-existing" ("don't disturb my arrangement") is a real, non-obvious default worth having once dotbeat's section model needs overlap semantics. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`22-opendaw-editing-workflow.md`](research/22-opendaw-editing-workflow.md) | — |
+| Clip-level loop/length/time-signature properties | Ableton’s Start/End/Loop/Position/Length/Signature clip panel. v0.10 format addition (BeatClipLoop/BeatTimeSignature — a clip-local bar-range override + metadata-only time signature; the engine is still constant-tempo 4/4), a small properties strip in the Clip View, and free CLI/MCP access via the existing generic beat set / beat_set path. | ✅ done | ✅ done | ✅ done | ✅ Done | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | [`phase-22-stream-ag.md`](phase-22-stream-ag.md) |
+| Overlapping-region resolution policy (clip / push / keep-existing) | A user-configurable preference for what happens when two regions/sections overlap, push direction always downward, never cascading. "keep-existing" ("don't disturb my arrangement") is a real, non-obvious default worth having once dotbeat's section model needs overlap semantics. Reimplemented for dotbeat's 1D section-list timeline (no independently-positioned regions): only growing a non-last section can conflict with anything. A GUI/session preference (like openDAW's own Preferences->Editing setting), not project content, so it is not a .beat format field. The CLI's `beat song` is whole-list replace and has no equivalent single-section-resize verb, so there is no CLI collision scenario to wire. | ✅ done | — | ✅ done | ✅ Done | [`22-opendaw-editing-workflow.md`](research/22-opendaw-editing-workflow.md) | [`phase-22-stream-ag.md`](phase-22-stream-ag.md) |
 
 ## Synth sound design
 

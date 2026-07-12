@@ -198,11 +198,73 @@ export function songDelete(doc: BeatDocument, index: number): BeatDocument {
   return setSong(doc, doc.song.filter((_, i) => i !== index))
 }
 
-/** Resize the section at `index` to `bars` bars (setSong validates the 1-64 range). */
-export function songResize(doc: BeatDocument, index: number, bars: number): BeatDocument {
+// ─── overlapping-region resolution policy (Phase 22 Stream AG) ──────────────────────────────────
+// docs/research/22-opendaw-editing-workflow.md §2.1: openDAW ships a user-configurable overlap
+// policy — `["clip", "push-existing", "keep-existing"]` — for what happens when a dragged/resized
+// region would overlap its neighbor. dotbeat's song timeline is a flat ORDERED LIST of section
+// durations (no independently-positioned regions — a section's start is always the sum of the
+// bars before it), so two sections can never literally overlap the way two Ableton clips on the
+// same track can. The one place growth genuinely "conflicts" with something is resizing a
+// NON-LAST section larger: that growth has to come from somewhere, and today it silently always
+// pushes every later section's start (their bar counts are untouched, they just begin later —
+// this already IS openDAW's "push-existing" behavior, since startBar is derived, not stored).
+// Shrinking, and growing the LAST section, never conflict with anything (nothing sits after them
+// to disturb), so every policy behaves identically there — matching openDAW, where the policy is a
+// no-op when there's nothing to overlap in the first place.
+export type OverlapPolicy = 'clip' | 'push-existing' | 'keep-existing'
+export const OVERLAP_POLICIES: readonly OverlapPolicy[] = ['clip', 'push-existing', 'keep-existing']
+
+/** Resize the section at `index` to `bars` bars (setSong validates the 1-64 range), resolving a
+ * growth-into-the-next-section conflict per `policy` (default 'push-existing' — today's original,
+ * unconditional behavior, so existing callers/tests are unaffected by the new parameter):
+ *
+ *   push-existing (default) — the resized section gets its full requested size; every later
+ *     section is unaffected (their bar counts don't change) and simply starts later. Total song
+ *     length grows by the delta. This is openDAW's "anything it overlaps gets pushed" — dotbeat has
+ *     no second track to push a whole region to, so "pushed" means "starts later in the same list."
+ *   clip — the resized section gets its full requested size; the NEXT section is truncated
+ *     (shrunk) to absorb the growth, so total song length is unchanged. Never cascades past that
+ *     one neighbor (openDAW's rule) — growth is capped at how many bars the next section can give
+ *     up before hitting the 1-bar floor.
+ *   keep-existing — the mirror image: nothing else may move or resize, so a growth that would
+ *     require it is simply refused (the section's bars stay at their current value). Shrinking
+ *     always succeeds under every policy (it never requires anything else to change). */
+export function songResize(doc: BeatDocument, index: number, bars: number, policy: OverlapPolicy = 'push-existing'): BeatDocument {
   if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no section to resize')
   if (!Number.isInteger(index) || index < 0 || index >= doc.song.length) throw new BeatEditError(`section index ${index} out of range (0-${doc.song.length - 1})`)
-  return setSong(doc, doc.song.map((s, i) => (i === index ? { scene: s.scene, bars } : s)))
+  if (!(OVERLAP_POLICIES as readonly string[]).includes(policy)) throw new BeatEditError(`unknown overlap policy "${String(policy)}" (expected ${OVERLAP_POLICIES.join('|')})`)
+  // Validated here, up front, rather than left to setSong: the 'clip' and 'keep-existing' branches
+  // below don't always pass the raw requested `bars` through to setSong (clip caps it against the
+  // neighbor's slack; keep-existing may no-op entirely), so an out-of-range request could otherwise
+  // slip past validation under those two policies while still correctly failing under push-existing
+  // — the same bad input must fail loudly identically no matter which policy is selected.
+  if (!Number.isInteger(bars) || bars < 1 || bars > 64) throw new BeatEditError(`section bars must be an integer 1-64, got ${bars}`)
+  const sections = doc.song
+  const cur = sections[index]!
+  const delta = bars - cur.bars
+  const isLast = index === sections.length - 1
+
+  if (delta <= 0 || isLast || policy === 'push-existing') {
+    // Shrinking, growing the last section, or the push-existing policy: only this section changes
+    // (setSong validates 1-64) — the original, unconditional resize behavior.
+    return setSong(doc, sections.map((s, i) => (i === index ? { scene: s.scene, bars } : s)))
+  }
+  if (policy === 'keep-existing') {
+    // Existing arrangement (everything but the incoming edit) must not move — refuse the part of
+    // the growth that would require it. A no-op write (harmless; writeIfChanged skips it).
+    return doc
+  }
+  // 'clip': the next section absorbs the growth (truncated, floor of 1 bar) so total length holds.
+  const next = sections[index + 1]!
+  const give = Math.min(delta, next.bars - 1)
+  return setSong(
+    doc,
+    sections.map((s, i) => {
+      if (i === index) return { scene: s.scene, bars: cur.bars + give }
+      if (i === index + 1) return { scene: s.scene, bars: next.bars - give }
+      return s
+    }),
+  )
 }
 
 export interface DaemonOptions {
@@ -649,10 +711,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     if (req.method === 'POST' && url.pathname === '/song') {
       readBody(req)
         .then((body) => {
-          const b = JSON.parse(body) as { op?: unknown; index?: unknown; bars?: unknown }
+          const b = JSON.parse(body) as { op?: unknown; index?: unknown; bars?: unknown; policy?: unknown }
           let next: BeatDocument
           if (b.op === 'append') next = songAppend(doc, Number(b.bars))
-          else if (b.op === 'resize') next = songResize(doc, Number(b.index), Number(b.bars))
+          else if (b.op === 'resize') next = songResize(doc, Number(b.index), Number(b.bars), typeof b.policy === 'string' ? (b.policy as OverlapPolicy) : undefined)
           else if (b.op === 'delete') next = songDelete(doc, Number(b.index))
           else {
             json(res, 400, { error: `unknown song op "${String(b.op)}" (expected append|resize|delete)` })

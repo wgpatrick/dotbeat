@@ -3,8 +3,8 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS, declaredLaneNames, defaultEffectChain } from './document.js'
+import type { BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, declaredLaneNames, defaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -40,6 +40,8 @@ function parseNum(value: string, what: string): number {
  *   bpm 124                      loop_bars 8                selected_track lead
  *   lead.cutoff 900              lead.osc square            lead.name Lead2
  *   lead.color #aabbcc           drums.pattern.kick[3] 0.7
+ *   lead.clip.verse-a.loop "0 4"                 lead.clip.verse-a.signature "3 4"   (v0.10;
+ *   empty value clears the override — see setClipLoop/setClipSignature)
  *
  * Returns a new document; never mutates. */
 export function setValue(doc: BeatDocument, path: string, value: string): BeatDocument {
@@ -179,6 +181,32 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   if (noteDeleteMatch) {
     if (value.trim() !== '') throw new BeatEditError(`note delete takes an empty value (got "${value}"); to edit a field use ${trackId}.note.${noteDeleteMatch[1]}.<pitch|start|duration|velocity>`)
     return removeNote(doc, trackId, noteDeleteMatch[1]!).doc
+  }
+
+  // v0.10 clip properties (Phase 22 Stream AG): <track>.clip.<clipId>.loop / .signature — the GUI's
+  // clip inspector edit path, same {path,value} /edit channel as everything else. "<start> <end>" /
+  // "<num> <den>" sets the override; an empty value clears it (back to null — no override). Thin
+  // wrappers around setClipLoop/setClipSignature below (the same functions a future CLI verb would
+  // call), kept here so `beat set`/POST /edit needs no new route for this, matching the house rule
+  // of reusing the generic edit channel wherever a single {path,value} line can express the fact.
+  const clipPropMatch = rest.match(/^clip\.([A-Za-z0-9_-]+)\.(loop|signature)$/)
+  if (clipPropMatch) {
+    const clipId = clipPropMatch[1]!
+    const field = clipPropMatch[2]! as 'loop' | 'signature'
+    if (field === 'loop') {
+      if (value.trim() === '') return setClipLoop(doc, trackId, clipId, null)
+      const parts = value.trim().split(/\s+/)
+      if (parts.length !== 2) throw new BeatEditError(`clip loop expects "<start> <end>" (bars), got "${value}"`)
+      const start = parseNum(parts[0]!, 'clip loop start')
+      const end = parseNum(parts[1]!, 'clip loop end')
+      return setClipLoop(doc, trackId, clipId, { start, end })
+    }
+    if (value.trim() === '') return setClipSignature(doc, trackId, clipId, null)
+    const parts = value.trim().split(/\s+/)
+    if (parts.length !== 2) throw new BeatEditError(`clip signature expects "<numerator> <denominator>", got "${value}"`)
+    const numerator = parseNum(parts[0]!, 'clip signature numerator')
+    const denominator = parseNum(parts[1]!, 'clip signature denominator')
+    return setClipSignature(doc, trackId, clipId, { numerator, denominator })
   }
 
   // track metadata
@@ -745,6 +773,10 @@ export function saveClip(doc: BeatDocument, trackId: string, clipId: string): { 
     notes: track.notes.map((n) => ({ ...n })),
     hits: track.kind === 'drums' ? track.hits.map((h) => ({ ...h })) : [],
     automation: existing === -1 ? [] : track.clips[existing]!.automation.map((l) => ({ ...l, points: l.points.map((p) => ({ ...p })) })),
+    // v0.10: re-snapshotting preserves the clip's existing loop/signature overrides (like
+    // automation above) rather than wiping them — they're clip metadata, not live-track content.
+    loop: existing === -1 ? null : track.clips[existing]!.loop,
+    signature: existing === -1 ? null : track.clips[existing]!.signature,
   }
   const clips = existing === -1 ? [...track.clips, clip] : track.clips.map((c, i) => (i === existing ? clip : c))
   return { doc: replaceTrack(doc, { ...track, clips }), created: existing === -1 }
@@ -788,6 +820,35 @@ function findClip(track: BeatTrack, clipId: string): BeatClip {
 function replaceClip(doc: BeatDocument, trackId: string, next: BeatClip): BeatDocument {
   const track = findTrack(doc, trackId)
   return replaceTrack(doc, { ...track, clips: track.clips.map((c) => (c.id === next.id ? next : c)) })
+}
+
+/** v0.10 (Phase 22 Stream AG): sets or clears a clip's own loop range (Ableton's "Loop Position &
+ * Length" — docs/research/18-ableton-ui-architecture.md's Clip View table). `loop: null` clears the
+ * override, returning the clip to tiling across whatever length the section/loopBars gives it. */
+export function setClipLoop(doc: BeatDocument, trackId: string, clipId: string, loop: BeatClipLoop | null): BeatDocument {
+  const track = findTrack(doc, trackId)
+  const clip = findClip(track, clipId)
+  if (loop === null) return replaceClip(doc, trackId, { ...clip, loop: null })
+  if (!Number.isFinite(loop.start) || loop.start < 0) throw new BeatEditError(`clip loop start must be >= 0, got ${loop.start}`)
+  if (!Number.isFinite(loop.end) || loop.end <= loop.start) throw new BeatEditError(`clip loop end must be > start, got start ${loop.start} end ${loop.end}`)
+  return replaceClip(doc, trackId, { ...clip, loop: { start: canon(loop.start), end: canon(loop.end) } })
+}
+
+/** v0.10: sets or clears a clip's own time signature (metadata only — the audio engine is still
+ * constant-tempo 4/4; see BeatTimeSignature's doc comment). `signature: null` clears the override. */
+export function setClipSignature(doc: BeatDocument, trackId: string, clipId: string, signature: BeatTimeSignature | null): BeatDocument {
+  const track = findTrack(doc, trackId)
+  const clip = findClip(track, clipId)
+  if (signature === null) return replaceClip(doc, trackId, { ...clip, signature: null })
+  // Integer fields fail loudly on a non-integer input rather than silently rounding — same stance
+  // instrument tracks' `program` field takes (setValue's `program` case above): a fractional time
+  // signature isn't a real musical fact to round away, it's a caller bug worth surfacing.
+  const { numerator, denominator } = signature
+  if (!Number.isInteger(numerator) || numerator < 1 || numerator > 32) throw new BeatEditError(`clip signature numerator must be an integer 1-32, got ${numerator}`)
+  if (!Number.isInteger(denominator) || !(TIME_SIG_DENOMINATORS as readonly number[]).includes(denominator)) {
+    throw new BeatEditError(`clip signature denominator must be one of ${TIME_SIG_DENOMINATORS.join('|')}, got ${denominator}`)
+  }
+  return replaceClip(doc, trackId, { ...clip, signature: { numerator, denominator } })
 }
 
 function checkAutomatableParam(param: string) {

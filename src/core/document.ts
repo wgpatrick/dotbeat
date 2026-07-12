@@ -337,18 +337,51 @@ export interface BeatAutomationLane {
   points: BeatAutomationPoint[]
 }
 
+/** v0.10 (Phase 22 Stream AG): a clip's own loop range, overriding the section/loopBars-driven
+ * tiling for just this clip — Ableton's "Loop Position & Length" (docs/research/18-ableton-ui-
+ * architecture.md's Clip View table: "Main Clip Properties: clip Start/End … Loop Position &
+ * Length, Clip Loop toggle, time signature"). Both fields are clip-local bar offsets (same unit
+ * `loop_bars` uses at the document level); `end` is exclusive and must be > `start`. Presence of
+ * this object on a clip IS the "Clip Loop" toggle — canonical elision, same discipline as v0.3's
+ * synth-field elision and v0.9's automation lanes: no object = no override = the clip tiles across
+ * whatever length the section/loopBars gives it (today's behavior, unchanged). */
+export interface BeatClipLoop {
+  start: number // bars, clip-local, >= 0
+  end: number // bars, clip-local, > start
+}
+
+/** v0.10: a clip's own time signature, overriding the document's implicit 4/4 for display/metadata
+ * purposes on just this clip (Ableton's per-clip Signature field). The playback engine is still
+ * constant-tempo 4/4 only (docs/phase-6-plan.md §Exclusions: "tempo changes / time signatures — no
+ * engine support"), so this is modeled and round-tripped but NOT yet interpreted by the audio
+ * engine — the same "format models it, engine catches up later" posture v0.9 automation's deferred
+ * `interpolation` column documents. Presence = override; absence = inherits the document's implicit
+ * 4/4 (canonical elision, as above). */
+export interface BeatTimeSignature {
+  numerator: number // 1-32
+  denominator: number // one of 1,2,4,8,16,32
+}
+
 /** v0.4: a named snapshot of playable content, owned by a track. Mirrors beatlab's Clip (a
  * value copy, not a reference — see docs/phase-6-plan.md). Synth-track clips carry notes;
  * drum-track clips carry hits (v0.8; was a five-lane pattern through v0.7 — the parser
  * migrates). v0.9: clips may also carry automation lanes (deliberately NOT modeled at the live
  * track / non-clip level — see docs/format-spec.md's v0.9 section for why clip-scoped-only was
- * chosen). Ids are track-scoped human slugs (D6). */
+ * chosen). v0.10: clips may also declare their own loop range and time signature (BeatClipLoop /
+ * BeatTimeSignature above), distinct from the track/section-level `loopBars`. Ids are track-scoped
+ * human slugs (D6). */
 export interface BeatClip {
   id: string
   notes: BeatNote[] // synth tracks only; always [] for drums
   hits: BeatDrumHit[] // drum tracks only; always [] for synth
   automation: BeatAutomationLane[] // v0.9; [] when the clip has none (serialized only when present)
+  loop: BeatClipLoop | null // v0.10; null = no clip-level loop override (canonical elision)
+  signature: BeatTimeSignature | null // v0.10; null = inherits the document's implicit 4/4
 }
+
+/** v0.10: legal time-signature denominators — the conventional note-value set (DAWproject and every
+ * mature DAW restrict to powers of two here; there's no such thing as a "/3" time signature). */
+export const TIME_SIG_DENOMINATORS: readonly number[] = [1, 2, 4, 8, 16, 32]
 
 /** v0.4: a scene maps tracks to clips — one complete statement of "what plays". Mirrors
  * beatlab's Scene.clipIds. Serialized as one `slot` line per mapping, in track order. */
