@@ -12,3 +12,6 @@ target/
 # beatlab is cloned as a scratch checkout outside the repo for desktop dev/testing — if anyone
 # ever clones it *inside* the worktree by mistake, don't let it land in git history.
 /beatlab/
+
+# Reference material for research (e.g. Ableton's own manual) — large binaries, never committed.
+/prior_art/
