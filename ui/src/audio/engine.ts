@@ -1487,7 +1487,21 @@ function ratchetSlots(count: number, curve: number, repeatLength: number, noteDu
   return slots
 }
 
-interface SynthChain {
+// Phase 26 Stream DC: the reorderable-effect-chain bookkeeping every host of one carries — was
+// SynthChain-only fields (Phase 22 Stream AA) before this stream, now shared structurally by
+// SynthChain, DrumBus, AND InstrumentVoice (see each interface below) so reconcileEffectChain can
+// splice ANY of them without three near-duplicate copies of the same reconcile logic. Just the
+// bookkeeping, not the graph topology — callers pass their own entry/downstream nodes (see
+// reconcileEffectChain's signature) since where the spine sits in each host's own graph differs
+// (SynthChain: headroom->...->saturator's fixed tail; DrumBus: filter->...->saturator's fixed
+// tail; InstrumentVoice: fxIn->...->muteGain, no fixed tail at all).
+interface EffectHost {
+  effects: Map<string, EffectRuntime>
+  effectOrder: string[]
+  effectsSig: string
+}
+
+interface SynthChain extends EffectHost {
   synth: Tone.PolySynth<Tone.Synth>
   osc2: Tone.PolySynth<Tone.Synth>
   osc2Gain: Tone.Gain
@@ -1563,16 +1577,18 @@ function findEffect(chain: SynthChain, type: EffectType): EffectRuntime | undefi
   return undefined
 }
 
-interface DrumBus {
+// Phase 26 Stream DC: eq3/compIn/compDry/compressor/compWet/compOut/distortion/bitcrush used to be
+// FIXED, always-wired fields here (the drum bus's own non-reorderable insert order, built once in
+// getDrumBus and driven straight off p.eqLow etc. in applyDrumBusParams) — this is exactly the
+// asymmetry the stream closes: they're now `effects`/`effectOrder`/`effectsSig` (EffectHost),
+// reconciled by the SAME reconcileEffectChain call SynthChain uses, so a drum track's insert order
+// is reorderable/add/remove/bypass-able through the identical `effects` list a synth track gets
+// (see BeatTrack.effects in document.ts). saturator/chorus/phaser/pingPong stay a FIXED tail after
+// the reorderable chain, unchanged — that was already true for synth tracks too (Phase 22 Stream
+// AC) and is explicitly out of this stream's scope (docs/effects-panel-redesign.md's "fixed vs
+// opt-in" distinction).
+interface DrumBus extends EffectHost {
   filter: Tone.Filter
-  eq3: Tone.EQ3
-  compIn: Tone.Gain
-  compDry: Tone.Gain
-  compressor: Tone.Compressor
-  compWet: Tone.Gain
-  compOut: Tone.Gain
-  distortion: Tone.Distortion
-  bitcrush: Tone.BitCrusher
   saturator: SaturatorNodes
   chorus: Tone.Chorus
   phaser: Tone.Phaser
@@ -1671,17 +1687,30 @@ interface Content {
 }
 
 /** One live instrument (SoundFont) track. `synth` is a spessasynth_lib WorkletSynthesizer running
- * on Tone's raw AudioContext; its output feeds `entry` (a native passthrough) → `muteGain` → `vol`
- * → `pan` → master. `sample`/`program` are the currently-loaded values, so syncInstruments() can
- * tell a cheap programChange from a full soundbank reload.
+ * on Tone's raw AudioContext; its output feeds `entry` (a native passthrough) → `fxIn` (a Tone
+ * bridge node — see below) → ...reorderable effects... → `muteGain` → `vol` → `pan` → master.
+ * `sample`/`program` are the currently-loaded values, so syncInstruments() can tell a cheap
+ * programChange from a full soundbank reload.
  * `muteGain` gates mute/solo (Phase 16 Stream K), same dedicated-gate discipline as
  * SynthChain.muteGain/DrumBus.muteGain — a separate node so it never fights the volume value.
  * `levelTap` is the post-fader side-tap (off `pan`, the last node before master) that
  * getTrackLevel() reads for this track's mixer meter, mirroring SynthChain.levelTap/
- * DrumBus.levelTap exactly (a waveform Analyser read as true RMS, not a decaying Tone.Meter). */
-interface InstrumentVoice {
+ * DrumBus.levelTap exactly (a waveform Analyser read as true RMS, not a decaying Tone.Meter).
+ *
+ * Phase 26 Stream DC: `fxIn`/`effects`/`effectOrder`/`effectsSig` (EffectHost) are new — instrument
+ * tracks previously had no insert chain at all (this file's own Phase 13 header comment used to
+ * say so explicitly). `fxIn` exists ONLY so reconcileEffectChain has a real Tone.ToneAudioNode
+ * entry point to splice into — `entry` itself is a native GainNode (the WorkletSynthesizer's raw
+ * output target), bridged into Tone via one fixed `Tone.connect(entry, fxIn)` made once in
+ * buildInstrument, exactly like SynthChain's fixed `filter -> headroom` connection. Deliberately
+ * NO fixed saturator/chorus/phaser/pingPong tail here (unlike SynthChain/DrumBus) — instrument
+ * tracks never had one, and adding it is out of this stream's scope (see docs/phase-26-plan.md
+ * Stream DC and effects-panel-redesign.md's fixed-vs-opt-in distinction: only the REORDERABLE
+ * chain is this stream's ask). */
+interface InstrumentVoice extends EffectHost {
   synth: WorkletSynthesizer
   entry: GainNode
+  fxIn: Tone.Gain
   muteGain: Tone.Gain
   vol: Tone.Volume
   pan: Tone.Panner
@@ -1825,26 +1854,6 @@ class Engine {
     return { reverb: this.reverbBus, delay: this.delayBus! }
   }
 
-  // filter -> EQ3 -> parallel comp -> distortion -> bitcrush -> (panner). dotbeat has no
-  // insertOrder field, so the order is fixed at BeatLab's default (['eq','comp','dist']); every
-  // insert is transparent at its default params (EQ 0 dB, compMix 0 = fully dry, distortion/
-  // bitcrush wet 0), so an unedited track's signal path is uncolored.
-  private wireInsertChain(
-    filter: Tone.ToneAudioNode,
-    eq3: Tone.EQ3,
-    compIn: Tone.Gain,
-    compOut: Tone.Gain,
-    distortion: Tone.Distortion,
-    bitcrush: Tone.BitCrusher,
-    saturator: SaturatorNodes,
-  ) {
-    filter.connect(eq3)
-    eq3.connect(compIn)
-    compOut.connect(distortion)
-    distortion.connect(bitcrush)
-    bitcrush.connect(saturator.in)
-  }
-
   /** Wire saturator -> chorus -> phaser -> pingPong -> nextStage (Phase 22 Stream AC's four new
    * inserts, in the fixed order research 17 §5 builds them — shared by buildSynthChain() and
    * getDrumBus() so the two chains never drift). */
@@ -1859,14 +1868,6 @@ class Engine {
     if (!this.drumBus) {
       const { reverb, delay } = this.getBuses()
       const filter = new Tone.Filter(12000, 'lowpass')
-      const eq3 = new Tone.EQ3()
-      const compIn = new Tone.Gain()
-      const compDry = new Tone.Gain(1)
-      const compressor = new Tone.Compressor()
-      const compWet = new Tone.Gain(0)
-      const compOut = new Tone.Gain()
-      const distortion = new Tone.Distortion({ distortion: 0, wet: 0 })
-      const bitcrush = new Tone.BitCrusher(8)
       const saturator = buildSaturator()
       const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 0 }).start()
       const phaser = new Tone.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 1000, wet: 0 })
@@ -1878,13 +1879,12 @@ class Engine {
       const reverbSend = new Tone.Gain(0)
       const delaySend = new Tone.Gain(0)
 
-      compIn.fan(compDry, compressor)
-      compressor.connect(compWet)
-      compDry.connect(compOut)
-      compWet.connect(compOut)
-      // ...bitcrush -> saturator -> chorus -> phaser -> pingPong -> muteGain -> panner: the mute
-      // gate is upstream of the fan-out so it catches the sends too.
-      this.wireInsertChain(filter, eq3, compIn, compOut, distortion, bitcrush, saturator)
+      // Phase 26 Stream DC: filter -> ...reorderable effects... -> saturator is NOT wired here —
+      // reconcileEffectChain (called from applyDrumBusParams, below) owns that whole link, exactly
+      // like buildSynthChain's own comment on this same pattern. effectsSig starts at
+      // EFFECTS_SIG_UNSET so the very first applyDrumBusParams call always reconciles, even for a
+      // drums track whose chain is explicitly empty. saturator->chorus->phaser->pingPong->muteGain
+      // ->panner IS static (Stream AC's fixed tail, unaffected by the reorderable list).
       this.wireFxTail(saturator, chorus, phaser, pingPong, muteGain)
       muteGain.connect(panner)
 
@@ -1900,12 +1900,15 @@ class Engine {
       vol.connect(delaySend)
       delaySend.connect(delay)
 
-      this.drumBus = { filter, eq3, compIn, compDry, compressor, compWet, compOut, distortion, bitcrush, saturator, chorus, phaser, pingPong, muteGain, levelTap, panner, vol, reverbSend, delaySend }
+      this.drumBus = {
+        filter, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET,
+        saturator, chorus, phaser, pingPong, muteGain, levelTap, panner, vol, reverbSend, delaySend,
+      }
     }
     return this.drumBus
   }
 
-  private applyDrumBusParams(p: EngineSynth) {
+  private applyDrumBusParams(p: EngineSynth, effects: BeatEffect[], trackId: string) {
     const bus = this.getDrumBus()
     bus.filter.frequency.value = p.cutoff
     bus.filter.Q.value = p.resonance
@@ -1921,19 +1924,11 @@ class Engine {
     bus.vol.volume.linearRampTo(p.volume, 0.02)
     bus.reverbSend.gain.value = p.sendReverb
     bus.delaySend.gain.value = p.sendDelay
-    bus.eq3.low.value = p.eqLow
-    bus.eq3.mid.value = p.eqMid
-    bus.eq3.high.value = p.eqHigh
-    bus.compressor.threshold.value = p.compThreshold
-    bus.compressor.ratio.value = p.compRatio
-    bus.compressor.attack.value = p.compAttack
-    bus.compressor.release.value = p.compRelease
-    bus.compWet.gain.value = p.compMix
-    bus.compDry.gain.value = 1 - p.compMix
-    bus.distortion.distortion = p.distortionAmount
-    bus.distortion.wet.value = p.distortionMix
-    bus.bitcrush.bits.value = Math.round(p.bitcrushBits)
-    bus.bitcrush.wet.value = p.bitcrushMix
+    // Phase 26 Stream DC: eq3/comp/distortion/bitcrush (and now, if `effect-add`ed, any of the
+    // other eight EffectType members too — see DrumBus's own doc comment) are reconciled/applied
+    // through the SAME machinery buildSynthChain/applyParams use, not hand-set here individually.
+    this.reconcileEffectChain(bus, bus.filter, bus.saturator.in, effects, trackId)
+    for (const runtime of bus.effects.values()) applyEffectParams(runtime, p)
     applySaturator(bus.saturator, p.saturatorCurve, p.saturatorDrive, p.saturatorMix)
     // chorusMode 'off' forces wet=0 regardless of chorusMix (mirrors the *Mix=0-bypasses
     // convention every other insert follows); 'vibrato' forces wet=1 fixed, no dry blend —
@@ -2303,7 +2298,7 @@ class Engine {
     if (drumsTrack) {
       const p = coerce(drumsTrack.synth)
       this.applyDrumVoiceParams(p)
-      this.applyDrumBusParams(p)
+      this.applyDrumBusParams(p, drumsTrack.effects ?? [], drumsTrack.id)
     }
     this.started = true
   }
@@ -2418,9 +2413,9 @@ class Engine {
     chain.lastWtPos = pos
   }
 
-  /** Rebuilds the chain's SPINE (filter -> ...ordered, enabled effects... -> muteGain) whenever
-   * the track's declared effect list's shape changed (add/remove/reorder/bypass) since the last
-   * reconcile — never on an unrelated param tick (cheap: a plain string compare against
+  /** Rebuilds a host's effect SPINE (`entry` -> ...ordered, enabled effects... -> `downstream`)
+   * whenever the track's declared effect list's shape changed (add/remove/reorder/bypass) since
+   * the last reconcile — never on an unrelated param tick (cheap: a plain string compare against
    * `effectsSig`). Disposes runtimes for ids no longer declared, builds runtimes for new ids,
    * reuses (and re-parents) everything else — so a live-playing voice's comp/eq3/etc. nodes
    * survive a reorder, only their position in the graph changes. A disabled effect's node is
@@ -2429,42 +2424,46 @@ class Engine {
    * comment in src/core/document.ts; this is the one place that "real bypass" choice is
    * implemented). `trackId` is threaded through ONLY so vinylDistortion instances can seed their
    * reproducible noise buffer from (trackId, effect id) — see buildEffectRuntime/
-   * buildVinylDistortion. */
-  private reconcileEffectChain(chain: SynthChain, effects: BeatEffect[], trackId: string): void {
+   * buildVinylDistortion.
+   *
+   * Phase 26 Stream DC: generalized from SynthChain-only to any EffectHost (SynthChain, DrumBus,
+   * InstrumentVoice) — `entry`/`downstream` are passed explicitly by the caller rather than read
+   * off fixed `chain.headroom`/`chain.saturator.in` fields, since where the spine sits in each
+   * host's own graph differs (see EffectHost's doc comment). Disconnecting `entry`'s own outgoing
+   * connection is safe and precise in every case — it only removes the spine link this function
+   * itself created (an effect's internal wiring, e.g. comp's dry/wet fan-in, was never touched and
+   * stays intact); whatever FIXED connection feeds `entry` (filter->headroom, or a drum bus's own
+   * filter, or an instrument voice's native->Tone bridge) is made once elsewhere and untouched
+   * here. */
+  private reconcileEffectChain(host: EffectHost, entry: Tone.ToneAudioNode, downstream: Tone.ToneAudioNode, effects: BeatEffect[], trackId: string): void {
     const sig = effects.map((e) => `${e.id}:${e.type}:${e.enabled}`).join('|')
-    if (sig === chain.effectsSig) return
+    if (sig === host.effectsSig) return
 
     const wanted = new Set(effects.map((e) => e.id))
-    for (const [id, runtime] of [...chain.effects]) {
+    for (const [id, runtime] of [...host.effects]) {
       if (!wanted.has(id)) {
         for (const n of runtime.nodes) n.dispose()
         if (runtime.raw) for (const n of runtime.raw) n.disconnect()
-        chain.effects.delete(id)
+        host.effects.delete(id)
       }
     }
     for (const e of effects) {
-      if (!chain.effects.has(e.id)) chain.effects.set(e.id, buildEffectRuntime(e.id, e.type, trackId))
+      if (!host.effects.has(e.id)) host.effects.set(e.id, buildEffectRuntime(e.id, e.type, trackId))
     }
 
-    // Re-wire the spine: headroom -> [enabled effects, in file order] -> muteGain. `filter ->
-    // headroom` itself is a FIXED connection made once in buildSynthChain (the headroom trim is
-    // pre-fader gain-staging, not part of the reorderable chain), so only headroom's own outgoing
-    // connection is ours to touch here. Disconnecting each boundary node's OWN outgoing connection
-    // is safe and precise — it only removes the spine link this function itself created (an
-    // effect's internal wiring, e.g. comp's dry/wet fan-in, was never touched and stays intact).
-    chain.headroom.disconnect()
-    for (const runtime of chain.effects.values()) runtime.exit.disconnect()
-    let upstream: Tone.ToneAudioNode = chain.headroom
+    entry.disconnect()
+    for (const runtime of host.effects.values()) runtime.exit.disconnect()
+    let upstream: Tone.ToneAudioNode = entry
     for (const e of effects) {
       if (!e.enabled) continue
-      const runtime = chain.effects.get(e.id)!
+      const runtime = host.effects.get(e.id)!
       upstream.connect(runtime.entry)
       upstream = runtime.exit
     }
-    upstream.connect(chain.saturator.in)
+    upstream.connect(downstream)
 
-    chain.effectOrder = effects.map((e) => e.id)
-    chain.effectsSig = sig
+    host.effectOrder = effects.map((e) => e.id)
+    host.effectsSig = sig
   }
 
   private applyParams(chain: SynthChain, p: EngineSynth, effects: BeatEffect[], trackId: string): void {
@@ -2510,7 +2509,7 @@ class Engine {
     chain.vol.volume.linearRampTo(p.volume, 0.02)
     chain.reverbSend.gain.value = p.sendReverb
     chain.delaySend.gain.value = p.sendDelay
-    this.reconcileEffectChain(chain, effects, trackId)
+    this.reconcileEffectChain(chain, chain.headroom, chain.saturator.in, effects, trackId)
     for (const runtime of chain.effects.values()) applyEffectParams(runtime, p)
     applySaturator(chain.saturator, p.saturatorCurve, p.saturatorDrive, p.saturatorMix)
     // See applyDrumBusParams for the chorusMode 'off'/'vibrato' special-casing rationale.
@@ -2565,7 +2564,7 @@ class Engine {
     this.drumDeclaredMode = !!drumsTrack && drumsTrack.lanes.length > 0
     if (drumsTrack) {
       const p = coerce(drumsTrack.synth)
-      this.applyDrumBusParams(p)
+      this.applyDrumBusParams(p, drumsTrack.effects ?? [], drumsTrack.id)
       if (this.drumDeclaredMode) {
         this.syncDeclaredDrumLanes(doc, drumsTrack)
       } else {
@@ -2673,15 +2672,24 @@ class Engine {
       }
       const entry = ctx.createGain()
       synth.connect(entry)
+      const fxIn = new Tone.Gain()
       const muteGain = new Tone.Gain(1)
       const vol = new Tone.Volume(applyVolumeFloor(inst.volume))
       const pan = new Tone.Panner(inst.pan)
       const levelTap = new Tone.Analyser('waveform', 256)
-      Tone.connect(entry, muteGain)
+      // Phase 26 Stream DC: entry (native) -> fxIn (Tone bridge) is a FIXED connection, made once
+      // here — the reorderable effect chain splices between fxIn and muteGain, reconciled every
+      // sync() tick from syncInstruments() (see reconcileEffectChain's own doc comment). fxIn's
+      // sole job is giving reconcileEffectChain a real Tone.ToneAudioNode to disconnect/reconnect;
+      // it has no gain-staging role of its own (unlike SynthChain's headroom trim).
+      Tone.connect(entry, fxIn)
       muteGain.chain(vol, pan, this.getMaster())
       pan.connect(levelTap) // post-fader side-tap (not in the audible path), see InstrumentVoice doc
       synth.programChange(0, inst.program)
-      this.instruments.set(trackId, { synth, entry, muteGain, vol, pan, levelTap, sample: inst.sample, program: inst.program })
+      this.instruments.set(trackId, {
+        synth, entry, fxIn, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET,
+        muteGain, vol, pan, levelTap, sample: inst.sample, program: inst.program,
+      })
     } catch (err) {
       console.warn(`[engine] instrument "${trackId}" failed to load:`, err)
     } finally {
@@ -2698,6 +2706,11 @@ class Engine {
       // best-effort teardown
     }
     voice.entry.disconnect()
+    voice.fxIn.dispose()
+    for (const runtime of voice.effects.values()) {
+      for (const n of runtime.nodes) n.dispose()
+      if (runtime.raw) for (const n of runtime.raw) n.disconnect()
+    }
     voice.muteGain.dispose()
     voice.vol.dispose()
     voice.pan.dispose()
@@ -2705,9 +2718,9 @@ class Engine {
   }
 
   /** Reconcile live instrument voices with the document: dispose vanished tracks, (re)build new or
-   * sample-changed ones, apply program/volume/pan on existing ones. Cheap program changes and
-   * level/pan updates are synchronous; a new track or a changed soundfont triggers an async
-   * (re)build. */
+   * sample-changed ones, apply program/volume/pan and the reorderable effect chain on existing
+   * ones. Cheap program/level/pan/effect-chain updates are synchronous; a new track or a changed
+   * soundfont triggers an async (re)build. */
   private syncInstruments(doc: BeatDocument): void {
     const wanted = new Set(doc.tracks.filter((t) => t.kind === 'instrument' && t.instrument).map((t) => t.id))
     for (const [id, voice] of [...this.instruments]) {
@@ -2742,6 +2755,16 @@ class Engine {
       // Ramped, not an instant jump — same anti-click reasoning as applyDrumBusParams's bus.vol.
       voice.vol.volume.linearRampTo(applyVolumeFloor(inst.volume), 0.02)
       voice.pan.pan.value = inst.pan
+      // Phase 26 Stream DC: the same reorderable effect chain synth/drum tracks get, spliced
+      // between the native synth output (fxIn) and the mute gate — see InstrumentVoice's own doc
+      // comment. `coerce(track.synth)` reads the same shared BeatSynth block every other track
+      // kind's effect knobs come from; for an instrument track that's the ~12 EffectType params
+      // (INSTRUMENT_EFFECT_FIELD_KEYS in document.ts) an agent/GUI can now set, everything else
+      // pinned at its INIT_SYNTH default (meaningless on a SoundFont voice, so never wired to
+      // anything here).
+      const p = coerce(track.synth)
+      this.reconcileEffectChain(voice, voice.fxIn, voice.muteGain, track.effects ?? [], track.id)
+      for (const runtime of voice.effects.values()) applyEffectParams(runtime, p)
     }
   }
 

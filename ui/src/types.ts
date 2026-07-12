@@ -206,8 +206,11 @@ export interface BeatSongSection {
 }
 
 // v0.10 (Phase 22 Stream AA): the ordered, reorderable per-track effect chain — mirrors
-// src/core/document.ts's EffectType/BeatEffect exactly. Synth tracks only (drum/instrument tracks
-// carry []); array order IS chain order (see ui/src/audio/engine.ts's buildSynthChain).
+// src/core/document.ts's EffectType/BeatEffect exactly. Originally synth-tracks-only; Phase 26
+// Stream DC widened it to every track kind (drum tracks' old fixed bus insert order folded into
+// this same reorderable list, instrument tracks gained one for the first time — see
+// src/core/document.ts's BeatTrack.effects comment). Array order IS chain order (see
+// ui/src/audio/engine.ts's reconcileEffectChain).
 // Phase 23 Streams BD, BE, and BF each widened this additively — see src/core/document.ts's
 // EffectType comment for why defaultEffectChain (engine.ts side: the migration target) stays the
 // original four regardless of this widened list, and why all eight new types are real chain

@@ -4,7 +4,7 @@
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
 import type { BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -279,7 +279,25 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
       if (!doc.media.some((m) => m.id === value)) throw new BeatEditError(`no sample "${value}" in the media block — register it with beat sample first`)
       return replaceTrack(doc, { ...track, instrument: { ...inst, sample: value } })
     }
-    throw new BeatEditError(`unknown field "${rest}" on instrument track "${trackId}" (have: soundfont, program, volume, pan, name, color)`)
+    // Phase 26 Stream DC: an instrument track's effect-chain param fields (eqLow, distortionMix,
+    // etc.) — the 12 EffectType members' own knobs, restricted via INSTRUMENT_EFFECT_FIELD_KEYS to
+    // the fields that actually apply to a SoundFont voice (see that constant's doc comment). Table-
+    // driven, same switch as the general optional-synth-fields branch below, just gated to this
+    // narrower key set instead of every SYNTH_FIELDS entry.
+    if (INSTRUMENT_EFFECT_FIELD_KEYS.has(rest)) {
+      const def = SYNTH_FIELD_BY_KEY.get(rest)!
+      switch (def.kind) {
+        case 'number':
+          return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: parseNum(value, rest) } })
+        case 'enum':
+          if (!def.values!.includes(value)) throw new BeatEditError(`${rest} must be one of ${def.values!.join('|')}, got "${value}"`)
+          return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: value } })
+        case 'bool':
+          if (value !== 'true' && value !== 'false') throw new BeatEditError(`${rest} must be true or false, got "${value}"`)
+          return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: value === 'true' } })
+      }
+    }
+    throw new BeatEditError(`unknown field "${rest}" on instrument track "${trackId}" (have: soundfont, program, volume, pan, name, color; effect-chain params: ${[...INSTRUMENT_EFFECT_FIELD_KEYS].join(', ')})`)
   }
 
   // required core synth params
@@ -534,7 +552,9 @@ export function duplicateNotes(doc: BeatDocument, trackId: string, opts: Duplica
 /** v0.10 effect-chain primitives (docs/phase-22-stream-aa.md). A track's `effects` array IS the
  * insert chain's order — these are the only ways to change it, so every mutation stays a small,
  * explicit list edit (add one entry, drop one entry, move one entry, flip one flag) rather than a
- * hand-rolled array splice at each call site. Synth tracks only — see BeatTrack.effects. */
+ * hand-rolled array splice at each call site. Phase 26 Stream DC widened this from synth-only to
+ * every track kind except 'audio' (which carries no live/non-clip content at all) — see
+ * BeatTrack.effects's comment in document.ts. */
 
 /** Adds a new effect instance. Mints `<type>` (or `<type>_2`, `_3`, ... on collision) when `id` is
  * omitted; errors if a given id already exists on the track. `index` inserts at that position
@@ -542,7 +562,7 @@ export function duplicateNotes(doc: BeatDocument, trackId: string, opts: Duplica
  * default for "add a new insert"). */
 export function addEffect(doc: BeatDocument, trackId: string, type: EffectType, opts: { id?: string; index?: number; enabled?: boolean } = {}): { doc: BeatDocument; effect: BeatEffect } {
   const track = findTrack(doc, trackId)
-  if (track.kind !== 'synth') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — effect chains only belong on synth tracks`)
+  if (track.kind === 'audio') throw new BeatEditError(`track "${trackId}" is an audio track — effect chains only belong on synth/drums/instrument tracks`)
   if (!(EFFECT_TYPES as readonly string[]).includes(type)) throw new BeatEditError(`effect type must be one of ${EFFECT_TYPES.join('|')}, got "${type}"`)
   let id = opts.id
   if (id === undefined) {
@@ -639,9 +659,12 @@ export function addTrack(
     clips: [],
     notes: [],
     hits: [],
-    // v0.10: a fresh synth track starts on the format's default chain (elided on serialize, same
-    // as every other init-patch default); drum/instrument tracks carry none.
-    effects: kind === 'synth' ? defaultEffectChain() : [],
+    // v0.10: a fresh synth or drums track starts on the format's default chain (elided on
+    // serialize, same as every other init-patch default) — Phase 26 Stream DC: drums matches
+    // synth here now that the old fixed bus insert is folded into this same reorderable list (see
+    // BeatTrack.effects). A fresh instrument track carries none — it never had a fixed insert to
+    // preserve backward compatibility with.
+    effects: kind === 'synth' || kind === 'drums' ? defaultEffectChain() : [],
     shuffleAmount: 0,
     shuffleGrid: 1,
   }

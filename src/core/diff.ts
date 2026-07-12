@@ -183,11 +183,16 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
       if (ta.instrument.volume !== tb.instrument.volume) out.push({ kind: 'instrument-param', trackId: id, param: 'volume', before: ta.instrument.volume, after: tb.instrument.volume })
       if (ta.instrument.pan !== tb.instrument.pan) out.push({ kind: 'instrument-param', trackId: id, param: 'pan', before: ta.instrument.pan, after: tb.instrument.pan })
     }
-    if (ta.kind !== 'instrument') {
-      for (const param of [...SYNTH_PARAM_ORDER, ...SYNTH_FIELDS.map((f) => f.key)]) {
-        if (ta.synth[param] !== tb.synth[param]) {
-          out.push({ kind: 'synth-param', trackId: id, param, before: ta.synth[param], after: tb.synth[param] })
-        }
+    // Phase 26 Stream DC: instrument tracks used to be skipped entirely here (their `synth` object
+    // was a pure unused placeholder — no field on it was ever settable). Now that instrument
+    // tracks can carry real effect-chain params (INSTRUMENT_EFFECT_FIELD_KEYS in document.ts —
+    // eqLow, distortionMix, etc.), diffing unconditionally is correct AND safe: every other
+    // SYNTH_FIELDS/SYNTH_PARAM_ORDER key stays pinned at its INIT_SYNTH default on an instrument
+    // track (edit.ts/parse.ts reject setting anything outside that key set on one), so this can
+    // never produce a spurious diff for a field that was never actually reachable.
+    for (const param of [...SYNTH_PARAM_ORDER, ...SYNTH_FIELDS.map((f) => f.key)]) {
+      if (ta.synth[param] !== tb.synth[param]) {
+        out.push({ kind: 'synth-param', trackId: id, param, before: ta.synth[param], after: tb.synth[param] })
       }
     }
 

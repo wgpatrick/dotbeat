@@ -101,11 +101,16 @@ test('the four new types support remove/bypass/diff exactly like the original fo
   assert.match(formatDiff(entries), /effect added trem1/)
 })
 
-test('addEffect rejects an unknown type and non-synth tracks, same as the original four', () => {
+// Phase 26 Stream DC: drum tracks now accept effect-add for every type, including these four
+// (previously synth-tracks-only) — only the unknown-type rejection and audio tracks still throw.
+test('addEffect rejects an unknown type and audio tracks; drums now accepts these four too', () => {
   const before = freshSynthTrack()
   assert.throws(() => addEffect(before, 'lead2', 'reverb' as never), BeatEditError)
   const { doc: drums } = addTrack(before, { id: 'drums', kind: 'drums' })
-  assert.throws(() => addEffect(drums, 'drums', 'autoPan'), BeatEditError)
+  const { effect } = addEffect(drums, 'drums', 'autoPan')
+  assert.equal(effect.type, 'autoPan')
+  const { doc: audioDoc } = addTrack(before, { id: 'atrk', kind: 'audio' })
+  assert.throws(() => addEffect(audioDoc, 'atrk', 'autoPan'), BeatEditError)
 })
 
 test('Auto Filter / Auto Pan / Tremolo / Utility params follow the standard canonical-elision contract', () => {

@@ -1,5 +1,5 @@
 import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -97,6 +97,13 @@ export function parse(text: string): BeatDocument {
   // explicit `effects none` (stay empty) from "never declared" (apply the default).
   const effectsSeen = new Set<BeatTrack>()
   const effectsNoneSeen = new Set<BeatTrack>()
+  // Phase 26 Stream DC: an instrument track's bare effect-param field lines (e.g. `distortionMix
+  // 0.4`) — the same ad hoc "field line directly under the track, no `synth` wrapper" shape
+  // volume/pan already use for instrument tracks, widened to the 12 EffectType chain members'
+  // own params (INSTRUMENT_EFFECT_FIELD_KEYS) so the reorderable effects chain Stream DC gives
+  // instrument tracks has real, persisted knobs behind it. Tracked per-track (like synthSeen) to
+  // reject duplicate lines the same way a duplicate `synth` param line is rejected.
+  const instrumentFieldsSeen = new Map<BeatTrack, Set<string>>()
 
   // v0.9: closes any open automation lane, validating it has >= 1 point (a lane with zero
   // points has no canonical serialized form — see BeatAutomationLane) and unique point ids.
@@ -162,7 +169,14 @@ export function parse(text: string): BeatDocument {
       throw new BeatParseError(`instrument track "${currentTrack.id}" is missing its soundfont line`, lineNo)
     }
     // v0.10: no explicit effect declaration at all -> the canonical default chain (see above).
-    if (currentTrack.kind === 'synth' && !effectsSeen.has(currentTrack)) {
+    // Phase 26 Stream DC: drum tracks migrate to the SAME default (eq3->comp->distortion->
+    // bitcrush, all enabled) — this is what makes a pre-Stream-DC file's drum bus (previously a
+    // fixed, non-reorderable insert order at these same params' default values) sound byte-for-
+    // byte identical after the fold-in; only a track that explicitly declares `effect`/`effects`
+    // lines (or `effects none`) departs from it. Instrument tracks are NOT included here — they
+    // never had a chain before, so the correct migration target is [], not a chain built for a
+    // fixed insert order they never actually had.
+    if ((currentTrack.kind === 'synth' || currentTrack.kind === 'drums') && !effectsSeen.has(currentTrack)) {
       currentTrack.effects = defaultEffectChain()
     }
   }
@@ -579,14 +593,48 @@ export function parse(text: string): BeatDocument {
         currentTrack.instrument[keyword] = v
         continue
       }
+      // Phase 26 Stream DC: an instrument track's effect-chain param fields — see
+      // instrumentFieldsSeen's own comment above for why this mirrors the volume/pan branch just
+      // above rather than requiring a `synth` block (which instrument tracks still don't get; the
+      // core 9 + non-effect optional fields genuinely don't apply to a SoundFont voice).
+      if (currentTrack.kind === 'instrument' && INSTRUMENT_EFFECT_FIELD_KEYS.has(keyword)) {
+        if (!currentTrack.instrument) throw new BeatParseError(`"${keyword}" must come after the soundfont line`, lineNo)
+        if (tokens.length !== 2) throw new BeatParseError(`"${keyword}" expects exactly 1 value`, lineNo)
+        const seen = instrumentFieldsSeen.get(currentTrack) ?? new Set<string>()
+        if (seen.has(keyword)) throw new BeatParseError(`duplicate synth param "${keyword}"`, lineNo)
+        seen.add(keyword)
+        instrumentFieldsSeen.set(currentTrack, seen)
+        const def = SYNTH_FIELD_BY_KEY.get(keyword)!
+        const value = tokens[1]!
+        const synth = currentTrack.synth as unknown as Record<string, unknown>
+        switch (def.kind) {
+          case 'number':
+            synth[def.key] = parseFloatStrict(value, lineNo, keyword)
+            break
+          case 'enum':
+            if (!def.values!.includes(value)) throw new BeatParseError(`${keyword} must be one of ${def.values!.join('|')}, got "${value}"`, lineNo)
+            synth[def.key] = value
+            break
+          case 'bool':
+            if (value !== 'true' && value !== 'false') throw new BeatParseError(`${keyword} must be true or false, got "${value}"`, lineNo)
+            synth[def.key] = value === 'true'
+            break
+          default:
+            // No EFFECT_PARAM_KEYS entry is 'trackref'-kind (no effect param references a track).
+            throw new BeatParseError(`unexpected field kind for "${keyword}"`, lineNo)
+        }
+        continue
+      }
       closeSynthIfOpen(lineNo)
       // v0.10: `effect <id> <type> [bypassed]` — one insert-chain entry, in file order (order IS
       // chain order). `effects none` is the explicit-empty-chain sentinel (distinguishes "the
       // user emptied the chain" from "the file never mentions effects" — see defaultEffectChain's
-      // comment). Both are synth-track-only; see BeatTrack.effects.
+      // comment). Phase 26 Stream DC: widened from synth-only to every track kind — see
+      // BeatTrack.effects's comment for why (audio tracks are the one kind still excluded; they
+      // carry no live/non-clip content at all, effects or otherwise).
       if (keyword === 'effect' || keyword === 'effects') {
         closeClipIfOpen(lineNo)
-        if (currentTrack.kind !== 'synth') throw new BeatParseError(`"${keyword}" lines only belong on synth tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+        if (currentTrack.kind === 'audio') throw new BeatParseError(`"${keyword}" lines only belong on synth/drums/instrument tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
         if (keyword === 'effects') {
           if (tokens.length !== 2 || tokens[1] !== 'none') throw new BeatParseError('effects takes exactly one value: none', lineNo)
           if (effectsSeen.has(currentTrack)) throw new BeatParseError(`track "${currentTrack.id}" already has an effect chain declaration`, lineNo)

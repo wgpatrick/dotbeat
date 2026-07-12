@@ -45,9 +45,10 @@ function describeTrack(t: BeatTrack, loopSteps: number): string[] {
   } else {
     lines.push(`  synth: ${s.osc}, ${formatNumber(s.volume)} dB, cutoff ${formatNumber(s.cutoff)} Hz, res ${formatNumber(s.resonance)}, ADSR ${formatNumber(s.attack)}/${formatNumber(s.decay)}/${formatNumber(s.sustain)}/${formatNumber(s.release)}, pan ${formatNumber(s.pan)}`)
   }
-  // v0.10: the ordered insert-effect chain (synth tracks only) — always shown, even at the default
-  // order, so an agent can see chain order without diffing against the format's default.
-  if (t.kind === 'synth') {
+  // v0.10: the ordered insert-effect chain — always shown, even at the default order, so an agent
+  // can see chain order without diffing against the format's default. Phase 26 Stream DC widened
+  // this from synth-only to drums/instrument too (audio tracks carry no effects chain).
+  if (t.kind === 'synth' || t.kind === 'drums' || t.kind === 'instrument') {
     const chain = t.effects.map((e) => `${e.id}(${e.type}${e.enabled ? '' : ', bypassed'})`).join(' -> ')
     lines.push(`  effects: ${chain || '(none)'}`)
   }
