@@ -17,6 +17,18 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: 'decisions.md',
   },
+  {
+    area: 'File format & core engine', feature: 'Reference-counted git-lfs asset GC',
+    description: 'A `beat lfs gc`-style command tracking which LFS objects are still referenced by any project on the machine, so orphaned sample/preset media can be safely deleted. git-lfs dedupes by content hash within a repo but has no native answer to "is this still used anywhere."',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/23-opendaw-collaboration-storage.md', plan: null,
+  },
+  {
+    area: 'File format & core engine', feature: 'git-lfs file locking for binary media',
+    description: 'Adopt git-lfs\'s existing `git lfs lock` (unused today) as a soft mutex with an honest override warning — the one part of a .beat project git genuinely can\'t diff/merge.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/23-opendaw-collaboration-storage.md', plan: null,
+  },
 
   // ── Track management ────────────────────────────────────────────────────
   {
@@ -62,6 +74,30 @@ export const rows = [
     description: 'One-shot edit primitives that rewrite note lines and produce a normal diff — CLI/MCP-first, same pattern as quantize.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/18-ableton-ui-architecture.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Groove / shuffle as a reversible time-warp',
+    description: 'Two literal fields (shuffleAmount, shuffleGrid) applied at read-time via warp()/unwarp() — never baked into stored note positions. Fits dotbeat\'s existing "quantize is an operation, not grid-lock" philosophy better than a stored per-note swing offset would.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/22-opendaw-editing-workflow.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Per-note probability (chance)',
+    description: 'A 0-100 field re-rolled via seeded RNG at each playback pass — cheap, real generative-sequencing capability from one scalar and one comparison in the trigger path.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/22-opendaw-editing-workflow.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Note ratchet / repeat (play-count + curve)',
+    description: 'Repeat a note N times within its duration with curve-shaped spacing, plus a "consolidate" action to bake it back into discrete notes. Design the richer 3-field shape (count + curve + per-repeat length) rather than openDAW\'s narrower 2-field version, which their own team is already mid-refactor away from.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/22-opendaw-editing-workflow.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Per-note micro-tuning (cent offset)',
+    description: 'A ±50-cent float field independent of semitone pitch, for expressive/microtonal tuning.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/22-opendaw-editing-workflow.md', plan: null,
   },
 
   // ── Drum programming ─────────────────────────────────────────────────────
@@ -115,6 +151,12 @@ export const rows = [
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/18-ableton-ui-architecture.md', plan: null,
   },
+  {
+    area: 'Arrangement / song structure', feature: 'Overlapping-region resolution policy (clip / push / keep-existing)',
+    description: 'A user-configurable preference for what happens when two regions/sections overlap, push direction always downward, never cascading. "keep-existing" ("don\'t disturb my arrangement") is a real, non-obvious default worth having once dotbeat\'s section model needs overlap semantics.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/22-opendaw-editing-workflow.md', plan: null,
+  },
 
   // ── Synth sound design ──────────────────────────────────────────────────
   {
@@ -128,6 +170,12 @@ export const rows = [
     description: 'wtPos exists in the format and an LFO can target it, but no wavetable oscillator exists in the engine — currently a dead knob.',
     core: 'missing', cli: 'na', gui: 'missing', status: 'not-started',
     research: null, plan: null,
+  },
+  {
+    area: 'Synth sound design', feature: 'Per-instrument polyphony limit + glide mode',
+    description: 'Mono/legato/portamento voice-count and glide-time fields per instrument — a concrete, bounded addition to the existing synth field set, not a new instrument.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/24-opendaw-roadmap-positioning.md', plan: null,
   },
 
   // ── LFOs / modulation ────────────────────────────────────────────────────
@@ -151,6 +199,12 @@ export const rows = [
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: null, plan: null,
   },
+  {
+    area: 'Instrument / SoundFont tracks', feature: 'One-shot sampler instrument track kind',
+    description: 'A lean sampler instrument (volume, sample, release, pitch-tracking — 3-4 literal fields) as a track kind distinct from the implicit "every track is a synth" assumption.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/21-opendaw-devices-effects.md', plan: null,
+  },
 
   // ── Mixer ────────────────────────────────────────────────────────────────
   {
@@ -173,11 +227,17 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'done', status: 'done',
     research: null, plan: 'phase-13-editing.md',
   },
+  {
+    area: 'Core effects', feature: 'Ordered, reorderable per-track effect chain',
+    description: 'Replace the fixed EQ→comp→dist→bitcrush insert order with an explicit ordered list of effect blocks — as flat literal text (order = line order), never a pointer/index indirection like openDAW\'s box graph uses.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/21-opendaw-devices-effects.md', plan: null,
+  },
 
   // ── Extended FX arsenal ──────────────────────────────────────────────────
   {
     area: 'Extended FX arsenal', feature: 'Ping Pong Delay',
-    description: 'Tone.PingPongDelay as a per-track insert — the cheapest of the two owner-named asks.',
+    description: 'Tone.PingPongDelay as a per-track insert — the cheapest of the two owner-named asks. Fold in continuously-variable cross-feedback + delay-time LFO wobble (research 21) rather than a binary ping-pong toggle.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/17-track-fx-arsenal.md', plan: null,
   },
@@ -200,6 +260,12 @@ export const rows = [
     research: 'research/17-track-fx-arsenal.md', plan: null,
   },
   {
+    area: 'Extended FX arsenal', feature: '7-band parametric EQ',
+    description: 'HP/LP with selectable slope + Q, 3 bell bands, 2 shelf bands, each independently enabled — same field-set-device shape as EQ3/compressor, just more bands. EQ3 can\'t do a real parametric bell cut; natural next tier after the research-17 build-next-four.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/21-opendaw-devices-effects.md', plan: null,
+  },
+  {
     area: 'Extended FX arsenal', feature: 'Auto Filter / Auto Pan / Tremolo',
     description: 'Dedicated Ableton-named devices — deferred since the shared LFO destination matrix already covers the sonic capability.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
@@ -207,7 +273,7 @@ export const rows = [
   },
   {
     area: 'Extended FX arsenal', feature: 'Redux (downsampling half)',
-    description: 'Bit-reduction already ships; sample-rate downsampling needs a small custom node (no Tone.js built-in).',
+    description: 'Bit-reduction already ships; sample-rate downsampling needs a small custom node (no Tone.js built-in). Consider folding bits+downsample into one "Crusher"-style field group with a shared enable/mix, per research 21, rather than two independently-toggled devices.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/17-track-fx-arsenal.md', plan: null,
   },
@@ -269,6 +335,12 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'done', status: 'done',
     research: null, plan: 'phase-15-history-panel.md',
   },
+  {
+    area: 'Versioning / history', feature: 'Musical-language git-merge conflict narration',
+    description: 'A `beat merge --explain` that narrates a merge conflict in the same phrasing D8 already uses for diffs ("both changed trk_bass.cutoff: 1200Hz vs 800Hz") instead of raw <<<<<<< markers. Reuses D8\'s DiffEntry machinery unchanged.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/23-opendaw-collaboration-storage.md', plan: null,
+  },
 
   // ── Vary / audition loop ────────────────────────────────────────────────
   {
@@ -298,6 +370,12 @@ export const rows = [
     description: 'Agent-facing per decisions.md D2 ("LLM narrates, never judges alone") — no GUI meter display planned, not a gap.',
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: 'decisions.md',
+  },
+  {
+    area: 'Metrics / critique loop', feature: 'GUI spectrum / level visualization',
+    description: 'A real-time FFT/level display reusing the exact spectral data `beat metrics` already computes server-side — a visualization of existing data, not a new judgment surface, so it doesn\'t reopen D2\'s "LLM narrates, never judges alone" decision.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/24-opendaw-roadmap-positioning.md', plan: null,
   },
 
   // ── Selection protocol ───────────────────────────────────────────────────
@@ -363,6 +441,18 @@ export const rows = [
     core: 'na', cli: 'done', gui: 'missing', status: 'not-started',
     research: null, plan: null,
   },
+  {
+    area: 'Project / folder management', feature: 'Save project as template',
+    description: '"Save as Template" opens as a fresh unsaved copy, never mutating the original — a natural fit for dotbeat\'s git-native model as "copy this file/folder as a new project," arguably cleaner than a browser-storage version.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/24-opendaw-roadmap-positioning.md', plan: null,
+  },
+  {
+    area: 'Project / folder management', feature: 'Optional cloud-folder sync (BYO storage)',
+    description: 'Sync a project folder to a drive the user already has (Nextcloud/Dropbox/GDrive via one storage-agnostic interface) for multi-machine convenience — explicitly not live collaboration; git still owns history/versioning. Not scoped or requested yet, noted as the right shape if/when it is.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/23-opendaw-collaboration-storage.md', plan: null,
+  },
 
   // ── Desktop app / packaging ──────────────────────────────────────────────
   {
@@ -398,8 +488,20 @@ export const rows = [
     research: 'research/16-audio-clip-editing.md', plan: null,
   },
   {
+    area: 'Audio-region clip editing', feature: 'Region-level fade in/out handles',
+    description: 'Two draggable, region-relative 0..1 handles at region edges (linear, crossing = min of both, snap-to-grid) — a small format addition (two normalized fields per region), well-specified prior art.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/24-opendaw-roadmap-positioning.md', plan: null,
+  },
+  {
+    area: 'Audio-region clip editing', feature: 'Tape-emulation knobs on audio-clip tracks',
+    description: 'Four unipolar "tape character" fields (flutter/wow/noise/saturation) baked into the region player itself, not a separate effect — cheap, on-brand with SYNTH_FIELDS\' small evocative knobs, could share saturation-curve code with the Saturator FX.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/21-opendaw-devices-effects.md', plan: null,
+  },
+  {
     area: 'Audio-region clip editing', feature: 'Warp markers + Complex-mode stretch',
-    description: 'Marker-list format addition plus a real stretch-algorithm integration via signalsmith-stretch (MIT/WASM).',
+    description: 'Marker-list format addition plus a real stretch-algorithm integration via signalsmith-stretch (MIT/WASM). Consider the 3-way TransientPlayMode vocabulary (Once/Repeat/Pingpong — research 22) for "what happens to a hit between two markers," smaller than Ableton\'s 5-way named-warp-mode system.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/16-audio-clip-editing.md', plan: null,
   },
@@ -408,6 +510,18 @@ export const rows = [
     description: 'Onset/transient detection plus the stretch library; sequence after the rest of the audio-clip format proves out.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/16-audio-clip-editing.md', plan: null,
+  },
+  {
+    area: 'Audio-region clip editing', feature: 'Bounce / freeze a MIDI clip to audio',
+    description: 'Render a MIDI clip, with its full effect chain, to a new audio clip in place — directly composable with the existing render engine once the audio-region clip format exists; sequence right after that lands.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/24-opendaw-roadmap-positioning.md', plan: null,
+  },
+  {
+    area: 'Audio-region clip editing', feature: 'Reverse audio clip',
+    description: 'An in-place reverse toggle on an audio region — trivial once regions exist, same dependency as bounce/freeze.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/24-opendaw-roadmap-positioning.md', plan: null,
   },
   {
     area: 'Audio-region clip editing', feature: 'Native audio recording',

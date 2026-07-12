@@ -104,3 +104,36 @@ are heterogeneously licensed per kit — the Debian DEP-5 copyright audit is the
 per-kit source, not the free-text <license> field. Nothing survived on 99Sounds/BPB/SampleSwap/
 MusicRadar/VSCO/Salamander — NOT cleared. Drum-craft/prep questions again produced zero verified
 claims (third strike for blog-grade sourcing) — needs a book-grade pass.
+
+*(10-15 predate this index; see `docs/product-roadmap.md` for what each shipped. 16-20 are the
+audio-clip-editing/FX-arsenal/Ableton-UI/drum-voice/drum-editor passes — same story, tracked in
+the roadmap rather than backfilled here.)*
+
+## 21-24 — openDAW deep dive, four angles (added 2026-07-12)
+
+Direct continuation of `docs/opendaw-notes.md`'s source-archaeology approach (read the actual
+clone at the time, not web search) rather than the earlier verified-web-search methodology above
+— openDAW is AGPL, so these mine it for facts/ideas/vocabulary only, never code. Four parallel
+passes, each ending in an adopt/adapt/skip candidate-feature table folded directly into
+`docs/product-roadmap.md`:
+
+- [`21-opendaw-devices-effects.md`](21-opendaw-devices-effects.md) — instrument/effect/device/mixer
+  architecture. Headline: openDAW's per-track effect chains are ordered and reorderable, dotbeat's
+  are a fixed insert set — worth adopting as flat ordered text (no pointer/index indirection).
+  Also flags openDAW's own scriptable-device and macro-knob features as the sharpest confirmations
+  yet of why in-file indirection breaks dotbeat's diff-friendliness thesis.
+- [`22-opendaw-editing-workflow.md`](22-opendaw-editing-workflow.md) — automation UX, region/clip
+  editing, groove/quantize. Headline: groove is a reversible read-time MIDI-effect in openDAW, not
+  a stored offset — matches dotbeat's existing "quantize is an operation" philosophy. New
+  note-editing vocabulary worth adopting: per-note chance, ratchet/repeat, micro-tuning (cent).
+- [`23-opendaw-collaboration-storage.md`](23-opendaw-collaboration-storage.md) — real-time
+  collaboration and cloud storage, the area most directly comparable to dotbeat's own thesis.
+  Headline: openDAW's live-collab bug log is itself the best evidence dotbeat's "no live collab"
+  decision avoids a genuinely hard problem class by construction; the actionable ideas are
+  narrower (reference-counted git-lfs GC, `git lfs lock` adoption, musical-language merge-conflict
+  narration).
+- [`24-opendaw-roadmap-positioning.md`](24-opendaw-roadmap-positioning.md) — what openDAW's own
+  team and users prioritize next (60+ internal design docs, 55 GitHub issues triaged). Headline:
+  openDAW's AI angle is content-generation (TTS, stem separation); dotbeat's agent-drives-the-
+  project axis is genuinely unclaimed territory. Concrete wins: region fade handles, project
+  templates, per-instrument polyphony/glide, bounce/freeze and reverse on audio clips.

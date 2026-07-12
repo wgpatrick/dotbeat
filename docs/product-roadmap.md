@@ -24,9 +24,9 @@ data file, not this file directly, so it stays in sync with the matching artifac
 A feature with links in both columns but status "Not started" means: fully scoped, ready for a
 stream to pick up — not guesswork, a decision away from being built.
 
-## Snapshot — 63 features tracked
+## Snapshot — 82 features tracked
 
-**21** Done · **0** In progress · **42** Not started
+**21** Done · **0** In progress · **61** Not started
 
 ---
 
@@ -36,6 +36,8 @@ stream to pick up — not guesswork, a decision away from being built.
 |---|---|---|---|---|---|---|---|
 | Diff-friendly canonical text format (.beat v0.9) | The .beat grammar itself: stable IDs, canonical field order, byte-identical round-trip. | ✅ done | ✅ done | — | ✅ Done | [`04-format-prior-art.md`](research/04-format-prior-art.md) | [`format-spec.md`](format-spec.md) |
 | git-lfs media/binary handling | Presets and sample media stored via git-lfs so the text file stays diff-clean (decisions.md D11). | ✅ done | ✅ done | — | ✅ Done | — | [`decisions.md`](decisions.md) |
+| Reference-counted git-lfs asset GC | A `beat lfs gc`-style command tracking which LFS objects are still referenced by any project on the machine, so orphaned sample/preset media can be safely deleted. git-lfs dedupes by content hash within a repo but has no native answer to "is this still used anywhere." | ❌ missing | ❌ missing | — | ⬜ Not started | [`23-opendaw-collaboration-storage.md`](research/23-opendaw-collaboration-storage.md) | — |
+| git-lfs file locking for binary media | Adopt git-lfs's existing `git lfs lock` (unused today) as a soft mutex with an honest override warning — the one part of a .beat project git genuinely can't diff/merge. | ❌ missing | ❌ missing | — | ⬜ Not started | [`23-opendaw-collaboration-storage.md`](research/23-opendaw-collaboration-storage.md) | — |
 
 ## Track management
 
@@ -53,6 +55,10 @@ stream to pick up — not guesswork, a decision away from being built.
 | Fold mode | Collapse the piano roll to only the pitches actually in use, like Ableton’s Fold. | — | — | ❌ missing | ⬜ Not started | — | — |
 | Scale-lock field + scale-tone highlighting | A per-clip/track scale + root note that constrains input and highlights in-scale keys. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | — |
 | Pitch & Time operations (transpose, ×2/÷2, fit-to-scale, invert, humanize, reverse, legato) | One-shot edit primitives that rewrite note lines and produce a normal diff — CLI/MCP-first, same pattern as quantize. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | — |
+| Groove / shuffle as a reversible time-warp | Two literal fields (shuffleAmount, shuffleGrid) applied at read-time via warp()/unwarp() — never baked into stored note positions. Fits dotbeat's existing "quantize is an operation, not grid-lock" philosophy better than a stored per-note swing offset would. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`22-opendaw-editing-workflow.md`](research/22-opendaw-editing-workflow.md) | — |
+| Per-note probability (chance) | A 0-100 field re-rolled via seeded RNG at each playback pass — cheap, real generative-sequencing capability from one scalar and one comparison in the trigger path. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`22-opendaw-editing-workflow.md`](research/22-opendaw-editing-workflow.md) | — |
+| Note ratchet / repeat (play-count + curve) | Repeat a note N times within its duration with curve-shaped spacing, plus a "consolidate" action to bake it back into discrete notes. Design the richer 3-field shape (count + curve + per-repeat length) rather than openDAW's narrower 2-field version, which their own team is already mid-refactor away from. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`22-opendaw-editing-workflow.md`](research/22-opendaw-editing-workflow.md) | — |
+| Per-note micro-tuning (cent offset) | A ±50-cent float field independent of semitone pitch, for expressive/microtonal tuning. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`22-opendaw-editing-workflow.md`](research/22-opendaw-editing-workflow.md) | — |
 
 ## Drum programming
 
@@ -71,6 +77,7 @@ stream to pick up — not guesswork, a decision away from being built.
 | Drag the rightmost loop boundary directly | Resize the loop by dragging its edge on the timeline instead of using +/- controls. | — | — | ❌ missing | ⬜ Not started | — | — |
 | Independent per-section scene editing | Today, appended sections share the source scene; editing one edits them all. Give each section its own scene. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | — | — |
 | Clip-level loop/length/time-signature properties | Ableton’s Start/End/Loop/Position/Length/Signature clip panel — not currently in the clip grammar. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`18-ableton-ui-architecture.md`](research/18-ableton-ui-architecture.md) | — |
+| Overlapping-region resolution policy (clip / push / keep-existing) | A user-configurable preference for what happens when two regions/sections overlap, push direction always downward, never cascading. "keep-existing" ("don't disturb my arrangement") is a real, non-obvious default worth having once dotbeat's section model needs overlap semantics. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`22-opendaw-editing-workflow.md`](research/22-opendaw-editing-workflow.md) | — |
 
 ## Synth sound design
 
@@ -78,6 +85,7 @@ stream to pick up — not guesswork, a decision away from being built.
 |---|---|---|---|---|---|---|---|
 | Full grouped synth param panel | ~54-field SYNTH_FIELDS across osc/filter/envelope/inserts/sends, exposed in one grouped GUI panel. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-13-editing.md`](phase-13-editing.md) |
 | Real wavetable oscillator | wtPos exists in the format and an LFO can target it, but no wavetable oscillator exists in the engine — currently a dead knob. | ❌ missing | — | ❌ missing | ⬜ Not started | — | — |
+| Per-instrument polyphony limit + glide mode | Mono/legato/portamento voice-count and glide-time fields per instrument — a concrete, bounded addition to the existing synth field set, not a new instrument. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`24-opendaw-roadmap-positioning.md`](research/24-opendaw-roadmap-positioning.md) | — |
 
 ## LFOs / modulation
 
@@ -91,6 +99,7 @@ stream to pick up — not guesswork, a decision away from being built.
 |---|---|---|---|---|---|---|---|
 | Playback, program select, meters, mute/solo | SoundFont-backed instrument tracks with program selection and real audio-gated mute/solo. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-14-instrument-tracks.md`](phase-14-instrument-tracks.md) |
 | Instrument-track FX chain | EQ/compression/sends per instrument track — today it’s level/pan only. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | — | — |
+| One-shot sampler instrument track kind | A lean sampler instrument (volume, sample, release, pitch-tracking — 3-4 literal fields) as a track kind distinct from the implicit "every track is a synth" assumption. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`21-opendaw-devices-effects.md`](research/21-opendaw-devices-effects.md) | — |
 
 ## Mixer
 
@@ -104,17 +113,19 @@ stream to pick up — not guesswork, a decision away from being built.
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
 | EQ3 / comp / distortion / bitcrush / reverb+delay sends / sidechain | The built-in insert set every synth and drum bus already carries. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-13-editing.md`](phase-13-editing.md) |
+| Ordered, reorderable per-track effect chain | Replace the fixed EQ→comp→dist→bitcrush insert order with an explicit ordered list of effect blocks — as flat literal text (order = line order), never a pointer/index indirection like openDAW's box graph uses. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`21-opendaw-devices-effects.md`](research/21-opendaw-devices-effects.md) | — |
 
 ## Extended FX arsenal
 
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
-| Ping Pong Delay | Tone.PingPongDelay as a per-track insert — the cheapest of the two owner-named asks. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
+| Ping Pong Delay | Tone.PingPongDelay as a per-track insert — the cheapest of the two owner-named asks. Fold in continuously-variable cross-feedback + delay-time LFO wobble (research 21) rather than a binary ping-pong toggle. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
 | Beat Repeat | Grid/gate/chance/mode stutter-repeat effect, genre-signature for EDM/hip-hop/glitch. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
 | Expose Chorus-Ensemble / Phaser-Flanger as a per-track insert | The DSP already runs on a shared mod-send bus; convert it into a proper configurable insert. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
 | Saturator | Tone.WaveShaper-based character saturation with an analog/warm/clip/fold curve family. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
+| 7-band parametric EQ | HP/LP with selectable slope + Q, 3 bell bands, 2 shelf bands, each independently enabled — same field-set-device shape as EQ3/compressor, just more bands. EQ3 can't do a real parametric bell cut; natural next tier after the research-17 build-next-four. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`21-opendaw-devices-effects.md`](research/21-opendaw-devices-effects.md) | — |
 | Auto Filter / Auto Pan / Tremolo | Dedicated Ableton-named devices — deferred since the shared LFO destination matrix already covers the sonic capability. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
-| Redux (downsampling half) | Bit-reduction already ships; sample-rate downsampling needs a small custom node (no Tone.js built-in). | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
+| Redux (downsampling half) | Bit-reduction already ships; sample-rate downsampling needs a small custom node (no Tone.js built-in). Consider folding bits+downsample into one "Crusher"-style field group with a shared enable/mix, per research 21, rather than two independently-toggled devices. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
 | Utility (stereo width / gain trim) | Near-free via Tone.StereoWidener — a mixing-hygiene tool, not a sound-design reach. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
 | Grain Delay / Vinyl Distortion / Resonators | Real custom DSP built from Tone.js primitives (GrainPlayer, WaveShaper+Noise, filter bank) — bigger lifts, good Phase-19+ candidates. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
 | Corpus | Resonant-body physical-modeling effect — no Tone.js primitive gets close; AudioWorklet-tier custom DSP, lowest priority. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`17-track-fx-arsenal.md`](research/17-track-fx-arsenal.md) | — |
@@ -134,6 +145,7 @@ stream to pick up — not guesswork, a decision away from being built.
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
 | git-backed checkpoints, history panel, pin/restore | Explicit checkpoint/history/pin/restore over git — not automatic, deliberately. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-15-history-panel.md`](phase-15-history-panel.md) |
+| Musical-language git-merge conflict narration | A `beat merge --explain` that narrates a merge conflict in the same phrasing D8 already uses for diffs ("both changed trk_bass.cutoff: 1200Hz vs 800Hz") instead of raw <<<<<<< markers. Reuses D8's DiffEntry machinery unchanged. | ❌ missing | ❌ missing | — | ⬜ Not started | [`23-opendaw-collaboration-storage.md`](research/23-opendaw-collaboration-storage.md) | — |
 
 ## Vary / audition loop
 
@@ -153,6 +165,7 @@ stream to pick up — not guesswork, a decision away from being built.
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
 | LUFS / spectral / crest / stereo metrics + lint | Agent-facing per decisions.md D2 ("LLM narrates, never judges alone") — no GUI meter display planned, not a gap. | ✅ done | ✅ done | — | ✅ Done | — | [`decisions.md`](decisions.md) |
+| GUI spectrum / level visualization | A real-time FFT/level display reusing the exact spectral data `beat metrics` already computes server-side — a visualization of existing data, not a new judgment surface, so it doesn't reopen D2's "LLM narrates, never judges alone" decision. | — | — | ❌ missing | ⬜ Not started | [`24-opendaw-roadmap-positioning.md`](research/24-opendaw-roadmap-positioning.md) | — |
 
 ## Selection protocol
 
@@ -187,6 +200,8 @@ stream to pick up — not guesswork, a decision away from being built.
 |---|---|---|---|---|---|---|---|
 | beat init + "Open Folder" re-pointing | Initialize a new .beat project and re-point the desktop app at a different project folder. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-20-track-project-management.md`](phase-20-track-project-management.md) |
 | New-project-from-scratch, GUI-reachable | Create a brand new project without dropping to the CLI first. | — | ✅ done | ❌ missing | ⬜ Not started | — | — |
+| Save project as template | "Save as Template" opens as a fresh unsaved copy, never mutating the original — a natural fit for dotbeat's git-native model as "copy this file/folder as a new project," arguably cleaner than a browser-storage version. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`24-opendaw-roadmap-positioning.md`](research/24-opendaw-roadmap-positioning.md) | — |
+| Optional cloud-folder sync (BYO storage) | Sync a project folder to a drive the user already has (Nextcloud/Dropbox/GDrive via one storage-agnostic interface) for multi-machine convenience — explicitly not live collaboration; git still owns history/versioning. Not scoped or requested yet, noted as the right shape if/when it is. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`23-opendaw-collaboration-storage.md`](research/23-opendaw-collaboration-storage.md) | — |
 
 ## Desktop app / packaging
 
@@ -202,8 +217,12 @@ stream to pick up — not guesswork, a decision away from being built.
 | Repitch-mode warping | A playbackRate-equivalent parameter — the cheapest warp mode and the natural first exit test. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`16-audio-clip-editing.md`](research/16-audio-clip-editing.md) | — |
 | Split-at-point | A pure edit primitive on the new clip-content shape — no DSP, no new engine capability. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`16-audio-clip-editing.md`](research/16-audio-clip-editing.md) | — |
 | Clip gain (static + automation lane) | Static gain is trivial; the time-varying case very likely reuses the existing BeatAutomationLane machinery. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`16-audio-clip-editing.md`](research/16-audio-clip-editing.md) | — |
-| Warp markers + Complex-mode stretch | Marker-list format addition plus a real stretch-algorithm integration via signalsmith-stretch (MIT/WASM). | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`16-audio-clip-editing.md`](research/16-audio-clip-editing.md) | — |
+| Region-level fade in/out handles | Two draggable, region-relative 0..1 handles at region edges (linear, crossing = min of both, snap-to-grid) — a small format addition (two normalized fields per region), well-specified prior art. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`24-opendaw-roadmap-positioning.md`](research/24-opendaw-roadmap-positioning.md) | — |
+| Tape-emulation knobs on audio-clip tracks | Four unipolar "tape character" fields (flutter/wow/noise/saturation) baked into the region player itself, not a separate effect — cheap, on-brand with SYNTH_FIELDS' small evocative knobs, could share saturation-curve code with the Saturator FX. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`21-opendaw-devices-effects.md`](research/21-opendaw-devices-effects.md) | — |
+| Warp markers + Complex-mode stretch | Marker-list format addition plus a real stretch-algorithm integration via signalsmith-stretch (MIT/WASM). Consider the 3-way TransientPlayMode vocabulary (Once/Repeat/Pingpong — research 22) for "what happens to a hit between two markers," smaller than Ableton's 5-way named-warp-mode system. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`16-audio-clip-editing.md`](research/16-audio-clip-editing.md) | — |
 | Beats-mode transient slicing | Onset/transient detection plus the stretch library; sequence after the rest of the audio-clip format proves out. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`16-audio-clip-editing.md`](research/16-audio-clip-editing.md) | — |
+| Bounce / freeze a MIDI clip to audio | Render a MIDI clip, with its full effect chain, to a new audio clip in place — directly composable with the existing render engine once the audio-region clip format exists; sequence right after that lands. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`24-opendaw-roadmap-positioning.md`](research/24-opendaw-roadmap-positioning.md) | — |
+| Reverse audio clip | An in-place reverse toggle on an audio region — trivial once regions exist, same dependency as bounce/freeze. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`24-opendaw-roadmap-positioning.md`](research/24-opendaw-roadmap-positioning.md) | — |
 | Native audio recording | No capture path exists today; gated behind the confirmed ~30ms web-audio latency wall — explicitly Tauri/M4-native scope. | ❌ missing | — | ❌ missing | ⬜ Not started | [`16-audio-clip-editing.md`](research/16-audio-clip-editing.md) | [`m4-native-engine-design.md`](m4-native-engine-design.md) |
 | Multi-take comping, freeze/flatten/bounce | Needs the butler-thread disk-streaming architecture already scoped for M4.2 — a different problem from single-clip warping. | ❌ missing | — | ❌ missing | ⬜ Not started | [`16-audio-clip-editing.md`](research/16-audio-clip-editing.md) | [`m4-native-engine-design.md`](m4-native-engine-design.md) |
 
