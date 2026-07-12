@@ -69,9 +69,15 @@ export const rows = [
   },
   {
     area: 'Track management', feature: 'Reorder tracks by dragging',
-    description: 'Ableton: "tracks can be reordered by selecting and dragging them above or below other tracks" (manual ch.6, p.152). dotbeat has reorder primitives for effect chains (`moveEffect`), drum lanes (`moveLane`), and song sections (`songMove`), but none for `doc.tracks` order — confirmed absent this pass. New `moveTrack(doc, fromIndex, toIndex)` in `src/core/edit.ts`, same splice-not-delete-insert shape as `songMove`; a drag handle on `.arr-track-header` reusing the native HTML5 drag-and-drop pattern the section chips already use.',
+    description: 'Ableton: "tracks can be reordered by selecting and dragging them above or below other tracks" (manual ch.6, p.152). dotbeat has reorder primitives for effect chains (`moveEffect`), drum lanes (`moveLane`), and song sections (`songMove`), but none for `doc.tracks` order — confirmed absent this pass. New `moveTrack(doc, fromIndex, toIndex)` in `src/core/edit.ts`, same splice-not-delete-insert shape as `songMove`; a drag handle on `.arr-track-header` reusing the native HTML5 drag-and-drop pattern the section chips already use. Research 74 §4 item 10 names this row explicitly as the obvious next reorderable list in the codebase and attaches a sequencing constraint, not new scope: build it against whatever canonical "currently dragging" visual token the drag-and-drop area below lands on (Phase 27 Stream EB ships the first version of that token; a follow-on full retrofit is tracked separately under "Drag & drop (cross-cutting)"), so this doesn\'t become a fifth independently-invented drag treatment the way effect-chain reorder, section reorder, and clip-block move each already are today.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/53-ableton-vs-dotbeat-arrangement-view.md', plan: null,
+  },
+  {
+    area: 'Track management', feature: 'Track-header visual grouping: identity cluster vs. action cluster',
+    description: 'The single-letter kind badge (`s`/`d`/`i`/`a`, `.arr-track-kind`) and the 9×9px flat swatch (`.arr-track-swatch`) use the exact same border/radius/font treatment as half a dozen unrelated small pill buttons elsewhere in the header (mute/solo, send badges, group toggle) — nothing is functionally wrong, but there\'s no visual grouping distinguishing "identity" controls (swatch, name, kind) from "action" controls (mute, solo, delete). A subtle background-tint difference (e.g. identity cluster on transparent, action cluster on `--panel-2`) would read the grouping at a glance without changing any control\'s function.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/70-ux-arrangement-view.md', plan: null,
   },
 
   // ── Note editing (piano roll) ───────────────────────────────────────────
@@ -89,7 +95,7 @@ export const rows = [
   },
   {
     area: 'Note editing (piano roll)', feature: 'Scale-lock field + scale-tone highlighting (Scale Mode)',
-    description: 'Ableton\'s Scale Mode is a persistent, propagating layer, not one flag: a Root Note + Scale Name toggle, Highlight Scale vs. Fold-to-Scale as two distinct piano-roll options, an independent flats/sharps/auto note-spelling preference, and propagation into Pitch & Time / MIDI Tools "Use Current Scale" toggles (manual ch.10 pp.269-272, ch.11 p.279). dotbeat already ships the one-shot transform (`fitToScaleNotes` + the `SCALES`/`nearestScaleTone` table, src/core/pitchtime.ts:102-134) but zero stored scale field anywhere — confirmed by grep across `src/core/document.ts`. Add an optional, elided `scale?: {root, name}` to `BeatClip`/`BeatTrack` (same pattern as `BeatClipLoop`), shade in-scale rows in `NoteView.tsx`\'s `buildPitchAxis`. Every generative note tool below (Euclidean/Seed/Stacks/Shape) inherits this same scale-awareness gap until it lands.',
+    description: 'Ableton\'s Scale Mode is a persistent, propagating layer, not one flag: a Root Note + Scale Name toggle, Highlight Scale vs. Fold-to-Scale as two distinct piano-roll options, an independent flats/sharps/auto note-spelling preference, and propagation into Pitch & Time / MIDI Tools "Use Current Scale" toggles (manual ch.10 pp.269-272, ch.11 p.279). dotbeat already ships the one-shot transform (`fitToScaleNotes` + the `SCALES`/`nearestScaleTone` table, src/core/pitchtime.ts:102-134) but zero stored scale field anywhere — confirmed by grep across `src/core/document.ts`. Add an optional, elided `scale?: {root, name}` to `BeatClip`/`BeatTrack` (same pattern as `BeatClipLoop`), shade in-scale rows in `NoteView.tsx`\'s `buildPitchAxis`. Every generative note tool below (Euclidean/Seed/Stacks/Shape) inherits this same scale-awareness gap until it lands. Research 71 §3 item 9 independently converges on the same "shade matching rows" requirement and notes a cheaper client-only interim: even without the stored `scale` field, `PitchTimePanel`\'s already-selected local `root`/`scale` state could drive a while-panel-is-open visual tint on matching rows, no format change needed for that narrower version.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/57-ableton-vs-dotbeat-editing-midi.md', plan: null,
   },
@@ -161,7 +167,7 @@ export const rows = [
   },
   {
     area: 'Note editing (piano roll)', feature: 'Velocity Randomize / Ramp toolbar (Deviation trails as its own field)',
-    description: 'Ableton\'s Velocity Editor always shows three sliders alongside the plain drag lane: Randomize [amount], Ramp [start][end], Deviation [range] (manual ch.10 pp.263-265). dotbeat\'s velocity lane (NoteView.tsx:999-1025) supports only single-bar drag. Randomize and Ramp are pure functions over a selection\'s `velocity` (no format change, cheap); Deviation needs a new `velocityRange` field plus a per-pass reroll — architecturally identical to `chance.ts`\'s `chanceFires` model, copy that pattern rather than inventing a new one.',
+    description: 'Ableton\'s Velocity Editor always shows three sliders alongside the plain drag lane: Randomize [amount], Ramp [start][end], Deviation [range] (manual ch.10 pp.263-265). dotbeat\'s velocity lane (NoteView.tsx:999-1025) supports only single-bar drag. Randomize and Ramp are pure functions over a selection\'s `velocity` (no format change, cheap); Deviation needs a new `velocityRange` field plus a per-pass reroll — architecturally identical to `chance.ts`\'s `chanceFires` model, copy that pattern rather than inventing a new one. Research 71 §3 item 10 independently flags this same gap (Ableton\'s dot-marker velocity/chance lane convention, ch.10 §1.7) and notes it also changes the velocity lane\'s own vertical real estate — a second control row beneath it, reusing the same slot `DrumLanePanel`\'s already-shipped collapse pattern could host.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/57-ableton-vs-dotbeat-editing-midi.md', plan: null,
   },
@@ -272,6 +278,48 @@ export const rows = [
     description: 'Ableton: click-and-hold to repeatedly re-play a chunk (real scrubbing at fine quantization), plus a Follow toggle that auto-pauses the instant an edit is made (manual ch.8 pp.211-213). dotbeat\'s "▶ Preview clip" is play/stop only, no scrub gesture, and there\'s no Follow-style auto-scroll-then-pause-on-edit behavior in NoteView. Scrub: a pointer-drag-and-hold gesture on the clip-loop strip or grid that repeatedly re-triggers `engine.auditionClip` at a small offset, quantized to the grid. Follow-pause: track "last edit timestamp" in local state and suppress auto-scroll for N ms after any edit.',
     core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
     research: 'research/55-ableton-vs-dotbeat-clip-view.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Progressive disclosure for the piano-roll gesture-legend hint bar',
+    description: 'NoteView.tsx\'s editor-toolbar renders a permanent, single unbroken line of ~11px text listing all seventeen available gestures ("click a key to preview · click empty grid to add · drag to marquee-select · ... dashed/dim = chance<100 · ticks = ratchet · ..."), consuming a full-width row of screen space regardless of whether the user needs it — the polar opposite of Ableton\'s near-total reliance on menus/manual/tooltips over persistent on-canvas copy. Move it behind a small `?`/`i` affordance next to the Clip/Device tabs that reveals the same text in a popover/tooltip on demand — relocate, don\'t delete, since the documentation value is real and arguably exceeds Ableton\'s own discoverability for a new user.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/70-ux-arrangement-view.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Box the Pitch & Time panel into labeled clusters',
+    description: 'PitchTimePanel is one continuous `flex-wrap` row of nine-plus controls (Transpose/×2/÷2, root+scale+Fit-to-Scale+Invert, Reverse, gap+Legato, quantize-grid+range+percent+starts/ends+Quantize, Consolidate) all styled identically — nothing visually groups "the scale operations" vs. "the time operations" vs. "quantize"; only the button labels distinguish them. Wrap the Transform, Scale, and Quantize groups in three visually separated sub-containers (a subtle `background: var(--panel-2)` chip with 4px padding each) inside the existing flex-wrap row — doesn\'t require adopting Ableton\'s knob widgets, just grouping.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Styled quantize-amount slider matching the app\'s dark theme',
+    description: 'PitchTimePanel\'s quantize-amount control is a stock, unstyled HTML `<input type="range">` — the one OS/browser-default control on a page where every other control is custom-styled, and it visually clashes with the rest of the panel. A ~40-line CSS-only track/thumb restyle (`appearance: none` + custom `::-webkit-slider-thumb`) gets this to parity with the rest of the UI without a new widget library.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Show note names on hover, not just at octave-C rows',
+    description: '`isOctaveTop` gates all pitch labels in the piano-roll keyboard strip (NoteView.tsx:932) — at `ROW_H=12px` this is defensible for space, but identifying an exact pitch today requires counting rows up/down from the nearest C. Show the label on `:hover` per-row (a lightweight tooltip or an inline fade-in), contrasted with Ableton\'s always-adjustable, always-labeled ruler. Distinct from the already-shipped "Clip view: note-name readout" row above, which lists names for the current selection, not a per-row hover label.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'A visible cursor-mode change for Draw vs. Select/Move',
+    description: 'The piano-roll grid always shows `cursor: crosshair` regardless of what a click will actually do (add a note vs. start a marquee-select vs. nothing) — the underlying gesture set already functions (click-empty-grid-to-add is Ableton\'s Draw Mode equivalent), but there\'s no visual signal of which mode a click is currently in, unlike Ableton\'s explicit pencil-cursor Draw Mode toggle.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Flats/sharps/MIDI-number note-name display preference',
+    description: '`pitchName` (NoteView.tsx:72) hardcodes the sharps-only `NOTE_NAMES` array. Ableton exposes a sharps/flats/both/MIDI-number preference via a right-click context menu on the piano ruler. Small, self-contained addition: a module-level display-preference plus a lookup-table swap.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Multi-select value-range affordance for continuous per-note controls',
+    description: 'Not urgent since dotbeat\'s per-note controls are already gated to a single selection (`NoteInspector` renders only for `sel.length===1`), but worth remembering as prior art: Ableton\'s split-triangle handle (spanning the value range across a multi-clip/multi-note selection with differing values, ch.8/ch.10) is the reference pattern if/when multi-note batch editing of continuous values (not just the chance-paint gesture) gets a GUI surface.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: null,
   },
 
   // ── Drum programming ─────────────────────────────────────────────────────
@@ -529,6 +577,36 @@ export const rows = [
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/55-ableton-vs-dotbeat-clip-view.md', plan: null,
   },
+  {
+    area: 'Arrangement / song structure', feature: 'Playhead top marker, matching the insert-marker\'s visual weight',
+    description: '`.arr-playhead` is a bare 2px glowing accent-colored vertical line — no flag, triangle, or top-anchored handle marker, unlike Ableton\'s insert-marker treatment, which pairs the line with a distinct top marker and a full-column tint on the current bar-cell. Add a small flag/triangle glyph anchored at the ruler\'s bottom edge (where the line originates) — cheap (one more absolutely-positioned `<div>`, a CSS triangle or 8×8px SVG) — gives the playhead the same "this is a real object" weight Ableton\'s insert marker has.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/70-ux-arrangement-view.md', plan: null,
+  },
+  {
+    area: 'Arrangement / song structure', feature: 'Edge-specific resize cursors on clip blocks',
+    description: '`.arr-clip-block` only ever shows `grab`/`grabbing` — there\'s no `ew-resize` cursor when hovering the resize-handle region at a clip\'s right edge, even though the resize gesture itself already works. Add a `:hover` rule keyed to pointer x-position near the edge (or a dedicated thin resize-handle sub-element) swapping to `ew-resize`, matching Ableton\'s bracket-cursor convention at a draggable edge.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/70-ux-arrangement-view.md', plan: null,
+  },
+  {
+    area: 'Arrangement / song structure', feature: 'Give the song-mode section chip row a distinct "tag" visual identity',
+    description: 'Today\'s SECTIONS chips are visually identical in weight to ordinary toolbar buttons — same gray background, same border-radius, same font size as `+ track`/`Export`/etc. Ableton\'s locator/section tags use a distinct flag shape (rounded rect + triangular left point) that reads as "a marker on the timeline," not "a button in a toolbar." A cheap CSS treatment (a clipped-corner or triangle-notch background) would give dotbeat\'s chips the same at-a-glance "this is timeline metadata" identity.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/70-ux-arrangement-view.md', plan: null,
+  },
+  {
+    area: 'Arrangement / song structure', feature: 'Zoom-level readout: tabular-nums + dimmer treatment',
+    description: 'The zoom-level readout ("354px/bar" / `-` / `+` / `fit` / `loop select`) is plain body text at the same size/weight as every other toolbar label, even though it\'s a live HUD value, not a static label. `font-variant-numeric: tabular-nums` (already used elsewhere, e.g. `.arr-strip-db`) plus a slightly dimmer color would read it as "current state," not "another button." Lowest-priority item in the whole comparison — a spare-cycle polish item, not worth scheduling on its own.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/70-ux-arrangement-view.md', plan: null,
+  },
+  {
+    area: 'Arrangement / song structure', feature: 'A "Set" (capture playhead) button beside clip loop start/end fields',
+    description: 'ClipPropertiesPanel\'s loop start/end are purely typed `<input type="number">` fields — no way to capture "wherever the playhead currently is" into a field with one click, unlike Ableton\'s Set-button pattern next to every Start/End/Position/Length field in its Clip panel. Companion to "Clip-level loop/length/time-signature properties" above, same panel.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/71-ux-clip-view-midi-editing.md', plan: null,
+  },
 
   // ── Synth sound design ──────────────────────────────────────────────────
   {
@@ -711,6 +789,18 @@ export const rows = [
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/67-ableton-vs-dotbeat-audio-effect-reference.md', plan: null,
   },
+  {
+    area: 'Mixer', feature: 'Differentiate volume vs. pan controls visually in the track-header inline strip',
+    description: 'Both volume and pan are the same native `<input type=range>` (`InlineStrip`, ArrangementView.tsx) varying only in width/min/max — no center-detent notch on the pan slider at 0, no filled-track-to-thumb affordance on volume, so the two controls read as the same widget rather than distinct parameter *types* the way Ableton\'s knob-vs-fader iconography does. Add a CSS-only center tick mark (a `background-image` gradient or a pseudo-element at 50%) for pan, and a filled-left-of-thumb track style for volume (`::-webkit-slider-runnable-track` gradient keyed to current value) — no bespoke knob widget needed.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/70-ux-arrangement-view.md', plan: null,
+  },
+  {
+    area: 'Mixer', feature: 'Inter-device (between-hop) level meters, in addition to the existing per-effect meter',
+    description: 'The shipped `EffectMeter` (Mixer area, "Peak metering + per-effect chain-row level meter" row above) reads a single effect\'s own output, inside its own row. Ableton additionally draws thin vertical LED-style level meters sandwiched in the border zone *between* adjacent device cards, so signal presence/absence at each hop in the chain is visible without opening anything. A nice-to-have once the row-level bypass/order story (Core effects area, this phase\'s Fix-first bug 3 and Stream EH) is solid, not before.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/72-ux-device-view.md', plan: null,
+  },
 
   // ── Core effects ─────────────────────────────────────────────────────────
   {
@@ -867,7 +957,7 @@ export const rows = [
   },
   {
     area: 'Core effects', feature: 'Per-device fold/collapse presentation (distinct from bypass)',
-    description: 'Ableton: a device can be collapsed by double-clicking its title bar or via the context menu\'s Fold — pure vertical-space management, independent of the Activator toggle (manual ch.23 p.429,434). dotbeat\'s `EffectRow` has no fold state; a row is always shown at full height. Low-stakes on its own, but relevant once per-device metering or A/B compare add more per-row real estate — a `<details>`-style collapse mirroring the existing `Group` component\'s pattern.',
+    description: 'Ableton: a device can be collapsed by double-clicking its title bar or via the context menu\'s Fold — pure vertical-space management, independent of the Activator toggle (manual ch.23 p.429,434). dotbeat\'s `EffectRow` has no fold state; a row is always shown at full height. Low-stakes on its own, but relevant once per-device metering or A/B compare add more per-row real estate — a `<details>`-style collapse mirroring the existing `Group` component\'s pattern. Research 72 §3 item 11 reconfirms this at the pixel level: every row is exactly one line tall today, fine at a 4-6-row chain but with no answer for a longer one once multiple same-type instances (Core effects area, above) ship.',
     core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
     research: 'research/63-ableton-vs-dotbeat-instruments-and-effects.md', plan: null,
   },
@@ -879,7 +969,7 @@ export const rows = [
   },
   {
     area: 'Core effects', feature: 'Per-device context menu (rename, duplicate, save-as-default)',
-    description: 'Ableton\'s per-device context menu: Cut/Copy/Duplicate/Rename/Group/Fold/"Show Preset Name"/"Save as Default Preset" plus device-specific extras (manual ch.23 pp.436-437 screenshot). dotbeat\'s `EffectRow` exposes exactly two mutating actions (remove, bypass) plus reorder — no menu, no rename, no duplicate. Rename/duplicate are the two with real payoff — duplicating an `EffectRow` (same type, params, new id, inserted after) is a small core primitive; rename needs a new optional label field on `BeatEffect` (a format addition). Cut/copy/paste across tracks and "save as default preset" are lower value given presets-as-tooling (D9) already covers most of that need.',
+    description: 'Ableton\'s per-device context menu: Cut/Copy/Duplicate/Rename/Group/Fold/"Show Preset Name"/"Save as Default Preset" plus device-specific extras (manual ch.23 pp.436-437 screenshot). dotbeat\'s `EffectRow` exposes exactly two mutating actions (remove, bypass) plus reorder — no menu, no rename, no duplicate. Rename/duplicate are the two with real payoff — duplicating an `EffectRow` (same type, params, new id, inserted after) is a small core primitive; rename needs a new optional label field on `BeatEffect` (a format addition). Cut/copy/paste across tracks and "save as default preset" are lower value given presets-as-tooling (D9) already covers most of that need. Research 72 §3 item 13 scopes a lighter v1: a per-row context menu offering just rename-the-instance-id + duplicate (once same-type duplicates are supported), in place of growing the always-visible icon row further.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/63-ableton-vs-dotbeat-instruments-and-effects.md', plan: null,
   },
@@ -891,9 +981,39 @@ export const rows = [
   },
   {
     area: 'Core effects', feature: 'Chain-list/knob-wall single-row UI unification',
-    description: 'Ableton\'s device title bar (chain-membership controls) and its parameter panel (the knobs) are the same visual object, one row in one list (manual ch.23 pp.428-436). dotbeat\'s `EffectChain` list and `PARAM_GROUPS` knob wall remain two separate DOM regions, mitigated since Phase 25 by the `justAdded` scroll-into-view + flash highlight but not eliminated. Full fix (`EffectRow` discloses its own knobs inline, Fold-style) is a bigger interaction-model rewrite of `SynthPanel.tsx` — worth doing once per-device meters and A/B compare (both wanting to live on the row) make the two-region split more obviously wrong, not before.',
+    description: 'Ableton\'s device title bar (chain-membership controls) and its parameter panel (the knobs) are the same visual object, one row in one list (manual ch.23 pp.428-436). dotbeat\'s `EffectChain` list and `PARAM_GROUPS` knob wall remain two separate DOM regions, mitigated since Phase 25 by the `justAdded` scroll-into-view + flash highlight but not eliminated. Full fix (`EffectRow` discloses its own knobs inline, Fold-style) is a bigger interaction-model rewrite of `SynthPanel.tsx` — worth doing once per-device meters and A/B compare (both wanting to live on the row) make the two-region split more obviously wrong, not before. Research 72 §3 item 5 independently reconfirms this gap post-Phase-26 and offers a cheaper interim short of the full rewrite: reuse the existing `.param-group-flash` mechanism (Phase 25) for more than just the add moment — a persistent "▸ show knobs" affordance on each chain row that scrolls to and flashes its group on click, or a colored left-edge bar matching the row\'s position, as a lighter first step before committing to the inline-disclosure rewrite.',
     core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
     research: 'research/63-ableton-vs-dotbeat-instruments-and-effects.md', plan: null,
+  },
+  {
+    area: 'Core effects', feature: 'Visible chevron/disclosure triangle on `.param-group-title`',
+    description: 'Each `.param-group` is a plain `<details>` with the browser\'s default disclosure marker suppressed — the *only* affordance for fold state is the summary text turning orange when open, no icon at all, contrary to `<details>`\'s usual disclosure-triangle convention this markup currently hides. Add a visible chevron/triangle that rotates on open, so fold state reads as a control, not just clickable text.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/72-ux-device-view.md', plan: null,
+  },
+  {
+    area: 'Core effects', feature: 'Visual badge distinguishing optional (removable) param groups from permanent synth-surface groups',
+    description: 'A newcomer scanning the panel has no visual cue for which of the ~10 open knob-wall boxes are optional/removable effects (`ParamGroup.effectType` set) vs. permanent synth sections like Oscillator that are always there — that distinction only exists in code today. A small dot/badge on any `ParamGroup` that has `effectType` set makes "this box will disappear if I remove it from the chain above" visible without reading source.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/72-ux-device-view.md', plan: null,
+  },
+  {
+    area: 'Core effects', feature: 'Insertion-line drop indicator for effect-chain reordering',
+    description: '`.effect-row.drop-target` currently draws an orange outline around the *whole* target row rather than a thin insertion line between two rows, so which side of the target row a dragged item will land on (before/after) isn\'t visually distinguished until after dropping — a real, concrete gap relative to typical reorderable-list conventions (Ableton\'s own manual doesn\'t screenshot its drop-indicator treatment either, so this isn\'t strictly an Ableton-parity claim, just a usability gap on dotbeat\'s own terms). Replace the whole-row border with a thin horizontal line between rows showing above/below placement before drop — natural follow-on once Phase 27 Stream EB\'s shared drag primitive exists to build it against.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/72-ux-device-view.md', plan: null,
+  },
+  {
+    area: 'Core effects', feature: 'Keyboard arrow-key nudge support on `Knob`',
+    description: '`Knob.tsx` has no keyboard handling at all — no `tabIndex`, no arrow-key nudge, no scroll-wheel support. Add arrow-key nudge once focused (small/large step with a modifier), matching the click-to-type affordance (this phase\'s Stream EI) for a fully non-drag path to every device parameter — a real accessibility gap, not just a nicety.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/72-ux-device-view.md', plan: null,
+  },
+  {
+    area: 'Core effects', feature: 'Double-click-to-reset-to-default on a knob',
+    description: 'No per-param "default" concept currently exists in the data model to reset to, so this is not purely cosmetic — flagged lower priority than the rest of the device-view punch list precisely because it needs a small data-side companion (a default value per param) before the double-click gesture itself is meaningful.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/72-ux-device-view.md', plan: null,
   },
 
   // ── Automation ───────────────────────────────────────────────────────────
@@ -1058,6 +1178,52 @@ export const rows = [
     research: null, plan: 'phase-13-editing.md',
   },
 
+  // ── Drag & drop (cross-cutting) ───────────────────────────────────────────
+  // Research 74 found dotbeat has five real drag-and-drop implementations (library→track/lane,
+  // note-drag, effect-chain reorder, section reorder, cross-track clip-block move) with zero shared
+  // code between any of them — four different visual answers to "something is currently being
+  // dragged." Phase 27 Stream EB ships the first version of a shared drag-state/drop-highlight
+  // primitive (fixing the worst offender, the track-header dragleave bug, along the way) scoped to
+  // the P0 surfaces (research/74 §4 items 1-3). The rows below are the P1/P2 follow-on work that
+  // primitive unlocks but doesn't itself require — a full retrofit across every surface, plus the
+  // browser/note-drag-specific affordances research 73/74 flagged.
+  {
+    area: 'Drag & drop (cross-cutting)', feature: 'Unify all five drag surfaces onto one canonical "currently dragging" token',
+    description: 'Today: effect-row reorder uses `opacity: 0.4` + solid accent border; the clip-block cross-track move uses `opacity: 0.65` + dashed border + `grabbing` cursor + `z-index: 4`; the library→track/lane drop target and (pre-Stream-EB) the note-drag have no treatment at all — four independently-invented answers to the same visual question across five surfaces, zero shared code. Phase 27 Stream EB establishes the primitive for the P0 surfaces (drop-target highlight + note-drag); this row is the full retrofit — point `EffectRow`, the clip-block drag, and the section-chip reorder at the same canonical token/class instead of their own bespoke CSS.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/74-ux-drag-and-drop.md', plan: null,
+  },
+  {
+    area: 'Drag & drop (cross-cutting)', feature: 'At-rest drag-handle affordance on browser rows and piano-roll notes',
+    description: 'Effect-chain reorder and section-chip reorder both carry a persistent `⠿` (braille-pattern) drag-handle glyph plus explicit move-up/move-down fallback buttons, visible before any drag starts. `ContentBrowser.tsx` rows and piano-roll notes give no cue at all that they\'re draggable until the user has already tried — discoverability rests entirely on printed hint text or nothing. Add the same `⠿` + `cursor: grab` pattern to both surfaces, directly reusing the proven convention rather than inventing a new one.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/74-ux-drag-and-drop.md', plan: null,
+  },
+  {
+    area: 'Drag & drop (cross-cutting)', feature: 'Custom `setDragImage()` for library-item drags',
+    description: 'No `setDragImage()` call anywhere in `ContentBrowser.tsx` — a library-item drag shows the browser\'s default translucent full-row snapshot (preview button, param count and all) rather than a purpose-built preview. Ableton\'s own strongest drag example ("Moving a Clip," manual ch.6 p.161) renders a content-accurate preview of the thing moving, not incidental UI chrome. Replace with a small, purpose-built icon+name chip. Research 73 originally flagged this as browser-specific P2; research 74 reframes it as P1 once understood as part of the five-surface pattern, not a one-off browser nicety — this row supersedes research 73 §4 item 9.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/74-ux-drag-and-drop.md', plan: null,
+  },
+  {
+    area: 'Drag & drop (cross-cutting)', feature: 'On-screen cue for the note-drag\'s Alt/Option modifiers',
+    description: 'Note-drag reads two modifier states with zero visual cue: the Alt/Option "duplicate instead of move" mode (checked once, at gesture start — a user who presses Alt a beat too late gets a silent wrong result) and the Alt/Cmd freehand grid-bypass mode (checked continuously — an off-grid note reads, at a glance, as a bug rather than intentional placement). Ableton\'s own manual doesn\'t screenshot equivalent modifier cues either (research 74 §2.5), so this is explicitly a "go beyond the reference" item, not a parity gap — and cheap, since the modifier state is already read every `onPointerMove`. A small badge or an OS-style `+`/off-grid cursor swap the instant the modifier is detected.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/74-ux-drag-and-drop.md', plan: null,
+  },
+  {
+    area: 'Drag & drop (cross-cutting)', feature: 'Live snap-to-grid visual feedback during a drag',
+    description: 'Missing everywhere in dotbeat today (no highlighted grid column/row at the computed snap target during a note-drag or clip-move) — and, per research 74 §2.4, not confirmed as an Ableton screenshot pattern either in its 32-page drag-and-drop sample, so this is aspirational polish, not a documented gap to close. The snapped position is already computed live (`snapStep`, `ArrangementView.tsx`\'s own grid snap) — this is a pure render addition, no new logic.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/74-ux-drag-and-drop.md', plan: null,
+  },
+  {
+    area: 'Drag & drop (cross-cutting)', feature: 'Non-drag fallback for library → track/lane placement',
+    description: 'Dragging is currently the *only* way to apply a preset/kit sample/soundfont from the browser onto a track/lane — worse for accessibility, and the reason `ui/verify-phase22-content-browser.mjs` has to fully simulate native HTML5 drag events rather than click a button. A non-drag fallback (e.g. select a track, then click a preset row\'s own "apply" action), mirroring the `◀`/`▶` fallback pattern effect rows and section chips already have. `applyPresetToTrack`/`installKitLane`/`installSoundfont` are already called from `handleLibraryDrop` rather than reinvented, so the fallback and the drag path can share the same underlying apply function from day one.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/74-ux-drag-and-drop.md', plan: null,
+  },
+
   // ── Preset / content library ─────────────────────────────────────────────
   {
     area: 'Preset / content library', feature: '36 presets + content taxonomy',
@@ -1109,7 +1275,7 @@ export const rows = [
   },
   {
     area: 'Preset / content library', feature: 'Collections / favoriting',
-    description: 'Ableton\'s Collections: 7 fixed color-coded, cross-type, user-curated labels, number-key-assignable to any item (manual ch.4 pp.79-81). No favoriting/starring/coloring mechanism exists for library content in dotbeat today (track header recoloring is a different thing — that colors a project track, not a browsable library item). If built, keep it flat and `localStorage`-based (browsing-session UI state, not the `.beat` file or `presets/factory.json`) rather than Ableton\'s full 7-color multi-assign system.',
+    description: 'Ableton\'s Collections: 7 fixed color-coded, cross-type, user-curated labels, number-key-assignable to any item (manual ch.4 pp.79-81). No favoriting/starring/coloring mechanism exists for library content in dotbeat today (track header recoloring is a different thing — that colors a project track, not a browsable library item). If built, keep it flat and `localStorage`-based (browsing-session UI state, not the `.beat` file or `presets/factory.json`) rather than Ableton\'s full 7-color multi-assign system. Research 73 §4 item 7 flags cheap groundwork worth doing well ahead of the full feature: reserve a small palette (5-7 hues) and a dot-slot in `.lib-row`\'s layout now — dotbeat\'s current design system has zero spare hues to draw from (§3.7 there), and retrofitting the color-dot real estate into every row component later is markedly more expensive than reserving it up front.',
     core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
     research: 'research/51-ableton-vs-dotbeat-browser.md', plan: null,
   },
@@ -1155,6 +1321,42 @@ export const rows = [
     core: 'na', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: null,
   },
+  {
+    area: 'Preset / content library', feature: 'Content browser rail: user-resizable width',
+    description: 'The rail is a fixed **260px** column (`.library-rail`) with no resize handle — the width is fixed in CSS, not draggable, unlike Ableton\'s own panel and its internal sidebar/content-pane divider, both draggable. `.lib-row-name` already truncates with ellipsis at 260px, which will worsen as preset/kit names and counts grow. Needs a resize-handle component — check for reuse against any other resizable panel dotbeat already has (e.g. the bottom pane) before building a new one.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/73-ux-browser.md', plan: null,
+  },
+  {
+    area: 'Preset / content library', feature: 'Minimal preview scrub/waveform strip at the bottom of the rail',
+    description: 'dotbeat\'s preview is a stateful icon button per row (`▶`→`…` while busy) with zero visual feedback beyond the button\'s own busy-spinner text — no waveform, no scrub bar, no persistent "currently previewing" indicator anywhere in the browser, versus Ableton\'s dedicated two-row Preview Tab footer (waveform + tags). A static waveform render + a thin playhead for the currently-previewing item, no scrubbing-to-seek required initially — check whether the audio-region/clip view already has a waveform-render utility to reuse (`ArrangementView.tsx` almost certainly renders waveforms for audio clips already) before building one from scratch.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/73-ux-browser.md', plan: null,
+  },
+  {
+    area: 'Preset / content library', feature: 'Selected-row state in the content browser',
+    description: 'Clicking a browser row today does nothing — the only two live affordances per row are the preview button and drag. Ableton\'s core click-then-act model keeps a clicked row visibly selected and persistent. Add `selected` local/store state + a `.lib-row.selected` background-fill rule reusing the existing `:hover` treatment\'s visual language — small, self-contained, and sets up (without requiring) future keyboard navigation.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/73-ux-browser.md', plan: null,
+  },
+  {
+    area: 'Preset / content library', feature: 'Section-header whitespace/rhythm micro-polish',
+    description: 'Rail sections are separated by a hard 1px bottom border per section, versus Ableton\'s softer whitespace-break (extra vertical space above each top-level sidebar section, no hard rule). A purely visual rhythm tweak — good "spare cycle" item during a broader polish pass, not worth scheduling on its own.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/73-ux-browser.md', plan: null,
+  },
+  {
+    area: 'Preset / content library', feature: 'Kit-group fold/unfold in the content browser',
+    description: 'Kit lanes (`.lib-kit-head` → `Kick`/`Snare`/`Clap`/`Hat`/`Open` rows) are always fully expanded — no disclosure triangle, no collapsed-by-default state, unlike every other section in the rail. `Section`\'s existing `open` state is directly reusable. Low urgency at today\'s 2 kits / 10 lanes total, becomes a real scanability win once kit count grows.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/73-ux-browser.md', plan: null,
+  },
+  {
+    area: 'Preset / content library', feature: 'Dedicated preview-volume control, decoupled from the master bus',
+    description: 'Previews go through whatever the master bus is already doing (no dedicated gain stage), unlike Ableton\'s separate Preview/Cue Volume knob living in the Master track\'s own strip. Currently previewing at full master level can be jarring mid-mix-review. Low cost as a single global control — sequence alongside the preview scrub/waveform strip above so it lands in the same footer element rather than as a separate bolt-on.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/73-ux-browser.md', plan: null,
+  },
 
   // ── Macros ───────────────────────────────────────────────────────────────
   {
@@ -1168,6 +1370,12 @@ export const rows = [
     description: 'Ableton\'s Rand button randomizes every mapped macro at once, with volume-shaped macros excluded by default as a footgun-prevention convention (manual ch.24 p.476). Sequence strictly after the Macro tooling layer above ships. Add `excludeFromRandomize?: boolean` to `BeatMacro`, defaulted true for any macro whose sole/first target is a volume-shaped param; a "Rand" button in the Macros row iterates visible, non-excluded macros. Cheap, real v1.1 polish, not required for the initial macro build.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/64-ableton-vs-dotbeat-racks.md', plan: null,
+  },
+  {
+    area: 'Macros', feature: 'Enlarge and visually elevate the Macro row',
+    description: '`.macro-row` renders one ordinary 40px `Knob` per macro at the exact same size/weight as any other knob on the page (e.g. a plain Filter cutoff knob) — it reads as one more knob-row among many rather than a distinct, elevated control surface, versus Ableton\'s 4×2 grid of large, individually-bordered cards with a big bold value readout under each. Larger knob size and individually bordered cards per macro (closer to Ableton\'s grid treatment, without requiring a literal 4×2 layout if horizontal space is preferred) would give the row its own visual identity. Also worth deciding whether per-track macro renaming is worth adding now that the row exists (today: fixed factory names only, e.g. `filter-sweep`/`grit`/`space`).',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/72-ux-device-view.md', plan: null,
   },
 
   // ── Undo / redo ──────────────────────────────────────────────────────────
@@ -1245,7 +1453,7 @@ export const rows = [
   },
   {
     area: 'Audio-region clip editing', feature: 'Region-level fade in/out handles',
-    description: 'Two draggable, region-relative 0..1 handles at region edges (linear, crossing = min of both, snap-to-grid) — a small format addition (two normalized fields per region), well-specified prior art. Ableton\'s concrete acceptance criteria (manual ch.6 pp.162-165): a Fade In Start/Fade Out End duration handle plus a Fade Curve shape handle, hard constraints (a fade can\'t cross a clip\'s own loop boundary; start/end fades on one clip can\'t overlap each other), and an auto-4ms-fade-on-edges default. Two normalized fields (`fadeIn`, `fadeOut`) on `BeatAudioRegion`; drag handles on `AudioClipInspector`\'s existing waveform canvas; engine-side linear gain ramp in the region player.',
+    description: 'Two draggable, region-relative 0..1 handles at region edges (linear, crossing = min of both, snap-to-grid) — a small format addition (two normalized fields per region), well-specified prior art. Ableton\'s concrete acceptance criteria (manual ch.6 pp.162-165): a Fade In Start/Fade Out End duration handle plus a Fade Curve shape handle, hard constraints (a fade can\'t cross a clip\'s own loop boundary; start/end fades on one clip can\'t overlap each other), and an auto-4ms-fade-on-edges default. Two normalized fields (`fadeIn`, `fadeOut`) on `BeatAudioRegion`; drag handles on `AudioClipInspector`\'s existing waveform canvas; engine-side linear gain ramp in the region player. Research 70 §4 item 8 pre-specs the exact visual grammar to match once this lands: small 6×6px squares at the clip\'s top corners on hover, a translucent triangular wash following the actual fade curve, a diamond mid-slope curve handle — filed now so the eventual build doesn\'t have to separately research the look.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/53-ableton-vs-dotbeat-arrangement-view.md', plan: null,
   },
