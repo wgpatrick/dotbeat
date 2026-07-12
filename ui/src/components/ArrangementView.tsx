@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
+import { engine } from '../audio/engine'
 import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, postClipMove, daemonBase } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, installAudioClip, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
@@ -28,6 +29,10 @@ const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument', 'audi
 const LOOP_MIN = 1
 const LOOP_MAX = 64
 const clampBars = (n: number, lo = LOOP_MIN, hi = LOOP_MAX) => Math.max(lo, Math.min(hi, Math.round(n)))
+
+// Phase 24 Stream CE: how much raw pointer movement (px) still counts as a "click" on the ruler
+// rather than a drag-to-select gesture — see the click-to-seek effect below.
+const CLICK_MOVE_PX = 4
 
 /** Change loop-mode length via the already-supported `loop_bars` edit path (optimistic + debounced;
  * one canonical line on disk). */
@@ -1274,6 +1279,11 @@ export function ArrangementView() {
   // handle) reads and sends to the daemon's POST /song resize op.
   const overlapPolicy = useStore((s) => s.overlapPolicy)
   const setOverlapPolicy = useStore((s) => s.setOverlapPolicy)
+  // Phase 24 Stream CE: the transport's loop-region override — null loops the full song/loop
+  // (today's default), or a bar range to loop just that while auditioning/editing it. Session-only
+  // (see store.ts's doc comment); set from THIS view's existing bar-range selection axis below.
+  const loopRegion = useStore((s) => s.loopRegion)
+  const setLoopRegion = useStore((s) => s.setLoopRegion)
   // Playback position for the moving playhead. currentStep is the SAME grid-quantized song position
   // the step-sequencer/NoteView playheads already read (engine's Tone.getDraw() handoff, ported in
   // Phase 12 Stream 1) — reused here, not a second position-tracking mechanism. It ticks at most
@@ -1288,6 +1298,10 @@ export function ArrangementView() {
   // Active drag band (bars), plus which axis is dragging (the ruler → all tracks, or a track id).
   const [drag, setDrag] = useState<{ axis: 'ruler' | string; start: number; cur: number } | null>(null)
   const dragRectLeft = useRef(0)
+  // Raw pointerdown clientX (Phase 24 Stream CE), separate from dragRectLeft's row-relative origin —
+  // used only to tell a plain click (negligible movement) apart from a real drag-to-select gesture on
+  // the ruler, so a click there can seek instead of committing a trivial one-bar selection.
+  const dragStartClientX = useRef(0)
   // Active length-resize drag on a section's right-edge handle (Phase 19). `bars` is the live,
   // previewed length; it commits on pointer-up (loop_bars for loop mode, POST /song for song mode).
   // `startScrollLeft` (Phase 22 Stream AG) is the .arr-scroll container's scrollLeft at drag-start —
@@ -1534,6 +1548,7 @@ export function ArrangementView() {
       e.preventDefault()
       const laneEl = (e.currentTarget as HTMLElement).querySelector('.arr-canvas') ?? e.currentTarget
       dragRectLeft.current = (laneEl as HTMLElement).getBoundingClientRect().left
+      dragStartClientX.current = e.clientX
       const b = barFromClientX(e.clientX)
       // Phase 24 Stream CC: seed the marquee's row-span tracker with the starting row (a drag that
       // never leaves its starting track still needs to register that row for the occurrence-select
@@ -1706,6 +1721,14 @@ export function ArrangementView() {
   }, [resize, songMode, overlapPolicy])
 
   // Window-level move/up so a drag that leaves the element still tracks and always commits.
+  //
+  // Phase 24 Stream CE: a plain CLICK on the ruler (pointerdown+pointerup with negligible on-screen
+  // movement) seeks the transport there instead of committing the trivial one-bar selection a click
+  // used to produce — distinct from an actual drag-to-select gesture, which still works exactly as
+  // before (including on the ruler, once the pointer has genuinely moved). Judged on raw pixel
+  // movement (CLICK_MOVE_PX), not bar delta — bar granularity alone would misclassify a real short
+  // drag that doesn't cross a bar boundary. Track-row axes are unaffected; click-to-seek is
+  // ruler-only, matching the plan's "clicking A SPOT ON THE RULER" framing.
   useEffect(() => {
     if (!drag) return
     const onMove = (e: PointerEvent) => {
@@ -1721,9 +1744,16 @@ export function ArrangementView() {
         if (tid) rowsSpannedRef.current.add(tid)
       }
     }
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
       setDrag((d) => {
         if (d) {
+          // Phase 24 Stream CE: a plain click on the ruler seeks instead of committing a trivial
+          // one-bar selection — see this effect's own header comment above.
+          const isClick = d.axis === 'ruler' && Math.abs(e.clientX - dragStartClientX.current) < CLICK_MOVE_PX
+          if (isClick) {
+            engine.seek(d.start)
+            return null
+          }
           const start = Math.min(d.start, d.cur)
           const end = Math.max(d.start, d.cur) + 1 // inclusive bar → exclusive end; selection needs start < end
           const bars = { start, end }
@@ -1754,6 +1784,36 @@ export function ArrangementView() {
       window.removeEventListener('pointerup', onUp)
     }
   }, [drag, barFromClientX, occurrencesByTrack])
+
+  // Phase 24 Stream CE: loop-region controls. `setLoopRange` is the one place that writes
+  // `loopRegion` — no separate "push this to the engine" call is needed: engine.ts's `tick()` reads
+  // `loopRegion` fresh from the store on every scheduled step, so a running transport picks up a
+  // newly set/cleared region on its very next tick automatically.
+  const setLoopRange = useCallback(
+    (range: { start: number; end: number } | null) => {
+      setLoopRegion(range)
+    },
+    [setLoopRegion],
+  )
+  // Loop whatever bar range is currently selected via the existing selection axis (drag the ruler or
+  // a track — docs/phase-13-views.md's "Selection wired to /selection"), reusing it rather than a
+  // second selection mechanism.
+  const loopThisSelection = useCallback(() => {
+    if (selection.bars) setLoopRange({ start: selection.bars.start, end: selection.bars.end })
+  }, [selection.bars, setLoopRange])
+  // A section chip's own "loop this section" toggle (song mode only): loop just that section's bar
+  // range, or clear the region if it's already looping exactly that section (a toggle, not just a
+  // setter — clicking an already-active section's loop button turns looping off).
+  const loopThisSection = useCallback(
+    (i: number) => {
+      const sec = sections[i]
+      if (!sec) return
+      const range = { start: sec.startBar, end: sec.startBar + sec.bars }
+      const alreadyThis = loopRegion && loopRegion.start === range.start && loopRegion.end === range.end
+      setLoopRange(alreadyThis ? null : range)
+    },
+    [sections, loopRegion, setLoopRange],
+  )
 
   const clickHeader = useCallback(
     (t: BeatTrack) => {
@@ -2141,6 +2201,21 @@ export function ArrangementView() {
                 >
                   ×
                 </button>
+                {/* Phase 24 Stream CE: loop just this section while auditioning/editing it, without
+                    changing the song structure — session-only transport state (store.ts's
+                    loopRegion), toggled off by clicking again. */}
+                <button
+                  className={`arr-chip-btn arr-chip-loop${
+                    loopRegion && sections[i] && loopRegion.start === sections[i]!.startBar && loopRegion.end === sections[i]!.startBar + sections[i]!.bars
+                      ? ' active'
+                      : ''
+                  }`}
+                  data-section-loop={i}
+                  title="loop just this section while auditioning it (click again to stop)"
+                  onClick={() => loopThisSection(i)}
+                >
+                  ⟲
+                </button>
               </span>
               )
             })}
@@ -2221,6 +2296,37 @@ export function ArrangementView() {
           <button className="arr-toolbtn" data-action="zoom-fit" disabled={zoomPxPerBar === null} title="fit to width" onClick={zoomFit}>
             fit
           </button>
+        </div>
+        {/* Phase 24 Stream CE: loop-region controls — loop just the currently-SELECTED bar range
+            (the same drag-the-ruler/a-track selection axis docs/phase-13-views.md's "Selection
+            wired to /selection" and `beat vary --scope selection` already use) instead of the whole
+            song/loop. Session-only (store.ts's loopRegion), never written to the .beat file. */}
+        <div className="arr-loop-region">
+          {loopRegion ? (
+            <>
+              <span className="arr-loop-badge" data-loop-region-active="1">
+                looping bars {loopRegion.start + 1}–{loopRegion.end}
+              </span>
+              <button
+                className="arr-chip-btn"
+                data-loop-clear="1"
+                title="stop looping just this range — back to the full song/loop"
+                onClick={() => setLoopRange(null)}
+              >
+                clear loop
+              </button>
+            </>
+          ) : (
+            <button
+              className="arr-chip-btn"
+              data-loop-selection="1"
+              disabled={!selection.bars}
+              title={selection.bars ? `loop bars ${selection.bars.start + 1}–${selection.bars.end}` : 'drag the ruler or a track to select a bar range first'}
+              onClick={loopThisSelection}
+            >
+              loop selection
+            </button>
+          )}
         </div>
       </div>
 

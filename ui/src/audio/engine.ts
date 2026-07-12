@@ -2787,7 +2787,32 @@ class Engine {
     }, 700)
   }
 
-  async play(): Promise<void> {
+  /** Phase 24 Stream CE: resolve the session-only loop-region override (`store.loopRegion`) against
+   * the CURRENT document's actual length, clamping to `[0, songBars]` and treating a range that's
+   * empty/inverted (e.g. the song got shorter after the region was set, or it hasn't been set at
+   * all) as inactive — falls back to the full-song wrap, same as `null`. Shared by `play()` (picks
+   * the playback START position) and `tick()` (wraps the manual step/pass computation) so both
+   * always agree on the same range. */
+  private resolveLoopRegion(songBars: number): { start: number; end: number } | null {
+    const raw = useStore.getState().loopRegion
+    if (!raw) return null
+    const start = Math.max(0, Math.min(Math.floor(raw.start), songBars))
+    const end = Math.max(0, Math.min(Math.floor(raw.end), songBars))
+    return end > start ? { start, end } : null
+  }
+
+  /** Starts the transport. `startBar`, when given, is where playback begins (click-to-seek's "start
+   * playback from the clicked position" case, Phase 24 Stream CE `seek()`) — otherwise playback
+   * starts at the active loop region's own start bar, or bar 0 when no region is active (unchanged
+   * default).
+   *
+   * The Transport's own NATIVE loop range (`t.loopStart`/`t.loopEnd`) deliberately always stays the
+   * full song, exactly as before this stream — it is NOT narrowed to the active region. A loop
+   * region is instead enforced entirely by `tick()`'s own manual step/pass modulo (see its comment),
+   * which wraps correctly for any magnitude of raw elapsed ticks with no dependency on Tone's own
+   * loop-crossing bookkeeping. This keeps the region concept fully self-contained in this file's own
+   * arithmetic rather than split across two wrap mechanisms that have to agree. */
+  async play(startBar?: number): Promise<void> {
     await this.ensureStarted()
     const doc = useStore.getState().doc
     if (!doc) return
@@ -2798,11 +2823,32 @@ class Engine {
     t.loopStart = 0
     const songBars = doc.song && doc.song.length > 0 ? (doc.song as { scene: string; bars: number }[]).reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
     t.loopEnd = `${songBars}m`
+    const region = this.resolveLoopRegion(songBars)
+    t.position = `${startBar ?? region?.start ?? 0}m`
     if (this.repeatId !== null) t.clear(this.repeatId)
     this.repeatId = t.scheduleRepeat((time) => this.tick(time), '16n', 0)
-    t.position = 0
     t.start()
     useStore.getState().setPlaying(true)
+  }
+
+  /** Phase 24 Stream CE: click-to-seek — clicking a spot on the ruler jumps the playhead there.
+   * Ableton's own framing: clicking while STOPPED starts playback from that position; clicking
+   * while PLAYING just relocates the playhead, leaving the transport's running state alone (no
+   * stop/restart, nothing else interrupted). `bar` is absolute within the full song/loop, the same
+   * units `tick()`'s own `bar` is in. */
+  seek(bar: number): void {
+    const doc = useStore.getState().doc
+    if (!doc) return
+    const clamped = Math.max(0, bar)
+    if (useStore.getState().playing) {
+      Tone.getTransport().position = `${clamped}m`
+      // tick() (scheduled every 16th note) overwrites this with the authoritative value on the very
+      // next step anyway, but nudging it here means the position readout and playhead jump
+      // immediately on click rather than up to one 16th note later.
+      useStore.setState({ currentStep: clamped * 16 })
+    } else {
+      void this.play(clamped)
+    }
   }
 
   stop(): void {
@@ -2812,6 +2858,21 @@ class Engine {
       t.clear(this.repeatId)
       this.repeatId = null
     }
+    // `t.clear()` cancels FUTURE tick() invocations, but any tick() that had already run before stop()
+    // was called may have left its own `Tone.getDraw().schedule(...)` callback queued — Draw is a
+    // separate rAF-driven timeline keyed to real AudioContext time, decoupled from the Transport's
+    // own start/stop, so those already-queued `currentStep` writes would otherwise still land a few
+    // hundred ms from now, stomping the `currentStep: -1` set below with a stale value from the
+    // session that just ended. Found live investigating Phase 24 Stream CE (a `play(bar)` seek right
+    // after a stop() briefly showed the PREVIOUS session's position before settling): cancel every
+    // pending Draw callback here so a stop is a clean cut, not a fade-out of stale reads. Must pass an
+    // explicit `0`, not call `cancel()` bare — Draw.cancel()'s default "after" argument is `now()`,
+    // which only cancels events scheduled for the FUTURE; an event already due but not yet flushed by
+    // the next animation frame (scheduled time <= now, exactly the stale-straggler case here) has
+    // `time <= after` and survives an argument-less cancel(). `0` is safely before every real
+    // AudioContext time (which only ever counts up from the context's own start), so it always
+    // catches every pending callback regardless of how "due" it already is.
+    Tone.getDraw().cancel(0)
     this.lastLaneTriggerTime = {}
     for (const voice of this.instruments.values()) {
       try {
@@ -2974,15 +3035,25 @@ class Engine {
     const transport = Tone.getTransport()
     const song = doc.song && doc.song.length > 0 ? (doc.song as { scene: string; bars: number }[]) : null
     const songBars = song ? song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
-    const totalSteps = songBars * 16
+    // Phase 24 Stream CE: wrap over the active loop region's bar range instead of the full song when
+    // one is set (wrapStartBar 0, wrapBars songBars when not — exactly today's
+    // `rawStep % (songBars*16)`). `step`/`bar` stay ABSOLUTE within the whole song (contentOf's own
+    // section lookup needs that to resolve the right scene/clip) — only the WRAP POINT narrows, the
+    // modulo below just re-centers on `wrapStartBar` instead of always on bar 0.
+    const region = this.resolveLoopRegion(songBars)
+    const wrapStartBar = region ? region.start : 0
+    const wrapBars = region ? region.end - region.start : songBars
+    const wrapStartStep = wrapStartBar * 16
+    const wrapSteps = wrapBars * 16
     const ticksPerStep = transport.PPQ / 4
     const rawStep = Math.round(transport.getTicksAtTime(time) / ticksPerStep)
-    const step = rawStep % totalSteps
+    const step = wrapStartStep + (((rawStep - wrapStartStep) % wrapSteps) + wrapSteps) % wrapSteps
     const bar = Math.floor(step / 16)
     // v0.10 chance (Phase 22 Stream AD): a per-loop-cycle counter, incremented once per full
-    // traversal of the loop/song — chanceFires re-rolls per (pass, track, note), so the same note
-    // is re-evaluated fresh every time the loop comes back around rather than a single fixed draw.
-    const pass = Math.floor(rawStep / totalSteps)
+    // traversal of the loop region (or the whole song/loop, same as before this stream when no
+    // region is active) — chanceFires re-rolls per (pass, track, note), so the same note is
+    // re-evaluated fresh every time the loop comes back around rather than a single fixed draw.
+    const pass = Math.floor((rawStep - wrapStartStep) / wrapSteps)
     const stepSeconds = Tone.Time('16n').toSeconds()
 
     for (const track of doc.tracks) {

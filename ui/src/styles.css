@@ -2371,6 +2371,33 @@ body {
   white-space: nowrap;
 }
 
+/* Phase 24 Stream CE: loop-region controls — a section chip's own "loop this" toggle, and the
+   generic loop-the-current-selection / clear-loop pair in the length bar. */
+.arr-chip-loop {
+  font-size: 11px;
+}
+.arr-chip-loop.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(224, 161, 60, 0.18);
+}
+.arr-loop-region {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+.arr-loop-badge {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(224, 161, 60, 0.18);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* ---- Phase 22 Stream AH: the content-browser sidebar (ContentBrowser.tsx) ---- */
 .library-rail {
   width: 260px;

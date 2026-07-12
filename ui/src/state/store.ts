@@ -81,6 +81,17 @@ interface DawState {
    * resets to the default on reload) and every resize call (the +/- chips and the drag handle) reads
    * it and sends it to the daemon's POST /song resize op. */
   overlapPolicy: 'clip' | 'push-existing' | 'keep-existing'
+  /** Phase 24 Stream CE: the transport's loop-region override, a `[start, end)` bar range, or
+   * `null` for today's default (loop the full song/loop — `engine.ts`'s existing `songBars`/
+   * `totalSteps` wrap). When set, `engine.ts`'s `tick()` wraps playback within this range instead,
+   * without touching the song/section structure itself. Deliberately session-only, same "view/
+   * session state stays out of the file" discipline as mute/solo, group-collapse, and CA/CD's
+   * pane-height/zoom state — looping a section while auditioning it is a listening choice, not a
+   * musical fact the `.beat` file's diff should carry. Set from the arrangement's existing bar-range
+   * SELECTION axis (`selection.bars` above — drag the ruler/a track, or a section chip's "loop
+   * this" button derives the range from the section's own bars) — reuses that axis rather than
+   * inventing a second one; setting a loop region does not itself change `selection`. */
+  loopRegion: { start: number; end: number } | null
 
   setDoc: (doc: BeatDocument) => void
   setConnected: (c: boolean) => void
@@ -99,6 +110,7 @@ interface DawState {
   toggleMute: (id: string) => void
   toggleSolo: (id: string) => void
   setOverlapPolicy: (p: DawState['overlapPolicy']) => void
+  setLoopRegion: (r: { start: number; end: number } | null) => void
 }
 
 export const useStore = create<DawState>((set) => ({
@@ -120,6 +132,7 @@ export const useStore = create<DawState>((set) => ({
   mutes: {},
   solos: {},
   overlapPolicy: 'push-existing', // matches the pre-Stream-AG unconditional-shift behavior
+  loopRegion: null,
 
   setDoc: (doc) =>
     set((s) => ({
@@ -144,6 +157,7 @@ export const useStore = create<DawState>((set) => ({
   toggleMute: (id) => set((s) => ({ mutes: { ...s.mutes, [id]: !s.mutes[id] } })),
   toggleSolo: (id) => set((s) => ({ solos: { ...s.solos, [id]: !s.solos[id] } })),
   setOverlapPolicy: (overlapPolicy) => set({ overlapPolicy }),
+  setLoopRegion: (loopRegion) => set({ loopRegion }),
 }))
 
 /** A track is effectively silenced iff it is explicitly muted, OR any track is soloed and this one
