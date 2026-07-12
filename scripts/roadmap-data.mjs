@@ -415,9 +415,9 @@ export const rows = [
   // ── Macros ───────────────────────────────────────────────────────────────
   {
     area: 'Macros', feature: 'Macro tooling layer',
-    description: 'A curated "front panel" of knobs mapped to real params, living outside the file (like presets) — turning a macro writes literal edits, never an in-file indirection.',
+    description: 'A curated "front panel" of knobs mapped to real params, living outside the file (like presets) — turning a macro writes literal edits, never an in-file indirection. Phase 23 research stream RC scoped the concrete data shape (BeatMacro/MacroTarget), storage (presets/macros.json via the existing /library route), and GUI placement (a Macros row in SynthPanel.tsx) — see research/27.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/18-ableton-ui-architecture.md', plan: null,
+    research: 'research/27-macro-tooling-layer.md', plan: null,
   },
 
   // ── Undo / redo ──────────────────────────────────────────────────────────
@@ -501,15 +501,15 @@ export const rows = [
   },
   {
     area: 'Audio-region clip editing', feature: 'Warp markers + Complex-mode stretch',
-    description: 'Marker-list format addition plus a real stretch-algorithm integration via signalsmith-stretch (MIT/WASM). Consider the 3-way TransientPlayMode vocabulary (Once/Repeat/Pingpong — research 22) for "what happens to a hit between two markers," smaller than Ableton\'s 5-way named-warp-mode system.',
+    description: 'Marker-list format addition plus a real stretch-algorithm integration via signalsmith-stretch (MIT/WASM). Consider the 3-way TransientPlayMode vocabulary (Once/Repeat/Pingpong — research 22) for "what happens to a hit between two markers," smaller than Ableton\'s 5-way named-warp-mode system. Phase 23 research stream RA scoped the concrete grammar (`marker <id> <sourceTime> <timelineTime>`), WASM binding (official signalsmith-stretch npm package), and offline-pre-stretch engine architecture — see research/25.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/16-audio-clip-editing.md', plan: null,
+    research: 'research/25-audio-warp-markers-stretch.md', plan: null,
   },
   {
     area: 'Audio-region clip editing', feature: 'Beats-mode transient slicing',
-    description: 'Onset/transient detection plus the stretch library; sequence after the rest of the audio-clip format proves out.',
+    description: 'Onset/transient detection plus the stretch library; sequence after the rest of the audio-clip format proves out. Phase 23 research stream RB recommends a dependency-free pure-TypeScript energy-based detector populating the same BeatAudioRegion.markers grammar RA scoped, with an MVP tier (markers + waveform overlay + split-at-transient) shippable independent of the stretch engine — see research/26.',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/16-audio-clip-editing.md', plan: null,
+    research: 'research/26-beats-mode-transient-slicing.md', plan: null,
   },
   {
     area: 'Audio-region clip editing', feature: 'Bounce / freeze a MIDI clip to audio',
