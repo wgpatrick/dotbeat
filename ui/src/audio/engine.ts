@@ -207,6 +207,10 @@ interface EngineSynth {
   glide: number
   keytrackAmount: number
   velToFilterAmount: number
+  velDest: LfoDest
+  velAmount: number
+  keyDest: LfoDest
+  keyAmount: number
   eqLow: number
   eqMid: number
   eqHigh: number
@@ -379,6 +383,10 @@ function coerce(p: BeatSynth): EngineSynth {
     glide: num(p.glide, 0),
     keytrackAmount: num(p.keytrackAmount, 0),
     velToFilterAmount: num(p.velToFilterAmount, 0),
+    velDest: (LFO_DESTS.includes(p.velDest as LfoDest) ? p.velDest : 'off') as LfoDest,
+    velAmount: num(p.velAmount, 0),
+    keyDest: (LFO_DESTS.includes(p.keyDest as LfoDest) ? p.keyDest : 'off') as LfoDest,
+    keyAmount: num(p.keyAmount, 0),
     eqLow: num(p.eqLow, 0),
     eqMid: num(p.eqMid, 0),
     eqHigh: num(p.eqHigh, 0),
@@ -3029,11 +3037,61 @@ class Engine {
    * detune) and loops over `ratchetSlots` — count<=1 is a single full-length slot, so this reduces
    * to exactly one trigger per call when nothing is ratcheted, same as before this stream. A
    * Beat-Repeat-triggered call ratchets too: a repeated ratcheted note repeats its whole ratchet
-   * pattern, which is the correct compounded behavior, not a special case. */
+   * pattern, which is the correct compounded behavior, not a special case. Phase 26 Stream DL: also
+   * dispatches velDest/velAmount and keyDest/keyAmount — the generalized vel/key modulation pair
+   * (destination-switch mirroring tick()'s applyLfoAdditive) — to whichever LFO_DESTS destination
+   * each targets, in addition to the legacy cutoff-only keytrackAmount/velToFilterAmount above. */
   private fireSynthNote(chain: SynthChain, p: EngineSynth, n: BeatNote, noteTime: number, stepSeconds: number, baseCutoff: number, lfoOn: boolean, lfo: number, lfo2On: boolean, lfo2: number): void {
     let freq = Tone.Frequency(n.pitch, 'midi').toFrequency() * Math.pow(2, n.cent / 1200)
     if (p.lfoDest === 'pitch' && lfoOn) freq *= Math.pow(2, (p.lfoDepth * lfo * 100) / 1200)
     if (p.lfo2Dest === 'pitch' && lfo2On) freq *= Math.pow(2, (p.lfo2Depth * lfo2 * 100) / 1200)
+    // Phase 26 Stream DL: generalized per-parameter velocity/key modulation — one amount routed to
+    // one of the SAME LFO_DESTS destinations (docs/phase-26-plan.md Stream DL, research/68 §11).
+    // velSignal/keySignal are the bipolar, LFO-style (-1..1-ish) modulation sources this note
+    // contributes: velSignal is 0 at velocity 0.5 (neutral, matching how a sine LFO centers on 0)
+    // and +/-1 at velocity 1/0; keySignal is octaves from middle C (60), UNCLAMPED (a note two
+    // octaves up contributes signal=2), same convention the legacy keytrackAmount cutoff-only knob
+    // below already uses for its own (pitch-60)/12 term. velDest/keyDest default to 'off' and
+    // velAmount/keyAmount default to 0 (SYNTH_FIELDS canonical elision), so every pre-Phase-26 file
+    // computes these but never acts on them below — see the cutoff block and applyNoteModAdditive.
+    const velSignal = (n.velocity - 0.5) * 2
+    const keySignal = (n.pitch - 60) / 12
+    if (p.velDest === 'pitch' && p.velAmount !== 0) freq *= Math.pow(2, (p.velAmount * velSignal * 100) / 1200)
+    if (p.keyDest === 'pitch' && p.keyAmount !== 0) freq *= Math.pow(2, (p.keyAmount * keySignal * 100) / 1200)
+    // Same shape as tick()'s applyLfoAdditive below (one function, called once per source with its
+    // own dest/amount/signal, so there's exactly one place that knows how each destination maps
+    // onto the live audio graph) — reuses the identical per-destination scale factors (resonance*8,
+    // pan*1, sends*0.5, eq*12dB, *Mix*0.5) for a consistent modulation-intensity convention across
+    // LFO/automation/vel/key. 'cutoff' is handled separately below (shares the legacy multiplicative
+    // keytrackAmount/velToFilterAmount math, for exact backward compatibility); 'pitch' is handled
+    // just above, once, before the ratchet loop; 'off'/'wtPos' are deliberate no-ops (wtPos:
+    // wavetable oscillators aren't ported, same scope note as applyLfoAdditive's twin below).
+    const applyNoteModAdditive = (dest: LfoDest, amt: number, signal: number, t: number): void => {
+      if (dest === 'off' || dest === 'cutoff' || dest === 'pitch' || dest === 'wtPos' || amt === 0) return
+      const d = amt * signal
+      const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
+      switch (dest) {
+        case 'amp': chain.vol.volume.linearRampToValueAtTime(p.volume + d * 12, t); break
+        case 'resonance': chain.filter.Q.linearRampToValueAtTime(Math.max(0, p.resonance + d * 8), t); break
+        case 'pan': chain.panner.pan.linearRampToValueAtTime(Math.max(-1, Math.min(1, p.pan + d)), t); break
+        case 'sendReverb': chain.reverbSend.gain.linearRampToValueAtTime(clamp01(p.sendReverb + d * 0.5), t); break
+        case 'sendDelay': chain.delaySend.gain.linearRampToValueAtTime(clamp01(p.sendDelay + d * 0.5), t); break
+        case 'eqLow': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.low.linearRampToValueAtTime(p.eqLow + d * 12, t); break }
+        case 'eqMid': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.mid.linearRampToValueAtTime(p.eqMid + d * 12, t); break }
+        case 'eqHigh': { const e = findEffect(chain, 'eq3'); if (e) e.eq3!.high.linearRampToValueAtTime(p.eqHigh + d * 12, t); break }
+        case 'compMix': {
+          const e = findEffect(chain, 'comp')
+          if (e) {
+            const v = clamp01(p.compMix + d * 0.5)
+            e.compDry!.gain.linearRampToValueAtTime(1 - v, t)
+            e.compWet!.gain.linearRampToValueAtTime(v, t)
+          }
+          break
+        }
+        case 'distortionMix': { const e = findEffect(chain, 'distortion'); if (e) e.distortion!.wet.linearRampToValueAtTime(clamp01(p.distortionMix + d * 0.5), t); break }
+        case 'bitcrushMix': { const e = findEffect(chain, 'bitcrush'); if (e) e.bitcrush!.wet.linearRampToValueAtTime(clamp01(p.bitcrushMix + d * 0.5), t); break }
+      }
+    }
     for (const slot of ratchetSlots(n.ratchetCount, n.ratchetCurve, n.ratchetLength, n.duration)) {
       const slotTime = noteTime + slot.start * stepSeconds
       const dur = Math.max(slot.duration * stepSeconds * 0.9, 0.05)
@@ -3046,13 +3104,27 @@ class Engine {
       if (p.subLevel > 0) chain.sub.triggerAttackRelease(freq / 2, dur, slotTime, n.velocity)
       if (p.noiseLevel > 0) chain.noise.triggerAttackRelease(dur, slotTime, n.velocity)
       if (p.fmLevel > 0) chain.fm.triggerAttackRelease(freq, dur, slotTime, n.velocity)
-      if (p.filterEnvAmount > 0 || p.keytrackAmount > 0 || p.velToFilterAmount > 0) {
+      // Phase 26 Stream DL: the trigger condition below gained two new OR-clauses (keyDest/velDest
+      // === 'cutoff') but the legacy keytrackMult/velMult terms and the original three OR-clauses
+      // are UNCHANGED — a pre-Phase-26 file (velDest/keyDest always 'off') hits the exact same
+      // condition and computes the exact same noteCutoff as before this stream (extraKeyMult/
+      // extraVelMult both fold to 1), which is the backward-compatibility contract this stream
+      // must hold (docs/phase-26-plan.md Stream DL: "existing velToFilterAmount/keytrackAmount
+      // fields working as-is").
+      if (p.filterEnvAmount > 0 || p.keytrackAmount > 0 || p.velToFilterAmount > 0 || (p.keyDest === 'cutoff' && p.keyAmount !== 0) || (p.velDest === 'cutoff' && p.velAmount !== 0)) {
         // Keytracking/velocity shift this note's cutoff at note-on; the filter envelope then
         // sweeps relative to that shifted value. Each ratchet repeat re-triggers its own envelope
         // pluck (count<=1 matches today's single-trigger behavior exactly).
         const keytrackMult = Math.pow(2, (p.keytrackAmount * (n.pitch - 60)) / 12)
         const velMult = Math.pow(2, p.velToFilterAmount * (n.velocity - 0.5) * 4)
-        const noteCutoff = Math.max(baseCutoff * keytrackMult * velMult, 20)
+        // extraKeyMult/extraVelMult: the generalized keyDest/velDest === 'cutoff' case, expressed in
+        // the SAME keySignal/velSignal terms as the pitch/additive destinations above (keySignal =
+        // (pitch-60)/12 exactly matches keytrackMult's own exponent term; velSignal*2 = (velocity-
+        // 0.5)*4 exactly matches velMult's own exponent term) — one shared bipolar-signal
+        // convention across every destination, cutoff included.
+        const extraKeyMult = p.keyDest === 'cutoff' ? Math.pow(2, p.keyAmount * keySignal) : 1
+        const extraVelMult = p.velDest === 'cutoff' ? Math.pow(2, p.velAmount * velSignal * 2) : 1
+        const noteCutoff = Math.max(baseCutoff * keytrackMult * velMult * extraKeyMult * extraVelMult, 20)
         const peak = Math.max(noteCutoff * Math.pow(2, p.filterEnvAmount * 4), 20)
         const sustainHz = Math.max(noteCutoff * Math.pow(2, p.filterEnvAmount * 4 * p.filterEnvSustain), 20)
         chain.filter.frequency.cancelScheduledValues(slotTime)
@@ -3061,6 +3133,17 @@ class Engine {
         chain.filter.frequency.exponentialRampToValueAtTime(sustainHz, slotTime + Math.max(p.filterEnvAttack, 0.001) + Math.max(p.filterEnvDecay, 0.001))
         chain.filter.frequency.exponentialRampToValueAtTime(noteCutoff, slotTime + dur + Math.max(p.filterEnvRelease, 0.001))
       }
+      // Target slotTime+stepSeconds, not slotTime itself — the SAME "ramp completes one step
+      // ahead" convention tick()'s own applyLfoAdditive uses for its rampTime (see below). These
+      // additive destinations (unlike cutoff/pitch) are driven by applyParams's hard `.value =`
+      // assignment every tick (Q/pan/sendReverb/sendDelay/eq/comp/distortion/bitcrush all reset to
+      // their base value at the START of every tick — see applyParams), so a ramp that finishes
+      // near slotTime itself would mostly just get erased by the VERY NEXT tick's reset before it
+      // could be heard. Landing on slotTime+stepSeconds instead means a densely-retriggered note
+      // (an arpeggio, a hi-hat pattern, ratchets — the realistic use case for per-note modulation)
+      // keeps this freshly re-asserted every tick, same as an LFO would.
+      applyNoteModAdditive(p.velDest, p.velAmount, velSignal, slotTime + stepSeconds)
+      applyNoteModAdditive(p.keyDest, p.keyAmount, keySignal, slotTime + stepSeconds)
     }
   }
 

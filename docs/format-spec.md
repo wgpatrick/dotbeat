@@ -241,7 +241,11 @@ the ~50 store-level params the format couldn't express. v0.3 exposes them:
   same indent: osc layers (`osc2Type/osc2Level/osc2Detune`, `subLevel`, `noiseLevel`, `fm*`,
   `unisonVoices/unisonWidth`, `wtTable/wtPos`), filter (`filterType`, `filterEnv*`), motion
   (`lfo*`, `lfo2*` — including tempo-sync `lfoSync/lfoSyncRate`/`lfo2Sync/lfo2SyncRate`, Phase 18 —
-  plus `glide`, `keytrackAmount`, `velToFilterAmount`, `macroValue`), inserts
+  plus `glide`, `keytrackAmount`, `velToFilterAmount`, `macroValue`, and Phase 26 Stream DL's
+  generalized `velDest/velAmount` + `keyDest/keyAmount` — one amount routed to any `LFO_DESTS`
+  destination, the same enum lfoDest/lfo2Dest share (see below); ADDITIVE to, not a replacement
+  for, the legacy cutoff-only `keytrackAmount`/`velToFilterAmount`, which keep applying
+  unconditionally for back-compat with pre-Phase-26 files), inserts
   (`eq*`, `comp*`, `distortion*`, `bitcrush*`, `pingPong*`, `chorus*`, `phaser*`, `saturator*` —
   the last four added Phase 22 Stream AC, `research/17-track-fx-arsenal.md` §5; Chorus/Phaser
   retired the old shared, un-configurable `sendMod` bus in favor of real per-track inserts —

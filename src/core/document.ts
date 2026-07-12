@@ -245,8 +245,22 @@ export interface BeatSynth {
   lfo2Sync: boolean
   lfo2SyncRate: LfoSyncRate
   glide: number // seconds
-  keytrackAmount: number
-  velToFilterAmount: number
+  keytrackAmount: number // legacy single-destination keytrack->cutoff amount, -1..1; kept for
+  // back-compat with pre-Phase-26 files (see keyDest/keyAmount below). ALWAYS applied to cutoff,
+  // unconditionally, regardless of keyDest — this is what makes an old file with a nonzero
+  // keytrackAmount and no keyDest/keyAmount play back identically to before this stream landed.
+  velToFilterAmount: number // legacy single-destination velocity->cutoff amount, 0..1; same
+  // back-compat contract as keytrackAmount above (always applied to cutoff, unconditionally).
+  // ---- Phase 26 Stream DL: generalized per-parameter velocity/key modulation. One amount routed
+  // to one of LFO_DESTS's named destinations (same "flat enum + one amount slider" pattern already
+  // proven twice for lfoDest/lfo2Dest) — ADDITIVE to, not a replacement for, the legacy
+  // keytrackAmount/velToFilterAmount cutoff-only knobs above (both keep working unconditionally).
+  // Default 'off'/0 so every pre-Phase-26 file (which never had these fields) elides them and
+  // renders byte-identical to before — see docs/research/68 §11 and docs/phase-26-plan.md Stream DL. ----
+  velDest: LfoDestination // which destination velocity modulates; 'off' = no extra vel modulation
+  velAmount: number // -1..1; signed depth applied to velDest (0 at velocity 0.5, +/-full at 1/0)
+  keyDest: LfoDestination // which destination MIDI pitch (keytracking) modulates; 'off' = none
+  keyAmount: number // -1..1; signed depth applied to keyDest per octave from middle C (60)
   macroValue: number
   eqLow: number // dB
   eqMid: number // dB
@@ -863,6 +877,11 @@ export const SYNTH_FIELDS: readonly SynthFieldDef[] = [
   { key: 'glide', kind: 'number', default: 0 },
   { key: 'keytrackAmount', kind: 'number', default: 0 },
   { key: 'velToFilterAmount', kind: 'number', default: 0 },
+  // ---- Phase 26 Stream DL: generalized vel/key modulation (see BeatSynth's velDest comment) ----
+  { key: 'velDest', kind: 'enum', default: 'off', values: LFO_DESTS },
+  { key: 'velAmount', kind: 'number', default: 0 },
+  { key: 'keyDest', kind: 'enum', default: 'off', values: LFO_DESTS },
+  { key: 'keyAmount', kind: 'number', default: 0 },
   { key: 'macroValue', kind: 'number', default: 0 },
   { key: 'eqLow', kind: 'number', default: 0 },
   { key: 'eqMid', kind: 'number', default: 0 },
