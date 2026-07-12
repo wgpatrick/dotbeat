@@ -1,5 +1,5 @@
-import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields } from './document.js'
+import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -274,6 +274,41 @@ export function parse(text: string): BeatDocument {
     return hit
   }
 
+  // Phase 26 Stream DK: parses a sample-backed lane's OPTIONAL trailing tokens — the lean drum-
+  // sampler surface (Start/Length trim, AHD envelope, one filter, a short playback-effect list)
+  // layered onto the existing `sample <id> <gainDb> <tune>` line as extra `key=value` tokens (same
+  // style as a synth-backed lane's own param tokens), plus two non-numeric special tokens:
+  // `filter=<lowpass|bandpass|highpass>` and `fx=<type>[,<type>...]` (ordered, comma-joined
+  // EffectType list — reuses BeatEffect/EFFECT_TYPES wholesale, id defaults to type like
+  // defaultEffectChain()'s own convention). Absent = every field at its documented default (see
+  // SAMPLE_LANE_PARAM_DEFAULTS/'lowpass'/[]) — a pre-Stream-DK 4-token line parses identically.
+  function parseSampleLaneExtras(name: string, tokens: string[], lineNo: number): { params: Record<string, number>; filterType: SampleLaneFilterType; effects: BeatEffect[] } {
+    const params: Record<string, number> = {}
+    let filterType: SampleLaneFilterType = 'lowpass'
+    let effects: BeatEffect[] = []
+    for (const kv of tokens) {
+      const eq = kv.indexOf('=')
+      if (eq === -1) throw new BeatParseError(`lane "${name}" sample extra must be "key=value", got "${kv}"`, lineNo)
+      const key = kv.slice(0, eq)
+      const raw = kv.slice(eq + 1)
+      if (key === 'filter') {
+        if (!isSampleLaneFilterType(raw)) throw new BeatParseError(`lane "${name}": filter must be one of lowpass|bandpass|highpass, got "${raw}"`, lineNo)
+        filterType = raw
+      } else if (key === 'fx') {
+        const types = raw.split(',').filter((t) => t.length > 0)
+        for (const t of types) {
+          if (!(EFFECT_TYPES as readonly string[]).includes(t)) throw new BeatParseError(`lane "${name}": unknown effect type "${t}" in fx list (expected one of ${EFFECT_TYPES.join('|')})`, lineNo)
+        }
+        effects = types.map((t) => ({ id: t, type: t as EffectType, enabled: true }))
+      } else if (isSampleLaneParamKey(key)) {
+        params[key] = parseFloatStrict(raw, lineNo, `lane ${name} ${key}`)
+      } else {
+        throw new BeatParseError(`lane "${name}": unknown sample lane field "${key}" (expected filter|fx|${Object.keys(SAMPLE_LANE_PARAM_DEFAULTS).join('|')})`, lineNo)
+      }
+    }
+    return { params, filterType, effects }
+  }
+
   // Phase 22 Stream AB: parses one of the three NEW `lane` declaration forms (synth:/sample/sf),
   // pushing onto `track.lanes` in declaration order. Returns false (no-op) if the line doesn't
   // match any new form, so the caller falls through to the legacy 5-token `lane <lane> <sample-id>
@@ -296,10 +331,10 @@ export function parse(text: string): BeatDocument {
       }
       backing = { type: 'synth', voice, params }
     } else if (sel === 'sample') {
-      if (tokens.length !== 6) throw new BeatParseError('lane sample expects exactly 4 values: <name> sample <sample-id> <gain dB> <tune semitones>', lineNo)
+      if (tokens.length < 6) throw new BeatParseError('lane sample expects at least 4 values: <name> sample <sample-id> <gain dB> <tune semitones> [key=value ...]', lineNo)
       const gainDb = parseFloatStrict(tokens[4]!, lineNo, 'lane gain')
       const tune = parseFloatStrict(tokens[5]!, lineNo, 'lane tune')
-      backing = { type: 'sample', sample: tokens[3]!, gainDb, tune }
+      backing = { type: 'sample', sample: tokens[3]!, gainDb, tune, ...parseSampleLaneExtras(name, tokens.slice(6), lineNo) }
     } else if (sel === 'sf') {
       if (tokens.length !== 6) throw new BeatParseError('lane sf expects exactly 4 values: <name> sf <sample-id> <program> <note>', lineNo)
       const program = parseIntStrict(tokens[4]!, lineNo, 'lane sf program')

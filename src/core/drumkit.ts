@@ -6,8 +6,8 @@
 // applyDrumKit below), so it gets its own parse/apply/list trio mirroring preset.ts's, rather than
 // forcing lane declarations through the param-bag vocabulary they don't fit.
 
-import type { BeatDocument, BeatDrumLaneDecl, BeatLaneBacking, DrumVoiceType } from './document.js'
-import { DRUM_VOICE_TYPES } from './document.js'
+import type { BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatLaneBacking, DrumVoiceType, EffectType } from './document.js'
+import { DRUM_VOICE_TYPES, EFFECT_TYPES, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
 
 export interface BeatDrumKit {
   /** Human slug, e.g. "kit-808" — the name `beat drum-kit`/`beat_drum_kit` refer to it by. */
@@ -46,7 +46,28 @@ function parseBacking(name: string, raw: unknown): BeatLaneBacking {
     if (typeof b.sample !== 'string' || !b.sample) throw new BeatDrumKitError(`lane "${name}": sample backing needs a "sample" id`)
     if (typeof b.gainDb !== 'number' || !Number.isFinite(b.gainDb)) throw new BeatDrumKitError(`lane "${name}": gainDb must be a finite number`)
     if (typeof b.tune !== 'number' || !Number.isFinite(b.tune) || b.tune < -24 || b.tune > 24) throw new BeatDrumKitError(`lane "${name}": tune must be -24..24 semitones`)
-    return { type: 'sample', sample: b.sample, gainDb: b.gainDb, tune: b.tune }
+    // Phase 26 Stream DK: optional Start/Length/AHD-envelope/filter/fx fields, same lean surface
+    // as the sample lane backing itself (research 68/decisions.md #145) — absent = every default.
+    const rawParams = (b as { params?: unknown }).params ?? {}
+    if (typeof rawParams !== 'object' || rawParams === null || Array.isArray(rawParams)) throw new BeatDrumKitError(`lane "${name}": params must be an object`)
+    const params: Record<string, number> = {}
+    for (const [k, v] of Object.entries(rawParams as Record<string, unknown>)) {
+      if (!isSampleLaneParamKey(k)) throw new BeatDrumKitError(`lane "${name}": unknown sample lane param "${k}"`)
+      if (typeof v !== 'number' || !Number.isFinite(v)) throw new BeatDrumKitError(`lane "${name}": param "${k}" must be a finite number`)
+      params[k] = v
+    }
+    const rawFilterType = (b as { filterType?: unknown }).filterType ?? 'lowpass'
+    if (typeof rawFilterType !== 'string' || !isSampleLaneFilterType(rawFilterType)) throw new BeatDrumKitError(`lane "${name}": filterType must be one of lowpass|bandpass|highpass`)
+    const rawEffects = (b as { effects?: unknown }).effects ?? []
+    if (!Array.isArray(rawEffects)) throw new BeatDrumKitError(`lane "${name}": effects must be an array`)
+    const effects: BeatEffect[] = rawEffects.map((e) => {
+      const eff = e as Partial<BeatEffect>
+      if (typeof eff.type !== 'string' || !(EFFECT_TYPES as readonly string[]).includes(eff.type)) {
+        throw new BeatDrumKitError(`lane "${name}": effect type must be one of ${EFFECT_TYPES.join('|')}`)
+      }
+      return { id: typeof eff.id === 'string' && eff.id ? eff.id : eff.type, type: eff.type as EffectType, enabled: eff.enabled !== false }
+    })
+    return { type: 'sample', sample: b.sample, gainDb: b.gainDb, tune: b.tune, params, filterType: rawFilterType, effects }
   }
   if (b.type === 'sf') {
     if (typeof b.sample !== 'string' || !b.sample) throw new BeatDrumKitError(`lane "${name}": sf backing needs a "sample" id`)
@@ -115,7 +136,14 @@ export function applyDrumKit(doc: BeatDocument, trackId: string, kit: BeatDrumKi
   if (orphaned.length) {
     throw new BeatDrumKitError(`track "${trackId}" has hits on lane(s) not in kit "${kit.name}" (${orphaned.join(', ')}) — remove or re-lane them first`)
   }
-  const lanes = kit.lanes.map((l) => ({ name: l.name, backing: { ...l.backing, ...(l.backing.type === 'synth' ? { params: { ...l.backing.params } } : {}) } }))
+  const lanes = kit.lanes.map((l) => ({
+    name: l.name,
+    backing: {
+      ...l.backing,
+      ...(l.backing.type === 'synth' || l.backing.type === 'sample' ? { params: { ...l.backing.params } } : {}),
+      ...(l.backing.type === 'sample' ? { effects: l.backing.effects.map((e) => ({ ...e })) } : {}),
+    },
+  }))
   return { ...doc, tracks: doc.tracks.map((t) => (t.id === trackId ? { ...t, lanes } : t)) }
 }
 

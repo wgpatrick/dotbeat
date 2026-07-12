@@ -114,6 +114,53 @@ export interface BeatLaneSampleBacking {
   sample: string // BeatMediaSample id
   gainDb: number // static lane level, multiplies per-hit velocity
   tune: number // semitones
+  /** Phase 26 Stream DK (research 68, decisions.md #145): the lean drum-sampler surface — Start/
+   * Length trim into the sample and a one-shot AHD amplitude envelope, layered on as elided-
+   * default overrides (SAMPLE_LANE_PARAM_DEFAULTS), same discipline as synth-backed lanes' own
+   * `params` bag (DRUM_VOICE_PARAM_DEFAULTS) — and settable through the SAME setLaneParam
+   * primitive, generalized to sample-backed lanes rather than given a second mechanism. Keys (see
+   * SAMPLE_LANE_PARAM_KEYS): `start`/`length` seconds — playback trim into the sample buffer
+   * (length 0 = play to the sample's natural end, the only value that would otherwise be
+   * meaningless, so it doubles as "unset"); `attack`/`hold`/`decay` seconds — the amplitude
+   * envelope Ableton's Drum Sampler ships (Attack ramps up from silence, Hold sustains at peak,
+   * Decay ramps back to silence; all-zero is a no-op, i.e. "play the trimmed sample unshaped");
+   * `cutoff`/`resonance` — the SAME filter primitive every synth-backed lane and synth track
+   * already has (Tone.Filter; see `filterType` below and ui/src/audio/engine.ts), cutoff default
+   * 18000 (this format's own filter-cutoff ceiling, so "default" and "wide open/no filtering
+   * applied" are the same value). */
+  params: Record<string, number>
+  /** The one filter every synth lane/track already has, reused wholesale — only audible once
+   * `cutoff`/`resonance` (params bag) are overridden off their wide-open defaults. */
+  filterType: SampleLaneFilterType
+  /** A short, ordered, lane-scoped playback-effect chain — reuses BeatTrack's own EffectType/
+   * BeatEffect machinery wholesale (research 68/decisions.md #145: lanes don't have their own
+   * effect concept yet, and a full bespoke lane-effect mechanism is explicitly out of this lean
+   * surface's scope). [] = none (the default; no line/token emitted). */
+  effects: BeatEffect[]
+}
+/** Phase 26 Stream DK: canonical key order + elided defaults for BeatLaneSampleBacking.params —
+ * same role as DRUM_VOICE_PARAM_DEFAULTS plays for synth-backed lanes' params bag. `length: 0`
+ * and `hold`/`decay: 0` are real, meaningful defaults (not sentinels needing special-casing at
+ * the type level): 0 hold/decay just means "no envelope shaping past attack" and 0 length means
+ * "no trim" since a real zero-length hit would be silent anyway. */
+export const SAMPLE_LANE_PARAM_KEYS = ['start', 'length', 'attack', 'hold', 'decay', 'cutoff', 'resonance'] as const
+export type SampleLaneParamKey = (typeof SAMPLE_LANE_PARAM_KEYS)[number]
+export const SAMPLE_LANE_PARAM_DEFAULTS: Record<SampleLaneParamKey, number> = {
+  start: 0,
+  length: 0,
+  attack: 0.001,
+  hold: 0,
+  decay: 0,
+  cutoff: 18000,
+  resonance: 0.7,
+}
+export function isSampleLaneParamKey(s: string): s is SampleLaneParamKey {
+  return (SAMPLE_LANE_PARAM_KEYS as readonly string[]).includes(s)
+}
+export const SAMPLE_LANE_FILTER_TYPES = ['lowpass', 'bandpass', 'highpass'] as const
+export type SampleLaneFilterType = (typeof SAMPLE_LANE_FILTER_TYPES)[number]
+export function isSampleLaneFilterType(s: string): s is SampleLaneFilterType {
+  return (SAMPLE_LANE_FILTER_TYPES as readonly string[]).includes(s)
 }
 export interface BeatLaneSfBacking {
   type: 'sf'

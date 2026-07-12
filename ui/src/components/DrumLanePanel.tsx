@@ -1,7 +1,46 @@
 import { useState } from 'react'
 import { postLaneOp } from '../daemon/bridge'
 import { useStore } from '../state/store'
-import { DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, declaredLaneNames, type BeatDrumLaneDecl, type BeatMediaSample, type BeatTrack, type DrumVoiceType } from '../types'
+import {
+  DRUM_VOICE_PARAM_DEFAULTS,
+  DRUM_VOICE_TYPES,
+  EFFECT_LABELS,
+  EFFECT_TYPES,
+  SAMPLE_LANE_FILTER_TYPES,
+  SAMPLE_LANE_PARAM_DEFAULTS,
+  SAMPLE_LANE_PARAM_KEYS,
+  declaredLaneNames,
+  type BeatDrumLaneDecl,
+  type BeatLaneSampleBacking,
+  type BeatMediaSample,
+  type BeatTrack,
+  type DrumVoiceType,
+  type EffectType,
+  type SampleLaneFilterType,
+} from '../types'
+
+// Phase 26 Stream DK: reconstructs a sample-backed lane's FULL `sample <id> <gainDb> <tune>
+// [key=value ...] [filter=...] [fx=...]` backing line from its current state plus a patch — needed
+// because setLaneBacking (the `op: 'backing'` route) REPLACES the whole backing, so changing just
+// filterType or the fx list must still carry every other already-set field forward (the numeric
+// Start/Length/AHD/filter knobs below use `op: 'param'` instead — setLaneParam merges one key at a
+// time, the same primitive synth-backed lanes' own per-param inputs already ride).
+function sampleBackingLine(
+  b: BeatLaneSampleBacking,
+  patch: { sample?: string; gainDb?: number | string; tune?: number | string; filterType?: SampleLaneFilterType; effects?: EffectType[] },
+): string {
+  const parts = ['sample', patch.sample ?? b.sample, String(patch.gainDb ?? b.gainDb), String(patch.tune ?? b.tune)]
+  for (const key of SAMPLE_LANE_PARAM_KEYS) {
+    const value = b.params[key]
+    if (value === undefined || value === SAMPLE_LANE_PARAM_DEFAULTS[key]) continue
+    parts.push(`${key}=${value}`)
+  }
+  const filterType = patch.filterType ?? b.filterType
+  if (filterType !== 'lowpass') parts.push(`filter=${filterType}`)
+  const effects = patch.effects ?? b.effects.map((e) => e.type)
+  if (effects.length > 0) parts.push(`fx=${effects.join(',')}`)
+  return parts.join(' ')
+}
 
 // Phase 23 Stream BB — the drum-lane management affordance the open per-track lane model (Phase
 // 22 Stream AB, docs/phase-22-stream-ab.md) shipped with no GUI surface for: "author via a kit
@@ -21,7 +60,14 @@ function backingSummary(b: BeatDrumLaneDecl['backing']): string {
     const parts = Object.entries(b.params).map(([k, v]) => `${k}=${v}`)
     return `synth:${b.voice}${parts.length ? ' ' + parts.join(' ') : ''}`
   }
-  if (b.type === 'sample') return `sample "${b.sample}" ${b.gainDb}dB ${b.tune}st`
+  if (b.type === 'sample') {
+    const extras = SAMPLE_LANE_PARAM_KEYS.filter((k) => b.params[k] !== undefined && b.params[k] !== SAMPLE_LANE_PARAM_DEFAULTS[k])
+      .map((k) => `${k}=${b.params[k]}`)
+      .join(' ')
+    const filter = b.filterType !== 'lowpass' ? ` filter=${b.filterType}` : ''
+    const fx = b.effects.length > 0 ? ` fx=${b.effects.map((e) => e.type).join(',')}` : ''
+    return `sample "${b.sample}" ${b.gainDb}dB ${b.tune}st${extras ? ' ' + extras : ''}${filter}${fx}`
+  }
   return `sf "${b.sample}" pgm ${b.program} note ${b.note}`
 }
 
@@ -156,7 +202,7 @@ function LaneRow({ track, lane, index, count }: { track: BeatTrack; lane: BeatDr
                   data-lane-sample={lane.name}
                   value={b.sample}
                   disabled={busy}
-                  onChange={(e) => void run(() => postLaneOp({ op: 'backing', track: track.id, name: lane.name, backing: `sample ${e.target.value} ${b.gainDb} ${b.tune}` }))}
+                  onChange={(e) => void run(() => postLaneOp({ op: 'backing', track: track.id, name: lane.name, backing: sampleBackingLine(b, { sample: e.target.value }) }))}
                 >
                   {media
                     .filter((m) => !isSoundfont(m))
@@ -174,7 +220,7 @@ function LaneRow({ track, lane, index, count }: { track: BeatTrack; lane: BeatDr
                   step={0.5}
                   disabled={busy}
                   defaultValue={b.gainDb}
-                  onBlur={(e) => void run(() => postLaneOp({ op: 'backing', track: track.id, name: lane.name, backing: `sample ${b.sample} ${e.target.value} ${b.tune}` }))}
+                  onBlur={(e) => void run(() => postLaneOp({ op: 'backing', track: track.id, name: lane.name, backing: sampleBackingLine(b, { gainDb: e.target.value }) }))}
                 />
               </label>
               <label className="lane-edit-field">
@@ -186,9 +232,65 @@ function LaneRow({ track, lane, index, count }: { track: BeatTrack; lane: BeatDr
                   max={24}
                   disabled={busy}
                   defaultValue={b.tune}
-                  onBlur={(e) => void run(() => postLaneOp({ op: 'backing', track: track.id, name: lane.name, backing: `sample ${b.sample} ${b.gainDb} ${e.target.value}` }))}
+                  onBlur={(e) => void run(() => postLaneOp({ op: 'backing', track: track.id, name: lane.name, backing: sampleBackingLine(b, { tune: e.target.value }) }))}
                 />
               </label>
+              {/* Phase 26 Stream DK: the lean drum-sampler surface — Start/Length trim, AHD
+                  envelope, filter cutoff/resonance, all riding setLaneParam (op: 'param') exactly
+                  like a synth-backed lane's own per-param inputs just above. */}
+              {SAMPLE_LANE_PARAM_KEYS.map((key) => (
+                <label className="lane-edit-field" key={key}>
+                  {key}
+                  <input
+                    type="number"
+                    step={key === 'cutoff' ? 100 : key === 'resonance' ? 0.1 : 0.01}
+                    disabled={busy}
+                    data-lane-param={`${lane.name}.${key}`}
+                    defaultValue={b.params[key] ?? SAMPLE_LANE_PARAM_DEFAULTS[key]}
+                    onBlur={(e) => {
+                      const raw = e.target.value.trim()
+                      const value = raw === '' ? undefined : Number(raw)
+                      void run(() => postLaneOp({ op: 'param', track: track.id, name: lane.name, key, value }))
+                    }}
+                  />
+                </label>
+              ))}
+              <label className="lane-edit-field">
+                filter
+                <select
+                  data-lane-filter={lane.name}
+                  value={b.filterType}
+                  disabled={busy}
+                  onChange={(e) => void run(() => postLaneOp({ op: 'backing', track: track.id, name: lane.name, backing: sampleBackingLine(b, { filterType: e.target.value as SampleLaneFilterType }) }))}
+                >
+                  {SAMPLE_LANE_FILTER_TYPES.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="lane-edit-field lane-edit-fx">
+                fx
+                {EFFECT_TYPES.map((type) => {
+                  const on = b.effects.some((e) => e.type === type)
+                  return (
+                    <label key={type} className="lane-fx-toggle">
+                      <input
+                        type="checkbox"
+                        data-lane-fx={`${lane.name}.${type}`}
+                        checked={on}
+                        disabled={busy}
+                        onChange={(e) => {
+                          const nextTypes = e.target.checked ? [...b.effects.map((eff) => eff.type), type] : b.effects.filter((eff) => eff.type !== type).map((eff) => eff.type)
+                          void run(() => postLaneOp({ op: 'backing', track: track.id, name: lane.name, backing: sampleBackingLine(b, { effects: nextTypes }) }))
+                        }}
+                      />
+                      {EFFECT_LABELS[type]}
+                    </label>
+                  )
+                })}
+              </div>
             </>
           )}
           {b.type === 'sf' && (

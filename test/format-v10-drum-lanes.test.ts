@@ -169,7 +169,7 @@ track drums Drums #e06c75 drums
   const doc = parse(text)
   const drums = drumsOf(doc)
   assert.deepEqual(drums.lanes, [
-    { name: 'crash', backing: { type: 'sample', sample: 'crash-1', gainDb: -3, tune: 0 } },
+    { name: 'crash', backing: { type: 'sample', sample: 'crash-1', gainDb: -3, tune: 0, params: {}, filterType: 'lowpass', effects: [] } },
     { name: 'rimshot', backing: { type: 'sf', sample: 'gm-kit', program: 0, note: 37 } },
   ])
   assert.equal(serialize(doc), text)
@@ -378,7 +378,7 @@ test('setLaneBacking to a sample/sf backing requires the sample already be regis
   assert.throws(() => setLaneBacking(doc, 'd', 'kick', ['sample', 'boom', '-2', '0']), /unregistered sample/)
   doc = setMediaSample(doc, 'boom', 'a'.repeat(64), 'media/boom.wav')
   const { doc: withSample } = setLaneBacking(doc, 'd', 'kick', ['sample', 'boom', '-2', '3'])
-  assert.deepEqual(withSample.tracks[1]!.lanes.find((l) => l.name === 'kick')!.backing, { type: 'sample', sample: 'boom', gainDb: -2, tune: 3 })
+  assert.deepEqual(withSample.tracks[1]!.lanes.find((l) => l.name === 'kick')!.backing, { type: 'sample', sample: 'boom', gainDb: -2, tune: 3, params: {}, filterType: 'lowpass', effects: [] })
   assert.deepEqual(parse(serialize(withSample)), withSample)
 })
 
@@ -399,9 +399,36 @@ test('setLaneParam edits one param on a synth-backed lane in place, and clears b
   assert.throws(() => setLaneParam(doc, 'd', 'nope', 'tune', 1), /no lane "nope"/)
 })
 
-test('setLaneParam refuses a sample/sf-backed lane — per-param edits only make sense for synth backings', () => {
+test('setLaneParam refuses an sf-backed lane — sf has no per-param shaping concept', () => {
+  let doc = addTrack(initDocument({}), { id: 'd', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
+  doc = setMediaSample(doc, 'gm-kit', 'a'.repeat(64), 'sf2/gm.sf2')
+  doc = setLaneBacking(doc, 'd', 'kick', ['sf', 'gm-kit', '0', '36']).doc
+  assert.throws(() => setLaneParam(doc, 'd', 'kick', 'note', 1), /sf-backed — only synth- and sample-backed lanes take per-param edits/)
+})
+
+// Phase 26 Stream DK: the lean drum-sampler surface (research 68/decisions.md #145) generalizes
+// setLaneParam off synth-only — Start/Length/AHD-envelope/filter knobs on a sample-backed lane
+// ride the SAME primitive, elide against SAMPLE_LANE_PARAM_DEFAULTS the same way, and reject any
+// key outside that fixed set (unlike a synth-backed lane, which accepts any key into its params
+// bag — the sample lane's surface is deliberately closed, not open-ended).
+test('setLaneParam edits Start/Length/AHD-envelope/filter params on a sample-backed lane, elides at defaults, and rejects unknown keys', () => {
   let doc = addTrack(initDocument({}), { id: 'd', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
   doc = setMediaSample(doc, 'boom', 'a'.repeat(64), 'media/boom.wav')
   doc = setLaneBacking(doc, 'd', 'kick', ['sample', 'boom', '0', '0']).doc
-  assert.throws(() => setLaneParam(doc, 'd', 'kick', 'tune', 1), /only synth-backed lanes take per-param edits/)
+
+  doc = setLaneParam(doc, 'd', 'kick', 'start', 0.05).doc
+  doc = setLaneParam(doc, 'd', 'kick', 'decay', 0.2).doc
+  const kick = doc.tracks[1]!.lanes.find((l) => l.name === 'kick')!
+  assert.deepEqual((kick.backing as { params: Record<string, number> }).params, { start: 0.05, decay: 0.2 })
+  assert.match(serialize(doc), /lane kick sample boom 0 0 start=0\.05 decay=0\.2/)
+
+  // canonical elision: setting cutoff back to its own default (18000, "wide open") clears the
+  // override rather than storing a redundant explicit default.
+  doc = setLaneParam(doc, 'd', 'kick', 'cutoff', 18000).doc
+  assert.doesNotMatch(serialize(doc), /cutoff=/)
+
+  doc = setLaneParam(doc, 'd', 'kick', 'start', undefined).doc // clear -> reverts to default, elided
+  assert.doesNotMatch(serialize(doc), /start=/)
+
+  assert.throws(() => setLaneParam(doc, 'd', 'kick', 'tune', 1), /unknown sample lane param "tune"/)
 })
