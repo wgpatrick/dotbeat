@@ -32,7 +32,7 @@ import { readFileSync, writeFileSync, watch, existsSync, type FSWatcher } from '
 import { createHash } from 'node:crypto'
 import { basename, dirname, resolve } from 'node:path'
 import type { BeatDocument, BeatSelection } from '../core/index.js'
-import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, setValue, validateSelection, type ExternalSandboxPayload } from '../core/index.js'
+import { parse, serialize, sandboxPayloadToBeatDocument, beatDocumentToPartialTracks, setValue, validateSelection, addTrack, removeTrack, BeatEditError, type ExternalSandboxPayload, type TrackKind } from '../core/index.js'
 // D3/D10 versioning surface over HTTP: the GUI's history panel (Phase 15 Stream H) reads the
 // checkpoint list and issues "go back" through these. All of it reuses src/history's real git-backed
 // functions — the daemon adds no versioning logic, just an HTTP face on the same verbs `beat
@@ -418,6 +418,60 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // dotbeat's own frontend track-structure channel (Phase 20 Stream W). Track ADD/REMOVE change the
+    // whole tracks list, so they don't fit setValue's single `path=value` shape (which is why /edit
+    // can't carry them) — they wrap core's addTrack/removeTrack, the exact functions `beat
+    // add-track`/`beat rm-track` call. Additive and structurally identical to /edit: run the pure core
+    // function, write-if-changed, revalidate the selection. Unlike /edit these RETURN the full raw
+    // document (same shape GET /document serves) because the daemon never SSE-echoes its own writes —
+    // the frontend applies the returned doc directly rather than re-pulling, so an add/remove reflects
+    // instantly (rename/color already go through /edit's <track>.name/.color setValue paths).
+    if (req.method === 'POST' && url.pathname === '/add-track') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { id?: unknown; kind?: unknown; name?: unknown; color?: unknown; soundfont?: { sample?: unknown; program?: unknown } }
+          if (typeof b.id !== 'string' || typeof b.kind !== 'string') {
+            json(res, 400, { error: 'body must be {id: string, kind: "synth"|"drums"|"instrument", name?, color?, soundfont?}' })
+            return
+          }
+          const opts: Parameters<typeof addTrack>[1] = { id: b.id, kind: b.kind as TrackKind }
+          if (typeof b.name === 'string') opts.name = b.name
+          if (typeof b.color === 'string') opts.color = b.color
+          if (b.soundfont && typeof b.soundfont.sample === 'string') {
+            opts.soundfont = { sample: b.soundfont.sample, program: typeof b.soundfont.program === 'number' ? b.soundfont.program : 0 }
+          }
+          const { doc: next } = addTrack(doc, opts)
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/remove-track') {
+      readBody(req)
+        .then((body) => {
+          const { id } = JSON.parse(body) as { id?: unknown }
+          if (typeof id !== 'string') {
+            json(res, 400, { error: 'body must be {id: string}' })
+            return
+          }
+          const { doc: next } = removeTrack(doc, id)
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return
     }

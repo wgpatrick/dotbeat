@@ -154,3 +154,53 @@ test('round-trip sanity: the text the daemon writes re-parses to the same docume
     assert.deepEqual(onDisk, daemon.getDoc())
   })
 })
+
+// Phase 20 Stream W: track structure add/remove over HTTP (the GUI's track-management surface).
+test('POST /add-track appends a track, writes it to the file, and returns the fresh document', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const before = daemon.getDoc().tracks.length
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/add-track`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'pad2', kind: 'synth' }),
+    })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { written: boolean; doc: { tracks: { id: string }[] } }
+    assert.equal(body.written, true)
+    assert.ok(body.doc.tracks.some((t) => t.id === 'pad2'))
+    // landed in memory AND on disk (a real track line, not just the response)
+    assert.equal(daemon.getDoc().tracks.length, before + 1)
+    assert.ok(readFileSync(filePath, 'utf8').split('\n').some((l) => l.startsWith('track pad2 ')))
+  })
+})
+
+test('POST /add-track rejects a duplicate id with 400 and does not write', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const before = readFileSync(filePath, 'utf8')
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/add-track`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'lead', kind: 'synth' }), // 'lead' already exists
+    })
+    assert.equal(res.status, 400)
+    assert.match(((await res.json()) as { error: string }).error, /already exists/)
+    assert.equal(readFileSync(filePath, 'utf8'), before)
+  })
+})
+
+test('POST /remove-track drops a track, cleans up disk, and returns the fresh document', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const before = daemon.getDoc().tracks.length
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/remove-track`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'chords' }),
+    })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { written: boolean; doc: { tracks: { id: string }[] } }
+    assert.equal(body.written, true)
+    assert.ok(!body.doc.tracks.some((t) => t.id === 'chords'))
+    assert.equal(daemon.getDoc().tracks.length, before - 1)
+    assert.ok(!readFileSync(filePath, 'utf8').split('\n').some((l) => l.startsWith('track chords ')))
+  })
+})
