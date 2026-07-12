@@ -70,7 +70,7 @@ the full thesis and prior-art comparison.
 | `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
 | `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
 | `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
-| [`docs/research/`](docs/research/) | 79 research passes — landscape/prior-art, engine architecture, and three full passes against Ableton Live's own reference manual: one feature-by-feature (chapters 50-69), one implementation-level UI/UX detail grounded in the manual's own screenshots (70-74), one round-2 follow-up re-verifying those fixes live and finding what's newly gapped (75-79). |
+| [`docs/research/`](docs/research/) | 86 research passes — landscape/prior-art, engine architecture, three full passes against Ableton Live's own reference manual (feature-by-feature 50-69, implementation-level UI/UX 70-74, round-2 live re-verification 75-79), and a batch of exploratory usability pilots (80-86) — an agent driving the real app via Playwright with no pre-scripted checklist, reading its own screenshots and reacting like a human tester, across realistic musical workflows (fresh-project build, existing-song editing, drum-clip variation, bass loop authoring, chord/automation, audio-sample layering, song structuring + mixing). |
 | [`docs/decisions.md`](docs/decisions.md) | 15 numbered design decisions with rationale and "revisit when" — check before proposing something that might contradict one. |
 | [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format grammar. |
 | [`docs/architecture.md`](docs/architecture.md) | Component architecture (daemon, engine, CLI, MCP, GUI/desktop tiers). |
@@ -94,7 +94,12 @@ device panel (working macros on every track kind, a leading Activator-style bypa
 click-to-type knobs), the content browser (per-type icons, in-place preview feedback), and a
 cross-cutting design-token/typography pass plus a keyboard-shortcut reference panel. A round-2
 follow-up re-verified all of it live and caught real regressions between independently-shipped
-fixes before they could ship broken. `docs/product-roadmap.md` tracks every feature's real status;
+fixes before they could ship broken. A newer, complementary thread — exploratory usability pilots
+with no pre-scripted checklist, an agent driving the real app and reading its own screenshots
+like a human tester — has since surfaced bugs the scripted verify suite structurally can't catch
+(a grid-click off-by-one, macro knobs desyncing from actual state after a preset swap, a clip
+editor that gets stuck on the first scene once a song has more than one). `docs/product-roadmap.md`
+tracks every feature's real status;
 `ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
 built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a
 CLI, and an AI agent, all at once — turn a knob in the GUI and `git diff` shows exactly one changed
