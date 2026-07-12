@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { declaredLaneNames, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
+import { declaredLaneNames, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
 import { postEdit, postSelection, postPitchTime, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
@@ -197,23 +197,6 @@ function snapStep(raw: number, freehand: boolean): number {
 // is displaying, and if so convert the absolute step to a clip-relative, tiled position with the
 // exact same modulo math `contentOf` uses for real playback.
 //
-// "The clip NoteView is displaying" needs its own definition since there's no per-clip selector in
-// the GUI yet (ClipPropertiesPanel.tsx's own header comment) — reuses that same file's established
-// "primary clip" rule (the first song-section's scene that maps this track to a real, existing
-// clip), duplicated locally for the same reason ClipPropertiesPanel duplicates it from
-// ArrangementView: four lines, not worth a shared module, kept in lockstep by this comment.
-function primaryClipFor(track: BeatTrack, doc: BeatDocument): BeatClip | null {
-  if (!doc.song) return null
-  for (const section of doc.song) {
-    const scene = doc.scenes.find((s) => s.id === section.scene)
-    const clipId = scene?.slots[track.id]
-    if (!clipId) continue
-    const clip = track.clips.find((c) => c.id === clipId)
-    if (clip) return clip
-  }
-  return null
-}
-
 /** Returns the clip-relative, tiled step to render the playhead at, or `null` if no playhead
  * should render at all (stopped, or the open clip isn't the one actually playing right now). */
 function resolveClipPlayhead(track: BeatTrack, doc: BeatDocument | null, currentStep: number, loopBars: number): number | null {
