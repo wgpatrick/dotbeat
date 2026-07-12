@@ -182,10 +182,22 @@ async function main() {
     const firstSceneId = doc.song[0].scene
     console.log(`[setup] song mode confirmed, first section's scene = "${firstSceneId}"`)
 
+    // Snapshot track ids BEFORE adding one and diff afterward, rather than assuming the new track
+    // lands on the bare id "synth" — the GUI's own addTrackOfKind (ArrangementView.tsx) mints
+    // synth/synth2/synth3/... on collision, and the shared example fixture this script runs against
+    // is also used for live manual testing (owner sessions), so it may already contain a real track
+    // literally named "synth" with real content by the time this runs. Checking `tracks.some(t =>
+    // t.id === 'synth')` would then resolve true IMMEDIATELY (a pre-existing track, not the new one),
+    // silently aliasing this whole test onto someone else's track — exactly the bug this replaced.
+    const idsBefore = new Set((await docNow()).tracks.map((t) => t.id))
     await page.click('[data-action="add-track"]')
     await page.click('[data-add-kind="synth"]')
-    await pollUntil(async () => (await docNow()).tracks.some((t) => t.id === 'synth'), 'a fresh "synth" track to appear')
-    const trackId = 'synth'
+    let trackId
+    await pollUntil(async () => {
+      const found = (await docNow()).tracks.map((t) => t.id).find((id) => !idsBefore.has(id))
+      if (found) trackId = found
+      return !!found
+    }, 'a genuinely NEW synth track to appear (an id not present before the add-track click)')
     // addTrackOfKind's own selection-edit write (debounced) must land before the next before/after
     // file diff, same discipline verify-phase23-stream-bc.mjs uses for its own fresh-track step.
     await pollUntil(() => readFileSync(songProj.beatPath, 'utf8').includes(`selected_track ${trackId}`), "the new track's own selection edit to land on disk")
