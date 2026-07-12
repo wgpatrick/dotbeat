@@ -3,8 +3,8 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain } from './document.js'
+import type { BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -702,6 +702,37 @@ export function removeHit(doc: BeatDocument, trackId: string, hitId: string): { 
 
 const LANE_NAME_RE = /^[a-zA-Z0-9_-]+$/
 
+/** Phase 26 Stream DK: parses a sample-backed lane's optional trailing tokens (Start/Length/AHD
+ * envelope/filter/fx-list) — the BeatEditError-throwing twin of parse.ts's `parseSampleLaneExtras`
+ * (same "parallel implementation, different error shape per caller" discipline this file's own
+ * doc comment above already applies to the whole backing grammar). */
+function parseSampleLaneExtraTokens(name: string, tokens: string[]): { params: Record<string, number>; filterType: SampleLaneFilterType; effects: BeatEffect[] } {
+  const params: Record<string, number> = {}
+  let filterType: SampleLaneFilterType = 'lowpass'
+  let effects: BeatEffect[] = []
+  for (const kv of tokens) {
+    const eq = kv.indexOf('=')
+    if (eq === -1) throw new BeatEditError(`lane "${name}" sample extra must be "key=value", got "${kv}"`)
+    const key = kv.slice(0, eq)
+    const raw = kv.slice(eq + 1)
+    if (key === 'filter') {
+      if (!isSampleLaneFilterType(raw)) throw new BeatEditError(`lane "${name}": filter must be one of lowpass|bandpass|highpass, got "${raw}"`)
+      filterType = raw
+    } else if (key === 'fx') {
+      const types = raw.split(',').filter((t) => t.length > 0)
+      for (const t of types) {
+        if (!(EFFECT_TYPES as readonly string[]).includes(t)) throw new BeatEditError(`lane "${name}": unknown effect type "${t}" in fx list (expected one of ${EFFECT_TYPES.join('|')})`)
+      }
+      effects = types.map((t) => ({ id: t, type: t as EffectType, enabled: true }))
+    } else if (isSampleLaneParamKey(key)) {
+      params[key] = canon(parseNum(raw, `lane ${name} ${key}`))
+    } else {
+      throw new BeatEditError(`lane "${name}": unknown sample lane field "${key}" (expected filter|fx|${Object.keys(SAMPLE_LANE_PARAM_DEFAULTS).join('|')})`)
+    }
+  }
+  return { params, filterType, effects }
+}
+
 /** Parses the SAME backing grammar the file's own `lane <name> <backing>` line uses (see
  * parse.ts's `tryParseLaneDecl`), from tokens already split off the name — e.g.
  * `['synth:membrane', 'tune=30']`, `['sample', 'crash-1', '-3', '0']`, `['sf', 'gm-kit', '0',
@@ -728,11 +759,12 @@ function parseLaneBackingTokens(name: string, tokens: string[]): BeatDrumLaneDec
     return { type: 'synth', voice: voice as DrumVoiceType, params }
   }
   if (sel === 'sample') {
-    if (tokens.length !== 4) throw new BeatEditError(`lane "${name}": sample backing expects "sample <sample-id> <gain dB> <tune semitones>", got "${tokens.join(' ')}"`)
+    if (tokens.length < 4) throw new BeatEditError(`lane "${name}": sample backing expects "sample <sample-id> <gain dB> <tune semitones> [key=value ...]", got "${tokens.join(' ')}"`)
     const gainDb = canon(parseNum(tokens[2]!, `lane ${name} gain`))
     const tune = canon(parseNum(tokens[3]!, `lane ${name} tune`))
     if (tune < -24 || tune > 24) throw new BeatEditError(`lane "${name}": tune must be -24..24 semitones, got ${tune}`)
-    return { type: 'sample', sample: tokens[1]!, gainDb, tune }
+    const { params, filterType, effects } = parseSampleLaneExtraTokens(name, tokens.slice(4))
+    return { type: 'sample', sample: tokens[1]!, gainDb, tune, params, filterType, effects }
   }
   if (sel === 'sf') {
     if (tokens.length !== 4) throw new BeatEditError(`lane "${name}": sf backing expects "sf <sample-id> <program> <note>", got "${tokens.join(' ')}"`)
@@ -840,17 +872,25 @@ export function setLaneBacking(doc: BeatDocument, trackId: string, name: string,
   return { doc: replaceTrack(doc, { ...track, lanes }), lane: lanes[idx]! }
 }
 
-/** Fine-grained single-param edit on a synth-backed lane — the exact gap
+/** Fine-grained single-param edit on a synth- OR sample-backed lane — the exact gap
  * docs/phase-22-stream-ab.md §5 flagged ("no dedicated setValue path for lanes[].backing.params
  * was added"). `value === undefined` clears the override back to that voice type's default
- * (DRUM_VOICE_PARAM_DEFAULTS), matching the format's own canonical-elision discipline for these
- * params (serialize.ts's `serializeLaneBacking` already omits a param equal to its default). */
+ * (DRUM_VOICE_PARAM_DEFAULTS for synth-backed / SAMPLE_LANE_PARAM_DEFAULTS for sample-backed),
+ * matching the format's own canonical-elision discipline for these params (serialize.ts's
+ * `serializeLaneBacking` already omits a param equal to its default). Phase 26 Stream DK
+ * generalized this off synth-only (research 68/decisions.md #145: the drum-sampler's Start/
+ * Length/AHD-envelope/filter surface rides this SAME primitive, not a new one) — sf-backed lanes
+ * still have no per-param concept (their two fields, program/note, are identity, not shaping) and
+ * are still refused here. */
 export function setLaneParam(doc: BeatDocument, trackId: string, name: string, key: string, value: number | undefined): { doc: BeatDocument; lane: BeatDrumLaneDecl } {
   const track = requireDrumsWithOpenLanes(doc, trackId)
   const idx = track.lanes.findIndex((l) => l.name === name)
   if (idx === -1) throw new BeatEditError(`no lane "${name}" on track "${trackId}" (have: ${track.lanes.map((l) => l.name).join(', ')})`)
   const lane = track.lanes[idx]!
-  if (lane.backing.type !== 'synth') throw new BeatEditError(`lane "${name}" is ${lane.backing.type}-backed — only synth-backed lanes take per-param edits`)
+  if (lane.backing.type === 'sf') throw new BeatEditError(`lane "${name}" is sf-backed — only synth- and sample-backed lanes take per-param edits`)
+  if (lane.backing.type === 'sample' && !isSampleLaneParamKey(key)) {
+    throw new BeatEditError(`lane "${name}": unknown sample lane param "${key}" (expected one of ${Object.keys(SAMPLE_LANE_PARAM_DEFAULTS).join('|')})`)
+  }
   const params = { ...lane.backing.params }
   if (value === undefined) delete params[key]
   else params[key] = canon(value)

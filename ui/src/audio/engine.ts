@@ -60,8 +60,8 @@ import spessaWorkletUrl from 'spessasynth_lib/dist/spessasynth_processor.min.js?
 import { useStore, isEffectivelyMuted } from '../state/store'
 import { daemonBase } from '../daemon/bridge'
 import { audioBufferToWav } from './wavEncode'
-import type { BeatAudioRegion, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatEffect, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumVoiceType, OscType, WtTable } from '../types'
-import { DRUM_VOICE_PARAM_DEFAULTS, WT_TABLES } from '../types'
+import type { BeatAudioRegion, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatEffect, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumVoiceType, OscType, SampleLaneFilterType, WtTable } from '../types'
+import { DRUM_VOICE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS, WT_TABLES } from '../types'
 import { buildWavetablePartials } from './wavetables'
 
 // Phase 18 Stream R: ONE shared, widened destination set for both LFO1 and LFO2 — mirrors
@@ -1610,7 +1610,24 @@ interface SampleLaneVoice {
   loadedSample: string | null // media id currently loaded into `player`
   gainDb: number
   tune: number // semitones -> Tone.Player.playbackRate
+  // Phase 26 Stream DK: the lean drum-sampler surface (research 68/decisions.md #145) — `params`
+  // (start/length/attack/hold/decay/cutoff/resonance, elided-default overrides exactly like a
+  // synth-backed lane's own `params`) and `filterType` are read at TRIGGER time (triggerDrum) to
+  // compute the Start/Length buffer trim and schedule the AHD envelope; `filter`/`envGain` are the
+  // always-wired nodes those two params sets drive (filter's frequency/type/Q updated here in
+  // sync; envGain's gain ramps scheduled per-hit in triggerDrum). Signal path: player -> filter ->
+  // envGain -> gain (static level*velocity, unchanged) -> [effectChain] -> effectsOut -> busIn.
+  params: Record<string, number>
+  filterType: SampleLaneFilterType
+  filter: Tone.Filter
+  envGain: Tone.Gain
   gain: Tone.Gain
+  // A short, ordered playback-effect chain reusing buildEffectRuntime/applyEffectParams wholesale
+  // (the same per-EffectType node builders a track's own insert chain uses) — rebuilt only when
+  // the declared `effects` type-list actually changes (effectsSig), not every sync tick.
+  effectsSig: string
+  effectRuntimes: EffectRuntime[]
+  effectsOut: Tone.Gain // fixed endpoint, connected to busIn once at construction
   player: Tone.Player | null
 }
 interface SfLaneVoice {
@@ -2013,9 +2030,78 @@ class Engine {
       }
     } else if (voice.kind === 'sample') {
       voice.player?.dispose()
+      voice.filter.dispose()
+      voice.envGain.dispose()
       voice.gain.dispose()
+      for (const r of voice.effectRuntimes) {
+        for (const n of r.nodes) n.dispose()
+        if (r.raw) for (const n of r.raw) n.disconnect()
+      }
+      voice.effectsOut.dispose()
     }
     // sf: nothing per-lane to dispose — the shared drumSfVoice is torn down separately.
+  }
+
+  /** Phase 26 Stream DK: (re)builds a sample-backed lane's playback-effect chain when its declared
+   * `effects` type-list actually changes (cheap signature check — types joined in order; ids don't
+   * matter for the chain's own shape, only for the file's own diff-friendliness), reusing
+   * buildEffectRuntime/applyEffectParams WHOLESALE — the exact per-EffectType node builders a
+   * track's own insert chain already uses (research 68/decisions.md #145: "the track-level
+   * EFFECT_TYPES machinery," not a bespoke lane mechanism). Per-effect PARAMETER VALUES are read
+   * from the drums TRACK's own synth block (`trackParams`, the same `coerce(track.synth)` the
+   * track's own chain/drum-bus already apply) — a deliberate, lean-scope tradeoff: every lane on a
+   * track sharing an effect TYPE shares that type's knob values (already exposed in SynthPanel),
+   * while WHICH types (and in what order) stays genuinely per-lane. Wired in series between
+   * `voice.gain` (existing static level*velocity tap) and the lane's fixed `effectsOut` (connected
+   * to the drum bus once, at construction, so this never has to touch that downstream wiring). */
+  private applySampleLaneEffects(voice: SampleLaneVoice, laneName: string, trackId: string, effects: BeatEffect[], trackParams: EngineSynth): void {
+    const sig = effects.map((e) => e.type).join(',')
+    if (sig !== voice.effectsSig) {
+      voice.gain.disconnect()
+      for (const r of voice.effectRuntimes) {
+        for (const n of r.nodes) n.dispose()
+        if (r.raw) for (const n of r.raw) n.disconnect()
+      }
+      voice.effectRuntimes = effects.map((e) => buildEffectRuntime(e.id, e.type, `${trackId}:${laneName}`))
+      let prev: Tone.ToneAudioNode = voice.gain
+      for (const r of voice.effectRuntimes) {
+        prev.connect(r.entry)
+        prev = r.exit
+      }
+      prev.connect(voice.effectsOut)
+      voice.effectsSig = sig
+    }
+    for (const r of voice.effectRuntimes) applyEffectParams(r, trackParams)
+  }
+
+  /** Phase 26 Stream DK: schedules one hit's AHD amplitude envelope on `voice.envGain` — Attack
+   * ramps 0->1, Hold sustains at 1, Decay ramps back to 0. `effectiveDur` (seconds, already
+   * combined from the lane's own Start/Length trim and any hit-level gate `duration` — see
+   * triggerDrum) clamps the decay ramp's END so a short trim/gate always finishes the fade exactly
+   * when playback stops, instead of the ramp overshooting past a player.stop() and clicking.
+   * decay === 0 (the default) is a deliberate no-op past attack/hold — "unshaped," today's
+   * pre-Stream-DK Trigger behavior, relying on Tone.Player's own short fadeOut for click-safety. */
+  private scheduleSampleLaneEnvelope(voice: SampleLaneVoice, t: number, effectiveDur: number): void {
+    const p = voice.params
+    const attack = Math.max(0, p.attack ?? SAMPLE_LANE_PARAM_DEFAULTS.attack)
+    const hold = Math.max(0, p.hold ?? SAMPLE_LANE_PARAM_DEFAULTS.hold)
+    const decay = Math.max(0, p.decay ?? SAMPLE_LANE_PARAM_DEFAULTS.decay)
+    const env = voice.envGain.gain
+    env.cancelScheduledValues(t)
+    if (attack > 0) {
+      env.setValueAtTime(0, t)
+      env.linearRampToValueAtTime(1, t + attack)
+    } else {
+      env.setValueAtTime(1, t)
+    }
+    if (decay > 0) {
+      const decayStart = t + attack + hold
+      const naturalEnd = decayStart + decay
+      const clampedEnd = effectiveDur > 0 ? Math.min(naturalEnd, t + effectiveDur) : naturalEnd
+      const rampEnd = Math.max(clampedEnd, decayStart + 0.001)
+      env.setValueAtTime(1, Math.min(decayStart, rampEnd))
+      env.linearRampToValueAtTime(0, rampEnd)
+    }
   }
 
   /** (Re)loads a sample-backed lane's one-shot buffer — this is the deferred v0.5 live sample-lane
@@ -2034,7 +2120,7 @@ class Engine {
         console.warn(`[engine] drum lane "${laneName}" sample failed to load:`, err)
         this.drumSamplePending.delete(laneName)
       },
-    }).connect(voice.gain)
+    }).connect(voice.filter)
     voice.player = player
     voice.loadedSample = sampleId
     if (old) old.dispose()
@@ -2099,6 +2185,10 @@ class Engine {
       }
     }
     const media = doc.media as { id: string; path: string }[]
+    // Phase 26 Stream DK: a sample-backed lane's playback-effect chain draws its per-type
+    // parameter VALUES from the drums track's own synth block (see applySampleLaneEffects's doc
+    // comment) — computed once per sync call, not once per lane.
+    const trackParams = coerce(track.synth)
     let sfNeeded: { sample: string; program: number } | null = null
     for (const decl of track.lanes as BeatDrumLaneDecl[]) {
       const backing = decl.backing
@@ -2117,13 +2207,41 @@ class Engine {
         let v = this.drumLanes.get(decl.name)
         if (!v || v.kind !== 'sample') {
           if (v) this.disposeLaneVoice(v)
-          const gain = new Tone.Gain(1).connect(busIn)
-          v = { kind: 'sample', sample: backing.sample, loadedSample: null, gainDb: backing.gainDb, tune: backing.tune, gain, player: null }
+          // Phase 26 Stream DK: player -> filter -> envGain -> gain (static level*velocity,
+          // unchanged) -> [effect chain, wired lazily by applySampleLaneEffects] -> effectsOut ->
+          // busIn. filter/envGain/gain/effectsOut are all built once here; only the effect chain
+          // in between gain and effectsOut is ever rebuilt (on an actual fx-list change).
+          const effectsOut = new Tone.Gain(1).connect(busIn)
+          const gain = new Tone.Gain(1).connect(effectsOut) // reconciled below once effectsSig is known
+          const envGain = new Tone.Gain(1).connect(gain)
+          const filter = new Tone.Filter(SAMPLE_LANE_PARAM_DEFAULTS.cutoff, 'lowpass').connect(envGain)
+          v = {
+            kind: 'sample',
+            sample: backing.sample,
+            loadedSample: null,
+            gainDb: backing.gainDb,
+            tune: backing.tune,
+            params: {},
+            filterType: 'lowpass',
+            filter,
+            envGain,
+            gain,
+            effectsSig: '',
+            effectRuntimes: [],
+            effectsOut,
+            player: null,
+          }
           this.drumLanes.set(decl.name, v)
         }
         v.gainDb = backing.gainDb
         v.tune = backing.tune
         v.gain.gain.value = Tone.dbToGain(backing.gainDb)
+        v.params = backing.params
+        v.filterType = backing.filterType
+        v.filter.frequency.value = backing.params.cutoff ?? SAMPLE_LANE_PARAM_DEFAULTS.cutoff
+        v.filter.Q.value = backing.params.resonance ?? SAMPLE_LANE_PARAM_DEFAULTS.resonance
+        v.filter.type = backing.filterType
+        this.applySampleLaneEffects(v, decl.name, track.id, backing.effects, trackParams)
         if (v.loadedSample !== backing.sample && !this.drumSamplePending.has(decl.name)) {
           const m = media.find((x) => x.id === backing.sample)
           if (m) {
@@ -2154,8 +2272,13 @@ class Engine {
     if (!voice) return
     try {
       if (voice.kind === 'synth') voice.node.triggerRelease(time)
-      else if (voice.kind === 'sample') voice.player?.stop(time)
-      else if (voice.kind === 'sf' && this.drumSfVoice) this.drumSfVoice.synth.noteOff(DRUM_CHANNEL, voice.note, { time })
+      else if (voice.kind === 'sample') {
+        voice.player?.stop(time)
+        // Cancel any in-flight AHD envelope ramp so a choked hit doesn't keep fading toward a
+        // stale target after the player itself has already stopped.
+        voice.envGain.gain.cancelScheduledValues(time)
+        voice.envGain.gain.setValueAtTime(1, time)
+      } else if (voice.kind === 'sf' && this.drumSfVoice) this.drumSfVoice.synth.noteOff(DRUM_CHANNEL, voice.note, { time })
     } catch {
       // best-effort — see comment above
     }
@@ -2724,11 +2847,24 @@ class Engine {
         if (!voice.player || !voice.player.loaded) return
         voice.player.playbackRate = Math.pow(2, voice.tune / 12)
         voice.gain.gain.setValueAtTime(Tone.dbToGain(voice.gainDb) * velocity, t)
-        // duration present -> gate/truncate (research 20 Part 4's Simpler-Gate analogue), with a
-        // short fade so truncation doesn't click; absent -> play the whole sample (today's Trigger).
-        voice.player.fadeOut = durSec !== undefined ? 0.015 : 0.005
-        if (durSec !== undefined) voice.player.start(t, 0, durSec)
-        else voice.player.start(t)
+        // Phase 26 Stream DK: Start/Length (params.start/length) trims the SAMPLE BUFFER itself —
+        // distinct from, and combined with, the hit-level `duration` gate above (Simpler-Gate
+        // analogue): whichever ends playback sooner wins. length<=0 (the default/"unset" value,
+        // see SAMPLE_LANE_PARAM_DEFAULTS) means "no trim beyond Start" — play to the buffer's
+        // natural end from `start`, exactly the pre-Stream-DK behavior when start is also 0.
+        const bufferDur = voice.player.buffer.duration
+        const start = Math.max(0, Math.min(voice.params.start ?? SAMPLE_LANE_PARAM_DEFAULTS.start, bufferDur))
+        const lengthOverride = voice.params.length ?? SAMPLE_LANE_PARAM_DEFAULTS.length
+        const naturalRemaining = Math.max(0, bufferDur - start)
+        const trimmedDur = lengthOverride > 0 ? Math.min(lengthOverride, naturalRemaining) : naturalRemaining
+        const effectiveDur = durSec !== undefined ? Math.min(trimmedDur, durSec) : trimmedDur
+        // duration present -> gate/truncate, with a short fade so truncation doesn't click; a
+        // lane-level Start/Length trim gets the same treatment (it's the same "cut the buffer
+        // short" case) — only a totally untrimmed, ungated hit keeps the original longer fade.
+        voice.player.fadeOut = durSec !== undefined || lengthOverride > 0 ? 0.015 : 0.005
+        if (durSec !== undefined || lengthOverride > 0) voice.player.start(t, start, Math.max(0.001, effectiveDur))
+        else voice.player.start(t, start)
+        this.scheduleSampleLaneEnvelope(voice, t, effectiveDur)
       } else {
         // sf-backed
         if (!this.drumSfVoice || this.drumSfVoice.sample !== voice.sample) return

@@ -27,11 +27,31 @@ export interface BeatLaneSynthBacking {
   voice: DrumVoiceType
   params: Record<string, number>
 }
+// Phase 26 Stream DK (mirrors src/core/document.ts's lean drum-sampler surface exactly — research
+// 68/decisions.md #145): Start/Length trim + AHD amplitude envelope + one filter, layered onto
+// the sample backing as elided-default `params` overrides, settable through the SAME setLaneParam
+// primitive synth-backed lanes already use, plus a short reused-EffectType playback-effect list.
+export const SAMPLE_LANE_PARAM_KEYS = ['start', 'length', 'attack', 'hold', 'decay', 'cutoff', 'resonance'] as const
+export type SampleLaneParamKey = (typeof SAMPLE_LANE_PARAM_KEYS)[number]
+export const SAMPLE_LANE_PARAM_DEFAULTS: Record<SampleLaneParamKey, number> = {
+  start: 0,
+  length: 0,
+  attack: 0.001,
+  hold: 0,
+  decay: 0,
+  cutoff: 18000,
+  resonance: 0.7,
+}
+export const SAMPLE_LANE_FILTER_TYPES = ['lowpass', 'bandpass', 'highpass'] as const
+export type SampleLaneFilterType = (typeof SAMPLE_LANE_FILTER_TYPES)[number]
 export interface BeatLaneSampleBacking {
   type: 'sample'
   sample: string
   gainDb: number
   tune: number
+  params: Record<string, number>
+  filterType: SampleLaneFilterType
+  effects: BeatEffect[]
 }
 export interface BeatLaneSfBacking {
   type: 'sf'

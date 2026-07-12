@@ -1,5 +1,5 @@
 import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
-import { DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, NOTE_FIELD_DEFAULTS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
+import { DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, NOTE_FIELD_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_KEYS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 // v0.10: the effect chain serializes iff it differs from the canonical default (isDefaultEffectChain)
@@ -68,7 +68,21 @@ function serializeLaneBacking(backing: BeatDrumLaneDecl['backing']): string {
     }
     return parts.join(' ')
   }
-  if (backing.type === 'sample') return `sample ${backing.sample} ${formatNumber(backing.gainDb)} ${formatNumber(backing.tune)}`
+  if (backing.type === 'sample') {
+    const parts = [`sample`, backing.sample, formatNumber(backing.gainDb), formatNumber(backing.tune)]
+    // Phase 26 Stream DK: Start/Length/AHD-envelope/filter params, canonical-elided against
+    // SAMPLE_LANE_PARAM_DEFAULTS in fixed key order (same discipline as synth-backed lanes' own
+    // params bag just above), then `filter=` iff non-default, then `fx=` iff any effects declared.
+    for (const key of SAMPLE_LANE_PARAM_KEYS) {
+      const value = backing.params[key]
+      if (value === undefined) continue
+      if (formatNumber(value) === formatNumber(SAMPLE_LANE_PARAM_DEFAULTS[key])) continue
+      parts.push(`${key}=${formatNumber(value)}`)
+    }
+    if (backing.filterType !== 'lowpass') parts.push(`filter=${backing.filterType}`)
+    if (backing.effects.length > 0) parts.push(`fx=${backing.effects.map((e) => e.type).join(',')}`)
+    return parts.join(' ')
+  }
   return `sf ${backing.sample} ${formatNumber(backing.program)} ${formatNumber(backing.note)}`
 }
 
