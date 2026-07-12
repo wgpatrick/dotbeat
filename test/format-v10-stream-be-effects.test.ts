@@ -39,8 +39,10 @@ function freshSynthTrack() {
   return doc
 }
 
-test('EFFECT_TYPES widens to 8 (Stream BE adds autoFilter/autoPan/tremolo/utility) but defaultEffectChain() stays exactly the original 4', () => {
-  assert.deepEqual([...EFFECT_TYPES], ['eq3', 'comp', 'distortion', 'bitcrush', 'autoFilter', 'autoPan', 'tremolo', 'utility'])
+test('EFFECT_TYPES includes Stream BE\'s four new types (autoFilter/autoPan/tremolo/utility — a sibling stream, BF, has since widened the enum further with its own types, so this checks inclusion, not exact membership) but defaultEffectChain() stays exactly the original 4', () => {
+  for (const t of ['eq3', 'comp', 'distortion', 'bitcrush', 'autoFilter', 'autoPan', 'tremolo', 'utility']) {
+    assert.ok((EFFECT_TYPES as readonly string[]).includes(t), `EFFECT_TYPES should include "${t}"`)
+  }
   assert.deepEqual(
     defaultEffectChain().map((e) => [e.id, e.type, e.enabled]),
     [

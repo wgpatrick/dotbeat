@@ -43,8 +43,10 @@ const CORE_SYNTH = `  synth
     release 0.1
     pan 0`
 
-test('EFFECT_TYPES gained the three new types, but defaultEffectChain() is untouched (still exactly the legacy four)', () => {
-  assert.deepEqual(EFFECT_TYPES, ['eq3', 'comp', 'distortion', 'bitcrush', 'grainDelay', 'vinylDistortion', 'resonator'])
+test('EFFECT_TYPES gained the three new types (a sibling stream, BE, has since widened the enum further with its own types, so this checks inclusion, not exact membership), but defaultEffectChain() is untouched (still exactly the legacy four)', () => {
+  for (const t of ['eq3', 'comp', 'distortion', 'bitcrush', 'grainDelay', 'vinylDistortion', 'resonator']) {
+    assert.ok((EFFECT_TYPES as readonly string[]).includes(t), `EFFECT_TYPES should include "${t}"`)
+  }
   assert.deepEqual(
     defaultEffectChain().map((e) => [e.id, e.type, e.enabled]),
     [
