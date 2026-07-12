@@ -452,7 +452,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_automate',
     description:
-      'Add or move a clip automation point (format v0.9): a (time, value) point on a named synth param\'s automation lane within one clip. time is in fractional 16th steps from the CLIP\'s own start (v0.7 number rules); value is in the param\'s own units (Hz for cutoff, dB for volume, 0..1 for resonance-like params, etc.). param is any numeric synth field (the core 9 minus osc, plus the v0.3 shaped surface — see beat_set\'s description for the full list). Pass id to move an existing point (matched by id) instead of adding a new one; omit it to add a new point with a minted id. Returns the musical edit list.',
+      'Add or move a clip automation point (format v0.9): a (time, value) point on a named synth param\'s automation lane within one clip. time is in fractional 16th steps from the CLIP\'s own start (v0.7 number rules); value is in the param\'s own units (Hz for cutoff, dB for volume, 0..1 for resonance-like params, etc.). param is any numeric synth field (the core 9 minus osc, plus the v0.3 shaped surface — see beat_set\'s description for the full list). Pass id to move an existing point (matched by id) instead of adding a new one; omit it to add a new point with a minted id. Phase 26 Stream DI: interpolation sets the segment-shape this point STARTS (toward the next point) — linear (default, elided), hold (step instantly to the next point\'s value at its time instead of ramping), or curve (an eased bow instead of a straight ramp); omit it on a move to leave the point\'s existing curve-shape untouched. Returns the musical edit list.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -463,6 +463,7 @@ const TOOLS: ToolDef[] = [
         time: { type: 'number' },
         value: { type: 'number' },
         id: { type: 'string', description: 'an existing point id to move; omit to add a new point' },
+        interpolation: { type: 'string', description: 'linear | hold | curve — the segment-shape this point starts; default linear; omit on a move to keep the existing shape' },
       },
       required: ['file', 'track', 'clip', 'param', 'time', 'value'],
     },
@@ -473,6 +474,7 @@ const TOOLS: ToolDef[] = [
         time: num(args, 'time'),
         value: num(args, 'value'),
         ...(typeof args.id === 'string' ? { id: args.id } : {}),
+        ...(typeof args.interpolation === 'string' ? { interpolation: args.interpolation as 'linear' | 'hold' | 'curve' } : {}),
       })
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))

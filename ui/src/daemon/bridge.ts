@@ -17,7 +17,7 @@
 // external edits reconcile via the SSE re-pull.
 
 import { useStore } from '../state/store'
-import type { BeatAutomationLane, BeatAutomationPoint, BeatDocument, BeatDrumHit, BeatSelection } from '../types'
+import type { AutomationInterpolation, BeatAutomationLane, BeatAutomationPoint, BeatDocument, BeatDrumHit, BeatSelection } from '../types'
 import { DRUM_LANES } from '../types'
 
 export function daemonBase(): string {
@@ -264,6 +264,10 @@ export interface AutomationEdit {
   time?: number
   value?: number
   id?: string
+  // Phase 26 Stream DI: the segment-shape this point starts (linear|hold|curve); omitted on a
+  // 'set' that moves an existing point preserves that point's current shape (see
+  // applyLocalAutomation below, mirroring core's setAutomationPoint/moveAutomationPoint exactly).
+  interpolation?: AutomationInterpolation
 }
 
 const canonV = (n: number) => Number(n.toFixed(4))
@@ -293,9 +297,15 @@ function applyLocalAutomation(doc: BeatDocument, e: AutomationEdit): BeatDocumen
     const time = canonV(e.time)
     const value = canonV(e.value)
     const existing = e.id !== undefined && lane ? lane.points.find((p) => p.id === e.id) : undefined
+    // Phase 26 Stream DI: 'linear' (or unset) is canonically elided — never actually stored — same
+    // one-canonical-form-per-state rule core's edit.ts applies (canonInterpolation there).
+    const canonInterp = (v: AutomationInterpolation | undefined): AutomationInterpolation | undefined => (v && v !== 'linear' ? v : undefined)
     if (existing) {
+      // Omitting e.interpolation on a move preserves the point's existing curve-shape (mirrors
+      // core's moveAutomationPoint: only an explicit value retargets it).
+      const nextInterp = canonInterp(e.interpolation !== undefined ? e.interpolation : existing.interpolation)
       nextLanes = clip.automation.map((l) =>
-        l.param === e.param ? { ...l, points: l.points.map((p) => (p.id === e.id ? { id: p.id, time, value } : p)) } : l,
+        l.param === e.param ? { ...l, points: l.points.map((p) => (p.id === e.id ? { id: p.id, time, value, ...(nextInterp ? { interpolation: nextInterp } : {}) } : p)) } : l,
       )
     } else {
       const points = lane ? lane.points : []
@@ -308,7 +318,8 @@ function applyLocalAutomation(doc: BeatDocument, e: AutomationEdit): BeatDocumen
         }
         id = `p${max + 1}`
       }
-      const added: BeatAutomationPoint = { id, time, value }
+      const interpolation = canonInterp(e.interpolation)
+      const added: BeatAutomationPoint = { id, time, value, ...(interpolation ? { interpolation } : {}) }
       nextLanes = lane
         ? clip.automation.map((l) => (l.param === e.param ? { ...l, points: [...l.points, added] } : l))
         : [...clip.automation, { param: e.param, points: [added] }]
@@ -335,6 +346,7 @@ export function postAutomation(e: AutomationEdit): void {
   if (e.time !== undefined) body.time = e.time
   if (e.value !== undefined) body.value = e.value
   if (e.id !== undefined) body.id = e.id
+  if (e.interpolation !== undefined) body.interpolation = e.interpolation
   sendQueue = sendQueue.then(() =>
     fetch(`${base}/automate`, {
       method: 'POST',

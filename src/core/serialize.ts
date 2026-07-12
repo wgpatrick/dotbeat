@@ -1,5 +1,5 @@
 import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
-import { DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, NOTE_FIELD_DEFAULTS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
+import { AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, NOTE_FIELD_DEFAULTS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 // v0.10: the effect chain serializes iff it differs from the canonical default (isDefaultEffectChain)
@@ -72,11 +72,20 @@ function serializeLaneBacking(backing: BeatDrumLaneDecl['backing']): string {
   return `sf ${backing.sample} ${formatNumber(backing.program)} ${formatNumber(backing.note)}`
 }
 
+// Phase 26 Stream DI: the one optional per-point field (interpolation), canonical-elided (iff !=
+// AUTOMATION_POINT_FIELD_DEFAULTS) as a trailing `key=value` token — same discipline and same
+// token grammar as noteOptionalTokens above, scaled down to BeatAutomationPoint's single field.
+function pointOptionalTokens(p: BeatAutomationPoint): string {
+  const parts: string[] = []
+  if ((p.interpolation ?? AUTOMATION_POINT_FIELD_DEFAULTS.interpolation) !== AUTOMATION_POINT_FIELD_DEFAULTS.interpolation) parts.push(`interpolation=${p.interpolation}`)
+  return parts.length ? ` ${parts.join(' ')}` : ''
+}
+
 // v0.9: canonical automation point order is (time, id) ascending, same discipline as notes/hits.
 function sortedPointLines(points: BeatAutomationPoint[], indent: string): string[] {
   return [...points]
     .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id))
-    .map((p) => `${indent}point ${p.id} ${formatNumber(p.time)} ${formatNumber(p.value)}`)
+    .map((p) => `${indent}point ${p.id} ${formatNumber(p.time)} ${formatNumber(p.value)}${pointOptionalTokens(p)}`)
 }
 
 // v0.9: automation lanes serialize in source order (first-seen — like clips themselves; order

@@ -59,7 +59,7 @@ import spessaWorkletUrl from 'spessasynth_lib/dist/spessasynth_processor.min.js?
 import { useStore, isEffectivelyMuted } from '../state/store'
 import { daemonBase } from '../daemon/bridge'
 import { audioBufferToWav } from './wavEncode'
-import type { BeatAudioRegion, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatEffect, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumVoiceType, OscType } from '../types'
+import type { AutomationInterpolation, BeatAudioRegion, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatEffect, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumVoiceType, OscType } from '../types'
 import { DRUM_VOICE_PARAM_DEFAULTS } from '../types'
 
 // Phase 18 Stream R: ONE shared, widened destination set for both LFO1 and LFO2 — mirrors
@@ -491,12 +491,36 @@ function lfoValueAt(rateHz: number, t: number): number {
   return Math.sin(2 * Math.PI * rateHz * t)
 }
 
+// Phase 26 Stream DI: one breakpoint as interpolateAutomation needs it — a plain (time, value)
+// pair plus the optional segment-shape THIS point starts (document.ts's AutomationInterpolation;
+// undefined === 'linear', the canonical default). Used everywhere the automation plumbing used to
+// spell out `{ time: number; value: number }[]` by hand (Content.automation, autoOf, contentOf's
+// inline clip cast) — one shared alias so the interpolation field can't be silently dropped by a
+// stale inline literal type.
+type AutoPoint = { time: number; value: number; interpolation?: AutomationInterpolation }
+
+// Quadratic ease-in — the 'curve' segment shape: eases gently away from the start value, then
+// catches up steeply toward the end value (a deliberately pronounced bow, not a subtle one — an
+// S-curve/smoothstep's deviation from a straight line tops out under 10% of the value range at its
+// most extreme point, closer to "linear with a slight wobble" than an audibly/visibly distinct
+// curve; `t*t` reaches a full 50% reduction at the segment's midpoint, matching Ableton's own
+// visibly-bowed curved segments [research/65, manual p.489] rather than a barely-there one).
+// Applied to the lerp fraction before either the linear or log-space blend below — so a curved
+// cutoff segment still respects log's frequency-perception correction, it just eases into it
+// instead of ramping at a constant rate.
+function curveEase(t: number): number {
+  return t * t
+}
+
 // Interpolate breakpoint automation. dotbeat units: `time` is in 16th steps from clip start, so
 // `posSteps` (contentStep) is directly comparable — NO 0..1 rescale (that was the BeatLab units
 // bug beatlab#5 fixed). `value` is already the param's raw unit. `log` compares in log-space
-// (cutoff only — frequency perception is logarithmic). No per-point curve field in dotbeat
-// (deferred), so every segment ramps linearly.
-function interpolateAutomation(points: { time: number; value: number }[], posSteps: number, log: boolean): number {
+// (cutoff only — frequency perception is logarithmic). Phase 26 Stream DI: the segment's shape is
+// read off its START point (`a.interpolation` — mirrors the UI's per-segment-owned-by-its-left-
+// point convention, ArrangementView.tsx's AutomationLane) — 'hold' steps instantly to `b.value`
+// right at `b.time` instead of ramping; 'curve' eases the ramp via curveEase; anything else (incl.
+// unset) ramps linearly, exactly as before this stream.
+function interpolateAutomation(points: AutoPoint[], posSteps: number, log: boolean): number {
   const pts = [...points].sort((a, b) => a.time - b.time)
   if (pts.length === 0) return 0
   if (posSteps <= pts[0].time) return pts[0].value
@@ -506,7 +530,9 @@ function interpolateAutomation(points: { time: number; value: number }[], posSte
     const b = pts[i + 1]
     if (posSteps >= a.time && posSteps <= b.time) {
       const t = (posSteps - a.time) / (b.time - a.time || 1)
-      return log && a.value > 0 && b.value > 0 ? a.value * Math.pow(b.value / a.value, t) : a.value + (b.value - a.value) * t
+      if (a.interpolation === 'hold') return t < 1 ? a.value : b.value
+      const shaped = a.interpolation === 'curve' ? curveEase(t) : t
+      return log && a.value > 0 && b.value > 0 ? a.value * Math.pow(b.value / a.value, shaped) : a.value + (b.value - a.value) * shaped
     }
   }
   return pts[pts.length - 1].value
@@ -1603,7 +1629,7 @@ const DRUM_CHANNEL = 9 // GM channel 10 (0-indexed) — research 19 Part IV/V.2,
 interface Content {
   notes: BeatNote[]
   hits: BeatDrumHit[]
-  automation: Map<string, { time: number; value: number }[]>
+  automation: Map<string, AutoPoint[]>
   contentStep: number
   // Phase 24 Stream CJ: the step contentStep WRAPS BACK TO at the start of each tiling pass — 0
   // except when a clip's own `loop` override has a non-zero `start` (in which case the cycle starts
@@ -3072,8 +3098,8 @@ class Engine {
     scenes: BeatDocument['scenes'],
     bar: number,
   ): Content | null {
-    const autoOf = (lanes: { param: string; points: { time: number; value: number }[] }[]): Map<string, { time: number; value: number }[]> => {
-      const m = new Map<string, { time: number; value: number }[]>()
+    const autoOf = (lanes: { param: string; points: AutoPoint[] }[]): Map<string, AutoPoint[]> => {
+      const m = new Map<string, AutoPoint[]>()
       for (const l of lanes) m.set(l.param, l.points)
       return m
     }
@@ -3104,7 +3130,7 @@ class Engine {
         id: string
         notes: BeatNote[]
         hits: BeatDrumHit[]
-        automation: { param: string; points: { time: number; value: number }[] }[]
+        automation: { param: string; points: AutoPoint[] }[]
         audio?: BeatAudioRegion
         loop?: { start: number; end: number } | null
       }[]
@@ -3168,7 +3194,7 @@ class Engine {
       // Every other track is silenced outright (content = null), not just muted — real isolation.
       const content = this.auditionTrackId
         ? track.id === this.auditionTrackId
-          ? { notes: track.notes, hits: track.hits, automation: new Map<string, { time: number; value: number }[]>(), contentStep: step % (doc.loopBars * 16), audio: null }
+          ? { notes: track.notes, hits: track.hits, automation: new Map<string, AutoPoint[]>(), contentStep: step % (doc.loopBars * 16), audio: null }
           : null
         : this.contentOf(track, step, doc.loopBars, song, doc.scenes, bar)
       if (!content) continue // song mode: this track is silent this section (or audition: not the auditioned track)

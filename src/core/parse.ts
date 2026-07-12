@@ -1,5 +1,5 @@
-import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields } from './document.js'
+import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind, WarpMode } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -38,6 +38,10 @@ function isDrumVoiceType(s: string): s is DrumVoiceType {
 
 function isWarpMode(s: string): s is WarpMode {
   return (WARP_MODES as readonly string[]).includes(s)
+}
+
+function isAutomationInterpolation(s: string): s is AutomationInterpolation {
+  return (AUTOMATION_INTERPOLATIONS as readonly string[]).includes(s)
 }
 
 function parseFloatStrict(tok: string, lineNo: number, field: string): number {
@@ -335,17 +339,48 @@ export function parse(text: string): BeatDocument {
     return { media, in: inPoint, out: outPoint, gainDb, warp: warpTok, rate, markers: [] }
   }
 
+  // Phase 26 Stream DI: trailing `key=value` tokens carry the one optional per-point field
+  // (interpolation) — same "liberal in, strict out" discipline as parseNoteOptionalFields above.
+  // An explicit "interpolation=linear" (the canonical default) parses fine but is intentionally
+  // NOT retained on the returned point — one canonical form per state (D4): a redundant default
+  // token silently canonicalizes away on the next serialize, same as note fields' own defaults.
+  function parsePointOptionalFields(tokens: string[], lineNo: number): Pick<BeatAutomationPoint, 'interpolation'> {
+    const out: Pick<BeatAutomationPoint, 'interpolation'> = {}
+    const seen = new Set<string>()
+    for (const tok of tokens) {
+      const eq = tok.indexOf('=')
+      if (eq === -1) throw new BeatParseError(`point field must be key=value, got "${tok}"`, lineNo)
+      const key = tok.slice(0, eq)
+      const valTok = tok.slice(eq + 1)
+      if (seen.has(key)) throw new BeatParseError(`duplicate point field "${key}"`, lineNo)
+      seen.add(key)
+      switch (key) {
+        case 'interpolation': {
+          if (!isAutomationInterpolation(valTok)) throw new BeatParseError(`point interpolation must be one of ${AUTOMATION_INTERPOLATIONS.join('|')}, got "${valTok}"`, lineNo)
+          if (valTok !== AUTOMATION_POINT_FIELD_DEFAULTS.interpolation) out.interpolation = valTok
+          break
+        }
+        default:
+          throw new BeatParseError(`unknown point field "${key}" (expected interpolation)`, lineNo)
+      }
+    }
+    return out
+  }
+
   // v0.9: `point <id> <time> <value>` — one automation point inside an open `auto` lane. time
   // is fractional 16th steps from the clip's start (v0.7 number rules); value is unconstrained
-  // (its legal range depends on which param the enclosing lane targets).
+  // (its legal range depends on which param the enclosing lane targets). Phase 26 Stream DI
+  // appends an OPTIONAL trailing `interpolation=linear|hold|curve` token (4 tokens parses exactly
+  // as before — byte-identical for every pre-existing file).
   function parsePointLine(tokens: string[], lineNo: number): BeatAutomationPoint {
-    if (tokens.length !== 4) throw new BeatParseError('point expects exactly 3 values: <id> <time> <value>', lineNo)
+    if (tokens.length < 4) throw new BeatParseError('point expects at least 3 values: <id> <time> <value> [interpolation=linear|hold|curve]', lineNo)
     const [, id, timeTok, valueTok] = tokens as [string, string, string, string]
     if (!SLUG_RE.test(id)) throw new BeatParseError(`point ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
     const time = parseFloatStrict(timeTok, lineNo, 'point time')
     if (time < 0) throw new BeatParseError(`point time must be >= 0, got ${time}`, lineNo)
     const value = parseFloatStrict(valueTok, lineNo, 'point value')
-    return { id, time, value }
+    const optional = parsePointOptionalFields(tokens.slice(4), lineNo)
+    return { id, time, value, ...optional }
   }
 
   // v0.8 migration: expand a legacy per-bar pattern into absolute hits. A step at velocity v

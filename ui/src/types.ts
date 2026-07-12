@@ -115,10 +115,15 @@ export interface BeatInstrument {
 // one automatable synth param within one clip; `time` is in 16th steps from the clip's start
 // (same unit as note/hit start), `value` is the param's raw unit. Mirrors src/core/document.ts's
 // BeatAutomationLane/BeatAutomationPoint (ui/ hand-mirrors core shapes — see this file's siblings).
+// Phase 26 Stream DI: `interpolation` is the segment-shape this point starts (toward the next
+// point) — 'linear' (default, elided when serialized) | 'hold' (step instantly at the next
+// point's time) | 'curve' (eased bow). Mirrors document.ts's AutomationInterpolation.
+export type AutomationInterpolation = 'linear' | 'hold' | 'curve'
 export interface BeatAutomationPoint {
   id: string
   time: number
   value: number
+  interpolation?: AutomationInterpolation
 }
 export interface BeatAutomationLane {
   param: string

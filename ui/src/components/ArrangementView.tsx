@@ -5,7 +5,7 @@ import { engine } from '../audio/engine'
 import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, postClipMove, daemonBase } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, installAudioClip, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
-import { declaredLaneNames, WARP_MODES, type BeatAutomationPoint, type BeatClip, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind, type WarpMode } from '../types'
+import { declaredLaneNames, WARP_MODES, type AutomationInterpolation, type BeatAutomationPoint, type BeatClip, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind, type WarpMode } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 import { loadWaveform, getCachedWaveform, drawWaveform, type WaveformData } from '../audio/waveform'
 
@@ -256,6 +256,7 @@ const AUTO_H = 46 // height of one automation sub-lane
 const AUTO_PAD = 6 // vertical inset for the curve inside a sub-lane
 const PICKER_H = 30 // height of the expanded add-a-lane strip
 const MARKER_HIT = 8 // px radius to grab a breakpoint
+const SEGMENT_HIT = 6 // px distance to grab a segment (Phase 26 Stream DI: alt/option-drag-to-bow)
 
 /** Every knob param, keyed — the value ranges (min/max) that map a raw automation value to the
  * sub-lane's y-axis. Reuses synthParams.ts's declarative table (the same one SynthPanel renders),
@@ -877,6 +878,7 @@ function AutomationLane({
   const spec = specFor(param)
   const min = spec.min ?? 0
   const max = spec.max ?? 1
+  const fmt = spec.format ?? ((v: number) => v.toFixed(2))
   // Subscribe to just this lane's points. `find` returns the store's own array reference (stable
   // across unrelated state changes), so Object.is equality keeps this from re-rendering per tick.
   const points = useStore(
@@ -886,7 +888,18 @@ function AutomationLane({
     ),
   )
   const markersRef = useRef<{ x: number; y: number; id: string }[]>([])
-  const dragRef = useRef<{ mode: 'move' | 'new'; id?: string; time: number; value: number } | null>(null)
+  // Phase 26 Stream DI: every rendered segment this draw pass, in CANVAS-LOCAL pixel coords (one
+  // entry per tile occurrence a segment is drawn in, since a looped lane repeats the same segment
+  // at multiple x offsets) — lets pointer gestures hit-test "near a line between two points," not
+  // just "on a point," for the alt/option-drag-to-bow gesture below.
+  const segmentsRef = useRef<{ ax: number; ay: number; bx: number; by: number; aId: string; bId: string }[]>([])
+  type DragState =
+    | { mode: 'move'; id: string; time: number; value: number }
+    | { mode: 'new'; time: number; value: number }
+    | { mode: 'bow'; aId: string; bId: string; midY: number; dy: number }
+  const dragRef = useRef<DragState | null>(null)
+  const dragLabelRef = useRef<HTMLDivElement>(null)
+  const [popup, setPopup] = useState<{ id: string; x: number; y: number; time: number; value: number; interpolation: AutomationInterpolation } | null>(null)
 
   const valueToY = useCallback((v: number) => {
     const norm = Math.max(0, Math.min(1, (v - min) / (max - min || 1)))
@@ -926,11 +939,14 @@ function AutomationLane({
     // adds a provisional point). Sorted by time — the canonical curve order.
     const drag = dragRef.current
     let eff = points.map((p) => ({ ...p }))
-    if (drag?.mode === 'move' && drag.id) eff = eff.map((p) => (p.id === drag.id ? { ...p, time: drag.time, value: drag.value } : p))
+    if (drag?.mode === 'move') eff = eff.map((p) => (p.id === drag.id ? { ...p, time: drag.time, value: drag.value } : p))
     if (drag?.mode === 'new') eff = [...eff, { id: '__draft__', time: drag.time, value: drag.value }]
     eff.sort((a, b) => a.time - b.time)
+    const draggedId = drag?.mode === 'move' ? drag.id : undefined
+    const bow = drag?.mode === 'bow' ? drag : null
 
     const markers: { x: number; y: number; id: string }[] = []
+    const segments: { ax: number; ay: number; bx: number; by: number; aId: string; bId: string }[] = []
     ctx.strokeStyle = track.color
     ctx.lineWidth = 1.5
     for (const occ of occurrences) {
@@ -942,7 +958,39 @@ function AutomationLane({
         ctx.beginPath()
         // hold the first value from the tile start
         ctx.moveTo((tileStartStep / 16) * pxPerBar, valueToY(eff[0]!.value))
-        for (const p of eff) ctx.lineTo(xAt(p.time), valueToY(p.value))
+        ctx.lineTo(xAt(eff[0]!.time), valueToY(eff[0]!.value))
+        // Phase 26 Stream DI: each segment renders per the shape its START point carries —
+        // 'hold' steps (a horizontal run, then a vertical jump right at the next point's time),
+        // 'curve' eases via curveEase-equivalent sampling (kept in visual sync with the engine's
+        // own curveEase in ui/src/audio/engine.ts — see that file's comment), anything else (incl.
+        // an in-progress bow-drag on THIS exact segment, which gets a live bezier-toward-the-
+        // pointer preview instead) draws a straight line, same as before this stream.
+        for (let i = 0; i < eff.length - 1; i++) {
+          const a = eff[i]!
+          const b = eff[i + 1]!
+          const ax = xAt(a.time)
+          const ay = valueToY(a.value)
+          const bx = xAt(b.time)
+          const by = valueToY(b.value)
+          segments.push({ ax, ay, bx, by, aId: a.id, bId: b.id })
+          if (bow && a.id === bow.aId && b.id === bow.bId) {
+            const mx = (ax + bx) / 2
+            const my = (ay + by) / 2 + bow.dy
+            ctx.quadraticCurveTo(mx, my, bx, by)
+          } else if (a.interpolation === 'hold') {
+            ctx.lineTo(bx, ay)
+            ctx.lineTo(bx, by)
+          } else if (a.interpolation === 'curve') {
+            const STEPS = 16
+            for (let s = 1; s <= STEPS; s++) {
+              const t = s / STEPS
+              const shaped = t * t // quadratic ease-in — mirrors engine.ts's curveEase exactly
+              ctx.lineTo(ax + (bx - ax) * t, valueToY(a.value + (b.value - a.value) * shaped))
+            }
+          } else {
+            ctx.lineTo(bx, by)
+          }
+        }
         // hold the last value to the tile end
         ctx.lineTo((tileEndStep / 16) * pxPerBar, valueToY(eff[eff.length - 1]!.value))
         ctx.stroke()
@@ -952,7 +1000,7 @@ function AutomationLane({
           const y = valueToY(p.value)
           ctx.beginPath()
           ctx.arc(x, y, 3.2, 0, Math.PI * 2)
-          ctx.fillStyle = p.id === drag?.id ? '#fff' : track.color
+          ctx.fillStyle = p.id === draggedId ? '#fff' : track.color
           ctx.fill()
           ctx.lineWidth = 1
           ctx.strokeStyle = 'rgba(0,0,0,0.6)'
@@ -960,10 +1008,16 @@ function AutomationLane({
           ctx.strokeStyle = track.color
           ctx.lineWidth = 1.5
           if (p.id !== '__draft__') markers.push({ x, y, id: p.id })
+          // 'hold' points get a small flat cap so the step is recognizable even without hovering
+          if (p.interpolation === 'hold') {
+            ctx.fillStyle = 'rgba(0,0,0,0.65)'
+            ctx.fillRect(x - 1, y - 1, 2, 2)
+          }
         }
       }
     }
     markersRef.current = markers
+    segmentsRef.current = segments
   }, [points, totalBars, pxPerBar, occurrences, loopSteps, track.color, valueToY])
 
   useEffect(() => {
@@ -986,8 +1040,33 @@ function AutomationLane({
     [occurrences, pxPerBar, loopSteps],
   )
 
+  // Phase 26 Stream DI: point-to-segment distance hit-test, using the segments draw() just laid
+  // out (canvas-local coords, one entry per rendered tile occurrence — see segmentsRef above).
+  // Feeds the alt/option-drag-to-bow gesture: "near (not on) a line between two breakpoints."
+  const hitTestSegment = useCallback((localX: number, localY: number) => {
+    let bestD = SEGMENT_HIT * SEGMENT_HIT
+    let best: { ax: number; ay: number; bx: number; by: number; aId: string; bId: string } | null = null
+    for (const s of segmentsRef.current) {
+      const dx = s.bx - s.ax
+      const dy = s.by - s.ay
+      const len2 = dx * dx + dy * dy || 1
+      let t = ((localX - s.ax) * dx + (localY - s.ay) * dy) / len2
+      t = Math.max(0, Math.min(1, t))
+      const px = s.ax + t * dx
+      const py = s.ay + t * dy
+      const d = (px - localX) ** 2 + (py - localY) ** 2
+      if (d <= bestD) {
+        bestD = d
+        best = s
+      }
+    }
+    return best
+  }, [])
+
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      if (e.button === 2) return // right-click is handled entirely by onContextMenu below
+      setPopup(null)
       const canvas = canvasRef.current
       if (!canvas) return
       const rect = canvas.getBoundingClientRect()
@@ -1003,10 +1082,44 @@ function AutomationLane({
           hit = m.id
         }
       }
-      // alt-click (or the row's remove) deletes a breakpoint
-      if (hit && (e.altKey || e.button === 2)) {
+      // alt-click deletes a breakpoint
+      if (hit && e.altKey) {
         postAutomation({ op: 'remove', track: track.id, clip: clipId, param, id: hit })
         return
+      }
+      // Phase 26 Stream DI: alt/option-drag on a SEGMENT (not a point) bows it into a curve —
+      // live preview is a quadratic bezier toward the drag point; on release this commits
+      // `interpolation: 'curve'` on the segment's start point (the persisted format is a flag, not
+      // a bow amount — see AutomationInterpolation's doc comment in document.ts — so the engine and
+      // the settled render both use a fixed ease, curveEase, once the drag ends).
+      if (e.altKey && !hit) {
+        const seg = hitTestSegment(localX, localY)
+        if (seg) {
+          e.preventDefault()
+          const midY = (seg.ay + seg.by) / 2
+          dragRef.current = { mode: 'bow', aId: seg.aId, bId: seg.bId, midY, dy: 0 }
+          draw()
+          const onMove = (ev: PointerEvent) => {
+            const drag = dragRef.current
+            if (!drag || drag.mode !== 'bow') return
+            drag.dy = ev.clientY - rect.top - drag.midY
+            draw()
+          }
+          const onUp = () => {
+            window.removeEventListener('pointermove', onMove)
+            window.removeEventListener('pointerup', onUp)
+            const drag = dragRef.current
+            dragRef.current = null
+            if (drag && drag.mode === 'bow') {
+              const aPoint = points.find((p) => p.id === drag.aId)
+              if (aPoint) postAutomation({ op: 'set', track: track.id, clip: clipId, param, id: aPoint.id, time: aPoint.time, value: aPoint.value, interpolation: 'curve' })
+            }
+            draw()
+          }
+          window.addEventListener('pointermove', onMove)
+          window.addEventListener('pointerup', onUp)
+          return
+        }
       }
       e.preventDefault()
       if (hit) {
@@ -1018,27 +1131,47 @@ function AutomationLane({
         dragRef.current = { mode: 'new', time: t.time, value: yToValue(localY) }
       }
       draw()
+      // Phase 26 Stream DI: surface the live drag value (already computed below, just never
+      // rendered before this stream) as a small floating label near the cursor — an imperative DOM
+      // write, not React state, matching draw()'s own no-React-per-move discipline (research 15 §2).
+      const showLabel = (lx: number, ly: number, value: number) => {
+        const label = dragLabelRef.current
+        if (!label) return
+        label.style.display = 'block'
+        label.style.left = `${lx + 10}px`
+        label.style.top = `${ly - 18}px`
+        label.textContent = fmt(value)
+      }
+      const hideLabel = () => {
+        const label = dragLabelRef.current
+        if (label) label.style.display = 'none'
+      }
+      // (dragRef.current here is always 'move' | 'new' — the 'bow' branch above already returned.)
+      const initial = dragRef.current
+      if (initial) showLabel(localX, localY, initial.value)
 
       const onMove = (ev: PointerEvent) => {
         const drag = dragRef.current
-        if (!drag) return
+        if (!drag || drag.mode === 'bow') return
         const lx = ev.clientX - rect.left
         const ly = ev.clientY - rect.top
         const t = clipTimeFromX(lx)
         if (t) drag.time = t.time
         drag.value = Number(yToValue(ly).toFixed(4))
         draw()
+        showLabel(lx, ly, drag.value)
       }
       const onUp = () => {
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
+        hideLabel()
         const drag = dragRef.current
         dragRef.current = null
-        if (!drag) {
+        if (!drag || drag.mode === 'bow') {
           draw()
           return
         }
-        if (drag.mode === 'move' && drag.id) {
+        if (drag.mode === 'move') {
           postAutomation({ op: 'set', track: track.id, clip: clipId, param, id: drag.id, time: drag.time, value: drag.value })
         } else if (drag.mode === 'new') {
           postAutomation({ op: 'set', track: track.id, clip: clipId, param, time: drag.time, value: drag.value })
@@ -1049,10 +1182,41 @@ function AutomationLane({
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [points, clipTimeFromX, yToValue, draw, track.id, clipId, param],
+    [points, clipTimeFromX, yToValue, draw, hitTestSegment, fmt, track.id, clipId, param],
   )
 
-  const fmt = spec.format ?? ((v: number) => v.toFixed(2))
+  // Phase 26 Stream DI: right-click a breakpoint -> a small popup with an exact numeric value
+  // <input> AND a linear/hold/curve toggle for the segment it starts (both features "touch the
+  // same component," research/65's recommendation to ship them together). Right-click empty space
+  // just closes any open popup.
+  const onContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const rect = canvas.getBoundingClientRect()
+      const localX = e.clientX - rect.left
+      const localY = e.clientY - rect.top
+      let hit: string | null = null
+      let best = MARKER_HIT * MARKER_HIT
+      for (const m of markersRef.current) {
+        const d = (m.x - localX) ** 2 + (m.y - localY) ** 2
+        if (d <= best) {
+          best = d
+          hit = m.id
+        }
+      }
+      if (!hit) {
+        setPopup(null)
+        return
+      }
+      const p = points.find((pt) => pt.id === hit)
+      if (!p) return
+      setPopup({ id: p.id, x: localX, y: localY, time: p.time, value: p.value, interpolation: p.interpolation ?? 'linear' })
+    },
+    [points],
+  )
+
   return (
     <div className="arr-auto-row" style={{ height: AUTO_H }}>
       <div className="arr-auto-head" style={{ width: HEADER_W }}>
@@ -1071,10 +1235,48 @@ function AutomationLane({
         data-auto-track={track.id}
         data-auto-param={param}
         onPointerDown={onPointerDown}
-        onContextMenu={(e) => e.preventDefault()}
+        onContextMenu={onContextMenu}
         style={{ touchAction: 'none' }}
       >
         <canvas ref={canvasRef} className="arr-auto-canvas" />
+        <div ref={dragLabelRef} className="arr-auto-drag-label" style={{ display: 'none' }} />
+        {popup && (
+          <div className="arr-auto-popup" style={{ left: popup.x, top: popup.y }} data-auto-popup={`${track.id}.${param}.${popup.id}`} onPointerDown={(e) => e.stopPropagation()}>
+            <input
+              type="number"
+              step="any"
+              className="arr-auto-popup-input"
+              defaultValue={popup.value}
+              autoFocus
+              data-auto-value-input={`${track.id}.${param}.${popup.id}`}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const v = Number((e.target as HTMLInputElement).value)
+                  if (Number.isFinite(v)) postAutomation({ op: 'set', track: track.id, clip: clipId, param, id: popup.id, time: popup.time, value: v, interpolation: popup.interpolation })
+                  setPopup(null)
+                } else if (e.key === 'Escape') {
+                  setPopup(null)
+                }
+              }}
+            />
+            <div className="arr-auto-popup-modes">
+              {(['linear', 'hold', 'curve'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`arr-auto-popup-mode${popup.interpolation === m ? ' on' : ''}`}
+                  data-auto-interp={`${track.id}.${param}.${popup.id}.${m}`}
+                  onClick={() => {
+                    postAutomation({ op: 'set', track: track.id, clip: clipId, param, id: popup.id, time: popup.time, value: popup.value, interpolation: m })
+                    setPopup((prev) => (prev ? { ...prev, interpolation: m } : prev))
+                  }}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

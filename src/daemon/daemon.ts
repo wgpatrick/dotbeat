@@ -32,7 +32,7 @@ import { readFileSync, writeFileSync, watch, existsSync, mkdirSync, copyFileSync
 import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { BeatDocument, BeatSelection, DrumLane } from '../core/index.js'
+import type { AutomationInterpolation, BeatDocument, BeatSelection, DrumLane } from '../core/index.js'
 import {
   parse,
   serialize,
@@ -41,6 +41,7 @@ import {
   setValue,
   setAutomationPoint,
   removeAutomationPoint,
+  AUTOMATION_INTERPOLATIONS,
   validateSelection,
   saveClip,
   setScene,
@@ -1008,9 +1009,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             time?: unknown
             value?: unknown
             id?: unknown
+            interpolation?: unknown
           }
           if (typeof b.track !== 'string' || typeof b.clip !== 'string' || typeof b.param !== 'string') {
             json(res, 400, { error: 'body must include string track, clip, param' })
+            return
+          }
+          if (b.interpolation !== undefined && !(AUTOMATION_INTERPOLATIONS as readonly string[]).includes(b.interpolation as string)) {
+            json(res, 400, { error: `interpolation must be one of ${AUTOMATION_INTERPOLATIONS.join('|')}` })
             return
           }
           if (b.op === 'remove') {
@@ -1027,7 +1033,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
               json(res, 400, { error: "op 'set' needs numeric time and value" })
               return
             }
-            const point = { time: b.time, value: b.value, ...(typeof b.id === 'string' ? { id: b.id } : {}) }
+            const point = {
+              time: b.time,
+              value: b.value,
+              ...(typeof b.id === 'string' ? { id: b.id } : {}),
+              ...(typeof b.interpolation === 'string' ? { interpolation: b.interpolation as AutomationInterpolation } : {}),
+            }
             const out = setAutomationPoint(doc, b.track, b.clip, b.param, point)
             const written = writeIfChanged(out.doc)
             json(res, 200, { written, id: out.point.id, created: out.created })
