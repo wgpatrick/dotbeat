@@ -1333,7 +1333,7 @@ function PitchTimePanel({ track, noteIds }: { track: BeatTrack; noteIds: string[
 
   return (
     <div className="pitch-time-panel" title="Pitch &amp; Time — one-shot ops (research 18's Clip View row); each is a normal diff, nothing is stored as clip state">
-      <span className="pitch-time-title">Pitch &amp; Time</span>
+      <span className="pitch-time-title section-heading">Pitch &amp; Time</span>
       <span className="pitch-time-scope">{scopeLabel}</span>
 
       <label className="pitch-time-field" title="shift pitch by N semitones, clamped to MIDI 0-127">
@@ -1489,7 +1489,7 @@ function NoteNameReadout({ track, noteIds }: { track: BeatTrack; noteIds: string
   const names = distinctPitches.map(pitchName)
   return (
     <div className="note-name-readout" data-testid="note-name-readout" title="the actual note names present — not just grid position">
-      <span className="note-inspector-title">notes</span>
+      <span className="note-inspector-title section-heading">notes</span>
       <span className="pitch-time-scope">({scopeLabel})</span>
       <span className="note-name-readout-names" data-note-names={names.join(',')}>
         {names.length ? names.join(', ') : '—'}
@@ -1516,7 +1516,7 @@ function NoteInspector({ note, trackId }: { note: BeatNote | undefined; trackId:
   }
   return (
     <div className="note-inspector" title="per-note fields (Phase 22): chance/cent/ratchet apply at playback, never baked into the stored note">
-      <span className="note-inspector-title">note {note.id}</span>
+      <span className="note-inspector-title section-heading">note {note.id}</span>
       <label className="note-inspector-field">
         chance
         <input type="number" min={0} max={100} step={1} defaultValue={note.chance} onChange={field('chance')} title="0-100: probability this note fires on any given playback pass (100 = always)" data-note-field="chance" />
