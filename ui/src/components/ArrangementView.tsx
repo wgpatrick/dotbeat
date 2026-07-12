@@ -2191,10 +2191,18 @@ export function ArrangementView() {
   const dragBand: Band = drag ? { start: Math.min(drag.start, drag.cur), end: Math.max(drag.start, drag.cur) + 1 } : null
   const committedBand: Band = selection.bars ?? null
   const selTracks = selection.tracks
-  function bandForTrack(id: string): Band {
-    if (drag) return drag.axis === 'ruler' || drag.axis === id ? dragBand : null
-    if (!committedBand) return null
-    return !selTracks || selTracks.includes(id) ? committedBand : null
+  // Phase 27 Stream EC (research/70 §3.5, item 2): a bar-range selection paints as a band across
+  // EVERY visible track row, matching Ableton's own default — a time-range selection is a full
+  // vertical band across the whole arrangement, not a highlight confined to whichever row was
+  // physically dragged across. This applies whether the drag/selection originated on the ruler OR
+  // inside one specific track's lane (Ableton's own lane-drag ALSO sets a full-arrangement time
+  // selection). Purely a RENDERING-scope widening: `selTracks`/`drag.axis` still exist and still
+  // drive the actual selection DATA sent via `postSelection` below (a lane drag still scopes the
+  // daemon's selection to that one track — the same value `beat vary --scope selection` and any
+  // other selection-reading op see) — only how many rows visually tint has changed, not what's
+  // selected.
+  function bandForTrack(): Band {
+    return drag ? dragBand : committedBand
   }
   const rulerBand: Band = drag ? (drag.axis === 'ruler' ? dragBand : null) : committedBand
 
@@ -2663,7 +2671,7 @@ export function ArrangementView() {
                 pxPerBar={renderPxPerBar}
                 detail={detail}
                 sections={renderSections}
-                band={bandForTrack(flat.track.id)}
+                band={bandForTrack()}
                 selected={!!selTracks && selTracks.includes(flat.track.id)}
                 onHeaderClick={() => clickHeader(flat.track)}
                 onRowPointerDown={(e) => beginDrag(flat.track.id, e)}
