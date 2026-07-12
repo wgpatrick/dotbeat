@@ -194,6 +194,71 @@ research-only, no code — feeds directly into CC's Part 1 design, so ideally la
 it (note in the doc if CC's own worktree has already started independently; that's fine, cross-check
 after rather than blocking).
 
+### CH — Audition a clip in isolation
+A third round of live feedback surfaced this: "I put some notes down [in the clip editor]. How can I
+hear it?" Confirmed by grep — there is NO clip-preview/audition mechanism anywhere in the codebase
+(`previewClip`/`auditionClip`/`playClip` don't exist). Today, playback ONLY plays whatever the
+current song position resolves to via `engine.ts`'s `contentOf` (song mode: the active section's
+scene's clip for each track; loop mode: each track's live/non-clip content) — a clip open in
+`NoteView.tsx` that isn't ALSO the one currently playing (wrong section, or not yet placed in any
+scene at all) is completely inaudible, with no way to hear it while authoring.
+
+Scope: an audition control (a "preview"/"solo this clip" play button, likely in `NoteView.tsx` near
+the transport-adjacent controls already in that file) that plays the currently-open clip's content
+directly — regardless of song position/current section — probably by temporarily overriding what
+`contentOf` resolves for this one track while auditioning is active (or a simpler, self-contained
+render/playback path scoped to just this clip's notes/hits, if that's cleaner than hijacking the main
+transport's content resolution). Stop auditioning cleanly (either on its own transport-stop, or when
+the user starts normal song playback). Verify live: open a clip that is NOT part of the currently
+playing section, hit audition, confirm real audible output (measure via the render/analysis
+infrastructure other streams' verify scripts already use, e.g. `src/core/metrics.ts`'s spectral
+analysis) corresponding to that clip's own notes, not silence.
+
+### CI — Place a clip into the arrangement for the first time (drag from the clip editor)
+Distinct from Stream CC's scope — CC handles clips that ALREADY have at least one occurrence
+somewhere in the song (selecting/moving existing placements); this stream is the FIRST placement of a
+clip that doesn't appear in any scene/section yet. Confirmed by grep: Phase 23 Stream BC built exactly
+this mechanism for AUDIO clips only (`ArrangementView.tsx`'s content-browser-drop handler on an
+`audio`-kind track header, `installAudioClip` — read that code and its surrounding comment, around
+"Phase 23 Stream BC" in this file, for the established pattern: reuse an existing occurrence if one
+exists, else "mint a new clip and slot it into the FIRST song section's scene... refused with a clear
+message in loop mode, where there's no scene to slot into yet"). Generalize the SAME mechanism to
+synth/drum clips.
+
+Scope: from `NoteView.tsx` (or wherever a clip is being authored/edited), a way to place the
+currently-open clip into the arrangement — either a direct drag gesture from the clip editor onto a
+track/section in the arrangement (matching the owner's own framing, "drag it into the arrangement"),
+or, if a cross-window/cross-pane drag is awkward given dotbeat's single-page layout, an equally
+discoverable button/action that does the same "slot this clip into a scene, placed in a section"
+operation BC's pattern already establishes — read `docs/phase-24-plan.md`'s CC section and coordinate
+scope in your own `docs/phase-24-stream-ci.md` write-up if there's any overlap risk (CC may also touch
+this same drop-target code). Refuse clearly in loop mode (no scene exists to slot into), matching BC's
+existing precedent. Verify live: author a new clip's content, place it via your new mechanism, confirm
+the file's scene/section actually references it afterward and it's now part of what plays.
+
+### CJ — Wire per-clip length (loop) override into actual playback + a drag handle to resize it
+Phase 22 Stream AG already modeled `BeatClipLoop` (`clip.loop: {start, end} | null`, bars, clip-local)
+and built a GUI editor for it (`ui/src/components/ClipPropertiesPanel.tsx`, numeric start/end fields)
+— but per `docs/format-spec.md`'s own note, it's "modeled and round-tripped but NOT yet interpreted by
+the audio engine" (confirmed by grep: `clip.loop`/`BeatClipLoop` is never referenced in
+`ui/src/audio/engine.ts`). Today EVERY clip implicitly tiles/repeats at the SAME period —
+`doc.loopBars` globally (see `contentOf`'s `loopSteps = loopBars * 16`) — there is no real per-clip
+length independent of that document-wide field, which is why "resize a clip" has nothing to hook into
+yet.
+
+Scope: this is the deepest stream in this batch — real engine work, not just GUI. (1) Wire
+`engine.ts`'s `contentOf` (and wherever else tiling is computed) to use a clip's own `clip.loop` range
+when present, falling back to today's `doc.loopBars`-wide tiling when `clip.loop` is null (the
+existing canonical-elision default). (2) Add a direct drag-handle affordance for resizing a clip's
+length — in whichever view makes sense given where clips are visualized (`NoteView.tsx`'s own clip
+canvas, and/or a clip block once Stream CC makes clip occurrences visible in the arrangement — check
+if CC has landed and coordinate/reuse its rendering rather than duplicating clip-boundary UI) —
+calling `setClipLoop` (`src/core/edit.ts`, already exists) rather than requiring the existing numeric
+fields in `ClipPropertiesPanel.tsx`. Verify live: drag-resize a clip shorter, confirm the FILE's
+`clip.loop` actually changed AND the rendered/measured audio now genuinely tiles at the new, shorter
+length (not the old `doc.loopBars`-wide one) — this needs a real render+measure check, not just a
+DOM/file assertion, since the whole point is proving the engine now actually reads this field.
+
 ## Process notes (carried forward from Phase 22/23)
 
 - Dispatch RF plus CA-CG (one research, seven build) against current `main`. CA, CD, CE, and CC all
