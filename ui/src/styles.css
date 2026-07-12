@@ -1901,11 +1901,77 @@ body {
   border-color: #c0503c;
 }
 .arr-auto-lane {
+  position: relative;
   flex: 0 0 auto;
   cursor: crosshair;
 }
 .arr-auto-canvas {
   display: block;
+}
+/* Phase 26 Stream DI: the live drag-value readout (a small floating label near the cursor while
+ * dragging a breakpoint) and the right-click exact-value/interpolation popup — both absolutely
+ * positioned within .arr-auto-lane's own coordinate space (canvas-local px, matching draw()'s own
+ * coordinate system) so they track the breakpoint they belong to exactly. */
+.arr-auto-drag-label {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.arr-auto-popup {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  cursor: default;
+}
+.arr-auto-popup-input {
+  font: inherit;
+  font-size: 11px;
+  width: 84px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+.arr-auto-popup-modes {
+  display: flex;
+  gap: 3px;
+}
+.arr-auto-popup-mode {
+  flex: 1;
+  font: inherit;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.arr-auto-popup-mode:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.arr-auto-popup-mode.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1a1a;
 }
 .arr-auto-picker {
   display: flex;

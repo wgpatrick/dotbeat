@@ -138,10 +138,12 @@ const USAGE = `usage:
                                                           scope to the GUI selection held by a running daemon instead of
                                                           typing --lanes/--ids by hand (lanes -> --lanes, bars/notes -> --ids)
   beat vary --groups                                      list the mutation groups
-  beat automate <file> <track> <clip> <param> <time> <value> [--id p1]
+  beat automate <file> <track> <clip> <param> <time> <value> [--id p1] [--interpolation linear|hold|curve]
                                                           add or move a clip automation point (time in fractional
                                                           16th steps from the clip's start; --id moves that point
-                                                          if it already exists, else adds it with that id)
+                                                          if it already exists, else adds it with that id;
+                                                          --interpolation sets the segment-shape this point starts,
+                                                          default linear — omit on a move to keep the existing shape)
   beat clip <file> <track> <clip-id>                      snapshot the track's live content into a clip
   beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
   beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
@@ -974,17 +976,28 @@ function songInsertCmd(argv) {
   process.stdout.write(`inserted section at index ${Number(index)} with new empty scene "${sceneId}"\n`)
 }
 
-// v0.9 clip automation (docs/phase-9-automation-plan.md)
+// v0.9 clip automation (docs/phase-9-automation-plan.md). Phase 26 Stream DI added an optional
+// --interpolation flag (linear|hold|curve) — the segment-shape this point starts (document.ts's
+// AutomationInterpolation); omitted on a move, the point's existing curve-shape is preserved.
 function automateCmd(argv) {
   const idIdx = argv.indexOf('--id')
   const id = idIdx !== -1 ? argv[idIdx + 1] : undefined
-  const positional = argv.filter((a, i) => !(idIdx !== -1 && (i === idIdx || i === idIdx + 1)))
+  const interpIdx = argv.indexOf('--interpolation')
+  const interpolation = interpIdx !== -1 ? argv[interpIdx + 1] : undefined
+  const positional = argv.filter(
+    (a, i) => !(idIdx !== -1 && (i === idIdx || i === idIdx + 1)) && !(interpIdx !== -1 && (i === interpIdx || i === interpIdx + 1)),
+  )
   const [file, track, clip, param, time, value] = positional
   if (!file || !track || !clip || !param || time === undefined || value === undefined) {
-    throw new BeatEditError('automate needs <file> <track> <clip> <param> <time> <value> [--id p1]')
+    throw new BeatEditError('automate needs <file> <track> <clip> <param> <time> <value> [--id p1] [--interpolation linear|hold|curve]')
   }
   const before = readDoc(file)
-  const { doc, created } = setAutomationPoint(before, track, clip, param, { time: Number(time), value: Number(value), ...(id !== undefined ? { id } : {}) })
+  const { doc, created } = setAutomationPoint(before, track, clip, param, {
+    time: Number(time),
+    value: Number(value),
+    ...(id !== undefined ? { id } : {}),
+    ...(interpolation !== undefined ? { interpolation } : {}),
+  })
   writeDoc(file, before, doc)
   if (!created) process.stdout.write(`(moved existing point)\n`)
 }

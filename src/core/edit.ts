@@ -3,8 +3,8 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
+import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -1256,6 +1256,21 @@ function checkAutomatableParam(param: string, trackKind: TrackKind) {
   }
 }
 
+/** Phase 26 Stream DI: validates an (optional) interpolation value passed to any of the point
+ * primitives below — same "fail loudly on an unknown value" stance as checkAutomatableParam. */
+function checkInterpolation(interpolation: AutomationInterpolation | undefined): void {
+  if (interpolation !== undefined && !(AUTOMATION_INTERPOLATIONS as readonly string[]).includes(interpolation)) {
+    throw new BeatEditError(`automation point interpolation must be one of ${AUTOMATION_INTERPOLATIONS.join('|')}, got "${String(interpolation)}"`)
+  }
+}
+
+/** Canonical elision (D4): 'linear' (the default) and unset both mean "no override" — never
+ * actually stored on the point, so there's exactly one representation of "this segment is
+ * linear," matching AUTOMATION_POINT_FIELD_DEFAULTS / the serializer's own elision check. */
+function canonInterpolation(v: AutomationInterpolation | undefined): AutomationInterpolation | undefined {
+  return v && v !== AUTOMATION_POINT_FIELD_DEFAULTS.interpolation ? v : undefined
+}
+
 /** Adds a new automation point to a clip's `param` lane (creating the lane if this is its first
  * point). Mints the next free `p<n>` id scoped to that lane if `id` is omitted; errors if a
  * given id already exists in the lane (use moveAutomationPoint to edit an existing point). */
@@ -1264,13 +1279,14 @@ export function addAutomationPoint(
   trackId: string,
   clipId: string,
   param: string,
-  point: { time: number; value: number; id?: string },
+  point: { time: number; value: number; id?: string; interpolation?: AutomationInterpolation },
 ): { doc: BeatDocument; point: BeatAutomationPoint } {
   const track = findTrack(doc, trackId)
   checkAutomatableParam(param, track.kind)
   const clip = findClip(track, clipId)
   if (!Number.isFinite(point.time) || point.time < 0) throw new BeatEditError(`automation point time must be >= 0, got ${point.time}`)
   if (!Number.isFinite(point.value)) throw new BeatEditError(`automation point value must be a finite number, got ${point.value}`)
+  checkInterpolation(point.interpolation)
 
   const lane = clip.automation.find((l) => l.param === param)
   const points = lane ? lane.points : []
@@ -1285,21 +1301,24 @@ export function addAutomationPoint(
   } else if (points.some((p) => p.id === id)) {
     throw new BeatEditError(`automation point id "${id}" already exists in the "${param}" lane on clip "${clipId}"`)
   }
-  const added: BeatAutomationPoint = { id, time: canon(point.time), value: canon(point.value) }
+  const interpolation = canonInterpolation(point.interpolation)
+  const added: BeatAutomationPoint = { id, time: canon(point.time), value: canon(point.value), ...(interpolation ? { interpolation } : {}) }
   const nextLanes = lane
     ? clip.automation.map((l) => (l.param === param ? { ...l, points: [...l.points, added] } : l))
     : [...clip.automation, { param, points: [added] }]
   return { doc: replaceClip(doc, trackId, { ...clip, automation: nextLanes }), point: added }
 }
 
-/** Moves an existing automation point: updates its time and/or value (whichever is passed). */
+/** Moves an existing automation point: updates its time, value, and/or curve-shape interpolation
+ * (whichever is passed — an interpolation-only call, e.g. a hold/curve toggle with time/value
+ * omitted, leaves the point's position untouched and just retargets which segment-shape it starts). */
 export function moveAutomationPoint(
   doc: BeatDocument,
   trackId: string,
   clipId: string,
   param: string,
   pointId: string,
-  changes: { time?: number; value?: number },
+  changes: { time?: number; value?: number; interpolation?: AutomationInterpolation },
 ): { doc: BeatDocument; point: BeatAutomationPoint } {
   const track = findTrack(doc, trackId)
   const clip = findClip(track, clipId)
@@ -1310,7 +1329,9 @@ export function moveAutomationPoint(
   const value = changes.value ?? existing.value
   if (!Number.isFinite(time) || time < 0) throw new BeatEditError(`automation point time must be >= 0, got ${time}`)
   if (!Number.isFinite(value)) throw new BeatEditError(`automation point value must be a finite number, got ${value}`)
-  const updated: BeatAutomationPoint = { id: pointId, time: canon(time), value: canon(value) }
+  checkInterpolation(changes.interpolation)
+  const interpolation = canonInterpolation(changes.interpolation !== undefined ? changes.interpolation : existing.interpolation)
+  const updated: BeatAutomationPoint = { id: pointId, time: canon(time), value: canon(value), ...(interpolation ? { interpolation } : {}) }
   const nextLanes = clip.automation.map((l) => (l.param === param ? { ...l, points: l.points.map((p) => (p.id === pointId ? updated : p)) } : l))
   return { doc: replaceClip(doc, trackId, { ...clip, automation: nextLanes }), point: updated }
 }
@@ -1318,13 +1339,14 @@ export function moveAutomationPoint(
 /** Add-or-move in one call: if `point.id` already names a point in the lane, moves it; otherwise
  * adds a new point (minting an id if none was given). This is what `beat automate` / `beat_
  * automate` call — the CLI/MCP surface doesn't ask the caller to know in advance which case
- * they're in. */
+ * they're in. Omitting `interpolation` on a move preserves the point's existing curve-shape (a
+ * plain drag shouldn't silently reset it back to linear). */
 export function setAutomationPoint(
   doc: BeatDocument,
   trackId: string,
   clipId: string,
   param: string,
-  point: { time: number; value: number; id?: string },
+  point: { time: number; value: number; id?: string; interpolation?: AutomationInterpolation },
 ): { doc: BeatDocument; point: BeatAutomationPoint; created: boolean } {
   const track = findTrack(doc, trackId)
   checkAutomatableParam(param, track.kind)
@@ -1332,7 +1354,7 @@ export function setAutomationPoint(
   const lane = clip.automation.find((l) => l.param === param)
   const existing = point.id !== undefined ? lane?.points.find((p) => p.id === point.id) : undefined
   if (existing) {
-    const moved = moveAutomationPoint(doc, trackId, clipId, param, point.id!, { time: point.time, value: point.value })
+    const moved = moveAutomationPoint(doc, trackId, clipId, param, point.id!, { time: point.time, value: point.value, interpolation: point.interpolation })
     return { doc: moved.doc, point: moved.point, created: false }
   }
   const added = addAutomationPoint(doc, trackId, clipId, param, point)

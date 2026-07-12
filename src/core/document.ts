@@ -502,15 +502,38 @@ export const NOTE_FIELD_DEFAULTS = {
   ratchetLength: 1,
 } as const satisfies Pick<BeatNote, 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength'>
 
+/** Phase 26 Stream DI: the segment-shape a point starts (research/65's item 6, closing
+ * `docs/product-roadmap.md`'s `❌ missing` curved-segments row). Lives on the LEFT point of a
+ * segment, mirroring Ableton's own per-segment (not per-lane) curve gesture [manual p.489] — the
+ * point that begins a segment owns how that segment interpolates toward the next point. 'linear'
+ * is the canonical default (see AUTOMATION_POINT_FIELD_DEFAULTS); 'hold' steps instantly to the
+ * next point's value at its time instead of ramping; 'curve' bows the segment (engine: an
+ * ease-in/ease-out toward the next value — see `interpolateAutomation` in ui/src/audio/engine.ts;
+ * UI: a live quadratic-bezier-toward-the-drag-point preview while alt/option-dragging the segment,
+ * `ArrangementView.tsx`'s `AutomationLane`). Meaningless on a lane's last point (no segment starts
+ * there) but not rejected — same "harmless if unused" posture as other trailing per-entity fields. */
+export type AutomationInterpolation = 'linear' | 'hold' | 'curve'
+export const AUTOMATION_INTERPOLATIONS: readonly AutomationInterpolation[] = ['linear', 'hold', 'curve']
+
 /** v0.9: one automation point — a (time, value) pair on a clip's automation lane for one synth
  * param. `time` is in 16th steps from the CLIP's own start (v0.7 fractional-number rules, same
- * unit as note/hit `start`). Stable id (D6); no interpolation field (curve shape — linear vs
- * hold — is deferred, see docs/phase-9-automation-plan.md). */
+ * unit as note/hit `start`). Stable id (D6). Phase 26 Stream DI added `interpolation` (curve shape
+ * for the segment this point starts — see AutomationInterpolation above); optional and elided from
+ * the serialized form when it's the canonical 'linear' default, same discipline as v0.10's
+ * NOTE_FIELD_DEFAULTS trailing `key=value` tokens (`sortedPointLines`/`parsePointOptionalFields`
+ * in serialize.ts/parse.ts). */
 export interface BeatAutomationPoint {
   id: string
   time: number // 16th steps from clip start, fractional, >= 0
   value: number // raw units of the automated param (Hz, dB, 0..1, etc. — whatever the param uses)
+  interpolation?: AutomationInterpolation // segment-shape this point starts; default 'linear' (elided)
 }
+
+/** v0.10-style canonical default for BeatAutomationPoint's one optional field, same shape/purpose
+ * as NOTE_FIELD_DEFAULTS: a field is serialized iff it differs from this. */
+export const AUTOMATION_POINT_FIELD_DEFAULTS = {
+  interpolation: 'linear',
+} as const satisfies Pick<Required<BeatAutomationPoint>, 'interpolation'>
 
 /** v0.9: one automation lane — every point recorded for a single synth param within one clip.
  * A lane only exists while it has >= 1 point (canonical elision: no lane = no automation for
