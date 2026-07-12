@@ -42,34 +42,120 @@ track drums drums #56b6c2 drums
   synth
     osc sawtooth
     volume 2
-    cutoff 9000
+    cutoff 7000
     resonance 0.8
     attack 0.01
     decay 0.2
     sustain 0.6
     release 0.3
     pan 0
-    eqLow 1
-    eqHigh 2
-    compMix 0.5
-    distortionAmount 0.15
-    distortionMix 0.2
-    kickPunch 0.08
-    kickDecay 0.5
-    hatDecay 0.04
-    openHatDecay 0.3
-    hatTone 6500
+    eqLow 2
+    eqMid -1.5
+    eqHigh -2
+    compThreshold -18
+    compRatio 5
+    compMix 0.45
+    distortionAmount 0.3
+    distortionMix 0.35
+    bitcrushBits 9
+    bitcrushMix 0.1
+    sendReverb 0.2
+    kickTune 45
+    kickDecay 0.35
+    snareTone 0.55
+    snareDecay 0.2
+    hatDecay 0.07
+    openHatDecay 0.4
+    hatTone 3500
   clip groove
-    pattern kick 0.9 0 0 0 0.85 0 0 0 0.9 0 0 0 0.85 0 0 0
-    pattern snare 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-    pattern clap 0 0 0 0 0.7 0 0 0 0 0 0 0 0.7 0 0 0
-    pattern hat 0 0 0.55 0 0 0 0.55 0 0 0 0.55 0 0 0 0.5 0
-    pattern openhat 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.4 0
-  pattern kick 0.9 0 0 0 0.85 0 0 0 0.9 0 0 0 0.85 0 0 0
-  pattern snare 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-  pattern clap 0 0 0 0 0.7 0 0 0 0 0 0 0 0.7 0 0 0
-  pattern hat 0 0 0.55 0 0 0 0.55 0 0 0 0.55 0 0 0 0.5 0
-  pattern openhat 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.4 0
+    hit kick0 kick 0 0.9
+    hit hat2 hat 2 0.55
+    hit kick4 kick 4 0.85
+    hit clap4 clap 4 0.7
+    hit hat6 hat 6 0.55
+    hit kick8 kick 8 0.9
+    hit hat10 hat 10 0.55
+    hit kick12 kick 12 0.85
+    hit clap12 clap 12 0.7
+    hit hat14 hat 14 0.5
+    hit openhat14 openhat 14 0.4
+    hit kick16 kick 16 0.9
+    hit hat18 hat 18 0.55
+    hit kick20 kick 20 0.85
+    hit clap20 clap 20 0.7
+    hit hat22 hat 22 0.55
+    hit kick24 kick 24 0.9
+    hit hat26 hat 26 0.55
+    hit kick28 kick 28 0.85
+    hit clap28 clap 28 0.7
+    hit hat30 hat 30 0.5
+    hit openhat30 openhat 30 0.4
+    hit kick32 kick 32 0.9
+    hit hat34 hat 34 0.55
+    hit kick36 kick 36 0.85
+    hit clap36 clap 36 0.7
+    hit hat38 hat 38 0.55
+    hit kick40 kick 40 0.9
+    hit hat42 hat 42 0.55
+    hit kick44 kick 44 0.85
+    hit clap44 clap 44 0.7
+    hit hat46 hat 46 0.5
+    hit openhat46 openhat 46 0.4
+    hit kick48 kick 48 0.9
+    hit hat50 hat 50 0.55
+    hit kick52 kick 52 0.85
+    hit clap52 clap 52 0.7
+    hit hat54 hat 54 0.55
+    hit kick56 kick 56 0.9
+    hit hat58 hat 58 0.55
+    hit kick60 kick 60 0.85
+    hit clap60 clap 60 0.7
+    hit hat62 hat 62 0.5
+    hit openhat62 openhat 62 0.4
+  hit kick0 kick 0 0.9
+  hit hat2 hat 2 0.55
+  hit kick4 kick 4 0.85
+  hit clap4 clap 4 0.7
+  hit hat6 hat 6 0.55
+  hit kick8 kick 8 0.9
+  hit hat10 hat 10 0.55
+  hit kick12 kick 12 0.85
+  hit clap12 clap 12 0.7
+  hit hat14 hat 14 0.5
+  hit openhat14 openhat 14 0.4
+  hit kick16 kick 16 0.9
+  hit hat18 hat 18 0.55
+  hit kick20 kick 20 0.85
+  hit clap20 clap 20 0.7
+  hit hat22 hat 22 0.55
+  hit kick24 kick 24 0.9
+  hit hat26 hat 26 0.55
+  hit kick28 kick 28 0.85
+  hit clap28 clap 28 0.7
+  hit hat30 hat 30 0.5
+  hit openhat30 openhat 30 0.4
+  hit kick32 kick 32 0.9
+  hit hat34 hat 34 0.55
+  hit kick36 kick 36 0.85
+  hit clap36 clap 36 0.7
+  hit hat38 hat 38 0.55
+  hit kick40 kick 40 0.9
+  hit hat42 hat 42 0.55
+  hit kick44 kick 44 0.85
+  hit clap44 clap 44 0.7
+  hit hat46 hat 46 0.5
+  hit openhat46 openhat 46 0.4
+  hit kick48 kick 48 0.9
+  hit hat50 hat 50 0.55
+  hit kick52 kick 52 0.85
+  hit clap52 clap 52 0.7
+  hit hat54 hat 54 0.55
+  hit kick56 kick 56 0.9
+  hit hat58 hat 58 0.55
+  hit kick60 kick 60 0.85
+  hit clap60 clap 60 0.7
+  hit hat62 hat 62 0.5
+  hit openhat62 openhat 62 0.4
 
 track bass bass #f7c948 synth
   synth
@@ -204,5 +290,7 @@ scene drop
 song
   section intro 4
   section build 4
-  section drop 8
+  section drop 13
+  section intro 4
+  section intro 4
   section intro 4

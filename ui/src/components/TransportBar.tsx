@@ -18,6 +18,11 @@ export function TransportBar() {
 
   const bar = currentStep >= 0 ? Math.floor(currentStep / 16) + 1 : 1
   const beat = currentStep >= 0 ? Math.floor((currentStep % 16) / 4) + 1 : 1
+  // Song mode's real length is the sum of its sections, not the vestigial loopBars field (which
+  // only means anything in plain loop mode, no `song` array) — showing loopBars unconditionally
+  // here read as a nonsensical "4 bars" on a 29-bar, 5-section song (owner-caught).
+  const totalBars = doc.song && doc.song.length > 0 ? doc.song.reduce((n, s) => n + s.bars, 0) : doc.loopBars
+  const barsLabel = doc.song && doc.song.length > 0 ? 'Song' : 'Loop'
 
   const onBpm = (v: number) => {
     if (!Number.isFinite(v) || v < 20 || v > 999) return
@@ -35,8 +40,8 @@ export function TransportBar() {
         <input type="number" min={20} max={999} value={doc.bpm} onChange={(e) => onBpm(Number(e.target.value))} />
       </div>
       <div className="transport-field">
-        <label>Bars</label>
-        <span className="transport-readout">{doc.loopBars}</span>
+        <label>{barsLabel}</label>
+        <span className="transport-readout">{totalBars}</span>
       </div>
       <div className="transport-field">
         <label>Position</label>
