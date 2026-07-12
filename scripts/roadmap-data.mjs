@@ -345,6 +345,18 @@ export const rows = [
     core: 'na', cli: 'na', gui: 'done', status: 'done',
     research: 'research/71-ux-clip-view-midi-editing.md', plan: 'phase-27-plan.md',
   },
+  {
+    area: 'Note editing (piano roll)', feature: 'Multi-clip editing + Focus Mode',
+    description: 'Ableton: up to 8 MIDI clips edited simultaneously (Session View across tracks/scenes, or Arrangement View across up to 8 tracks over a time selection), each with its own colored loop-bar strip stacked above a shared grid, plus Focus Mode narrowing editing to one active clip while still showing the others\' notes in gray (manual ch.10 §10.8, pp.274-277). `NoteView` is hard-scoped to exactly one `track: BeatTrack` prop (`NoteView.tsx:272`) — there is no multi-track/multi-clip simultaneous editing surface at all. A real, substantial feature requiring a fundamentally different top-level component shape, not a look/feel or gesture change — flagged for roadmap awareness, not scoped for a UI-polish phase.',
+    core: 'missing', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/76-ux-clip-view-midi-editing-round2.md', plan: null,
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Drums-track title bar / DrumLanePanel accent share one hue by design — worth a deliberate call',
+    description: 'For drums tracks, `.noteview-titlebar`\'s `background: track.color` and `DrumLanePanel`\'s Stream EG left-border accent resolve to the byte-identical hex (`#56b6c2`) — confirmed live, and by design per `styles.css:3183-3187`\'s own comment ("the SAME hue as `.kind-drums`... since this panel only ever appears on drum tracks"), not an accident. Every other stacked bottom panel\'s EG accent was deliberately chosen distinct from anything else in the view, so this one case where two independent Phase 27 streams\' (ED\'s track-identity color, EG\'s panel-identity color) choices happened to collapse into one signal deserves a conscious decision recorded rather than staying an unexamined side effect — either confirm it as intentional ("hue = drums" reinforcement) or give `DrumLanePanel` its own distinct accent to match every other panel\'s convention.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/76-ux-clip-view-midi-editing-round2.md', plan: null,
+  },
 
   // ── Drum programming ─────────────────────────────────────────────────────
   {
@@ -636,6 +648,24 @@ export const rows = [
     description: 'A lane drag used to tint only the row physically dragged across; Ableton\'s default time-range selection spans the full arrangement (every track) at once. bandForTrack() now renders the active/committed band on every visible row unconditionally — a pure rendering-scope change, the underlying selection data (daemon.getSelection(), resolveVaryTarget()) stays scoped exactly as before.',
     core: 'done', cli: 'na', gui: 'done', status: 'done',
     research: 'research/70-ux-arrangement-view.md', plan: 'phase-27-plan.md',
+  },
+  {
+    area: 'Arrangement / song structure', feature: 'Editing Grid: zoom-adaptive/fixed snap-density system',
+    description: 'Ableton\'s entire "editing grid" layer (manual ch.6 §6.10, p.165) — cursor snaps to a meter-relative grid, independently zoom-adaptive or fixed, five dedicated shortcuts (Ctrl/Cmd+1/+2 narrow/widen density, +3 toggles triplets, +4 toggles snap on/off, +5 toggles fixed-vs-adaptive), a live spacing readout in the ruler\'s corner, Alt/Cmd-drag to bypass snapping for one gesture — has no dotbeat analog at any grain finer than section-boundary snapping. Confirmed by direct read: `ArrangementView.tsx` has no `snapStep`/grid-density concept anywhere (`tickIntervalFor` only thins ruler number labels, a display concern). Lower priority than it first appears — dotbeat\'s arrangement model is section/bar-grained by design, so a finer editing grid mostly matters once sub-bar clip placement becomes a real feature; worth a design note next to that future work rather than building standalone.',
+    core: 'missing', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/75-ux-arrangement-view-round2.md', plan: null,
+  },
+  {
+    area: 'Arrangement / song structure', feature: 'Waveform Vertical Zoom Level (Arrangement lane)',
+    description: 'Ableton: a dedicated slider (manual ch.6 p.152, item 14) that enlarges the vertical amplitude display of every audio clip\'s waveform in the Arrangement, independent of clip gain, applying globally to all audio tracks. Not independently actionable yet — dotbeat\'s Arrangement lane renders a flat single-color fill for audio clips, not a waveform at all (real waveform rendering only exists in the separate `AudioClipInspector`), so there\'s nothing in this view for a vertical-zoom control to act on. File as a follow-on to whenever real waveform-in-lane rendering is scheduled, not before.',
+    core: 'missing', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/75-ux-arrangement-view-round2.md', plan: null,
+  },
+  {
+    area: 'Arrangement / song structure', feature: 'Loop-mode synthetic clip block: cursor overstates its own (selection-only) drag behavior',
+    description: 'The synthetic full-loop `.arr-clip-block` Phase 27 added for loop-mode projects (Stream EA bug-1 fix) shows the same `cursor: grab` every real, movable clip block uses, but in loop mode (a single section) dragging it performs a bar-range selection, not a move — a deliberate, code-documented tradeoff (`ArrangementView.tsx:879-894`\'s own comment), not a bug, but a minor cursor/affordance mismatch confirmed live this round. Cheapest fix: a loop-mode-specific cursor (e.g. `crosshair`, matching the plain lane) on the synthetic block only, leaving real occurrences\' `grab` untouched.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/75-ux-arrangement-view-round2.md', plan: null,
   },
 
   // ── Synth sound design ──────────────────────────────────────────────────
