@@ -788,6 +788,57 @@ async function pullSelection(base: string): Promise<void> {
   }
 }
 
+// ─── in-session undo/redo (Phase 26 Stream DB, research/28) ─────────────────────────────────────
+// A session-only, ephemeral full-document-snapshot stack that lives in the DAEMON (src/daemon/
+// daemon.ts's undoStack/redoStack), deliberately separate from the git-backed checkpoint/History
+// panel (POST /restore — durable, named, explicit). Ctrl+Z/Ctrl+Shift+Z (wired in App.tsx) call
+// postUndo/postRedo below; both follow the same "daemon returns the full raw document, apply it
+// straight to the store" convention as postAddTrack/postEffectOp (no optimistic local mirror is
+// possible here — the target state lives only in the daemon's stack, not something the client can
+// compute) — so a round-trip is required, unlike postEdit's debounced fire-and-forget.
+
+async function pullUndoState(base: string): Promise<void> {
+  try {
+    const res = await fetch(`${base}/undo-state`)
+    if (!res.ok) throw new Error(`GET /undo-state: HTTP ${res.status}`)
+    const { canUndo, canRedo } = (await res.json()) as { canUndo: boolean; canRedo: boolean }
+    useStore.getState().setUndoState({ canUndo, canRedo })
+  } catch (err) {
+    console.warn('[daw] could not load undo state from daemon:', err)
+  }
+}
+
+/** Pop one step off the daemon's in-session undo stack and apply the resulting document. No-op
+ * (resolves quietly) when the stack is already empty. */
+export async function postUndo(): Promise<void> {
+  const base = daemonBase()
+  try {
+    const res = await fetch(`${base}/undo`, { method: 'POST' })
+    if (!res.ok) throw new Error(`POST /undo: HTTP ${res.status}`)
+    const body = (await res.json()) as { undone: boolean; doc: BeatDocument; canUndo: boolean; canRedo: boolean }
+    if (body.undone) useStore.getState().setDoc(body.doc)
+    useStore.getState().setUndoState({ canUndo: body.canUndo, canRedo: body.canRedo })
+  } catch (err) {
+    console.warn('[daw] could not POST /undo:', err)
+  }
+}
+
+/** Pop one step off the daemon's in-session redo stack and apply the resulting document. No-op
+ * (resolves quietly) when the stack is already empty, or when a new edit since the last undo has
+ * cleared it (the daemon clears the redo stack on any new committed edit — research/28 §5.1). */
+export async function postRedo(): Promise<void> {
+  const base = daemonBase()
+  try {
+    const res = await fetch(`${base}/redo`, { method: 'POST' })
+    if (!res.ok) throw new Error(`POST /redo: HTTP ${res.status}`)
+    const body = (await res.json()) as { redone: boolean; doc: BeatDocument; canUndo: boolean; canRedo: boolean }
+    if (body.redone) useStore.getState().setDoc(body.doc)
+    useStore.getState().setUndoState({ canUndo: body.canUndo, canRedo: body.canRedo })
+  } catch (err) {
+    console.warn('[daw] could not POST /redo:', err)
+  }
+}
+
 /** Push a pointing selection to the daemon (the D2 channel `beat vary --scope selection` reads).
  * Mirrors it locally immediately; the daemon broadcasts a `selection` SSE event that reconciles
  * any agent-set value back. A 400 means the selection didn't resolve against the current document. */
@@ -814,6 +865,7 @@ export function initBridge(): void {
   events.addEventListener('open', () => {
     void pullDocument(base)
     void pullSelection(base)
+    void pullUndoState(base)
   })
   events.addEventListener('doc', () => {
     // The event payload is the /doc projection; the raw model lives at /document, so re-pull it.
@@ -827,6 +879,17 @@ export function initBridge(): void {
       console.warn('[daw] bad selection event payload:', err)
     }
   })
+  events.addEventListener('undo-state', (e) => {
+    // Phase 26 Stream DB: the daemon broadcasts this on every undo-stack change (a committed edit,
+    // an undo, a redo, or an external edit clearing the stack) so Undo/Redo's greyed-out state stays
+    // live across every connected client, not just the one that triggered the change.
+    try {
+      const { canUndo, canRedo } = JSON.parse((e as MessageEvent).data) as { canUndo: boolean; canRedo: boolean }
+      useStore.getState().setUndoState({ canUndo, canRedo })
+    } catch (err) {
+      console.warn('[daw] bad undo-state event payload:', err)
+    }
+  })
   events.addEventListener('parse-error', (e) => {
     const msg = (JSON.parse((e as MessageEvent).data) as { message: string }).message
     console.warn('[daw] file edit did not parse:', msg)
@@ -837,6 +900,7 @@ export function initBridge(): void {
   // Cover the case where the SSE `open` is slow or the browser buffers it: pull once eagerly too.
   void pullDocument(base)
   void pullSelection(base)
+  void pullUndoState(base)
 }
 
 export { DRUM_LANES }

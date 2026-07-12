@@ -99,6 +99,13 @@ interface DawState {
    * `playing`: starting normal playback clears this (engine.play()), and starting an audition
    * doesn't touch `playing` (see engine.ts's auditionClip/stopAudition). */
   auditioningTrackId: string | null
+  /** Phase 26 Stream DB (research/28): whether the daemon's session-only in-memory undo/redo stack
+   * has anything to pop, mirrored from GET /undo-state + the `undo-state` SSE event so Ctrl+Z's
+   * affordance (TransportBar's Undo/Redo buttons) can grey out without an extra round-trip per
+   * keypress. This is NOT the git-backed History panel's checkpoint list — a wholly separate,
+   * ephemeral mechanism (see bridge.ts's postUndo/postRedo header comment). */
+  canUndo: boolean
+  canRedo: boolean
 
   setDoc: (doc: BeatDocument) => void
   setConnected: (c: boolean) => void
@@ -119,6 +126,7 @@ interface DawState {
   setOverlapPolicy: (p: DawState['overlapPolicy']) => void
   setLoopRegion: (r: { start: number; end: number } | null) => void
   setAuditioning: (trackId: string | null) => void
+  setUndoState: (s: { canUndo: boolean; canRedo: boolean }) => void
 }
 
 export const useStore = create<DawState>((set) => ({
@@ -142,6 +150,8 @@ export const useStore = create<DawState>((set) => ({
   overlapPolicy: 'push-existing', // matches the pre-Stream-AG unconditional-shift behavior
   loopRegion: null,
   auditioningTrackId: null,
+  canUndo: false,
+  canRedo: false,
 
   setDoc: (doc) =>
     set((s) => ({
@@ -168,6 +178,7 @@ export const useStore = create<DawState>((set) => ({
   setOverlapPolicy: (overlapPolicy) => set({ overlapPolicy }),
   setLoopRegion: (loopRegion) => set({ loopRegion }),
   setAuditioning: (auditioningTrackId) => set({ auditioningTrackId }),
+  setUndoState: ({ canUndo, canRedo }) => set({ canUndo, canRedo }),
 }))
 
 /** A track is effectively silenced iff it is explicitly muted, OR any track is soloed and this one

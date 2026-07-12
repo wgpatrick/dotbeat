@@ -413,6 +413,10 @@ export interface Daemon {
   getDoc: () => BeatDocument
   /** Test hook: the current in-memory selection (what /selection serves; {} when unset). */
   getSelection: () => BeatSelection
+  /** Test hook: depth of the in-session undo stack (what GET /undo-state's canUndo/undoCount serve). */
+  getUndoDepth: () => number
+  /** Test hook: depth of the in-session redo stack. */
+  getRedoDepth: () => number
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -582,6 +586,29 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
   // held in memory ONLY — never serialized into the .beat file. {} = no selection.
   let selection: BeatSelection = {}
 
+  // Phase 26 Stream DB (research/28): a session-only, in-memory undo/redo stack of full BeatDocument
+  // snapshots — deliberately separate from src/history/history.ts's git-backed checkpoint system
+  // (durable, named, explicit). This stack is the "oops" recovery for Ctrl+Z: cheap, ephemeral, lost
+  // on daemon restart. See research/28 §5 for the full design; the choices below map 1:1 to it.
+  const undoStack: BeatDocument[] = []
+  const redoStack: BeatDocument[] = []
+  const UNDO_MAX = 200 // research/28 §5.4: bound depth; documents are small (§2), so this is cheap
+  // Gesture coalescing (research/28 §5.3): a drag (e.g. a knob) fires many /edit calls for the SAME
+  // path in quick succession — those should collapse into ONE undo step, not one per tick. Track the
+  // most recent coalescing key (e.g. an /edit path) and when it was last used; a write that reuses
+  // the same key within the window extends the in-flight gesture instead of pushing a new snapshot.
+  let lastUndoKey: string | null = null
+  let lastUndoAt = 0
+  const UNDO_COALESCE_MS = 700
+
+  function undoState() {
+    return { canUndo: undoStack.length > 0, canRedo: redoStack.length > 0, undoCount: undoStack.length, redoCount: redoStack.length }
+  }
+
+  function broadcastUndoState() {
+    broadcast('undo-state', undoState())
+  }
+
   function broadcast(event: string, data: unknown) {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
     for (const client of sseClients) client.write(frame)
@@ -619,6 +646,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
     doc = next
     canonicalText = serialize(doc)
+    // research/28 §3's named edge case: a hand edit / CLI call / other process landed on disk
+    // between two GUI edits. The in-session undo stack's snapshots are only meaningful relative to
+    // a document history WE observed — an external change means the stack could "restore" a state
+    // that silently discards content nobody asked to discard. Treat it as authoritative and clear,
+    // the same way a checkpoint's restore() already treats external state as authoritative.
+    if (undoStack.length > 0 || redoStack.length > 0) {
+      undoStack.length = 0
+      redoStack.length = 0
+      lastUndoKey = null
+      broadcastUndoState()
+    }
     broadcast('doc', beatDocumentToPartialTracks(doc))
     revalidateSelection()
   }
@@ -638,14 +676,47 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
   // Shared write path for a document-producing edit: canonical-to-canonical comparison decides
   // whether anything is written (same discipline as POST /state — identical music, identical
   // bytes, no write, no watcher echo). Re-parses our own canonical text so in-memory === disk.
-  function writeIfChanged(nextDoc: BeatDocument): boolean {
+  //
+  // Phase 26 Stream DB: this is also the ONE choke point research/28 §5.1 identified for the
+  // undo stack — every one of the 15+ mutating routes already funnels through here, so wrapping
+  // it (rather than instrumenting each route) is what gives undo total coverage for free.
+  // `coalesceKey`, when given, is a gesture identity (e.g. /edit's `path`): a write that reuses the
+  // same key within UNDO_COALESCE_MS is treated as a continuation of the SAME in-flight gesture (a
+  // knob drag firing many debounced /edit calls for one path) rather than a new undo step — see
+  // research/28 §5.3. Callers with no natural gesture identity (add-track, effect ops, …) omit it
+  // and each call is its own distinct undo step, which is correct for one-shot structural edits.
+  function writeIfChanged(nextDoc: BeatDocument, coalesceKey?: string): boolean {
     const nextText = serialize(nextDoc)
     if (nextText === canonicalText) return false
+    const now = Date.now()
+    const coalesced = coalesceKey !== undefined && coalesceKey === lastUndoKey && now - lastUndoAt < UNDO_COALESCE_MS
+    if (!coalesced) {
+      // Push the PRE-write document — the state Ctrl+Z should land back on — and drop the oldest
+      // entry once past the cap. A fresh edit always invalidates any redo branch (research/28 §5.1).
+      undoStack.push(doc)
+      if (undoStack.length > UNDO_MAX) undoStack.shift()
+      redoStack.length = 0
+    }
+    lastUndoKey = coalesceKey ?? null
+    lastUndoAt = now
     writeFileSync(filePath, nextText)
     lastFileText = nextText
     canonicalText = nextText
     doc = parse(nextText)
+    broadcastUndoState()
     return true
+  }
+
+  // Used only by POST /undo and POST /redo themselves: writes a target snapshot straight to disk
+  // WITHOUT touching the undo/redo stacks (they manage the stacks explicitly around this call) —
+  // using writeIfChanged here would incorrectly push the snapshot being navigated AWAY from back
+  // onto its own stack and wipe the other stack's freshly-pushed entry.
+  function commitDoc(nextDoc: BeatDocument) {
+    const nextText = serialize(nextDoc)
+    if (nextText !== canonicalText) writeFileSync(filePath, nextText)
+    lastFileText = nextText
+    canonicalText = nextText
+    doc = parse(nextText)
   }
 
   const server: Server = createServer((req, res) => {
@@ -844,13 +915,67 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             json(res, 400, { error: 'body must be {path: string, value: string}' })
             return
           }
-          const written = writeIfChanged(setValue(doc, path, value))
+          // `path` doubles as the undo-coalescing gesture key (research/28 §5.3): repeated /edit
+          // calls for the SAME path within the coalesce window (a knob drag's debounced ticks)
+          // collapse into one undo step instead of one per call. EXCEPT the bare `<track>.note` /
+          // `<track>.hit` ADD grammar (core's setValue, edit.ts) — every call there mints a brand
+          // new entity (a fresh id), so two quick-succession adds sharing that literal path string
+          // are two distinct gestures, not one continued drag; coalescing them would silently drop
+          // the first add from the undo stack. Skip the key for that shape only.
+          const isAppendGrammar = path.endsWith('.note') || path.endsWith('.hit')
+          const written = writeIfChanged(setValue(doc, path, value), isAppendGrammar ? undefined : path)
           revalidateSelection()
           json(res, 200, { written })
         })
         .catch((err) => {
           json(res, 400, { error: err instanceof Error ? err.message : String(err) })
         })
+      return
+    }
+
+    // Phase 26 Stream DB (research/28): the in-session, ephemeral undo/redo stack — deliberately
+    // separate from src/history/history.ts's git-backed checkpoint system (POST /restore, /pin).
+    // GET /undo-state serves the current stack depths (so the GUI can grey out buttons on load and
+    // after reconnect); the daemon also broadcasts an `undo-state` SSE event on every change so all
+    // connected clients stay in sync without polling. POST /undo and POST /redo pop the appropriate
+    // stack and write the resulting document straight to disk (commitDoc — same canonical-compare
+    // discipline writeIfChanged uses, just without re-pushing the snapshot being navigated away
+    // from), then RETURN the full raw document so the caller applies it directly — same convention
+    // postAddTrack/postEffectOp already use, no new sync channel needed.
+    if (req.method === 'GET' && url.pathname === '/undo-state') {
+      json(res, 200, undoState())
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/undo') {
+      if (undoStack.length === 0) {
+        json(res, 200, { undone: false, doc, ...undoState() })
+        return
+      }
+      const target = undoStack.pop()!
+      redoStack.push(doc)
+      if (redoStack.length > UNDO_MAX) redoStack.shift()
+      commitDoc(target)
+      lastUndoKey = null // break gesture coalescing — the next edit starts a fresh undo step
+      revalidateSelection()
+      broadcastUndoState()
+      json(res, 200, { undone: true, doc, ...undoState() })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/redo') {
+      if (redoStack.length === 0) {
+        json(res, 200, { redone: false, doc, ...undoState() })
+        return
+      }
+      const target = redoStack.pop()!
+      undoStack.push(doc)
+      if (undoStack.length > UNDO_MAX) undoStack.shift()
+      commitDoc(target)
+      lastUndoKey = null
+      revalidateSelection()
+      broadcastUndoState()
+      json(res, 200, { redone: true, doc, ...undoState() })
       return
     }
 
@@ -2052,6 +2177,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     filePath,
     getDoc: () => doc,
     getSelection: () => selection,
+    getUndoDepth: () => undoStack.length,
+    getRedoDepth: () => redoStack.length,
     close: () =>
       new Promise<void>((done) => {
         if (watchTimer) clearTimeout(watchTimer)
