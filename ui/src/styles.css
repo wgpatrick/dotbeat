@@ -945,10 +945,14 @@ body {
   outline-offset: -1px;
 }
 
-/* ---- clip-loop resize strip (Phase 24 Stream CJ): drags the primary clip's own loop.end --------- */
+/* ---- clip-loop resize strip (Phase 24 Stream CJ): drags the primary clip's own loop.start/end ---- */
+/* Phase 27 Stream EF: two symmetric handles (start + end), both thickened with a triangular grip
+   cap so the strip reads as draggable AT REST — not just discoverable by accidentally hovering the
+   9px invisible zone the old end-only handle used (research/71 §2.6/§3.4 item 4, matching Ableton's
+   loop brace being visibly grabbable at both edges without a drag in progress). */
 .noteview-cliploop-strip {
   position: relative;
-  height: 10px;
+  height: 14px;
   margin-bottom: 2px;
   min-width: min-content;
 }
@@ -965,23 +969,52 @@ body {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 9px;
-  margin-left: -4px;
+  width: 13px;
+  margin-left: -6px;
   cursor: ew-resize;
   z-index: 4;
   touch-action: none;
 }
+/* the vertical grip bar — thickened from the original 2px to 4px so it's legible without hovering */
 .noteview-cliploop-handle::after {
   content: '';
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 4px;
-  width: 2px;
+  left: 6px;
+  width: 4px;
+  border-radius: 2px;
   background: var(--accent);
+}
+/* the triangular cap — a small inward-pointing nub at the strip's vertical center, evoking
+   Ableton's brace-handle convention; the start handle's triangle points right (into the loop
+   range), the end handle's points left, so together they visually bracket the range like "[ ]". */
+.noteview-cliploop-handle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+.noteview-cliploop-handle-start::before {
+  left: 1px;
+  border-left: 7px solid var(--accent);
+}
+.noteview-cliploop-handle-end::before {
+  right: 1px;
+  border-right: 7px solid var(--accent);
 }
 .noteview-cliploop-handle:hover::after {
   background: #fff;
+}
+.noteview-cliploop-handle-start:hover::before {
+  border-left-color: #fff;
+}
+.noteview-cliploop-handle-end:hover::before {
+  border-right-color: #fff;
 }
 .noteview-cliploop-label {
   position: absolute;
