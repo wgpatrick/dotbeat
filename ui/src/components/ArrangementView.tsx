@@ -4,7 +4,7 @@ import { useStore, isEffectivelyMuted } from '../state/store'
 import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, daemonBase } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
-import { DRUM_LANES, type BeatAutomationPoint, type BeatDocument, type BeatGroup, type BeatTrack, type DrumLane, type TrackKind } from '../types'
+import { declaredLaneNames, type BeatAutomationPoint, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 
 // Phase 20 Stream W — track add/delete/rename/recolor + project-folder controls. There is no BeatLab
@@ -237,7 +237,7 @@ function trackOccurrences(track: BeatTrack, sections: Section[], doc: BeatDocume
 const NO_POINTS: BeatAutomationPoint[] = []
 
 type FlatNote = { start: number; duration: number; pitch: number } // start/duration in 16th steps, absolute over the song
-type FlatHit = { start: number; lane: DrumLane }
+type FlatHit = { start: number; lane: string }
 interface TrackFlat {
   track: BeatTrack
   notes: FlatNote[]
@@ -455,11 +455,14 @@ function TrackRow({
 
     if (detail) {
       if (track.kind === 'drums') {
-        // Five stacked lane rows; a hit is a tick at its lane.
-        const laneH = ROW_H / DRUM_LANES.length
+        // Stacked lane rows (the track's own declared lanes, or the implicit 5 — Phase 22 Stream
+        // AB); a hit is a tick at its lane.
+        const laneNames = declaredLaneNames(track)
+        const laneH = ROW_H / laneNames.length
         ctx.fillStyle = track.color
         for (const h of flat.hits) {
-          const li = DRUM_LANES.indexOf(h.lane)
+          const li = laneNames.indexOf(h.lane)
+          if (li === -1) continue
           const x = (h.start / 16) * pxPerBar
           const y = li * laneH + 2
           ctx.fillRect(x, y, Math.max(2, pxPerBar / 16), laneH - 3)

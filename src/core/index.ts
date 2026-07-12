@@ -59,6 +59,13 @@ export {
   DRUM_PRESET_CATEGORIES,
 } from './preset.js'
 export {
+  parseDrumKitLibrary,
+  applyDrumKit,
+  formatDrumKitList,
+  BeatDrumKitError,
+  type BeatDrumKit,
+} from './drumkit.js'
+export {
   parseSelection,
   serializeSelection,
   validateSelection,

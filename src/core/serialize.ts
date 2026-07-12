@@ -1,5 +1,5 @@
-import type { BeatAutomationLane, BeatAutomationPoint, BeatDrumHit, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
-import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, isDefaultEffectChain } from './document.js'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
+import { DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 // v0.10: the effect chain serializes iff it differs from the canonical default (isDefaultEffectChain)
@@ -21,14 +21,35 @@ function sortedNoteLines(notes: BeatNote[], indent: string): string[] {
     .map((n) => `${indent}note ${n.id} ${n.pitch} ${formatNumber(n.start)} ${formatNumber(n.duration)} ${formatNumber(n.velocity)}`)
 }
 
-// v0.8: canonical drum-hit order is (start, lane-in-DRUM_LANES-order, id) ascending — one hit per
+// v0.8: canonical drum-hit order is (start, lane-in-declared-order, id) ascending — one hit per
 // line, so an added/moved hit is a one-line diff. Hits are free-timed events (research 12); the
-// old fixed-grid `pattern` lines are gone from the grammar (migrated on parse).
-const laneIndex = (lane: string) => DRUM_LANES.indexOf(lane as (typeof DRUM_LANES)[number])
-function sortedHitLines(hits: BeatDrumHit[], indent: string): string[] {
+// old fixed-grid `pattern` lines are gone from the grammar (migrated on parse). Phase 22 Stream AB:
+// "declared order" is the track's OWN `lanes` list when it has one, else DRUM_LANES (unchanged) —
+// so a legacy track's hits still sort exactly as before.
+function sortedHitLines(hits: BeatDrumHit[], laneOrder: readonly string[], indent: string): string[] {
+  const laneIndex = (lane: string) => {
+    const i = laneOrder.indexOf(lane)
+    return i === -1 ? laneOrder.length : i
+  }
   return [...hits]
     .sort((a, b) => a.start - b.start || laneIndex(a.lane) - laneIndex(b.lane) || a.id.localeCompare(b.id))
-    .map((h) => `${indent}hit ${h.id} ${h.lane} ${formatNumber(h.start)} ${formatNumber(h.velocity)}`)
+    .map((h) => `${indent}hit ${h.id} ${h.lane} ${formatNumber(h.start)} ${formatNumber(h.velocity)}${h.duration !== undefined ? ` ${formatNumber(h.duration)}` : ''}`)
+}
+
+// Phase 22 Stream AB: one `lane <name> <backing>` declaration line, canonical-eliding synth params
+// that equal that voice type's default (DRUM_VOICE_PARAM_DEFAULTS) — same discipline as SYNTH_FIELDS.
+function serializeLaneBacking(backing: BeatDrumLaneDecl['backing']): string {
+  if (backing.type === 'synth') {
+    const defaults = DRUM_VOICE_PARAM_DEFAULTS[backing.voice]
+    const parts = [`synth:${backing.voice}`]
+    for (const [key, value] of Object.entries(backing.params)) {
+      if (formatNumber(value) === formatNumber(defaults[key] ?? Number.NaN)) continue
+      parts.push(`${key}=${formatNumber(value)}`)
+    }
+    return parts.join(' ')
+  }
+  if (backing.type === 'sample') return `sample ${backing.sample} ${formatNumber(backing.gainDb)} ${formatNumber(backing.tune)}`
+  return `sf ${backing.sample} ${formatNumber(backing.program)} ${formatNumber(backing.note)}`
 }
 
 // v0.9: canonical automation point order is (time, id) ascending, same discipline as notes/hits.
@@ -87,23 +108,34 @@ function serializeTrack(t: BeatTrack): string[] {
   // effect lines; their `effects` field stays [] and is not this feature's concern, see
   // BeatTrack.effects).
   if (t.kind === 'synth') lines.push(...serializeEffectLines(t.effects, '  '))
-  // v0.5 lane samples: DRUM_LANES order (canonical), one line per assigned lane.
+  // Phase 22 Stream AB: the OPEN lane list, declared order, one line per lane — only for tracks
+  // that opted in (t.lanes.length > 0); a legacy/migrated track (t.lanes === []) emits none of
+  // these, exactly as before. Comes before the legacy v0.5 lane-sample lines below so a track's
+  // own declared identity reads first.
+  if (t.kind === 'drums') {
+    for (const decl of t.lanes) {
+      lines.push(`  lane ${decl.name} ${serializeLaneBacking(decl.backing)}`)
+    }
+  }
+  // v0.5 lane samples: DRUM_LANES order (canonical), one line per assigned lane. Unchanged —
+  // still the only mechanism for a track with an empty `lanes` list (t.lanes.length === 0).
   if (t.kind === 'drums') {
     for (const lane of DRUM_LANES) {
       const ls = t.laneSamples[lane]
       if (ls) lines.push(`  lane ${lane} ${ls.sample} ${formatNumber(ls.gainDb)} ${formatNumber(ls.tune)}`)
     }
   }
+  const laneOrder = t.kind === 'drums' ? declaredLaneNames(t) : DRUM_LANES
   // v0.4 clips: source order (creation order is meaningful, like tracks); content in canonical
   // form (sorted notes / sorted hits) one indent level deeper than live content.
   for (const clip of t.clips) {
     lines.push(`  clip ${clip.id}`)
-    if (t.kind === 'drums') lines.push(...sortedHitLines(clip.hits, '    '))
+    if (t.kind === 'drums') lines.push(...sortedHitLines(clip.hits, laneOrder, '    '))
     lines.push(...sortedNoteLines(clip.notes, '    '))
     lines.push(...serializeAutomationLanes(t.id, clip.automation, '    '))
   }
   if (t.kind === 'drums') {
-    lines.push(...sortedHitLines(t.hits, '  '))
+    lines.push(...sortedHitLines(t.hits, laneOrder, '  '))
   }
   lines.push(...sortedNoteLines(t.notes, '  '))
   return lines

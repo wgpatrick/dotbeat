@@ -52,13 +52,19 @@ function patternToHits(pattern: Record<string, number[]>, totalSteps: number): B
  * GUI/engine, which still speak patterns (research 12: the grid is a view over events). A hit
  * lands in the step nearest its start (mod 16, so it shows in the one-bar cycle); off-grid hits
  * are snapped in this projection only — the .beat file keeps their true time, and the daemon
- * carries them over on GUI pushes so they are never lost. Velocity is max-wins on collisions. */
+ * carries them over on GUI pushes so they are never lost. Velocity is max-wins on collisions.
+ * Phase 22 Stream AB: a hit on a lane OUTSIDE the closed 5-lane DRUM_LANES set (a custom lane from
+ * an open per-track kit) has no cell in this legacy 5-lane grid and is silently excluded from the
+ * pattern view — beatlab's own live store has no concept of open lanes yet (see research 19's
+ * scope note); the .beat file itself still keeps every hit losslessly regardless. */
 function hitsToPattern(hits: BeatDrumHit[]): BeatDrumPattern {
   const pattern = Object.fromEntries(DRUM_LANES.map((lane) => [lane, Array<number>(16).fill(0)])) as BeatDrumPattern
   for (const h of hits) {
+    if (!(DRUM_LANES as readonly string[]).includes(h.lane)) continue
+    const lane = h.lane as (typeof DRUM_LANES)[number]
     const step = Math.round(h.start) % 16
     const cell = ((step % 16) + 16) % 16
-    if (h.velocity > pattern[h.lane][cell]!) pattern[h.lane][cell] = h.velocity
+    if (h.velocity > pattern[lane][cell]!) pattern[lane][cell] = h.velocity
   }
   return pattern
 }
@@ -223,6 +229,7 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     kind: t.kind,
     synth: toBeatSynth(t.synth, t.id, report),
     laneSamples: {},
+    lanes: [], // beatlab payloads have no open-lane concept yet — implicit 5 DRUM_LANES (see hitsToPattern)
     clips: (t.clips ?? []).map((c) => {
       if (c.name !== undefined && c.name !== c.id) report.droppedFields.push(`${t.id}.${c.id}.name`)
       return {

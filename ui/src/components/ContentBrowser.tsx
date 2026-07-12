@@ -122,7 +122,7 @@ function KitLaneRow({ kit, lane }: { kit: string; lane: LibraryKitLane }) {
           await engine.previewBuffer(bytes)
         }}
       />
-      <span className="lib-row-name">{DRUM_LABELS[lane.lane]}</span>
+      <span className="lib-row-name">{(DRUM_LABELS as Record<string, string>)[lane.lane] ?? lane.lane}</span>
     </div>
   )
 }

@@ -41,7 +41,13 @@ export type LfoDestination =
 // BeatLab's own lane set and order (DRUM_LANES in beatlab/src/types.ts). Order is canonical for
 // serialization: all five lanes are always emitted, in this order, so toggling any drum step is
 // always a one-line diff and never inserts or deletes lines (the Humdrum fixed-grid discipline —
-// see docs/format-spec.md).
+// see docs/format-spec.md). Phase 22 Stream AB (docs/research/19-drum-voice-expansion.md Part VI
+// Option B): this closed 5-member set is now the IMPLICIT default only — a drum track whose
+// `lanes` list (below) is empty is assumed to have exactly these 5, synth-backed, in this order
+// (what every v<=0.9 file already meant, since none of them declared lanes at all). A track with a
+// non-empty `lanes` list uses that OPEN, per-track set instead — DRUM_LANES/DrumLane stay around
+// for the migration default and for the legacy `laneSamples` mechanism (still closed to these 5,
+// unchanged since v0.5), NOT as a ceiling on what a drum hit's `lane` may name.
 export const DRUM_LANES = ['kick', 'snare', 'clap', 'hat', 'openhat'] as const
 export type DrumLane = (typeof DRUM_LANES)[number]
 
@@ -51,15 +57,113 @@ export type DrumLane = (typeof DRUM_LANES)[number]
 // docs/research/12-drum-representation.md: every mature DAW stores events, grids are views.
 export type BeatDrumPattern = Record<DrumLane, number[]>
 
+/** Phase 22 Stream AB (research 19 Part VI/VII): the three ways a drum lane can produce sound.
+ * `synth` reuses dotbeat's existing hand-built Tone.js voice families, now parameterized instead
+ * of hardcoded per lane; `sample` generalizes the v0.5 `BeatLaneSample` one-shot mechanism off the
+ * closed DrumLane enum; `sf` is new — a SoundFont note on the drum channel (research 19 Part V.2).
+ * A lane's identity (its name, its position) is independent of its backing — swapping a lane's
+ * backing is a one-line diff and the `hit` lines that reference it by name don't move. */
+export type DrumVoiceType = 'membrane' | 'noise' | 'metal'
+
+export interface BeatLaneSynthBacking {
+  type: 'synth'
+  voice: DrumVoiceType
+  /** Per-lane character params, generalized off the old track-wide kickTune/kickPunch/kickDecay/
+   * snareTone/snareDecay/hatDecay/openHatDecay/hatTone fields (research 19 Part VII step 2). Only
+   * keys that differ from DRUM_VOICE_PARAM_DEFAULTS[voice] are meant to be present (canonical
+   * elision is applied by the serializer; the parser stores exactly what the line says). */
+  params: Record<string, number>
+}
+export interface BeatLaneSampleBacking {
+  type: 'sample'
+  sample: string // BeatMediaSample id
+  gainDb: number // static lane level, multiplies per-hit velocity
+  tune: number // semitones
+}
+export interface BeatLaneSfBacking {
+  type: 'sf'
+  sample: string // BeatMediaSample id of an .sf2/.sf3
+  program: number // SoundFont program number within the bank (0-127)
+  note: number // GM MIDI note number this lane triggers (0-127) — see research 19 Part III/IV
+}
+export type BeatLaneBacking = BeatLaneSynthBacking | BeatLaneSampleBacking | BeatLaneSfBacking
+
+/** One declared lane on a drum track's OPEN lane list (research 19 Part VI Option B). Canonical
+ * order is declaration order — the same discipline clips and auto lanes already use ("first-seen
+ * order is meaningful, not alphabetized"). Only present when a track opts into the new model; an
+ * empty `lanes` list means "the 5 implicit DRUM_LANES, synth-backed" (see DRUM_LANES's comment). */
+export interface BeatDrumLaneDecl {
+  name: string // open lane identity — any slug; hits reference lanes by this name
+  backing: BeatLaneBacking
+}
+
+export const DRUM_VOICE_TYPES: readonly DrumVoiceType[] = ['membrane', 'noise', 'metal']
+
+/** Per-voice-type default character params (research 19 Part VII step 2) — mirrors the OLD
+ * track-wide SYNTH_FIELDS drum-voice defaults (kickTune 32.7/kickPunch 0.05/kickDecay 0.4,
+ * snareTone 0/snareDecay 0.13, hatDecay 0.05/hatTone 4000, openHatDecay 0.35) so a migrated legacy
+ * voice and a freshly-declared default-tuned lane agree on what "unshaped" sounds like. Keys are
+ * generic (not lane-literal) since any lane can use any voice type now. */
+export const DRUM_VOICE_PARAM_DEFAULTS: Record<DrumVoiceType, Record<string, number>> = {
+  membrane: { tune: 32.7, punch: 0.05, decay: 0.4 },
+  noise: { tone: 0, decay: 0.13 },
+  metal: { decay: 0.05, tone: 4000 },
+}
+
+/** Research 19 Part VII's suggested 12-lane General-MIDI-aligned default kit — the working subset
+ * of the GM percussion map (notes 35-59) covering the 808/909 canon. This is a superset of the old
+ * 5 DRUM_LANES (kick/snare/clap/hat/openhat keep their names and GM notes), so a migrated legacy
+ * file's hits still name real lanes in this kit if it's ever applied to one. `beat init`/`beat
+ * add-track --kind drums` uses this as the new default going forward (crash/ride default to
+ * synth:metal here — a deliberate simplification: a bare `addTrack` call has no media context to
+ * point sf/sample backings at, so the "sample wins for metallic voices" recommendation is realized
+ * by the kit-808/kit-909/kit-acoustic presets instead — see docs/phase-22-stream-ab.md). */
+export const DEFAULT_DRUM_KIT: readonly { name: string; note: number; voice: DrumVoiceType }[] = [
+  { name: 'kick', note: 36, voice: 'membrane' },
+  { name: 'snare', note: 38, voice: 'noise' },
+  { name: 'rimshot', note: 37, voice: 'noise' },
+  { name: 'clap', note: 39, voice: 'noise' },
+  { name: 'hat', note: 42, voice: 'metal' },
+  { name: 'openhat', note: 46, voice: 'metal' },
+  { name: 'tom_lo', note: 45, voice: 'membrane' },
+  { name: 'tom_mid', note: 47, voice: 'membrane' },
+  { name: 'tom_hi', note: 50, voice: 'membrane' },
+  { name: 'crash', note: 49, voice: 'metal' },
+  { name: 'ride', note: 51, voice: 'metal' },
+  { name: 'cowbell', note: 56, voice: 'membrane' },
+]
+
+/** Lane names in a drum track's OPEN lane list, canonical order — or the 5 implicit DRUM_LANES
+ * when the track declares none (legacy/migrated files). The single source of truth for "what
+ * lanes does this track have," used by hit validation, the engine's dispatch table, and the
+ * editor's row axis. */
+export function declaredLaneNames(track: Pick<BeatTrack, 'lanes'>): readonly string[] {
+  return track.lanes.length > 0 ? track.lanes.map((l) => l.name) : DRUM_LANES
+}
+
+/** DEFAULT_DRUM_KIT realized as declared lane list — what `beat add-track --kind drums` / a fresh
+ * GUI drum track writes by default going forward (research 19 Part VII; see DEFAULT_DRUM_KIT's
+ * comment for why crash/ride land on synth:metal here rather than a sample/sf backing). Kept as a
+ * function (not a frozen constant) since callers may want their own mutable copy. */
+export function defaultDrumKitLanes(): BeatDrumLaneDecl[] {
+  return DEFAULT_DRUM_KIT.map((v) => ({ name: v.name, backing: { type: 'synth', voice: v.voice, params: {} } }))
+}
+
 /** v0.8: one drum hit — a free-timed trigger event, fully general (owner decision). `start` is
  * in 16th steps from the loop start, fractional allowed (v0.7 number rules), ABSOLUTE across
- * loop_bars (unlike the old per-bar pattern cycle). No duration: drum voices/one-shots are
- * triggers (SMF note-off irrelevance for percussion; Hydrogen's length=-1 — research 12). */
+ * loop_bars (unlike the old per-bar pattern cycle). Originally no duration (SMF note-off
+ * irrelevance for percussion; Hydrogen's length=-1 — research 12); Phase 22 Stream AB (research
+ * 20 Part 7) adds it back as the OPTIONAL trailing field research 12 pre-authorized: absent means
+ * today's lengthless trigger (elided, so every pre-existing hit line stays byte-identical),
+ * present means "gate this voice for `duration` steps" (release for synth/sf-backed lanes,
+ * truncation for sample-backed ones — see research 20 Part 4 and ui/src/audio/engine.ts). */
 export interface BeatDrumHit {
   id: string
-  lane: DrumLane
+  lane: string // Phase 22 Stream AB: open — any name declared on the track's `lanes` list, or one
+  // of the 5 implicit DRUM_LANES for a track that declares none. Validated at parse time.
   start: number // 16th steps, fractional, absolute over the loop
   velocity: number // (0..1]; a zero-velocity hit is meaningless and rejected
+  duration?: number // 16th steps, fractional, > 0; absent = one-shot trigger (see above)
 }
 
 export interface BeatSynth {
@@ -276,6 +380,13 @@ export interface BeatTrack {
   synth: BeatSynth // drum tracks carry these too — in BeatLab they're the real drum bus/voice params
   instrument?: BeatInstrument // v0.6; present iff kind === 'instrument' (synth block absent)
   laneSamples: Partial<Record<DrumLane, BeatLaneSample>> // v0.5; drum tracks only, {} when none
+  /** Phase 22 Stream AB (research 19 Part VI Option B): the OPEN, per-track ordered lane
+   * declaration list. Drum tracks only; [] for synth/instrument tracks and for legacy/migrated
+   * drum tracks that never declared lanes (see DRUM_LANES's comment — [] there means "the 5
+   * implicit DRUM_LANES, synth-backed"). When non-empty, this list is authoritative for the
+   * track's lane identity: hits validate against it (not DRUM_LANES), and it drives the engine's
+   * lane->backing dispatch table and the editor's row axis. */
+  lanes: BeatDrumLaneDecl[]
   clips: BeatClip[] // v0.4; [] when the track has none (serialized only when present)
   notes: BeatNote[] // synth tracks only; always [] for drums
   hits: BeatDrumHit[] // v0.8; drum tracks only, always [] for synth/instrument

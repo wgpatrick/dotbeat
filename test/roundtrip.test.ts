@@ -153,6 +153,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
         kind: 'synth',
         synth: { osc: 'sawtooth', volume: -8, cutoff: 700, resonance: 0.8, attack: 0.005, decay: 0.25, sustain: 0.3, release: 0.15, pan: 0, ...defaultSynthFields() },
         laneSamples: {},
+        lanes: [],
         clips: [],
         notes: [
           { id: 'u1', pitch: 33, start: 0, duration: 2, velocity: 0.8 },
@@ -168,6 +169,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
         kind: 'drums',
         synth: { osc: 'sawtooth', volume: -10, cutoff: 9000, resonance: 0.8, attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.3, pan: 0, ...defaultSynthFields() },
         laneSamples: {},
+        lanes: [],
         clips: [],
         notes: [],
         hits: [
@@ -213,6 +215,7 @@ test('formatNumber stabilizes floating-point noise so round-tripping is idempote
           ...defaultSynthFields(),
         },
         laneSamples: {},
+        lanes: [],
         clips: [],
         notes: [],
         hits: [],

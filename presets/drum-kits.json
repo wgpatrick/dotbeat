@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "kits": [
+    {
+      "name": "kit-808",
+      "description": "Roland TR-808-flavored 12-lane kit: synth-backed, boomy tuned kick, long metallic hats/cymbals, classic cowbell (research 19 Part VII).",
+      "lanes": [
+        { "name": "kick", "backing": { "type": "synth", "voice": "membrane", "params": { "tune": 32.7, "punch": 0.08, "decay": 0.55 } } },
+        { "name": "snare", "backing": { "type": "synth", "voice": "noise", "params": { "decay": 0.18 } } },
+        { "name": "rimshot", "backing": { "type": "synth", "voice": "noise", "params": { "decay": 0.05 } } },
+        { "name": "clap", "backing": { "type": "synth", "voice": "noise", "params": { "decay": 0.25 } } },
+        { "name": "hat", "backing": { "type": "synth", "voice": "metal", "params": { "decay": 0.04, "tone": 6000 } } },
+        { "name": "openhat", "backing": { "type": "synth", "voice": "metal", "params": { "decay": 0.4, "tone": 6000 } } },
+        { "name": "tom_lo", "backing": { "type": "synth", "voice": "membrane", "params": { "tune": 20, "decay": 0.5 } } },
+        { "name": "tom_mid", "backing": { "type": "synth", "voice": "membrane", "params": { "tune": 28, "decay": 0.45 } } },
+        { "name": "tom_hi", "backing": { "type": "synth", "voice": "membrane", "params": { "tune": 38, "decay": 0.4 } } },
+        { "name": "crash", "backing": { "type": "synth", "voice": "metal", "params": { "decay": 0.9, "tone": 5000 } } },
+        { "name": "ride", "backing": { "type": "synth", "voice": "metal", "params": { "decay": 1.1, "tone": 4500 } } },
+        { "name": "cowbell", "backing": { "type": "synth", "voice": "membrane", "params": { "tune": 55, "punch": 0.02, "decay": 0.3 } } }
+      ]
+    },
+    {
+      "name": "kit-909",
+      "description": "Roland TR-909-flavored 12-lane kit: synth-backed, tighter/punchier kick, crisper hats than the 808 (research 19 Part VII).",
+      "lanes": [
+        { "name": "kick", "backing": { "type": "synth", "voice": "membrane", "params": { "tune": 28.5, "punch": 0.12, "decay": 0.35 } } },
+        { "name": "snare", "backing": { "type": "synth", "voice": "noise", "params": { "decay": 0.15, "tone": 0.1 } } },
+        { "name": "rimshot", "backing": { "type": "synth", "voice": "noise", "params": { "decay": 0.05 } } },
+        { "name": "clap", "backing": { "type": "synth", "voice": "noise", "params": { "decay": 0.22 } } },
+        { "name": "hat", "backing": { "type": "synth", "voice": "metal", "params": { "decay": 0.03, "tone": 7000 } } },
+        { "name": "openhat", "backing": { "type": "synth", "voice": "metal", "params": { "decay": 0.3, "tone": 7000 } } },
+        { "name": "tom_lo", "backing": { "type": "synth", "voice": "membrane", "params": { "tune": 24, "decay": 0.35 } } },
+        { "name": "tom_mid", "backing": { "type": "synth", "voice": "membrane", "params": { "tune": 32, "decay": 0.32 } } },
+        { "name": "tom_hi", "backing": { "type": "synth", "voice": "membrane", "params": { "tune": 42, "decay": 0.28 } } },
+        { "name": "crash", "backing": { "type": "synth", "voice": "metal", "params": { "decay": 0.8, "tone": 6000 } } },
+        { "name": "ride", "backing": { "type": "synth", "voice": "metal", "params": { "decay": 1.0, "tone": 5500 } } },
+        { "name": "cowbell", "backing": { "type": "synth", "voice": "membrane", "params": { "tune": 58, "punch": 0.02, "decay": 0.25 } } }
+      ]
+    },
+    {
+      "name": "kit-acoustic",
+      "description": "Realistic acoustic kit, SoundFont-backed against the bundled MuldjordKit (presets/sf2/muldjordkit-small.sf2, CC-BY-4.0) on GM-standard notes (research 19 Part V.2). Register the bank first: beat sample <file> muldjordkit presets/sf2/muldjordkit-small.sf2 (id must be exactly 'muldjordkit', or pass --sample to remap).",
+      "lanes": [
+        { "name": "kick", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 36 } },
+        { "name": "snare", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 38 } },
+        { "name": "rimshot", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 37 } },
+        { "name": "clap", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 39 } },
+        { "name": "hat", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 42 } },
+        { "name": "openhat", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 46 } },
+        { "name": "tom_lo", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 45 } },
+        { "name": "tom_mid", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 47 } },
+        { "name": "tom_hi", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 50 } },
+        { "name": "crash", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 49 } },
+        { "name": "ride", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 51 } },
+        { "name": "cowbell", "backing": { "type": "sf", "sample": "muldjordkit", "program": 0, "note": 56 } }
+      ]
+    }
+  ]
+}

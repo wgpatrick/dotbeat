@@ -3,8 +3,8 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS, defaultEffectChain } from './document.js'
+import type { BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TRACK_COLORS, TRACK_KINDS, declaredLaneNames, defaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -61,11 +61,12 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   // Upserts/removes the on-grid hit at integer step `step` (canonical id `<lane><step>`); a
   // velocity of 0 removes it. Off-grid hits at fractional starts are untouched. Keeps the
   // familiar step-toggle vocabulary working over the event model (research 12: grid as input).
-  const patternMatch = rest.match(/^pattern\.([a-z]+)\[(\d+)\]$/)
+  const patternMatch = rest.match(/^pattern\.([a-zA-Z0-9_-]+)\[(\d+)\]$/)
   if (patternMatch) {
     if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — no pattern to edit`)
     const lane = patternMatch[1]!
-    if (!(DRUM_LANES as readonly string[]).includes(lane)) throw new BeatEditError(`unknown drum lane "${lane}" (expected one of ${DRUM_LANES.join('|')})`)
+    const laneNames = declaredLaneNames(track)
+    if (!laneNames.includes(lane)) throw new BeatEditError(`unknown drum lane "${lane}" (expected one of ${laneNames.join('|')})`)
     const step = Number(patternMatch[2]!)
     const maxStep = doc.loopBars * 16
     if (step >= maxStep) throw new BeatEditError(`step ${step} out of range (loop is ${maxStep} steps, 0-${maxStep - 1}); use beat add-hit for an off-grid hit past the loop`)
@@ -73,7 +74,7 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     if (vel < 0 || vel > 1) throw new BeatEditError(`step velocities must be 0..1, got ${vel}`)
     const id = `${lane}${step}`
     const rest2 = track.hits.filter((h) => h.id !== id && !(h.lane === lane && h.start === step))
-    const nextHits = vel > 0 ? [...rest2, { id, lane: lane as DrumLane, start: step, velocity: canon(vel) }] : rest2
+    const nextHits = vel > 0 ? [...rest2, { id, lane, start: step, velocity: canon(vel) }] : rest2
     return replaceTrack(doc, { ...track, hits: nextHits })
   }
 
@@ -86,6 +87,51 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   if (effectEnabledMatch) {
     if (value !== 'true' && value !== 'false') throw new BeatEditError(`effect enabled must be true or false, got "${value}"`)
     return setEffectEnabled(doc, trackId, effectEnabledMatch[1]!, value === 'true').doc
+  }
+
+  // hit grammar (drum tracks) — the drum-side analog of the note grammar above (research 20 Part
+  // 7 step 8: "<track>.hit.<id>.start|velocity|duration|lane", add via "<track>.hit"). Each is
+  // one canonical `.beat` line, same discipline as note.*.
+  //   <track>.hit  "<lane> <start> <velocity> [<duration>]"  -> add (mints the next h-id)
+  //   <track>.hit.<id>.lane|start|velocity|duration  <v>     -> move/resize/retarget one field
+  //   <track>.hit.<id>  ""                                   -> delete (empty value removes)
+  if (rest === 'hit') {
+    const parts = value.trim().split(/\s+/)
+    if (parts.length !== 3 && parts.length !== 4) throw new BeatEditError(`hit add expects "<lane> <start> <velocity> [<duration>]", got "${value}"`)
+    const [lane, startTok, velTok, durTok] = parts
+    const start = parseNum(startTok!, 'start')
+    const velocity = parseNum(velTok!, 'velocity')
+    const duration = durTok !== undefined ? parseNum(durTok, 'duration') : undefined
+    return addHit(doc, trackId, { lane: lane!, start, velocity, duration }).doc
+  }
+  const hitFieldMatch = rest.match(/^hit\.([A-Za-z0-9_-]+)\.(lane|start|velocity|duration)$/)
+  if (hitFieldMatch) {
+    const hitId = hitFieldMatch[1]!
+    const field = hitFieldMatch[2]! as 'lane' | 'start' | 'velocity' | 'duration'
+    const existing = track.hits.find((h) => h.id === hitId)
+    if (!existing) throw new BeatEditError(`no hit "${hitId}" on track "${trackId}"`)
+    if (field === 'duration' && value.trim() === '') {
+      // empty value clears the duration (bar -> marker, the inverse of dragging a duration on)
+      const removed = removeHit(doc, trackId, hitId).doc
+      return addHit(removed, trackId, { id: hitId, lane: existing.lane, start: existing.start, velocity: existing.velocity }).doc
+    }
+    const removed = removeHit(doc, trackId, hitId).doc
+    if (field === 'lane') {
+      return addHit(removed, trackId, { id: hitId, lane: value, start: existing.start, velocity: existing.velocity, duration: existing.duration }).doc
+    }
+    const n = parseNum(value, `hit.${hitId}.${field}`)
+    return addHit(removed, trackId, {
+      id: hitId,
+      lane: existing.lane,
+      start: field === 'start' ? n : existing.start,
+      velocity: field === 'velocity' ? n : existing.velocity,
+      duration: field === 'duration' ? n : existing.duration,
+    }).doc
+  }
+  const hitDeleteMatch = rest.match(/^hit\.([A-Za-z0-9_-]+)$/)
+  if (hitDeleteMatch) {
+    if (value.trim() !== '') throw new BeatEditError(`hit delete takes an empty value (got "${value}"); to edit a field use ${trackId}.hit.${hitDeleteMatch[1]}.<lane|start|velocity|duration>`)
+    return removeHit(doc, trackId, hitDeleteMatch[1]!).doc
   }
 
   // note grammar (synth/instrument tracks) — the piano-roll edit primitive, the note-side analog
@@ -380,10 +426,16 @@ function validateTrackIdentity(id: string, name: string, color: string) {
 }
 
 /** Adds a new track with the format's init patch (INIT_SYNTH; drum tracks start with no hits).
- * Color defaults cycle TRACK_COLORS by track index; name defaults to the id. */
+ * Color defaults cycle TRACK_COLORS by track index; name defaults to the id. Phase 22 Stream AB:
+ * `lanes` lets a caller opt a fresh drum track into the OPEN lane list explicitly (the CLI's `beat
+ * add-track --kind drums` passes `defaultDrumKitLanes()` — the new 12-lane GM-aligned default kit,
+ * research 19 Part VII); omitted (the default for every other/internal caller, including this
+ * function's own many existing callers across quantize/humanize/vary/tests) leaves `lanes: []`,
+ * i.e. the legacy/implicit 5 DRUM_LANES — unchanged behavior, deliberately not switched wholesale
+ * so the low-level primitive stays backward compatible. */
 export function addTrack(
   doc: BeatDocument,
-  opts: { id: string; kind: TrackKind; name?: string; color?: string; soundfont?: { sample: string; program: number } },
+  opts: { id: string; kind: TrackKind; name?: string; color?: string; soundfont?: { sample: string; program: number }; lanes?: BeatDrumLaneDecl[] },
 ): { doc: BeatDocument; track: BeatTrack } {
   const { id, kind } = opts
   if (!(TRACK_KINDS as readonly string[]).includes(kind)) throw new BeatEditError(`track kind must be one of ${TRACK_KINDS.join('|')}, got "${kind}"`)
@@ -407,6 +459,7 @@ export function addTrack(
     synth: kind === 'drums' ? { ...INIT_SYNTH, cutoff: 12000, resonance: 0.1 } : { ...INIT_SYNTH },
     ...(kind === 'instrument' ? { instrument: { sample: opts.soundfont!.sample, program: opts.soundfont!.program, volume: -10, pan: 0 } } : {}),
     laneSamples: {},
+    lanes: kind === 'drums' ? (opts.lanes ?? []) : [],
     clips: [],
     notes: [],
     hits: [],
@@ -419,13 +472,22 @@ export function addTrack(
 
 /** Adds a free-timed drum hit to a drum track (v0.8). If `id` is omitted, mints the next free
  * `h<n>` id above the current max. start is in fractional 16th steps (snapped to canonical
- * precision); velocity in (0, 1]. */
-export function addHit(doc: BeatDocument, trackId: string, hit: { lane: DrumLane; start: number; velocity: number; id?: string }): { doc: BeatDocument; hit: BeatDrumHit } {
+ * precision); velocity in (0, 1]. Phase 22 Stream AB: `lane` is open — validated against the
+ * track's declared lane set (declaredLaneNames: its own `lanes` list, or the implicit 5
+ * DRUM_LANES for a legacy/migrated track) rather than a closed enum; an optional `duration` (> 0
+ * steps) gates the voice for that long instead of firing a one-shot trigger (research 20 Part 7). */
+export function addHit(
+  doc: BeatDocument,
+  trackId: string,
+  hit: { lane: string; start: number; velocity: number; duration?: number; id?: string },
+): { doc: BeatDocument; hit: BeatDrumHit } {
   const track = findTrack(doc, trackId)
   if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — hits only belong on drum tracks`)
-  if (!(DRUM_LANES as readonly string[]).includes(hit.lane)) throw new BeatEditError(`unknown drum lane "${hit.lane}" (expected one of ${DRUM_LANES.join('|')})`)
+  const laneNames = declaredLaneNames(track)
+  if (!laneNames.includes(hit.lane)) throw new BeatEditError(`unknown drum lane "${hit.lane}" (expected one of ${laneNames.join('|')})`)
   if (!Number.isFinite(hit.start) || hit.start < 0) throw new BeatEditError(`hit start must be a step position >= 0, got ${hit.start}`)
   if (hit.velocity <= 0 || hit.velocity > 1) throw new BeatEditError(`hit velocity must be in (0, 1], got ${hit.velocity}`)
+  if (hit.duration !== undefined && (!Number.isFinite(hit.duration) || hit.duration <= 0)) throw new BeatEditError(`hit duration must be > 0 steps, got ${hit.duration}`)
   let id = hit.id
   if (id === undefined) {
     let max = 0
@@ -438,6 +500,7 @@ export function addHit(doc: BeatDocument, trackId: string, hit: { lane: DrumLane
     throw new BeatEditError(`hit id "${id}" already exists on track "${trackId}"`)
   }
   const added: BeatDrumHit = { id, lane: hit.lane, start: canon(hit.start), velocity: canon(hit.velocity) }
+  if (hit.duration !== undefined) added.duration = canon(hit.duration)
   return { doc: replaceTrack(doc, { ...track, hits: [...track.hits, added] }), hit: added }
 }
 

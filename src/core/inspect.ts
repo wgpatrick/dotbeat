@@ -3,7 +3,7 @@
 // parsed document; this is the human-shaped view.)
 
 import type { BeatClip, BeatDocument, BeatTrack } from './document.js'
-import { DRUM_LANES } from './document.js'
+import { declaredLaneNames } from './document.js'
 import { formatNumber } from './format.js'
 
 // v0.9: ", auto: cutoff(3), volume(2)" — lane names + point counts, in lane order; empty when
@@ -32,18 +32,23 @@ function describeTrack(t: BeatTrack, loopSteps: number): string[] {
     // v0.8: hits are free-timed events. Render the first bar as a 16-step grid VIEW (X >= 0.75,
     // x > 0, . = off — a hit shows in the cell nearest its start) and count off-grid hits (a
     // fractional start) separately, so loose/tapped timing is visible without the grid lying.
-    for (const lane of DRUM_LANES) {
+    // Phase 22 Stream AB: iterate the track's own declared lanes (or the implicit 5 DRUM_LANES
+    // for a legacy/migrated track) instead of the closed enum, so a custom-named lane's hits show.
+    for (const lane of declaredLaneNames(t)) {
       const laneHits = t.hits.filter((h) => h.lane === lane)
       const grid = Array<number>(16).fill(0)
       let offGrid = 0
+      let withDuration = 0
       for (const h of laneHits) {
         if (!Number.isInteger(h.start)) offGrid++
+        if (h.duration !== undefined) withDuration++
         const cell = ((Math.round(h.start) % 16) + 16) % 16
         if (h.velocity > grid[cell]!) grid[cell] = h.velocity
       }
       const strip = grid.map((v) => (v === 0 ? '.' : v >= 0.75 ? 'X' : 'x')).join('')
       const off = offGrid > 0 ? `, ${offGrid} off-grid` : ''
-      lines.push(`  ${lane.padEnd(7)} ${strip}  (${laneHits.length} hit${laneHits.length === 1 ? '' : 's'}${off})`)
+      const dur = withDuration > 0 ? `, ${withDuration} with duration` : ''
+      lines.push(`  ${lane.padEnd(7)} ${strip}  (${laneHits.length} hit${laneHits.length === 1 ? '' : 's'}${off}${dur})`)
     }
   } else {
     const n = t.notes.length

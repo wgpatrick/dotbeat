@@ -44,6 +44,7 @@ import {
   setGroupColor,
   setGroupTracks,
   initDocument,
+  defaultDrumKitLanes,
   diffDocuments,
   formatDiff,
   describeDocument,
@@ -52,6 +53,9 @@ import {
   formatPresetList,
   filterPresetsByCategory,
   PRESET_CATEGORIES,
+  parseDrumKitLibrary,
+  applyDrumKit,
+  formatDrumKitList,
   parseSelection,
   serializeSelection,
   selectionToVaryScope,
@@ -64,7 +68,8 @@ import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.
 
 const USAGE = `usage:
   beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track
-  beat add-track <file> <id> <synth|drums|instrument> [--name N] [--color #hex] [--soundfont <sample-id> --program N]
+  beat add-track <file> <id> <synth|drums|instrument> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--legacy-lanes]
+                                                          (a fresh drums track defaults to the 12-lane kit; --legacy-lanes opts back into the old implicit 5)
   beat rm-track <file> <id>
   beat group <file> <id> <track-id> [<track-id> ...] [--name N] [--color #hex]
                                                           fold N existing tracks into one named, colored
@@ -77,7 +82,7 @@ const USAGE = `usage:
   beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
   beat add-note <file> <track> <pitch> <start> <duration> <velocity>
   beat rm-note <file> <track> <note-id>
-  beat add-hit <file> <track> <lane> <start> <velocity>   free-timed drum hit (start in fractional 16th steps)
+  beat add-hit <file> <track> <lane> <start> <velocity> [duration]   free-timed drum hit (start/duration in fractional 16th steps)
   beat rm-hit <file> <track> <hit-id>
   beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes id,id]
                                                           snap notes toward the grid (grid in 16th steps:
@@ -92,6 +97,8 @@ const USAGE = `usage:
                                                           --list-categories for the enumerated set)
   beat presets --list-categories                          list the valid --category values
   beat preset <file> <track> <name>                       apply a preset to a track (a bag of set edits)
+  beat drum-kits [--json]                                  list the factory drum-kit library (kit-808/kit-909/kit-acoustic)
+  beat drum-kit <file> <track> <name>                      apply a drum kit to a track (replaces its whole lane list)
   beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render]
                                                           batch-generate small-diff variants of one param group
   beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,oh | --ids a,b] [--render]
@@ -172,6 +179,10 @@ function addTrackCmd(argv) {
   const colorIdx = rest.indexOf('--color')
   const sfIdx = rest.indexOf('--soundfont')
   const progIdx = rest.indexOf('--program')
+  // Phase 22 Stream AB: a fresh drum track defaults to the 12-lane GM-aligned kit going forward
+  // (research 19 Part VII) — --legacy-lanes opts back into the old implicit-5, empty-lanes[] shape
+  // for a caller/script that specifically wants pre-v0.10 behavior.
+  const legacyLanes = rest.includes('--legacy-lanes')
   const before = readDoc(file)
   const { doc } = addTrack(before, {
     id,
@@ -179,6 +190,7 @@ function addTrackCmd(argv) {
     ...(nameIdx !== -1 ? { name: rest[nameIdx + 1] } : {}),
     ...(colorIdx !== -1 ? { color: rest[colorIdx + 1] } : {}),
     ...(sfIdx !== -1 ? { soundfont: { sample: rest[sfIdx + 1], program: progIdx !== -1 ? Number(rest[progIdx + 1]) : 0 } } : {}),
+    ...(kind === 'drums' && !legacyLanes ? { lanes: defaultDrumKitLanes() } : {}),
   })
   writeDoc(file, before, doc)
 }
@@ -355,10 +367,10 @@ function rmNoteCmd(argv) {
 }
 
 function addHitCmd(argv) {
-  const [file, track, lane, start, velocity] = argv
-  if (!file || !track || !lane || start === undefined || velocity === undefined) throw new BeatEditError('add-hit needs <file> <track> <lane> <start> <velocity>')
+  const [file, track, lane, start, velocity, duration] = argv
+  if (!file || !track || !lane || start === undefined || velocity === undefined) throw new BeatEditError('add-hit needs <file> <track> <lane> <start> <velocity> [duration]')
   const before = readDoc(file)
-  const { doc } = addHit(before, track, { lane, start: Number(start), velocity: Number(velocity) })
+  const { doc } = addHit(before, track, { lane, start: Number(start), velocity: Number(velocity), ...(duration !== undefined ? { duration: Number(duration) } : {}) })
   writeDoc(file, before, doc)
 }
 
@@ -452,6 +464,29 @@ function presetCmd(argv) {
   if (!preset) throw new BeatEditError(`no preset "${name}" (have: ${presets.map((p) => p.name).join(', ')})`)
   const before = readDoc(file)
   writeDoc(file, before, applyPreset(before, track, preset))
+}
+
+// Phase 22 Stream AB: drum kits (kit-808/kit-909/kit-acoustic) — a separate small library from
+// synth presets above, since a kit replaces a track's whole `lanes` list rather than setting synth
+// params (see src/core/drumkit.ts's header comment for why it's not bolted onto BeatPreset).
+function loadDrumKits() {
+  const path = process.env.BEAT_DRUM_KITS ?? resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets', 'drum-kits.json')
+  return parseDrumKitLibrary(readFileSync(path, 'utf8'))
+}
+
+function drumKitsCmd(argv) {
+  const kits = loadDrumKits()
+  process.stdout.write(argv.includes('--json') ? JSON.stringify(kits, null, 2) + '\n' : formatDrumKitList(kits))
+}
+
+function drumKitCmd(argv) {
+  const [file, track, name] = argv
+  if (!file || !track || !name) throw new BeatEditError('drum-kit needs <file> <track> <kit-name> (see `beat drum-kits`)')
+  const kits = loadDrumKits()
+  const kit = kits.find((k) => k.name === name)
+  if (!kit) throw new BeatEditError(`no drum kit "${name}" (have: ${kits.map((k) => k.name).join(', ')})`)
+  const before = readDoc(file)
+  writeDoc(file, before, applyDrumKit(before, track, kit))
 }
 
 // ---- variation-and-taste loop (rung 1) — docs/research/08-variation-loop-prior-art.md ------
@@ -1143,6 +1178,12 @@ async function main() {
       break
     case 'preset':
       presetCmd(rest)
+      break
+    case 'drum-kits':
+      drumKitsCmd(rest)
+      break
+    case 'drum-kit':
+      drumKitCmd(rest)
       break
     case 'metrics':
       metricsCmd(rest)

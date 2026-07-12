@@ -358,6 +358,9 @@ not the storage model.
   of the five lanes, a fractional `start` in 16th steps (v0.7 number rules, absolute over the
   loop), velocity in (0, 1]. No duration — drum voices are one-shot triggers (SMF note-off is
   irrelevant for percussion; Hydrogen uses `length=-1`). Canonical order: (start, lane, id).
+  (v0.10 adds back an OPTIONAL trailing `duration` and opens up `<lane>` beyond the five — see
+  the v0.10 section below; this section describes the grammar as of v0.8-v0.9, still valid for
+  every lengthless hit on the implicit 5 lanes, which remains the common case.)
 - **`pattern` lines are gone from the grammar** but v≤0.7 files still parse: legacy patterns
   migrate to hits on read (a step at velocity v → a hit at that step, the per-bar cycle tiled
   across the loop; ids `<lane><step>`). Lossless and automatic — old projects just work.
@@ -498,6 +501,61 @@ removable, reorderable — without its indirection mechanism).
   same reasoning clip/scene/song get dedicated verbs instead of overloading `beat set`) and
   `setEffectEnabled` (fits `beat set`'s plain `path=value` grammar too, as
   `<track>.effect.<id>.enabled`, alongside its own `beat effect-bypass`/`beat_effect_bypass`).
+### v0.10 additions — open drum lanes + optional hit duration (Phase 22 Stream AB; research 19/20)
+
+Research 19 (`docs/research/19-drum-voice-expansion.md`) and research 20
+(`docs/research/20-drum-clip-editor-redesign.md`) concluded the closed 5-lane `kick/snare/clap/
+hat/openhat` set was a BeatLab holdover, not a deliberate constraint, and that the redesigned
+drum-clip editor and a bigger lane cardinality are one body of work sharing one format version
+bump (research 20 Part 6). This is that bump. Full detail — grammar, migration mechanics, and the
+concrete decisions made while building it — lives in `docs/phase-22-stream-ab.md`; this section is
+the format-spec-level summary.
+
+- **`lanes: BeatDrumLaneDecl[]` — an open, per-track ordered lane list.** A drum track MAY declare
+  its own lane set with `lane <name> <backing>` lines, where `<backing>` is one of:
+  - `synth:<voice>` (`voice` = `membrane`|`noise`|`metal`), optionally followed by `key=value`
+    character params (e.g. `lane kick synth:membrane tune=30 punch=0.08`) — the generalized,
+    data-driven form of the old per-lane hardcoded Tone.js voices.
+  - `sample <sample-id> <gain dB> <tune semitones>` — a NEW explicit keyword form (distinct from
+    the legacy v0.5 form below) that puts the lane on the open list.
+  - `sf <sample-id> <program> <note>` — a SoundFont-backed lane (research 19 Part V.2): triggers
+    `<note>` (a GM MIDI note) on `<program>` of the referenced `.sf2`/`.sf3`, on the drum channel.
+  - Canonical order is DECLARATION order (research 19 Part VI Option B) — the same discipline
+    clips and `auto` lanes already use. `hit`/`pattern` lines reference lanes by this declared
+    name; the parser rejects a `hit` whose lane isn't declared.
+- **Backward compatibility is additive, not a migration pass.** A track with NO `lane`
+  declarations (`lanes: []` — every pre-v0.10 file) is assumed to have the 5 implicit `DRUM_LANES`,
+  synth-backed, in their historical order; this assumption is made by the ENGINE and editor at
+  runtime, never materialized into the document. The legacy v0.5 form (`lane <lane> <sample-id>
+  <gain dB> <tune semitones>`, exactly 4 values, `<lane>` one of the closed 5) is UNCHANGED and
+  keeps populating the separate `laneSamples` map exactly as before — it does not touch `lanes`.
+  The two mechanisms are disambiguated at parse time by the 3rd token (`synth:...`/`sample`/`sf`
+  select the new forms; anything else falls through to the legacy 4-value form) and coexist
+  without collision. The net effect: **every pre-existing `.beat` file parses into an identical
+  document and re-serializes byte-for-byte unchanged** — round-tripped and tested
+  (`test/format-v10-drum-lanes.test.ts`).
+- **Optional `duration` on `hit` lines** (research 20 Part 7, cashing in research 12's own
+  pre-authorized escape hatch: "an optional trailing token adds back compatibly under canonical
+  elision"): `hit <id> <lane> <start> <velocity> [<duration>]`. Appended LAST, so a hit with no
+  duration is a plain 4-value line — a byte-for-byte truncation of the 5-value form, meaning every
+  pre-existing hit line is untouched. Present, it gates the voice for `duration` 16th-steps instead
+  of firing a lengthless one-shot; meaning is resolved per the lane's backing (research 20 Part 4):
+  release for synth-/sf-backed lanes, truncation for sample-backed ones. `duration > 0`, same unit
+  and precision rules as `start`/`BeatNote.duration`.
+- **The 12-lane default kit** (research 19 Part VII): `kick`/`snare`/`rimshot`/`clap`/`hat`/
+  `openhat`/`tom_lo`/`tom_mid`/`tom_hi`/`crash`/`ride`/`cowbell`, each carrying its GM note number —
+  a strict superset of the old 5 (same names, same meanings). `beat add-track --kind drums` writes
+  this by default going forward; the low-level `addTrack()` core primitive keeps its old
+  zero-lanes default for every other/internal caller (existing tests, `vary`/`humanize`/`quantize`
+  internals) so nothing that doesn't ask for the new kit is affected.
+- **Presets**: `kit-808`, `kit-909` (synth-backed, the generalized voice table), `kit-acoustic`
+  (SoundFont-backed against the already-bundled `muldjordkit-small.sf2`) — see
+  `docs/phase-22-stream-ab.md` for the exact declarations.
+- **Diff**: a new `lane-decl` entry (added/removed/backing-changed, matched by declared name) and
+  `hit-changed` gained a `duration` field, alongside the existing `lane`/`start`/`velocity`.
+- **Do NOT build** (per both research docs, explicitly out of scope for this stream): no per-hit
+  "mode" flag (the lane's backing decides), no 128-pad grid UI, no per-pad device chains, no key/
+  velocity zones — research 18's Racks-skip stands.
 
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 

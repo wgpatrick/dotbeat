@@ -17,7 +17,7 @@
 // external edits reconcile via the SSE re-pull.
 
 import { useStore } from '../state/store'
-import type { BeatAutomationLane, BeatAutomationPoint, BeatDocument, BeatDrumHit, BeatSelection, DrumLane } from '../types'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatDocument, BeatDrumHit, BeatSelection } from '../types'
 import { DRUM_LANES } from '../types'
 
 export function daemonBase(): string {
@@ -44,15 +44,48 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
   if (idx === -1) return null
   const track = doc.tracks[idx]!
 
-  const patternMatch = rest.match(/^pattern\.([a-z]+)\[(\d+)\]$/)
+  const patternMatch = rest.match(/^pattern\.([a-zA-Z0-9_-]+)\[(\d+)\]$/)
   if (patternMatch) {
-    const lane = patternMatch[1] as DrumLane
+    const lane = patternMatch[1]!
     const step = Number(patternMatch[2])
     const vel = Number(value)
     const id = `${lane}${step}`
     const kept = track.hits.filter((h) => h.id !== id && !(h.lane === lane && h.start === step))
     const nextHits: BeatDrumHit[] = vel > 0 ? [...kept, { id, lane, start: step, velocity: canon(vel) }] : kept
     const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, hits: nextHits } : t))
+    return { ...doc, tracks }
+  }
+
+  // hit grammar (Phase 22 Stream AB drum editor) — mirrors core setValue's hit paths
+  // (src/core/edit.ts), the drum-side analog of the note grammar just below.
+  if (rest === 'hit') {
+    const parts = value.trim().split(/\s+/)
+    const [lane, start, velocity, duration] = parts
+    let max = 0
+    for (const t of doc.tracks) for (const h of t.hits) {
+      const m = h.id.match(/^h(\d+)$/)
+      if (m) max = Math.max(max, Number(m[1]))
+    }
+    const hit: BeatDrumHit = { id: `h${max + 1}`, lane: lane!, start: canon(Number(start)), velocity: canon(Number(velocity)) }
+    if (duration !== undefined) hit.duration = canon(Number(duration))
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, hits: [...t.hits, hit] } : t))
+    return { ...doc, tracks }
+  }
+  const hitFieldMatch = rest.match(/^hit\.([A-Za-z0-9_-]+)\.(lane|start|velocity|duration)$/)
+  if (hitFieldMatch) {
+    const [, hitId, field] = hitFieldMatch
+    if (field === 'duration' && value.trim() === '') {
+      const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, hits: t.hits.map((h) => (h.id === hitId ? { ...h, duration: undefined } : h)) } : t))
+      return { ...doc, tracks }
+    }
+    const n: string | number = field === 'lane' ? value : canon(Number(value))
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, hits: t.hits.map((h) => (h.id === hitId ? { ...h, [field!]: n } : h)) } : t))
+    return { ...doc, tracks }
+  }
+  const hitDeleteMatch = rest.match(/^hit\.([A-Za-z0-9_-]+)$/)
+  if (hitDeleteMatch) {
+    const hitId = hitDeleteMatch[1]
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, hits: t.hits.filter((h) => h.id !== hitId) } : t))
     return { ...doc, tracks }
   }
 

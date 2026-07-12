@@ -50,6 +50,9 @@ import {
   formatPresetList,
   filterPresetsByCategory,
   PRESET_CATEGORIES,
+  parseDrumKitLibrary,
+  applyDrumKit,
+  formatDrumKitList,
   parseSelection,
   serializeSelection,
   type BeatDocument,
@@ -396,7 +399,8 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'beat_add_hit',
-    description: 'Add a free-timed drum hit to a drum track (format v0.8). start is in fractional 16th-note steps (e.g. 4.5 is halfway between steps 4 and 5 — the off-grid timing that gives a groove its feel); velocity 0..1. lane is one of kick|snare|clap|hat|openhat.',
+    description:
+      'Add a free-timed drum hit to a drum track (format v0.10). start is in fractional 16th-note steps (e.g. 4.5 is halfway between steps 4 and 5 — the off-grid timing that gives a groove its feel); velocity 0..1. lane is open: one of the track\'s own declared lanes (see beat_inspect), or one of the implicit kick|snare|clap|hat|openhat for a track that declares none. Optional duration (16th steps, > 0) gates the voice instead of firing a one-shot trigger — release for synth/SoundFont-backed lanes, truncation for sample-backed ones.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -405,13 +409,15 @@ const TOOLS: ToolDef[] = [
         lane: { type: 'string' },
         start: { type: 'number' },
         velocity: { type: 'number' },
+        duration: { type: 'number' },
       },
       required: ['file', 'track', 'lane', 'start', 'velocity'],
     },
     handler: (args) => {
       const file = str(args, 'file')
       const before = parse(readFileSync(file, 'utf8'))
-      const { doc } = addHit(before, str(args, 'track'), { lane: str(args, 'lane') as never, start: num(args, 'start'), velocity: num(args, 'velocity') })
+      const duration = typeof args.duration === 'number' ? args.duration : undefined
+      const { doc } = addHit(before, str(args, 'track'), { lane: str(args, 'lane'), start: num(args, 'start'), velocity: num(args, 'velocity'), duration })
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
     },
@@ -695,6 +701,38 @@ const TOOLS: ToolDef[] = [
       if (!preset) throw new Error(`no preset "${name}" (have: ${presets.map((p) => p.name).join(', ')})`)
       const before = parse(readFileSync(file, 'utf8'))
       const doc = applyPreset(before, str(args, 'track'), preset)
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_drum_kits',
+    description:
+      'List the factory drum-kit library (Phase 22 Stream AB, docs/research/19-drum-voice-expansion.md): kit-808/kit-909 (synth-backed) and kit-acoustic (SoundFont-backed against the bundled MuldjordKit — register it first with beat_sample under the id "muldjordkit", or pass --sample to remap when applying). A kit REPLACES a drum track\'s whole lane list — see beat_drum_kit.',
+    inputSchema: { type: 'object', properties: {} },
+    handler: () => formatDrumKitList(parseDrumKitLibrary(readFileSync(join(repoRoot, 'presets', 'drum-kits.json'), 'utf8'))),
+  },
+  {
+    name: 'beat_drum_kit',
+    description:
+      'Apply a named drum kit to a track: REPLACES its whole declared lane list (research 19 Part VI/VII) with the kit\'s — a complete voicing, not an incremental edit. Fails loudly if the track has existing hits on lanes the new kit doesn\'t declare, or if a sample/SoundFont-backed lane references media the file hasn\'t registered yet (beat_sample first). Use beat_drum_kits to see what exists.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        kit: { type: 'string', description: 'a name from beat_drum_kits, e.g. "kit-808"' },
+      },
+      required: ['file', 'track', 'kit'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const kits = parseDrumKitLibrary(readFileSync(join(repoRoot, 'presets', 'drum-kits.json'), 'utf8'))
+      const name = str(args, 'kit')
+      const kit = kits.find((k) => k.name === name)
+      if (!kit) throw new Error(`no drum kit "${name}" (have: ${kits.map((k) => k.name).join(', ')})`)
+      const before = parse(readFileSync(file, 'utf8'))
+      const doc = applyDrumKit(before, str(args, 'track'), kit)
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
     },

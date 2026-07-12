@@ -752,6 +752,11 @@ body {
 .noteview-note:active {
   cursor: grabbing;
 }
+/* A durationless hit (a one-shot trigger marker, Phase 22 Stream AB) — a small pill instead of a
+   bar, distinguished with a light border so it doesn't read as a truncated note. */
+.noteview-note.marker {
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
 .noteview-resize {
   position: absolute;
   right: 0;

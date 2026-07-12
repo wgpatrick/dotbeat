@@ -1,5 +1,5 @@
-import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, defaultEffectChain, defaultSynthFields } from './document.js'
+import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TRACK_KINDS, declaredLaneNames, defaultEffectChain, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -30,6 +30,10 @@ function isDrumLane(s: string): s is DrumLane {
 
 function isEffectType(s: string): s is EffectType {
   return (EFFECT_TYPES as readonly string[]).includes(s)
+}
+
+function isDrumVoiceType(s: string): s is DrumVoiceType {
+  return (DRUM_VOICE_TYPES as readonly string[]).includes(s)
 }
 
 function parseFloatStrict(tok: string, lineNo: number, field: string): number {
@@ -186,17 +190,67 @@ export function parse(text: string): BeatDocument {
   }
 
   // v0.8: a free-timed drum hit — `hit <id> <lane> <start> <velocity>`. start is fractional
-  // steps (v0.7 number rules), absolute over the loop; no duration (one-shot trigger).
-  function parseHitLine(tokens: string[], lineNo: number): BeatDrumHit {
-    if (tokens.length !== 5) throw new BeatParseError('hit expects exactly 4 values: <id> <lane> <start> <velocity>', lineNo)
-    const [, id, laneTok, startTok, velTok] = tokens as [string, string, string, string, string]
+  // steps (v0.7 number rules), absolute over the loop. Phase 22 Stream AB (research 20 Part 7)
+  // appends an OPTIONAL trailing `duration` — 5 tokens (no duration) parses exactly as before
+  // (byte-identical for every pre-existing file); 6 tokens gates the voice for that many steps.
+  // `laneNames` is the enclosing track's declared lane set (declaredLaneNames) — validated here
+  // so an undeclared lane fails loudly at parse time, not silently at playback.
+  function parseHitLine(tokens: string[], laneNames: readonly string[], lineNo: number): BeatDrumHit {
+    if (tokens.length !== 5 && tokens.length !== 6) throw new BeatParseError('hit expects 4 or 5 values: <id> <lane> <start> <velocity> [<duration>]', lineNo)
+    const [, id, laneTok, startTok, velTok, durTok] = tokens as [string, string, string, string, string, string?]
     if (!SLUG_RE.test(id)) throw new BeatParseError(`hit ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
-    if (!isDrumLane(laneTok)) throw new BeatParseError(`unknown drum lane "${laneTok}" (expected one of ${DRUM_LANES.join('|')})`, lineNo)
+    if (!laneNames.includes(laneTok)) throw new BeatParseError(`unknown drum lane "${laneTok}" (expected one of ${laneNames.join('|')} — declare it with a "lane" line first)`, lineNo)
     const start = parseFloatStrict(startTok, lineNo, 'hit start')
     if (start < 0) throw new BeatParseError(`hit start must be >= 0, got ${start}`, lineNo)
     const velocity = parseFloatStrict(velTok, lineNo, 'hit velocity')
     if (velocity <= 0 || velocity > 1) throw new BeatParseError(`hit velocity must be in (0, 1], got ${velocity}`, lineNo)
-    return { id, lane: laneTok, start, velocity }
+    const hit: BeatDrumHit = { id, lane: laneTok, start, velocity }
+    if (durTok !== undefined) {
+      const duration = parseFloatStrict(durTok, lineNo, 'hit duration')
+      if (duration <= 0) throw new BeatParseError(`hit duration must be > 0 steps, got ${duration}`, lineNo)
+      hit.duration = duration
+    }
+    return hit
+  }
+
+  // Phase 22 Stream AB: parses one of the three NEW `lane` declaration forms (synth:/sample/sf),
+  // pushing onto `track.lanes` in declaration order. Returns false (no-op) if the line doesn't
+  // match any new form, so the caller falls through to the legacy 5-token `lane <lane> <sample-id>
+  // <gain> <tune>` handling (unchanged — see below), which is what keeps every pre-existing v0.5+
+  // file parsing byte-identically: the new forms are additive, never required.
+  function tryParseLaneDecl(tokens: string[], track: BeatTrack, lineNo: number): boolean {
+    if (tokens.length < 3) return false
+    const name = tokens[1]!
+    const sel = tokens[2]!
+    let backing: BeatDrumLaneDecl['backing'] | null = null
+    if (sel.startsWith('synth:')) {
+      const voice = sel.slice('synth:'.length)
+      if (!isDrumVoiceType(voice)) throw new BeatParseError(`unknown drum voice type "${voice}" (expected one of ${DRUM_VOICE_TYPES.join('|')})`, lineNo)
+      const params: Record<string, number> = {}
+      for (const kv of tokens.slice(3)) {
+        const eq = kv.indexOf('=')
+        if (eq === -1) throw new BeatParseError(`lane synth param must be "key=value", got "${kv}"`, lineNo)
+        const key = kv.slice(0, eq)
+        params[key] = parseFloatStrict(kv.slice(eq + 1), lineNo, `lane ${name} ${key}`)
+      }
+      backing = { type: 'synth', voice, params }
+    } else if (sel === 'sample') {
+      if (tokens.length !== 6) throw new BeatParseError('lane sample expects exactly 4 values: <name> sample <sample-id> <gain dB> <tune semitones>', lineNo)
+      const gainDb = parseFloatStrict(tokens[4]!, lineNo, 'lane gain')
+      const tune = parseFloatStrict(tokens[5]!, lineNo, 'lane tune')
+      backing = { type: 'sample', sample: tokens[3]!, gainDb, tune }
+    } else if (sel === 'sf') {
+      if (tokens.length !== 6) throw new BeatParseError('lane sf expects exactly 4 values: <name> sf <sample-id> <program> <note>', lineNo)
+      const program = parseIntStrict(tokens[4]!, lineNo, 'lane sf program')
+      const note = parseIntStrict(tokens[5]!, lineNo, 'lane sf note')
+      if (program < 0 || program > 127) throw new BeatParseError(`lane sf program must be 0-127, got ${program}`, lineNo)
+      if (note < 0 || note > 127) throw new BeatParseError(`lane sf note must be 0-127, got ${note}`, lineNo)
+      backing = { type: 'sf', sample: tokens[3]!, program, note }
+    }
+    if (!backing) return false
+    if (track.lanes.some((l) => l.name === name)) throw new BeatParseError(`duplicate lane declaration "${name}"`, lineNo)
+    track.lanes.push({ name, backing })
+    return true
   }
 
   // v0.9: `point <id> <time> <value>` — one automation point inside an open `auto` lane. time
@@ -292,6 +346,7 @@ export function parse(text: string): BeatDocument {
             ? { ...INIT_SYNTH }
             : ({ osc: 'sawtooth', volume: 0, cutoff: 0, resonance: 0, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0, ...defaultSynthFields() } as BeatSynth),
           laneSamples: {},
+          lanes: [],
           clips: [],
           notes: [],
           hits: [],
@@ -432,7 +487,12 @@ export function parse(text: string): BeatDocument {
       if (keyword === 'lane') {
         closeClipIfOpen(lineNo)
         if (currentTrack.kind !== 'drums') throw new BeatParseError(`lane lines only belong in drum tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
-        if (tokens.length !== 5) throw new BeatParseError('lane expects exactly 4 values: <lane> <sample-id> <gain dB> <tune semitones>', lineNo)
+        // Phase 22 Stream AB: try the new open-lane-list forms (synth:<voice> | sample <id> <gain>
+        // <tune> | sf <id> <program> <note>) FIRST; if none match, fall through to the legacy
+        // v0.5 form below unchanged — this is what keeps every pre-existing file parsing (and,
+        // since neither form touches the other's storage, re-serializing) byte-identically.
+        if (tryParseLaneDecl(tokens, currentTrack, lineNo)) continue
+        if (tokens.length !== 5) throw new BeatParseError('lane expects exactly 4 values: <lane> <sample-id> <gain dB> <tune semitones> (or a synth:/sample/sf backing)', lineNo)
         const [, laneTok, sampleId, gainTok, tuneTok] = tokens as [string, string, string, string, string]
         if (!isDrumLane(laneTok)) throw new BeatParseError(`unknown drum lane "${laneTok}" (expected one of ${DRUM_LANES.join('|')})`, lineNo)
         if (currentTrack.laneSamples[laneTok]) throw new BeatParseError(`duplicate lane line for "${laneTok}"`, lineNo)
@@ -458,7 +518,7 @@ export function parse(text: string): BeatDocument {
         currentTrack.notes.push(parseNoteLine(tokens, lineNo))
       } else if (keyword === 'hit') {
         if (currentTrack.kind !== 'drums') throw new BeatParseError(`hit lines only belong in drum tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
-        currentTrack.hits.push(parseHitLine(tokens, lineNo))
+        currentTrack.hits.push(parseHitLine(tokens, declaredLaneNames(currentTrack), lineNo))
       } else if (keyword === 'pattern') {
         // legacy (v<=0.7): accumulate, migrate to hits at track close
         if (currentTrack.kind !== 'drums') throw new BeatParseError(`pattern lines only belong in drum tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
@@ -485,7 +545,7 @@ export function parse(text: string): BeatDocument {
         }
         if (keyword === 'hit') {
           if (currentTrack.kind !== 'drums') throw new BeatParseError(`hit lines only belong in drum-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
-          currentClip.hits.push(parseHitLine(tokens, lineNo))
+          currentClip.hits.push(parseHitLine(tokens, declaredLaneNames(currentTrack), lineNo))
           continue
         }
         if (keyword === 'pattern') {
@@ -610,6 +670,15 @@ export function parse(text: string): BeatDocument {
   for (const t of tracks) {
     for (const [laneName, ls] of Object.entries(t.laneSamples)) {
       if (ls && !mediaIds.has(ls.sample)) throw new BeatParseError(`track "${t.id}" lane ${laneName}: references unknown sample "${ls.sample}"`, eof)
+    }
+  }
+  // Phase 22 Stream AB: sample-/sf-backed entries on the OPEN lane list must also reference a
+  // declared media sample — same fail-loudly stance as laneSamples/soundfont above.
+  for (const t of tracks) {
+    for (const decl of t.lanes) {
+      if ((decl.backing.type === 'sample' || decl.backing.type === 'sf') && !mediaIds.has(decl.backing.sample)) {
+        throw new BeatParseError(`track "${t.id}" lane "${decl.name}": references unknown sample "${decl.backing.sample}"`, eof)
+      }
     }
   }
 

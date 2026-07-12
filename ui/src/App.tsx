@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import { initBridge } from './daemon/bridge'
 import { useStore, selectedTrackId } from './state/store'
 import { TransportBar } from './components/TransportBar'
-import { StepSequencer } from './components/StepSequencer'
 import { SynthPanel } from './components/SynthPanel'
 import { InstrumentPanel } from './components/InstrumentPanel'
 import { NoteView } from './components/NoteView'
@@ -36,9 +35,10 @@ import { ContentBrowser } from './components/ContentBrowser'
 //     existing `.workspace` column unchanged — nothing inside ArrangementView/BottomPane moved.
 
 /** The bottom detail pane — Ableton's Clip View / Device View for the selected track. Clip View is
- * the note/hit editor for the track's kind (StepSequencer for drums, NoteView/piano-roll otherwise);
- * Device View is the sound (InstrumentPanel for SoundFont tracks, SynthPanel otherwise). Reuses those
- * components verbatim — only their location and the toggle that reveals them are new. */
+ * NoteView for every track kind (Phase 22 Stream AB retired StepSequencer — NoteView now takes a
+ * row-axis adapter and handles drum tracks via a named-lane adapter, the same "one editor, two row
+ * models" shape Ableton itself uses for its Drum Rack — see NoteView.tsx's header comment); Device
+ * View is the sound (InstrumentPanel for SoundFont tracks, SynthPanel otherwise). */
 function BottomPane() {
   const doc = useStore((s) => s.doc)
   const selected = useStore(selectedTrackId)
@@ -50,9 +50,7 @@ function BottomPane() {
   const track = doc.tracks.find((t) => t.id === selected)
   if (!track) return null
 
-  // Which concrete editor/device the two facets resolve to for this track's kind — exactly the
-  // decision the old Editor tab already made, just split across the Clip/Device toggle.
-  const clip = track.kind === 'drums' ? <StepSequencer track={track} /> : <NoteView track={track} />
+  const clip = <NoteView track={track} />
   const device = track.kind === 'instrument' ? <InstrumentPanel track={track} /> : <SynthPanel track={track} />
 
   return (

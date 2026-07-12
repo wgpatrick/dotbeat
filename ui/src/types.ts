@@ -16,6 +16,46 @@ export const DRUM_LABELS: Record<DrumLane, string> = {
   openhat: 'Open',
 }
 
+// Phase 22 Stream AB (mirrors src/core/document.ts's open lane model — research 19 Part VI Option
+// B). A drum track's `lanes` is either [] (legacy/migrated: the implicit 5 DRUM_LANES above,
+// synth-backed) or a fully-declared, ordered list that's authoritative for that track's lane
+// identity — see declaredLaneNames() below.
+export type DrumVoiceType = 'membrane' | 'noise' | 'metal'
+export interface BeatLaneSynthBacking {
+  type: 'synth'
+  voice: DrumVoiceType
+  params: Record<string, number>
+}
+export interface BeatLaneSampleBacking {
+  type: 'sample'
+  sample: string
+  gainDb: number
+  tune: number
+}
+export interface BeatLaneSfBacking {
+  type: 'sf'
+  sample: string
+  program: number
+  note: number
+}
+export type BeatLaneBacking = BeatLaneSynthBacking | BeatLaneSampleBacking | BeatLaneSfBacking
+export interface BeatDrumLaneDecl {
+  name: string
+  backing: BeatLaneBacking
+}
+
+export const DRUM_VOICE_PARAM_DEFAULTS: Record<DrumVoiceType, Record<string, number>> = {
+  membrane: { tune: 32.7, punch: 0.05, decay: 0.4 },
+  noise: { tone: 0, decay: 0.13 },
+  metal: { decay: 0.05, tone: 4000 },
+}
+
+/** Lane names in a drum track's declared order, or the implicit 5 DRUM_LANES when it declares
+ * none — mirrors src/core/document.ts's declaredLaneNames exactly (see that function's comment). */
+export function declaredLaneNames(track: Pick<BeatTrack, 'lanes'>): readonly string[] {
+  return track.lanes.length > 0 ? track.lanes.map((l) => l.name) : DRUM_LANES
+}
+
 export type OscType = 'sine' | 'triangle' | 'sawtooth' | 'square'
 export const OSC_TYPES_LIST: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square']
 export type TrackKind = 'synth' | 'drums' | 'instrument'
@@ -30,9 +70,10 @@ export interface BeatNote {
 
 export interface BeatDrumHit {
   id: string
-  lane: DrumLane
+  lane: string // Phase 22 Stream AB: open — validated against the track's declaredLaneNames()
   start: number // 16th steps, absolute over the loop
   velocity: number // (0..1]
+  duration?: number // 16th steps, > 0; absent = one-shot trigger (research 20 Part 7)
 }
 
 // The nine core synth params the panel exposes as controls; the full block carries ~60 fields
@@ -127,6 +168,7 @@ export interface BeatTrack {
   clips: BeatClip[]
   laneSamples: Record<string, unknown>
   effects: BeatEffect[]
+  lanes: BeatDrumLaneDecl[]
 }
 
 export interface BeatDocument {

@@ -10,9 +10,19 @@
 // machine-applicable changeset, and — later — the natural undo / --dry-run representation. Each
 // entry carries `before`/`after`, so inverting a diff is structurally trivial when we need it.
 
-import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatEffect, BeatNote, BeatTrack, DrumLane } from './document.js'
+import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatNote, BeatTrack, DrumLane } from './document.js'
 import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
 import { formatNumber } from './format.js'
+
+// Phase 22 Stream AB: a one-line human description of a lane's backing, for lane-decl diffs.
+function laneBackingDesc(b: BeatDrumLaneDecl['backing']): string {
+  if (b.type === 'synth') {
+    const params = Object.entries(b.params).map(([k, v]) => `${k}=${formatNumber(v)}`).join(' ')
+    return `synth:${b.voice}${params ? ` ${params}` : ''}`
+  }
+  if (b.type === 'sample') return `sample ${b.sample} (${formatNumber(b.gainDb)} dB, ${formatNumber(b.tune)} st)`
+  return `sf ${b.sample} program ${formatNumber(b.program)} note ${formatNumber(b.note)}`
+}
 
 export type DiffEntry =
   | { kind: 'header'; field: 'bpm' | 'loop_bars' | 'selected_track' | 'format_version'; before: string | number; after: string | number }
@@ -27,7 +37,7 @@ export type DiffEntry =
   // v0.8 drum hits (match by id, like notes)
   | { kind: 'hit-added'; trackId: string; hit: BeatDrumHit }
   | { kind: 'hit-removed'; trackId: string; hit: BeatDrumHit }
-  | { kind: 'hit-changed'; trackId: string; hitId: string; changes: { field: 'lane' | 'start' | 'velocity'; before: string | number; after: string | number }[] }
+  | { kind: 'hit-changed'; trackId: string; hitId: string; changes: { field: 'lane' | 'start' | 'velocity' | 'duration'; before: string | number | undefined; after: string | number | undefined }[] }
   // v0.4 song structure
   | { kind: 'clip-added'; trackId: string; clipId: string }
   | { kind: 'clip-removed'; trackId: string; clipId: string }
@@ -41,6 +51,8 @@ export type DiffEntry =
   | { kind: 'media-removed'; sampleId: string; path: string }
   | { kind: 'media-changed'; sampleId: string; field: 'sha256' | 'path'; before: string; after: string }
   | { kind: 'lane-sample'; trackId: string; lane: DrumLane; before: string | null; after: string | null }
+  // Phase 22 Stream AB: the OPEN lane list — added/removed/backing-changed, matched by name
+  | { kind: 'lane-decl'; trackId: string; lane: string; before: string | null; after: string | null }
   // v0.6 instrument tracks
   | { kind: 'instrument-param'; trackId: string; param: 'soundfont' | 'program' | 'volume' | 'pan'; before: string | number; after: string | number }
   // v0.9 clip automation (matched by (clipId, param, pointId) — points are stable ids, like notes/hits)
@@ -197,10 +209,11 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
         out.push({ kind: 'hit-added', trackId: id, hit: h })
         continue
       }
-      const changes: { field: 'lane' | 'start' | 'velocity'; before: string | number; after: string | number }[] = []
+      const changes: { field: 'lane' | 'start' | 'velocity' | 'duration'; before: string | number | undefined; after: string | number | undefined }[] = []
       if (before.lane !== h.lane) changes.push({ field: 'lane', before: before.lane, after: h.lane })
       if (before.start !== h.start) changes.push({ field: 'start', before: before.start, after: h.start })
       if (before.velocity !== h.velocity) changes.push({ field: 'velocity', before: before.velocity, after: h.velocity })
+      if (before.duration !== h.duration) changes.push({ field: 'duration', before: before.duration, after: h.duration })
       if (changes.length) out.push({ kind: 'hit-changed', trackId: id, hitId: hid, changes })
     }
 
@@ -298,6 +311,21 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
     if (ga.tracks.join(',') !== gb.tracks.join(',')) out.push({ kind: 'group-tracks', groupId: gid, before: ga.tracks, after: gb.tracks })
   }
 
+  // Phase 22 Stream AB: the OPEN lane list, per common track, matched by declared name (like
+  // notes/hits — an add/remove/backing-swap reads as exactly that, not a whole-list replace).
+  for (const id of commonIds) {
+    const ta = aTracks.get(id)!.t
+    const tb = bTracks.get(id)!.t
+    const aLanes = new Map(ta.lanes.map((l) => [l.name, l]))
+    const bLanes = new Map(tb.lanes.map((l) => [l.name, l]))
+    const names = new Set([...aLanes.keys(), ...bLanes.keys()])
+    for (const name of names) {
+      const before = aLanes.get(name) ? laneBackingDesc(aLanes.get(name)!.backing) : null
+      const after = bLanes.get(name) ? laneBackingDesc(bLanes.get(name)!.backing) : null
+      if (before !== after) out.push({ kind: 'lane-decl', trackId: id, lane: name, before, after })
+    }
+  }
+
   // The song is one ordered statement — compare whole (order IS the data; per-index diffs of a
   // reordered section list would read as noise).
   const songKey = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}:${x.bars}`).join(',') : '')
@@ -358,9 +386,11 @@ export function formatDiff(entries: DiffEntry[]): string {
       case 'hit-removed':
         lines.push(`${e.trackId}: ${e.hit.lane} hit removed ${e.hit.id} (step ${formatNumber(e.hit.start)})`)
         break
-      case 'hit-changed':
-        lines.push(`${e.trackId}: hit ${e.hitId} ${e.changes.map((c) => `${c.field} ${typeof c.before === 'number' ? formatNumber(c.before) : c.before} -> ${typeof c.after === 'number' ? formatNumber(c.after) : c.after}`).join(', ')}`)
+      case 'hit-changed': {
+        const fmtHitVal = (v: string | number | undefined) => (v === undefined ? '(none)' : typeof v === 'number' ? formatNumber(v) : v)
+        lines.push(`${e.trackId}: hit ${e.hitId} ${e.changes.map((c) => `${c.field} ${fmtHitVal(c.before)} -> ${fmtHitVal(c.after)}`).join(', ')}`)
         break
+      }
       case 'clip-added':
         lines.push(`${e.trackId}: clip added "${e.clipId}"`)
         break
@@ -390,6 +420,9 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'lane-sample':
         lines.push(`${e.trackId}: ${e.lane} lane ${e.before ?? 'synth voice'} -> ${e.after ?? 'synth voice'}`)
+        break
+      case 'lane-decl':
+        lines.push(`${e.trackId}: lane "${e.lane}" ${e.before ?? '(undeclared)'} -> ${e.after ?? '(removed)'}`)
         break
       case 'instrument-param':
         lines.push(`${e.trackId}: ${e.param} ${fmtVal(e.before)} -> ${fmtVal(e.after)}`)

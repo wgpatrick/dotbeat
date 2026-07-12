@@ -26,7 +26,7 @@ stream to pick up — not guesswork, a decision away from being built.
 
 ## Snapshot — 82 features tracked
 
-**27** Done · **0** In progress · **55** Not started
+**31** Done · **0** In progress · **51** Not started
 
 ---
 
@@ -64,10 +64,10 @@ stream to pick up — not guesswork, a decision away from being built.
 
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
-| Open per-track lane model + 12-lane GM-aligned default kit | Replace the closed 5-lane enum with a declared lane list; synth-backed 808/909 voices + SoundFont-backed realistic percussion, hybrid by role. | 🔶 partial | 🔶 partial | ❌ missing | ⬜ Not started | [`19-drum-voice-expansion.md`](research/19-drum-voice-expansion.md) | — |
-| Optional per-hit duration field | One optional duration token on hit lines — byte-identical for existing files; substrate (synth/sample/SF) decides release vs. truncation semantics. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`20-drum-clip-editor-redesign.md`](research/20-drum-clip-editor-redesign.md) | — |
-| Unified drum clip editor | Extend NoteView with a row-axis adapter for named drum lanes instead of pitch; retire StepSequencer as the primary editor. | — | — | ❌ missing | ⬜ Not started | [`20-drum-clip-editor-redesign.md`](research/20-drum-clip-editor-redesign.md) | — |
-| Choke-group handling (hat pair) | Open hat silenced by closed hat on the same tick, standard drum-machine behavior. | ❌ missing | — | — | ⬜ Not started | [`19-drum-voice-expansion.md`](research/19-drum-voice-expansion.md) | — |
+| Open per-track lane model + 12-lane GM-aligned default kit | v0.10: an open, declared, ordered lane list per drum track (synth:<voice>/sample/sf backings), layered additively alongside the legacy closed-5-lane mechanism so every pre-v0.10 file parses and re-serializes byte-identically. kit-808/kit-909 (synth) + kit-acoustic (SoundFont, MuldjordKit) ship in presets/drum-kits.json; `beat add-track --kind drums` defaults to the 12-lane kit going forward. No dedicated GUI knob surface for per-lane synth params yet (author via a kit preset or hand-edit) — the honest gap this leaves open. | ✅ done | ✅ done | 🔶 partial | ✅ Done | [`19-drum-voice-expansion.md`](research/19-drum-voice-expansion.md) | [`phase-22-stream-ab.md`](phase-22-stream-ab.md) |
+| Optional per-hit duration field | One optional trailing duration token on hit lines, elided when absent (byte-identical for every pre-existing file); the lane's backing decides release (synth/SF) vs. truncation (sample) semantics. `beat add-hit`/`beat set <track>.hit.<id>.duration` and the GUI's drag-to-resize both write it. | ✅ done | ✅ done | ✅ done | ✅ Done | [`20-drum-clip-editor-redesign.md`](research/20-drum-clip-editor-redesign.md) | [`phase-22-stream-ab.md`](phase-22-stream-ab.md) |
+| Unified drum clip editor | NoteView generalized behind a row-axis adapter (rowCount/rowLabel/rowOfValue/valueOfRow) — melodic tracks keep the unchanged pitch adapter, drum tracks get a named-lane adapter over the kit's declared lanes. A durationless hit renders as a marker; dragging its edge creates a duration (marker -> bar). Soft grid-snap by default, Alt/Cmd freehand bypass. StepSequencer.tsx retired (deleted, no second permanent editor). | — | — | ✅ done | ✅ Done | [`20-drum-clip-editor-redesign.md`](research/20-drum-clip-editor-redesign.md) | [`phase-22-stream-ab.md`](phase-22-stream-ab.md) |
+| Choke-group handling (hat pair) | A closed-hat hit silences a ringing open hat (declared-lane kits only, keyed by canonical lane name) — release for synth/SF voices, stop for sample players. | — | — | ✅ done | ✅ Done | [`19-drum-voice-expansion.md`](research/19-drum-voice-expansion.md) | [`phase-22-stream-ab.md`](phase-22-stream-ab.md) |
 
 ## Arrangement / song structure
 

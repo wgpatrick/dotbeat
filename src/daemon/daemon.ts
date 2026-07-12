@@ -64,6 +64,7 @@ import {
   setGroupColor,
   setGroupTracks,
   initDocument,
+  defaultDrumKitLanes,
   BeatEditError,
   BeatPresetError,
   BeatParseError,
@@ -738,6 +739,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           if (b.soundfont && typeof b.soundfont.sample === 'string') {
             opts.soundfont = { sample: b.soundfont.sample, program: typeof b.soundfont.program === 'number' ? b.soundfont.program : 0 }
           }
+          // Phase 22 Stream AB: a fresh drum track from the GUI's "add track" gets the 12-lane
+          // GM-aligned default kit (research 19 Part VII), same as `beat add-track --kind drums`.
+          if (b.kind === 'drums') opts.lanes = defaultDrumKitLanes()
           const { doc: next } = addTrack(doc, opts)
           const written = writeIfChanged(next)
           revalidateSelection()

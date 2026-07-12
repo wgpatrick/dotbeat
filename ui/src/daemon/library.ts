@@ -10,7 +10,7 @@
 
 import { daemonBase } from './bridge'
 import { useStore } from '../state/store'
-import type { BeatDocument, DrumLane } from '../types'
+import type { BeatDocument } from '../types'
 
 export interface LibraryPreset {
   name: string
@@ -20,7 +20,10 @@ export interface LibraryPreset {
   params: Record<string, number | string | boolean>
 }
 export interface LibraryKitLane {
-  lane: DrumLane
+  // Phase 22 Stream AB opened the lane model to arbitrary declared names (research 19 Part VI
+  // Option B) — widened from the old closed DrumLane enum so a kit one-shot can target any of a
+  // 12-lane kit's rows (rimshot/tom_lo/cowbell/...), not just the legacy 5.
+  lane: string
   file: string
 }
 export interface LibraryKit {
@@ -80,7 +83,7 @@ export async function applyPresetToTrack(track: string, name: string): Promise<v
 
 /** Drag one kit lane onto a drum lane (targetLane, if it differs from the sample's own lane) or a
  * whole kit onto a drum track (lane omitted -> every lane the kit has). */
-export async function installKitLane(track: string, kit: string, opts: { lane?: DrumLane; targetLane?: DrumLane } = {}): Promise<void> {
+export async function installKitLane(track: string, kit: string, opts: { lane?: string; targetLane?: string } = {}): Promise<void> {
   const doc = await postLibrary('/library/install-kit', { track, kit, ...opts })
   useStore.getState().setDoc(doc)
 }
@@ -104,7 +107,7 @@ export type DragPayload =
   | { type: 'preset'; name: string; kind: 'synth' | 'drums' | 'any' }
   // `lane` present = one one-shot (drop onto a specific drum lane, possibly a DIFFERENT lane than
   // its own); `lane` absent = the whole kit, every lane it has (drop onto a drum track's header).
-  | { type: 'kit-lane'; kit: string; lane?: DrumLane }
+  | { type: 'kit-lane'; kit: string; lane?: string }
   | { type: 'soundfont'; file: string }
 
 export function setDragPayload(dt: DataTransfer, payload: DragPayload): void {
