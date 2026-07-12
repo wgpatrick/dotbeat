@@ -10,7 +10,7 @@
 // machine-applicable changeset, and — later — the natural undo / --dry-run representation. Each
 // entry carries `before`/`after`, so inverting a diff is structurally trivial when we need it.
 
-import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatNote, BeatTrack, DrumLane } from './document.js'
+import type { BeatAudioRegion, BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatNote, BeatTrack, DrumLane } from './document.js'
 import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -76,6 +76,11 @@ export type DiffEntry =
   | { kind: 'group-removed'; groupId: string; name: string }
   | { kind: 'group-meta'; groupId: string; field: 'name' | 'color'; before: string; after: string }
   | { kind: 'group-tracks'; groupId: string; before: string[]; after: string[] }
+  // Phase 22 Stream AE: an audio-region clip's region, matched by clip id (a clip has at most
+  // one). Field changes itemize like hit-changed — a trim/gain/warp edit names exactly what moved.
+  | { kind: 'audio-region-added'; trackId: string; clipId: string; region: BeatAudioRegion }
+  | { kind: 'audio-region-removed'; trackId: string; clipId: string; region: BeatAudioRegion }
+  | { kind: 'audio-region-changed'; trackId: string; clipId: string; changes: { field: 'media' | 'in' | 'out' | 'gainDb' | 'warp' | 'rate'; before: string | number; after: string | number }[] }
 
 // v0.9: diffs one clip's automation lanes. Lanes match by param name; points within a lane match
 // by id (like notes/hits) — a point moved in time or re-valued reports as one changed entry, not
@@ -264,6 +269,21 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
       // snapshot, re-snapshot noise is common), automation points are itemized per-point, matched
       // by (param, id) — a knob move mid-clip is a specific musical fact worth naming, not noise.
       diffClipAutomation(id, cid, ca.automation, cb.automation, out)
+
+      // Phase 22 Stream AE: audio-region clips. A clip has at most one region, so it's not a
+      // membership diff like notes/hits — added/removed/field-changed, matched by clip id.
+      if (ca.audio && !cb.audio) out.push({ kind: 'audio-region-removed', trackId: id, clipId: cid, region: ca.audio })
+      else if (!ca.audio && cb.audio) out.push({ kind: 'audio-region-added', trackId: id, clipId: cid, region: cb.audio })
+      else if (ca.audio && cb.audio) {
+        const changes: { field: 'media' | 'in' | 'out' | 'gainDb' | 'warp' | 'rate'; before: string | number; after: string | number }[] = []
+        if (ca.audio.media !== cb.audio.media) changes.push({ field: 'media', before: ca.audio.media, after: cb.audio.media })
+        if (ca.audio.in !== cb.audio.in) changes.push({ field: 'in', before: ca.audio.in, after: cb.audio.in })
+        if (ca.audio.out !== cb.audio.out) changes.push({ field: 'out', before: ca.audio.out, after: cb.audio.out })
+        if (ca.audio.gainDb !== cb.audio.gainDb) changes.push({ field: 'gainDb', before: ca.audio.gainDb, after: cb.audio.gainDb })
+        if (ca.audio.warp !== cb.audio.warp) changes.push({ field: 'warp', before: ca.audio.warp, after: cb.audio.warp })
+        if (ca.audio.rate !== cb.audio.rate) changes.push({ field: 'rate', before: ca.audio.rate, after: cb.audio.rate })
+        if (changes.length) out.push({ kind: 'audio-region-changed', trackId: id, clipId: cid, changes })
+      }
     }
   }
 
@@ -489,6 +509,15 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'group-tracks':
         lines.push(`group ${e.groupId}: tracks ${e.before.join(',') || '(none)'} -> ${e.after.join(',') || '(none)'}`)
+        break
+      case 'audio-region-added':
+        lines.push(`${e.trackId}: clip "${e.clipId}" audio region added (${e.region.media} ${formatNumber(e.region.in)}-${formatNumber(e.region.out)}, ${e.region.warp})`)
+        break
+      case 'audio-region-removed':
+        lines.push(`${e.trackId}: clip "${e.clipId}" audio region removed (${e.region.media} ${formatNumber(e.region.in)}-${formatNumber(e.region.out)})`)
+        break
+      case 'audio-region-changed':
+        lines.push(`${e.trackId}: clip "${e.clipId}" audio ${e.changes.map((c) => `${c.field} ${typeof c.before === 'number' ? formatNumber(c.before) : c.before} -> ${typeof c.after === 'number' ? formatNumber(c.after) : c.after}`).join(', ')}`)
         break
       case 'song-changed': {
         const fmt = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}(${x.bars})`).join(' ') : '(no song)')

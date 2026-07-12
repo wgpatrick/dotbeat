@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
-import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, daemonBase } from '../daemon/bridge'
+import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, daemonBase } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
-import { declaredLaneNames, type BeatAutomationPoint, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind } from '../types'
+import { declaredLaneNames, WARP_MODES, type BeatAutomationPoint, type BeatClip, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind, type WarpMode } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 
 // Phase 20 Stream W — track add/delete/rename/recolor + project-folder controls. There is no BeatLab
@@ -15,7 +15,7 @@ import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 // button (its SceneLauncher scene-del). Rename/color write the existing `<track>.name`/`<track>.color`
 // setValue paths via postEdit; add/remove go through the new /add-track /remove-track daemon routes
 // (postAddTrack/postRemoveTrack) wrapping core's addTrack/removeTrack.
-const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument']
+const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument', 'audio']
 
 // ── Arrangement length (Phase 19 Stream V) ───────────────────────────────────────────────────────
 // Two length surfaces, matching the two document modes. Loop mode (doc.song === null) is a single
@@ -225,11 +225,15 @@ const MARKER_HIT = 8 // px radius to grab a breakpoint
 const SPEC_BY_KEY: Map<string, ParamSpec> = new Map()
 for (const g of PARAM_GROUPS) for (const p of g.params) if (p.kind === 'knob') SPEC_BY_KEY.set(p.key, p)
 
-/** The automatable params offered for a track kind, in synthParams group order. */
+/** The automatable params offered for a track kind, in synthParams group order. Phase 22 Stream
+ * AE: 'audio' tracks aren't in synthParams.ts's PARAM_GROUPS table at all (they carry no synth
+ * block) — their one automatable param is the clip's own 'gain' (AUDIO_AUTOMATABLE_PARAMS in
+ * document.ts), so it's listed directly rather than derived from the loop below. */
 const AUTO_OPTIONS_BY_KIND: Record<TrackKind, { key: string; label: string }[]> = {
   synth: [],
   drums: [],
   instrument: [],
+  audio: [{ key: 'gain', label: 'Clip Gain' }],
 }
 for (const g of PARAM_GROUPS) {
   for (const kind of g.kinds) {
@@ -241,13 +245,19 @@ for (const g of PARAM_GROUPS) {
   }
 }
 
+// Phase 22 Stream AE: 'gain' isn't a synth field (it's not in PARAM_GROUPS/SPEC_BY_KEY at all —
+// it only exists on audio-track clips, AUDIO_AUTOMATABLE_PARAMS in document.ts), so it needs its
+// own range here rather than falling through to the generic 0..1 default — a clip gain automation
+// point is a dB value, same shape as the synth volume field's range.
 function specFor(param: string): ParamSpec {
+  if (param === 'gain') return { key: 'gain', label: 'Clip Gain', kind: 'knob', min: -60, max: 6, format: (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)}` }
   return SPEC_BY_KEY.get(param) ?? { key: param, label: param, kind: 'knob', min: 0, max: 1, format: (v: number) => v.toFixed(2) }
 }
 function laneLabel(track: BeatTrack, param: string): string {
   const spec = specFor(param)
   if (param === 'volume') return 'Track Vol'
   if (param === 'pan') return 'Track Pan'
+  if (param === 'gain') return 'Clip Gain'
   return `${track.name} / ${spec.label}`
 }
 
@@ -379,6 +389,7 @@ function TrackRow({
   groupPickChecked,
   onToggleGroupPick,
   alreadyGrouped,
+  audioOccurrences,
 }: {
   flat: TrackFlat
   totalBars: number
@@ -397,6 +408,10 @@ function TrackRow({
   /** True when this track already belongs to a group — a track can only be in one, so the pick
    * checkbox is hidden rather than offered-and-refused. */
   alreadyGrouped?: boolean
+  /** Phase 22 Stream AE: this track's clip occurrences (only meaningful for kind 'audio' — every
+   * other kind ignores it). Passed down rather than recomputed: the parent already builds this
+   * exact list (occurrencesByTrack) for the automation-lane wiring. */
+  audioOccurrences?: ClipOccurrence[]
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { track } = flat
@@ -491,7 +506,32 @@ function TrackRow({
       }
     }
 
-    if (detail) {
+    if (track.kind === 'audio') {
+      // Phase 22 Stream AE: the minimum-viable visual — a flat-colored labeled block per clip
+      // occurrence (section), with dark edge markers standing in for in/out handles. No waveform
+      // rendering and no drag-to-trim this stream (a real lift — see docs/phase-22-stream-ae.md's
+      // honest gap note); trim via the fields under the track, or `beat set`/beat_set.
+      for (const occ of audioOccurrences ?? []) {
+        const clip = track.clips.find((c) => c.id === occ.clipId)
+        if (!clip?.audio) continue
+        const x = occ.startBar * pxPerBar
+        const w = Math.max(4, occ.bars * pxPerBar)
+        ctx.fillStyle = track.color
+        ctx.globalAlpha = 0.85
+        ctx.fillRect(x + 1, 4, w - 2, ROW_H - 8)
+        ctx.globalAlpha = 1
+        ctx.fillStyle = 'rgba(0,0,0,0.35)'
+        ctx.fillRect(x + 1, 4, 3, ROW_H - 8) // in-point marker
+        ctx.fillRect(x + w - 4, 4, 3, ROW_H - 8) // out-point marker
+        if (w > 40) {
+          ctx.fillStyle = '#0b0e14'
+          ctx.font = '10px sans-serif'
+          ctx.textBaseline = 'middle'
+          const label = clip.audio.warp === 'off' ? clip.audio.media : `${clip.audio.media} · ${clip.audio.warp} x${clip.audio.rate}`
+          ctx.fillText(label, x + 8, ROW_H / 2, w - 16)
+        }
+      }
+    } else if (detail) {
       if (track.kind === 'drums') {
         // Stacked lane rows (the track's own declared lanes, or the implicit 5 — Phase 22 Stream
         // AB); a hit is a tick at its lane.
@@ -549,7 +589,7 @@ function TrackRow({
       ctx.lineTo(x1 - 0.5, ROW_H)
       ctx.stroke()
     }
-  }, [flat, totalBars, pxPerBar, detail, sections, band, track])
+  }, [flat, totalBars, pxPerBar, detail, sections, band, track, audioOccurrences])
 
   return (
     <div className={`arr-row ${dimmed ? 'dimmed' : ''}`} style={{ height: ROW_H }}>
@@ -967,6 +1007,53 @@ function GroupHeaderRow({ group, collapsed, onToggleCollapse, onUngroup }: { gro
   )
 }
 
+/** Phase 22 Stream AE: the minimum-viable trim/gain/warp editor for an audio-region clip — numeric
+ * fields, not canvas drag-handles (a real drag-gesture lift on top of the canvas's existing
+ * pointer/hit-testing code — deliberately out of scope this stream; see the block/handle-marker
+ * visual in TrackRow and docs/phase-22-stream-ae.md's honest gap note). Edits ride the ordinary
+ * postEdit `<track>.clip.<id>.audio.<field>` path (core's setValue already carries it), so they're
+ * optimistic + debounced exactly like every other knob in this file. Shown under a track's row for
+ * its PRIMARY (first-playing) clip occurrence only — trimming a later occurrence of the same clip
+ * id trims every occurrence, since they all reference one clip. */
+function AudioClipInspector({ track, clip }: { track: BeatTrack; clip: BeatClip }) {
+  const region = clip.audio
+  if (!region) return null
+  const base = `${track.id}.clip.${clip.id}.audio`
+  return (
+    <div className="arr-audio-inspector" style={{ paddingLeft: HEADER_W }}>
+      <span className="arr-audio-inspector-label">{clip.id}:</span>
+      <label>
+        in
+        <input type="number" step="0.01" min={0} defaultValue={region.in} data-audio-in={clip.id} onBlur={(e) => postEdit(`${base}.in`, e.target.value)} />
+      </label>
+      <label>
+        out
+        <input type="number" step="0.01" min={0} defaultValue={region.out} data-audio-out={clip.id} onBlur={(e) => postEdit(`${base}.out`, e.target.value)} />
+      </label>
+      <label>
+        gain (dB)
+        <input type="number" step="0.5" defaultValue={region.gainDb} data-audio-gain={clip.id} onBlur={(e) => postEdit(`${base}.gainDb`, e.target.value)} />
+      </label>
+      <label>
+        warp
+        <select value={region.warp} data-audio-warp={clip.id} onChange={(e) => postEdit(`${base}.warp`, e.target.value)}>
+          {WARP_MODES.map((w: WarpMode) => (
+            <option key={w} value={w}>
+              {w}
+            </option>
+          ))}
+        </select>
+      </label>
+      {region.warp === 'repitch' && (
+        <label>
+          rate
+          <input type="number" step="0.05" min={0.1} max={8} defaultValue={region.rate} data-audio-rate={clip.id} onBlur={(e) => postEdit(`${base}.rate`, e.target.value)} />
+        </label>
+      )}
+    </div>
+  )
+}
+
 export function ArrangementView() {
   const doc = useStore((s) => s.doc)
   const selection = useStore((s) => s.selection)
@@ -1156,6 +1243,33 @@ export function ArrangementView() {
       })
     },
     [occurrencesByTrack],
+  )
+
+  // Phase 22 Stream AE: split-at-playhead. currentStep is the SAME absolute song-timeline step the
+  // moving playhead div is positioned from (see showPlayhead/playheadLeft below); find whichever
+  // occurrence (section) the playhead currently sits over for this track, convert to a CLIP-
+  // relative step, and hand off to the daemon's /audio-split route (postAudioSplit).
+  const splitAudioAtPlayhead = useCallback(
+    async (track: BeatTrack) => {
+      const occ = occurrencesByTrack.get(track.id) ?? []
+      const hit = occ.find((o) => currentStep >= o.startBar * 16 && currentStep < (o.startBar + o.bars) * 16)
+      if (!hit) {
+        window.alert('Move the playhead over this track\'s clip first (split-at-playhead needs a position inside the clip).')
+        return
+      }
+      const atSteps = currentStep - hit.startBar * 16
+      if (atSteps <= 0) {
+        window.alert('The playhead is at the very start of the clip — nothing to split there.')
+        return
+      }
+      try {
+        await postAudioSplit(track.id, hit.clipId, atSteps)
+        postSelection({ tracks: [track.id] })
+      } catch (err) {
+        window.alert(`Could not split: ${(err as Error).message}`)
+      }
+    },
+    [occurrencesByTrack, currentStep],
   )
 
   const barFromClientX = useCallback(
@@ -1733,16 +1847,29 @@ export function ArrangementView() {
                 groupPickChecked={groupPick.has(flat.track.id)}
                 onToggleGroupPick={() => toggleGroupPick(flat.track.id)}
                 alreadyGrouped={!!row.grouped}
+                audioOccurrences={occ}
                 headerExtra={
-                  <button
-                    className={`arr-auto-toggle ${open ? 'on' : ''}`}
-                    data-auto-toggle={flat.track.id}
-                    disabled={!canAutomate}
-                    title={canAutomate ? 'automation lanes' : 'add this track to a scene to automate its clip'}
-                    onClick={() => setAutoOpen((p) => ({ ...p, [flat.track.id]: !p[flat.track.id] }))}
-                  >
-                    A
-                  </button>
+                  <>
+                    <button
+                      className={`arr-auto-toggle ${open ? 'on' : ''}`}
+                      data-auto-toggle={flat.track.id}
+                      disabled={!canAutomate}
+                      title={canAutomate ? 'automation lanes' : 'add this track to a scene to automate its clip'}
+                      onClick={() => setAutoOpen((p) => ({ ...p, [flat.track.id]: !p[flat.track.id] }))}
+                    >
+                      A
+                    </button>
+                    {flat.track.kind === 'audio' && (
+                      <button
+                        className="arr-auto-toggle"
+                        data-audio-split={flat.track.id}
+                        title="split-at-playhead: cut this track's clip at the current playhead position"
+                        onClick={() => void splitAudioAtPlayhead(flat.track)}
+                      >
+                        ✂
+                      </button>
+                    )}
+                  </>
                 }
               />
               {open && canAutomate && (
@@ -1752,6 +1879,12 @@ export function ArrangementView() {
                   onAdd={(param) => addLane(flat.track.id, param)}
                 />
               )}
+              {flat.track.kind === 'audio' &&
+                primaryClip &&
+                (() => {
+                  const clip = flat.track.clips.find((c) => c.id === primaryClip)
+                  return clip?.audio ? <AudioClipInspector track={flat.track} clip={clip} /> : null
+                })()}
               {primaryClip &&
                 visible.map((param) => (
                   <AutomationLane

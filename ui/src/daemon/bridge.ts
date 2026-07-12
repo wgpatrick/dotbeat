@@ -159,6 +159,20 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
     return { ...doc, tracks }
   }
 
+  // Phase 22 Stream AE: trimming an existing audio-region clip's field (in/out/gainDb/warp/rate)
+  // — mirrors core setValue's <track>.clip.<id>.audio.<field> path (src/core/edit.ts). Creating a
+  // NEW clip (<track>.clip.<id>.audio with no trailing field) isn't mirrored here — that flow goes
+  // through beat_audio_clip / the CLI, not a drag gesture, so the SSE re-pull is fast enough.
+  const clipAudioFieldMatch = rest.match(/^clip\.([A-Za-z0-9_-]+)\.audio\.(media|in|out|gainDb|warp|rate)$/)
+  if (clipAudioFieldMatch) {
+    const [, clipId, field] = clipAudioFieldMatch as [string, string, 'media' | 'in' | 'out' | 'gainDb' | 'warp' | 'rate']
+    const nextVal: string | number = field === 'media' || field === 'warp' ? value : canon(Number(value))
+    const tracks = doc.tracks.map((t, i) =>
+      i === idx ? { ...t, clips: t.clips.map((c) => (c.id === clipId && c.audio ? { ...c, audio: { ...c.audio, [field]: nextVal } } : c)) } : t,
+    )
+    return { ...doc, tracks }
+  }
+
   // track metadata (Phase 20 Stream W): name/color live on the TRACK, not the synth block — core's
   // setValue routes them to track.name/track.color (src/core/edit.ts). Mirror them there so an inline
   // rename / color-pick reflects instantly; without this branch they'd fall through to the synth-param
@@ -331,7 +345,7 @@ export function postAutomation(e: AutomationEdit): void {
 
 export interface AddTrackOpts {
   id: string
-  kind: 'synth' | 'drums' | 'instrument'
+  kind: 'synth' | 'drums' | 'instrument' | 'audio'
   name?: string
   color?: string
   soundfont?: { sample: string; program: number }
@@ -430,6 +444,34 @@ export async function postGroupOp(body: GroupOp): Promise<void> {
   const { doc } = (await res.json()) as { written: boolean; doc: BeatDocument }
   useStore.getState().setDoc(doc)
 }
+
+// ─── audio-region split-at-point (Phase 22 Stream AE) ───────────────────────────────────────────
+// Split produces TWO clips (the original, trimmed, plus a newly-minted second half), so it can't
+// ride postEdit's {path,value} grammar — same shape as postSong: POST the additive daemon route,
+// then re-pull /document (the daemon doesn't echo its own writes). Trims to an EXISTING clip's
+// in/out/gainDb/warp/rate (no new clip produced) DO ride the ordinary postEdit path — see
+// applyLocalEdit's clip-audio-field mirror below.
+
+/** Split one audio-region clip at a timeline position (fractional 16th steps from the clip's own
+ * start). Returns the two resulting clip ids. Throws with the daemon's error message on failure
+ * (e.g. a split position outside the region). */
+export async function postAudioSplit(track: string, clip: string, at: number, newClipId?: string): Promise<{ firstId: string; secondId: string }> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/audio-split`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ track, clip, at, ...(newClipId !== undefined ? { newClipId } : {}) }),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { firstId, secondId } = (await res.json()) as { written: boolean; firstId: string; secondId: string }
+  const docRes = await fetch(`${base}/document`)
+  if (docRes.ok) useStore.getState().setDoc((await docRes.json()) as BeatDocument)
+  return { firstId, secondId }
+}
+
 
 // ─── vary-and-audition (Phase 15 Stream I) ──────────────────────────────────────────────────────
 // The daemon's POST /vary returns a batch of param-variants, each a list of {path,value} edits in

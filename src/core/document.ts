@@ -5,7 +5,7 @@
 
 export type OscType = 'sine' | 'triangle' | 'sawtooth' | 'square'
 
-export type TrackKind = 'synth' | 'drums' | 'instrument'
+export type TrackKind = 'synth' | 'drums' | 'instrument' | 'audio'
 
 /** Phase 18 Stream R: an LFO rate expressed as a tempo-synced note division instead of free Hz —
  * Ableton's convention (Synced / Triplet / Dotted). `t` = triplet (2/3 the plain division's
@@ -362,21 +362,77 @@ export interface BeatTimeSignature {
   denominator: number // one of 1,2,4,8,16,32
 }
 
+/** Phase 22 Stream AE: `off | repitch | complex` — see BeatAudioRegion's `warp` field. `complex`
+ * is a legal enum value with NO implementation this stream (needs the signalsmith-stretch WASM
+ * dependency — a separate, bigger future stream, `docs/research/16-audio-clip-editing.md` §8
+ * item 5); the engine treats it as unwarped (same as `off`) until that stream lands. */
+export type WarpMode = 'off' | 'repitch' | 'complex'
+export const WARP_MODES: readonly WarpMode[] = ['off', 'repitch', 'complex']
+
+/** Repitch-mode playbackRate bounds — generous but sane (an 8x range covers every real musical
+ * use; Ableton's own Repitch mode has no hard limit, but an unbounded value is more likely a typo
+ * than a deliberate choice, so the format fails loudly past this range rather than silently
+ * storing an extreme value). */
+export const AUDIO_RATE_MIN = 0.1
+export const AUDIO_RATE_MAX = 8
+
+/** Phase 22 Stream AE: reserved for warp === 'complex' (an ordered (sourceTime, timelineTime)
+ * pair anchoring a point in the source audio to a point on the clip timeline — Ableton's warp
+ * marker, `docs/research/16-audio-clip-editing.md` §4). Structurally present in the schema now
+ * (this stream's format bump), same "reserve the shape, ship the implementation later" move as
+ * v0.9's automation points, but NOT wired into the parser/serializer/edit primitives this round
+ * — `BeatAudioRegion.markers` is always `[]` until warp markers ship as their own stream. */
+export interface BeatAudioWarpMarker {
+  id: string
+  sourceTime: number // seconds into the source media
+  timelineTime: number // 16th steps from the clip's own start
+}
+
+/** Phase 22 Stream AE: an audio-region clip's entire content — the prerequisite format addition
+ * for `docs/research/16-audio-clip-editing.md`'s "Audio-region clip editing" roadmap area. A
+ * clip on an 'audio' track IS one region (the same "one clip, one thing" shape synth/drum clips
+ * already have for notes/hits — no need for a clip to hold a LIST of regions). Reuses the v0.5
+ * content-addressed `media/` block (BeatMediaSample.id) rather than inventing a second asset
+ * mechanism. All six fields are always serialized (no canonical elision) — this is Csound/note-
+ * style "one bundled event, one line" grammar, not DAWproject-style "one param per line": like
+ * `note`/`hit`, a region's fields are small, fixed, and edited together (a trim gesture changes
+ * in/out together; that's one edit, and one line is the right diff granularity — see
+ * format-spec.md's "why notes are positional" section, the same reasoning applied here). */
+export interface BeatAudioRegion {
+  media: string // BeatMediaSample id (v0.5 media block)
+  in: number // seconds into the source media (in-point); >= 0
+  out: number // seconds into the source media (out-point); > in
+  gainDb: number // static clip gain, dB (the audio-clip analog of a mixer fader — not note velocity)
+  warp: WarpMode
+  rate: number // playbackRate multiplier; meaningful only when warp === 'repitch'; canonical value is exactly 1 for 'off'/'complex' (one canonical form per state — D4)
+  markers: BeatAudioWarpMarker[] // reserved for warp === 'complex'; always [] this stream
+}
+
+/** Phase 22 Stream AE: the only automatable param on an audio-region clip (its static gain,
+ * time-varied) — reuses the v0.9 BeatAutomationLane/BeatAutomationPoint machinery UNCHANGED,
+ * confirming `docs/research/16-audio-clip-editing.md` §3's belief that clip gain "would very
+ * likely just plug into the existing automation-lane machinery rather than needing new grammar."
+ * A separate list (not folded into AUTOMATABLE_SYNTH_PARAMS) because it's a different namespace —
+ * 'gain' is meaningful only on an audio-track clip, never on a synth/drums/instrument track. */
+export const AUDIO_AUTOMATABLE_PARAMS: readonly string[] = ['gain']
+
 /** v0.4: a named snapshot of playable content, owned by a track. Mirrors beatlab's Clip (a
  * value copy, not a reference — see docs/phase-6-plan.md). Synth-track clips carry notes;
  * drum-track clips carry hits (v0.8; was a five-lane pattern through v0.7 — the parser
- * migrates). v0.9: clips may also carry automation lanes (deliberately NOT modeled at the live
- * track / non-clip level — see docs/format-spec.md's v0.9 section for why clip-scoped-only was
- * chosen). v0.10: clips may also declare their own loop range and time signature (BeatClipLoop /
- * BeatTimeSignature above), distinct from the track/section-level `loopBars`. Ids are track-scoped
+ * migrates); Phase 22 Stream AE: audio-track clips carry one audio region. v0.9: clips may also
+ * carry automation lanes (deliberately NOT modeled at the live track / non-clip level — see
+ * docs/format-spec.md's v0.9 section for why clip-scoped-only was chosen). v0.10: clips may also
+ * declare their own loop range and time signature (BeatClipLoop / BeatTimeSignature above),
+ * distinct from the track/section-level `loopBars`. Ids are track-scoped
  * human slugs (D6). */
 export interface BeatClip {
   id: string
-  notes: BeatNote[] // synth tracks only; always [] for drums
-  hits: BeatDrumHit[] // drum tracks only; always [] for synth
+  notes: BeatNote[] // synth/instrument tracks only; always [] for drums/audio
+  hits: BeatDrumHit[] // drum tracks only; always [] for synth/instrument/audio
   automation: BeatAutomationLane[] // v0.9; [] when the clip has none (serialized only when present)
   loop: BeatClipLoop | null // v0.10; null = no clip-level loop override (canonical elision)
   signature: BeatTimeSignature | null // v0.10; null = inherits the document's implicit 4/4
+  audio?: BeatAudioRegion // Phase 22 Stream AE; present iff the enclosing track is kind 'audio'
 }
 
 /** v0.10: legal time-signature denominators — the conventional note-value set (DAWproject and every
@@ -710,7 +766,7 @@ export function defaultSynthFields(): Omit<BeatSynth, (typeof SYNTH_PARAM_ORDER)
   return out as Omit<BeatSynth, (typeof SYNTH_PARAM_ORDER)[number]>
 }
 
-export const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument']
+export const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument', 'audio']
 
 /** The format's standard init patch for a newly-created track (`beat init` / `beat add-track`).
  * A format-level default, not a copy of any host app's: a mellow filtered saw that sounds

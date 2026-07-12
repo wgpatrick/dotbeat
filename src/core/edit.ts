@@ -3,8 +3,8 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, EffectType, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, declaredLaneNames, defaultEffectChain } from './document.js'
+import type { BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatNote, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, EffectType, OscType, TrackKind, WarpMode } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -207,6 +207,35 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     const numerator = parseNum(parts[0]!, 'clip signature numerator')
     const denominator = parseNum(parts[1]!, 'clip signature denominator')
     return setClipSignature(doc, trackId, clipId, { numerator, denominator })
+  }
+
+  // Phase 22 Stream AE: audio-region clip grammar (the clip-scoped analog of the note paths
+  // above — this content type has no LIVE/non-clip form, only clip.<id>.audio):
+  //   <track>.clip.<id>.audio         "<media-id> <in> <out> [gainDb] [warp] [rate]" -> create/replace
+  //   <track>.clip.<id>.audio.<field> <n or token>                                  -> trim one field
+  const clipAudioAddMatch = rest.match(/^clip\.([A-Za-z0-9_-]+)\.audio$/)
+  if (clipAudioAddMatch) {
+    const parts = value.trim().split(/\s+/)
+    if (parts.length < 3 || parts.length > 6) throw new BeatEditError(`audio region expects "<media-id> <in> <out> [gainDb] [warp] [rate]", got "${value}"`)
+    const [media, inTok, outTok, gainTok, warpTok, rateTok] = parts
+    const region: Parameters<typeof addAudioClip>[3] = { media: media!, in: parseNum(inTok!, 'in'), out: parseNum(outTok!, 'out') }
+    if (gainTok !== undefined) region.gainDb = parseNum(gainTok, 'gainDb')
+    if (warpTok !== undefined) {
+      if (!(WARP_MODES as readonly string[]).includes(warpTok)) throw new BeatEditError(`warp must be one of ${WARP_MODES.join('|')}, got "${warpTok}"`)
+      region.warp = warpTok as WarpMode
+    }
+    if (rateTok !== undefined) region.rate = parseNum(rateTok, 'rate')
+    return addAudioClip(doc, trackId, clipAudioAddMatch[1]!, region).doc
+  }
+  const clipAudioFieldMatch = rest.match(/^clip\.([A-Za-z0-9_-]+)\.audio\.(media|in|out|gainDb|warp|rate)$/)
+  if (clipAudioFieldMatch) {
+    const [, clipId, field] = clipAudioFieldMatch as [string, string, 'media' | 'in' | 'out' | 'gainDb' | 'warp' | 'rate']
+    if (field === 'media') return setClipAudioRegion(doc, trackId, clipId, { media: value }).doc
+    if (field === 'warp') {
+      if (!(WARP_MODES as readonly string[]).includes(value)) throw new BeatEditError(`warp must be one of ${WARP_MODES.join('|')}, got "${value}"`)
+      return setClipAudioRegion(doc, trackId, clipId, { warp: value as WarpMode }).doc
+    }
+    return setClipAudioRegion(doc, trackId, clipId, { [field]: parseNum(value, field) }).doc
   }
 
   // track metadata
@@ -851,7 +880,17 @@ export function setClipSignature(doc: BeatDocument, trackId: string, clipId: str
   return replaceClip(doc, trackId, { ...clip, signature: { numerator, denominator } })
 }
 
-function checkAutomatableParam(param: string) {
+/** Phase 22 Stream AE: which params a track kind's clips may automate — synth/instrument/drums
+ * (drum tracks automate their own bus synth params, same as synth) use AUTOMATABLE_SYNTH_PARAMS;
+ * audio tracks use the separate AUDIO_AUTOMATABLE_PARAMS ('gain' only) — different namespaces, no
+ * overlap, so a track kind fully determines which set applies. */
+function checkAutomatableParam(param: string, trackKind: TrackKind) {
+  if (trackKind === 'audio') {
+    if (!(AUDIO_AUTOMATABLE_PARAMS as readonly string[]).includes(param)) {
+      throw new BeatEditError(`"${param}" is not an automatable param for an audio-track clip (have: ${AUDIO_AUTOMATABLE_PARAMS.join(', ')})`)
+    }
+    return
+  }
   if (!(AUTOMATABLE_SYNTH_PARAMS as readonly string[]).includes(param)) {
     throw new BeatEditError(`"${param}" is not an automatable synth param (have: ${AUTOMATABLE_SYNTH_PARAMS.join(', ')})`)
   }
@@ -868,7 +907,7 @@ export function addAutomationPoint(
   point: { time: number; value: number; id?: string },
 ): { doc: BeatDocument; point: BeatAutomationPoint } {
   const track = findTrack(doc, trackId)
-  checkAutomatableParam(param)
+  checkAutomatableParam(param, track.kind)
   const clip = findClip(track, clipId)
   if (!Number.isFinite(point.time) || point.time < 0) throw new BeatEditError(`automation point time must be >= 0, got ${point.time}`)
   if (!Number.isFinite(point.value)) throw new BeatEditError(`automation point value must be a finite number, got ${point.value}`)
@@ -928,7 +967,7 @@ export function setAutomationPoint(
   point: { time: number; value: number; id?: string },
 ): { doc: BeatDocument; point: BeatAutomationPoint; created: boolean } {
   const track = findTrack(doc, trackId)
-  checkAutomatableParam(param)
+  checkAutomatableParam(param, track.kind)
   const clip = findClip(track, clipId)
   const lane = clip.automation.find((l) => l.param === param)
   const existing = point.id !== undefined ? lane?.points.find((p) => p.id === point.id) : undefined
@@ -951,4 +990,136 @@ export function removeAutomationPoint(doc: BeatDocument, trackId: string, clipId
   const remaining = lane.points.filter((p) => p.id !== pointId)
   const nextLanes = remaining.length === 0 ? clip.automation.filter((l) => l.param !== param) : clip.automation.map((l) => (l.param === param ? { ...l, points: remaining } : l))
   return { doc: replaceClip(doc, trackId, { ...clip, automation: nextLanes }), point: existing }
+}
+
+/** Phase 22 Stream AE: audio-region clip primitives (`docs/phase-22-stream-ae.md`). An audio-
+ * region clip is one bundled entity (media + in/out + gain + warp + rate — see BeatAudioRegion
+ * in document.ts), so these operate on the whole region at once, the same shape addNote/addHit
+ * take for their own single-line entities. Gain automation reuses addAutomationPoint/
+ * moveAutomationPoint/removeAutomationPoint/setAutomationPoint unchanged (param 'gain', gated by
+ * checkAutomatableParam's track-kind branch above) — no separate primitives needed for that part. */
+
+function validateAudioRegionFields(region: { media: string; in: number; out: number; gainDb: number; warp: WarpMode; rate: number }, doc: BeatDocument): void {
+  if (!doc.media.some((m) => m.id === region.media)) throw new BeatEditError(`no sample "${region.media}" in the media block (have: ${doc.media.map((m) => m.id).join(', ') || 'none'}) — register it with beat sample first`)
+  if (!Number.isFinite(region.in) || region.in < 0) throw new BeatEditError(`audio in-point must be >= 0, got ${region.in}`)
+  if (!Number.isFinite(region.out) || region.out <= region.in) throw new BeatEditError(`audio out-point must be > in-point, got in=${region.in} out=${region.out}`)
+  if (!(WARP_MODES as readonly string[]).includes(region.warp)) throw new BeatEditError(`warp must be one of ${WARP_MODES.join('|')}, got "${region.warp}"`)
+  if (!Number.isFinite(region.rate) || region.rate < AUDIO_RATE_MIN || region.rate > AUDIO_RATE_MAX) throw new BeatEditError(`audio rate must be ${AUDIO_RATE_MIN}-${AUDIO_RATE_MAX}, got ${region.rate}`)
+  if (region.warp !== 'repitch' && region.rate !== 1) throw new BeatEditError(`audio rate must be 1 when warp is "${region.warp}" (rate only applies to warp=repitch), got ${region.rate}`)
+}
+
+/** Creates (or replaces) a clip on an audio track with a single audio region — the direct,
+ * one-call creation path (mirrors addNote/addHit's directness). saveClip's generic "snapshot
+ * whatever's live" pattern doesn't apply here: audio tracks carry no live/non-clip content in
+ * this stream (see docs/phase-22-stream-ae.md's scope notes). Upserts: an existing clip id's
+ * region is replaced, the same re-snapshot ergonomics saveClip gives synth/drum tracks. */
+export function addAudioClip(
+  doc: BeatDocument,
+  trackId: string,
+  clipId: string,
+  region: { media: string; in: number; out: number; gainDb?: number; warp?: WarpMode; rate?: number },
+): { doc: BeatDocument; clip: BeatClip } {
+  const track = findTrack(doc, trackId)
+  if (track.kind !== 'audio') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — audio-region clips only belong on audio tracks`)
+  if (!/^[a-zA-Z0-9_-]+$/.test(clipId)) throw new BeatEditError(`clip ids are single alphanumeric/_/- tokens, got "${clipId}"`)
+  const full: BeatAudioRegion = {
+    media: region.media,
+    in: canon(region.in),
+    out: canon(region.out),
+    gainDb: canon(region.gainDb ?? 0),
+    warp: region.warp ?? 'off',
+    rate: canon(region.rate ?? 1),
+    markers: [],
+  }
+  validateAudioRegionFields(full, doc)
+  const existing = track.clips.findIndex((c) => c.id === clipId)
+  const clip: BeatClip = existing === -1 ? { id: clipId, notes: [], hits: [], automation: [], loop: null, signature: null, audio: full } : { ...track.clips[existing]!, audio: full }
+  const clips = existing === -1 ? [...track.clips, clip] : track.clips.map((c, i) => (i === existing ? clip : c))
+  return { doc: replaceTrack(doc, { ...track, clips }), clip }
+}
+
+/** Updates one or more fields on an EXISTING clip's audio region directly — the trim/gain/warp
+ * edit primitive (what a GUI drag-handle or `beat set <track>.clip.<id>.audio.<field>` calls, see
+ * setValue below). Fields not passed keep their current value. Switching `warp` away from
+ * 'repitch' silently normalizes `rate` back to 1 (one canonical form per state, D4) unless the
+ * caller ALSO passed a new rate in the same call. */
+export function setClipAudioRegion(
+  doc: BeatDocument,
+  trackId: string,
+  clipId: string,
+  changes: { media?: string; in?: number; out?: number; gainDb?: number; warp?: WarpMode; rate?: number },
+): { doc: BeatDocument; region: BeatAudioRegion } {
+  const track = findTrack(doc, trackId)
+  const clip = findClip(track, clipId)
+  if (!clip.audio) throw new BeatEditError(`clip "${clipId}" on track "${trackId}" has no audio region`)
+  const next: BeatAudioRegion = {
+    media: changes.media ?? clip.audio.media,
+    in: changes.in !== undefined ? canon(changes.in) : clip.audio.in,
+    out: changes.out !== undefined ? canon(changes.out) : clip.audio.out,
+    gainDb: changes.gainDb !== undefined ? canon(changes.gainDb) : clip.audio.gainDb,
+    warp: changes.warp ?? clip.audio.warp,
+    rate: changes.rate !== undefined ? canon(changes.rate) : clip.audio.rate,
+    markers: clip.audio.markers,
+  }
+  if (next.warp !== 'repitch' && changes.rate === undefined) next.rate = 1
+  validateAudioRegionFields(next, doc)
+  return { doc: replaceClip(doc, trackId, { ...clip, audio: next }), region: next }
+}
+
+/** Split-at-point (`docs/research/16-audio-clip-editing.md` §2): given a timeline position (16th
+ * steps from the clip's own start), splits one audio-region clip into two, each referencing the
+ * same media with adjusted in/out points — a pure edit primitive, no DSP, no engine involvement
+ * beyond consuming the new format field. `atSteps` converts to source-media seconds via the
+ * region's own rate (repitch changes how much source material elapses per timeline second: at
+ * rate=2, twice as much source plays per second of timeline, so the split point in the SOURCE
+ * file is further along than a naive step*stepSeconds would put it).
+ *
+ * The first half keeps the clip's id with `out` trimmed to the split point; the second half is a
+ * NEW clip (auto-numbered `<id>-2`, `<id>-3`, ... unless `newClipId` is given) inserted
+ * immediately after the first in the track's clip list, with `in` moved to the split point.
+ * Gain-automation points partition by time — before the split stay on the first clip unchanged;
+ * at/after it move to the second clip, retimed relative to ITS own new start — the same "survive
+ * the split, attached to whichever segment they fall in" discipline research 16 §2 documents for
+ * warp markers (not yet built, but automation already behaves this way today). */
+export function splitAudioClip(doc: BeatDocument, trackId: string, clipId: string, atSteps: number, opts: { newClipId?: string } = {}): { doc: BeatDocument; first: BeatClip; second: BeatClip } {
+  const track = findTrack(doc, trackId)
+  if (track.kind !== 'audio') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — split-at-point only applies to audio-region clips`)
+  const idx = track.clips.findIndex((c) => c.id === clipId)
+  if (idx === -1) throw new BeatEditError(`no clip "${clipId}" on track "${trackId}" (have: ${track.clips.map((c) => c.id).join(', ') || 'none'})`)
+  const clip = track.clips[idx]!
+  if (!clip.audio) throw new BeatEditError(`clip "${clipId}" on track "${trackId}" has no audio region`)
+  if (!Number.isFinite(atSteps) || atSteps <= 0) throw new BeatEditError(`split position must be > 0 steps from the clip's start, got ${atSteps}`)
+
+  const stepSeconds = 60 / doc.bpm / 4 // one 16th note, seconds, at the document's tempo
+  const sourceSplit = canon(clip.audio.in + atSteps * stepSeconds * clip.audio.rate)
+  const MIN_REGION_SECONDS = 0.001
+  if (sourceSplit <= clip.audio.in + MIN_REGION_SECONDS || sourceSplit >= clip.audio.out - MIN_REGION_SECONDS) {
+    throw new BeatEditError(
+      `split position ${atSteps} steps is out of range for clip "${clipId}" (region spans ${formatNumber(clip.audio.in)}-${formatNumber(clip.audio.out)}s of source, split would land at ${formatNumber(sourceSplit)}s)`,
+    )
+  }
+
+  let newId = opts.newClipId
+  if (newId === undefined) {
+    let n = 2
+    while (track.clips.some((c) => c.id === `${clipId}-${n}`)) n++
+    newId = `${clipId}-${n}`
+  } else if (track.clips.some((c) => c.id === newId)) {
+    throw new BeatEditError(`clip id "${newId}" already exists on track "${trackId}"`)
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(newId)) throw new BeatEditError(`clip ids are single alphanumeric/_/- tokens, got "${newId}"`)
+
+  const partitionAutomation = (before: boolean): BeatClip['automation'] =>
+    clip.automation
+      .map((lane) => ({
+        param: lane.param,
+        points: lane.points.filter((p) => (before ? p.time < atSteps : p.time >= atSteps)).map((p) => (before ? { ...p } : { ...p, time: canon(p.time - atSteps) })),
+      }))
+      .filter((lane) => lane.points.length > 0)
+
+  const first: BeatClip = { ...clip, audio: { ...clip.audio, out: sourceSplit }, automation: partitionAutomation(true) }
+  const second: BeatClip = { id: newId, notes: [], hits: [], automation: partitionAutomation(false), loop: null, signature: null, audio: { ...clip.audio, in: sourceSplit } }
+
+  const clips = [...track.clips.slice(0, idx), first, second, ...track.clips.slice(idx + 1)]
+  return { doc: replaceTrack(doc, { ...track, clips }), first, second }
 }

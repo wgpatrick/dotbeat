@@ -43,6 +43,9 @@ export {
   setEffectEnabled,
   setClipLoop,
   setClipSignature,
+  addAudioClip,
+  setClipAudioRegion,
+  splitAudioClip,
   BeatEditError,
   type QuantizeOptions,
 } from './edit.js'

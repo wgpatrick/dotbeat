@@ -1,4 +1,4 @@
-import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
+import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
 import { DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, NOTE_FIELD_DEFAULTS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -25,6 +25,13 @@ function noteOptionalTokens(n: BeatNote): string {
   if (formatNumber(n.ratchetCurve) !== formatNumber(NOTE_FIELD_DEFAULTS.ratchetCurve)) parts.push(`ratchetCurve=${formatNumber(n.ratchetCurve)}`)
   if (formatNumber(n.ratchetLength) !== formatNumber(NOTE_FIELD_DEFAULTS.ratchetLength)) parts.push(`ratchetLength=${formatNumber(n.ratchetLength)}`)
   return parts.length ? ` ${parts.join(' ')}` : ''
+}
+
+// Phase 22 Stream AE: one audio-region clip's entire content, one bundled line (no per-field
+// elision — see BeatAudioRegion's doc comment in document.ts for why this follows the note/hit
+// discipline instead of the SYNTH_FIELDS elision discipline).
+function serializeAudioLine(region: BeatAudioRegion, indent: string): string {
+  return `${indent}audio ${region.media} ${formatNumber(region.in)} ${formatNumber(region.out)} ${formatNumber(region.gainDb)} ${region.warp} ${formatNumber(region.rate)}`
 }
 
 // Canonical note order: (start, pitch, id) ascending — see format-spec.md's "canonical ordering".
@@ -104,6 +111,17 @@ function serializeClipProps(clip: BeatClip, indent: string): string[] {
 function serializeTrack(t: BeatTrack): string[] {
   const lines: string[] = []
   lines.push(`track ${t.id} ${t.name} ${t.color} ${t.kind}`)
+  // Phase 22 Stream AE: audio tracks carry no synth block, lane samples, or live notes/hits —
+  // every audio track's content is clip-scoped (one audio-region clip = one line + its optional
+  // gain automation lane), source order preserved like every other track's clip list.
+  if (t.kind === 'audio') {
+    for (const clip of t.clips) {
+      lines.push(`  clip ${clip.id}`)
+      if (clip.audio) lines.push(serializeAudioLine(clip.audio, '    '))
+      lines.push(...serializeAutomationLanes(t.id, clip.automation, '    '))
+    }
+    return lines
+  }
   // v0.6 instrument tracks: a soundfont voice line instead of a synth block; volume/pan elided
   // at their defaults (-10 dB, center) like every optional field.
   if (t.kind === 'instrument') {

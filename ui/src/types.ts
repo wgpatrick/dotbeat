@@ -58,7 +58,7 @@ export function declaredLaneNames(track: Pick<BeatTrack, 'lanes'>): readonly str
 
 export type OscType = 'sine' | 'triangle' | 'sawtooth' | 'square'
 export const OSC_TYPES_LIST: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square']
-export type TrackKind = 'synth' | 'drums' | 'instrument'
+export type TrackKind = 'synth' | 'drums' | 'instrument' | 'audio'
 
 export interface BeatNote {
   id: string
@@ -137,6 +137,23 @@ export interface BeatTimeSignature {
 }
 export const TIME_SIG_DENOMINATORS: readonly number[] = [1, 2, 4, 8, 16, 32]
 
+// Phase 22 Stream AE (format v0.10): an audio-region clip's entire content — media reference
+// (v0.5 media block id) + in/out points (seconds into the SOURCE media) + static gain + warp
+// mode + repitch rate. Mirrors src/core/document.ts's BeatAudioRegion. `warp` is 'off'|'repitch'|
+// 'complex' ('complex' is a legal value with no engine support yet — see engine.ts). `markers` is
+// reserved for warp==='complex' (not built this stream) and always empty.
+export type WarpMode = 'off' | 'repitch' | 'complex'
+export const WARP_MODES: readonly WarpMode[] = ['off', 'repitch', 'complex']
+export interface BeatAudioRegion {
+  media: string
+  in: number
+  out: number
+  gainDb: number
+  warp: WarpMode
+  rate: number
+  markers: { id: string; sourceTime: number; timelineTime: number }[]
+}
+
 export interface BeatClip {
   id: string
   notes: BeatNote[]
@@ -144,6 +161,7 @@ export interface BeatClip {
   automation: BeatAutomationLane[]
   loop: BeatClipLoop | null
   signature: BeatTimeSignature | null
+  audio?: BeatAudioRegion // Phase 22 Stream AE; present iff the enclosing track is kind 'audio'
 }
 
 export interface BeatScene {

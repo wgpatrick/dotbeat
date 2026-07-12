@@ -1,5 +1,5 @@
-import type { BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, declaredLaneNames, defaultEffectChain, defaultSynthFields } from './document.js'
+import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, TrackKind, WarpMode } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -34,6 +34,10 @@ function isEffectType(s: string): s is EffectType {
 
 function isDrumVoiceType(s: string): s is DrumVoiceType {
   return (DRUM_VOICE_TYPES as readonly string[]).includes(s)
+}
+
+function isWarpMode(s: string): s is WarpMode {
+  return (WARP_MODES as readonly string[]).includes(s)
 }
 
 function parseFloatStrict(tok: string, lineNo: number, field: string): number {
@@ -137,6 +141,9 @@ export function parse(text: string): BeatDocument {
       legacyClipPatterns.delete(currentClip)
     }
     if (currentTrack.kind === 'drums') assertUniqueHitIds(currentClip.hits, `clip "${currentClip.id}"`, lineNo)
+    // Phase 22 Stream AE: an audio-track clip with no `audio` line is meaningless (an empty
+    // region) — same fail-loudly stance as an instrument track missing its soundfont line.
+    if (currentTrack.kind === 'audio' && !currentClip.audio) throw new BeatParseError(`clip "${currentClip.id}" on audio track "${currentTrack.id}" has no audio line`, lineNo)
     currentClip = null
   }
 
@@ -307,6 +314,27 @@ export function parse(text: string): BeatDocument {
     return true
   }
 
+  // Phase 22 Stream AE: `audio <media-id> <in> <out> <gain dB> <warp> <rate>` — the entire
+  // content of one audio-region clip, one bundled event per line (note/hit-style, no per-field
+  // elision — see BeatAudioRegion's doc comment). `in`/`out` are seconds into the SOURCE media
+  // (not timeline steps); `rate` must be exactly 1 when `warp` isn't 'repitch' — one canonical
+  // form per state (D4), so a hand-edited "off 1.5" is rejected rather than silently accepted as
+  // a second spelling of "off 1".
+  function parseAudioLine(tokens: string[], lineNo: number): BeatAudioRegion {
+    if (tokens.length !== 7) throw new BeatParseError('audio expects exactly 6 values: <media-id> <in> <out> <gain dB> <warp> <rate>', lineNo)
+    const [, media, inTok, outTok, gainTok, warpTok, rateTok] = tokens as [string, string, string, string, string, string, string]
+    const inPoint = parseFloatStrict(inTok, lineNo, 'audio in')
+    if (inPoint < 0) throw new BeatParseError(`audio in-point must be >= 0, got ${inPoint}`, lineNo)
+    const outPoint = parseFloatStrict(outTok, lineNo, 'audio out')
+    if (outPoint <= inPoint) throw new BeatParseError(`audio out-point must be > in-point, got in=${inPoint} out=${outPoint}`, lineNo)
+    const gainDb = parseFloatStrict(gainTok, lineNo, 'audio gain')
+    if (!isWarpMode(warpTok)) throw new BeatParseError(`audio warp must be one of ${WARP_MODES.join('|')}, got "${warpTok}"`, lineNo)
+    const rate = parseFloatStrict(rateTok, lineNo, 'audio rate')
+    if (rate < AUDIO_RATE_MIN || rate > AUDIO_RATE_MAX) throw new BeatParseError(`audio rate must be ${AUDIO_RATE_MIN}-${AUDIO_RATE_MAX}, got ${rate}`, lineNo)
+    if (warpTok !== 'repitch' && rate !== 1) throw new BeatParseError(`audio rate must be 1 when warp is "${warpTok}" (rate only applies to warp=repitch), got ${rate}`, lineNo)
+    return { media, in: inPoint, out: outPoint, gainDb, warp: warpTok, rate, markers: [] }
+  }
+
   // v0.9: `point <id> <time> <value>` — one automation point inside an open `auto` lane. time
   // is fractional 16th steps from the clip's start (v0.7 number rules); value is unconstrained
   // (its legal range depends on which param the enclosing lane targets).
@@ -385,7 +413,7 @@ export function parse(text: string): BeatDocument {
         const [, id, name, color, kind] = tokens as [string, string, string, string, string]
         if (trackIds.has(id)) throw new BeatParseError(`duplicate track id "${id}"`, lineNo)
         if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatParseError(`track color must be a lowercase hex color like #c678dd, got "${color}"`, lineNo)
-        if (!isTrackKind(kind)) throw new BeatParseError(`track kind must be one of synth|drums, got "${kind}"`, lineNo)
+        if (!isTrackKind(kind)) throw new BeatParseError(`track kind must be one of ${TRACK_KINDS.join('|')}, got "${kind}"`, lineNo)
         trackIds.add(id)
         currentTrack = {
           id,
@@ -393,10 +421,10 @@ export function parse(text: string): BeatDocument {
           color,
           kind,
           // core 9 are placeholders until the synth block fills them (all required); the v0.3
-          // optional fields start at their canonical defaults (elision contract). Instrument
-          // tracks never serialize a synth block — they carry the canonical INIT copy so
+          // optional fields start at their canonical defaults (elision contract). Instrument and
+          // audio tracks never serialize a synth block — they carry the canonical INIT copy so
           // parse(serialize(x)) deep-equals documents built via addTrack.
-          synth: kind === 'instrument'
+          synth: kind === 'instrument' || kind === 'audio'
             ? { ...INIT_SYNTH }
             : ({ osc: 'sawtooth', volume: 0, cutoff: 0, resonance: 0, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0, ...defaultSynthFields() } as BeatSynth),
           laneSamples: {},
@@ -491,6 +519,7 @@ export function parse(text: string): BeatDocument {
       if (!currentTrack) throw new BeatParseError(`"${keyword}" outside of any track`, lineNo)
       if (keyword === 'synth') {
         if (currentTrack.kind === 'instrument') throw new BeatParseError(`instrument tracks have no synth block; "${currentTrack.id}" uses a soundfont line`, lineNo)
+        if (currentTrack.kind === 'audio') throw new BeatParseError(`audio tracks have no synth block; "${currentTrack.id}" carries audio-region clips instead`, lineNo)
         closeSynthIfOpen(lineNo)
         closeClipIfOpen(lineNo)
         if (tokens.length !== 1) throw new BeatParseError('synth takes no values on its own line', lineNo)
@@ -588,7 +617,7 @@ export function parse(text: string): BeatDocument {
       }
       closeClipIfOpen(lineNo)
       if (keyword === 'note') {
-        if (currentTrack.kind === 'drums') throw new BeatParseError(`note lines only belong in synth/instrument tracks; "${currentTrack.id}" is a drums track`, lineNo)
+        if (currentTrack.kind === 'drums' || currentTrack.kind === 'audio') throw new BeatParseError(`note lines only belong in synth/instrument tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
         currentTrack.notes.push(parseNoteLine(tokens, lineNo))
       } else if (keyword === 'hit') {
         if (currentTrack.kind !== 'drums') throw new BeatParseError(`hit lines only belong in drum tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
@@ -600,6 +629,10 @@ export function parse(text: string): BeatDocument {
         const { lane, steps } = parsePatternLine(tokens, acc, lineNo)
         acc[lane] = steps
         legacyTrackPatterns.set(currentTrack, acc)
+      } else if (keyword === 'audio') {
+        // Phase 22 Stream AE: audio-region clips only — a live (non-clip) audio line makes no
+        // sense in this stream's clip-only design (see docs/phase-22-stream-ae.md).
+        throw new BeatParseError(`audio lines only belong inside a clip block; "${currentTrack.id}" has one directly under the track`, lineNo)
       } else {
         throw new BeatParseError(`unexpected keyword "${keyword}" inside a track`, lineNo)
       }
@@ -638,7 +671,7 @@ export function parse(text: string): BeatDocument {
           continue
         }
         if (keyword === 'note') {
-          if (currentTrack.kind === 'drums') throw new BeatParseError(`note lines only belong in synth/instrument-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+          if (currentTrack.kind === 'drums' || currentTrack.kind === 'audio') throw new BeatParseError(`note lines only belong in synth/instrument-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
           currentClip.notes.push(parseNoteLine(tokens, lineNo))
           continue
         }
@@ -656,9 +689,19 @@ export function parse(text: string): BeatDocument {
           legacyClipPatterns.set(currentClip, acc)
           continue
         }
+        if (keyword === 'audio') {
+          // Phase 22 Stream AE: the entire content of an audio-region clip, one bundled line
+          // (see parseAudioLine above).
+          if (currentTrack.kind !== 'audio') throw new BeatParseError(`audio lines only belong in audio-track clips; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+          if (currentClip.audio) throw new BeatParseError(`duplicate audio line in clip "${currentClip.id}"`, lineNo)
+          currentClip.audio = parseAudioLine(tokens, lineNo)
+          continue
+        }
         if (keyword === 'auto') {
           // v0.9: `auto <track>.<param>` opens an automation lane; its points are level-3
-          // `point` lines, collected until the next level <= 2 line closes it (above).
+          // `point` lines, collected until the next level <= 2 line closes it (above). Phase 22
+          // Stream AE: an audio-track clip's only automatable param is 'gain' (AUDIO_AUTOMATABLE_
+          // PARAMS) — reuses this exact same lane/point grammar unchanged (research 16 §3).
           if (tokens.length !== 2) throw new BeatParseError('auto expects exactly 1 value: <track>.<param>', lineNo)
           const target = tokens[1]!
           const dot = target.indexOf('.')
@@ -666,7 +709,11 @@ export function parse(text: string): BeatDocument {
           const targetTrack = target.slice(0, dot)
           const param = target.slice(dot + 1)
           if (targetTrack !== currentTrack.id) throw new BeatParseError(`auto target track "${targetTrack}" must match the enclosing track "${currentTrack.id}"`, lineNo)
-          if (!(AUTOMATABLE_SYNTH_PARAMS as readonly string[]).includes(param)) throw new BeatParseError(`"${param}" is not an automatable synth param (expected one of ${AUTOMATABLE_SYNTH_PARAMS.join(', ')})`, lineNo)
+          if (currentTrack.kind === 'audio') {
+            if (!(AUDIO_AUTOMATABLE_PARAMS as readonly string[]).includes(param)) throw new BeatParseError(`"${param}" is not an automatable param for an audio-track clip (expected one of ${AUDIO_AUTOMATABLE_PARAMS.join(', ')})`, lineNo)
+          } else if (!(AUTOMATABLE_SYNTH_PARAMS as readonly string[]).includes(param)) {
+            throw new BeatParseError(`"${param}" is not an automatable synth param (expected one of ${AUTOMATABLE_SYNTH_PARAMS.join(', ')})`, lineNo)
+          }
           if (currentClip.automation.some((l) => l.param === param)) throw new BeatParseError(`duplicate automation lane "${param}" on clip "${currentClip.id}"`, lineNo)
           currentAutoLane = { param, points: [] }
           currentClip.automation.push(currentAutoLane)
@@ -778,6 +825,12 @@ export function parse(text: string): BeatDocument {
       if ((decl.backing.type === 'sample' || decl.backing.type === 'sf') && !mediaIds.has(decl.backing.sample)) {
         throw new BeatParseError(`track "${t.id}" lane "${decl.name}": references unknown sample "${decl.backing.sample}"`, eof)
       }
+    }
+  }
+  // Phase 22 Stream AE: every audio-region clip must reference a declared media sample
+  for (const t of tracks) {
+    for (const clip of t.clips) {
+      if (clip.audio && !mediaIds.has(clip.audio.media)) throw new BeatParseError(`track "${t.id}" clip "${clip.id}": audio references unknown sample "${clip.audio.media}"`, eof)
     }
   }
 

@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { copyFileSync, mkdtempSync, readFileSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -84,6 +84,8 @@ test('beat mcp speaks the MCP handshake and serves the tool suite', async () => 
       'beat_pin',
       'beat_unpin',
       'beat_pins',
+      'beat_audio_clip',
+      'beat_audio_split',
     ]) {
       assert.ok(names.includes(expected), `missing tool ${expected}`)
     }
@@ -158,6 +160,72 @@ test('tools/call: beat_group folds tracks, beat_group_set edits it, beat_rm_grou
     const dup = await mcp.request('tools/call', { name: 'beat_group', arguments: { file, id: 'g2', track_ids: ['bass', 'lead'] } })
     assert.equal(dup.isError, true)
     assert.match(dup.content[0].text, /already in group/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Phase 22 Stream AE: audio-region clip tools (format v0.10). No beat_sample MCP tool exists yet
+// (media registration is CLI-only — a pre-existing gap, not this stream's to close), so the
+// fixture below writes its own media block directly; format-level edits don't verify the bytes
+// on disk (see docs/format-spec.md's v0.5 section — hash/existence checks are a LOAD-time
+// concern, not a parse-time one), so a placeholder hash is fine for exercising the tool surface.
+test('tools/call: beat_add_track(audio), beat_audio_clip, and beat_audio_split work end-to-end', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-audio-test-'))
+  const file = join(dir, 'song.beat')
+  writeFileSync(
+    file,
+    `format_version 0.10
+bpm 120
+loop_bars 4
+selected_track lead
+
+media
+  sample smp_kick sha256:${'a'.repeat(64)} media/kick.wav
+
+track lead Lead #c678dd synth
+  synth
+    osc sawtooth
+    volume 0
+    cutoff 1000
+    resonance 1
+    attack 0.01
+    decay 0.1
+    sustain 0.5
+    release 0.1
+    pan 0
+`,
+  )
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    const addTrack = await mcp.request('tools/call', { name: 'beat_add_track', arguments: { file, id: 'atrk', kind: 'audio' } })
+    assert.match(addTrack.content[0].text, /atrk: track added \(audio/)
+
+    const clipCall = await mcp.request('tools/call', {
+      name: 'beat_audio_clip',
+      arguments: { file, track: 'atrk', clip: 'c1', media: 'smp_kick', in: 0, out: 0.5, gain_db: -3, warp: 'repitch', rate: 1.5 },
+    })
+    assert.match(clipCall.content[0].text, /atrk: clip added "c1"/)
+    assert.match(readFileSync(file, 'utf8'), /audio smp_kick 0 0\.5 -3 repitch 1\.5/)
+
+    // tool-level failure (unregistered media id) comes back as isError, not a protocol error
+    const badClip = await mcp.request('tools/call', {
+      name: 'beat_audio_clip',
+      arguments: { file, track: 'atrk', clip: 'c2', media: 'smp_ghost', in: 0, out: 1 },
+    })
+    assert.equal(badClip.isError, true)
+    assert.match(badClip.content[0].text, /no sample "smp_ghost"/)
+
+    const splitCall = await mcp.request('tools/call', { name: 'beat_audio_split', arguments: { file, track: 'atrk', clip: 'c1', at: 2 } })
+    assert.match(splitCall.content[0].text, /split into "c1" and "c1-2"/)
+    const after = readFileSync(file, 'utf8')
+    // 2 steps @ 120bpm = 0.25s of timeline; rate 1.5 (repitch) -> 0.375s of source material
+    assert.match(after, /clip c1\n {4}audio smp_kick 0 0\.375/)
+    assert.match(after, /clip c1-2\n {4}audio smp_kick 0\.375 0\.5/)
   } finally {
     mcp.close()
   }

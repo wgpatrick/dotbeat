@@ -29,6 +29,8 @@ import {
   removeEffect,
   moveEffect,
   setEffectEnabled,
+  addAudioClip,
+  splitAudioClip,
   humanize,
   quantizeNotes,
   transposeNotes,
@@ -189,13 +191,13 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_add_track',
     description:
-      'Add a new track (synth, drums, or instrument) to a .beat file with the format init patch — the way an agent builds a project up from beat_init. An instrument track is a sampled SF2 voice: pass soundfont_sample (a media id already registered via beat_sample) and optionally soundfont_program (the SF2 program number, default 0) — see beat_inspect on an instrument track for the bank\'s full preset list. Returns the edit list.',
+      'Add a new track (synth, drums, instrument, or audio) to a .beat file with the format init patch — the way an agent builds a project up from beat_init. An instrument track is a sampled SF2 voice: pass soundfont_sample (a media id already registered via beat_sample) and optionally soundfont_program (the SF2 program number, default 0) — see beat_inspect on an instrument track for the bank\'s full preset list. An audio track (format v0.10, Phase 22 Stream AE) starts with no clips — add audio-region clips afterward with beat_audio_clip. Returns the edit list.',
     inputSchema: {
       type: 'object',
       properties: {
         file: { type: 'string' },
         id: { type: 'string', description: 'single alphanumeric token, e.g. "bass"' },
-        kind: { type: 'string', enum: ['synth', 'drums', 'instrument'] },
+        kind: { type: 'string', enum: ['synth', 'drums', 'instrument', 'audio'] },
         name: { type: 'string', description: 'single token; defaults to id' },
         color: { type: 'string', description: 'lowercase #rrggbb; defaults to a palette cycle' },
         soundfont_sample: { type: 'string', description: 'instrument tracks only: a media id (register the .sf2 with beat_sample first)' },
@@ -206,7 +208,7 @@ const TOOLS: ToolDef[] = [
     handler: (args) => {
       const file = str(args, 'file')
       const before = parse(readFileSync(file, 'utf8'))
-      const kind = str(args, 'kind') as 'synth' | 'drums' | 'instrument'
+      const kind = str(args, 'kind') as 'synth' | 'drums' | 'instrument' | 'audio'
       const { doc } = addTrack(before, {
         id: str(args, 'id'),
         kind,
@@ -552,6 +554,60 @@ const TOOLS: ToolDef[] = [
       const { doc } = setEffectEnabled(before, str(args, 'track'), str(args, 'effect_id'), args.enabled)
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_audio_clip',
+    description:
+      'Create or replace an audio-region clip (format v0.10, Phase 22 Stream AE) on an \'audio\'-kind track: a clip whose entire content is a span of a content-addressed media file (register it first with `beat sample` — this tool does not read audio files itself). in/out are seconds into the SOURCE media (not timeline steps) — the span that plays. gain is the static clip level in dB (default 0). warp is off (native rate, the default), repitch (variable-speed playback — pitch moves with tempo, set rate to the playbackRate multiplier), or complex (a legal value with no implementation yet — behaves like off). rate only applies when warp=repitch and must be 1 otherwise. Upserts: an existing clip id\'s region is replaced. To trim an EXISTING clip\'s fields (e.g. a drag-handle gesture) use beat_set with path "<track>.clip.<clip_id>.audio.<field>" (field one of media, in, out, gainDb, warp, rate) instead of recreating the clip. Returns the musical edit list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        clip: { type: 'string' },
+        media: { type: 'string', description: 'a sample id already registered in the media block (beat_sample / `beat sample`)' },
+        in: { type: 'number', description: 'in-point, seconds into the source media' },
+        out: { type: 'number', description: 'out-point, seconds into the source media; must be > in' },
+        gain_db: { type: 'number', description: 'static clip gain in dB; default 0' },
+        warp: { type: 'string', enum: ['off', 'repitch', 'complex'], description: "default 'off'" },
+        rate: { type: 'number', description: 'playbackRate multiplier; only when warp=repitch; default 1' },
+      },
+      required: ['file', 'track', 'clip', 'media', 'in', 'out'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const region: Parameters<typeof addAudioClip>[3] = { media: str(args, 'media'), in: num(args, 'in'), out: num(args, 'out') }
+      if (args.gain_db !== undefined) region.gainDb = num(args, 'gain_db')
+      if (typeof args.warp === 'string') region.warp = args.warp as 'off' | 'repitch' | 'complex'
+      if (args.rate !== undefined) region.rate = num(args, 'rate')
+      const { doc } = addAudioClip(before, str(args, 'track'), str(args, 'clip'), region)
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_audio_split',
+    description:
+      'Split-at-point (format v0.10, Phase 22 Stream AE, docs/research/16-audio-clip-editing.md §2): cuts one audio-region clip into two at a timeline position, no DSP. at is in fractional 16th steps from the CLIP\'s own start (the same unit note/hit start and automation point time already use). Both halves reference the same media with adjusted in/out points; gain-automation points partition by time (before the split stay on the first clip, at/after move to the second, retimed relative to its own new start). The first half keeps the original clip id; the second is auto-numbered ("<clip>-2", "<clip>-3", ...) unless new_clip_id is given. Returns the musical edit list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        clip: { type: 'string' },
+        at: { type: 'number', description: 'split position, fractional 16th steps from the clip\'s own start' },
+        new_clip_id: { type: 'string', description: 'id for the second half; omit to auto-number' },
+      },
+      required: ['file', 'track', 'clip', 'at'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, first, second } = splitAudioClip(before, str(args, 'track'), str(args, 'clip'), num(args, 'at'), typeof args.new_clip_id === 'string' ? { newClipId: args.new_clip_id } : {})
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc)) + `split into "${first.id}" and "${second.id}"\n`
     },
   },
   {

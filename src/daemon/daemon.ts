@@ -65,6 +65,7 @@ import {
   setGroupTracks,
   initDocument,
   defaultDrumKitLanes,
+  splitAudioClip,
   BeatEditError,
   BeatPresetError,
   BeatParseError,
@@ -723,6 +724,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           const written = writeIfChanged(next)
           revalidateSelection()
           json(res, 200, { written, song: doc.song })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // Phase 22 Stream AE: split-at-point for audio-region clips. Not expressible as a single
+    // {path,value} /edit — it produces TWO clips (first trimmed in place, second newly minted) —
+    // so it's an additive route wrapping core's splitAudioClip (the same function `beat
+    // audio-split` / `beat_audio_split` call), same shape as /song above. Returns the resulting
+    // clip ids so the GUI can select the new one without re-deriving the naming scheme.
+    if (req.method === 'POST' && url.pathname === '/audio-split') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; clip?: unknown; at?: unknown; newClipId?: unknown }
+          if (typeof b.track !== 'string' || typeof b.clip !== 'string' || typeof b.at !== 'number') {
+            json(res, 400, { error: 'body must be {track: string, clip: string, at: number, newClipId?: string}' })
+            return
+          }
+          const { doc: next, first, second } = splitAudioClip(doc, b.track, b.clip, b.at, typeof b.newClipId === 'string' ? { newClipId: b.newClipId } : {})
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, firstId: first.id, secondId: second.id })
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500

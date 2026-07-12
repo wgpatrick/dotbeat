@@ -34,6 +34,8 @@ import {
   addHit,
   removeHit,
   setAutomationPoint,
+  addAudioClip,
+  splitAudioClip,
   humanize,
   quantizeNotes,
   transposeNotes,
@@ -77,7 +79,7 @@ import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.
 
 const USAGE = `usage:
   beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track
-  beat add-track <file> <id> <synth|drums|instrument> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--legacy-lanes]
+  beat add-track <file> <id> <synth|drums|instrument|audio> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--legacy-lanes]
                                                           (a fresh drums track defaults to the 12-lane kit; --legacy-lanes opts back into the old implicit 5)
   beat rm-track <file> <id>
   beat group <file> <id> <track-id> [<track-id> ...] [--name N] [--color #hex]
@@ -144,6 +146,16 @@ const USAGE = `usage:
   beat effect-bypass <file> <track> <effect-id> <true|false>  bypass/re-enable one insert (real routing
                                                           bypass, not just its own mix knob — see beat_set's
                                                           <track>.effect.<id>.enabled path for the same edit)
+  beat audio-clip <file> <track> <clip-id> <media-id> <in> <out> [gain] [warp off|repitch|complex] [rate]
+                                                          create/replace an audio-region clip on an
+                                                          'audio' track (in/out are seconds into the
+                                                          source media); trim an existing clip's fields
+                                                          with beat set <track>.clip.<id>.audio.<field> <v>
+  beat audio-split <file> <track> <clip-id> <at-step> [--id new-clip-id]
+                                                          split-at-point: cuts one audio-region clip into
+                                                          two at a timeline position (fractional 16th
+                                                          steps from the clip's start), same media,
+                                                          adjusted in/out — no DSP
   beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
   beat suggest <file> <track> [--target <lane-or-id>] [--log f]
                                                           read the scores log and propose the next beat-vary round
@@ -194,7 +206,7 @@ function initCmd(argv) {
 
 function addTrackCmd(argv) {
   const [file, id, kind, ...rest] = argv
-  if (!file || !id || !kind) throw new BeatEditError('add-track needs <file> <id> <synth|drums|instrument>')
+  if (!file || !id || !kind) throw new BeatEditError('add-track needs <file> <id> <synth|drums|instrument|audio>')
   const nameIdx = rest.indexOf('--name')
   const colorIdx = rest.indexOf('--color')
   const sfIdx = rest.indexOf('--soundfont')
@@ -967,6 +979,39 @@ function effectBypassCmd(argv) {
   writeDoc(file, before, doc)
 }
 
+// Phase 22 Stream AE: audio-region clips (docs/phase-22-stream-ae.md). `audio-clip` creates/
+// replaces a clip's region in one call (mirrors `lane`'s <sample-id> <gain> <tune> shape); trims
+// after creation go through the ordinary `beat set <track>.clip.<id>.audio.<field> <value>` path
+// (setValue already carries it — see edit.ts), so there's no separate "trim" subcommand.
+function audioClipCmd(argv) {
+  const [file, track, clip, media, inPoint, outPoint, gain, warp, rate] = argv
+  if (!file || !track || !clip || !media || inPoint === undefined || outPoint === undefined) {
+    throw new BeatEditError('audio-clip needs <file> <track> <clip> <media-id> <in> <out> [gain dB] [warp off|repitch|complex] [rate]')
+  }
+  const before = readDoc(file)
+  const region = { media, in: Number(inPoint), out: Number(outPoint) }
+  if (gain !== undefined) region.gainDb = Number(gain)
+  if (warp !== undefined) region.warp = warp
+  if (rate !== undefined) region.rate = Number(rate)
+  const { doc } = addAudioClip(before, track, clip, region)
+  writeDoc(file, before, doc)
+}
+
+// Split-at-point (research/16-audio-clip-editing.md §2): one pure edit, no DSP — see
+// splitAudioClip in edit.ts. `at` is in fractional 16th steps from the clip's own start (the same
+// unit note/hit `start` and automation `point` time already use).
+function audioSplitCmd(argv) {
+  const idIdx = argv.indexOf('--id')
+  const newId = idIdx !== -1 ? argv[idIdx + 1] : undefined
+  const positional = argv.filter((a, i) => !(idIdx !== -1 && (i === idIdx || i === idIdx + 1)))
+  const [file, track, clip, at] = positional
+  if (!file || !track || !clip || at === undefined) throw new BeatEditError('audio-split needs <file> <track> <clip> <at-step> [--id new-clip-id]')
+  const before = readDoc(file)
+  const { doc, first, second } = splitAudioClip(before, track, clip, Number(at), newId !== undefined ? { newClipId: newId } : {})
+  writeDoc(file, before, doc)
+  process.stdout.write(`split "${clip}" into "${first.id}" and "${second.id}"\n`)
+}
+
 function fmtDb(x, unit = '') {
   return Number.isFinite(x) ? `${x.toFixed(1)}${unit}` : String(x)
 }
@@ -1302,6 +1347,12 @@ async function main() {
       break
     case 'effect-bypass':
       effectBypassCmd(rest)
+      break
+    case 'audio-clip':
+      audioClipCmd(rest)
+      break
+    case 'audio-split':
+      audioSplitCmd(rest)
       break
     case 'score':
       await scoreCmd(rest)

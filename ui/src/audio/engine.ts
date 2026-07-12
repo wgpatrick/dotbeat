@@ -59,7 +59,7 @@ import spessaWorkletUrl from 'spessasynth_lib/dist/spessasynth_processor.min.js?
 import { useStore, isEffectivelyMuted } from '../state/store'
 import { daemonBase } from '../daemon/bridge'
 import { audioBufferToWav } from './wavEncode'
-import type { BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatEffect, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumVoiceType, OscType } from '../types'
+import type { BeatAudioRegion, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatEffect, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumVoiceType, OscType } from '../types'
 import { DRUM_VOICE_PARAM_DEFAULTS } from '../types'
 
 // Phase 18 Stream R: ONE shared, widened destination set for both LFO1 and LFO2 — mirrors
@@ -921,6 +921,10 @@ interface Content {
   hits: BeatDrumHit[]
   automation: Map<string, { time: number; value: number }[]>
   contentStep: number
+  // Phase 22 Stream AE: the active audio-region clip's content, only ever non-null for 'audio'-
+  // kind tracks in song mode (audio-region clips have no live/non-clip form this stream — see
+  // docs/phase-22-stream-ae.md — so loop mode and every other track kind always gets null here).
+  audio: BeatAudioRegion | null
 }
 
 /** One live instrument (SoundFont) track. `synth` is a spessasynth_lib WorkletSynthesizer running
@@ -941,6 +945,19 @@ interface InstrumentVoice {
   levelTap: Tone.Analyser
   sample: string
   program: number
+}
+
+/** Phase 22 Stream AE: one live audio-region-clip track. `player` is a shared, reused Tone.Player
+ * — its `.buffer` is swapped (not rebuilt) when the currently-active clip references different
+ * media, and `.playbackRate`/`.volume` are set per-trigger from the active BeatAudioRegion (repitch
+ * rate, static gain + gain-automation ramps). `player` → `muteGain` → master, the same dedicated-
+ * gate discipline as SynthChain/DrumBus/InstrumentVoice so mute/solo never fights the region's own
+ * gain value. No separate track-level volume/pan this stream (documented gap, see
+ * docs/phase-22-stream-ae.md) — a clip's own `gainDb` is the only level control. */
+interface AudioTrackVoice {
+  player: Tone.Player
+  muteGain: Tone.Gain
+  levelTap: Tone.Analyser
 }
 
 class Engine {
@@ -967,6 +984,15 @@ class Engine {
   private instruments = new Map<string, InstrumentVoice>()
   private instrumentPending = new Set<string>()
   private workletModulePromise: Promise<void> | null = null
+
+  // Phase 22 Stream AE: audio-region-clip tracks. `audioTracks` holds one voice per 'audio'-kind
+  // track (built lazily, like `instruments`); `audioBuffers` is a CONTENT-ADDRESSED decode cache
+  // keyed by media id — shared across every track/clip that references the same sample, matching
+  // the format's own content-addressed `media/` block. `audioBufferPending` guards the async
+  // fetch+decode the same way `instrumentPending` guards a soundfont load.
+  private audioTracks = new Map<string, AudioTrackVoice>()
+  private audioBuffers = new Map<string, Tone.ToneAudioBuffer>()
+  private audioBufferPending = new Set<string>()
   // spessasynth_lib's WorkletSynthesizer constructs a native AudioWorkletNode, which requires a
   // real (native) BaseAudioContext. Tone 15 wraps its context in standardized-audio-context, whose
   // rawContext is NOT a native BaseAudioContext — so we run Tone itself on a native AudioContext
@@ -1625,6 +1651,7 @@ class Engine {
     // 16th tick, so a mute toggled mid-playback takes effect on the next step (well under a beat).
     this.applyMuteGates()
     this.syncInstruments(doc)
+    this.syncAudioTracks(doc)
   }
 
   /** Gate each track's output to 0 or 1 from the store's effective mute/solo state (mute wins; if
@@ -1643,6 +1670,9 @@ class Engine {
       this.drumBus.muteGain.gain.value = isEffectivelyMuted(state, this.drumTrackId) ? 0 : 1
     }
     for (const [id, voice] of this.instruments) {
+      voice.muteGain.gain.value = isEffectivelyMuted(state, id) ? 0 : 1
+    }
+    for (const [id, voice] of this.audioTracks) {
       voice.muteGain.gain.value = isEffectivelyMuted(state, id) ? 0 : 1
     }
   }
@@ -1668,6 +1698,8 @@ class Engine {
     if (this.drumBus && trackId === this.drumTrackId) return Engine.rmsDb(this.drumBus.levelTap.getValue() as Float32Array)
     const voice = this.instruments.get(trackId)
     if (voice) return Engine.rmsDb(voice.levelTap.getValue() as Float32Array)
+    const audioVoice = this.audioTracks.get(trackId)
+    if (audioVoice) return Engine.rmsDb(audioVoice.levelTap.getValue() as Float32Array)
     return null
   }
 
@@ -1784,6 +1816,79 @@ class Engine {
       }
       voice.vol.volume.value = inst.volume
       voice.pan.pan.value = inst.pan
+    }
+  }
+
+  // ---- audio-region-clip tracks (Phase 22 Stream AE) ---------------------------------------
+
+  /** Fetch + decode one media sample's bytes into the shared, content-addressed buffer cache (the
+   * same daemon `/media/<path>` route instrument soundfonts use). Fire-and-forget from
+   * syncAudioTracks(); on completion every track whose active clip references this media id can
+   * start scheduling it on the next tick. */
+  private async loadAudioBuffer(mediaId: string, mediaPath: string): Promise<void> {
+    try {
+      const res = await fetch(`${daemonBase()}/media/${mediaPath}`)
+      if (!res.ok) throw new Error(`fetch media "${mediaPath}": HTTP ${res.status}`)
+      const bytes = await res.arrayBuffer()
+      const ctx = this.ensureNativeContext()
+      const decoded = await ctx.decodeAudioData(bytes)
+      // If the sample vanished from the document while decoding, drop it silently — nothing
+      // references it, so there's nothing to serve; a future re-add re-fetches.
+      const stillWanted = useStore.getState().doc?.media?.some((m) => (m as { id: string }).id === mediaId)
+      if (!stillWanted) return
+      this.audioBuffers.set(mediaId, new Tone.ToneAudioBuffer(decoded))
+    } catch (err) {
+      console.warn(`[engine] audio media "${mediaId}" failed to load:`, err)
+    } finally {
+      this.audioBufferPending.delete(mediaId)
+    }
+  }
+
+  private buildAudioTrackVoice(): AudioTrackVoice {
+    const player = new Tone.Player()
+    const muteGain = new Tone.Gain(1)
+    const levelTap = new Tone.Analyser('waveform', 256)
+    player.chain(muteGain, this.getMaster())
+    muteGain.connect(levelTap) // post-fader side-tap, same discipline as every other levelTap
+    return { player, muteGain, levelTap }
+  }
+
+  private disposeAudioTrackVoice(voice: AudioTrackVoice): void {
+    try {
+      voice.player.stop()
+    } catch {
+      // best-effort: a not-yet-started player may reject stop()
+    }
+    voice.player.dispose()
+    voice.muteGain.dispose()
+    voice.levelTap.dispose()
+  }
+
+  /** Reconcile live audio-track voices with the document: dispose vanished tracks, build voices
+   * for new ones, and kick off (deduplicated) buffer loads for every media id any audio track's
+   * clips currently reference — a track can visit several clips (and therefore several media
+   * files) over a song's lifetime, so this pre-fetches all of them rather than just the one
+   * active this instant. */
+  private syncAudioTracks(doc: BeatDocument): void {
+    const audioTracks = doc.tracks.filter((t) => t.kind === 'audio')
+    const wanted = new Set(audioTracks.map((t) => t.id))
+    for (const [id, voice] of [...this.audioTracks]) {
+      if (!wanted.has(id)) {
+        this.disposeAudioTrackVoice(voice)
+        this.audioTracks.delete(id)
+      }
+    }
+    for (const track of audioTracks) {
+      if (!this.audioTracks.has(track.id)) this.audioTracks.set(track.id, this.buildAudioTrackVoice())
+      for (const clip of track.clips) {
+        if (!clip.audio) continue
+        const mediaId = clip.audio.media
+        if (this.audioBuffers.has(mediaId) || this.audioBufferPending.has(mediaId)) continue
+        const media = (doc.media as { id: string; path: string }[]).find((m) => m.id === mediaId)
+        if (!media) continue // not registered — nothing to load (reported elsewhere)
+        this.audioBufferPending.add(mediaId)
+        void this.loadAudioBuffer(mediaId, media.path)
+      }
     }
   }
 
@@ -2052,6 +2157,13 @@ class Engine {
         }
       }
     }
+    for (const voice of this.audioTracks.values()) {
+      try {
+        voice.player.stop()
+      } catch {
+        // best-effort: a not-yet-started player may reject stop()
+      }
+    }
     useStore.getState().setPlaying(false)
     useStore.setState({ currentStep: -1 })
   }
@@ -2121,7 +2233,10 @@ class Engine {
       return m
     }
     if (!song || song.length === 0) {
-      return { notes: track.notes, hits: track.hits, automation: new Map(), contentStep: step }
+      // Phase 22 Stream AE: audio-region clips have no live/non-clip form this stream (see
+      // docs/phase-22-stream-ae.md), so loop mode is always silent for 'audio'-kind tracks —
+      // audio: null unconditionally here, populated only from a clip below.
+      return { notes: track.notes, hits: track.hits, automation: new Map(), contentStep: step, audio: null }
     }
     // Resolve (bar -> section -> scene -> this track's clip).
     let cursor = 0
@@ -2139,11 +2254,19 @@ class Engine {
     const scene = (scenes as { id: string; slots: Record<string, string> }[]).find((sc) => sc.id === sceneId)
     const clipId = scene?.slots?.[track.id]
     if (!clipId) return null
-    const clip = (track.clips as { id: string; notes: BeatNote[]; hits: BeatDrumHit[]; automation: { param: string; points: { time: number; value: number }[] }[] }[]).find((c) => c.id === clipId)
+    const clip = (
+      track.clips as { id: string; notes: BeatNote[]; hits: BeatDrumHit[]; automation: { param: string; points: { time: number; value: number }[] }[]; audio?: BeatAudioRegion }[]
+    ).find((c) => c.id === clipId)
     if (!clip) return null
     const rel = step - sectionStartBar * 16
     const loopSteps = loopBars * 16
-    return { notes: clip.notes, hits: clip.hits, automation: autoOf(clip.automation ?? []), contentStep: ((rel % loopSteps) + loopSteps) % loopSteps }
+    return {
+      notes: clip.notes,
+      hits: clip.hits,
+      automation: autoOf(clip.automation ?? []),
+      contentStep: ((rel % loopSteps) + loopSteps) % loopSteps,
+      audio: clip.audio ?? null,
+    }
   }
 
   private tick(time: number): void {
@@ -2232,6 +2355,40 @@ class Engine {
             const slotDur = Math.max(slot.duration * stepSeconds * 0.9, 0.02)
             voice.synth.noteOn(0, midi, vel, { time: slotTime })
             voice.synth.noteOff(0, midi, { time: slotTime + slotDur })
+          }
+        }
+        continue
+      }
+
+      if (track.kind === 'audio') {
+        // Phase 22 Stream AE: audio-region clip playback — a Tone.Player per track, buffer
+        // swapped to whichever media the ACTIVE clip references, offset/duration taken straight
+        // from the region's in/out (source-media seconds — unaffected by playbackRate, same as
+        // the native AudioBufferSourceNode.start(when, offset, duration) semantics Tone.Player
+        // wraps), playbackRate set from `rate` only in warp='repitch' (off/complex play at native
+        // rate — complex has no stretch implementation yet, see BeatAudioRegion's doc comment).
+        const voice = this.audioTracks.get(track.id)
+        const region = content.audio
+        if (voice && region) {
+          const buf = this.audioBuffers.get(region.media)
+          const gainAuto = content.automation.get('gain')
+          if (content.contentStep === 0 && buf) {
+            // A clip re-triggers at the start of every pass through its own content (contentStep
+            // wraps to 0 — the same tiling `contentOf` already gives notes/hits, reused as-is).
+            if (voice.player.buffer !== buf) voice.player.buffer = buf
+            const rate = region.warp === 'repitch' ? region.rate : 1
+            voice.player.playbackRate = rate
+            voice.player.volume.value = gainAuto && gainAuto.length ? interpolateAutomation(gainAuto, content.contentStep, false) : region.gainDb
+            const duration = Math.max(region.out - region.in, 0.001)
+            try {
+              voice.player.start(time, region.in, duration)
+            } catch (err) {
+              console.warn(`[engine] audio track "${track.id}" failed to start:`, err)
+            }
+          } else if (gainAuto && gainAuto.length) {
+            // Mid-region gain automation: ramp the already-playing player's volume, the same
+            // linearRampToValueAtTime discipline every other automated param below uses.
+            voice.player.volume.linearRampToValueAtTime(interpolateAutomation(gainAuto, content.contentStep, false), time + stepSeconds)
           }
         }
         continue

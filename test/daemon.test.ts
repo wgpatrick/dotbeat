@@ -549,3 +549,64 @@ test('POST /new-project with a `from` that is not a valid .beat file is rejected
     assert.ok(!existsSync(join(dir, 'project.beat')))
   })
 })
+
+// ─── Phase 22 Stream AE: POST /audio-split (split-at-point over HTTP, the GUI's split gesture) ───
+
+async function withAudioDaemon(fn: (daemon: Daemon, filePath: string) => Promise<void>) {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-daemon-audio-test-'))
+  const filePath = join(dir, 'song.beat')
+  writeFileSync(
+    filePath,
+    `format_version 0.10
+bpm 120
+loop_bars 4
+selected_track atrk
+
+media
+  sample smp_kick sha256:${'a'.repeat(64)} media/kick.wav
+
+track atrk atrk #56b6c2 audio
+  clip c1
+    audio smp_kick 0 8 0 off 1
+`,
+  )
+  const daemon = await startDaemon({ filePath, port: 0 })
+  try {
+    await fn(daemon, filePath)
+  } finally {
+    await daemon.close()
+  }
+}
+
+const postAudioSplit = (port: number, body: unknown) =>
+  fetch(`http://127.0.0.1:${port}/audio-split`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
+test('POST /audio-split cuts one audio-region clip into two, writes to disk, and returns both ids', async () => {
+  await withAudioDaemon(async (daemon, filePath) => {
+    const res = await postAudioSplit(daemon.port, { track: 'atrk', clip: 'c1', at: 4 }) // 4 steps @ 120bpm = 0.5s
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { written: boolean; firstId: string; secondId: string }
+    assert.equal(body.written, true)
+    assert.equal(body.firstId, 'c1')
+    assert.equal(body.secondId, 'c1-2')
+
+    const doc = daemon.getDoc()
+    const track = doc.tracks.find((t) => t.id === 'atrk')!
+    assert.deepEqual(track.clips.map((c) => c.id), ['c1', 'c1-2'])
+    assert.equal(track.clips[0]!.audio!.out, 0.5)
+    assert.equal(track.clips[1]!.audio!.in, 0.5)
+    assert.equal(track.clips[1]!.audio!.out, 8)
+    // Persisted to disk and re-parses identically (in-memory === disk invariant).
+    assert.deepEqual(parse(readFileSync(filePath, 'utf8')), doc)
+  })
+})
+
+test('POST /audio-split rejects a bad request body and an out-of-range split position (400, no write)', async () => {
+  await withAudioDaemon(async (daemon) => {
+    assert.equal((await postAudioSplit(daemon.port, { track: 'atrk', clip: 'c1' })).status, 400) // missing `at`
+    const res = await postAudioSplit(daemon.port, { track: 'atrk', clip: 'c1', at: 999 })
+    assert.equal(res.status, 400)
+    assert.match((await res.json() as { error: string }).error, /out of range/)
+    assert.equal(daemon.getDoc().tracks.find((t) => t.id === 'atrk')!.clips.length, 1, 'the rejected split left the doc untouched')
+  })
+})

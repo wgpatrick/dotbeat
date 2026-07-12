@@ -22,12 +22,26 @@ function clipPropsSummary(c: BeatClip): string {
   return parts.length ? `, ${parts.join(', ')}` : ''
 }
 
+// Phase 22 Stream AE: "smp_drumloop 0-8s (repitch x1.5, -3 dB)" — the audio-region equivalent of
+// the note/hit summaries below, one line per clip's region.
+function audioRegionSummary(c: BeatClip): string {
+  if (!c.audio) return `${c.id} (no audio region)`
+  const a = c.audio
+  const warp = a.warp === 'off' ? 'unwarped' : a.warp === 'repitch' ? `repitch x${formatNumber(a.rate)}` : 'complex (unimplemented)'
+  return `${c.id} (${a.media} ${formatNumber(a.in)}-${formatNumber(a.out)}s, ${warp}, ${formatNumber(a.gainDb)} dB${clipAutomationSummary(c)})`
+}
+
 function describeTrack(t: BeatTrack, loopSteps: number): string[] {
   const lines: string[] = []
   const s = t.synth
   lines.push(`${t.id}  "${t.name}"  ${t.kind}  ${t.color}`)
   if (t.kind === 'instrument' && t.instrument) {
     lines.push(`  soundfont: ${t.instrument.sample} program ${formatNumber(t.instrument.program)}, ${formatNumber(t.instrument.volume)} dB, pan ${formatNumber(t.instrument.pan)}`)
+  } else if (t.kind === 'audio') {
+    // Phase 22 Stream AE: audio tracks carry no synth block and no live/non-clip content — every
+    // audio-region clip is listed below, same as the `clips:` line other kinds get.
+    lines.push(`  clips: ${t.clips.length === 0 ? 'none' : t.clips.map(audioRegionSummary).join(', ')}`)
+    return lines
   } else {
     lines.push(`  synth: ${s.osc}, ${formatNumber(s.volume)} dB, cutoff ${formatNumber(s.cutoff)} Hz, res ${formatNumber(s.resonance)}, ADSR ${formatNumber(s.attack)}/${formatNumber(s.decay)}/${formatNumber(s.sustain)}/${formatNumber(s.release)}, pan ${formatNumber(s.pan)}`)
   }
@@ -70,7 +84,15 @@ function describeTrack(t: BeatTrack, loopSteps: number): string[] {
     }
   }
   if (t.clips.length > 0) {
-    lines.push(`  clips: ${t.clips.map((c) => `${c.id} (${t.kind === 'drums' ? `${c.hits.length} hits` : `${c.notes.length} note${c.notes.length === 1 ? '' : 's'}`}${clipAutomationSummary(c)}${clipPropsSummary(c)})`).join(', ')}`)
+    lines.push(
+      `  clips: ${t.clips
+        .map((c) =>
+          t.kind === 'audio'
+            ? audioRegionSummary(c)
+            : `${c.id} (${t.kind === 'drums' ? `${c.hits.length} hits` : `${c.notes.length} note${c.notes.length === 1 ? '' : 's'}`}${clipAutomationSummary(c)}${clipPropsSummary(c)})`,
+        )
+        .join(', ')}`,
+    )
   }
   return lines
 }

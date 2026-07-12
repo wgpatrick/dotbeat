@@ -562,6 +562,74 @@ the format-spec-level summary.
   "mode" flag (the lane's backing decides), no 128-pad grid UI, no per-pad device chains, no key/
   velocity zones — research 18's Racks-skip stands.
 
+### v0.10 additions — audio-region clips (Phase 22 Stream AE, docs/phase-22-stream-ae.md)
+
+`BeatClip` gains a third content shape (media reference + in/out + gain + warp + rate), on a new
+`audio` track kind — the prerequisite for `docs/research/16-audio-clip-editing.md`'s "Audio-region
+clip editing" roadmap area.
+
+```
+track solo Solo #e5c07b audio
+  clip take-a
+    audio smp_drumloop 0 8 -3 repitch 1.5
+    auto solo.gain
+      point p1 0 -3
+      point p2 4 0
+```
+
+- **`audio <media-id> <in> <out> <gain dB> <warp> <rate>`** — one bundled clip-content line, all
+  six fields always serialized (**no canonical elision** — this follows the `note`/`hit` "one
+  bundled event per line" discipline, not the ~50-field `SYNTH_FIELDS` elision discipline: a
+  region's fields are small, fixed, and edited together, the same reasoning that keeps a note's
+  five fields on one line). `in`/`out` are seconds into the **source media file**, not timeline
+  steps — independent of the document's `bpm`. `warp` is `off | repitch | complex`; `complex` is a
+  legal enum value with **no engine implementation yet** (needs the signalsmith-stretch dependency,
+  a deliberately separate future stream — see research 16 §8 item 5) and plays back unwarped until
+  that stream lands. `rate` is the playbackRate multiplier for `warp = repitch` (`0.1`-`8`) and
+  **must be exactly `1`** for every other warp value — enforced at parse and edit time (one
+  canonical form per state, D4): a hand-edited `off 1.5` is a parse error, not a second spelling of
+  `off 1`.
+- **`BeatAudioRegion.markers`** (an ordered `(sourceTime, timelineTime)` list, structurally the same
+  shape a v0.9 automation point already establishes) is reserved for `warp = complex` but **always
+  `[]` this stream** — no `marker` line grammar, no edit primitives. Present in the type now so the
+  eventual warp-marker stream is a pure grammar addition, not a breaking change.
+- **Clip-only, deliberately** — unlike notes/hits, audio regions have **no live/non-clip form**:
+  `BeatTrack` gets no `audio` field, only `BeatClip.audio?`. An audio-region clip only plays when
+  reachable through a scene + song section; a fresh `audio` track with no clips plays nothing (same
+  as a drum track with no lane samples assigned). Every clip on an `audio`-kind track must carry an
+  `audio` line (fail-loud at parse time, same stance as an instrument track missing its `soundfont`
+  line); `audio` tracks carry no synth block, no lane samples, no note/hit lines.
+- **Reuses the v0.5 `media` block unchanged** — `media-id` must resolve against a declared sample
+  (validated post-parse, same discipline as instrument soundfonts and drum lane samples). No second
+  asset mechanism.
+- **Gain automation reuses the v0.9 `auto`/`point` grammar completely unchanged** — an audio-track
+  clip's only automatable param is `gain` (`AUDIO_AUTOMATABLE_PARAMS` in `document.ts`, a separate
+  namespace from `AUTOMATABLE_SYNTH_PARAMS`; a synth param is rejected on an audio clip and vice
+  versa). This confirms research 16 §3's prediction that clip gain "would very likely just plug
+  into the existing automation-lane machinery" rather than needing new grammar.
+- **Split-at-point** (`splitAudioClip` in `src/core/edit.ts`) is a pure edit primitive, not new
+  grammar: it replaces one clip with two, same media reference, adjusted `in`/`out` (accounting for
+  `rate` when converting a timeline step position to source-media seconds), gain-automation points
+  partitioned by time and retimed for the second half — no DSP, no engine involvement.
+- **Format version bumped to `0.10`** — a real grammar addition (three streams' worth of scope:
+  format, engine, edit primitives), not a footnote.
+- **CLI/MCP**: `beat add-track <file> <id> audio` (already generic); `beat audio-clip <file>
+  <track> <clip> <media-id> <in> <out> [gain] [warp] [rate]` / `beat_audio_clip`; `beat audio-split
+  <file> <track> <clip> <at-step> [--id]` / `beat_audio_split` (split-at-point); trims to an
+  existing clip's region go through the ordinary `beat set <track>.clip.<id>.audio.<field> <value>`
+  path (same shape `<track>.note.<id>.<field>` already establishes), no new command needed.
+- **Engine** (`ui/src/audio/engine.ts`): one `Tone.Player` per `audio`-kind track, a
+  content-addressed decoded-buffer cache shared across clips referencing the same media,
+  `playbackRate` driven by `rate` only when `warp = repitch`, `volume` driven by `gainDb` plus any
+  gain-automation ramp. Verified live (not just unit-tested): repitch measurably shifts the
+  rendered spectral centroid, trim measurably changes what's audible when, split halves both play
+  back correctly, and gain (static and automated) measurably changes rendered level — see
+  `ui/verify-phase22-audio-region.mjs` and `docs/phase-22-stream-ae.md`'s Verification section.
+
+**Explicitly deferred to future streams** (per `docs/research/16-audio-clip-editing.md` §8's own
+sequencing): warp markers, Complex-mode stretch (needs signalsmith-stretch), beats-mode transient
+slicing, native audio recording, multi-take comping.
+
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
 Clips/scenes (shipped v0.4), swing, arrangement (shipped v0.4), multi-device chains beyond the
