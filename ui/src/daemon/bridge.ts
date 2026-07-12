@@ -485,6 +485,36 @@ export async function postAudioSplit(track: string, clip: string, at: number, ne
   return { firstId, secondId }
 }
 
+// ─── clip-occurrence move (Phase 24 Stream CC) ──────────────────────────────────────────────────
+// ArrangementView.tsx's marquee-select-then-drag: moving one or more selected clip occurrences to
+// different section(s) at once (preserving each one's section-index offset from the others). Not a
+// {path,value} /edit — see daemon.ts's applyClipMoves doc comment for why a move needs its own
+// batched route (private per-section scene cloning, so it never bleeds into a sibling section that
+// happens to reuse the same scene). Same shape as postAudioSplit: POST, then apply the daemon's
+// returned full document directly (no optimistic local mirror for a multi-scene batch write).
+
+export interface ClipMove {
+  track: string
+  fromIndex: number
+  toIndex: number
+}
+
+export async function postClipMove(moves: ClipMove[]): Promise<void> {
+  if (moves.length === 0) return
+  const base = daemonBase()
+  const res = await fetch(`${base}/clip-move`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ moves }),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc } = (await res.json()) as { written: boolean; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
+}
+
 // ─── Pitch & Time operations + Consolidate (Phase 23 Stream BA) ─────────────────────────────────
 // The six Ableton-style one-shot ops (src/core/pitchtime.ts) plus ratchet's Consolidate action.
 // Phase 22 Stream AD shipped these CLI/MCP-only ("no daemon route needed"); this stream adds POST

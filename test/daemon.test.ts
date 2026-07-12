@@ -417,6 +417,135 @@ function docTotalBars(daemon: Daemon): number {
   return daemon.getDoc().song!.reduce((n, s) => n + s.bars, 0)
 }
 
+// ─── Phase 24 Stream CC: cross-section clip move (POST /clip-move) ────────────────────────────────
+// ArrangementView.tsx's marquee-select-then-drag: moving one or more clip occurrences to different
+// section(s) at once, preserving their relative section-index offset. See daemon.ts's
+// applyClipMoves doc comment for the full design — occurrences are 1:1 with sections, so a move
+// clears the track's slot in the source section's scene and sets it in the target's, but every
+// section TOUCHED by the batch gets a freshly-minted PRIVATE scene first, so the move never bleeds
+// into a sibling section that happens to reuse the same original scene.
+const postClipMove = (port: number, moves: unknown) =>
+  fetch(`http://127.0.0.1:${port}/clip-move`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ moves }) })
+
+/** A small controlled 4-section song where scene "verse" deliberately backs TWO separate sections
+ * (0 and 3) — the shared-scene case a move has to handle without bleeding into section 3 when
+ * section 0 is the one being edited. Section 1 ("chorus") maps both tracks; section 2 ("bridge")
+ * maps neither (silent), so it's never touched by any of these tests. */
+async function sharedSceneSong(): Promise<{ daemon: Daemon; filePath: string }> {
+  const { initDocument, addTrack, saveClip, setScene, setSong, serialize: ser } = await import('../src/core/index.js')
+  let doc = initDocument({ trackId: 'lead' })
+  doc = addTrack(doc, { id: 'drums', kind: 'drums' }).doc
+  doc = saveClip(doc, 'lead', 'leadClip').doc
+  doc = saveClip(doc, 'drums', 'drumsClip').doc
+  doc = setScene(doc, 'verse', { lead: 'leadClip', drums: 'drumsClip' })
+  doc = setScene(doc, 'chorus', { lead: 'leadClip' })
+  doc = setScene(doc, 'bridge', {})
+  doc = setSong(doc, [
+    { scene: 'verse', bars: 4 }, // 0
+    { scene: 'chorus', bars: 4 }, // 1
+    { scene: 'bridge', bars: 4 }, // 2 — genuinely empty, a clean destination for a move
+    { scene: 'verse', bars: 4 }, // 3 — shares the ORIGINAL "verse" scene with section 0
+  ])
+  const dir = mkdtempSync(join(tmpdir(), 'beat-daemon-clipmove-test-'))
+  const filePath = join(dir, 'song.beat')
+  writeFileSync(filePath, ser(doc))
+  const daemon = await startDaemon({ filePath, port: 0 })
+  return { daemon, filePath }
+}
+
+test('POST /clip-move moves one track\'s occurrence to a different section without touching a sibling section that shares the same scene', async () => {
+  const { daemon, filePath } = await sharedSceneSong()
+  try {
+    // Move "drums" from section 0 ("verse") to section 1 ("chorus", currently drums-less).
+    const res = await postClipMove(daemon.port, [{ track: 'drums', fromIndex: 0, toIndex: 1 }])
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { written: boolean }
+    assert.equal(body.written, true)
+
+    const doc = daemon.getDoc()
+    assert.equal(doc.song!.length, 4, 'move never changes the section COUNT')
+    const sec0 = doc.scenes.find((s) => s.id === doc.song![0]!.scene)!
+    const sec1 = doc.scenes.find((s) => s.id === doc.song![1]!.scene)!
+    const sec3 = doc.scenes.find((s) => s.id === doc.song![3]!.scene)!
+    assert.equal(sec0.slots.drums, undefined, 'drums unmapped at the source section')
+    assert.equal(sec0.slots.lead, 'leadClip', 'lead untouched at the source section')
+    assert.equal(sec1.slots.drums, 'drumsClip', 'drums mapped at the destination section')
+    assert.equal(sec1.slots.lead, 'leadClip', 'chorus\'s own lead mapping is untouched')
+    // Section 3 shared the ORIGINAL "verse" scene with section 0 — it must be completely
+    // unaffected: still has drums mapped (the whole point of private-scene cloning).
+    assert.equal(sec3.slots.drums, 'drumsClip', 'a sibling section sharing the old scene keeps its own drums mapping')
+    assert.equal(sec3.slots.lead, 'leadClip')
+    // Section 0 and section 3 must now be on DIFFERENT scenes (the clone), even though they
+    // started on the same one.
+    assert.notEqual(doc.song![0]!.scene, doc.song![3]!.scene)
+    // in-memory === disk invariant still holds.
+    assert.deepEqual(parse(readFileSync(filePath, 'utf8')), doc)
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('POST /clip-move batches a whole marquee-selected group as one write, preserving each occurrence\'s relative section offset', async () => {
+  const { daemon } = await sharedSceneSong()
+  try {
+    // Move BOTH lead and drums from section 0 to section 2 in one batch (as a real marquee-drag
+    // would issue) — both should land together, and section 3 (still sharing the ORIGINAL "verse"
+    // scene) must stay untouched.
+    const res = await postClipMove(daemon.port, [
+      { track: 'lead', fromIndex: 0, toIndex: 2 },
+      { track: 'drums', fromIndex: 0, toIndex: 2 },
+    ])
+    assert.equal(res.status, 200)
+    const doc = daemon.getDoc()
+    const sec0 = doc.scenes.find((s) => s.id === doc.song![0]!.scene)!
+    const sec2 = doc.scenes.find((s) => s.id === doc.song![2]!.scene)!
+    const sec3 = doc.scenes.find((s) => s.id === doc.song![3]!.scene)!
+    assert.equal(sec0.slots.lead, undefined)
+    assert.equal(sec0.slots.drums, undefined)
+    assert.equal(sec2.slots.lead, 'leadClip')
+    assert.equal(sec2.slots.drums, 'drumsClip')
+    assert.equal(sec3.slots.lead, 'leadClip', 'sibling section 3 (shared the old "verse" scene) is untouched')
+    assert.equal(sec3.slots.drums, 'drumsClip')
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('POST /clip-move rejects an out-of-range section index and a track with no occurrence at fromIndex, without writing', async () => {
+  const { daemon, filePath } = await sharedSceneSong()
+  try {
+    const before = readFileSync(filePath, 'utf8')
+    const badIndex = await postClipMove(daemon.port, [{ track: 'drums', fromIndex: 0, toIndex: 99 }])
+    assert.equal(badIndex.status, 400)
+    // "chorus" (section 1) has no drums slot — moving drums FROM section 1 is a no-op source.
+    const badSource = await postClipMove(daemon.port, [{ track: 'drums', fromIndex: 1, toIndex: 2 }])
+    assert.equal(badSource.status, 400)
+    assert.equal(readFileSync(filePath, 'utf8'), before, 'a rejected move must not touch the file')
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('POST /clip-move is a no-op (200, unwritten) when every move has fromIndex === toIndex', async () => {
+  const { daemon, filePath } = await sharedSceneSong()
+  try {
+    const before = readFileSync(filePath, 'utf8')
+    const res = await postClipMove(daemon.port, [{ track: 'drums', fromIndex: 0, toIndex: 0 }])
+    assert.equal(res.status, 200)
+    assert.equal(readFileSync(filePath, 'utf8'), before)
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('POST /clip-move outside song mode is rejected with a 400', async () => {
+  await withDaemon(async (daemon) => {
+    assert.equal(daemon.getDoc().song, null)
+    const res = await postClipMove(daemon.port, [{ track: 'lead', fromIndex: 0, toIndex: 1 }])
+    assert.equal(res.status, 400)
+  })
+})
+
 // Phase 20 Stream W: track structure add/remove over HTTP (the GUI's track-management surface).
 test('POST /add-track appends a track, writes it to the file, and returns the fresh document', async () => {
   await withDaemon(async (daemon, filePath) => {

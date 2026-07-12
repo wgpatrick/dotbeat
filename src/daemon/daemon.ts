@@ -235,6 +235,87 @@ export function songDelete(doc: BeatDocument, index: number): BeatDocument {
   return setSong(doc, doc.song.filter((_, i) => i !== index))
 }
 
+// ─── cross-section clip move (Phase 24 Stream CC) ────────────────────────────────────────────────
+// ArrangementView.tsx's occurrences are 1:1 with sections: a track's clip occurrence at section
+// index N is simply "does section N's scene map this track to a clip" (trackOccurrences/
+// flattenTrack). There is no independent per-track bar position to move — a clip is never at an
+// arbitrary bar, only ever "this track's slot in this section's scene" — so the honest edit
+// primitive for "drag a clip occurrence to a different bar position" is: clear the track's slot in
+// the source section's scene, and set it in the target section's scene (exactly what docs/
+// phase-24-plan.md's own framing anticipated: "moving a clip... edits which SCENE a section
+// plays... for that track").
+//
+// The one wrinkle: dotbeat scenes are deliberately REUSED across sections (night-shift-song.beat's
+// own "intro" scene backs 4 separate sections) — that's real, intentional content, not an edge
+// case. Naively mutating a shared scene's slots would silently also change every OTHER section
+// that happens to reuse it, which is not what "move THIS occurrence" means. So every section
+// touched by a batch of moves (as a source OR a destination) gets its own freshly-minted, private
+// scene — a full copy of its current slot map, patched with just this batch's removals/additions —
+// before any slot is written. Sections not in the batch, even if they shared the old scene id,
+// never change. A whole marquee-selected GROUP of moves (potentially several tracks, several
+// sections) is applied as one batch/one write, so a multi-clip drag is one clean commit, not N.
+export interface ClipMove {
+  track: string
+  fromIndex: number
+  toIndex: number
+}
+
+export function applyClipMoves(doc: BeatDocument, moves: ClipMove[]): BeatDocument {
+  if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no sections to move a clip between')
+  const sections = doc.song
+  const real = moves.filter((m) => m.fromIndex !== m.toIndex)
+  if (real.length === 0) return doc
+
+  for (const mv of real) {
+    if (!Number.isInteger(mv.fromIndex) || mv.fromIndex < 0 || mv.fromIndex >= sections.length) {
+      throw new BeatEditError(`fromIndex ${mv.fromIndex} out of range (0-${sections.length - 1})`)
+    }
+    if (!Number.isInteger(mv.toIndex) || mv.toIndex < 0 || mv.toIndex >= sections.length) {
+      throw new BeatEditError(`toIndex ${mv.toIndex} out of range (0-${sections.length - 1})`)
+    }
+  }
+
+  // Resolve every move's clip id up front, against the UNCHANGED starting document — a track can
+  // be both a "from" and a "to" for different moves in the same batch (e.g. two tracks swapping
+  // sections), so nothing here may read a slot that an earlier move in this same loop already
+  // touched.
+  const resolved = real.map((mv) => {
+    const scene = doc.scenes.find((s) => s.id === sections[mv.fromIndex]!.scene)
+    const clipId = scene?.slots[mv.track]
+    if (!clipId) throw new BeatEditError(`track "${mv.track}" has no clip playing in section ${mv.fromIndex}`)
+    return { ...mv, clipId }
+  })
+
+  const removals = new Map<number, Set<string>>() // section index -> track ids to unmap
+  const additions = new Map<number, Map<string, string>>() // section index -> track id -> clip id to map
+  for (const mv of resolved) {
+    if (!removals.has(mv.fromIndex)) removals.set(mv.fromIndex, new Set())
+    removals.get(mv.fromIndex)!.add(mv.track)
+    if (!additions.has(mv.toIndex)) additions.set(mv.toIndex, new Map())
+    additions.get(mv.toIndex)!.set(mv.track, mv.clipId)
+  }
+
+  const nextSections = sections.map((s) => ({ ...s }))
+  let next = doc
+  for (const idx of new Set<number>([...removals.keys(), ...additions.keys()])) {
+    const sec = nextSections[idx]!
+    const scene = next.scenes.find((s) => s.id === sec.scene)
+    const slots = { ...(scene?.slots ?? {}) }
+    for (const track of removals.get(idx) ?? []) delete slots[track]
+    for (const [track, clipId] of additions.get(idx) ?? []) slots[track] = clipId
+    // Always mint a fresh scene for a touched section, even if its old scene wasn't actually
+    // shared — simplest way to guarantee this move never bleeds into a sibling section, and
+    // nextSceneId(next) is always strictly past every scene minted so far this batch too.
+    const newId = nextSceneId(next)
+    next = setScene(next, newId, slots)
+    nextSections[idx] = { ...sec, scene: newId }
+  }
+  return setSong(
+    next,
+    nextSections.map((s) => ({ scene: s.scene, bars: s.bars })),
+  )
+}
+
 // ─── overlapping-region resolution policy (Phase 22 Stream AG) ──────────────────────────────────
 // docs/research/22-opendaw-editing-workflow.md §2.1: openDAW ships a user-configurable overlap
 // policy — `["clip", "push-existing", "keep-existing"]` — for what happens when a dragged/resized
@@ -774,6 +855,36 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           const written = writeIfChanged(next)
           revalidateSelection()
           json(res, 200, { written, song: doc.song })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // Phase 24 Stream CC: move a clip occurrence (or a whole marquee-selected GROUP of them, across
+    // however many tracks) to different section(s), as one batched write — see applyClipMoves'
+    // doc comment for why this can't just be a scene-slot {path,value} /edit (shared-scene bleed).
+    if (req.method === 'POST' && url.pathname === '/clip-move') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { moves?: unknown }
+          if (!Array.isArray(b.moves)) {
+            json(res, 400, { error: 'body must be {moves: {track: string, fromIndex: number, toIndex: number}[]}' })
+            return
+          }
+          const moves: ClipMove[] = b.moves.map((raw, i) => {
+            const m = raw as { track?: unknown; fromIndex?: unknown; toIndex?: unknown }
+            if (typeof m.track !== 'string' || typeof m.fromIndex !== 'number' || typeof m.toIndex !== 'number') {
+              throw new BeatEditError(`moves[${i}] must be {track: string, fromIndex: number, toIndex: number}`)
+            }
+            return { track: m.track, fromIndex: m.fromIndex, toIndex: m.toIndex }
+          })
+          const next = applyClipMoves(doc, moves)
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc })
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500

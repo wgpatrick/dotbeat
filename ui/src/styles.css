@@ -1644,11 +1644,56 @@ body {
   padding: 0 3px;
 }
 .arr-lane {
+  position: relative; /* positioning context for the .arr-clip-block overlay (Phase 24 Stream CC) */
   flex: 0 0 auto;
   cursor: crosshair;
 }
 .arr-canvas {
   display: block;
+}
+
+/* ---- clip occurrence blocks (Phase 24 Stream CC) ---- */
+/* A bounded, labeled, selectable block per clip occurrence, one per track row per section it plays
+   in — sits above the canvas (later in DOM order) so it both reads as a clear boundary and catches
+   pointer events for click / marquee-select / drag-move. The canvas underneath keeps drawing the
+   occurrence's own content in miniature (note/hit ticks, or the audio fill) — this overlay only
+   owns the chrome (border/label/selection), not the content. */
+.arr-clip-block {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: grab;
+  overflow: hidden;
+  z-index: 1;
+}
+.arr-clip-block:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.arr-clip-block.selected {
+  border-width: 2px;
+  box-shadow: 0 0 0 1px var(--accent);
+  background: rgba(224, 161, 60, 0.16);
+}
+.arr-clip-block.dragging {
+  opacity: 0.65;
+  border-style: dashed;
+  cursor: grabbing;
+  z-index: 4;
+}
+.arr-clip-label {
+  position: absolute;
+  left: 4px;
+  top: 2px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
 }
 
 /* ---- automation lanes (Phase 20 Stream Z) ---- */

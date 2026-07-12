@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
-import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, daemonBase } from '../daemon/bridge'
+import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, postClipMove, daemonBase } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, installAudioClip, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
 import { declaredLaneNames, WARP_MODES, type BeatAutomationPoint, type BeatClip, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind, type WarpMode } from '../types'
@@ -302,18 +302,46 @@ interface ClipOccurrence {
   clipId: string
   startBar: number
   bars: number
+  /** Phase 24 Stream CC: this occurrence's index into the `sections`/`doc.song` array. Occurrences
+   * are 1:1 with sections (a track's clip is never at an arbitrary bar, only ever "this track's
+   * slot in this section's scene" — see daemon.ts's applyClipMoves doc comment), so the section
+   * index IS the move primitive's addressing unit — clicking/dragging a clip block needs it to
+   * build a {track, fromIndex, toIndex} move. */
+  sectionIndex: number
 }
 function trackOccurrences(track: BeatTrack, sections: Section[], doc: BeatDocument): ClipOccurrence[] {
   if (!doc.song) return []
   const out: ClipOccurrence[] = []
-  for (const s of sections) {
+  sections.forEach((s, sectionIndex) => {
     const scene = doc.scenes.find((sc) => sc.id === s.scene)
     const clipId = scene?.slots[track.id]
-    if (!clipId) continue
-    if (!track.clips.find((c) => c.id === clipId)) continue
-    out.push({ clipId, startBar: s.startBar, bars: s.bars })
-  }
+    if (!clipId) return
+    if (!track.clips.find((c) => c.id === clipId)) return
+    out.push({ clipId, startBar: s.startBar, bars: s.bars, sectionIndex })
+  })
   return out
+}
+
+/** Phase 24 Stream CC: a stable string key for a (track, section-occurrence) pair — the unit both
+ * the marquee selection Set and the clip-move batch address. */
+function occKey(trackId: string, sectionIndex: number): string {
+  return `${trackId}::${sectionIndex}`
+}
+
+/** The section whose startBar is closest to `targetStartBar` — how a drag's continuous bar delta
+ * snaps to the section grid a clip occurrence can actually live on (occurrences are 1:1 with
+ * sections; there is no in-between bar position to land on). */
+function nearestSectionIndex(sections: Section[], targetStartBar: number): number {
+  let best = 0
+  let bestDist = Infinity
+  for (let i = 0; i < sections.length; i++) {
+    const d = Math.abs(sections[i]!.startBar - targetStartBar)
+    if (d < bestDist) {
+      bestDist = d
+      best = i
+    }
+  }
+  return best
 }
 
 const NO_POINTS: BeatAutomationPoint[] = []
@@ -447,7 +475,10 @@ function TrackRow({
   groupPickChecked,
   onToggleGroupPick,
   alreadyGrouped,
-  audioOccurrences,
+  occurrences,
+  selectedOcc,
+  dragPreview,
+  onOccPointerDown,
 }: {
   flat: TrackFlat
   totalBars: number
@@ -466,10 +497,22 @@ function TrackRow({
   /** True when this track already belongs to a group — a track can only be in one, so the pick
    * checkbox is hidden rather than offered-and-refused. */
   alreadyGrouped?: boolean
-  /** Phase 22 Stream AE: this track's clip occurrences (only meaningful for kind 'audio' — every
-   * other kind ignores it). Passed down rather than recomputed: the parent already builds this
-   * exact list (occurrencesByTrack) for the automation-lane wiring. */
-  audioOccurrences?: ClipOccurrence[]
+  /** This track's clip occurrences (Phase 22 Stream AE originally passed these for 'audio'-kind
+   * canvas rendering only; Phase 24 Stream CC generalized it to every kind — it now also drives
+   * the bounded/labeled/selectable `.arr-clip-block` DOM overlay every track row renders). Passed
+   * down rather than recomputed: the parent already builds this exact list (occurrencesByTrack)
+   * for the automation-lane wiring. */
+  occurrences?: ClipOccurrence[]
+  /** Phase 24 Stream CC: which occurrences (by occKey) are part of the current marquee/click
+   * selection — drives `.arr-clip-block.selected`. */
+  selectedOcc: Set<string>
+  /** Phase 24 Stream CC: the live preview while a selected clip is being dragged — every occurrence
+   * whose key is in `keys` renders shifted by `deltaBars` (bars, can be fractional-looking but is
+   * always a whole-bar round), until the drag commits or cancels. */
+  dragPreview: { deltaBars: number; keys: Set<string> } | null
+  /** Phase 24 Stream CC: pointerdown on one clip block — stops the event from also starting the
+   * lane's own empty-space marquee/bar-select drag (see beginClipDrag in the parent). */
+  onOccPointerDown: (sectionIndex: number, e: React.PointerEvent) => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { track } = flat
@@ -500,7 +543,7 @@ function TrackRow({
   // (installAudioClip), the clip-creation half Stream AE's format work left for the GUI. No new
   // position signal exists at the header (unlike the canvas, a header drop isn't "at bar N"), so the
   // target clip is resolved the same "primary occurrence" convention every other per-track panel in
-  // this file already uses (audioOccurrences[0]): reuse it in place if the track already has one,
+  // this file already uses (occurrences[0]): reuse it in place if the track already has one,
   // otherwise mint a new clip and slot it into the FIRST song section's scene (sections[0]) so it's
   // immediately visible — refused with a clear message in loop mode, where there's no scene to slot
   // into yet (add a song section first).
@@ -527,7 +570,7 @@ function TrackRow({
             window.alert('Drag a single kit sample (not a whole kit) onto an audio track — one clip, one sample.')
             return
           }
-          const existingClipId = audioOccurrences?.[0]?.clipId
+          const existingClipId = occurrences?.[0]?.clipId
           const firstScene = sections[0]?.scene
           const opts: { clipId?: string; sceneId?: string } =
             existingClipId !== undefined ? { clipId: existingClipId } : firstScene && firstScene !== LOOP_SCENE_SENTINEL ? { sceneId: firstScene } : {}
@@ -547,7 +590,7 @@ function TrackRow({
         installSoundfont(payload.file, { track: track.id }).catch((err) => window.alert(`Could not install soundfont: ${(err as Error).message}`))
       }
     },
-    [track.id, track.kind, track.name, audioOccurrences, sections],
+    [track.id, track.kind, track.name, occurrences, sections],
   )
 
   useEffect(() => {
@@ -589,11 +632,19 @@ function TrackRow({
     }
 
     if (track.kind === 'audio') {
-      // Phase 22 Stream AE: the minimum-viable visual — a flat-colored labeled block per clip
-      // occurrence (section), with dark edge markers standing in for in/out handles. No waveform
-      // rendering and no drag-to-trim this stream (a real lift — see docs/phase-22-stream-ae.md's
-      // honest gap note); trim via the fields under the track, or `beat set`/beat_set.
-      for (const occ of audioOccurrences ?? []) {
+      // Phase 22 Stream AE: a flat-colored fill per clip occurrence (section), with dark edge
+      // markers standing in for in/out handles — the "internal content in miniature" flavor
+      // research/30 (Ableton) calls out for audio (a stand-in for a real waveform; see
+      // AudioClipInspector's actual waveform strip for the real thing). No drag-to-trim this
+      // stream (a real lift — see docs/phase-22-stream-ae.md's honest gap note); trim via the
+      // fields under the track, or `beat set`/beat_set.
+      //
+      // Phase 24 Stream CC: the clip ID label used to be drawn here too — it now lives on the
+      // `.arr-clip-block` DOM overlay every track kind gets (bounded/labeled/selectable), so this
+      // canvas text is just the media filename + warp mode (extra detail the DOM label doesn't
+      // carry), anchored to the BOTTOM of the block so it doesn't collide with the DOM label at
+      // the top.
+      for (const occ of occurrences ?? []) {
         const clip = track.clips.find((c) => c.id === occ.clipId)
         if (!clip?.audio) continue
         const x = occ.startBar * pxPerBar
@@ -607,10 +658,10 @@ function TrackRow({
         ctx.fillRect(x + w - 4, 4, 3, ROW_H - 8) // out-point marker
         if (w > 40) {
           ctx.fillStyle = '#0b0e14'
-          ctx.font = '10px sans-serif'
-          ctx.textBaseline = 'middle'
+          ctx.font = '9px sans-serif'
+          ctx.textBaseline = 'bottom'
           const label = clip.audio.warp === 'off' ? clip.audio.media : `${clip.audio.media} · ${clip.audio.warp} x${clip.audio.rate}`
-          ctx.fillText(label, x + 8, ROW_H / 2, w - 16)
+          ctx.fillText(label, x + 8, ROW_H - 5, w - 16)
         }
       }
     } else if (detail) {
@@ -671,7 +722,7 @@ function TrackRow({
       ctx.lineTo(x1 - 0.5, ROW_H)
       ctx.stroke()
     }
-  }, [flat, totalBars, pxPerBar, detail, sections, band, track, audioOccurrences])
+  }, [flat, totalBars, pxPerBar, detail, sections, band, track, occurrences])
 
   return (
     <div className={`arr-row ${dimmed ? 'dimmed' : ''}`} style={{ height: ROW_H }}>
@@ -763,6 +814,33 @@ function TrackRow({
       </div>
       <div className="arr-lane" data-track={track.id} onPointerDown={onRowPointerDown} style={{ touchAction: 'none' }}>
         <canvas ref={canvasRef} className="arr-canvas" />
+        {/* Phase 24 Stream CC: a bounded, labeled, selectable block per clip occurrence — Part 1's
+            visibility fix. Sits ABOVE the canvas (later in DOM order) so it both reads clearly and
+            catches pointer events for click/marquee-select/drag-move; the canvas underneath keeps
+            drawing the occurrence's own content in miniature (note/hit ticks, or the audio fill).
+            Absent entirely in loop mode (occurrences is always [] there — no scene/clip concept to
+            show a boundary for). */}
+        {(occurrences ?? []).map((occ) => {
+          const key = occKey(track.id, occ.sectionIndex)
+          const isSelected = selectedOcc.has(key)
+          const isDragging = !!dragPreview?.keys.has(key)
+          const left = (occ.startBar + (isDragging ? dragPreview!.deltaBars : 0)) * pxPerBar
+          const width = Math.max(4, occ.bars * pxPerBar)
+          return (
+            <div
+              key={key}
+              className={`arr-clip-block ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
+              data-clip-block={key}
+              data-clip-id={occ.clipId}
+              data-section-index={occ.sectionIndex}
+              style={{ left, width, borderColor: track.color }}
+              title={`${occ.clipId} · ${occ.bars} bar${occ.bars === 1 ? '' : 's'}`}
+              onPointerDown={(e) => onOccPointerDown(occ.sectionIndex, e)}
+            >
+              <span className="arr-clip-label">{occ.clipId}</span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -1223,6 +1301,30 @@ export function ArrangementView() {
   // here is the chip's index at drag-start, which is safe because nothing reorders the array mid-drag
   // (the move only commits on drop).
   const [sectionDrag, setSectionDrag] = useState<{ draggingIndex: number | null; overIndex: number | null }>({ draggingIndex: null, overIndex: null })
+  // ── Cross-track clip occurrence selection + drag-move (Phase 24 Stream CC) ───────────────────
+  // No existing selection state fits this: `selection` (above) is the daemon-owned D2 pointing
+  // protocol (a bar range, optionally scoped to tracks) that `beat vary --scope selection` reads —
+  // coarser and a different owner (server round-trip) than "which specific clip BLOCKS are
+  // marquee-selected right now," which is pure, local, transient GUI interaction state, never
+  // meant to survive a reload or be read by anything outside this component.
+  //
+  // `selectedOcc` keys are `occKey(trackId, sectionIndex)` — occurrences are 1:1 with sections
+  // (see ClipOccurrence's own doc comment), so that pair is the addressable unit. A plain marquee
+  // REPLACES the selection (no shift-to-add — out of scope, matches this stream's own scope cut).
+  const [selectedOcc, setSelectedOcc] = useState<Set<string>>(new Set())
+  // Which track rows the current empty-space lane drag has passed over, keyed the same way `drag`
+  // (above) already is — reuses that SAME gesture (a lane pointerdown) rather than inventing a
+  // second one, so the existing single-track bar-range selection (`postSelection`, read by `beat
+  // vary --scope selection`) keeps working unchanged; this just ALSO derives which clip blocks the
+  // resulting rectangle intersects, across however many rows the pointer crossed. Populated by the
+  // `drag` pointermove effect below; read (and reset) on pointerup.
+  const rowsSpannedRef = useRef<Set<string>>(new Set())
+  // Live preview while dragging a selected clip block: every occurrence whose key is in `keys`
+  // renders shifted by `deltaBars` bars until the drag commits (nearest-section-snapped) or is
+  // released as a no-op. Set/cleared imperatively by beginClipDrag's own pointermove/up listeners
+  // (the same "attach on pointerdown, tear down on pointerup" idiom AutomationLane's onPointerDown
+  // already uses in this file — not a useEffect, since the gesture is inherently one-shot).
+  const [clipDrag, setClipDrag] = useState<{ deltaBars: number; keys: Set<string> } | null>(null)
   // Automation UI state (Phase 20 Stream Z): which track headers have the add-a-lane picker open,
   // and which params the user has explicitly added (a lane can be shown before it has any points).
   // Lanes that already carry points always show regardless — see visibleParamsFor.
@@ -1433,9 +1535,78 @@ export function ArrangementView() {
       const laneEl = (e.currentTarget as HTMLElement).querySelector('.arr-canvas') ?? e.currentTarget
       dragRectLeft.current = (laneEl as HTMLElement).getBoundingClientRect().left
       const b = barFromClientX(e.clientX)
+      // Phase 24 Stream CC: seed the marquee's row-span tracker with the starting row (a drag that
+      // never leaves its starting track still needs to register that row for the occurrence-select
+      // computed on pointerup below). A ruler-originated drag spans no specific row — it's the
+      // existing full-width bar-range selection, unrelated to clip-block marquee-select.
+      rowsSpannedRef.current = axis === 'ruler' ? new Set() : new Set([axis])
       setDrag({ axis, start: b, cur: b })
     },
     [barFromClientX],
+  )
+
+  // Pointerdown on a clip block (Phase 24 Stream CC). stopPropagation (called by the block itself,
+  // TrackRow's onOccPointerDown) already kept the lane's own beginDrag from also firing, so this is
+  // purely the clip-move gesture — attach/tear-down window listeners inline, the SAME "one-shot
+  // gesture, no useEffect" idiom AutomationLane's onPointerDown already uses in this file.
+  //
+  // Click vs. drag: released with negligible movement → a plain click, selects just this one
+  // occurrence (replacing whatever was selected). Released after a real drag → snaps the ORIGIN
+  // clip's new start bar to the nearest section, turns that into a section-INDEX delta (the only
+  // grid a clip can actually live on — see ClipOccurrence's doc comment), and applies the SAME
+  // section-index delta to every occurrence in the group (the whole current selection if the
+  // dragged block was already part of it, else just this one block — "keep its own single-clip
+  // drag behavior" for a block outside any selection, per docs/phase-24-plan.md's CC scope). One
+  // batched POST /clip-move commits the whole group as one write.
+  const beginClipDrag = useCallback(
+    (trackId: string, sectionIndex: number, e: React.PointerEvent) => {
+      e.stopPropagation()
+      e.preventDefault()
+      const key = occKey(trackId, sectionIndex)
+      const keys = selectedOcc.has(key) ? new Set(selectedOcc) : new Set([key])
+      const startClientX = e.clientX
+      const pxb = pxPerBar || 1
+      let moved = false
+      let deltaBars = 0
+      const onMove = (ev: PointerEvent) => {
+        const dxPx = ev.clientX - startClientX
+        if (Math.abs(dxPx) > 3) moved = true
+        deltaBars = Math.round(dxPx / pxb)
+        setClipDrag(deltaBars === 0 ? null : { deltaBars, keys })
+      }
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        setClipDrag(null)
+        if (!moved) {
+          setSelectedOcc(new Set([key]))
+          return
+        }
+        if (deltaBars === 0) return
+        const origin = sections[sectionIndex]
+        if (!origin) return
+        const targetIndex = nearestSectionIndex(sections, origin.startBar + deltaBars)
+        const deltaSections = targetIndex - sectionIndex
+        if (deltaSections === 0) return
+        const moves: { track: string; fromIndex: number; toIndex: number }[] = []
+        for (const k of keys) {
+          const sep = k.lastIndexOf('::')
+          const tid = k.slice(0, sep)
+          const fromIndex = Number(k.slice(sep + 2))
+          const toIndex = fromIndex + deltaSections
+          if (toIndex < 0 || toIndex >= sections.length) {
+            window.alert('Cannot move the selection that far — it would fall outside the arrangement.')
+            return
+          }
+          moves.push({ track: tid, fromIndex, toIndex })
+        }
+        setSelectedOcc(new Set())
+        postClipMove(moves).catch((err) => window.alert(`Could not move clip(s): ${(err as Error).message}`))
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [selectedOcc, pxPerBar, sections],
   )
 
   // Start a length-resize drag from a section's right-edge handle. stopPropagation keeps the ruler's
@@ -1537,7 +1708,19 @@ export function ArrangementView() {
   // Window-level move/up so a drag that leaves the element still tracks and always commits.
   useEffect(() => {
     if (!drag) return
-    const onMove = (e: PointerEvent) => setDrag((d) => (d ? { ...d, cur: barFromClientX(e.clientX) } : d))
+    const onMove = (e: PointerEvent) => {
+      setDrag((d) => (d ? { ...d, cur: barFromClientX(e.clientX) } : d))
+      // Phase 24 Stream CC: for a track-lane-originated drag (not the ruler), track every row the
+      // pointer physically passes over — elementFromPoint against the live DOM rather than
+      // re-deriving each row's stacked height (ROW_H + variable automation-lane extras + group
+      // headers) a second time here; the DOM already knows.
+      if (drag.axis !== 'ruler') {
+        const el = document.elementFromPoint(e.clientX, e.clientY)
+        const laneEl = el instanceof Element ? el.closest('.arr-lane') : null
+        const tid = laneEl?.getAttribute('data-track')
+        if (tid) rowsSpannedRef.current.add(tid)
+      }
+    }
     const onUp = () => {
       setDrag((d) => {
         if (d) {
@@ -1545,6 +1728,21 @@ export function ArrangementView() {
           const end = Math.max(d.start, d.cur) + 1 // inclusive bar → exclusive end; selection needs start < end
           const bars = { start, end }
           postSelection(d.axis === 'ruler' ? { bars } : { tracks: [d.axis], bars })
+          // Phase 24 Stream CC: derive the clip-occurrence marquee selection from the SAME
+          // gesture — every occurrence, on every row the pointer crossed, whose bar range
+          // intersects [start, end). A ruler drag doesn't touch this (full-width bar-range select
+          // only); a plain click (zero-width row set beyond the seeded starting row, 1-bar range)
+          // naturally degenerates to "select whatever's exactly there, else clear" — no separate
+          // click-to-deselect path needed.
+          if (d.axis !== 'ruler') {
+            const next = new Set<string>()
+            for (const tid of rowsSpannedRef.current) {
+              for (const occ of occurrencesByTrack.get(tid) ?? []) {
+                if (occ.startBar < end && occ.startBar + occ.bars > start) next.add(occKey(tid, occ.sectionIndex))
+              }
+            }
+            setSelectedOcc(next)
+          }
         }
         return null
       })
@@ -1555,7 +1753,7 @@ export function ArrangementView() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
-  }, [drag, barFromClientX])
+  }, [drag, barFromClientX, occurrencesByTrack])
 
   const clickHeader = useCallback(
     (t: BeatTrack) => {
@@ -2130,7 +2328,10 @@ export function ArrangementView() {
                 groupPickChecked={groupPick.has(flat.track.id)}
                 onToggleGroupPick={() => toggleGroupPick(flat.track.id)}
                 alreadyGrouped={!!row.grouped}
-                audioOccurrences={occ}
+                occurrences={occ}
+                selectedOcc={selectedOcc}
+                dragPreview={clipDrag}
+                onOccPointerDown={(sectionIndex, e) => beginClipDrag(flat.track.id, sectionIndex, e)}
                 headerExtra={
                   <>
                     <button
