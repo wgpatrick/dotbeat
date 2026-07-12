@@ -459,7 +459,29 @@ export function MacroRow({ track }: { track: BeatTrack }) {
   if (track.kind !== 'synth' && track.kind !== 'drums' && track.kind !== 'instrument') return null
   if (error) return <div className="macro-row macro-row-error">macros: {error}</div>
   if (!macros) return null
-  const applicable = macros.filter((m) => m.kind === track.kind || m.kind === 'any')
+  // Bug 1 fix (Phase 28 Stream FE, docs/research/77 §2.3/§3 P0 item 1): the row-level `m.kind ===
+  // track.kind` gate was coarser than the per-param legality test MacroKnob's own onChange already
+  // applies one function above (isParamLegalForKind) — for an instrument track, only the literal
+  // `kind: 'any'` macro (`space`) ever survived, even though macros like `grit`/`warmth` target
+  // params (distortionAmount/bitcrushBits, eqHigh/eqLow) that ARE legal on an instrument track once
+  // the matching effect (distortion/eq3) is in its chain. Reuse the existing, more precise function
+  // instead of inventing a second, looser one: a macro also qualifies if at least one of its targets
+  // passes isParamLegalForKind for this track's kind.
+  //
+  // The extra `track.kind === 'instrument'` guard here is deliberate, not a literal transcription of
+  // the plan's one-line diff: isParamLegalForKind's own body returns `true` unconditionally for any
+  // non-'instrument' kind ("synth/drums keep the full field set unchanged") — it only actually
+  // discriminates for instrument tracks. Without this guard, `m.targets.some(...)` would be trivially
+  // true for EVERY macro on synth/drums tracks too (their kind check always short-circuits the OR to
+  // "show all 8 macros"), silently defeating the existing kind-based curation there (e.g. `punch`/
+  // `snap`, drums-only macros, would leak onto every synth track). Gating to instrument-only keeps the
+  // fix scoped to the actual bug — synth/drums rows are provably byte-for-byte unaffected.
+  const applicable = macros.filter(
+    (m) =>
+      m.kind === track.kind ||
+      m.kind === 'any' ||
+      (track.kind === 'instrument' && m.targets.some((t) => isParamLegalForKind(t.param, track.kind as TrackKind))),
+  )
   if (applicable.length === 0) return null
 
   return (

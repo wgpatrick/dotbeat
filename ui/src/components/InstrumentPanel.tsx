@@ -187,6 +187,13 @@ export function InstrumentPanel({ track }: { track: BeatTrack }) {
           NOT duplicated; SoundfontPicker is the adapted, sensible equivalent, not a placeholder for
           a second, separate PresetPicker. */}
       <SoundfontPicker track={track} />
+      {/* Phase 28 Stream FE (docs/phase-28-plan.md, docs/research/77 §2.5/§3 P2 item 3): MacroRow now
+          sits directly after the picker, matching SynthPanel.tsx's own picker -> macros -> chain
+          rhythm, instead of being wedged after a whole soundfont knob block the other two panel kinds
+          don't have at that position. The soundfont program/volume/pan controls move down below,
+          folded in as their own group alongside the Effect Chain (part of "chain" in that rhythm, not
+          a fourth thing between "picker" and "macros"). */}
+      <MacroRow track={track} />
       <div className="param-groups">
         <div className="param-group" style={{ display: 'block' }}>
           <div className="param-group-title">soundfont</div>
@@ -233,12 +240,6 @@ export function InstrumentPanel({ track }: { track: BeatTrack }) {
           )}
         </div>
       </div>
-      {/* Phase 27 Stream EA bug 4: instrument tracks used to go straight from this soundfont/program
-          block to the Effect Chain below, with nothing in between — MacroRow was never even called
-          here (not just gated by its own now-dropped `track.kind` guard, see SynthPanel.tsx). Now
-          that Phase 26 Stream DC gave instrument tracks a real, macro-able Effect Chain, this is the
-          same macro row synth/drum tracks get, reusing SynthPanel's own component verbatim. */}
-      <MacroRow track={track} />
       {/* Phase 26 Stream DC: reuses SynthPanel's own EffectChain/Group — same add/reorder/bypass
           UI and effectType-gated knob-group rendering synth/drum tracks already have. */}
       <EffectChain track={track} onAdded={setJustAdded} />
