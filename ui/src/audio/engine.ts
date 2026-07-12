@@ -1191,7 +1191,7 @@ class Engine {
   async previewSynthPreset(params: Partial<BeatSynth>, pitch = 60, velocity = 0.85): Promise<void> {
     await this.ensureStarted()
     const chain = this.buildSynthChain()
-    this.applyParams(chain, coerce(params as BeatSynth))
+    this.applyParams(chain, coerce(params as BeatSynth), [])
     const freq = Tone.Frequency(Math.round(pitch), 'midi').toFrequency()
     chain.synth.triggerAttackRelease(freq, 0.5, undefined, velocity)
     setTimeout(() => this.disposeChain(chain), 1800)
