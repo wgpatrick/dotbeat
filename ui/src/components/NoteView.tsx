@@ -4,6 +4,7 @@ import { postEdit, postSelection, postPitchTime, postPlaceClip, postDuplicateNot
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
+import { makeDropTargetHandlers, DROP_TARGET_HOVER_CLASS, DRAGGING_CLASS } from '../dragDrop'
 import { ClipPropertiesPanel, primaryClipFor } from './ClipPropertiesPanel'
 import { DrumLanePanel } from './DrumLanePanel'
 
@@ -870,40 +871,36 @@ export function NoteView({ track }: { track: BeatTrack }) {
               const black = axis.isBlackRow(row)
               const label = axis.rowLabel(row)
               const isOctaveTop = !isDrums && pc(axis.valueOfRow(row) as number) === 0
+              // Phase 27 Stream EB: shared drop-target primitive (ui/src/dragDrop.ts) — same
+              // `.drop-target-hover` class/handlers as ArrangementView.tsx's track header, replacing
+              // the hardcoded `#2f5d3a` inline fill this row used to swap in ad hoc (research/74
+              // §3.1). Each row is a flat leaf element (no children under the cursor), so it didn't
+              // have the dragleave-on-child bug the header did, but it inherits the fix anyway by
+              // sharing the same handler factory rather than reinventing enter/leave bookkeeping.
+              const isRowHover = dropHoverRow === row
+              const rowDrop = isDrums
+                ? makeDropTargetHandlers<HTMLDivElement>(LIBRARY_DND_MIME, isRowHover, (v) => setDropHoverRow(v ? row : null), (e) => {
+                    const payload = readDragPayload(e.dataTransfer)
+                    if (!payload || payload.type !== 'kit-lane') return
+                    installKitLane(track.id, payload.kit, { lane: payload.lane ?? label, targetLane: label }).catch((err) =>
+                      window.alert(`Could not install sample: ${(err as Error).message}`),
+                    )
+                  })
+                : null
               return (
                 <div
                   key={row}
                   data-row={row}
                   data-row-value={axis.valueOfRow(row)}
                   data-drop-target={isDrums ? `lane-${label}` : undefined}
+                  className={isDrums && isRowHover ? DROP_TARGET_HOVER_CLASS : ''}
                   onPointerDown={(e) => {
                     e.preventDefault()
                     if (editable) axis.preview(track.id, row)
                   }}
-                  onDragOver={
-                    isDrums
-                      ? (e) => {
-                          if (!e.dataTransfer.types.includes(LIBRARY_DND_MIME)) return
-                          e.preventDefault()
-                          e.dataTransfer.dropEffect = 'copy'
-                          setDropHoverRow(row)
-                        }
-                      : undefined
-                  }
-                  onDragLeave={isDrums ? () => setDropHoverRow(null) : undefined}
-                  onDrop={
-                    isDrums
-                      ? (e) => {
-                          e.preventDefault()
-                          setDropHoverRow(null)
-                          const payload = readDragPayload(e.dataTransfer)
-                          if (!payload || payload.type !== 'kit-lane') return
-                          installKitLane(track.id, payload.kit, { lane: payload.lane ?? label, targetLane: label }).catch((err) =>
-                            window.alert(`Could not install sample: ${(err as Error).message}`),
-                          )
-                        }
-                      : undefined
-                  }
+                  onDragOver={rowDrop?.onDragOver}
+                  onDragLeave={rowDrop?.onDragLeave}
+                  onDrop={rowDrop?.onDrop}
                   title={isDrums ? `${label} — drop a kit sample here to load it onto this lane` : pitchName(axis.valueOfRow(row) as number)}
                   style={{
                     position: 'absolute',
@@ -912,7 +909,10 @@ export function NoteView({ track }: { track: BeatTrack }) {
                     right: 0,
                     height: ROW_H,
                     boxSizing: 'border-box',
-                    background: dropHoverRow === row ? '#2f5d3a' : black ? '#232630' : isDrums ? '#1a1c22' : '#c3c7cf',
+                    // Background left unset while hovered so the shared `.drop-target-hover` CSS
+                    // class's own tint (not this inline style) is what actually shows — an inline
+                    // style would otherwise win specificity over the class and hide it.
+                    background: isDrums && isRowHover ? undefined : black ? '#232630' : isDrums ? '#1a1c22' : '#c3c7cf',
                     color: black ? '#9aa0ab' : isDrums ? '#c3c7cf' : '#2a2c33',
                     borderBottom: isOctaveTop ? '1px solid #05060a' : '1px solid rgba(0,0,0,0.28)',
                     display: 'flex',
@@ -1019,10 +1019,19 @@ export function NoteView({ track }: { track: BeatTrack }) {
             const ratchetCount = ev.ratchetCount ?? 1
             const isRatcheted = ratchetCount > 1
             const ticks = isRatcheted ? ratchetTicks(ratchetCount, ev.ratchetCurve ?? 0) : []
+            // Phase 27 Stream EB: research/74 §3.2 found this was the only drag surface in the app
+            // with ZERO visual distinction between static and dragging (confirmed live: dragging a
+            // note's `className` read identically to its resting selected state, no token, no
+            // opacity/outline change). `preview[ev.id]` is only populated for events in the active
+            // move/resize gesture's group, so its presence IS "this note is currently being
+            // dragged" — reuses the same `.dragging` class/convention every other drag source in
+            // the app now shares (effect-chain reorder, section-chip reorder, arrangement clip-block
+            // move) rather than inventing a fifth treatment.
+            const isDraggingNote = !!preview?.[ev.id]
             return (
               <div
                 key={ev.id}
-                className={`noteview-note${selSet.has(ev.id) ? ' selected' : ''}${isMarker ? ' marker' : ''}${isChancy ? ' chancy' : ''}${isRatcheted ? ' ratcheted' : ''}`}
+                className={`noteview-note${selSet.has(ev.id) ? ' selected' : ''}${isMarker ? ' marker' : ''}${isChancy ? ' chancy' : ''}${isRatcheted ? ' ratcheted' : ''}${isDraggingNote ? ` ${DRAGGING_CLASS}` : ''}`}
                 style={{
                   left: `calc(${shown.start} * var(--note-step-w))`,
                   width: isMarker ? `${MARKER_W}px` : `calc(${shown.duration} * var(--note-step-w) - 1px)`,
