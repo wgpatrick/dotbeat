@@ -170,10 +170,21 @@ function harmonicRatio(samples, sampleRate, f0) {
 // Real core defaults (INIT_SYNTH) as the base, so every SYNTH_FIELDS key is present — spreading a
 // hand-picked subset would leave the rest `undefined` and fail to serialize/parse.
 let BASE_SYNTH
+let DEFAULT_EFFECT_CHAIN
+
+// Phase 22 Stream AA landed after this script was first written: every BeatTrack now needs an
+// `effects` field, and `[]` means "explicitly emptied" (isDefaultEffectChain), NOT "use the
+// default eq3/comp/distortion/bitcrush chain" — these fixtures want the latter, so every track
+// below calls this (populated lazily by baseSynth(), which every fixture already awaits first)
+// rather than a bare `[]`.
+function defaultEffectChain() {
+  return DEFAULT_EFFECT_CHAIN
+}
 async function baseSynth() {
   if (!BASE_SYNTH) {
-    const { INIT_SYNTH } = await import(join(repoRoot, 'dist/src/core/index.js'))
+    const { INIT_SYNTH, defaultEffectChain: coreDefaultEffectChain } = await import(join(repoRoot, 'dist/src/core/index.js'))
     BASE_SYNTH = { ...INIT_SYNTH, osc: 'sine', volume: -8, cutoff: 8000, resonance: 0.7, attack: 0.001, decay: 0.05, sustain: 0, release: 0.05, pan: 0 }
+    DEFAULT_EFFECT_CHAIN = coreDefaultEffectChain()
   }
   return BASE_SYNTH
 }
@@ -186,12 +197,12 @@ async function pingPongDoc() {
     // note at step 0 would already be over (and any ping-pong echoes it triggers already decayed)
     // before the recording begins; starting the note 1s in gives comfortable margin, and the long
     // loop guarantees no loop-around repeat confuses the single-blip measurement below.
-    formatVersion: '0.9', bpm: 120, loopBars: 4, selectedTrack: 't1', media: [], scenes: [], song: null,
+    formatVersion: '0.9', bpm: 120, loopBars: 4, selectedTrack: 't1', media: [], scenes: [], song: null, groups: [],
     tracks: [{
       id: 't1', name: 't1', color: '#e06c75', kind: 'synth',
       synth: { ...base },
       notes: [{ id: 'n1', pitch: 69, start: 8, duration: 1, velocity: 0.95 }],
-      clips: [], laneSamples: {}, hits: [],
+      clips: [], laneSamples: {}, hits: [], effects: defaultEffectChain(), lanes: [],
     }],
   }
 }
@@ -199,7 +210,7 @@ async function pingPongDoc() {
 async function beatRepeatDoc() {
   const base = await baseSynth()
   return {
-    formatVersion: '0.9', bpm: 120, loopBars: 1, selectedTrack: 'drums', media: [], scenes: [], song: null,
+    formatVersion: '0.9', bpm: 120, loopBars: 1, selectedTrack: 'drums', media: [], scenes: [], song: null, groups: [],
     tracks: [{
       id: 'drums', name: 'drums', color: '#e35d5d', kind: 'drums',
       // kickDecay well UNDER one 16th-step (0.125s @ 120bpm) so five consecutive-16th-step kicks
@@ -210,7 +221,7 @@ async function beatRepeatDoc() {
       // that beatRepeatGate=4 opens at the end of the bar (see resolveBeatRepeat's doc comment in
       // engine.ts: gate window = the last `gate` steps of the bar). Captured slice = [11,12).
       hits: [{ id: 'h1', lane: 'kick', start: 11, velocity: 0.95 }],
-      clips: [], laneSamples: {}, notes: [],
+      clips: [], laneSamples: {}, notes: [], effects: defaultEffectChain(), lanes: [],
     }],
   }
 }
@@ -218,12 +229,12 @@ async function beatRepeatDoc() {
 async function modDoc() {
   const base = await baseSynth()
   return {
-    formatVersion: '0.9', bpm: 120, loopBars: 4, selectedTrack: 't1', media: [], scenes: [], song: null,
+    formatVersion: '0.9', bpm: 120, loopBars: 4, selectedTrack: 't1', media: [], scenes: [], song: null, groups: [],
     tracks: [{
       id: 't1', name: 't1', color: '#61afef', kind: 'synth',
       synth: { ...base, osc: 'sawtooth', volume: -6, cutoff: 6000, attack: 0.01, decay: 0.05, sustain: 1, release: 0.1 },
       notes: [{ id: 'n1', pitch: 57, start: 0, duration: 62, velocity: 0.85 }], // holds the whole 4-bar loop
-      clips: [], laneSamples: {}, hits: [],
+      clips: [], laneSamples: {}, hits: [], effects: defaultEffectChain(), lanes: [],
     }],
   }
 }
@@ -231,7 +242,7 @@ async function modDoc() {
 async function saturatorDoc() {
   const base = await baseSynth()
   return {
-    formatVersion: '0.9', bpm: 120, loopBars: 4, selectedTrack: 't1', media: [], scenes: [], song: null,
+    formatVersion: '0.9', bpm: 120, loopBars: 4, selectedTrack: 't1', media: [], scenes: [], song: null, groups: [],
     tracks: [{
       id: 't1', name: 't1', color: '#c678dd', kind: 'synth',
       // Quiet pure sine, held the whole loop, at a low enough amplitude that drive=0 (preGain=1
@@ -240,7 +251,7 @@ async function saturatorDoc() {
       // saturator's added nonlinearity, not the oscillator's or a level difference.
       synth: { ...base, osc: 'sine', volume: -34, cutoff: 18000, resonance: 0.1, attack: 0.02, decay: 0.05, sustain: 1, release: 0.1, saturatorCurve: 'analog', saturatorMix: 1 },
       notes: [{ id: 'n1', pitch: 57, start: 0, duration: 62, velocity: 0.6 }], // A3 = 220 Hz
-      clips: [], laneSamples: {}, hits: [],
+      clips: [], laneSamples: {}, hits: [], effects: defaultEffectChain(), lanes: [],
     }],
   }
 }
