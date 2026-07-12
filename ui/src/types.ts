@@ -57,8 +57,18 @@ export function declaredLaneNames(track: Pick<BeatTrack, 'lanes'>): readonly str
   return track.lanes.length > 0 ? track.lanes.map((l) => l.name) : DRUM_LANES
 }
 
-export type OscType = 'sine' | 'triangle' | 'sawtooth' | 'square'
-export const OSC_TYPES_LIST: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square']
+// Phase 26 Stream DH: mirrors src/core/document.ts's OscType exactly — 'wavetable' is a real
+// scanning oscillator now (ui/src/audio/wavetables.ts + engine.ts's applyParams), driven by the
+// existing wtTable/wtPos fields below (BeatSynth's index signature; see engine.ts's EngineSynth
+// for the strictly-typed view). Shared with osc2Type — see document.ts's OscType comment for why
+// that field falls back rather than actually scanning when set to 'wavetable'.
+export type OscType = 'sine' | 'triangle' | 'sawtooth' | 'square' | 'wavetable'
+export const OSC_TYPES_LIST: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square', 'wavetable']
+// The wtTable enum (BeatSynth.wtTable — untyped here since BeatSynth only strictly types the core
+// 9, see its own comment below) — exported so wavetables.ts and synthParams.ts's dropdown share
+// one literal list, same "hand-mirrors core" convention as OSC_TYPES_LIST above.
+export type WtTable = 'analog' | 'pwm' | 'vocal' | 'custom'
+export const WT_TABLES: readonly WtTable[] = ['analog', 'pwm', 'vocal', 'custom']
 export type TrackKind = 'synth' | 'drums' | 'instrument' | 'audio'
 
 export interface BeatNote {
