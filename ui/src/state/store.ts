@@ -29,6 +29,14 @@ interface DawState {
    * falls back to the first), so the pane can always be shown; this lets the user collapse it and
    * have selecting a track re-open it — Ableton's "drag the pane to the window bottom to close" idiom. */
   bottomPaneOpen: boolean
+  /** Phase 24 Stream CA: the bottom detail pane's height in px, set by dragging the divider between
+   * `.main-area` and `.bottom-pane` (`PaneDivider` in App.tsx). `null` means "use the CSS default"
+   * (`styles.css`'s `.bottom-pane { height: 42vh }`) — the common case, so most sessions never carry
+   * an explicit pixel value at all. This is a view preference, not a musical fact, so it follows the
+   * exact same session-only treatment as mute/solo and `BeatGroup.collapsed` (see the `mutes`/`solos`
+   * doc comment below for the fuller rationale): never written to the `.beat` file, resets to the CSS
+   * default on reload rather than persisting across sessions. */
+  bottomPaneHeight: number | null
   /** Whether the version-history drawer is slid open over the main view (was the 4th tab). */
   historyOpen: boolean
   /** Whether the full all-strips Mixer overlay is open (was the 3rd tab; now an on-demand overlay). */
@@ -82,6 +90,7 @@ interface DawState {
   setBottomPane: (p: BottomPane) => void
   toggleBottomPane: () => void
   setBottomPaneOpen: (open: boolean) => void
+  setBottomPaneHeight: (h: number | null) => void
   toggleHistory: () => void
   toggleMixer: () => void
   toggleLibrary: () => void
@@ -102,6 +111,7 @@ export const useStore = create<DawState>((set) => ({
   masterLevel: undefined,
   bottomPane: 'clip',
   bottomPaneOpen: true,
+  bottomPaneHeight: null,
   historyOpen: false,
   mixerOpen: false,
   libraryOpen: false,
@@ -125,6 +135,7 @@ export const useStore = create<DawState>((set) => ({
   setBottomPane: (bottomPane) => set({ bottomPane, bottomPaneOpen: true }),
   toggleBottomPane: () => set((s) => ({ bottomPane: s.bottomPane === 'clip' ? 'device' : 'clip', bottomPaneOpen: true })),
   setBottomPaneOpen: (bottomPaneOpen) => set({ bottomPaneOpen }),
+  setBottomPaneHeight: (bottomPaneHeight) => set({ bottomPaneHeight }),
   toggleHistory: () => set((s) => ({ historyOpen: !s.historyOpen })),
   toggleMixer: () => set((s) => ({ mixerOpen: !s.mixerOpen })),
   toggleLibrary: () => set((s) => ({ libraryOpen: !s.libraryOpen })),

@@ -1069,13 +1069,39 @@ body {
   display: flex;
   flex-direction: column;
 }
+/* Phase 24 Stream CA: the draggable divider between .main-area and .bottom-pane. A thin flex item of
+   its own between them (both stacked in the same .workspace flex column), so it takes no layout
+   logic beyond a fixed 6px height — grabbing it and dragging vertically resizes .bottom-pane, see
+   App.tsx's PaneDivider. */
+.pane-divider {
+  flex: 0 0 6px;
+  cursor: row-resize;
+  background: transparent;
+  position: relative;
+  touch-action: none;
+}
+.pane-divider::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 2px;
+  background: var(--line);
+  border-radius: 1px;
+}
+.pane-divider:hover::after,
+.pane-divider.dragging::after {
+  background: var(--accent);
+}
 .bottom-pane {
   flex: 0 0 auto;
   height: 42vh;
   min-height: 200px;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--line);
+  /* border-top removed in favor of .pane-divider's own hairline, which now sits directly above this
+     pane whenever it's rendered (Phase 24 Stream CA) — the two together would double up otherwise. */
   background: var(--bg);
 }
 .bottom-pane-bar {

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { initBridge } from './daemon/bridge'
 import { useStore, selectedTrackId } from './state/store'
 import { TransportBar } from './components/TransportBar'
@@ -46,6 +46,7 @@ function BottomPane() {
   const open = useStore((s) => s.bottomPaneOpen)
   const setBottomPane = useStore((s) => s.setBottomPane)
   const setBottomPaneOpen = useStore((s) => s.setBottomPaneOpen)
+  const height = useStore((s) => s.bottomPaneHeight)
   if (!doc || !open) return null
   const track = doc.tracks.find((t) => t.id === selected)
   if (!track) return null
@@ -54,7 +55,15 @@ function BottomPane() {
   const device = track.kind === 'instrument' ? <InstrumentPanel track={track} /> : <SynthPanel track={track} />
 
   return (
-    <section className="bottom-pane" data-testid="bottom-pane" data-pane={pane}>
+    <section
+      className="bottom-pane"
+      data-testid="bottom-pane"
+      data-pane={pane}
+      // Phase 24 Stream CA: an explicit drag-set height overrides the CSS default (42vh). `undefined`
+      // (height === null) leaves the CSS rule in charge, so a session that never touches the divider
+      // renders byte-identical to before this stream.
+      style={height != null ? { height: `${height}px` } : undefined}
+    >
       <div className="bottom-pane-bar">
         <span className="bottom-pane-track" style={{ color: track.color }} title={`selected track: ${track.name}`}>
           {track.name}
@@ -93,6 +102,61 @@ function BottomPane() {
       </div>
       <div className="bottom-pane-body">{pane === 'clip' ? clip : device}</div>
     </section>
+  )
+}
+
+// Phase 24 Stream CA: a draggable horizontal divider between `.main-area` and `.bottom-pane`. Same
+// window-level pointermove/pointerup drag idiom ArrangementView.tsx's own section-resize handle
+// (`beginResize`) already establishes — preview live while dragging, no daemon/file write at all
+// here (this is pure session UI state, see the `bottomPaneHeight` doc comment in state/store.ts).
+const MIN_PANE_HEIGHT = 200 // matches the pre-existing CSS min-height — never let the pane collapse away
+const MIN_MAIN_AREA_HEIGHT = 160 // don't let the pane swallow the whole arrangement either
+const DIVIDER_HEIGHT = 6
+
+function PaneDivider() {
+  const setHeight = useStore((s) => s.setBottomPaneHeight)
+  const [drag, setDrag] = useState<{ startY: number; startHeight: number } | null>(null)
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    // Read the pane's REAL current height off the DOM rather than trusting the store's own value —
+    // it may still be null (CSS default 42vh in effect), and this is the one honest source of the
+    // actual pixel height regardless of which is currently driving layout.
+    const paneEl = document.querySelector('.bottom-pane') as HTMLElement | null
+    const startHeight = paneEl?.getBoundingClientRect().height ?? MIN_PANE_HEIGHT
+    setDrag({ startY: e.clientY, startHeight })
+  }, [])
+
+  useEffect(() => {
+    if (!drag) return
+    const onMove = (e: PointerEvent) => {
+      const workspace = document.querySelector('.workspace') as HTMLElement | null
+      const workspaceHeight = workspace?.getBoundingClientRect().height ?? Infinity
+      const maxHeight = Math.max(MIN_PANE_HEIGHT, workspaceHeight - MIN_MAIN_AREA_HEIGHT - DIVIDER_HEIGHT)
+      // The divider sits ABOVE the pane, so dragging UP (clientY decreases) should grow it.
+      const delta = drag.startY - e.clientY
+      const next = Math.min(maxHeight, Math.max(MIN_PANE_HEIGHT, drag.startHeight + delta))
+      setHeight(next)
+    }
+    const onUp = () => setDrag(null)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [drag, setHeight])
+
+  return (
+    <div
+      className={`pane-divider ${drag ? 'dragging' : ''}`}
+      data-testid="pane-divider"
+      onPointerDown={onPointerDown}
+      // Double-click resets to the CSS default (42vh) — a quick way back after over-dragging.
+      onDoubleClick={() => setHeight(null)}
+      style={{ touchAction: 'none' }}
+      title="drag to resize the clip/device pane (double-click to reset)"
+    />
   )
 }
 
@@ -187,7 +251,12 @@ export function App() {
           <main className="main-area">
             <ArrangementView />
           </main>
-          {selected && <BottomPane />}
+          {selected && (
+            <>
+              <PaneDivider />
+              <BottomPane />
+            </>
+          )}
         </div>
       </div>
 
