@@ -29,6 +29,10 @@ import { DRUM_LABELS } from '../types'
 //   - drag a kit one-shot onto a drum lane (StepSequencer.tsx's lane row), or a whole kit onto a
 //     drum track's header -> registers the wav into the PROJECT's own media/ and assigns it via
 //     setLaneSample, same as `beat sample` + `beat lane` chained by hand.
+//   - drag a kit one-shot onto an AUDIO track's header (Phase 23 Stream BC) -> registers the wav the
+//     same way, then creates or replaces that track's audio-region clip via addAudioClip — the
+//     drag-to-create-audio-clip interaction docs/phase-22-stream-ae.md's format work left for a
+//     later GUI pass.
 //   - drag a soundfont onto an instrument track's header -> reassigns its bank.
 // Every ▶ button previews BEFORE any of that — an ephemeral engine voice or a raw fetch-decode-play,
 // never touching the store's document (engine.previewSynthPreset/previewDrumPreset/previewBuffer/
@@ -113,7 +117,7 @@ function KitLaneRow({ kit, lane }: { kit: string; lane: LibraryKitLane }) {
       data-kit={kit}
       data-lane={lane.lane}
       onDragStart={(e) => setDragPayload(e.dataTransfer, { type: 'kit-lane', kit, lane: lane.lane })}
-      title={`${kit}/${lane.file} — drag onto a drum lane`}
+      title={`${kit}/${lane.file} — drag onto a drum lane, or onto an audio track to create a clip`}
     >
       <PreviewButton
         title={`preview ${kit}/${lane.file}`}

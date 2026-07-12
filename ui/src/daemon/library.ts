@@ -95,6 +95,39 @@ export async function installSoundfont(file: string, opts: { track?: string; pro
   useStore.getState().setDoc(doc)
 }
 
+/** Phase 23 Stream BC: drag a kit one-shot (a real audio file — a `presets/kit-<id>` lane wav) onto an
+ * `audio`-kind track to create a clip from it — the drag-to-create-audio-clip interaction the audio-
+ * region clip format's GUI layer was still missing (docs/phase-22-stream-ae.md's own "not built"
+ * note: repitch/split/gain trimming shipped, clip *creation* didn't). Same drag payload
+ * (`kit-lane`) Stream AH already established for dropping a one-shot onto a drum lane — this is
+ * just a new landing zone for it, not a new protocol. `clipId` given replaces that existing clip's
+ * region in place; omitted mints a new one, slotted into `sceneId`'s scene if given (so it's
+ * immediately visible on the arrangement canvas — omit sceneId in loop mode, where there's no scene
+ * to slot into and the clip is created but not yet reachable from any section). Returns the id of
+ * the clip that was created or replaced. */
+export async function installAudioClip(
+  track: string,
+  kit: string,
+  lane: string,
+  opts: { clipId?: string; sceneId?: string } = {},
+): Promise<string> {
+  const res = await fetch(`${daemonBase()}/library/install-audio-clip`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ track, kit, lane, ...opts }),
+  })
+  if (!res.ok) {
+    const msg = await res
+      .json()
+      .then((b) => (b as { error?: string }).error)
+      .catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc, clipId } = (await res.json()) as { written: boolean; doc: BeatDocument; clipId: string }
+  useStore.getState().setDoc(doc)
+  return clipId
+}
+
 // ─── drag-and-drop payload protocol ──────────────────────────────────────────────────────────────
 // One custom MIME carrying a small tagged JSON payload — ContentBrowser.tsx sets it on drag-start;
 // ArrangementView.tsx's track header and StepSequencer.tsx's lane rows read it on drop. A duck-typed

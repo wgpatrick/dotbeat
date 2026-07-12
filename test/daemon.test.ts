@@ -226,6 +226,45 @@ test('POST /song rejects a bad op and an out-of-range bar count', async () => {
   })
 })
 
+// Phase 23 Stream BC regression: converting loop -> song mode used to 500 whenever an `audio`-kind
+// track was present. sceneFromLiveContent snapshotted EVERY track's live content into the new
+// scene, but an audio track has none (Stream AE: "BeatTrack gets no `audio` field, only
+// `BeatClip.audio?`") — saveClip produced a clip with no `audio` line, which the parser then
+// rejects outright the moment writeIfChanged's serialize+parse round-trip ran, 500-ing the whole
+// route (discovered live via ui/verify-phase23-stream-bc.mjs's drag-to-create-clip flow). Fixed by
+// skipping audio-kind tracks in sceneFromLiveContent — they simply start unmapped/silent in the new
+// scene, same as any track absent from a scene's slots.
+test('POST /song append with an audio-kind track present does not 500 — the audio track starts unmapped, not with a phantom clip', async () => {
+  const { initDocument, addTrack, serialize: ser } = await import('../src/core/index.js')
+  const dir = mkdtempSync(join(tmpdir(), 'beat-daemon-song-audio-test-'))
+  const filePath = join(dir, 'song.beat')
+  let doc = initDocument({ trackId: 'lead' })
+  doc = addTrack(doc, { id: 'fx', kind: 'audio' }).doc
+  writeFileSync(filePath, ser(doc))
+  const daemon = await startDaemon({ filePath, port: 0 })
+  try {
+    const res = await postSong(daemon.port, { op: 'append', bars: 4 })
+    assert.equal(res.status, 200)
+    assert.equal(((await res.json()) as { written: boolean }).written, true)
+
+    const next = daemon.getDoc()
+    assert.ok(next.song && next.song.length === 2)
+    const sceneId = next.song![0]!.scene
+    const scene = next.scenes.find((s) => s.id === sceneId)
+    assert.ok(scene)
+    // the synth track snapshotted in and got mapped, same as the existing test above...
+    assert.equal(scene!.slots.lead, sceneId)
+    // ...but the audio track did NOT — no slot, no phantom clip.
+    assert.equal(scene!.slots.fx, undefined, 'the audio track should stay unmapped in the new scene')
+    const fxTrack = next.tracks.find((t) => t.id === 'fx')!
+    assert.equal(fxTrack.clips.length, 0, 'the audio track should get no snapshot clip')
+    // in-memory === disk invariant still holds (the round-trip that used to 500 now succeeds cleanly).
+    assert.deepEqual(parse(readFileSync(filePath, 'utf8')), next)
+  } finally {
+    await daemon.close()
+  }
+})
+
 // ─── Phase 22 Stream AG: overlapping-region resolution policy (POST /song resize) ─────────────────
 // docs/research/22-opendaw-editing-workflow.md §2.1's clip/push-existing/keep-existing, reimplemented
 // for dotbeat's 1D section-list timeline (src/daemon/daemon.ts's songResize doc comment has the full

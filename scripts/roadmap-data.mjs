@@ -465,9 +465,9 @@ export const rows = [
   // ── Audio-region clip editing ─────────────────────────────────────────────
   {
     area: 'Audio-region clip editing', feature: 'Audio-region clip format',
-    description: 'Media reference + in-point + out-point + gain + a warp enum + optional markers (v0.10). Clip-only (no live/non-clip audio content this stream); one clip = one region, all six fields on one bundled `audio` line (note/hit discipline, no elision).',
-    core: 'done', cli: 'done', gui: 'partial', status: 'progress',
-    research: 'research/16-audio-clip-editing.md', plan: 'phase-22-stream-ae.md',
+    description: 'Media reference + in-point + out-point + gain + a warp enum + optional markers (v0.10). Clip-only (no live/non-clip audio content this stream); one clip = one region, all six fields on one bundled `audio` line (note/hit discipline, no elision). Phase 23 Stream BC closed the GUI gap: drag a kit one-shot from the content browser onto an audio track to create/replace a region (mints a clip and slots it into the current song section\'s scene, or fills an already-slotted clip in place), plus a static min/max-per-pixel waveform in the clip inspector so the in/out trim fields are visually legible. Also fixed a real bug the drag-drop flow surfaced: converting loop mode to song mode with an audio track present used to 500 (sceneFromLiveContent tried to snapshot a live-content clip an audio track structurally can\'t have) — audio tracks now correctly stay unmapped/silent until a real region is created.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/16-audio-clip-editing.md', plan: 'phase-23-stream-bc.md',
   },
   {
     area: 'Audio-region clip editing', feature: 'Repitch-mode warping',

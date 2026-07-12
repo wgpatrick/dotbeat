@@ -66,6 +66,7 @@ import {
   initDocument,
   defaultDrumKitLanes,
   splitAudioClip,
+  addAudioClip,
   BeatEditError,
   BeatPresetError,
   BeatParseError,
@@ -73,6 +74,7 @@ import {
   type TrackKind,
   type BeatPreset,
   type EffectType,
+  type BeatTrack,
 } from '../core/index.js'
 // Phase 23 Stream BA: the six Pitch & Time operations + Consolidate, over HTTP. Phase 22 Stream AD
 // shipped these as CLI/MCP-only edit primitives ("no daemon route, matching quantize's own
@@ -83,6 +85,11 @@ import {
 // additive shape exactly: one POST, one op, RETURNS the full raw document (no SSE echo of the
 // daemon's own writes) so the GUI applies it directly, same as postAddTrack/postEffectAdd.
 import { transposeNotes, timeScaleNotes, fitToScaleNotes, invertNotes, reverseNotes, legatoNotes, consolidateRatchet, BeatPitchTimeError } from '../core/pitchtime.js'
+// Phase 23 Stream BC: reads a bundled kit one-shot's own duration (sample count / sample rate) so a
+// freshly dragged-in audio clip's region can default to `out = the file's full length` instead of an
+// arbitrary guess. The exact same decoder the mix-metrics/MCP surface already uses (src/mcp/server.ts)
+// — a pure binary parse, no audio context, so it works fine in the daemon's Node process.
+import { decodeWav } from '../metrics/index.js'
 // D3/D10 versioning surface over HTTP: the GUI's history panel (Phase 15 Stream H) reads the
 // checkpoint list and issues "go back" through these. All of it reuses src/history's real git-backed
 // functions — the daemon adds no versioning logic, just an HTTP face on the same verbs `beat
@@ -171,11 +178,23 @@ function nextSceneId(doc: BeatDocument): string {
 
 /** Build a scene from every track's LIVE content: snapshot each track into a clip named `sceneId`
  * (core's saveClip) and map every track to it (core's setScene). This is how loop mode becomes song
- * mode without discarding what's there — the existing loop content becomes a real, playable scene. */
+ * mode without discarding what's there — the existing loop content becomes a real, playable scene.
+ *
+ * Phase 23 Stream BC fix: `audio`-kind tracks are SKIPPED here — they have no live content to
+ * snapshot (docs/phase-22-stream-ae.md: "BeatTrack gets no `audio` field, only `BeatClip.audio?`"),
+ * and saveClip's generic "snapshot whatever's live" produces a clip with no `audio` line, which the
+ * parser then rejects outright (every clip on an audio track must carry one, same fail-loud stance
+ * as an instrument track missing its soundfont line) — so converting to song mode with an empty
+ * audio track present used to 500 the whole /song route. Leaving it unmapped in the new scene is a
+ * perfectly valid state already handled everywhere else (an unmapped track is silent that section,
+ * same as any track absent from a scene's slots) — the track just starts silent until a real region
+ * is created and slotted (e.g. dragging a sample onto it — ui/src/daemon/library.ts's
+ * installAudioClip). */
 function sceneFromLiveContent(doc: BeatDocument, sceneId: string): BeatDocument {
   let d = doc
   const slots: Record<string, string> = {}
   for (const t of d.tracks) {
+    if (t.kind === 'audio') continue
     d = saveClip(d, t.id, sceneId).doc
     slots[t.id] = sceneId
   }
@@ -415,6 +434,16 @@ function listSoundfonts(): SoundfontEntry[] {
       return { file, ...meta }
     })
     .sort((a, b) => a.file.localeCompare(b.file))
+}
+
+/** Phase 23 Stream BC: the next free `clip<n>` id on a track — used when a drag-created audio clip
+ * has no caller-given id (a brand new clip, not a replace-in-place drop onto an existing one). Same
+ * "mint the next free numbered id" idiom splitAudioClip already uses for its second half. */
+function nextFreeClipId(track: BeatTrack): string {
+  const existing = new Set(track.clips.map((c) => c.id))
+  let n = 1
+  while (existing.has(`clip${n}`)) n++
+  return `clip${n}`
 }
 
 /** Resolves a library-relative path to bytes under `presetsRoot`, refusing anything that escapes
@@ -1429,6 +1458,87 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           const written = writeIfChanged(next)
           revalidateSelection()
           json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // POST /library/install-audio-clip {track, kit, lane, clipId?, sceneId?} — the drag-a-kit-one-
+    // shot-onto-an-audio-track interaction (Phase 23 Stream BC): the clip-CREATION half of the
+    // audio-region clip GUI gap docs/phase-22-stream-ae.md left open (that stream shipped trim/gain/
+    // warp/split editing for an ALREADY-existing clip; nothing in the GUI could create one). Reuses
+    // the exact same content-browser drag payload Stream AH already established for kit one-shots
+    // (`{type:'kit-lane', kit, lane}` — ui/src/daemon/library.ts) rather than inventing a new drag
+    // protocol, and the same copy-into-project-media/register/content-address discipline
+    // install-kit uses just above — the two new pieces are reading the wav's own duration
+    // (decodeWav, imported above) to size the region's initial out-point to the file's real length,
+    // and creating/replacing the clip via core's addAudioClip.
+    //   - `clipId` given: REPLACE that existing clip's region in place (it's already slotted
+    //     somewhere — dropping a new sample onto a clip being edited swaps its content, the same
+    //     mental model a preset drop re-applying params in place already uses). No scene write.
+    //   - `clipId` omitted: MINT a new clip id on the track (nextFreeClipId); if `sceneId` is also
+    //     given, slot it into that scene — merged into the scene's EXISTING slots (never clobbers
+    //     other tracks' slots in the same scene) — so the new clip is immediately visible/playable.
+    //     `sceneId` omitted (e.g. loop-mode, no song block at all) still creates the clip on the
+    //     track, just not reachable from any section yet — song-mode-only playback for audio
+    //     regions is Stream AE's own documented design (see its "why clip-only" section), not a new
+    //     limitation this route introduces.
+    if (req.method === 'POST' && url.pathname === '/library/install-audio-clip') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; kit?: unknown; lane?: unknown; clipId?: unknown; sceneId?: unknown }
+          if (typeof b.track !== 'string' || typeof b.kit !== 'string' || typeof b.lane !== 'string') {
+            json(res, 400, { error: 'body must be {track: string, kit: string, lane: string, clipId?: string, sceneId?: string}' })
+            return
+          }
+          const track = doc.tracks.find((t) => t.id === b.track)
+          if (!track) {
+            json(res, 404, { error: `no track "${b.track}"` })
+            return
+          }
+          if (track.kind !== 'audio') {
+            json(res, 400, { error: `track "${b.track}" is a ${track.kind} track — audio clips only go on an "audio" track` })
+            return
+          }
+          const kit = listKits().find((k) => k.id === b.kit)
+          if (!kit) {
+            json(res, 404, { error: `no kit "${b.kit}" (see GET /library)` })
+            return
+          }
+          const laneFile = kit.lanes.find((l) => l.lane === b.lane)
+          if (!laneFile) {
+            json(res, 404, { error: `kit "${b.kit}" has no "${b.lane}" lane (have: ${kit.lanes.map((l) => l.lane).join(', ')})` })
+            return
+          }
+          const mediaDir = resolve(dirname(filePath), 'media')
+          mkdirSync(mediaDir, { recursive: true })
+          const destName = `${kit.id}-${laneFile.lane}.wav`
+          const destAbs = resolve(mediaDir, destName)
+          copyFileSync(resolve(presetsRoot, kit.id, laneFile.file), destAbs)
+          const bytes = readFileSync(destAbs)
+          const sha256 = createHash('sha256').update(bytes).digest('hex')
+          const mediaId = `${kit.id}-${laneFile.lane}`
+          let next = setMediaSample(doc, mediaId, sha256, `media/${destName}`)
+          let durationSec: number
+          try {
+            durationSec = decodeWav(bytes).durationSeconds
+          } catch (err) {
+            json(res, 400, { error: `could not read "${destName}"'s duration: ${err instanceof Error ? err.message : String(err)}` })
+            return
+          }
+          const clipId = typeof b.clipId === 'string' && b.clipId ? b.clipId : nextFreeClipId(track)
+          const { doc: withClip } = addAudioClip(next, track.id, clipId, { media: mediaId, in: 0, out: Math.max(0.02, durationSec) })
+          next = withClip
+          if (typeof b.sceneId === 'string' && b.sceneId) {
+            const scene = next.scenes.find((s) => s.id === b.sceneId)
+            next = setScene(next, b.sceneId, { ...(scene?.slots ?? {}), [track.id]: clipId })
+          }
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc, clipId })
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500

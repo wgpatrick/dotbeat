@@ -3,9 +3,10 @@ import type { ReactNode } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
 import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, daemonBase } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
-import { applyPresetToTrack, installKitLane, installSoundfont, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
+import { applyPresetToTrack, installKitLane, installSoundfont, installAudioClip, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
 import { declaredLaneNames, WARP_MODES, type BeatAutomationPoint, type BeatClip, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind, type WarpMode } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
+import { loadWaveform, getCachedWaveform, drawWaveform, type WaveformData } from '../audio/waveform'
 
 // Phase 20 Stream W — track add/delete/rename/recolor + project-folder controls. There is no BeatLab
 // component to port these from (BeatLab's tracks are lesson-defined; its store has no track
@@ -110,6 +111,11 @@ const RULER_H = 26
 const DETAIL_PX_PER_BAR = 32 // at or above this, draw real ticks; below, density blocks
 const DENSITY_REF = 6 // events/bar that reads as full-opacity (soft normalization, not a hard cap)
 const GROUP_HEADER_H = 34 // Phase 22 Stream AF: one collapsible fold-header row per track group
+// Loop mode's synthetic single-section sentinel scene name (see the `sections` useMemo below) —
+// shared so any code that needs to tell "a real song-mode scene" apart from "there is no song at
+// all" (Phase 23 Stream BC's drag-to-create-audio-clip: it can only auto-slot into a real scene)
+// reads the same literal rather than re-typing the magic string.
+const LOOP_SCENE_SENTINEL = '(loop)'
 
 // ── Inline channel-strip helpers (Phase 18): the arrangement track header carries a compact subset
 // of the full mixer, reusing MixerView's exact data-flow — volume/pan write `<id>.volume`/`<id>.pan`
@@ -436,6 +442,16 @@ function TrackRow({
   // it has, via installKitLane with no `lane`), or a soundfont onto an instrument track
   // (installSoundfont). A single kit ONE-SHOT (payload.lane set) also lands here if dropped on the
   // header rather than a specific lane row (StepSequencer.tsx) — it just installs to its own lane.
+  //
+  // Phase 23 Stream BC: that same one-shot payload also lands on an `audio`-kind track header —
+  // dragging a real audio file (a kit's own wav) onto an audio track creates a clip from it
+  // (installAudioClip), the clip-creation half Stream AE's format work left for the GUI. No new
+  // position signal exists at the header (unlike the canvas, a header drop isn't "at bar N"), so the
+  // target clip is resolved the same "primary occurrence" convention every other per-track panel in
+  // this file already uses (audioOccurrences[0]): reuse it in place if the track already has one,
+  // otherwise mint a new clip and slot it into the FIRST song section's scene (sections[0]) so it's
+  // immediately visible — refused with a clear message in loop mode, where there's no scene to slot
+  // into yet (add a song section first).
   const [dropHover, setDropHover] = useState(false)
   const handleLibraryDrop = useCallback(
     (e: React.DragEvent) => {
@@ -450,13 +466,27 @@ function TrackRow({
         }
         applyPresetToTrack(track.id, payload.name).catch((err) => window.alert(`Could not apply preset: ${(err as Error).message}`))
       } else if (payload.type === 'kit-lane') {
-        if (track.kind !== 'drums') {
-          window.alert(`"${track.name}" is not a drum track — drop kit samples onto a drum track.`)
-          return
+        if (track.kind === 'drums') {
+          installKitLane(track.id, payload.kit, payload.lane ? { lane: payload.lane } : {}).catch((err) =>
+            window.alert(`Could not install sample: ${(err as Error).message}`),
+          )
+        } else if (track.kind === 'audio') {
+          if (!payload.lane) {
+            window.alert('Drag a single kit sample (not a whole kit) onto an audio track — one clip, one sample.')
+            return
+          }
+          const existingClipId = audioOccurrences?.[0]?.clipId
+          const firstScene = sections[0]?.scene
+          const opts: { clipId?: string; sceneId?: string } =
+            existingClipId !== undefined ? { clipId: existingClipId } : firstScene && firstScene !== LOOP_SCENE_SENTINEL ? { sceneId: firstScene } : {}
+          if (existingClipId === undefined && !opts.sceneId) {
+            window.alert('Add a song section first ("+ section") — audio clips only play once slotted into a song-mode scene.')
+            return
+          }
+          installAudioClip(track.id, payload.kit, payload.lane, opts).catch((err) => window.alert(`Could not create audio clip: ${(err as Error).message}`))
+        } else {
+          window.alert(`"${track.name}" is a ${track.kind} track — drop kit samples onto a drum or audio track.`)
         }
-        installKitLane(track.id, payload.kit, payload.lane ? { lane: payload.lane } : {}).catch((err) =>
-          window.alert(`Could not install sample: ${(err as Error).message}`),
-        )
       } else if (payload.type === 'soundfont') {
         if (track.kind !== 'instrument') {
           window.alert(`"${track.name}" is not an instrument track — drop a soundfont onto an instrument track.`)
@@ -465,7 +495,7 @@ function TrackRow({
         installSoundfont(payload.file, { track: track.id }).catch((err) => window.alert(`Could not install soundfont: ${(err as Error).message}`))
       }
     },
-    [track.id, track.kind, track.name],
+    [track.id, track.kind, track.name, audioOccurrences, sections],
   )
 
   useEffect(() => {
@@ -1014,42 +1044,93 @@ function GroupHeaderRow({ group, collapsed, onToggleCollapse, onUngroup }: { gro
  * postEdit `<track>.clip.<id>.audio.<field>` path (core's setValue already carries it), so they're
  * optimistic + debounced exactly like every other knob in this file. Shown under a track's row for
  * its PRIMARY (first-playing) clip occurrence only — trimming a later occurrence of the same clip
- * id trims every occurrence, since they all reference one clip. */
+ * id trims every occurrence, since they all reference one clip.
+ *
+ * Phase 23 Stream BC added the waveform strip above the numeric fields (ui/src/audio/waveform.ts):
+ * decodes the region's referenced media independently of the playback engine's own buffer cache and
+ * draws a static min/max-per-pixel-column render, dimming whatever falls outside [in, out] — closing
+ * the "numeric fields only, no waveform, trim points hard to reason about" gap Stream AE's own
+ * honest-gap note left open. Still no drag-to-trim on the waveform itself (same deferred lift). */
 function AudioClipInspector({ track, clip }: { track: BeatTrack; clip: BeatClip }) {
   const region = clip.audio
+  const doc = useStore((s) => s.doc)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [waveform, setWaveform] = useState<WaveformData | null>(null)
+  const mediaPath = useMemo(() => {
+    if (!region || !doc) return undefined
+    return (doc.media as { id: string; path: string }[]).find((m) => m.id === region.media)?.path
+  }, [doc, region])
+
+  useEffect(() => {
+    if (!region || !mediaPath) {
+      setWaveform(null)
+      return
+    }
+    const cached = getCachedWaveform(region.media)
+    if (cached) {
+      setWaveform(cached)
+      return
+    }
+    let live = true
+    loadWaveform(region.media, mediaPath)
+      .then((wf) => {
+        if (live) setWaveform(wf)
+      })
+      .catch((err) => console.warn(`[waveform] could not decode "${region.media}":`, err))
+    return () => {
+      live = false
+    }
+  }, [region, mediaPath])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !waveform || !region) return
+    drawWaveform(canvas, waveform, region.in, region.out, track.color)
+  }, [waveform, region, track.color])
+
   if (!region) return null
   const base = `${track.id}.clip.${clip.id}.audio`
   return (
     <div className="arr-audio-inspector" style={{ paddingLeft: HEADER_W }}>
-      <span className="arr-audio-inspector-label">{clip.id}:</span>
-      <label>
-        in
-        <input type="number" step="0.01" min={0} defaultValue={region.in} data-audio-in={clip.id} onBlur={(e) => postEdit(`${base}.in`, e.target.value)} />
-      </label>
-      <label>
-        out
-        <input type="number" step="0.01" min={0} defaultValue={region.out} data-audio-out={clip.id} onBlur={(e) => postEdit(`${base}.out`, e.target.value)} />
-      </label>
-      <label>
-        gain (dB)
-        <input type="number" step="0.5" defaultValue={region.gainDb} data-audio-gain={clip.id} onBlur={(e) => postEdit(`${base}.gainDb`, e.target.value)} />
-      </label>
-      <label>
-        warp
-        <select value={region.warp} data-audio-warp={clip.id} onChange={(e) => postEdit(`${base}.warp`, e.target.value)}>
-          {WARP_MODES.map((w: WarpMode) => (
-            <option key={w} value={w}>
-              {w}
-            </option>
-          ))}
-        </select>
-      </label>
-      {region.warp === 'repitch' && (
+      <canvas
+        className="arr-audio-waveform"
+        data-audio-waveform={clip.id}
+        data-waveform-ready={waveform ? 'true' : 'false'}
+        ref={canvasRef}
+        width={600}
+        height={48}
+      />
+      <div className="arr-audio-inspector-fields">
+        <span className="arr-audio-inspector-label">{clip.id}:</span>
         <label>
-          rate
-          <input type="number" step="0.05" min={0.1} max={8} defaultValue={region.rate} data-audio-rate={clip.id} onBlur={(e) => postEdit(`${base}.rate`, e.target.value)} />
+          in
+          <input type="number" step="0.01" min={0} defaultValue={region.in} data-audio-in={clip.id} onBlur={(e) => postEdit(`${base}.in`, e.target.value)} />
         </label>
-      )}
+        <label>
+          out
+          <input type="number" step="0.01" min={0} defaultValue={region.out} data-audio-out={clip.id} onBlur={(e) => postEdit(`${base}.out`, e.target.value)} />
+        </label>
+        <label>
+          gain (dB)
+          <input type="number" step="0.5" defaultValue={region.gainDb} data-audio-gain={clip.id} onBlur={(e) => postEdit(`${base}.gainDb`, e.target.value)} />
+        </label>
+        <label>
+          warp
+          <select value={region.warp} data-audio-warp={clip.id} onChange={(e) => postEdit(`${base}.warp`, e.target.value)}>
+            {WARP_MODES.map((w: WarpMode) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
+        </label>
+        {region.warp === 'repitch' && (
+          <label>
+            rate
+            <input type="number" step="0.05" min={0.1} max={8} defaultValue={region.rate} data-audio-rate={clip.id} onBlur={(e) => postEdit(`${base}.rate`, e.target.value)} />
+          </label>
+        )}
+      </div>
     </div>
   )
 }
@@ -1122,7 +1203,7 @@ export function ArrangementView() {
       })
     }
     // Loop mode: one implicit section over loop_bars.
-    return [{ scene: '(loop)', bars: doc?.loopBars ?? 4, startBar: 0 }]
+    return [{ scene: LOOP_SCENE_SENTINEL, bars: doc?.loopBars ?? 4, startBar: 0 }]
   }, [doc])
 
   const totalBars = useMemo(() => sections.reduce((n, s) => n + s.bars, 0), [sections])
