@@ -74,7 +74,16 @@ export interface ParamGroup {
   effectType?: EffectType
 }
 
+// osc2Type's own dropdown — no 'wavetable' here, see MAIN_OSC_TYPES below for why.
 const OSC_TYPES = ['sine', 'triangle', 'sawtooth', 'square'] as const
+// Phase 26 Stream DH: the main `osc` field's dropdown ONLY — 'wavetable' is a real oscillator now
+// (ui/src/audio/wavetables.ts + engine.ts's applyParams), driven by the WT/WTpos knobs just below
+// it in the 'osc' group. Deliberately NOT added to OSC_TYPES (osc2Type's own dropdown): osc2/osc3/
+// the 4 unison pairs share osc2Type's value but have no wtTable2/wtPos2 of their own to scan, so
+// engine.ts falls them back to a plain sawtooth if a document ever sets osc2Type=wavetable
+// (legal at the format level, since OscType is one shared type — see document.ts's comment) — a
+// silent, surprising no-op UI control isn't worth offering here even though the CLI/format allow it.
+const MAIN_OSC_TYPES = ['sine', 'triangle', 'sawtooth', 'square', 'wavetable'] as const
 // Phase 18 Stream R: widened from {off,pitch,cutoff,amp,wtPos} — mirrors src/core/document.ts's
 // LFO_DESTS exactly (ui/ hand-mirrors core constants; see synthParams.ts's own file-header note
 // and engine.ts's identical LFO_DESTS). Shared by both lfoDest and lfo2Dest — same shared-enum
@@ -126,7 +135,7 @@ export const PARAM_GROUPS: ParamGroup[] = [
     kinds: ['synth'],
     open: true,
     params: [
-      e('osc', 'Osc', OSC_TYPES),
+      e('osc', 'Osc', MAIN_OSC_TYPES),
       e('wtTable', 'WT', ['analog', 'pwm', 'vocal', 'custom']),
       k('wtPos', 'WTpos', 0, 1, fmt.pct),
       e('osc2Type', 'Osc2', OSC_TYPES),

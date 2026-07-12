@@ -3,7 +3,13 @@
 // grammar" section for the frozen grammar this type mirrors, and the worked example there for
 // what serializing one of these actually looks like on disk.
 
-export type OscType = 'sine' | 'triangle' | 'sawtooth' | 'square'
+// Phase 26 Stream DH added 'wavetable': a real scanning wavetable oscillator (ui/src/audio/
+// wavetables.ts), finally giving the long-format-frozen-but-dead `wtTable`/`wtPos` fields
+// (SYNTH_FIELDS below) something to control. Shared by both `osc` and `osc2Type` (same type),
+// but only the MAIN `osc` field has its own wtTable/wtPos pair to scan — see wtTable's comment
+// below and ui/src/audio/engine.ts's applyParams for the osc2Type/osc3/uniPairs fallback when
+// this value leaks there (no second wtTable2/wtPos2 field exists to drive them).
+export type OscType = 'sine' | 'triangle' | 'sawtooth' | 'square' | 'wavetable'
 
 export type TrackKind = 'synth' | 'drums' | 'instrument' | 'audio'
 
@@ -215,7 +221,7 @@ export interface BeatSynth {
   // ---- v0.3: the full musical surface (serialized iff != default — canonical elision) ----
   // Every field maps 1:1 onto beatlab's SynthParams; defaults are frozen copies of beatlab's
   // DEFAULT_SYNTH at v0.3 freeze time (see SYNTH_FIELDS below and format-spec.md).
-  wtTable: 'analog' | 'pwm' | 'vocal' | 'custom' // wavetable set for the main osc's WT mode
+  wtTable: 'analog' | 'pwm' | 'vocal' | 'custom' // wavetable set for the main osc's WT mode (osc==='wavetable')
   wtPos: number // 0..1 wavetable position
   filterType: 'lowpass' | 'bandpass' | 'highpass'
   osc2Type: OscType
@@ -748,7 +754,7 @@ export interface BeatDocument {
   song: BeatSongSection[] | null // v0.4; null = no song block = loop mode (today's behavior)
 }
 
-export const OSC_TYPES: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square']
+export const OSC_TYPES: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square', 'wavetable']
 
 /** Phase 18 Stream R: widened from the original {off,pitch,cutoff,amp,wtPos} — see LfoDestination
  * above for the rationale. Shared by lfoDest and lfo2Dest (SYNTH_FIELDS below): this ALSO fixes a

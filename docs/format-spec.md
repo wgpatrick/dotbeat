@@ -102,7 +102,7 @@ selected_track <track id>
 
 track <id> <name> <color hex, lowercase> <kind: synth|drums>
   synth
-    osc <sine|triangle|sawtooth|square>
+    osc <sine|triangle|sawtooth|square|wavetable>  # 'wavetable' scans wtTable/wtPos (v0.3 fields) — Phase 26 Stream DH
     volume <number, dB>
     cutoff <number, Hz>
     resonance <number>

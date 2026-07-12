@@ -37,11 +37,12 @@
 // muteGain (gated by applyMuteGates() exactly like synth chains/the drum bus) and levelTap (read by
 // getTrackLevel() for the mixer meter) — see InstrumentVoice, buildInstrument(), applyMuteGates().
 //
-// Deliberately NOT ported (out of Stream A scope — see the parity doc): wavetable oscillators
-// (dotbeat's osc is only sine/tri/saw/square), drawn LFO shapes (lfoShape stays sine-only),
-// reorderable insert order, the arpeggiator, sample-slicing / per-lane one-shots (v0.5 media),
-// and live-MIDI monitoring. Instrument tracks get level/pan/mute into the master bus but NOT the
-// synth FX chain (EQ/comp/sends/sidechain) — full instrument FX parity remains a later stream.
+// Deliberately NOT ported (out of Stream A scope — see the parity doc): drawn LFO shapes
+// (lfoShape stays sine-only), reorderable insert order, the arpeggiator, sample-slicing / per-lane
+// one-shots (v0.5 media), and live-MIDI monitoring. Instrument tracks get level/pan/mute into the
+// master bus but NOT the synth FX chain (EQ/comp/sends/sidechain) — full instrument FX parity
+// remains a later stream. Wavetable oscillators (formerly "dotbeat's osc is only sine/tri/saw/
+// square") shipped in Phase 26 Stream DH — see OSC_SET/setWavetable/ui/src/audio/wavetables.ts.
 //
 // Phase 18 Stream R ADDED tempo-synced LFO rates (lfoSync/lfoSyncRate, lfo2Sync/lfo2SyncRate — a
 // note division instead of free Hz, resolved against the live doc.bpm every tick) and widened
@@ -59,8 +60,9 @@ import spessaWorkletUrl from 'spessasynth_lib/dist/spessasynth_processor.min.js?
 import { useStore, isEffectivelyMuted } from '../state/store'
 import { daemonBase } from '../daemon/bridge'
 import { audioBufferToWav } from './wavEncode'
-import type { BeatAudioRegion, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatEffect, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumVoiceType, OscType } from '../types'
-import { DRUM_VOICE_PARAM_DEFAULTS } from '../types'
+import type { BeatAudioRegion, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatEffect, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumVoiceType, OscType, WtTable } from '../types'
+import { DRUM_VOICE_PARAM_DEFAULTS, WT_TABLES } from '../types'
+import { buildWavetablePartials } from './wavetables'
 
 // Phase 18 Stream R: ONE shared, widened destination set for both LFO1 and LFO2 — mirrors
 // src/core/document.ts's LFO_DESTS/LfoDestination exactly (ui/ is a standalone Vite app with no
@@ -179,6 +181,10 @@ interface EngineSynth {
   sustain: number
   release: number
   pan: number
+  // Phase 26 Stream DH: the main osc's wavetable set + scan position — only meaningful when
+  // osc==='wavetable' (setWavetable below), but always coerced/present like every other field.
+  wtTable: WtTable
+  wtPos: number
   osc2Type: OscType
   osc2Level: number
   osc2Detune: number
@@ -308,7 +314,21 @@ interface EngineSynth {
   hatTone: number
 }
 
-const OSC_SET: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square']
+// Phase 26 Stream DH: 'wavetable' is legal on `osc` (the main oscillator — the only layer with its
+// own wtTable/wtPos pair to scan, see coerce()/setWavetable below). osc2/osc3/the 4 uniPairs share
+// `osc2Type`'s value with no wtTable2/wtPos2 of their own to drive — OSC_SET still includes
+// 'wavetable' (document.ts's OSC_TYPES allows it on osc2Type too, since it's the same OscType) so
+// a document that sets osc2Type=wavetable still parses/coerces without falling back to the
+// no-such-value default, but LAYER_OSC_SET below is what those layers actually apply it through.
+const OSC_SET: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square', 'wavetable']
+// osc2/osc3/uniPairs fallback set: 'wavetable' isn't meaningful there (no second wtTable/wtPos),
+// so applyParams maps it to 'sawtooth' — the same fallback shape as an unrecognized enum value
+// elsewhere in this file (e.g. filterType/autoFilterType's `.includes(...) ? v : 'lowpass'`).
+type LayerOscType = Exclude<OscType, 'wavetable'>
+const LAYER_OSC_SET: readonly LayerOscType[] = ['sine', 'triangle', 'sawtooth', 'square']
+function layerOscType(v: OscType): LayerOscType {
+  return (LAYER_OSC_SET as readonly OscType[]).includes(v) ? (v as LayerOscType) : 'sawtooth'
+}
 
 // The mixer fader's true minimum (bug investigation, see docs/volume-fader-bugfix.md). MixerView.
 // tsx's VOL_MIN = -60 is the lowest dB value a fader drag can WRITE, and its label displays "-∞"
@@ -340,6 +360,7 @@ function coerce(p: BeatSynth): EngineSynth {
   const saturatorCurve = (v: unknown, d: SaturatorCurve): SaturatorCurve => (typeof v === 'string' && SATURATOR_CURVES.includes(v as SaturatorCurve) ? (v as SaturatorCurve) : d)
   const resonatorChord = (v: unknown, d: ResonatorChord): ResonatorChord => (typeof v === 'string' && RESONATOR_CHORDS.includes(v as ResonatorChord) ? (v as ResonatorChord) : d)
   const eqSlope = (v: unknown, d: EqFilterSlope): EqFilterSlope => (typeof v === 'string' && EQ_FILTER_SLOPES.includes(v as EqFilterSlope) ? (v as EqFilterSlope) : d)
+  const wtTable = (v: unknown, d: WtTable): WtTable => (typeof v === 'string' && WT_TABLES.includes(v as WtTable) ? (v as WtTable) : d)
   return {
     osc: osc(p.osc, 'sawtooth'),
     volume: applyVolumeFloor(num(p.volume, -10)),
@@ -351,6 +372,8 @@ function coerce(p: BeatSynth): EngineSynth {
     sustain: num(p.sustain, 0.6),
     release: num(p.release, 0.3),
     pan: num(p.pan, 0),
+    wtTable: wtTable(p.wtTable, 'analog'),
+    wtPos: Math.max(0, Math.min(1, num(p.wtPos, 0.5))),
     osc2Type: osc(p.osc2Type, 'sawtooth'),
     osc2Level: num(p.osc2Level, 0),
     osc2Detune: num(p.osc2Detune, 12),
@@ -1513,6 +1536,12 @@ interface SynthChain {
   reverbSend: Tone.Gain
   delaySend: Tone.Gain
   lastOsc: OscType | null
+  // Phase 26 Stream DH: debounce state for the wavetable oscillator's regenerated Tone `partials`
+  // array (setWavetable below) — null until the chain has ever been in wavetable mode. Kept
+  // SEPARATE from lastOsc so switching osc away from 'wavetable' and back doesn't lose the "was
+  // this table/position already applied" memo.
+  lastWtTable: WtTable | null
+  lastWtPos: number | null
 }
 
 /** Finds the live effect runtime of a given TYPE in a chain (used by LFO/clip-automation
@@ -2227,7 +2256,25 @@ class Engine {
       synth, osc2, osc2Gain, osc2Pan, osc3, osc3Gain, osc3Pan, uniPairs, sub, subGain, noise, noiseGain, fm, fmGain,
       filter, headroom, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET, saturator, chorus, phaser, pingPong,
       muteGain, levelTap, panner, vol, reverbSend, delaySend, lastOsc: null,
+      lastWtTable: null, lastWtPos: null,
     }
+  }
+
+  /** Phase 26 Stream DH: (re)generate the main osc's wavetable frame and push it to the live
+   * voice(s) as a Tone `custom` oscillator (see ui/src/audio/wavetables.ts's own header for why a
+   * harmonic-partials array is the chosen representation). Debounced against the chain's own last-
+   * applied table/position so a tick where nothing meaningfully moved (well under one cent of scan
+   * position) doesn't pay for a PeriodicWave rebuild on every one of PolySynth's voices — `force`
+   * (set when the chain is ENTERING wavetable mode, i.e. lastOsc wasn't already 'wavetable') always
+   * applies regardless of the epsilon, so switching osc to 'wavetable' is never silently stale. */
+  private setWavetable(chain: SynthChain, table: WtTable, pos: number, force: boolean): void {
+    const WT_POS_EPSILON = 0.003
+    const changed = force || chain.lastWtTable !== table || chain.lastWtPos === null || Math.abs(chain.lastWtPos - pos) > WT_POS_EPSILON
+    if (!changed) return
+    const partials = buildWavetablePartials(table, pos)
+    chain.synth.set({ oscillator: { type: 'custom', partials } })
+    chain.lastWtTable = table
+    chain.lastWtPos = pos
   }
 
   /** Rebuilds the chain's SPINE (filter -> ...ordered, enabled effects... -> muteGain) whenever
@@ -2282,17 +2329,27 @@ class Engine {
   private applyParams(chain: SynthChain, p: EngineSynth, effects: BeatEffect[], trackId: string): void {
     const env = { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release }
     chain.synth.set({ envelope: env, portamento: p.glide })
-    if (chain.lastOsc !== p.osc) {
+    if (p.osc === 'wavetable') {
+      // Real scanning wavetable oscillator (Phase 26 Stream DH) — see setWavetable's own comment
+      // for the debounce/regeneration strategy. `force` fires whenever the chain is freshly
+      // entering wavetable mode (lastOsc wasn't already 'wavetable'), so the very first frame is
+      // never skipped by the epsilon check.
+      this.setWavetable(chain, p.wtTable, p.wtPos, chain.lastOsc !== 'wavetable')
+      chain.lastOsc = 'wavetable'
+    } else if (chain.lastOsc !== p.osc) {
       chain.synth.set({ oscillator: { type: p.osc } })
       chain.lastOsc = p.osc
     }
-    chain.osc2.set({ oscillator: { type: p.osc2Type }, envelope: env, portamento: p.glide })
-    chain.osc3.set({ oscillator: { type: p.osc2Type }, envelope: env, portamento: p.glide })
+    // osc2/osc3/uniPairs share osc2Type but have no wtTable/wtPos of their own — 'wavetable' there
+    // falls back to a plain sawtooth (layerOscType) rather than silently doing nothing audible.
+    const layerType = layerOscType(p.osc2Type)
+    chain.osc2.set({ oscillator: { type: layerType }, envelope: env, portamento: p.glide })
+    chain.osc3.set({ oscillator: { type: layerType }, envelope: env, portamento: p.glide })
     const width = p.unisonVoices >= 3 ? p.unisonWidth : 0
     chain.osc2Pan.pan.value = width * 0.5
     chain.osc3Pan.pan.value = -width * 0.5
     for (const u of chain.uniPairs) {
-      u.poly.set({ oscillator: { type: p.osc2Type }, envelope: env, portamento: p.glide })
+      u.poly.set({ oscillator: { type: layerType }, envelope: env, portamento: p.glide })
       u.gain.gain.value = p.unisonVoices >= u.minVoices ? p.osc2Level * u.level : 0
       u.pan.pan.value = Math.sign(u.mul) * width * (u.minVoices === 5 ? 0.8 : 1)
     }
@@ -3357,12 +3414,16 @@ class Engine {
       // document schema at all — see LFO_DESTS's comment) — now both LFOs share one destination
       // enum and both can reach the full set. One function, called once per LFO with its own
       // dest/depth/value, so there's exactly one place that knows how each destination maps onto
-      // the live audio graph. ('off'/'pitch'/'cutoff'/'amp' are handled above/below; 'wtPos' is a
-      // deliberate no-op — wavetable oscillators aren't ported, see the file-header scope note.)
+      // the live audio graph. ('off'/'pitch'/'cutoff'/'amp' are handled above/below.) 'wtPos'
+      // (Phase 26 Stream DH) is a STEPPED destination, not a ramp like the others — there's no
+      // AudioParam to ramp, setWavetable regenerates the oscillator's partials outright, so it
+      // only actually moves anything when the track's own osc is 'wavetable' (a no-op otherwise,
+      // same shape as eqLow/compMix/etc. being a no-op when the matching effect isn't present).
       const applyLfoAdditive = (dest: LfoDest, depth: number, lfoVal: number): void => {
         const d = depth * lfoVal
         const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
         switch (dest) {
+          case 'wtPos': if (p.osc === 'wavetable') this.setWavetable(chain, p.wtTable, clamp01(p.wtPos + d), false); break
           case 'resonance': chain.filter.Q.linearRampToValueAtTime(Math.max(0, p.resonance + d * 8), rampTime); break
           case 'pan': chain.panner.pan.linearRampToValueAtTime(Math.max(-1, Math.min(1, p.pan + d)), rampTime); break
           case 'sendReverb': chain.reverbSend.gain.linearRampToValueAtTime(clamp01(p.sendReverb + d * 0.5), rampTime); break
