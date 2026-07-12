@@ -491,3 +491,21 @@ export const PARAM_GROUPS: ParamGroup[] = [
     ],
   },
 ]
+
+// Phase 27 Stream EA bug 4: instrument tracks carry a real BeatSynth object like every other kind
+// (so a raw field READ never crashes), but src/core/edit.ts's setValue only actually ACCEPTS the
+// ~12 EffectType chain members' own fields for an instrument track (INSTRUMENT_EFFECT_FIELD_KEYS —
+// core osc/filter/envelope/LFO/sends/sidechain/drumvoice fields have no meaning on a SoundFont
+// voice, a deliberate Phase 26 Stream DC decision, not something this bugfix stream should widen).
+// Dropping MacroRow's `track.kind` guard means an instrument track can now reach a macro (e.g. the
+// factory "space" macro, kind 'any') whose targets were never audited against that allowlist —
+// confirmed live: `beat set <file> keys.sendReverb <v>` throws `unknown field "sendReverb" on
+// instrument track`. Rather than posting a doomed edit (a real daemon-side error, not just
+// "decorative"), MacroKnob checks this before each target — safe no-op on the illegal param,
+// matching the tolerance PresetPicker's own comment already extends to 'audio'-kind macros that
+// have nothing live to act on. Purely derived from THIS table's own `kinds` field (no new data), so
+// it can't drift from what Group/Control already render as legal for a kind.
+export function isParamLegalForKind(key: string, kind: TrackKind): boolean {
+  if (kind !== 'instrument') return true // synth/drums keep the full field set unchanged
+  return PARAM_GROUPS.some((g) => g.kinds.includes('instrument') && g.params.some((p) => p.key === key))
+}

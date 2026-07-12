@@ -740,6 +740,22 @@ function TrackRow({
     }
   }, [flat, totalBars, pxPerBar, detail, sections, band, track, occurrences])
 
+  // Phase 27 Stream EA bug 1: `occurrences` is [] whenever this isn't song mode (see
+  // trackOccurrences's `if (!doc.song) return []` in the parent) — synthesize one display-only
+  // occurrence spanning `sections[0]` when that's the loop-mode implicit section (identified the same
+  // way the header-drop handler above already does: `scene === LOOP_SCENE_SENTINEL`), so the
+  // `.arr-clip-block` boundary/label/selection chrome mounts in loop mode too. clipId has no real
+  // clip to name, so it uses the same LOOP_SCENE_SENTINEL label the section itself already carries.
+  // A real drag/click on this block still routes through the ordinary onOccPointerDown → beginClipDrag
+  // path in the parent; with only one section to land on, a drag there is always a same-section no-op
+  // and a plain click just (de)selects the block — see beginClipDrag's own comment.
+  const displayOccurrences: ClipOccurrence[] =
+    occurrences && occurrences.length > 0
+      ? occurrences
+      : sections.length === 1 && sections[0]!.scene === LOOP_SCENE_SENTINEL
+        ? [{ clipId: LOOP_SCENE_SENTINEL, startBar: sections[0]!.startBar, bars: sections[0]!.bars, sectionIndex: 0 }]
+        : []
+
   return (
     <div className={`arr-row ${dimmed ? 'dimmed' : ''}`} style={{ height: ROW_H }}>
       <div
@@ -834,9 +850,17 @@ function TrackRow({
             visibility fix. Sits ABOVE the canvas (later in DOM order) so it both reads clearly and
             catches pointer events for click/marquee-select/drag-move; the canvas underneath keeps
             drawing the occurrence's own content in miniature (note/hit ticks, or the audio fill).
-            Absent entirely in loop mode (occurrences is always [] there — no scene/clip concept to
-            show a boundary for). */}
-        {(occurrences ?? []).map((occ) => {
+            `occurrences` (the parent's real song-scene occurrences, from trackOccurrences) is always
+            [] in loop mode — no scene/clip concept there — which used to mean this chrome never
+            mounted for a fresh/simple project (Phase 27 Stream EA bug 1: `examples/night-shift.beat`
+            itself, and every new project until it grows a `song` block). Fixed below by synthesizing
+            ONE display-only occurrence spanning the loop's own implicit section (see `sections`'s own
+            loop-mode branch, which already builds exactly this one-section-over-loop_bars shape) —
+            purely a render-time affordance for THIS overlay; `occurrences` itself is passed through
+            unmodified everywhere else in this component (the audio-fill canvas above, the
+            library-drop clip-targeting logic), so it doesn't change what loop-mode content exists,
+            only that its row now gets a visible boundary/label/selection target like song mode's do. */}
+        {displayOccurrences.map((occ) => {
           const key = occKey(track.id, occ.sectionIndex)
           const isSelected = selectedOcc.has(key)
           const isDragging = !!dragPreview?.keys.has(key)
@@ -1807,6 +1831,16 @@ export function ArrangementView() {
         setClipDrag(null)
         if (!moved) {
           setSelectedOcc(new Set([key]))
+          // Bug 2 fix (Phase 27 Stream EA), extended: a clip block's own pointerdown stopPropagation
+          // keeps the lane's onRowPointerDown (and therefore its own click-sets-selectedTrack fix,
+          // below in this file) from ever firing when the click lands ON a block rather than empty
+          // lane space. Bug 1's fix means loop-mode rows now ALWAYS have a block spanning the full
+          // row, so without this, "click anywhere in a track's row" would silently stop being true
+          // again the moment a click happened to land on the (now omnipresent) block. Same three
+          // side effects clickHeader/the lane's own click path use.
+          setSelectedTrack(trackId)
+          postEdit('selected_track', trackId)
+          setBottomPaneOpen(true)
           return
         }
         if (deltaBars === 0) return
@@ -1833,7 +1867,7 @@ export function ArrangementView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [selectedOcc, pxPerBar, sections],
+    [selectedOcc, pxPerBar, sections, setSelectedTrack, setBottomPaneOpen],
   )
 
   // Start a length-resize drag from a section's right-edge handle. stopPropagation keeps the ruler's
@@ -1961,10 +1995,22 @@ export function ArrangementView() {
         if (d) {
           // Phase 24 Stream CE: a plain click on the ruler seeks instead of committing a trivial
           // one-bar selection — see this effect's own header comment above.
-          const isClick = d.axis === 'ruler' && Math.abs(e.clientX - dragStartClientX.current) < CLICK_MOVE_PX
-          if (isClick) {
+          const isClick = Math.abs(e.clientX - dragStartClientX.current) < CLICK_MOVE_PX
+          if (d.axis === 'ruler' && isClick) {
             engine.seek(d.start)
             return null
+          }
+          if (d.axis !== 'ruler' && isClick) {
+            // Bug 2 fix (Phase 27 Stream EA): a plain click anywhere in a track's `.arr-lane` row —
+            // not just its name button (clickHeader, which sets the SAME three things) — should also
+            // open that track's clip in the bottom pane. Without this, clicking the lane only ever
+            // touched the bar-range `selection` state below, leaving `selectedTrack` (and therefore
+            // the bottom pane) pointed at whichever track's NAME was last clicked — two state slices
+            // that look like one "select this track's row" gesture but silently weren't wired
+            // together. A real drag (isClick false) still does bar-range selection only, unchanged.
+            setSelectedTrack(d.axis)
+            postEdit('selected_track', d.axis)
+            setBottomPaneOpen(true)
           }
           const start = Math.min(d.start, d.cur)
           const end = Math.max(d.start, d.cur) + 1 // inclusive bar → exclusive end; selection needs start < end
@@ -1995,7 +2041,7 @@ export function ArrangementView() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
-  }, [drag, barFromClientX, occurrencesByTrack])
+  }, [drag, barFromClientX, occurrencesByTrack, setSelectedTrack, setBottomPaneOpen])
 
   // Phase 24 Stream CE: loop-region controls. `setLoopRange` is the one place that writes
   // `loopRegion` — no separate "push this to the engine" call is needed: engine.ts's `tick()` reads

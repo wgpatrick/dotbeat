@@ -3,7 +3,7 @@ import { Knob } from './Knob'
 import { type BeatTrack, type EffectType } from '../types'
 import { postEdit, daemonBase } from '../daemon/bridge'
 import { fetchLibrary, installSoundfont, type LibrarySoundfont } from '../daemon/library'
-import { EffectChain, Group } from './SynthPanel'
+import { EffectChain, Group, MacroRow } from './SynthPanel'
 import { PARAM_GROUPS } from './synthParams'
 import { useStore } from '../state/store'
 
@@ -177,6 +177,15 @@ export function InstrumentPanel({ track }: { track: BeatTrack }) {
         </span>
         <span className="toolbar-tip">instrument (SoundFont) track · pick a program · set level/pan · each edit is one line in the .beat file</span>
       </div>
+      {/* Phase 27 Stream EA bug 4 (docs/phase-27-plan.md): SoundfontPicker (below) already IS this
+          track kind's own preset-picker — a hot-swap browser over "what presets exist for
+          instrument/soundfont tracks today" (its own doc comment: "the instrument-track analog of
+          SynthPanel's PresetPicker"), reusing the same `.preset-picker` shell/CSS and the same
+          apply-immediately gesture. SynthPanel's own `PresetPicker` swaps a bag of ~58 synth params
+          (osc/filter/envelope/...) that have no meaning on a SoundFont voice at all (see this file's
+          header comment) — "the exact same preset shape doesn't apply" here, so it's deliberately
+          NOT duplicated; SoundfontPicker is the adapted, sensible equivalent, not a placeholder for
+          a second, separate PresetPicker. */}
       <SoundfontPicker track={track} />
       <div className="param-groups">
         <div className="param-group" style={{ display: 'block' }}>
@@ -224,6 +233,12 @@ export function InstrumentPanel({ track }: { track: BeatTrack }) {
           )}
         </div>
       </div>
+      {/* Phase 27 Stream EA bug 4: instrument tracks used to go straight from this soundfont/program
+          block to the Effect Chain below, with nothing in between — MacroRow was never even called
+          here (not just gated by its own now-dropped `track.kind` guard, see SynthPanel.tsx). Now
+          that Phase 26 Stream DC gave instrument tracks a real, macro-able Effect Chain, this is the
+          same macro row synth/drum tracks get, reusing SynthPanel's own component verbatim. */}
+      <MacroRow track={track} />
       {/* Phase 26 Stream DC: reuses SynthPanel's own EffectChain/Group — same add/reorder/bypass
           UI and effectType-gated knob-group rendering synth/drum tracks already have. */}
       <EffectChain track={track} onAdded={setJustAdded} />

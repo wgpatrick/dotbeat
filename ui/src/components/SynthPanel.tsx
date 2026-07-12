@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Knob } from './Knob'
-import { PARAM_GROUPS, type ParamGroup, type ParamSpec, type TrackKind } from './synthParams'
+import { PARAM_GROUPS, isParamLegalForKind, type ParamGroup, type ParamSpec, type TrackKind } from './synthParams'
 import { EFFECT_TYPES, EFFECT_LABELS, type BeatEffect, type BeatTrack, type EffectType } from '../types'
 import { postEdit, postEffectAdd, postEffectRemove, postEffectMove, postEffectEnabled } from '../daemon/bridge'
 import { fetchLibrary, applyPresetToTrack, resolveMacro, inverseResolveMacroTarget, type LibraryPreset, type LibraryMacro } from '../daemon/library'
@@ -404,14 +404,23 @@ function MacroKnob({ track, macro }: { track: BeatTrack; macro: LibraryMacro }) 
         format={(v) => `${Math.round(v)}`}
         onChange={(v) => {
           setKnob(v)
-          for (const { param, value } of resolveMacro(macro, v)) postEdit(`${track.id}.${param}`, String(value))
+          // Bug 4 fix (Phase 27 Stream EA): skip any target this track's kind can't legally carry
+          // (see isParamLegalForKind's own comment) instead of posting an edit the daemon will
+          // reject — matters today for instrument tracks + the "space" macro's sendReverb/sendDelay.
+          for (const { param, value } of resolveMacro(macro, v)) {
+            if (!isParamLegalForKind(param, track.kind as TrackKind)) continue
+            postEdit(`${track.id}.${param}`, String(value))
+          }
         }}
       />
     </div>
   )
 }
 
-function MacroRow({ track }: { track: BeatTrack }) {
+// Exported (Phase 27 Stream EA bug 4) so InstrumentPanel.tsx can render the same macro row synth/
+// drum tracks already get, now that the `track.kind` guard below no longer excludes 'instrument' —
+// see this file's own MacroRow guard comment for why that exclusion was stale.
+export function MacroRow({ track }: { track: BeatTrack }) {
   const [macros, setMacros] = useState<LibraryMacro[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -429,9 +438,13 @@ function MacroRow({ track }: { track: BeatTrack }) {
     }
   }, [])
 
-  // Same kind restriction PresetPicker uses above: 'audio' tracks carry a synth block but nothing
-  // wires it into the live graph, so an 'any'-kind macro (e.g. Space) would be decorative there.
-  if (track.kind !== 'synth' && track.kind !== 'drums') return null
+  // Bug 4 fix (Phase 27 Stream EA): this guard used to also exclude 'instrument' tracks — stale
+  // since Phase 26 Stream DC gave instrument tracks a real, reorderable `effects` chain (the exact
+  // mechanism macros act on via resolveMacro -> postEdit), so an instrument-kind macro is no more
+  // "decorative" there than on a synth track. 'audio' tracks remain excluded: they carry a synth
+  // block but nothing wires it into the live graph, so even an 'any'-kind macro (e.g. Space) would
+  // be a dead control there.
+  if (track.kind !== 'synth' && track.kind !== 'drums' && track.kind !== 'instrument') return null
   if (error) return <div className="macro-row macro-row-error">macros: {error}</div>
   if (!macros) return null
   const applicable = macros.filter((m) => m.kind === track.kind || m.kind === 'any')
@@ -491,6 +504,20 @@ export function SynthPanel({ track }: { track: BeatTrack }) {
     if (g.effectType) return effects.some((e) => e.type === g.effectType)
     return true
   })
+    // Bug 3 fix (Phase 27 Stream EA): PARAM_GROUPS is a fixed array order, so an effectType group's
+    // knobs used to stay wherever PARAM_GROUPS put them even after the user dragged that effect to a
+    // new position in the Effect Chain list above — "the order I see in the chain" and "the order I
+    // see the knobs in" silently diverged. Sort by real chain position instead. Fixed-insert/core
+    // groups (no effectType — osc/filter/lfo/amp/velkeymod/pingpong/beatrepeat/chorusphaser/
+    // saturator/sends/sidechain/drumvoice) have no chain position to sort by; pinned at the START
+    // (sortKey -1, before every effectType group) — core synth surface reads first regardless of
+    // chain reordering, and Array#sort's stability keeps their own PARAM_GROUPS-relative order among
+    // themselves. Every effectType group then follows in the SAME order as the Effect Chain list.
+    .sort((a, b) => {
+      const ai = a.effectType ? effects.findIndex((e) => e.type === a.effectType) : -1
+      const bi = b.effectType ? effects.findIndex((e) => e.type === b.effectType) : -1
+      return ai - bi
+    })
 
   // Tracks which effect type was JUST added via the Effect Chain panel, so the matching group can
   // force itself open and scroll into view for one moment — see Group's own comment. Cleared after
