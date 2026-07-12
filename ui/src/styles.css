@@ -1272,6 +1272,12 @@ body {
 .arr-ruler-corner {
   flex: 0 0 auto;
   border-right: 1px solid var(--line);
+  /* Phase 24 Stream CD: stays pinned at the left edge while the timeline scrolls horizontally under
+     zoom, the same "frozen corner cell" idiom as a spreadsheet — matches .arr-track-header below. */
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
 }
 .arr-ruler {
   position: relative;
@@ -1299,6 +1305,36 @@ body {
   color: var(--text-dim);
   font-size: 10px;
 }
+/* Bar-number tick strip along the bottom of the ruler (Phase 24 Stream CD) — sits below the
+   section-label row (see the RULER_H/TICK_ROW_H split in ArrangementView.tsx). pointer-events:none
+   throughout so it never steals the ruler's own drag-to-select/click-to-seek gestures. */
+.arr-bar-ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+.arr-bar-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.22);
+  padding-left: 3px;
+  display: flex;
+  align-items: flex-end;
+}
+.arr-bar-tick-num {
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.arr-bar-tick-minor {
+  position: absolute;
+  top: 2px;
+  bottom: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
 .arr-ruler-band {
   position: absolute;
   top: 0;
@@ -1323,6 +1359,12 @@ body {
   background: var(--panel);
   border-right: 1px solid var(--line);
   color: var(--text);
+  /* Phase 24 Stream CD: pinned at the left edge of .arr-scroll while the timeline scrolls
+     horizontally under zoom, so the track name/mixer strip stays visible no matter how far right
+     you've scrolled — matches .arr-ruler-corner's own left-sticky treatment above. */
+  position: sticky;
+  left: 0;
+  z-index: 1;
 }
 .arr-track-header.selected {
   box-shadow: inset 3px 0 0 var(--accent);
@@ -2700,4 +2742,19 @@ body {
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text);
+}
+
+/* ---- Phase 24 Stream CD: timeline zoom controls (arrangement toolbar) ---- */
+.arr-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+.arr-zoom-readout {
+  min-width: 54px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }

@@ -109,9 +109,35 @@ async function postSong(body: { op: 'append' | 'resize' | 'delete' | 'move'; ind
 
 const ROW_H = 56 // taller than the pre-Phase-18 44px: the header now stacks a name row + an inline mixer strip
 const HEADER_W = 264 // wide enough for the inline channel strip (mute/solo/volume/pan/sends) in the track header
-const RULER_H = 26
+const TICK_ROW_H = 13 // Phase 24 Stream CD: bar-number tick strip along the bottom of the ruler
+const RULER_H = 26 + TICK_ROW_H // was a flat 26 pre-Stream-CD; the extra room is the new tick row below the section-label row
 const DETAIL_PX_PER_BAR = 32 // at or above this, draw real ticks; below, density blocks
 const DENSITY_REF = 6 // events/bar that reads as full-opacity (soft normalization, not a hard cap)
+
+// ── Timeline zoom (Phase 24 Stream CD) ───────────────────────────────────────────────────────────
+// pxPerBar used to be nothing but laneWidth / totalBars — always fit-to-container-width, no
+// independent zoom, and no horizontal scroll (the timeline could never be wider than its container).
+// Zoom decouples the two: `null` means "fit to width" (today's behavior, and still the default); a
+// number pins pxPerBar regardless of container width. `.arr-scroll` already has `overflow: auto`
+// (previously exercised only by the Phase 22 Stream AG resize-drag live preview — see the render*
+// comment further down), so once pxPerBar * totalBars exceeds laneWidth the container just scrolls;
+// no new scroll plumbing is needed, only decoupling pxPerBar from laneWidth. Session-only UI state —
+// never written to the .beat file, same treatment as mute/solo and group-collapse — so it lives in
+// local component state below, not the document or even the Zustand store.
+const MIN_PX_PER_BAR = 4
+const MAX_PX_PER_BAR = 256
+const ZOOM_FACTOR = 1.4 // per zoom-in/out step (button click or one wheel-zoom tick)
+
+/** Bar-tick label density for the ruler, zoom-aware in the same spirit DETAIL_PX_PER_BAR already
+ * applies to note/hit rendering: once there's a full DETAIL_PX_PER_BAR worth of room per bar, number
+ * every bar; below that, skip bars (in powers of two) so the numbers never overlap. */
+function tickIntervalFor(pxPerBar: number): number {
+  if (pxPerBar >= DETAIL_PX_PER_BAR) return 1
+  if (pxPerBar >= DETAIL_PX_PER_BAR / 2) return 2
+  if (pxPerBar >= DETAIL_PX_PER_BAR / 4) return 4
+  if (pxPerBar >= DETAIL_PX_PER_BAR / 8) return 8
+  return 16
+}
 const GROUP_HEADER_H = 34 // Phase 22 Stream AF: one collapsible fold-header row per track group
 // Loop mode's synthetic single-section sentinel scene name (see the `sections` useMemo below) —
 // shared so any code that needs to tell "a real song-mode scene" apart from "there is no song at
@@ -1154,6 +1180,9 @@ export function ArrangementView() {
   const currentStep = useStore((s) => s.currentStep)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [laneWidth, setLaneWidth] = useState(800)
+  // Timeline zoom (Phase 24 Stream CD): null = fit-to-width (default, today's behavior); a number
+  // pins pxPerBar independently of laneWidth. See the module-level comment above MIN_PX_PER_BAR.
+  const [zoomPxPerBar, setZoomPxPerBar] = useState<number | null>(null)
   // Active drag band (bars), plus which axis is dragging (the ruler → all tracks, or a track id).
   const [drag, setDrag] = useState<{ axis: 'ruler' | string; start: number; cur: number } | null>(null)
   const dragRectLeft = useRef(0)
@@ -1215,7 +1244,12 @@ export function ArrangementView() {
   }, [doc])
 
   const totalBars = useMemo(() => sections.reduce((n, s) => n + s.bars, 0), [sections])
-  const pxPerBar = totalBars > 0 ? laneWidth / totalBars : 0
+  const fitPxPerBar = totalBars > 0 ? laneWidth / totalBars : 0
+  // zoomPxPerBar overrides the fit-to-width value once the user has zoomed; otherwise fall back to
+  // it, preserving the pre-Stream-CD default exactly. Every downstream reader of pxPerBar (detail
+  // threshold, canvas sizing, ruler width, drag math, the resize-preview freeze) already goes through
+  // this one variable, so decoupling it here is the whole of the zoom feature's plumbing.
+  const pxPerBar = zoomPxPerBar ?? fitPxPerBar
   const detail = pxPerBar >= DETAIL_PX_PER_BAR
   const songMode = !!doc?.song?.length
 
@@ -1391,6 +1425,42 @@ export function ArrangementView() {
       setResize({ index, startBar, startBars, startX: e.clientX, startScrollLeft: scrollRef.current?.scrollLeft ?? 0, bars: startBars })
     },
     [pxPerBar],
+  )
+
+  // Zoom controls (Phase 24 Stream CD): step the effective px/bar up or down by ZOOM_FACTOR, clamped
+  // to [MIN_PX_PER_BAR, MAX_PX_PER_BAR]. Reading `z ?? fitPxPerBar` (not `pxPerBar`) means the very
+  // first zoom-in/out step is relative to whatever's currently on screen (the fit value) rather than
+  // some stale prior zoom.
+  const zoomIn = useCallback(() => {
+    setZoomPxPerBar((z) => Math.min(MAX_PX_PER_BAR, (z ?? fitPxPerBar) * ZOOM_FACTOR))
+  }, [fitPxPerBar])
+  const zoomOut = useCallback(() => {
+    setZoomPxPerBar((z) => Math.max(MIN_PX_PER_BAR, (z ?? fitPxPerBar) / ZOOM_FACTOR))
+  }, [fitPxPerBar])
+  const zoomFit = useCallback(() => setZoomPxPerBar(null), [])
+
+  // Scroll-wheel zoom with Cmd/Ctrl held (trackpad pinch also arrives as a wheel event with ctrlKey
+  // set, so this covers both). Anchor-preserving: the bar currently under the pointer stays under the
+  // pointer after the zoom change, the same idiom every pan/zoom canvas uses, rather than always
+  // zooming around the left edge (which would walk the view away from whatever you're looking at).
+  const onWheelZoom = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (!(e.ctrlKey || e.metaKey)) return // plain wheel still scrolls normally
+      e.preventDefault()
+      const scrollEl = scrollRef.current
+      const cur = zoomPxPerBar ?? fitPxPerBar
+      if (!scrollEl || cur <= 0) return
+      const rect = scrollEl.getBoundingClientRect()
+      const pointerOffsetInViewport = e.clientX - rect.left
+      const contentX = pointerOffsetInViewport + scrollEl.scrollLeft - HEADER_W
+      const barAtPointer = contentX / cur
+      const next = Math.max(MIN_PX_PER_BAR, Math.min(MAX_PX_PER_BAR, cur * (e.deltaY < 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR)))
+      setZoomPxPerBar(next)
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollLeft = Math.max(0, barAtPointer * next + HEADER_W - pointerOffsetInViewport)
+      })
+    },
+    [zoomPxPerBar, fitPxPerBar],
   )
 
   // Window-level move/up for the resize handle: preview the new bar count while dragging, commit once
@@ -1635,6 +1705,21 @@ export function ArrangementView() {
   const rulerBand: Band = drag ? (drag.axis === 'ruler' ? dragBand : null) : committedBand
 
   const modeLabel = detail ? 'detail view' : `density view (${pxPerBar.toFixed(1)}px/bar)`
+
+  // Bar-number ticks along the ruler (Phase 24 Stream CD). Built from renderTotalBars/renderPxPerBar
+  // (not the plain totalBars/pxPerBar) so ticks track the SAME live values the section labels and
+  // resize preview already use — including the frozen px/bar + trailing buffer while a resize drag is
+  // in progress. Bar counts here are small (tens, not thousands), so a plain array built fresh each
+  // render is cheap enough that a useMemo would be overkill (matches modeLabel/showPlayhead above,
+  // also plain per-render consts).
+  const tickInterval = tickIntervalFor(renderPxPerBar)
+  const barTicks: number[] = []
+  for (let b = 0; b < renderTotalBars; b += tickInterval) barTicks.push(b)
+  // Once there's real room to spare (double the detail threshold), also draw unlabeled minor ticks at
+  // each quarter-bar (beat) — "finer subdivision at high zoom," the same LOD instinct DETAIL_PX_PER_BAR
+  // already applies to note/hit rendering, extended to the ruler. Only meaningful when tickInterval is
+  // already 1 (guaranteed at this px/bar), so it can safely reuse barTicks as the per-bar list.
+  const showBeatTicks = renderPxPerBar >= DETAIL_PX_PER_BAR * 2
 
   // Playhead x in scroll-content coordinates: header column + fractional bar position. Step-precise
   // (finer than the requested bar granularity, at no extra cost). Shown only while the transport is
@@ -1897,14 +1982,33 @@ export function ArrangementView() {
             ))}
           </select>
         </label>
+        {/* Phase 24 Stream CD: timeline zoom, independent of container width. "fit" (disabled once
+            already at fit) returns to the pre-Stream-CD default; +/- step pxPerBar by ZOOM_FACTOR;
+            Cmd/Ctrl+scroll-wheel over the timeline (onWheelZoom below) does the same, anchored to the
+            pointer. The readout doubles as a live pxPerBar probe for verification. */}
+        <div className="arr-zoom-controls" title="timeline zoom (or Cmd/Ctrl+scroll over the timeline)">
+          <button className="arr-toolbtn" data-action="zoom-out" disabled={pxPerBar <= MIN_PX_PER_BAR + 0.01} title="zoom out" onClick={zoomOut}>
+            −
+          </button>
+          <span className="arr-zoom-readout" data-pxperbar={pxPerBar.toFixed(2)}>
+            {Math.round(pxPerBar)}px/bar
+          </span>
+          <button className="arr-toolbtn" data-action="zoom-in" disabled={pxPerBar >= MAX_PX_PER_BAR - 0.01} title="zoom in" onClick={zoomIn}>
+            +
+          </button>
+          <button className="arr-toolbtn" data-action="zoom-fit" disabled={zoomPxPerBar === null} title="fit to width" onClick={zoomFit}>
+            fit
+          </button>
+        </div>
       </div>
 
-      <div className="arr-scroll" ref={scrollRef}>
+      <div className="arr-scroll" ref={scrollRef} onWheel={onWheelZoom}>
         {/* Ruler: section labels + boundaries; dragging it selects a bar range across all tracks. */}
         <div className="arr-ruler-row" style={{ height: RULER_H }}>
           <div className="arr-ruler-corner" style={{ width: HEADER_W }} />
           <div
             className="arr-ruler"
+            data-pxperbar={renderPxPerBar.toFixed(2)}
             style={{ width: renderTotalBars * renderPxPerBar, touchAction: 'none' }}
             onPointerDown={(e) => beginDrag('ruler', e)}
           >
@@ -1912,13 +2016,30 @@ export function ArrangementView() {
               <div
                 key={i}
                 className="arr-section-label"
-                style={{ left: s.startBar * renderPxPerBar, width: s.bars * renderPxPerBar }}
+                style={{ left: s.startBar * renderPxPerBar, width: s.bars * renderPxPerBar, height: RULER_H - TICK_ROW_H }}
                 title={`${s.scene} · ${s.bars} bars`}
               >
                 <span className="arr-section-name">{s.scene}</span>
                 <span className="arr-section-bars">{s.bars}</span>
               </div>
             ))}
+            {/* Bar-number ticks (Phase 24 Stream CD): a thin strip along the bottom of the ruler,
+                below the section-label row, one tick per `tickInterval` bars (zoom-aware — see
+                tickIntervalFor). pointer-events:none (styles.css) so they never intercept the
+                ruler's own drag-to-select/click-to-seek gestures. */}
+            <div className="arr-bar-ticks" style={{ top: RULER_H - TICK_ROW_H, height: TICK_ROW_H }}>
+              {barTicks.map((b) => (
+                <div key={`tick-${b}`} className="arr-bar-tick" data-bar-tick={b} style={{ left: b * renderPxPerBar }}>
+                  <span className="arr-bar-tick-num">{b + 1}</span>
+                </div>
+              ))}
+              {showBeatTicks &&
+                barTicks.flatMap((b) =>
+                  [1, 2, 3].map((q) => (
+                    <div key={`beat-${b}-${q}`} className="arr-bar-tick-minor" style={{ left: (b + q / 4) * renderPxPerBar }} />
+                  )),
+                )}
+            </div>
             {rulerBand && (
               <div
                 className="arr-ruler-band"
