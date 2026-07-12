@@ -195,6 +195,8 @@ function mkDoc({ in: inP, out, gainDb = 0, warp = 'off', rate = 1, gainPoints, l
     notes: [],
     hits: [],
     automation: gainPoints ? [{ param: 'gain', points: gainPoints.map((p, i) => ({ id: `p${i + 1}`, time: p.time, value: p.value })) }] : [],
+    loop: null,
+    signature: null,
     audio: { media: MEDIA_ID, in: inP, out, gainDb, warp, rate, markers: [] },
   }
   return {
@@ -211,11 +213,16 @@ function mkDoc({ in: inP, out, gainDb = 0, warp = 'off', rate = 1, gainPoints, l
         kind: 'audio',
         synth: { osc: 'sine', volume: 0, cutoff: 1000, resonance: 1, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0 }, // unused placeholder
         laneSamples: {},
+        lanes: [],
         notes: [],
         hits: [],
+        effects: [],
+        shuffleAmount: 0,
+        shuffleGrid: 1,
         clips: [clip],
       },
     ],
+    groups: [],
     scenes: [{ id: 's1', slots: { atrk: 'c1' } }],
     song: [{ scene: 's1', bars: loopBars }],
   }
