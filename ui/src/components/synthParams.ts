@@ -15,12 +15,21 @@
 // docs/effects-panel-redesign.md): a ParamGroup whose knobs are ONLY audible once the matching
 // EffectType is actually `effect-add`ed to the track's reorderable `effects` chain (Phase 22
 // Stream AA) now says so via `effectType` below. SynthPanel.tsx's group filter hides that group
-// entirely until the type is present in `track.effects` — for SYNTH tracks only; several of these
-// same fields (eq3/comp/distortion/bitcrush) ALSO drive drum tracks' fixed, always-wired bus
-// insert (engine.ts's getDrumBus), so a group's `effectType` gate never applies on a drum track
-// (drum tracks carry no `effects` chain at all — BeatTrack.effects is synth-only). Groups with no
-// `effectType` are FIXED inserts (saturator/chorus/phaser/pingPong/beatRepeat) or core synth
-// surface (osc/filter/lfo/amp/sends/sidechain/drumvoice) — always visible, unaffected by this.
+// entirely until the type is present in `track.effects`. Groups with no `effectType` are FIXED
+// inserts (saturator/chorus/phaser/pingPong/beatRepeat) or core synth surface (osc/filter/lfo/amp/
+// sends/sidechain/drumvoice) — always visible, unaffected by this.
+//
+// Phase 26 Stream DC: drum and instrument tracks used to be exempted from the `effectType` gate
+// (drums carried no `effects` chain at all — its eq3/comp/distortion/bitcrush drove a separate,
+// fixed bus insert instead; instrument tracks had no chain-member groups listed for them at all).
+// Both now carry the SAME reorderable `effects` chain synth tracks do (BeatTrack.effects in
+// document.ts, ui/src/audio/engine.ts's reconcileEffectChain), so the gate applies identically to
+// every kind that reaches SynthPanel/InstrumentPanel — no more per-kind special-casing in the
+// filter itself. `kinds` below was widened accordingly: every one of the 12 EffectType groups now
+// lists 'drums' AND 'instrument' alongside 'synth' — real parity, not just eq3/comp/distortion/
+// bitcrush (drum tracks can now `effect-add` eq7/autoFilter/autoPan/tremolo/utility/grainDelay/
+// vinylDistortion/resonator too, the same generic machinery already supported, just previously
+// ungated for drums specifically).
 
 // Hand-mirrors src/core/document.ts's EffectType, via ui/src/types.ts (SynthPanel.tsx's own
 // EffectChain component already imports the same type from the same place).
@@ -199,16 +208,14 @@ export const PARAM_GROUPS: ParamGroup[] = [
   // one per EffectType — same resolution the eq7/grainDelay/vinylDistortion/resonator groups below
   // already use, and for the same reason (docs/effects-panel-redesign.md): the old combined group
   // rendered all four knob clusters together regardless of whether eq3/comp/distortion/bitcrush
-  // were each still present in a SYNTH track's `effects` chain, so e.g. removing `comp` alone left
-  // its knobs visible and implied-live. `effectType` below gates each of these four to real chain
-  // membership on synth tracks; on DRUM tracks (kinds still lists 'drums') the gate is skipped
-  // entirely (SynthPanel.tsx only applies it when kind === 'synth') because these same four fields
-  // drive getDrumBus()'s fixed, always-wired bus insert there instead — drum tracks carry no
-  // `effects` chain at all (BeatTrack.effects is synth-only, always [] for drums).
+  // were each still present in a track's `effects` chain, so e.g. removing `comp` alone left its
+  // knobs visible and implied-live. Phase 26 Stream DC: `effectType` below now gates ALL THREE
+  // kinds identically (drums/instrument used to be exempted — see this file's header comment for
+  // why that's no longer needed now that every kind carries a real `effects` chain).
   {
     id: 'eq3',
     title: 'EQ3',
-    kinds: ['synth', 'drums'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'eq3',
     params: [k('eqLow', 'EQlo', -18, 18, fmt.db), k('eqMid', 'EQmid', -18, 18, fmt.db), k('eqHigh', 'EQhi', -18, 18, fmt.db)],
@@ -216,7 +223,7 @@ export const PARAM_GROUPS: ParamGroup[] = [
   {
     id: 'comp',
     title: 'Compressor',
-    kinds: ['synth', 'drums'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'comp',
     params: [
@@ -230,7 +237,7 @@ export const PARAM_GROUPS: ParamGroup[] = [
   {
     id: 'distortion',
     title: 'Distortion',
-    kinds: ['synth', 'drums'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'distortion',
     params: [k('distortionAmount', 'Drive', 0, 1, fmt.pct), k('distortionMix', 'DrvMix', 0, 1, fmt.pct)],
@@ -238,7 +245,7 @@ export const PARAM_GROUPS: ParamGroup[] = [
   {
     id: 'bitcrush',
     title: 'Bitcrush',
-    kinds: ['synth', 'drums'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'bitcrush',
     params: [
@@ -298,16 +305,14 @@ export const PARAM_GROUPS: ParamGroup[] = [
     params: [e('saturatorCurve', 'Curve', SATURATOR_CURVES), k('saturatorDrive', 'Drive', 0, 1, fmt.pct), k('saturatorMix', 'Mix', 0, 1, fmt.pct)],
   },
   // Phase 23 Stream BE: Auto Filter / Auto Pan / Tremolo / Utility — additive entries in Stream
-  // AA's reorderable effect chain (unlike inserts/pingpong/beatrepeat/chorusphaser/saturator
-  // above, which are wired for BOTH synth and drum tracks, these four are synth-tracks-only —
-  // see src/core/document.ts's BeatTrack.effects comment — so `kinds` is ['synth'] only; showing
-  // them on a drum track's panel would be decorative knobs with no engine wiring behind them).
-  // Phase 25: each now carries `effectType` (this file's header comment) so SynthPanel.tsx hides
-  // the whole group until the matching type is actually present in the track's `effects` chain.
+  // AA's reorderable effect chain. Phase 26 Stream DC: widened from synth-only to
+  // ['synth','drums','instrument'] now that every kind carries a real `effects` chain (see this
+  // file's header comment) — a drum or instrument track can now `effect-add` these too, same as
+  // eq3/comp/distortion/bitcrush above. `effectType` gates each group to real chain membership.
   {
     id: 'autofilter',
     title: 'Auto Filter',
-    kinds: ['synth'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'autoFilter',
     params: [
@@ -322,7 +327,7 @@ export const PARAM_GROUPS: ParamGroup[] = [
   {
     id: 'autopan',
     title: 'Auto Pan',
-    kinds: ['synth'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'autoPan',
     params: [k('autoPanRate', 'Rate', 0.02, 10, fmt.hz, true), k('autoPanDepth', 'Depth', 0, 1, fmt.pct), k('autoPanMix', 'Mix', 0, 1, fmt.pct)],
@@ -330,7 +335,7 @@ export const PARAM_GROUPS: ParamGroup[] = [
   {
     id: 'tremolo',
     title: 'Tremolo',
-    kinds: ['synth'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'tremolo',
     params: [
@@ -343,7 +348,7 @@ export const PARAM_GROUPS: ParamGroup[] = [
   {
     id: 'utility',
     title: 'Utility',
-    kinds: ['synth'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'utility',
     params: [k('utilityWidth', 'Width', 0, 1, fmt.pct), k('utilityGain', 'Gain', -24, 24, fmt.db)],
@@ -351,14 +356,12 @@ export const PARAM_GROUPS: ParamGroup[] = [
   // Phase 23 Stream BF: these three are real EffectType CHAIN members (document.ts's EFFECT_TYPES),
   // unlike the fixed inserts above — knobs here only do something audible once the matching effect
   // is actually `effect-add`ed via the Effect Chain panel (same decoupled-knobs-vs-chain-membership
-  // convention the eq3/comp/distortion/bitcrush groups above already have). synth-only: drum tracks
-  // never carry an `effects` chain (see BeatTrack.effects), so these controls would be dead weight
-  // there — unlike the AC group above, which drum tracks' OWN fixed bus also wires. Phase 25: each
-  // now carries `effectType` so SynthPanel.tsx actually hides the group until the type is added.
+  // convention the eq3/comp/distortion/bitcrush groups above already have). Phase 26 Stream DC:
+  // widened from synth-only to every kind, same as the Stream BE group above.
   {
     id: 'graindelay',
     title: 'Grain Delay',
-    kinds: ['synth'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'grainDelay',
     params: [
@@ -372,7 +375,7 @@ export const PARAM_GROUPS: ParamGroup[] = [
   {
     id: 'vinyldistortion',
     title: 'Vinyl Distortion',
-    kinds: ['synth'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'vinylDistortion',
     params: [k('vinylDrive', 'Drive', 0, 1, fmt.pct), k('vinylNoiseLevel', 'Noise', 0, 1, fmt.pct), k('vinylTone', 'Tone', 0, 1, fmt.pct), k('vinylMix', 'Mix', 0, 1, fmt.pct)],
@@ -380,21 +383,21 @@ export const PARAM_GROUPS: ParamGroup[] = [
   {
     id: 'resonator',
     title: 'Resonators',
-    kinds: ['synth'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'resonator',
     params: [k('resonatorFreq', 'Freq', 40, 4000, fmt.hz, true), e('resonatorChord', 'Chord', RESONATOR_CHORDS), k('resonatorQ', 'Q', 0.5, 200, fmt.num1, true), k('resonatorMix', 'Mix', 0, 1, fmt.pct)],
   },
   {
-    // Phase 23 Stream BD: 7-band parametric EQ. 'synth' ONLY (not 'drums', unlike every other
-    // insert group above) — eq7 is reachable only through the v0.10 reorderable `effects` chain,
-    // which is synth-tracks-only by format-spec.md's own rule; the drum bus (getDrumBus in
-    // engine.ts) is untouched by this stream, so these fields would be inert on a drum track.
-    // Phase 25: `effectType: 'eq7'` below — SynthPanel.tsx hides this whole group until an 'eq7'
-    // entry is actually present in the track's `effects` chain.
+    // Phase 23 Stream BD: 7-band parametric EQ. Phase 26 Stream DC: widened from synth-only to
+    // every kind — eq7 is reachable through the reorderable `effects` chain every track kind now
+    // carries (drum bus/instrument tracks are no longer untouched by this — see BeatTrack.effects
+    // and ui/src/audio/engine.ts's reconcileEffectChain). `effectType: 'eq7'` below — SynthPanel/
+    // InstrumentPanel hide this whole group until an 'eq7' entry is actually present in the
+    // track's `effects` chain.
     id: 'eq7',
     title: 'EQ7 (Parametric)',
-    kinds: ['synth'],
+    kinds: ['synth', 'drums', 'instrument'],
     open: false,
     effectType: 'eq7',
     params: [

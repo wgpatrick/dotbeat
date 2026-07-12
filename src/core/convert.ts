@@ -258,9 +258,11 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     notes: t.kind === 'synth' ? t.notes.map(toBeatNote) : [],
     hits: t.kind === 'drums' ? patternToHits(toBeatPattern(t.pattern, t.id), loopSteps) : [],
     // v0.10: BeatLab's own insertOrder isn't converted (see DELIBERATELY_UNMODELED's comment
-    // above) — every imported synth track lands on dotbeat's default chain, same as any other
-    // file that never declares one explicitly.
-    effects: t.kind === 'synth' ? defaultEffectChain() : [],
+    // above) — every imported synth or drums track lands on dotbeat's default chain, same as any
+    // other file that never declares one explicitly (Phase 26 Stream DC: drums matches synth here
+    // now that the drum bus's old fixed insert order is this same reorderable list — see
+    // BeatTrack.effects).
+    effects: t.kind === 'synth' || t.kind === 'drums' ? defaultEffectChain() : [],
     // v0.10 groove: no external-payload concept either (see toBeatNote above) — default "off".
     // daemon.ts's POST /state carries the CURRENT document's groove across (same never-erase
     // rule as laneSamples), so this default only matters for a track that's genuinely new.

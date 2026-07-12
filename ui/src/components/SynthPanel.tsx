@@ -162,7 +162,9 @@ function EffectRow({
   )
 }
 
-function EffectChain({ track, onAdded }: { track: BeatTrack; onAdded: (type: EffectType) => void }) {
+// Exported (Phase 26 Stream DC) so InstrumentPanel.tsx can reuse the exact same chain UI instead
+// of reinventing it — instrument tracks now carry a real `effects` chain too (BeatTrack.effects).
+export function EffectChain({ track, onAdded }: { track: BeatTrack; onAdded: (type: EffectType) => void }) {
   const [addType, setAddType] = useState<EffectType>(EFFECT_TYPES[0]!)
   const [dragState, setDragState] = useState<{ draggingId: string | null; overId: string | null }>({ draggingId: null, overId: null })
   const effects = track.effects ?? []
@@ -312,7 +314,10 @@ function PresetPicker({ track }: { track: BeatTrack }) {
 // the Effect Chain panel above (SynthPanel's `justAdded` state) — force the <details> open (it may
 // default closed, e.g. eq7/autoFilter/grainDelay) and scroll it into view, so "I added eq7" and "I
 // can see eq7's knobs" are the same visible moment, not something the human has to go find.
-function Group({ track, group, trackIds, highlight }: { track: BeatTrack; group: ParamGroup; trackIds: string[]; highlight: boolean }) {
+// Exported (Phase 26 Stream DC) so InstrumentPanel.tsx can render the same effectType-gated groups
+// (eq3/comp/distortion/bitcrush/eq7/autoFilter/... — see synthParams.ts's PARAM_GROUPS) instead of
+// reinventing the renderer.
+export function Group({ track, group, trackIds, highlight }: { track: BeatTrack; group: ParamGroup; trackIds: string[]; highlight: boolean }) {
   const ref = useRef<HTMLDetailsElement>(null)
   useEffect(() => {
     if (highlight && ref.current) {
@@ -340,14 +345,13 @@ export function SynthPanel({ track }: { track: BeatTrack }) {
   const kind = track.kind as TrackKind
   const effects = track.effects ?? []
   // Phase 25 (owner feedback — see synthParams.ts's own header comment): a group whose
-  // `effectType` is set is an opt-in reorderable-chain member — only render it on a SYNTH track
-  // when that type is actually present in `track.effects`. The same field set also drives drum
-  // tracks' fixed, always-wired bus insert (engine.ts's getDrumBus), so the gate never applies for
-  // kind 'drums' — those groups (eq3/comp/distortion/bitcrush) stay unconditionally visible there,
-  // same as the truly-fixed groups (saturator/chorus/phaser/pingPong/beatRepeat, no `effectType`).
+  // `effectType` is set is an opt-in reorderable-chain member — only render it when that type is
+  // actually present in `track.effects`. Phase 26 Stream DC: this now applies unconditionally
+  // (drum tracks used to be exempted here because they carried no `effects` chain at all — they
+  // do now, folded in from the old fixed bus insert, see BeatTrack.effects in document.ts).
   const groups = PARAM_GROUPS.filter((g) => {
     if (!g.kinds.includes(kind)) return false
-    if (g.effectType && kind === 'synth') return effects.some((e) => e.type === g.effectType)
+    if (g.effectType) return effects.some((e) => e.type === g.effectType)
     return true
   })
 
@@ -368,11 +372,13 @@ export function SynthPanel({ track }: { track: BeatTrack }) {
           {track.name}
         </span>
         <span className="toolbar-tip">
-          {kind === 'drums' ? 'drum bus + voice params' : 'full synth surface'} · drag a knob · every edit is one line in the .beat file
+          {kind === 'drums' ? 'drum bus + voice params + effect chain' : 'full synth surface'} · drag a knob · every edit is one line in the .beat file
         </span>
       </div>
       <PresetPicker track={track} />
-      {kind === 'synth' && <EffectChain track={track} onAdded={setJustAdded} />}
+      {/* Phase 26 Stream DC: drum tracks get the same reorderable Effect Chain UI synth tracks
+          already had — their eq3/comp/distortion/bitcrush insert order is no longer fixed. */}
+      {(kind === 'synth' || kind === 'drums') && <EffectChain track={track} onAdded={setJustAdded} />}
       <div className="param-groups">
         {groups.map((g) => (
           <Group key={g.id} track={track} group={g} trackIds={trackIds} highlight={g.effectType === justAdded} />

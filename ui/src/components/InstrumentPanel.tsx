@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Knob } from './Knob'
-import { type BeatTrack } from '../types'
+import { type BeatTrack, type EffectType } from '../types'
 import { postEdit, daemonBase } from '../daemon/bridge'
 import { fetchLibrary, installSoundfont, type LibrarySoundfont } from '../daemon/library'
+import { EffectChain, Group } from './SynthPanel'
+import { PARAM_GROUPS } from './synthParams'
+import { useStore } from '../state/store'
 
 // Phase 14 Stream F: the device panel for an instrument (SoundFont) track. Instrument tracks carry
 // a tiny param set (BeatInstrument: sample/program/volume/pan) rather than the 55-field synth block,
@@ -10,6 +13,14 @@ import { fetchLibrary, installSoundfont, type LibrarySoundfont } from '../daemon
 // is populated from the daemon's `/soundfont-presets` route (which parses the bank's actual .sf2
 // programs, the same list `beat inspect` prints); volume/pan reuse the shared Knob. Every control
 // POSTs `<track>.<field>` via /edit — one line in the .beat file, same as every other edit.
+//
+// Phase 26 Stream DC: instrument tracks now carry the SAME reorderable insert-effect chain synth/
+// drum tracks do (BeatTrack.effects in document.ts) — reuses SynthPanel's own EffectChain/Group
+// components rather than reinventing the add/reorder/bypass UI or the effectType-gated knob-group
+// renderer (docs/effects-panel-redesign.md's pattern). The knobs behind each group are the ~12
+// EffectType chain members' own params (document.ts's INSTRUMENT_EFFECT_FIELD_KEYS) — the ONLY
+// SYNTH_FIELDS an instrument track can carry; everything else (oscillator/filter/envelope/LFO)
+// still has no meaning on a SoundFont voice, unchanged from this file's original design.
 
 interface Preset {
   program: number
@@ -121,6 +132,20 @@ export function InstrumentPanel({ track }: { track: BeatTrack }) {
   const sample = inst?.sample
   const [presets, setPresets] = useState<Preset[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Select the stable tracks array reference (unchanged on per-tick currentStep/masterLevel
+  // updates), same discipline SynthPanel's own trackIds derivation uses.
+  const tracks = useStore((s) => s.doc?.tracks)
+  const trackIds = tracks?.map((t) => t.id) ?? []
+  const effects = track.effects ?? []
+  // Same effectType gate SynthPanel applies — only render a chain-member's knob group once that
+  // type is actually present in `track.effects` (docs/effects-panel-redesign.md).
+  const groups = PARAM_GROUPS.filter((g) => g.kinds.includes('instrument') && g.effectType && effects.some((e) => e.type === g.effectType))
+  const [justAdded, setJustAdded] = useState<EffectType | null>(null)
+  useEffect(() => {
+    if (justAdded === null) return
+    const t = setTimeout(() => setJustAdded(null), 1600)
+    return () => clearTimeout(t)
+  }, [justAdded])
 
   useEffect(() => {
     if (!sample) return
@@ -198,6 +223,14 @@ export function InstrumentPanel({ track }: { track: BeatTrack }) {
             <div className="toolbar-tip">{presets.length} program{presets.length === 1 ? '' : 's'} in this bank</div>
           )}
         </div>
+      </div>
+      {/* Phase 26 Stream DC: reuses SynthPanel's own EffectChain/Group — same add/reorder/bypass
+          UI and effectType-gated knob-group rendering synth/drum tracks already have. */}
+      <EffectChain track={track} onAdded={setJustAdded} />
+      <div className="param-groups">
+        {groups.map((g) => (
+          <Group key={g.id} track={track} group={g} trackIds={trackIds} highlight={g.effectType === justAdded} />
+        ))}
       </div>
     </div>
   )

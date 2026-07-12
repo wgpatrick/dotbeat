@@ -194,7 +194,18 @@ ${CORE_SYNTH}
   assert.throws(() => parse(bad), BeatParseError)
 })
 
-test('drum tracks never carry the new effect types either (effects stays synth-only)', () => {
+// Phase 26 Stream DC (docs/phase-26-plan.md Stream DC): drum tracks now carry the same reorderable
+// `effects` chain synth tracks do (folded in from the old fixed bus insert order), so they can
+// `effect-add` any of the 12 EffectType members, including the three Stream BF added here — only
+// audio tracks (no live/non-clip content at all) still reject effect-add.
+test('drum tracks can now carry the new effect types too (folded into the same reorderable chain)', () => {
   const { doc: withTrack } = addTrack(initDocument({ trackId: 'lead' }), { id: 'drums', kind: 'drums' })
-  assert.throws(() => addEffect(withTrack, 'drums', 'resonator'), BeatEditError)
+  const { doc, effect } = addEffect(withTrack, 'drums', 'resonator')
+  assert.equal(effect.type, 'resonator')
+  assert.deepEqual(
+    doc.tracks.find((t) => t.id === 'drums')!.effects.map((e) => e.type),
+    ['eq3', 'comp', 'distortion', 'bitcrush', 'resonator'],
+  )
+  const { doc: audioDoc } = addTrack(withTrack, { id: 'atrk', kind: 'audio' })
+  assert.throws(() => addEffect(audioDoc, 'atrk', 'resonator'), BeatEditError)
 })

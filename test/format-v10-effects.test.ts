@@ -74,27 +74,28 @@ test('a fresh addTrack synth track carries the default chain, elided on serializ
   assert.equal(serialize(doc).includes('effects none'), false)
 })
 
-test('a drum track never carries or serializes effect lines', () => {
+// Phase 26 Stream DC (docs/phase-26-plan.md): drum tracks used to never carry an `effects` chain
+// at all — their eq3/comp/distortion/bitcrush drove a separate, FIXED (non-reorderable) bus insert
+// in ui/src/audio/engine.ts's getDrumBus. That fixed insert order is now folded into this same
+// reorderable list (the same default chain a fresh synth track gets), so a drum track's insert
+// order is reorderable/add/remove/bypass-able through the identical primitive a synth track uses —
+// mirrors the synth test just above it.
+test('a fresh addTrack drum track also carries the default chain, elided on serialize', () => {
   const { doc } = addTrack(initDocument({ trackId: 'lead' }), { id: 'drums', kind: 'drums' })
   const t = doc.tracks.find((x) => x.id === 'drums')!
-  assert.deepEqual(t.effects, [])
-  assert.equal(serialize(doc).includes('effect'), false)
+  assert.deepEqual(t.effects, defaultEffectChain())
+  assert.equal(serialize(doc).includes('effect '), false)
+  assert.equal(serialize(doc).includes('effects none'), false)
 })
 
-test('effect lines are rejected outside synth tracks', () => {
+test('effect lines are rejected only on audio tracks (no live/non-clip content at all)', () => {
   const bad = `format_version 0.10
 bpm 120
 loop_bars 1
-selected_track drums
+selected_track atrk
 
-track drums Drums #e35d5d drums
-${CORE_SYNTH}
+track atrk atrk #56b6c2 audio
   effect eq3 eq3
-  pattern kick 0 0 0 0
-  pattern snare 0 0 0 0
-  pattern clap 0 0 0 0
-  pattern hat 0 0 0 0
-  pattern openhat 0 0 0 0
 `
   assert.throws(() => parse(bad), BeatParseError)
 })
@@ -160,7 +161,7 @@ test('toggling one bypass on an already-non-default chain changes exactly one li
   assert.deepEqual(changed, ['  effect comp comp'])
 })
 
-test('addEffect appends by default, mints an id on collision, and rejects non-synth tracks', () => {
+test('addEffect appends by default, mints an id on collision, and rejects only audio tracks', () => {
   const { doc: withTrack } = addTrack(initDocument({ trackId: 'lead' }), { id: 'lead2', kind: 'synth' })
   const { doc, effect } = addEffect(withTrack, 'lead2', 'eq3')
   assert.equal(effect.id, 'eq3_2') // 'eq3' already taken by the default chain
@@ -168,8 +169,14 @@ test('addEffect appends by default, mints an id on collision, and rejects non-sy
     doc.tracks.find((t) => t.id === 'lead2')!.effects.map((e) => e.id),
     ['eq3', 'comp', 'distortion', 'bitcrush', 'eq3_2'],
   )
+  // Phase 26 Stream DC: drum tracks now accept effect-add (folded into the same reorderable list
+  // as the old fixed bus insert) — the id-minting rule applies identically (drums' own default
+  // chain already claims 'eq3').
   const { doc: drums } = addTrack(withTrack, { id: 'drums', kind: 'drums' })
-  assert.throws(() => addEffect(drums, 'drums', 'eq3'), BeatEditError)
+  const { effect: drumEffect } = addEffect(drums, 'drums', 'eq3')
+  assert.equal(drumEffect.id, 'eq3_2')
+  const { doc: audioDoc } = addTrack(withTrack, { id: 'atrk', kind: 'audio' })
+  assert.throws(() => addEffect(audioDoc, 'atrk', 'eq3'), BeatEditError)
 })
 
 test('addEffect at an explicit index inserts there; removeEffect drops by id', () => {

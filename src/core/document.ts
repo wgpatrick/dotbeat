@@ -687,6 +687,46 @@ export function isDefaultEffectChain(effects: readonly BeatEffect[]): boolean {
   return effects.every((e, i) => e.id === def[i]!.id && e.type === def[i]!.type && e.enabled === def[i]!.enabled)
 }
 
+// Phase 26 Stream DC: which SYNTH_FIELDS keys back each EffectType's own knobs — the single source
+// of truth for "which optional synth fields does an instrument track need to carry." Instrument
+// tracks deliberately do NOT get the full ~58-field synth block a synth/drums track does (the core
+// osc/filter/envelope/LFO fields have no meaning on a SoundFont voice — see BeatInstrument's own
+// doc comment above, "fail-loudly beats half-meaningful knobs"), but the 12 EffectType chain
+// members are generic audio inserts that apply just as meaningfully to a SoundFont track's output
+// as to a synth track's — so those, and only those, become settable/serializable on an instrument
+// track (parse.ts/serialize.ts/edit.ts's INSTRUMENT_EFFECT_FIELD_KEYS-driven bare field lines,
+// mirroring the existing volume/pan precedent). Hand-mirrors PARAM_GROUPS' per-type param lists in
+// ui/src/components/synthParams.ts (kept in sync by inspection; both ultimately key off the same
+// SYNTH_FIELDS entries below, so a drift would show up as a knob with no matching serializable
+// field or vice versa).
+export const EFFECT_PARAM_KEYS: Record<EffectType, readonly (keyof BeatSynth)[]> = {
+  eq3: ['eqLow', 'eqMid', 'eqHigh'],
+  comp: ['compThreshold', 'compRatio', 'compAttack', 'compRelease', 'compMix'],
+  distortion: ['distortionAmount', 'distortionMix'],
+  bitcrush: ['bitcrushBits', 'bitcrushMix', 'bitcrushRate'],
+  autoFilter: ['autoFilterRate', 'autoFilterDepth', 'autoFilterBaseFrequency', 'autoFilterOctaves', 'autoFilterType', 'autoFilterMix'],
+  autoPan: ['autoPanRate', 'autoPanDepth', 'autoPanMix'],
+  tremolo: ['tremoloRate', 'tremoloDepth', 'tremoloSpread', 'tremoloMix'],
+  utility: ['utilityWidth', 'utilityGain'],
+  grainDelay: ['grainDelayTime', 'grainDelayFeedback', 'grainDelaySize', 'grainDelayPitch', 'grainDelayMix'],
+  vinylDistortion: ['vinylDrive', 'vinylNoiseLevel', 'vinylTone', 'vinylMix'],
+  resonator: ['resonatorFreq', 'resonatorChord', 'resonatorQ', 'resonatorMix'],
+  eq7: [
+    'eq7HpOn', 'eq7HpFreq', 'eq7HpSlope', 'eq7HpQ',
+    'eq7LowShelfOn', 'eq7LowShelfFreq', 'eq7LowShelfGain',
+    'eq7Bell1On', 'eq7Bell1Freq', 'eq7Bell1Gain', 'eq7Bell1Q',
+    'eq7Bell2On', 'eq7Bell2Freq', 'eq7Bell2Gain', 'eq7Bell2Q',
+    'eq7Bell3On', 'eq7Bell3Freq', 'eq7Bell3Gain', 'eq7Bell3Q',
+    'eq7HighShelfOn', 'eq7HighShelfFreq', 'eq7HighShelfGain',
+    'eq7LpOn', 'eq7LpFreq', 'eq7LpSlope', 'eq7LpQ',
+  ],
+}
+
+/** Flattened lookup set for parse/serialize/edit — "is this SYNTH_FIELDS key one of the ones an
+ * instrument track is allowed to carry." Order doesn't matter (a Set), unlike SYNTH_FIELDS itself
+ * (whose declaration order IS serialization order). */
+export const INSTRUMENT_EFFECT_FIELD_KEYS: ReadonlySet<string> = new Set(Object.values(EFFECT_PARAM_KEYS).flat())
+
 export interface BeatTrack {
   id: string
   name: string
@@ -705,10 +745,18 @@ export interface BeatTrack {
   clips: BeatClip[] // v0.4; [] when the track has none (serialized only when present)
   notes: BeatNote[] // synth tracks only; always [] for drums
   hits: BeatDrumHit[] // v0.8; drum tracks only, always [] for synth/instrument
-  // v0.10: the ordered insert-effect chain — synth tracks only (drum/instrument tracks carry []
-  // and never serialize effect lines; drum-bus insert ordering is out of this stream's scope, see
-  // docs/phase-22-stream-aa.md). A synth track always has SOME chain in memory (the default when
-  // the file has no explicit declaration); [] here means "explicitly emptied" (`effects none`).
+  // v0.10: the ordered insert-effect chain — originally synth-tracks-only (Phase 22 Stream AA;
+  // drum tracks got a separate, non-reorderable fixed bus insert instead, engine.ts's getDrumBus).
+  // Phase 26 Stream DC widened this to EVERY track kind, reusing the exact same BeatEffect/
+  // EffectType machinery (buildEffectRuntime/reconcileEffectChain in ui/src/audio/engine.ts were
+  // already fully generic — nothing there was actually synth-specific): drum tracks now route
+  // through the SAME reorderable list (folding the old fixed eq3->comp->distortion->bitcrush
+  // insert order into it — see defaultEffectChain's migration comment below for how backward
+  // compatibility is preserved), and instrument (SoundFont) tracks, which previously had NO insert
+  // chain at all, can now carry one too (empty by default — no prior fixed behavior to preserve).
+  // A synth or drums track always has SOME chain in memory (the default when the file has no
+  // explicit declaration, see parse.ts); [] here means "explicitly emptied" (`effects none`) for
+  // synth/drums, or "never added one" (the ordinary starting state) for instrument tracks.
   effects: BeatEffect[]
   // v0.10: groove/shuffle — a reversible time-WARP applied at read/playback time (src/core/
   // groove.ts's warpStep/unwarpStep), never baked into stored note/hit `start` (research 22

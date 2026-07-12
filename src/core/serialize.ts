@@ -1,5 +1,5 @@
 import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
-import { DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, NOTE_FIELD_DEFAULTS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
+import { DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
 import { formatNumber } from './format.js'
 
 // v0.10: the effect chain serializes iff it differs from the canonical default (isDefaultEffectChain)
@@ -11,6 +11,18 @@ import { formatNumber } from './format.js'
 function serializeEffectLines(effects: BeatEffect[], indent: string): string[] {
   if (isDefaultEffectChain(effects)) return []
   if (effects.length === 0) return [`${indent}effects none`]
+  return effects.map((e) => `${indent}effect ${e.id} ${e.type}${e.enabled ? '' : ' bypassed'}`)
+}
+
+// Phase 26 Stream DC: an instrument track's own effect-chain serializer. Unlike synth/drums (whose
+// canonical "never declared" default is the non-empty legacy 4-effect chain, so an EXPLICITLY
+// emptied chain needs the `effects none` sentinel to stay distinguishable — see serializeEffectLines
+// above), an instrument track's canonical default IS the empty list (it never had a fixed insert to
+// preserve backward compatibility with). "Never declared" and "explicitly emptied" are therefore
+// the SAME state for an instrument track, so there's nothing to disambiguate: elide entirely
+// whenever the chain is empty, and never emit the `effects none` sentinel for this kind at all.
+function serializeInstrumentEffectLines(effects: BeatEffect[], indent: string): string[] {
+  if (effects.length === 0) return []
   return effects.map((e) => `${indent}effect ${e.id} ${e.type}${e.enabled ? '' : ' bypassed'}`)
 }
 
@@ -129,6 +141,25 @@ function serializeTrack(t: BeatTrack): string[] {
     lines.push(`  soundfont ${inst.sample} ${formatNumber(inst.program)}`)
     if (formatNumber(inst.volume) !== '-10') lines.push(`  volume ${formatNumber(inst.volume)}`)
     if (formatNumber(inst.pan) !== '0') lines.push(`  pan ${formatNumber(inst.pan)}`)
+    // Phase 26 Stream DC: an instrument track's effect-chain param fields — canonical elision
+    // (iff != default), same discipline as the synth/drums branch's own optional-field loop below,
+    // but restricted to INSTRUMENT_EFFECT_FIELD_KEYS (the 12 EffectType chain members' own knobs —
+    // see that constant's comment in document.ts for why the rest of SYNTH_FIELDS doesn't apply to
+    // a SoundFont voice). Bare field lines, no `synth` wrapper — same shape as volume/pan above.
+    for (const def of SYNTH_FIELDS) {
+      if (!INSTRUMENT_EFFECT_FIELD_KEYS.has(def.key)) continue
+      const value = t.synth[def.key]
+      if (value === def.default) continue
+      if (def.kind === 'number' && formatNumber(value as number) === formatNumber(def.default as number)) continue
+      const text = def.kind === 'number' ? formatNumber(value as number) : String(value)
+      lines.push(`  ${def.key} ${text}`)
+    }
+    // v0.10: the ordered insert-effect chain — see BeatTrack.effects's comment (Phase 26 Stream DC
+    // widened this from synth-only to instrument tracks too). Uses the instrument-specific elision
+    // rule (serializeInstrumentEffectLines), NOT serializeEffectLines — an instrument track's
+    // canonical default is [], not the non-empty legacy chain, so there's no "effects none" state
+    // to represent (see that function's own comment).
+    lines.push(...serializeInstrumentEffectLines(t.effects, '  '))
     lines.push(...grooveLine(t))
     // v0.8+: instrument clips carry notes only (same grammar as synth-track clips)
     for (const clip of t.clips) {
@@ -154,10 +185,11 @@ function serializeTrack(t: BeatTrack): string[] {
     const text = def.kind === 'number' ? formatNumber(value as number) : def.kind === 'trackref' ? (value === null ? 'none' : String(value)) : String(value)
     lines.push(`    ${def.key} ${text}`)
   }
-  // v0.10: the ordered insert-effect chain (synth tracks only — drums/instrument never serialize
-  // effect lines; their `effects` field stays [] and is not this feature's concern, see
-  // BeatTrack.effects).
-  if (t.kind === 'synth') lines.push(...serializeEffectLines(t.effects, '  '))
+  // v0.10: the ordered insert-effect chain. Phase 26 Stream DC folded drum tracks' old fixed
+  // eq3->comp->distortion->bitcrush bus insert into this same reorderable list — see
+  // BeatTrack.effects's comment — so drums now serializes it exactly like synth. (Instrument
+  // tracks reach serializeEffectLines from their own branch above, before this generic one.)
+  if (t.kind === 'synth' || t.kind === 'drums') lines.push(...serializeEffectLines(t.effects, '  '))
   lines.push(...grooveLine(t))
   // Phase 22 Stream AB: the OPEN lane list, declared order, one line per lane — only for tracks
   // that opted in (t.lanes.length > 0); a legacy/migrated track (t.lanes === []) emits none of
