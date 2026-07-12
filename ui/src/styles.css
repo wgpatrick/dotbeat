@@ -2919,13 +2919,20 @@ body {
 
 /* Phase 27 Stream EJ (research/73 §4 item 1) — a distinct per-content-type glyph, ahead of the
    preview button, so a scan of the rail no longer relies on the identical preview-circle as its
-   only "icon." Sized to sit quietly next to the 20px preview button, colored to match dim row
-   text at rest and pick up the accent on hover/preview, same as the row's other chrome. */
+   only "icon." Sized to sit quietly next to the 20px preview button, and pick up the accent on
+   hover/preview, same as the row's other chrome.
+   Phase 28 Stream FF (research/78 §3 item 1) — rest-state color used to be var(--text-dim), the
+   exact same gray as the row's dim meta text one line below it, so Phase 27's whole point (make
+   each content type visually distinguishable) only actually landed on hover/preview, not during
+   an ordinary idle scan of the rail. #b4b9c4 sits meaningfully lighter than --text-dim (#8a8f9a)
+   — real idle contrast against both the row background and the dim meta text it used to match —
+   while staying well short of --accent's hover/active pop, keeping the "quiet, not loud" register
+   the rest of this rail's chrome uses at rest. */
 .lib-type-icon {
   flex: 0 0 auto;
   width: 12px;
   height: 12px;
-  color: var(--text-dim);
+  color: #b4b9c4;
   display: block;
 }
 .lib-row:hover .lib-type-icon,
@@ -2938,14 +2945,18 @@ body {
    accent tint already established at styles.css:2779) plus an accent-colored name, so scanning the
    list shows which item is playing without having to focus on the tiny 20px button. Cleared by
    ContentBrowser's playingKey state — either the row's own preview duration elapses, or another
-   row starts previewing and takes over playingKey first. */
+   row starts previewing and takes over playingKey first.
+   Phase 28 Stream FF (research/78 §3 item 2) — peak alpha was 0.24, which live-verified as a
+   fairly solid warm fill rather than the "soft wash" this comment describes: recalibrated down to
+   0.15 so the pulse actually reads as a wash the row name/icon sit on top of, not a fill that
+   competes with them. */
 @keyframes lib-row-pulse {
   0%,
   100% {
     background: rgba(224, 161, 60, 0.09);
   }
   50% {
-    background: rgba(224, 161, 60, 0.24);
+    background: rgba(224, 161, 60, 0.15);
   }
 }
 .lib-row-previewing {
