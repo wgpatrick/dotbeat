@@ -167,6 +167,21 @@ function Section({ title, count, children }: { title: string; count: number; chi
 // typical kick/snare/hat sample — is used) so the row can show a real in-place "currently playing"
 // window instead of a flash. `onStart`/`onEnd` let the ROW (not just this button) carry the visual
 // state — see `lib-row-previewing` in ContentBrowser's row components below.
+// Phase 28 Stream FF (research/78 §3 item 3) — the active-state glyph used to be the Unicode
+// `❚❚` pause character, which relies on the font's own hinting at a size it was never designed
+// for: live-verified at the button's real ~20px/9px-font rendered size, the two bars fuse into a
+// single indistinguishable blob rather than reading as "paused." A small hand-drawn SVG (two
+// explicit thin rects, not glyph rendering) stays legible as two distinct bars at that size
+// because its geometry is fixed rather than left to font hinting.
+function PauseIcon() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true" data-icon="pause-active">
+      <rect x="1.5" y="1" width="2.4" height="8" rx="0.5" fill="currentColor" />
+      <rect x="6.1" y="1" width="2.4" height="8" rx="0.5" fill="currentColor" />
+    </svg>
+  )
+}
+
 function PreviewButton({
   onPreview,
   title,
@@ -199,7 +214,7 @@ function PreviewButton({
         window.setTimeout(onEnd, durationMs)
       }}
     >
-      {busy ? '…' : active ? '❚❚' : '▶'}
+      {busy ? '…' : active ? <PauseIcon /> : '▶'}
     </button>
   )
 }
