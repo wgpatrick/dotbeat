@@ -346,6 +346,18 @@ export const rows = [
     research: 'research/71-ux-clip-view-midi-editing.md', plan: 'phase-27-plan.md',
   },
   {
+    area: 'Note editing (piano roll)', feature: 'Local time-zoom control on the note grid',
+    description: '`--note-step-w` was a fixed 14px with no gesture to change it, unlike Ableton\'s rich multi-axis MIDI-editor zoom system. Added a local zoom control (buttons + Cmd/Ctrl+scroll, mirroring ArrangementView\'s own zoomPxPerBar/onWheelZoom idiom) scoped per-instance via an inline `--note-step-w` override rather than touching the global default.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/76-ux-clip-view-midi-editing-round2.md', plan: 'phase-28-plan.md',
+  },
+  {
+    area: 'Note editing (piano roll)', feature: 'Velocity lane: extend paint-across-notes gesture (previously chance-lane-only)',
+    description: 'The chance lane already supported dragging across multiple notes to paint probability in one gesture; the velocity lane was still single-note-anchored. Generalized the same mechanism to the velocity lane so a single drag sweep changes every note it crosses, not just the one under the cursor at drag-start.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/76-ux-clip-view-midi-editing-round2.md', plan: 'phase-28-plan.md',
+  },
+  {
     area: 'Note editing (piano roll)', feature: 'Multi-clip editing + Focus Mode',
     description: 'Ableton: up to 8 MIDI clips edited simultaneously (Session View across tracks/scenes, or Arrangement View across up to 8 tracks over a time selection), each with its own colored loop-bar strip stacked above a shared grid, plus Focus Mode narrowing editing to one active clip while still showing the others\' notes in gray (manual ch.10 §10.8, pp.274-277). `NoteView` is hard-scoped to exactly one `track: BeatTrack` prop (`NoteView.tsx:272`) — there is no multi-track/multi-clip simultaneous editing surface at all. A real, substantial feature requiring a fundamentally different top-level component shape, not a look/feel or gesture change — flagged for roadmap awareness, not scoped for a UI-polish phase.',
     core: 'missing', cli: 'na', gui: 'missing', status: 'not-started',
@@ -1494,6 +1506,26 @@ export const rows = [
     description: 'Ableton\'s Merging Sets lets a user drag a whole Set from the browser onto a track/empty space to reconstruct all its tracks/clips/devices, or unfold a Set like a folder and drag out one track/clip/device chain/Group Track without opening it (manual ch.5 pp.131-134). dotbeat has no equivalent — `beat import-track <source.beat> <track-id> --into <dest.beat> [--as <new-id>]` is a well-defined text operation given both files share one grammar and stable slugs (D6), more precise than Ableton\'s drag-target ambiguity since there\'s no rendering/preview step to get wrong.',
     core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
     research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: null,
+  },
+
+  // ── Design system (cross-cutting) ────────────────────────────────────────
+  {
+    area: 'Design system (cross-cutting)', feature: 'Real design-token layer (--danger/--muted/--good/--surface-recessed/--radius-*)',
+    description: '`--danger`/`--muted` were referenced by `var(--x, <fallback>)` at 7+ call sites but never actually defined in `:root`, so every one silently rendered its fallback; `--text`/`--panel-2`\'s embedded fallback hexes had independently drifted from their real values. Added real token definitions (promoted from whichever color was already doing that job ad hoc), a `--surface-recessed` token folding four near-black literals, and a real three-tier `--radius-sm/md/lg` scale replacing eight ad hoc pixel values — reconciling ~10 near-duplicate reds/greens onto the new tokens file-wide.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/79-ux-overall-patterns-round2.md', plan: 'phase-28-plan.md',
+  },
+  {
+    area: 'Design system (cross-cutting)', feature: 'Typography & panel-label consistency (--label-tracking, shared .section-heading, --font-mono)',
+    description: 'Eight mixed em/px letter-spacing values and four independently-invented panel-title conventions (nine class names total) consolidated onto one `--label-tracking` token and one shared `.section-heading` rule; two separately-typed monospace font stacks folded onto one `--font-mono` token. Applied across App.tsx/ArrangementView.tsx/SynthPanel.tsx/NoteView.tsx.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/79-ux-overall-patterns-round2.md', plan: 'phase-28-plan.md',
+  },
+  {
+    area: 'Design system (cross-cutting)', feature: 'Keyboard-shortcut reference panel',
+    description: 'Shortcut discoverability was three different mechanisms (a persistent on-canvas label, a hover-only tooltip, a dense inline sentence), no single reference. A new Shortcuts topbar button (matching the Browser/Mixer/History convention) opens a grouped, keycap-styled list of the app\'s real current shortcut surface (Global, Piano Roll/Note Editing, Knobs), inventoried directly from the actual handler code, not invented.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/79-ux-overall-patterns-round2.md', plan: 'phase-28-plan.md',
   },
 
   // ── Desktop app / packaging ──────────────────────────────────────────────
