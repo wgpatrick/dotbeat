@@ -876,7 +876,22 @@ function TrackRow({
               data-section-index={occ.sectionIndex}
               style={{ left, width, borderColor: track.color }}
               title={`${occ.clipId} · ${occ.bars} bar${occ.bars === 1 ? '' : 's'}`}
-              onPointerDown={(e) => onOccPointerDown(occ.sectionIndex, e)}
+              onPointerDown={
+                occ.clipId === LOOP_SCENE_SENTINEL
+                  ? // The synthetic loop-mode block (Phase 27 Stream EA bug 1) has no real clip to
+                    // move — beginClipDrag's move branch is always a same-section no-op here, and
+                    // its unconditional stopPropagation silently ate every OTHER gesture the bare
+                    // lane would otherwise have handled, including Stream EC's bar-range-selection
+                    // drag (regression caught by ec's own live-verify script re-run post-merge: a
+                    // drag on this block produced no selection at all, since beginDrag/onRowPointerDown
+                    // never got the chance to fire). Route straight to the lane's own handler instead
+                    // — it already covers both the plain-click-selects-track case (bug 2's fix, in
+                    // this same handler's onUp) and the real bar-range-select drag, so a "click/drag
+                    // on this row" behaves identically whether or not the synthetic block happens to
+                    // be there.
+                    onRowPointerDown
+                  : (e) => onOccPointerDown(occ.sectionIndex, e)
+              }
             >
               <span className="arr-clip-label">{occ.clipId}</span>
             </div>
