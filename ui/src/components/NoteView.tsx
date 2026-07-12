@@ -530,6 +530,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
                   key={row}
                   data-row={row}
                   data-row-value={axis.valueOfRow(row)}
+                  data-drop-target={isDrums ? `lane-${label}` : undefined}
                   onPointerDown={(e) => {
                     e.preventDefault()
                     if (editable) axis.preview(track.id, row)

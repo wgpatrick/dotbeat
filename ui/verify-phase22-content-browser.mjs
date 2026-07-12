@@ -166,7 +166,9 @@ async function main() {
     await selectTrack(page, 'drums')
     await pollUntil(() => page.evaluate(() => window.__store.getState().doc.selectedTrack === 'drums'), 'drums selection')
     await page.click('[data-pane-tab="clip"]')
-    await page.waitForSelector('[data-testid="bottom-pane"] .stepseq', { timeout: 5000 })
+    // Phase 22 Stream AB retired StepSequencer.tsx — NoteView now renders drum tracks too, behind
+    // a row-axis adapter (data-event-kind="hit" distinguishes it from the pitch/note view).
+    await page.waitForSelector('[data-testid="bottom-pane"] .noteview[data-event-kind="hit"]', { timeout: 5000 })
     before = readFileSync(beatPath, 'utf8')
     await page.dragAndDrop('[data-kit="kit-init"][data-lane="kick"]', '[data-drop-target="lane-kick"]')
     await pollUntil(
