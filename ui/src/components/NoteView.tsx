@@ -528,21 +528,24 @@ export function NoteView({ track }: { track: BeatTrack }) {
     postEdit(`${track.id}.${editPrefix}.${id}`, '')
   }
 
-  // ---- clip-loop resize handle (Phase 24 Stream CJ) ----------------------------------------------
-  // Drags the primary clip's own `loop.end` (bars, clip-local) via a handle drawn over the grid at
-  // the clip's current effective length — `clip.loop?.end ?? loopBars` when no override exists yet,
-  // i.e. the handle starts at the SAME position the clip already effectively tiles at today (the
-  // canonical-elision default engine.ts's contentOf now falls back to), so a drag always starts from
-  // where the clip visibly already ends. Calls the SAME `setClipLoop` primitive
-  // (src/core/edit.ts) the numeric fields in ClipPropertiesPanel.tsx use, via the same
-  // `<track>.clip.<id>.loop` edit path — this is a second INPUT METHOD for the identical fact, not a
-  // second mechanism. Only the END is drag-resizable (start stays wherever it already was, 0 for a
-  // fresh override) — matches Stream AG's own precedent of a single right-edge drag handle
-  // (ArrangementView.tsx's section-resize) rather than inventing a two-handle range-select gesture.
-  const clipLoopGesture = useRef<{ rect: DOMRect; stepW: number; origStart: number; origEnd: number; downX: number } | null>(null)
+  // ---- clip-loop resize handle (Phase 24 Stream CJ; both-edges drag added Phase 27 Stream EF) -----
+  // Drags the primary clip's own `loop.start`/`loop.end` (bars, clip-local) via handles drawn over
+  // the grid at the clip's current effective range — `clip.loop?.start ?? 0` /
+  // `clip.loop?.end ?? loopBars` when no override exists yet, i.e. a handle starts at the SAME
+  // position the clip already effectively tiles at today (the canonical-elision default engine.ts's
+  // contentOf now falls back to), so a drag always starts from where the clip visibly already is.
+  // Calls the SAME `setClipLoop` primitive (src/core/edit.ts) the numeric fields in
+  // ClipPropertiesPanel.tsx use, via the same `<track>.clip.<id>.loop` edit path — this is a second
+  // INPUT METHOD for the identical fact, not a second mechanism. Originally (Phase 24 Stream CJ)
+  // only the END was drag-resizable; research/71 §2.6/§3.4 item 4 flagged the missing start handle
+  // as a real gap against Ableton's both-edges-draggable loop brace, so Stream EF adds a second,
+  // symmetric handle at the START edge, sharing this same `origStart`-aware gesture plumbing (the
+  // `edge` field below just selects which side of the range a given pointer gesture is moving).
+  const clipLoopGesture = useRef<{ rect: DOMRect; stepW: number; origStart: number; origEnd: number; downX: number; edge: 'start' | 'end' } | null>(null)
   const [clipLoopPreviewEnd, setClipLoopPreviewEnd] = useState<number | null>(null)
+  const [clipLoopPreviewStart, setClipLoopPreviewStart] = useState<number | null>(null)
 
-  function startClipLoopResize(e: React.PointerEvent) {
+  function startClipLoopResize(e: React.PointerEvent, edge: 'start' | 'end') {
     if (!primaryClip) return
     e.stopPropagation()
     e.preventDefault()
@@ -551,8 +554,12 @@ export function NoteView({ track }: { track: BeatTrack }) {
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     const origStart = primaryClip.loop?.start ?? 0
     const origEnd = primaryClip.loop?.end ?? loopBars
-    clipLoopGesture.current = { rect, stepW: rect.width / totalSteps, origStart, origEnd, downX: e.clientX }
-    setClipLoopPreviewEnd(origEnd)
+    clipLoopGesture.current = { rect, stepW: rect.width / totalSteps, origStart, origEnd, downX: e.clientX, edge }
+    // Only seed the preview for the edge actually being dragged — the other edge's rendered
+    // position keeps reading straight from `primaryClip.loop` (via the `?? ` fallback below),
+    // so only the handle/label under the pointer lights up during a single-edge drag.
+    if (edge === 'end') setClipLoopPreviewEnd(origEnd)
+    else setClipLoopPreviewStart(origStart)
   }
 
   function onClipLoopPointerMove(e: React.PointerEvent) {
@@ -560,28 +567,38 @@ export function NoteView({ track }: { track: BeatTrack }) {
     if (!g) return
     const stepsFromLeft = (e.clientX - g.rect.left) / g.stepW
     const barsFromLeft = Math.round(stepsFromLeft / 16)
-    // Clamp to [start+1, loopBars] — can't shrink to zero/negative length, and the grid itself
-    // (totalSteps = loopBars*16) is the natural upper bound on how far right the handle can reach.
-    const end = Math.max(g.origStart + 1, Math.min(loopBars, barsFromLeft))
-    setClipLoopPreviewEnd(end)
+    if (g.edge === 'start') {
+      // Clamp to [0, end-1] — can't push the start past (or onto) the end, and can't go negative.
+      const start = Math.max(0, Math.min(g.origEnd - 1, barsFromLeft))
+      setClipLoopPreviewStart(start)
+    } else {
+      // Clamp to [start+1, loopBars] — can't shrink to zero/negative length, and the grid itself
+      // (totalSteps = loopBars*16) is the natural upper bound on how far right the handle can reach.
+      const end = Math.max(g.origStart + 1, Math.min(loopBars, barsFromLeft))
+      setClipLoopPreviewEnd(end)
+    }
   }
 
   function onClipLoopPointerUp(e: React.PointerEvent) {
     const g = clipLoopGesture.current
-    const end = clipLoopPreviewEnd
+    const previewEnd = clipLoopPreviewEnd
+    const previewStart = clipLoopPreviewStart
     clipLoopGesture.current = null
     setClipLoopPreviewEnd(null)
-    if (!g || end === null || !primaryClip) return
+    setClipLoopPreviewStart(null)
+    if (!g || !primaryClip) return
     if (Math.abs(e.clientX - g.downX) < DRAG_THRESHOLD) return // a tap, not a real drag — no-op
+    const start = g.edge === 'start' ? (previewStart ?? g.origStart) : g.origStart
+    const end = g.edge === 'end' ? (previewEnd ?? g.origEnd) : g.origEnd
     const path = `${track.id}.clip.${primaryClip.id}.loop`
-    if (end === loopBars && g.origStart === 0) {
+    if (start === 0 && end === loopBars) {
       // Dragged back out to the full document-wide length — clear the override rather than writing
       // an explicit "0 loopBars" that means the exact same thing (canonical elision: no override IS
       // the full-length default, same discipline setClipLoop's own null branch already documents).
       if (primaryClip.loop) postEdit(path, '')
       return
     }
-    postEdit(path, `${g.origStart} ${end}`)
+    postEdit(path, `${start} ${end}`)
   }
 
   // ---- Place in Arrangement (Phase 24 Stream CI) ----
@@ -967,12 +984,15 @@ export function NoteView({ track }: { track: BeatTrack }) {
             })}
           </div>
           <div className="noteview-lanes" style={{ flex: '0 0 auto' }}>
-            {/* Phase 24 Stream CJ: this clip's own loop-length drag handle — only rendered when a
+            {/* Phase 24 Stream CJ: this clip's own loop-length drag handles — only rendered when a
                 real saved clip exists to resize (same gating as ClipPropertiesPanel's numeric
                 fields). The shaded range shows [loop.start, loop.end) bars (or the full document
                 loopBars width when no override is set — today's default tiling engine.ts now
-                falls back to); dragging the handle at its right edge shortens/lengthens it, live-
-                previewed, committed via setClipLoop on pointer-up. */}
+                falls back to); dragging either handle shortens/lengthens/shifts it, live-previewed,
+                committed via setClipLoop on pointer-up. Phase 27 Stream EF added the START-edge
+                handle (research/71 §2.6/§3.4 item 4: Ableton's loop brace is draggable at BOTH
+                edges, dotbeat's was end-only) — both handles share the SAME gesture plumbing above,
+                just targeting opposite edges of the range. */}
             {primaryClip && (
               <div
                 className="noteview-cliploop-strip"
@@ -982,7 +1002,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
                 onPointerUp={onClipLoopPointerUp}
               >
                 {(() => {
-                  const start = primaryClip.loop?.start ?? 0
+                  const start = clipLoopPreviewStart ?? primaryClip.loop?.start ?? 0
                   const end = clipLoopPreviewEnd ?? primaryClip.loop?.end ?? loopBars
                   return (
                     <>
@@ -994,12 +1014,24 @@ export function NoteView({ track }: { track: BeatTrack }) {
                         }}
                       />
                       <div
-                        className="noteview-cliploop-handle"
+                        className="noteview-cliploop-handle noteview-cliploop-handle-start"
+                        data-clip-loop-handle-start={track.id}
+                        title={`drag to resize this clip's own loop start (currently bar ${start}) — matches "${track.id}.clip.${primaryClip.id}.loop"`}
+                        style={{ left: `calc(${start * 16} * var(--note-step-w))` }}
+                        onPointerDown={(e) => startClipLoopResize(e, 'start')}
+                      />
+                      <div
+                        className="noteview-cliploop-handle noteview-cliploop-handle-end"
                         data-clip-loop-handle={track.id}
                         title={`drag to resize this clip's own loop length (currently ${end} bar${end === 1 ? '' : 's'}) — matches "${track.id}.clip.${primaryClip.id}.loop"`}
                         style={{ left: `calc(${end * 16} * var(--note-step-w))` }}
-                        onPointerDown={startClipLoopResize}
+                        onPointerDown={(e) => startClipLoopResize(e, 'end')}
                       />
+                      {clipLoopPreviewStart !== null && (
+                        <div className="noteview-cliploop-label noteview-cliploop-label-start" data-clip-loop-label-start={track.id} style={{ left: `calc(${start * 16} * var(--note-step-w))` }}>
+                          {start} bar{start === 1 ? '' : 's'}
+                        </div>
+                      )}
                       {clipLoopPreviewEnd !== null && (
                         <div className="noteview-cliploop-label" data-clip-loop-label={track.id} style={{ left: `calc(${end * 16} * var(--note-step-w))` }}>
                           {end} bar{end === 1 ? '' : 's'}
