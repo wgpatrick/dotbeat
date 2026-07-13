@@ -37,70 +37,134 @@ track drums Drums #56b6c2 drums
   lane ride synth:metal
   lane cowbell synth:membrane
   clip pulse
-    hit h1 hat 0 0.5
-    hit h2 hat 4 0.5
-    hit h3 hat 8 0.5
-    hit h4 hat 12 0.5
-    hit h5 hat 16 0.5
-    hit h6 hat 20 0.5
-    hit h7 hat 24 0.5
-    hit h8 hat 28 0.5
-    hit h9 hat 32 0.5
-    hit h10 hat 36 0.5
-    hit h11 hat 40 0.5
-    hit h12 hat 44 0.5
-    hit h13 hat 48 0.5
-    hit h14 hat 52 0.5
-    hit h15 hat 56 0.5
-    hit h16 hat 60 0.5
-    hit h17 hat 64 0.5
-    hit h18 hat 68 0.5
-    hit h19 hat 72 0.5
-    hit h20 hat 76 0.5
-    hit h21 hat 80 0.5
-    hit h22 hat 84 0.5
-    hit h23 hat 88 0.5
-    hit h24 hat 92 0.5
-    hit h25 hat 96 0.5
-    hit h26 hat 100 0.5
-    hit h27 hat 104 0.5
-    hit h28 hat 108 0.5
-    hit h29 hat 112 0.5
-    hit h30 hat 116 0.5
-    hit h31 hat 120 0.5
-    hit h32 hat 124 0.5
-  hit h1 hat 0 0.5
-  hit h2 hat 4 0.5
-  hit h3 hat 8 0.5
-  hit h4 hat 12 0.5
-  hit h5 hat 16 0.5
-  hit h6 hat 20 0.5
-  hit h7 hat 24 0.5
-  hit h8 hat 28 0.5
-  hit h9 hat 32 0.5
-  hit h10 hat 36 0.5
-  hit h11 hat 40 0.5
-  hit h12 hat 44 0.5
-  hit h13 hat 48 0.5
-  hit h14 hat 52 0.5
-  hit h15 hat 56 0.5
-  hit h16 hat 60 0.5
-  hit h17 hat 64 0.5
-  hit h18 hat 68 0.5
-  hit h19 hat 72 0.5
-  hit h20 hat 76 0.5
-  hit h21 hat 80 0.5
-  hit h22 hat 84 0.5
-  hit h23 hat 88 0.5
-  hit h24 hat 92 0.5
-  hit h25 hat 96 0.5
-  hit h26 hat 100 0.5
-  hit h27 hat 104 0.5
-  hit h28 hat 108 0.5
-  hit h29 hat 112 0.5
-  hit h30 hat 116 0.5
-  hit h31 hat 120 0.5
-  hit h32 hat 124 0.5
+    hit h1 kick 0 0.85
+    hit h5 hat 2 0.4
+    hit h2 kick 4 0.85
+    hit h6 hat 6 0.4
+    hit h3 kick 8 0.85
+    hit h7 hat 10 0.4
+    hit h4 kick 12 0.85
+    hit h8 hat 14 0.4
+    hit h9 kick 16 0.85
+    hit h13 hat 18 0.4
+    hit h10 kick 20 0.85
+    hit h14 hat 22 0.4
+    hit h11 kick 24 0.85
+    hit h15 hat 26 0.4
+    hit h12 kick 28 0.85
+    hit h16 hat 30 0.4
+    hit h17 kick 32 0.85
+    hit h21 hat 34 0.4
+    hit h18 kick 36 0.85
+    hit h22 hat 38 0.4
+    hit h19 kick 40 0.85
+    hit h23 hat 42 0.4
+    hit h20 kick 44 0.85
+    hit h24 hat 46 0.4
+    hit h25 kick 48 0.85
+    hit h29 hat 50 0.4
+    hit h26 kick 52 0.85
+    hit h30 hat 54 0.4
+    hit h27 kick 56 0.85
+    hit h31 hat 58 0.4
+    hit h28 kick 60 0.85
+    hit h32 hat 62 0.4
+    hit h33 kick 64 0.85
+    hit h37 hat 66 0.4
+    hit h34 kick 68 0.85
+    hit h38 hat 70 0.4
+    hit h35 kick 72 0.85
+    hit h39 hat 74 0.4
+    hit h36 kick 76 0.85
+    hit h40 hat 78 0.4
+    hit h41 kick 80 0.85
+    hit h45 hat 82 0.4
+    hit h42 kick 84 0.85
+    hit h46 hat 86 0.4
+    hit h43 kick 88 0.85
+    hit h47 hat 90 0.4
+    hit h44 kick 92 0.85
+    hit h48 hat 94 0.4
+    hit h49 kick 96 0.85
+    hit h53 hat 98 0.4
+    hit h50 kick 100 0.85
+    hit h54 hat 102 0.4
+    hit h51 kick 104 0.85
+    hit h55 hat 106 0.4
+    hit h52 kick 108 0.85
+    hit h56 hat 110 0.4
+    hit h57 kick 112 0.85
+    hit h61 hat 114 0.4
+    hit h58 kick 116 0.85
+    hit h62 hat 118 0.4
+    hit h59 kick 120 0.85
+    hit h63 hat 122 0.4
+    hit h60 kick 124 0.85
+    hit h64 hat 126 0.4
+  hit h1 kick 0 0.85
+  hit h5 hat 2 0.4
+  hit h2 kick 4 0.85
+  hit h6 hat 6 0.4
+  hit h3 kick 8 0.85
+  hit h7 hat 10 0.4
+  hit h4 kick 12 0.85
+  hit h8 hat 14 0.4
+  hit h9 kick 16 0.85
+  hit h13 hat 18 0.4
+  hit h10 kick 20 0.85
+  hit h14 hat 22 0.4
+  hit h11 kick 24 0.85
+  hit h15 hat 26 0.4
+  hit h12 kick 28 0.85
+  hit h16 hat 30 0.4
+  hit h17 kick 32 0.85
+  hit h21 hat 34 0.4
+  hit h18 kick 36 0.85
+  hit h22 hat 38 0.4
+  hit h19 kick 40 0.85
+  hit h23 hat 42 0.4
+  hit h20 kick 44 0.85
+  hit h24 hat 46 0.4
+  hit h25 kick 48 0.85
+  hit h29 hat 50 0.4
+  hit h26 kick 52 0.85
+  hit h30 hat 54 0.4
+  hit h27 kick 56 0.85
+  hit h31 hat 58 0.4
+  hit h28 kick 60 0.85
+  hit h32 hat 62 0.4
+  hit h33 kick 64 0.85
+  hit h37 hat 66 0.4
+  hit h34 kick 68 0.85
+  hit h38 hat 70 0.4
+  hit h35 kick 72 0.85
+  hit h39 hat 74 0.4
+  hit h36 kick 76 0.85
+  hit h40 hat 78 0.4
+  hit h41 kick 80 0.85
+  hit h45 hat 82 0.4
+  hit h42 kick 84 0.85
+  hit h46 hat 86 0.4
+  hit h43 kick 88 0.85
+  hit h47 hat 90 0.4
+  hit h44 kick 92 0.85
+  hit h48 hat 94 0.4
+  hit h49 kick 96 0.85
+  hit h53 hat 98 0.4
+  hit h50 kick 100 0.85
+  hit h54 hat 102 0.4
+  hit h51 kick 104 0.85
+  hit h55 hat 106 0.4
+  hit h52 kick 108 0.85
+  hit h56 hat 110 0.4
+  hit h57 kick 112 0.85
+  hit h61 hat 114 0.4
+  hit h58 kick 116 0.85
+  hit h62 hat 118 0.4
+  hit h59 kick 120 0.85
+  hit h63 hat 122 0.4
+  hit h60 kick 124 0.85
+  hit h64 hat 126 0.4
 
 track bass Bass #f7c948 synth
   synth
@@ -125,6 +189,8 @@ track bass Bass #f7c948 synth
     compMix 0.5
     distortionAmount 0.15
     distortionMix 0.2
+    duckSource drums
+    duckAmount 0.35
   clip a
     note u100001 41 0 15 0.8
     note u100002 41 16 15 0.7
@@ -409,6 +475,8 @@ track pad Pad #c678dd synth
     eqMid -1
     sendReverb 0.55
     sendDelay 0.15
+    duckSource drums
+    duckAmount 0.5
   clip open-a
     note u100073 53 0 32 0.45
     note u100074 60 0 32 0.45
@@ -460,44 +528,450 @@ track pad Pad #c678dd synth
     note u100078 64 96 32 0.45
     note u100079 67 96 32 0.45
     note u100080 71 96 32 0.45
+    auto pad.cutoff
+      point rise0 0 900
+      point rise1 127 4200
+  clip intro-a
+    note u100065 57 0 32 0.45
+    note u100066 60 0 32 0.45
+    note u100067 64 0 32 0.45
+    note u100068 67 0 32 0.45
+    note u100069 55 32 32 0.45
+    note u100070 62 32 32 0.45
+    note u100071 64 32 32 0.45
+    note u100072 67 32 32 0.45
+    note u100073 59 64 32 0.45
+    note u100074 62 64 32 0.45
+    note u100075 67 64 32 0.45
+    note u100076 69 64 32 0.45
+    note u100077 60 96 32 0.45
+    note u100078 64 96 32 0.45
+    note u100079 67 96 32 0.45
+    note u100080 71 96 32 0.45
+    auto pad.cutoff
+      point sweep0 0 400
+      point sweep1 127 2600
   note u100065 57 0 32 0.45
   note u100066 60 0 32 0.45
   note u100067 64 0 32 0.45
   note u100068 67 0 32 0.45
-  note u100069 59 32 32 0.45
+  note u100069 55 32 32 0.45
   note u100070 62 32 32 0.45
-  note u100071 67 32 32 0.45
-  note u100072 69 32 32 0.45
-  note u100073 55 64 32 0.45
-  note u100074 59 64 32 0.45
-  note u100075 62 64 32 0.45
-  note u100076 66 64 32 0.45
+  note u100071 64 32 32 0.45
+  note u100072 67 32 32 0.45
+  note u100073 59 64 32 0.45
+  note u100074 62 64 32 0.45
+  note u100075 67 64 32 0.45
+  note u100076 69 64 32 0.45
   note u100077 60 96 32 0.45
   note u100078 64 96 32 0.45
   note u100079 67 96 32 0.45
   note u100080 71 96 32 0.45
 
+track arp Arp #e06c75 synth
+  synth
+    osc sawtooth
+    volume -5
+    cutoff 4200
+    resonance 1
+    attack 0.001
+    decay 0.1
+    sustain 0.05
+    release 0.05
+    pan 0
+    filterEnvAmount 0.4
+    filterEnvDecay 0.12
+    sendReverb 0.15
+    sendDelay 0.45
+  clip arp-a
+    note u100081 69 0 0.9 0.65
+    note u100082 72 1 0.9 0.65
+    note u100083 76 2 0.9 0.65
+    note u100084 79 3 0.9 0.65
+    note u100085 76 4 0.9 0.65
+    note u100086 72 5 0.9 0.65
+    note u100087 69 6 0.9 0.65
+    note u100088 72 7 0.9 0.65
+    note u100089 76 8 0.9 0.65
+    note u100090 79 9 0.9 0.65
+    note u100091 76 10 0.9 0.65
+    note u100092 72 11 0.9 0.65
+    note u100093 69 12 0.9 0.65
+    note u100094 72 13 0.9 0.65
+    note u100095 76 14 0.9 0.65
+    note u100096 79 15 0.9 0.65
+    note u100097 76 16 0.9 0.65
+    note u100098 72 17 0.9 0.65
+    note u100099 69 18 0.9 0.65
+    note u100100 72 19 0.9 0.65
+    note u100101 76 20 0.9 0.65
+    note u100102 79 21 0.9 0.65
+    note u100103 76 22 0.9 0.65
+    note u100104 72 23 0.9 0.65
+    note u100105 69 24 0.9 0.65
+    note u100106 72 25 0.9 0.65
+    note u100107 76 26 0.9 0.65
+    note u100108 79 27 0.9 0.65
+    note u100109 76 28 0.9 0.65
+    note u100110 72 29 0.9 0.65
+    note u100111 69 30 0.9 0.65
+    note u100112 72 31 0.9 0.65
+    note u100113 67 32 0.9 0.65
+    note u100114 74 33 0.9 0.65
+    note u100115 76 34 0.9 0.65
+    note u100116 79 35 0.9 0.65
+    note u100117 76 36 0.9 0.65
+    note u100118 74 37 0.9 0.65
+    note u100119 67 38 0.9 0.65
+    note u100120 74 39 0.9 0.65
+    note u100121 76 40 0.9 0.65
+    note u100122 79 41 0.9 0.65
+    note u100123 76 42 0.9 0.65
+    note u100124 74 43 0.9 0.65
+    note u100125 67 44 0.9 0.65
+    note u100126 74 45 0.9 0.65
+    note u100127 76 46 0.9 0.65
+    note u100128 79 47 0.9 0.65
+    note u100129 76 48 0.9 0.65
+    note u100130 74 49 0.9 0.65
+    note u100131 67 50 0.9 0.65
+    note u100132 74 51 0.9 0.65
+    note u100133 76 52 0.9 0.65
+    note u100134 79 53 0.9 0.65
+    note u100135 76 54 0.9 0.65
+    note u100136 74 55 0.9 0.65
+    note u100137 67 56 0.9 0.65
+    note u100138 74 57 0.9 0.65
+    note u100139 76 58 0.9 0.65
+    note u100140 79 59 0.9 0.65
+    note u100141 76 60 0.9 0.65
+    note u100142 74 61 0.9 0.65
+    note u100143 67 62 0.9 0.65
+    note u100144 74 63 0.9 0.65
+    note u100145 71 64 0.9 0.65
+    note u100146 74 65 0.9 0.65
+    note u100147 79 66 0.9 0.65
+    note u100148 81 67 0.9 0.65
+    note u100149 79 68 0.9 0.65
+    note u100150 74 69 0.9 0.65
+    note u100151 71 70 0.9 0.65
+    note u100152 74 71 0.9 0.65
+    note u100153 79 72 0.9 0.65
+    note u100154 81 73 0.9 0.65
+    note u100155 79 74 0.9 0.65
+    note u100156 74 75 0.9 0.65
+    note u100157 71 76 0.9 0.65
+    note u100158 74 77 0.9 0.65
+    note u100159 79 78 0.9 0.65
+    note u100160 81 79 0.9 0.65
+    note u100161 79 80 0.9 0.65
+    note u100162 74 81 0.9 0.65
+    note u100163 71 82 0.9 0.65
+    note u100164 74 83 0.9 0.65
+    note u100165 79 84 0.9 0.65
+    note u100166 81 85 0.9 0.65
+    note u100167 79 86 0.9 0.65
+    note u100168 74 87 0.9 0.65
+    note u100169 71 88 0.9 0.65
+    note u100170 74 89 0.9 0.65
+    note u100171 79 90 0.9 0.65
+    note u100172 81 91 0.9 0.65
+    note u100173 79 92 0.9 0.65
+    note u100174 74 93 0.9 0.65
+    note u100175 71 94 0.9 0.65
+    note u100176 74 95 0.9 0.65
+    note u100177 72 96 0.9 0.65
+    note u100178 76 97 0.9 0.65
+    note u100179 79 98 0.9 0.65
+    note u100180 83 99 0.9 0.65
+    note u100181 79 100 0.9 0.65
+    note u100182 76 101 0.9 0.65
+    note u100183 72 102 0.9 0.65
+    note u100184 76 103 0.9 0.65
+    note u100185 79 104 0.9 0.65
+    note u100186 83 105 0.9 0.65
+    note u100187 79 106 0.9 0.65
+    note u100188 76 107 0.9 0.65
+    note u100189 72 108 0.9 0.65
+    note u100190 76 109 0.9 0.65
+    note u100191 79 110 0.9 0.65
+    note u100192 83 111 0.9 0.65
+    note u100193 79 112 0.9 0.65
+    note u100194 76 113 0.9 0.65
+    note u100195 72 114 0.9 0.65
+    note u100196 76 115 0.9 0.65
+    note u100197 79 116 0.9 0.65
+    note u100198 83 117 0.9 0.65
+    note u100199 79 118 0.9 0.65
+    note u100200 76 119 0.9 0.65
+    note u100201 72 120 0.9 0.65
+    note u100202 76 121 0.9 0.65
+    note u100203 79 122 0.9 0.65
+    note u100204 83 123 0.9 0.65
+    note u100205 79 124 0.9 0.65
+    note u100206 76 125 0.9 0.65
+    note u100207 72 126 0.9 0.65
+    note u100208 76 127 0.9 0.65
+  clip arp-d
+    note u100081 69 0 0.9 0.65
+    note u100082 72 1 0.9 0.65
+    note u100083 76 2 0.9 0.65
+    note u100084 79 3 0.9 0.65
+    note u100085 76 4 0.9 0.65
+    note u100086 72 5 0.9 0.65
+    note u100087 69 6 0.9 0.65
+    note u100088 72 7 0.9 0.65
+    note u100089 76 8 0.9 0.65
+    note u100090 79 9 0.9 0.65
+    note u100091 76 10 0.9 0.65
+    note u100092 72 11 0.9 0.65
+    note u100093 69 12 0.9 0.65
+    note u100094 72 13 0.9 0.65
+    note u100095 76 14 0.9 0.65
+    note u100096 79 15 0.9 0.65
+    note u100097 76 16 0.9 0.65
+    note u100098 72 17 0.9 0.65
+    note u100099 69 18 0.9 0.65
+    note u100100 72 19 0.9 0.65
+    note u100101 76 20 0.9 0.65
+    note u100102 79 21 0.9 0.65
+    note u100103 76 22 0.9 0.65
+    note u100104 72 23 0.9 0.65
+    note u100105 69 24 0.9 0.65
+    note u100106 72 25 0.9 0.65
+    note u100107 76 26 0.9 0.65
+    note u100108 79 27 0.9 0.65
+    note u100109 76 28 0.9 0.65
+    note u100110 72 29 0.9 0.65
+    note u100111 69 30 0.9 0.65
+    note u100112 72 31 0.9 0.65
+    note u100113 71 32 0.9 0.65
+    note u100114 74 33 0.9 0.65
+    note u100115 79 34 0.9 0.65
+    note u100116 81 35 0.9 0.65
+    note u100117 79 36 0.9 0.65
+    note u100118 74 37 0.9 0.65
+    note u100119 71 38 0.9 0.65
+    note u100120 74 39 0.9 0.65
+    note u100121 79 40 0.9 0.65
+    note u100122 81 41 0.9 0.65
+    note u100123 79 42 0.9 0.65
+    note u100124 74 43 0.9 0.65
+    note u100125 71 44 0.9 0.65
+    note u100126 74 45 0.9 0.65
+    note u100127 79 46 0.9 0.65
+    note u100128 81 47 0.9 0.65
+    note u100129 79 48 0.9 0.65
+    note u100130 74 49 0.9 0.65
+    note u100131 71 50 0.9 0.65
+    note u100132 74 51 0.9 0.65
+    note u100133 79 52 0.9 0.65
+    note u100134 81 53 0.9 0.65
+    note u100135 79 54 0.9 0.65
+    note u100136 74 55 0.9 0.65
+    note u100137 71 56 0.9 0.65
+    note u100138 74 57 0.9 0.65
+    note u100139 79 58 0.9 0.65
+    note u100140 81 59 0.9 0.65
+    note u100141 79 60 0.9 0.65
+    note u100142 74 61 0.9 0.65
+    note u100143 71 62 0.9 0.65
+    note u100144 74 63 0.9 0.65
+    note u100145 67 64 0.9 0.65
+    note u100146 71 65 0.9 0.65
+    note u100147 74 66 0.9 0.65
+    note u100148 78 67 0.9 0.65
+    note u100149 74 68 0.9 0.65
+    note u100150 71 69 0.9 0.65
+    note u100151 67 70 0.9 0.65
+    note u100152 71 71 0.9 0.65
+    note u100153 74 72 0.9 0.65
+    note u100154 78 73 0.9 0.65
+    note u100155 74 74 0.9 0.65
+    note u100156 71 75 0.9 0.65
+    note u100157 67 76 0.9 0.65
+    note u100158 71 77 0.9 0.65
+    note u100159 74 78 0.9 0.65
+    note u100160 78 79 0.9 0.65
+    note u100161 74 80 0.9 0.65
+    note u100162 71 81 0.9 0.65
+    note u100163 67 82 0.9 0.65
+    note u100164 71 83 0.9 0.65
+    note u100165 74 84 0.9 0.65
+    note u100166 78 85 0.9 0.65
+    note u100167 74 86 0.9 0.65
+    note u100168 71 87 0.9 0.65
+    note u100169 67 88 0.9 0.65
+    note u100170 71 89 0.9 0.65
+    note u100171 74 90 0.9 0.65
+    note u100172 78 91 0.9 0.65
+    note u100173 74 92 0.9 0.65
+    note u100174 71 93 0.9 0.65
+    note u100175 67 94 0.9 0.65
+    note u100176 71 95 0.9 0.65
+    note u100177 72 96 0.9 0.65
+    note u100178 76 97 0.9 0.65
+    note u100179 79 98 0.9 0.65
+    note u100180 83 99 0.9 0.65
+    note u100181 79 100 0.9 0.65
+    note u100182 76 101 0.9 0.65
+    note u100183 72 102 0.9 0.65
+    note u100184 76 103 0.9 0.65
+    note u100185 79 104 0.9 0.65
+    note u100186 83 105 0.9 0.65
+    note u100187 79 106 0.9 0.65
+    note u100188 76 107 0.9 0.65
+    note u100189 72 108 0.9 0.65
+    note u100190 76 109 0.9 0.65
+    note u100191 79 110 0.9 0.65
+    note u100192 83 111 0.9 0.65
+    note u100193 79 112 0.9 0.65
+    note u100194 76 113 0.9 0.65
+    note u100195 72 114 0.9 0.65
+    note u100196 76 115 0.9 0.65
+    note u100197 79 116 0.9 0.65
+    note u100198 83 117 0.9 0.65
+    note u100199 79 118 0.9 0.65
+    note u100200 76 119 0.9 0.65
+    note u100201 72 120 0.9 0.65
+    note u100202 76 121 0.9 0.65
+    note u100203 79 122 0.9 0.65
+    note u100204 83 123 0.9 0.65
+    note u100205 79 124 0.9 0.65
+    note u100206 76 125 0.9 0.65
+    note u100207 72 126 0.9 0.65
+    note u100208 76 127 0.9 0.65
+
+track air Air #61afef synth
+  synth
+    osc sine
+    volume -12
+    cutoff 9000
+    resonance 0.8
+    attack 0.3
+    decay 0.2
+    sustain 0.6
+    release 1.5
+    pan 0
+    fmLevel 0.4
+    fmHarmonicity 4
+    fmModIndex 6
+    lfoRate 3
+    lfoDepth 0.1
+    lfoDest amp
+    eqLow -6
+    eqHigh 2
+    sendReverb 0.6
+    sendDelay 0.3
+    duckSource drums
+    duckAmount 0.5
+  clip air-a
+    note u100081 69 0 32 0.4
+    note u100082 72 0 32 0.4
+    note u100083 76 0 32 0.4
+    note u100084 79 0 32 0.4
+    note u100085 67 32 32 0.4
+    note u100086 74 32 32 0.4
+    note u100087 76 32 32 0.4
+    note u100088 79 32 32 0.4
+    note u100089 71 64 32 0.4
+    note u100090 74 64 32 0.4
+    note u100091 79 64 32 0.4
+    note u100092 81 64 32 0.4
+    note u100093 72 96 32 0.4
+    note u100094 76 96 32 0.4
+    note u100095 79 96 32 0.4
+    note u100096 83 96 32 0.4
+  clip air-d
+    note u100081 69 0 32 0.4
+    note u100082 72 0 32 0.4
+    note u100083 76 0 32 0.4
+    note u100084 79 0 32 0.4
+    note u100085 71 32 32 0.4
+    note u100086 74 32 32 0.4
+    note u100087 79 32 32 0.4
+    note u100088 81 32 32 0.4
+    note u100089 67 64 32 0.4
+    note u100090 71 64 32 0.4
+    note u100091 74 64 32 0.4
+    note u100092 78 64 32 0.4
+    note u100093 72 96 32 0.4
+    note u100094 76 96 32 0.4
+    note u100095 79 96 32 0.4
+    note u100096 83 96 32 0.4
+    auto air.cutoff
+      point rise0 0 1200
+      point rise1 127 7000
+    auto air.volume
+      point vol0 0 -16
+      point vol1 127 -8
+
+track saw Saw #d19a66 synth
+  synth
+    osc sawtooth
+    volume -7
+    cutoff 6500
+    resonance 0.6
+    attack 0.02
+    decay 0.2
+    sustain 0.6
+    release 0.4
+    pan 0
+    osc2Level 0.6
+    osc2Detune 18
+    unisonVoices 7
+    unisonWidth 1
+    eqHigh 1
+    sendReverb 0.3
+    sendDelay 0.25
+    duckSource drums
+    duckAmount 0.45
+  clip saw-a
+    note u100081 53 0 32 0.55
+    note u100082 60 0 32 0.55
+    note u100083 64 0 32 0.55
+    note u100084 69 0 32 0.55
+    note u100085 48 32 32 0.55
+    note u100086 55 32 32 0.55
+    note u100087 62 32 32 0.55
+    note u100088 64 32 32 0.55
+    note u100089 50 64 32 0.55
+    note u100090 55 64 32 0.55
+    note u100091 62 64 32 0.55
+    note u100092 71 64 32 0.55
+    note u100093 45 96 32 0.55
+    note u100094 52 96 32 0.55
+    note u100095 60 96 32 0.55
+    note u100096 67 96 32 0.55
+
 scene intro
   slot keys close-a
-  slot pad shim-a
+  slot pad intro-a
+  slot air air-a
 
 scene groove
   slot drums pulse
   slot bass a
   slot keys open-a
   slot pad open-a
+  slot arp arp-a
 
 scene lift
   slot drums pulse
   slot bass d
   slot keys shim-d
   slot pad shim-d
+  slot arp arp-d
+  slot air air-d
 
 scene peak
   slot drums pulse
   slot bass a
   slot keys open-a
   slot pad shim-a
+  slot arp arp-a
+  slot air air-a
+  slot saw saw-a
 
 song
   section intro 8
