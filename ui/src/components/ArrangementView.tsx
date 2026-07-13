@@ -1679,7 +1679,17 @@ export function ArrangementView() {
   // dance track rename needed: selecting a section (`setSelectedSection`) is a plain state set with
   // no sibling toolbar mounting above the chips, so there's no analogous layout-shift-mid-gesture
   // bug here for a plain per-chip onDoubleClick to worry about.
-  const [sceneRename, setSceneRename] = useState<{ sceneId: string; draft: string } | null>(null)
+  //
+  // `sectionIndex` (not just `sceneId`) is part of this state on purpose. Root cause, confirmed by
+  // instrumenting a real headless run: two sections can share the SAME scene (songAppend's
+  // duplicate-by-reference behavior — see T4 below), so keying the open rename field on `sceneId`
+  // alone made EVERY chip sharing that scene match `isRenamingThis` at once, mounting one
+  // `autoFocus` `<input>` per matching chip simultaneously. The later one in DOM order stole focus
+  // from the earlier one immediately after mount, firing its `onBlur` (`commitSceneRename`) before
+  // a real user (or a test) could ever type into it — the rename field appeared to instantly close
+  // itself. Scoping by section index means only the chip actually double-clicked opens an input;
+  // the commit itself still targets `sceneId`, so the name still applies scene-wide (T4's contract).
+  const [sceneRename, setSceneRename] = useState<{ sceneId: string; sectionIndex: number; draft: string } | null>(null)
   const commitSceneRename = useCallback(() => {
     setSceneRename((cur) => {
       if (!cur) return null
@@ -2714,7 +2724,10 @@ export function ArrangementView() {
               // never blank, matching the existing "section chips show something" contract.
               const sceneObj = doc.scenes.find((sc) => sc.id === s.scene)
               const sceneDisplayName = (sceneObj?.name ?? s.scene).replace(/_/g, ' ')
-              const isRenamingThis = sceneRename?.sceneId === s.scene
+              // Scoped by sectionIndex, not just sceneId — see the sceneRename declaration's comment
+              // above for why (two sections can share one scene; only the double-clicked CHIP should
+              // open an input, even though the commit still applies scene-wide).
+              const isRenamingThis = sceneRename?.sceneId === s.scene && sceneRename.sectionIndex === i
               const chipClasses = [
                 'arr-section-chip',
                 isDragging && 'dragging',
@@ -2757,7 +2770,7 @@ export function ArrangementView() {
                     data-rename-scene={s.scene}
                     autoFocus
                     value={sceneRename!.draft}
-                    onChange={(e) => setSceneRename({ sceneId: s.scene, draft: e.target.value })}
+                    onChange={(e) => setSceneRename({ sceneId: s.scene, sectionIndex: i, draft: e.target.value })}
                     onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -2776,7 +2789,7 @@ export function ArrangementView() {
                     onClick={() => setSelectedSection(i)}
                     onDoubleClick={() => {
                       setSelectedSection(i)
-                      setSceneRename({ sceneId: s.scene, draft: sceneObj?.name ?? '' })
+                      setSceneRename({ sceneId: s.scene, sectionIndex: i, draft: sceneObj?.name ?? '' })
                     }}
                   >
                     {sceneDisplayName}
