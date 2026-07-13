@@ -81,14 +81,14 @@ test('resolveMacro handles an inverted range (min > max) — punch\'s kickDecay 
   assert.ok(at100 < at0)
 })
 
-test('resolveMacro applies exp/log curve shaping, not just linear', () => {
+test('resolveMacro applies quadIn/quadOut curve shaping, not just linear', () => {
   const macro = parseMacroLibrary(macrosJson).find((m) => m.name === 'filter-sweep')!
   const cutoffTarget = macro.targets.find((t) => t.param === 'cutoff')!
-  assert.equal(cutoffTarget.curve, 'exp')
+  assert.equal(cutoffTarget.curve, 'quadIn')
   const at50 = resolveMacro(macro, 50).find((r) => r.param === 'cutoff')!.value
   const linearMid = cutoffTarget.min + 0.5 * (cutoffTarget.max - cutoffTarget.min)
-  // exp curve (n*n) at knob=50 (n=0.5, shaped=0.25) sits well below the LINEAR midpoint.
-  assert.ok(at50 < linearMid, `exp-curved midpoint (${at50}) should sit below the linear midpoint (${linearMid})`)
+  // quadIn curve (n*n) at knob=50 (n=0.5, shaped=0.25) sits well below the LINEAR midpoint.
+  assert.ok(at50 < linearMid, `quadIn-curved midpoint (${at50}) should sit below the linear midpoint (${linearMid})`)
 })
 
 test('applying a macro is exactly a bag of synth-param edits — nothing else changes, and no macro reference is left in the document', () => {
@@ -210,11 +210,11 @@ test('formatMacroList on an empty library', () => {
   assert.equal(formatMacroList([]), 'no macros\n')
 })
 
-test('inverseResolveTarget round-trips resolveMacro for linear, exp, and log curves', () => {
+test('inverseResolveTarget round-trips resolveMacro for linear, quadIn, and quadOut curves', () => {
   const linear: MacroTarget = { param: 'sendReverb', min: 0, max: 0.7 }
-  const exp: MacroTarget = { param: 'cutoff', min: 80, max: 18000, curve: 'exp' }
-  const log: MacroTarget = { param: 'resonance', min: 0.1, max: 5, curve: 'log' }
-  for (const t of [linear, exp, log]) {
+  const quadIn: MacroTarget = { param: 'cutoff', min: 80, max: 18000, curve: 'quadIn' }
+  const quadOut: MacroTarget = { param: 'resonance', min: 0.1, max: 5, curve: 'quadOut' }
+  for (const t of [linear, quadIn, quadOut]) {
     for (const knob of [0, 25, 50, 75, 100]) {
       const macro = { name: 'x', kind: 'any' as const, category: 'tone' as const, description: '', targets: [t] }
       const { value } = resolveMacro(macro, knob)[0]!

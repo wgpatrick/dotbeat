@@ -180,6 +180,7 @@ const USAGE = `usage:
                                                           steps from the clip's start), same media,
                                                           adjusted in/out — no DSP
   beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
+                                                          (pick is a variant number, "1" or "v1" both work)
   beat suggest <file> <track> [--target <lane-or-id>] [--log f]
                                                           read the scores log and propose the next beat-vary round
   beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
@@ -881,8 +882,14 @@ async function scoreCmd(argv) {
   if (picks.length > 3) throw new BeatEditError('at most 3 ranked picks (Edisyn (3,16) pattern — ranking more adds fatigue, not signal)')
   const manifest = JSON.parse(readFileSync(resolve(dir, 'manifest.json'), 'utf8'))
   const ranks = picks.map((p) => {
-    const n = Number(p)
-    if (!Number.isInteger(n) || n < 1 || n > manifest.variants.length) throw new BeatEditError(`pick "${p}" is not a variant number 1-${manifest.variants.length}`)
+    // Phase 33 Stream ME (docs/research/96): variants are always DISPLAYED as v1/v2/... (printed
+    // summary, manifest, suggest's "adopt" line) but historically had to be REFERENCED as bare
+    // integers only — a real discoverability gap (a user typing the natural "v2" hit a wall).
+    // Accept either form here, normalizing to the bare integer everywhere below; bare integers
+    // keep working exactly as before.
+    const normalized = /^[vV](\d+)$/.test(p) ? p.slice(1) : p
+    const n = Number(normalized)
+    if (!Number.isInteger(n) || n < 1 || n > manifest.variants.length) throw new BeatEditError(`pick "${p}" is not a variant number 1-${manifest.variants.length} (accepts "N" or "vN")`)
     return n
   })
   if (new Set(ranks).size !== ranks.length) throw new BeatEditError('picks must be distinct')

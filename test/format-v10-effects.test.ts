@@ -265,18 +265,30 @@ test('diffDocuments reports effect add/remove/bypass as musical facts, matched b
   assert.match(text, /effect comp bypassed/)
 })
 
-test('diffDocuments reports a pure reorder as effect-moved entries, matched by id (same discipline as track-moved)', () => {
+test('diffDocuments reports a pure single-effect reorder as ONE effect-moved entry, not one per shifted index', () => {
   const { doc: withTrack } = addTrack(initDocument({ trackId: 'lead' }), { id: 'lead2', kind: 'synth' })
   const a = withTrack
   const b = moveEffect(a, 'lead2', 'bitcrush', 0).doc // eq3,comp,distortion,bitcrush -> bitcrush,eq3,comp,distortion
   const entries = diffDocuments(a, b)
-  // Moving one entry to the front necessarily shifts every other entry's own index too (the same
-  // "position, not identity, is what's compared" characteristic diff.ts's track-moved logic
-  // already documents) — every displaced id gets its own entry, no add/remove noise since nothing
-  // was added or removed, just reordered.
-  assert.equal(entries.every((e) => e.kind === 'effect-moved'), true)
-  assert.equal(entries.length, 4)
+  // Phase 33 Stream ME (docs/research/98): moving one effect to the front mechanically shifts every
+  // OTHER effect's own index too, but only bitcrush conceptually moved — diffEffects detects that
+  // removing bitcrush alone reconciles both orderings (eq3,comp,distortion stayed in the same
+  // relative order) and reports just that one relocation, matching the raw file's own "one line
+  // relocated" diff instead of one line per shifted index (previously 4 lines for this exact case).
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0]!.kind, 'effect-moved')
   assert.match(formatDiff(entries), /effect bitcrush moved from position 3 to 0/)
+})
+
+test('diffDocuments falls back to per-index effect-moved entries for a genuine multi-effect reshuffle', () => {
+  const { doc: withTrack } = addTrack(initDocument({ trackId: 'lead' }), { id: 'lead2', kind: 'synth' })
+  const a = withTrack // eq3, comp, distortion, bitcrush
+  // Reverse the whole chain — no single id's removal reconciles the two orderings, so every
+  // shifted id should still get its own entry (the fallback must not hide a real multi-item change).
+  const b = moveEffect(moveEffect(a, 'lead2', 'bitcrush', 0).doc, 'lead2', 'distortion', 1).doc // -> bitcrush, distortion, eq3, comp
+  const entries = diffDocuments(a, b)
+  assert.equal(entries.every((e) => e.kind === 'effect-moved'), true)
+  assert.ok(entries.length > 1, 'a genuine multi-item reshuffle should not collapse to a single entry')
 })
 
 test('beat inspect shows the effect chain, including bypass state', () => {
