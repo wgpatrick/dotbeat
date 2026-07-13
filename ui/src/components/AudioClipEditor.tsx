@@ -108,8 +108,14 @@ function AudioClipInspector({ track, clip }: { track: BeatTrack; clip: BeatClip 
           </select>
         </label>
         {region.warp === 'repitch' && (
-          <label>
-            rate
+          // Phase 31 Stream KE item 2 (docs/research/93: a pilot following an external tutorial's
+          // "locate the Transpose knob" instruction had no way to connect that to a plain "rate"
+          // field nested inside a "warp" dropdown). This IS dotbeat's transpose control — a
+          // playback-rate multiplier, not a semitone value, so the label says so directly rather than
+          // renaming the field to "transpose" outright (which would misrepresent the units/mechanism:
+          // it couples pitch and speed together, unlike a real semitone knob).
+          <label title="dotbeat's transpose equivalent: multiplies playback speed and pitch together (1 = unchanged, 2 = one octave up + double speed, 0.5 = one octave down + half speed).">
+            rate (pitch + speed, ≈ transpose)
             <input type="number" step="0.05" min={0.1} max={8} defaultValue={region.rate} data-audio-rate={clip.id} onBlur={(e) => postEdit(`${base}.rate`, e.target.value)} />
           </label>
         )}

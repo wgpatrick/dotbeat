@@ -3225,6 +3225,27 @@ body {
   border-color: var(--accent);
   color: var(--accent);
 }
+/* Phase 31 Stream KE item 4: a subtle color cue reinforcing the "shares content" vs "independent
+   copy" distinction the button labels now spell out directly — `-shared` (plain "+ section") stays
+   the default dashed/dim treatment (still fully visible, not de-emphasized to the point of hiding
+   the footgun), `-independent` (insert/capture scene) gets a `--good` solid border+text so the two
+   safer options read as a matched, deliberately-different pair at a glance, not three identical
+   buttons. */
+.arr-add-section-independent {
+  border-style: solid;
+  border-color: var(--good);
+  color: var(--good);
+}
+.arr-add-section-independent:hover {
+  border-color: var(--good);
+  color: var(--good);
+  filter: brightness(1.15);
+}
+.arr-add-section-hint {
+  margin-left: 4px;
+  opacity: 0.7;
+  font-size: 10px;
+}
 /* Section right-edge resize handle sitting over the ruler. */
 .arr-section-resize {
   position: absolute;
