@@ -8,9 +8,10 @@
 //   1. boot the daemon on the target .beat file (the GUI's data source over HTTP/SSE)
 //   2. serve a production build of ui/ (vite preview; auto-built if ui/dist is missing)
 //   3. load it in headless Chromium at ?daw=<daemon-port> so the store fills from the daemon
-//   4. engine.play() then engine.recordWav(seconds) — captures the live post-limiter master output
-//      (MediaRecorder -> opus -> decode -> WAV, the real-audio path the parity harness uses) and
-//      writes the bytes to disk. Real-time capture: takes about as long as the audio is long.
+//   4. engine.recordWav(seconds) armed first, then engine.play() — captures the live post-limiter
+//      master output (MediaRecorder -> opus -> decode -> WAV, the real-audio path the parity
+//      harness uses) from the downbeat onward, trims the recorder-spin-up silence, and writes the
+//      bytes to disk. Real-time capture: takes about as long as the audio is long.
 //
 // Usage:
 //   node cli/render.mjs <project.beat> [-o out.wav] [--tail <sec>] [--daemon-port N] [--preview-port N]
@@ -105,7 +106,14 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   const browser = await chromium.launch({
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
     headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required'],
+    // The throttling flags matter for real-time capture: a headless page counts as backgrounded,
+    // and background throttling slows the audio graph's driving timers, worsening capture underrun.
+    args: [
+      '--autoplay-policy=no-user-gesture-required',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+    ],
   })
   const page = await browser.newPage()
   const pageErrors = []
@@ -130,9 +138,18 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
 async function captureWav(page, seconds, pageErrors) {
   console.error("rendering (real-time capture through dotbeat's own engine)...")
   const base64 = await page.evaluate(async (secs) => {
+    // Recorder first, playback second. recordWav captures wall-clock time off the live master
+    // bus, so anything that sounds before the recorder is rolling is simply absent from the
+    // file — the previous play-then-settle-then-record order lost the loop's first ~250ms
+    // (the downbeat itself). ensureStarted() resumes the AudioContext without starting the
+    // transport (recording from a suspended context captures silence); the extra 1.25s of
+    // capture plus trimLeadingSilence() below absorb the recorder's spin-up latency (measured
+    // at 300-800ms of wall clock between recordWav() arming and the downbeat landing on tape).
+    await window.__engine.ensureStarted()
+    const recording = window.__engine.recordWav(secs + 1.25)
+    await new Promise((r) => setTimeout(r, 200)) // recorder rolling before the first note
     await window.__engine.play()
-    await new Promise((r) => setTimeout(r, 250)) // let the graph settle before capture
-    const blob = await window.__engine.recordWav(secs)
+    const blob = await recording
     window.__engine.stop()
     const buf = await blob.arrayBuffer()
     const bytes = new Uint8Array(buf)
@@ -141,7 +158,38 @@ async function captureWav(page, seconds, pageErrors) {
     return btoa(binary)
   }, seconds)
   if (pageErrors.length) throw new Error('page error(s) during render:\n' + pageErrors.join('\n'))
-  return Buffer.from(base64, 'base64')
+  return trimLeadingSilence(Buffer.from(base64, 'base64'), seconds)
+}
+
+/** Cut the recorder-spin-up silence off the front of a canonical 44-byte-header 16-bit PCM WAV
+ * (what engine.recordWav()/audioBufferToWav produce) so the file starts on the loop's first
+ * sound, then cap it at `seconds` so the deliberate over-capture doesn't lengthen the file.
+ * MediaRecorder start latency is wall-clock and jittery, so onset detection (first frame above
+ * a tiny threshold, backed off 5ms to keep the attack ramp) is the honest alignment. */
+function trimLeadingSilence(wav, seconds) {
+  const numChannels = wav.readUInt16LE(22)
+  const sampleRate = wav.readUInt32LE(24)
+  const bitsPerSample = wav.readUInt16LE(34)
+  if (bitsPerSample !== 16 || wav.toString('ascii', 36, 40) !== 'data') return wav // not the shape we wrote — leave it alone
+  const dataStart = 44
+  const frameBytes = 2 * numChannels
+  const totalFrames = Math.floor((wav.length - dataStart) / frameBytes)
+  const threshold = 40 // ≈0.0012 full scale — under any real signal, over dither/denormal noise
+  let onset = 0
+  for (; onset < totalFrames; onset++) {
+    const base = dataStart + onset * frameBytes
+    let audible = false
+    for (let ch = 0; ch < numChannels; ch++) if (Math.abs(wav.readInt16LE(base + ch * 2)) > threshold) audible = true
+    if (audible) break
+  }
+  if (onset >= totalFrames) return wav // all silence — nothing to align to
+  const startFrame = Math.max(0, onset - Math.round(sampleRate * 0.005))
+  const keepFrames = Math.min(totalFrames - startFrame, Math.round(seconds * sampleRate))
+  const data = wav.subarray(dataStart + startFrame * frameBytes, dataStart + (startFrame + keepFrames) * frameBytes)
+  const out = Buffer.concat([wav.subarray(0, dataStart), data])
+  out.writeUInt32LE(36 + data.length, 4) // RIFF chunk size
+  out.writeUInt32LE(data.length, 40) // data chunk size
+  return out
 }
 
 export async function renderCommand(argv) {
