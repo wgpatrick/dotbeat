@@ -1624,6 +1624,56 @@ export const rows = [
     research: 'research/88-usability-pilot-clip-creation.md', plan: 'phase-30-plan.md',
   },
 
+  // ── Reliability & usability fixes (Phase 31) ──────────────────────────────
+  // Source: four usability pilots (research/90-93) — two detailed musical workflows and, for the
+  // first time, two that followed real, independently-published Ableton beginner tutorials step by
+  // step in dotbeat instead of Ableton. Two findings were flagged "verify first" since they touched
+  // areas Phase 29/30 already fixed and verified; both got a real answer rather than an assumption
+  // (one confirmed real and fixed, one confirmed NOT reproducing and locked in with a regression
+  // guard) — see phase-31-plan.md for the full verification discipline.
+  {
+    area: 'Reliability & usability fixes (Phase 31)', feature: '"Place in Arrangement" mistargeting a newly-selected section',
+    description: 'Confirmed real (research/90): `placeInArrangement`\'s existing-clip lookup reused `primaryClipFor`\'s deliberate fallback-to-first-occurrence behavior — correct for VIEWING a clip\'s properties, wrong for the write-targeting decision. A newly-inserted empty section with no clip of its own silently resolved to whatever OTHER section\'s clip existed first, so placing new content overwrote that clip instead of minting one for the actually-selected section — caused a real data-loss incident in the pilot. Fixed with a strict, non-fallback lookup used only by the targeting decision, leaving the viewing-path fallback untouched.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/90-usability-pilot-dnb-song.md', plan: 'phase-31-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 31)', feature: 'Clip-block click targeting for empty/new sections + capture-scene skipping Audio tracks',
+    description: 'A freshly-inserted empty section had no clickable clip block at all — only the section\'s own name chip retargeted the editor (research/93). Fixed by having a plain click anywhere on a track\'s row resolve the clicked bar to a section index, covering both the loop-mode and empty-new-scene cases without new DOM chrome. Separately, `+ capture scene` unconditionally skipped every Audio track when building a new scene\'s slots — even ones with a real, already-placed clip — reproduced 5 times in research/93. Root cause: a guard meant only for an EMPTY audio track (avoiding a real 500 on loop→song conversion) was skipping populated ones too; narrowed to only skip when no clip exists yet, carrying over an existing clip\'s content otherwise.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/93-usability-pilot-tutorial-abletonlessons.md', plan: 'phase-31-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 31)', feature: 'Audio re-drop destroying edited warp/rate/gain settings',
+    description: 'Re-dropping a sample onto an already-populated audio track reset `warp`/`rate`/`gainDb` back to hardcoded defaults instead of preserving them across a media swap, silently discarding e.g. a carefully-set repitch rate (research/93). Media-dependent fields (`in`/`out`) still reset to match the new sample\'s length; media-independent settings now carry over from the existing clip.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/93-usability-pilot-tutorial-abletonlessons.md', plan: 'phase-31-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 31)', feature: 'Client/daemon desync on a rejected edit',
+    description: 'A drum-grid data/display desync research/93 reported did NOT reproduce on current main after extensive re-testing (matching Phase 30 Stream JA\'s prior negative finding for the same bug family) — locked in with a regression guard rather than assumed fixed. But a genuinely different case DID reproduce: an audio clip\'s `rate` field rejected by the daemon\'s own validation (e.g. a value outside the legal range) left the REJECTED value showing in the UI indefinitely, since the optimistic local update never reconciled with the server\'s actual (unchanged) state on a non-200 response. Fixed generally in `postEdit`\'s edit-posting path (re-pulls ground truth on any rejected edit, not just audio-specific), plus a `key`-based remount so already-mounted number inputs actually repaint the corrected value without a reload.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/93-usability-pilot-tutorial-abletonlessons.md', plan: 'phase-31-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 31)', feature: 'Note editor: new-note selection, a second sticky-header instance, mid-session row drift',
+    description: 'Three independent NoteView.tsx bugs (research/90, 91): a just-added note wasn\'t reliably the active selection for the very next keyboard shortcut, so e.g. Shift+ArrowRight could silently resize a different, stale note instead — fixed by reading the new note/hit back off the store immediately after the add and making it authoritative. A second sticky-header instance (the Clip/Device tab header itself, distinct from the lane-list title bar Phase 29 Stream GC already fixed) silently ate clicks near the top of a scrolled note grid — fixed with `pointer-events: none` on the purely-decorative header. A mid-session row-click drift (not present at session start, appearing after scroll/section-switch activity) was reproduced and traced to the key-row label strip missing a clip-placement-conditional offset the note grid itself already had.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/90-usability-pilot-dnb-song.md', plan: 'phase-31-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 31)', feature: 'Synth panel: envelope/effect defaults, preset label, knob sensitivity cue',
+    description: 'Five independent findings (research/90, 91): filter-envelope shape knobs and a freshly-added effect\'s mix control both defaulted to 0% with no visual cue they were inert until raised (now dim + an inline hint); the amp/filter envelope ADSR groups now carry sub-labels distinguishing them; the PRESET dropdown showed a stale, misleading preset name on a fresh track whose live params matched nothing in the catalog (now shows "custom (no matching preset)" instead of silently defaulting to index 0\'s label, without disturbing the existing "stay at the last real match" behavior for hand-tweaked params); knobs with a wide/log-curved range now get a visual "sensitive" cue (dashed arc + range readout) rather than a silent, unpredictable overshoot risk — chosen over normalizing the shared drag-sensitivity constant, which risked regressing already-tuned knobs elsewhere.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/91-usability-pilot-trance-lead.md', plan: 'phase-31-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 31)', feature: 'Small copy/interaction fixes: track rename, audio transpose labeling, new-project messaging, scene-button prominence',
+    description: 'Track rename needed two double-clicks because selecting an unselected track mounts a toolbar above the track list, shifting layout before the second click lands — often onto a DIFFERENT track\'s row entirely (research/90) — fixed with a list-level click coordinator that tracks the originally-clicked track across the shift. The audio clip\'s "rate" field is now labeled to connect it to "Transpose" (research/93). "new project…"\'s toast gave a CLI-only next step; now matches "open folder…"\'s own honest desktop-app/CLI framing (research/92). The three scene-creation buttons now spell out "shares content" / "independent, empty" / "independent copy" in visible label text plus a color cue, not just hover tooltips (research/90, 93).',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/90-usability-pilot-dnb-song.md', plan: 'phase-31-plan.md',
+  },
+
   // ── Known usability gaps (backlog) ────────────────────────────────────────
   // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
   // feature) or too cross-cutting (spans many components) to fold into a single fix-phase stream.

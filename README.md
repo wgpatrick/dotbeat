@@ -55,7 +55,7 @@ the full thesis and prior-art comparison.
 
 | Path | What |
 |---|---|
-| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (284 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
+| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (294 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, prior-art comparison, research provenance. |
 | `src/core/` | The `.beat` format: types, parser, serializer, converter, semantic diff, edit primitives (quantize/humanize/transpose/fit-to-scale/groove/…), inspect. Pure TS, no GUI deps. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over HTTP/SSE, echo suppression by canonical-text comparison. |
@@ -70,7 +70,7 @@ the full thesis and prior-art comparison.
 | `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
 | `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
 | `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
-| [`docs/research/`](docs/research/) | 89 research passes — landscape/prior-art, engine architecture, three full passes against Ableton Live's own reference manual (feature-by-feature 50-69, implementation-level UI/UX 70-74, round-2 live re-verification 75-79), and ten exploratory usability pilots (80-89, see `docs/usability-testing.md`) — an agent driving the real app via Playwright with no pre-scripted checklist, reading its own screenshots and reacting like a human tester, across realistic musical workflows and, in a second round, focused audits of core feature areas (arrangement view, clip creation, clip editing). |
+| [`docs/research/`](docs/research/) | 93 research passes — landscape/prior-art, engine architecture, three full passes against Ableton Live's own reference manual (feature-by-feature 50-69, implementation-level UI/UX 70-74, round-2 live re-verification 75-79), and fourteen exploratory usability pilots (80-93, see `docs/usability-testing.md`) — an agent driving the real app via Playwright with no pre-scripted checklist, reading its own screenshots and reacting like a human tester. Covers realistic musical workflows, focused audits of core feature areas, and — a newer variant — following real, independently-published Ableton beginner tutorials step by step in dotbeat instead of Ableton, measuring against an external standard rather than the project's own assumptions. |
 | [`docs/decisions.md`](docs/decisions.md) | 15 numbered design decisions with rationale and "revisit when" — check before proposing something that might contradict one. |
 | [`docs/usability-testing.md`](docs/usability-testing.md) | The exploratory usability-pilot methodology — no checklist, an agent reads its own screenshots and reacts like a human tester. A standing practice, run alongside `ui/verify-*.mjs`'s scripted assertions whenever GUI-facing behavior changes. |
 | [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format grammar. |
@@ -109,7 +109,15 @@ was real from those too — an unreliable Undo button, non-atomic multi-entity u
 click target, several note-editor UX gaps, and Audio tracks' bottom panel showing an empty note-grid
 instead of real controls — while also catching that some of those pilots' findings were artifacts of
 testing against a checkout mid-merge, not real gaps, and leaving those alone rather than "fixing"
-something that wasn't broken. `docs/product-roadmap.md` tracks every feature's real status;
+something that wasn't broken. A third pilot round (90-93) added two detailed musical builds and a
+new variant — following real, independently-published Ableton beginner tutorials step by step in
+dotbeat instead of Ableton — which surfaced a genuine "Place in Arrangement" mistargeting bug, a
+client/daemon desync on rejected edits, and `+ capture scene` silently skipping Audio tracks; Phase
+31 fixed all of it, verifying two "sounds serious" findings against a stable checkout before touching
+anything (one turned out real, one didn't reproduce and got a regression guard instead of a guess).
+Bigger findings that don't fit a fix phase — a real reverse-audio action, section/scene naming, right-
+click context menus — go straight into the roadmap as ordinary not-started rows rather than a second
+tracking system. `docs/product-roadmap.md` tracks every feature's real status;
 `ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
 built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a
 CLI, and an AI agent, all at once — turn a knob in the GUI and `git diff` shows exactly one changed
