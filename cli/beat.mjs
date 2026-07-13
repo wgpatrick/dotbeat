@@ -213,12 +213,12 @@ const USAGE = `usage:
   beat unpin <file> <name...>                             remove a pin by name
   beat pins <file>                                        list this project's pins, newest checkpoint first
   beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon
-  beat mcp                                                MCP server over stdio: most of the above as tools (~50,
+  beat mcp                                                MCP server over stdio: the commands above as tools (~54,
                                                           covering track/note/hit/effect/song/preset/macro/drum-kit/
-                                                          checkpoint/render/metrics editing) — NOT 1:1 with the CLI:
-                                                          vary, score, sample, lane, and daemon have no MCP tool and
-                                                          stay CLI-only; send tools/list on a running 'beat mcp' for
-                                                          the exact, current set
+                                                          vary/score/sample/lane/checkpoint/render/metrics editing) —
+                                                          only daemon (a long-running process, structurally not a
+                                                          tool call) stays CLI-only; send tools/list on a running
+                                                          'beat mcp' for the exact, current set
   beat mcp-init <file> [--force]                          write a .mcp.json next to <file> so Claude Code
                                                           (or any MCP client) auto-discovers 'beat mcp' there
 
@@ -768,47 +768,21 @@ async function varyCmd(argv) {
     throw err
   }
 
-  const { mkdirSync } = await import('node:fs')
-  const { createHash } = await import('node:crypto')
-  mkdirSync(outDir, { recursive: true })
-  const manifest = {
-    parent: file,
-    parentSha256: createHash('sha256').update(text).digest('hex'),
-    track,
-    group,
-    count,
-    amount,
-    seed,
-    createdAt: new Date().toISOString(),
-    // Renders are nondeterministic run-to-run (see docs/phase-5-plan.md Result) — only compare
-    // renders from the same batch, never across sessions.
-    variants: variants.map((v, i) => ({
-      file: `v${i + 1}.beat`,
-      edits: v.edits.map((e) => `${e.path} ${e.value}`),
-    })),
-  }
-  for (let i = 0; i < variants.length; i++) {
-    writeFileSync(resolve(outDir, `v${i + 1}.beat`), serialize(variants[i].doc))
-  }
-  writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
+  // Manifest write + render shaping live in src/vary/batch.ts, shared with beat_vary over MCP
+  // (Phase 34 Stream NA) — the manifest shape is the contract `beat score`/`beat_score` read.
+  const { writeVaryBatch, renderVaryBatch } = await import('../dist/src/vary/batch.js')
+  const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group, count, amount, seed, outDir, variants })
   process.stdout.write(`${outDir}/: ${variants.length} variants of ${track}.${group} (amount ${amount}, seed ${seed})\n`)
   for (let i = 0; i < variants.length; i++) {
     process.stdout.write(`  v${i + 1}: ${manifest.variants[i].edits.join(', ')}\n`)
   }
 
   if (argv.includes('--render')) {
-    const { execFileSync } = await import('node:child_process')
-    const { fileURLToPath } = await import('node:url')
     // D15: the one render path is dotbeat's own engine driven headless (cli/render.mjs). It's a
     // real-time capture per variant, so a batch of N takes ~N * loop-length plus browser startup —
     // slower than the retired faster-than-realtime offline path. Correct output, honest cost; a
     // dedicated fast batch renderer for dotbeat's own engine is future work (see D15 / phase-17 doc).
-    const renderCli = fileURLToPath(new URL('./render.mjs', import.meta.url))
-    for (let i = 0; i < variants.length; i++) {
-      const beatFile = resolve(outDir, `v${i + 1}.beat`)
-      process.stdout.write(`rendering v${i + 1}/${variants.length}...\n`)
-      execFileSync(process.execPath, [renderCli, beatFile, '-o', resolve(outDir, `v${i + 1}.wav`)], { stdio: ['ignore', 'ignore', 'inherit'] })
-    }
+    renderVaryBatch(outDir, variants.length, { onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
   }
 }
@@ -881,42 +855,19 @@ async function varyFeelCmd(argv, file, track) {
     if (err instanceof BeatVaryError) throw new BeatEditError(err.message)
     throw err
   }
-  const { mkdirSync } = await import('node:fs')
-  const { createHash } = await import('node:crypto')
-  mkdirSync(outDir, { recursive: true })
-  const manifest = {
-    parent: file,
-    parentSha256: createHash('sha256').update(text).digest('hex'),
-    track,
-    group: 'feel',
-    count,
-    seed,
-    createdAt: new Date().toISOString(),
-    variants: variants.map((v, i) => ({ file: `v${i + 1}.beat`, recipe: v.recipe })),
-  }
-  for (let i = 0; i < variants.length; i++) writeFileSync(resolve(outDir, `v${i + 1}.beat`), serialize(variants[i].doc))
-  writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
+  // Manifest write + render shaping live in src/vary/batch.ts, shared with beat_vary over MCP
+  // (Phase 34 Stream NA) — the manifest shape is the contract `beat score`/`beat_score` read.
+  const { writeVaryBatch, renderVaryBatch } = await import('../dist/src/vary/batch.js')
+  const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group: 'feel', count, seed, outDir, variants })
   process.stdout.write(`${outDir}/: ${variants.length} feel variants of ${track} (seed ${seed})\n`)
   for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
 
   if (argv.includes('--render')) {
-    const { execFileSync } = await import('node:child_process')
-    const { fileURLToPath } = await import('node:url')
-    const { existsSync, symlinkSync } = await import('node:fs')
-    // variant .beat files reference media relative to themselves; the parent's media/ dir sits
-    // next to the parent, so link it into the batch dir before rendering.
-    const parentMedia = resolve(dirname(resolve(file)), 'media')
-    const batchMedia = resolve(outDir, 'media')
-    if (existsSync(parentMedia) && !existsSync(batchMedia)) {
-      try { symlinkSync(parentMedia, batchMedia, 'dir') } catch { /* best-effort; render will report a missing sample */ }
-    }
     // D15: render through dotbeat's own engine (cli/render.mjs) — real-time per variant (see the
     // matching note in varyCmd above; a fast batch renderer for the canonical engine is future work).
-    const renderCli = fileURLToPath(new URL('./render.mjs', import.meta.url))
-    for (let i = 0; i < variants.length; i++) {
-      process.stdout.write(`rendering v${i + 1}/${variants.length}...\n`)
-      execFileSync(process.execPath, [renderCli, resolve(outDir, `v${i + 1}.beat`), '-o', resolve(outDir, `v${i + 1}.wav`)], { stdio: ['ignore', 'ignore', 'inherit'] })
-    }
+    // linkMediaFrom: variant .beat files reference media relative to themselves; the parent's
+    // media/ dir sits next to the parent, so batch.ts links it into the batch dir before rendering.
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
   }
 }
@@ -925,47 +876,19 @@ async function scoreCmd(argv) {
   const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--log')
   const [dir, ...picks] = positional
   if (!dir || picks.length === 0) throw new BeatEditError('score needs <batch-dir> and 1-3 ranked picks (variant numbers, best first)')
-  if (picks.length > 3) throw new BeatEditError('at most 3 ranked picks (Edisyn (3,16) pattern — ranking more adds fatigue, not signal)')
-  const manifestPath = resolve(dir, 'manifest.json')
-  let manifest
+  // Pick normalization ("N" or "vN", Phase 33 Stream ME), manifest read, jsonl entry shape, and
+  // the adopt-hint output all live in src/vary/batch.ts, shared verbatim with beat_score over MCP
+  // (Phase 34 Stream NA) — a batch generated on either surface scores on either surface.
+  const { scoreBatch, formatScoreResult, BeatBatchError, DEFAULT_SCORES_LOG } = await import('../dist/src/vary/batch.js')
+  const logPath = flagValue(argv, '--log') ?? DEFAULT_SCORES_LOG
+  let result
   try {
-    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    result = scoreBatch(dir, picks, logPath)
   } catch (err) {
-    if (err.code === 'ENOENT') throw new BeatEditError(`no such batch directory or missing manifest.json: ${dir}`)
-    throw new BeatEditError(`could not read ${manifestPath}: ${err.message}`)
+    if (err instanceof BeatBatchError) throw new BeatEditError(err.message)
+    throw err
   }
-  const ranks = picks.map((p) => {
-    // Phase 33 Stream ME (docs/research/96): variants are always DISPLAYED as v1/v2/... (printed
-    // summary, manifest, suggest's "adopt" line) but historically had to be REFERENCED as bare
-    // integers only — a real discoverability gap (a user typing the natural "v2" hit a wall).
-    // Accept either form here, normalizing to the bare integer everywhere below; bare integers
-    // keep working exactly as before.
-    const normalized = /^[vV](\d+)$/.test(p) ? p.slice(1) : p
-    const n = Number(normalized)
-    if (!Number.isInteger(n) || n < 1 || n > manifest.variants.length) throw new BeatEditError(`pick "${p}" is not a variant number 1-${manifest.variants.length} (accepts "N" or "vN")`)
-    return n
-  })
-  if (new Set(ranks).size !== ranks.length) throw new BeatEditError('picks must be distinct')
-  const logPath = flagValue(argv, '--log') ?? 'beat-scores.jsonl'
-  // param batches carry replayable `edits`; feel batches carry a `recipe` (the whole variant
-  // file IS the result, since humanize isn't a set-replayable edit).
-  const isFeel = manifest.group === 'feel'
-  const entry = {
-    t: new Date().toISOString(),
-    batch: dir,
-    track: manifest.track,
-    group: manifest.group,
-    amount: manifest.amount,
-    seed: manifest.seed,
-    parentSha256: manifest.parentSha256,
-    picks: ranks.map((n, i) => ({ rank: i + 1, variant: `v${n}.beat`, ...(isFeel ? { recipe: manifest.variants[n - 1].recipe } : { edits: manifest.variants[n - 1].edits }) })),
-    rejected: manifest.variants.map((_, i) => i + 1).filter((n) => !ranks.includes(n)).map((n) => `v${n}.beat`),
-  }
-  const { appendFileSync } = await import('node:fs')
-  appendFileSync(logPath, JSON.stringify(entry) + '\n')
-  process.stdout.write(`scored ${dir}: ${ranks.map((n) => `v${n}`).join(' > ')} -> ${logPath}\n`)
-  if (isFeel) process.stdout.write(`to adopt the winner (${entry.picks[0].recipe}): cp ${resolve(dir, `v${ranks[0]}.beat`)} ${manifest.parent}\n`)
-  else process.stdout.write(`to adopt the winner: beat set ${manifest.parent} ${entry.picks[0].edits.join(' ')}\n`)
+  process.stdout.write(formatScoreResult(result))
 }
 
 async function suggestCmd(argv) {
