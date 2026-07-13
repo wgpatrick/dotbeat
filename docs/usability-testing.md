@@ -102,3 +102,48 @@ Before finishing: kill the daemon and Vite processes, delete the scratch directo
 have leaked into the tracked repo before this way — a `.sf2` sample auto-collected into `examples/`
 by a daemon's content-browser logic, debug screenshots committed despite instructions not to. Catch
 these before they land, not after.
+
+## Variant: CLI/MCP pilots (no GUI at all)
+
+Every pilot through `docs/research/93` drove the GUI via Playwright. dotbeat's actual thesis is that
+the CLI, the GUI, and an AI agent all edit the same file — so a pilot that never opens the GUI and
+instead accomplishes a realistic task purely through the `beat` CLI, or purely through the MCP tool
+surface (`beat mcp`), is testing something the GUI pilots structurally cannot: whether the
+non-visual surfaces are actually usable by someone (or something) with no prior knowledge of
+dotbeat's internals beyond what the CLI's own `--help` output or the MCP tools' own descriptions
+expose.
+
+The same six rules above still apply, translated:
+
+- **No pre-scripted checklist** — discover the actual command/tool set as you go (`beat` with no
+  args, `beat <cmd> --help`, or an MCP `tools/list` call), the way a real first-time user or a fresh
+  AI agent integration would, not by reading `cli/beat.mjs`'s source first.
+- **"Screenshot after every action, read it before the next" becomes "read every command's actual
+  output/response before deciding the next command."** A CLI/MCP pilot that chains commands based on
+  assumed success is exactly as blind as a GUI pilot that chains clicks without reading screenshots
+  — the failure mode is the same, just the medium differs.
+- **Ground truth discipline still applies, arguably more directly**: there's no "screen" to be fooled
+  by here, but there IS a real risk of a command reporting success while not doing what its name/
+  description implied, or an MCP tool's description misleading an agent into a wrong call. Always
+  check `beat inspect` / the raw `.beat` file / `GET /document` against what a command claimed to do.
+- **Try at least one non-obvious path** — an intentionally malformed command, an ambiguous MCP tool
+  call, a command run in the wrong order — the way a real user or agent genuinely would stumble.
+
+**For an MCP pilot specifically**: there's no ready-made MCP client tool to hand a dispatched agent,
+so the pilot needs to speak the protocol itself — spawn `beat mcp` as a subprocess and write a small
+script (Node.js is simplest, matching the rest of this codebase) that sends JSON-RPC requests over
+stdio (`initialize`, `tools/list`, `tools/call`) and reads the responses, the same way a real MCP
+client integration would. This mirrors the precedent of pilots writing their own small Playwright
+driver scripts when no ready-made browser tool was available — same idea, different protocol.
+Evaluate the tool descriptions/schemas as if encountering them cold: would a fresh agent, given only
+the `tools/list` output, guess the correct usage without trial and error?
+
+**Fixture/port discipline is unchanged** — disposable scratch projects, never
+`examples/night-shift-song.beat`. Ports still matter for the daemon if a CLI/MCP pilot needs one
+running (some CLI commands talk to a live daemon, e.g. `beat selection`), but there's no Vite dev
+server involved at all for a pure CLI/MCP session.
+
+**Report format is the same** (`docs/research/NN-usability-pilot-<name>.md`, same findings tags),
+with one addition: call out explicitly whether a finding is CLI-specific, MCP-specific, or a gap in
+the underlying `src/core`/`src/daemon` capability itself (which would also affect the GUI) — these
+have different fixes and shouldn't get conflated.
