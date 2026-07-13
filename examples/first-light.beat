@@ -3,6 +3,11 @@ bpm 140
 loop_bars 8
 selected_track drums
 
+media
+  sample vox-ah sha256:0180430221509e97b7d244a0e90201215bbc59b4a87c194fa1695a82ae9c1fc3 media/vox-ah.wav
+  sample vox-oo sha256:bbc648d21d32c809e373d7ce261da65c27a79dbedec46b32bc1e015de2022b6d media/vox-oo.wav
+  sample vox-eh sha256:78ec74c8b5b53bd04518c0f791b9977f1db8dc2d94c225965ba8be78d734f2bd media/vox-eh.wav
+
 track drums Drums #56b6c2 drums
   synth
     osc sawtooth
@@ -1538,6 +1543,79 @@ track saw Saw #d19a66 synth
     note u100095 60 96 32 0.55
     note u100096 67 96 32 0.55
 
+track vox Vox #be5046 drums
+  synth
+    osc sawtooth
+    volume -6
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+    eqLow -4
+    sendReverb 0.4
+    sendDelay 0.35
+    duckSource drums
+    duckAmount 0.3
+  lane kick synth:membrane
+  lane snare synth:noise
+  lane rimshot synth:noise
+  lane clap synth:noise
+  lane hat synth:metal
+  lane openhat synth:metal
+  lane tom_lo synth:membrane
+  lane tom_mid synth:membrane
+  lane tom_hi synth:membrane
+  lane crash synth:metal
+  lane ride synth:metal
+  lane cowbell synth:membrane
+  lane kick vox-ah 0.9 0
+  lane snare vox-ah 0.9 3
+  lane clap vox-oo 0.85 7
+  lane hat vox-eh 0.8 -2
+  lane openhat vox-oo 0.85 5
+  clip vox-a
+    hit h1 hat 3 0.55
+    hit h2 snare 6 0.7
+    hit h3 kick 11 0.6
+    hit h4 clap 14 0.5
+    hit h5 snare 22 0.65
+    hit h6 hat 27 0.5
+    hit h7 hat 35 0.55
+    hit h8 snare 38 0.7
+    hit h9 kick 43 0.6
+    hit h10 clap 46 0.5
+    hit h11 snare 54 0.65
+    hit h12 hat 59 0.5
+    hit h13 hat 67 0.55
+    hit h14 snare 70 0.7
+    hit h15 kick 75 0.6
+    hit h16 clap 78 0.5
+    hit h17 snare 86 0.65
+    hit h18 hat 91 0.5
+    hit h19 hat 99 0.55
+    hit h20 snare 102 0.7
+    hit h21 kick 107 0.6
+    hit h22 clap 110 0.5
+    hit h23 snare 118 0.65
+    hit h24 hat 123 0.5
+    hit h25 openhat 126 0.55
+  clip vox-d
+    hit h1 clap 4 0.55
+    hit h2 kick 16 0.6
+    hit h3 openhat 26 0.45
+    hit h4 clap 36 0.55
+    hit h5 kick 48 0.6
+    hit h6 openhat 58 0.45
+    hit h7 clap 68 0.55
+    hit h8 kick 80 0.6
+    hit h9 openhat 90 0.45
+    hit h10 clap 100 0.55
+    hit h11 kick 112 0.6
+    hit h12 openhat 122 0.45
+
 scene intro
   slot keys close-a
   slot pad intro-a
@@ -1557,6 +1635,7 @@ scene lift
   slot pad shim-d
   slot arp arp-d
   slot air air-d
+  slot vox vox-d
 
 scene peak
   slot drums pulse-full
@@ -1566,6 +1645,7 @@ scene peak
   slot arp arp-a
   slot air air-a
   slot saw saw-a
+  slot vox vox-a
 
 scene groove1
   slot drums pulse-lite
@@ -1580,6 +1660,7 @@ scene groove2
   slot pad open-a
   slot arp arp-a
   slot air air-a
+  slot vox vox-a
 
 scene drive
   slot drums pulse-full
@@ -1588,12 +1669,17 @@ scene drive
   slot pad open-a
   slot arp arp-a
   slot air air-a
+  slot vox vox-a
 
 scene outro
   slot keys close-a
   slot pad shim-a
   slot arp arp-a
   slot air air-a
+  slot vox vox-d
+
+scene voxtest
+  slot vox vox-a
 
 song
   section intro 8
