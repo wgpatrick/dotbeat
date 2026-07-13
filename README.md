@@ -11,7 +11,7 @@ blob you hope merges.
 
 ```bash
 npm install
-npm test                          # 620 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
+npm test                          # 629 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat bass.cutoff 900   # prints "bass: cutoff 700 -> 900"
@@ -55,7 +55,7 @@ the full thesis and prior-art comparison.
 
 | Path | What |
 |---|---|
-| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (294 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
+| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (299 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, prior-art comparison, research provenance. |
 | `src/core/` | The `.beat` format: types, parser, serializer, converter, semantic diff, edit primitives (quantize/humanize/transpose/fit-to-scale/groove/…), inspect. Pure TS, no GUI deps. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over HTTP/SSE, echo suppression by canonical-text comparison. |
@@ -66,7 +66,7 @@ the full thesis and prior-art comparison.
 | `ui/` | dotbeat's own GUI (Vite + React + Tone.js) — arrangement view, piano-roll/drum-lane clip editing, mixer, effects chain, content browser. Its own product design, not a wrapped teaching app (see `docs/decisions.md` D12). |
 | `desktop/` | Tauri desktop shell — early-stage, working toward a native Mac app (`docs/product-spec-desktop.md`). |
 | `cli/beat.mjs` | The unified `beat` CLI — run with no args for the full, current command list. |
-| `test/` | 620 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
+| `test/` | 629 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
 | `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
 | `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
 | `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
@@ -123,7 +123,10 @@ shipped in Phase 32. A fourth pilot round (94-100) tried something new: testing 
 MCP tool surface directly instead of the GUI, cheap enough (~4 minutes per pilot) to run in volume —
 it found a genuine data-loss bug in `beat restore` (contradicting its own "never destroys work"
 guarantee), an MCP/CLI parity gap in drum-kit defaults, and several smaller correctness and
-error-handling gaps. `docs/product-roadmap.md` tracks every feature's real status;
+error-handling gaps — Phase 33 fixed all of it, including one fix (`beat lint` naming the real
+offending track) that needed genuine per-track audio isolation rather than a heuristic, since a
+shallow guess would have reproduced the exact bug it was meant to fix. `docs/product-roadmap.md`
+tracks every feature's real status;
 `ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
 built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a
 CLI, and an AI agent, all at once — turn a knob in the GUI and `git diff` shows exactly one changed

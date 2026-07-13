@@ -1680,6 +1680,41 @@ export const rows = [
     research: 'research/90-usability-pilot-dnb-song.md', plan: 'phase-31-plan.md',
   },
 
+  // ── Reliability & usability fixes (Phase 33) ──────────────────────────────
+  // Source: seven CLI/MCP pilots (research/94-100) — the first pilots of the new, dramatically
+  // cheaper CLI/MCP variant (docs/usability-testing.md), run directly against the `beat` CLI and
+  // the MCP tool surface with no GUI involved at all.
+  {
+    area: 'Reliability & usability fixes (Phase 33)', feature: '`beat restore` silently discarding uncommitted work',
+    description: 'The most severe finding of this session: `restore()` wrote the historical content over the live file BEFORE ever checkpointing whatever was currently on disk, so any uncommitted edit was silently and permanently destroyed — directly contradicting the function\'s own documented contract ("append-only — never destroys work"). Confirmed via a controlled repro (research/97): an uncommitted bpm edit vanished with zero trace in `git log --all -p` after a restore call. Fixed by checkpointing the pre-restore state first — `checkpoint()` already no-ops harmlessly when there\'s nothing uncommitted, so this is always safe. Verified by directly reproducing the exact scenario against a real `beat` CLI session; the pre-restore edit now survives as its own real, inspectable checkpoint. Fixed and pushed ahead of the rest of this phase given its severity.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/97-usability-pilot-cli-history.md', plan: 'phase-33-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 33)', feature: 'MCP/CLI parity + help-text accuracy',
+    description: '`beat_add_track` over MCP silently skipped the default 12-lane drum kit the CLI\'s equivalent command applies — confirmed by direct comparison of an MCP session\'s `beat_inspect` output against a CLI session on the same starting state (research/95). Now matches exactly. Also: `beat mcp`\'s help text no longer overstates its own tool coverage (`vary`/`score`/`sample`/`lane`/`daemon` are CLI-only, not on the real ~50-tool MCP surface); `beat_checkpoint`\'s tool description now explains its first-checkpoint auto-label behavior; `add-note`/`add-hit`\'s velocity-is-0-1-not-MIDI-127 convention (which caused 16 failed commands in a row in one pilot session) is now documented in both CLI help and MCP tool schemas; `add-track`\'s real default effect chain is now documented by name in both surfaces. `clip`\'s live-content-accumulation semantic was investigated and confirmed intentional (matches the same "capture current live state" model `+ capture scene` already uses) — documented rather than changed.',
+    core: 'na', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/95-usability-pilot-mcp-agent.md', plan: 'phase-33-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 33)', feature: 'Error handling: stack-trace leaks + `beat suggest` validation',
+    description: 'Three commands leaked raw Node stack traces instead of the CLI\'s own clean `error: ...` convention: `beat score` on a bad batch-dir path, `beat humanize --timing -1` (its error class was never in the top-level catch\'s whitelist, unlike its siblings), and `beat diff --git` with a bad rev — all three now fail the same clean way as every other command. `beat suggest`\'s cold-start recommendation used to unconditionally pick a drums-only param group regardless of track kind, making its first-ever suggestion for a synth track a silent no-op (research/96) — added group-legality-by-track-kind logic grounded in the GUI\'s own `PARAM_GROUPS[].kinds` (the real ground truth for which knobs are audible per kind), and added the same track-existence validation `vary` already had that `suggest` was silently skipping.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/96-usability-pilot-cli-vary-loop.md', plan: 'phase-33-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 33)', feature: '`beat inspect`/`lint`/`quantize` correctness',
+    description: '`beat inspect`\'s plain-text view omitted track groups entirely, even though `--json` and `beat diff --git` both showed them correctly — added a per-track group marker plus a top-level group section. `beat lint`\'s fix suggestions didn\'t name the offending track, so applying its literal advice could target the wrong track and leave the real issue unchanged (research/98\'s exact repro) — real per-track audio isolation was needed to fix this correctly (a "loudest declared volume" heuristic would have just reproduced the same bug), so `beat lint <wav> --doc <file>` now renders each track soloed (reusing the GUI\'s own real mute/solo mechanism) so lint\'s rules can name the actual offending track. `beat quantize` could silently push a note past a loop\'s own boundary with no warning — added a CLI-side warning mirroring Phase 30 Stream KC\'s GUI fix for the identical underlying issue.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/98-usability-pilot-cli-existing-project.md', plan: 'phase-33-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 33)', feature: 'Macro curve mislabeling + small CLI UX papercuts',
+    description: 'Macro curve `"exp"` resolved as a plain quadratic ease, not a true exponential/log curve, despite its own doc comment claiming otherwise (research/100, confirmed by direct reverse-engineering). A genuine log-space curve would be undefined/near-zero for most of a knob\'s travel on a target with `min=0` — exactly the case for the "grit" macro\'s `distortionAmount` — so implementing a real exponential curve would trade one bug for a worse regression on an existing macro; renamed `\'exp\'`/`\'log\'` → `\'quadIn\'`/`\'quadOut\'` everywhere instead, leaving every existing macro\'s resolved output byte-identical while the name now matches the actual math. Also: `beat score` now accepts `"v1"` or `"1"` for a variant pick, matching how variants are already displayed everywhere else; `effect-move`\'s musical diff no longer reports one line per shifted effect index when only one effect conceptually moved.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/100-usability-pilot-cli-macro-effects.md', plan: 'phase-33-plan.md',
+  },
+
   // ── Known usability gaps (backlog) ────────────────────────────────────────
   // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
   // feature) or too cross-cutting (spans many components) to fold into a single fix-phase stream.
