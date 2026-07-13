@@ -49,6 +49,15 @@ the behavior it's asserting is correct.
 shipped, as part of that work's own wrap-up — the same standing-habit footing as the
 roadmap/README refresh (below). Don't wait to be asked.
 
+**The same applies to the CLI and MCP surfaces** (`docs/usability-testing.md`'s "Variant: CLI/MCP
+pilots" section) — run one whenever a phase adds or changes a `beat` subcommand or an MCP tool.
+These pilots are dramatically cheaper than GUI ones (research/94: ~4 minutes, 26 tool calls, versus
+15-50+ minutes for a GUI pilot) since there's no screenshot-and-read loop or browser to drive, just
+commands and their output — cheap enough that there's no excuse to skip one. Owner's own framing,
+2026-07-12, after the first CLI pilot came back fast: "it might make sense to... encourage usability
+tests whenever new features have been added on the CLI... so whenever we add to the CLI we do
+usability tests to help verify."
+
 ## Dispatching parallel agents in worktrees: push before you dispatch
 
 `EnterWorktree`/`Agent(isolation: "worktree")` branch from `origin/<default-branch>` by default

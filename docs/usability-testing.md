@@ -30,6 +30,12 @@ the area that just shipped should be too. Don't wait to be asked. A pilot doesn'
 elaborate: one focused session against the specific feature area that changed is enough; save the
 full multi-pilot batches (5+ sessions) for periodic broader sweeps, not every small stream.
 
+**The same trigger applies to the CLI and MCP surfaces** (see the variant section below) — whenever
+a phase adds or changes a `beat` subcommand or an MCP tool, run one against it. These pilots are
+much cheaper than GUI ones (the first, research/94, took ~4 minutes and 26 tool calls versus a GUI
+pilot's 15-50+ minutes) since there's no screenshot-and-read loop or browser to drive — cheap enough
+that skipping one is a real gap, not a reasonable cost tradeoff.
+
 Also good triggers: after fixing a batch of pilot-found bugs (re-verify the fix landed the way a
 real user would experience it, not just that the specific repro steps from the report now pass),
 and whenever a feature area hasn't had a pilot pointed at it yet (check `docs/research/` for
