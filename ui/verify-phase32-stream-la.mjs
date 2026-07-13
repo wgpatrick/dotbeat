@@ -83,10 +83,20 @@ const trackSelectSel = (name) => `.arr-track-select:has(.arr-track-name:text-is(
 /** Right-clicks the center of the element `selector` resolves to (a real mouse event sequence
  * through the browser's input pipeline — the same `page.mouse.click(x, y, {button:'right'})` idiom
  * verify-phase29-stream-ge.mjs's GE3 already proved works against this app's PointerEvent-based
- * handlers). */
+ * handlers). Scrolls the target into view first — the same `scrollIntoViewIfNeeded()` every other
+ * note-interacting verify script in this repo already does (phase17/19/22/24/26-db/27-eb/28-fb/
+ * 28-fd/29-gc/30-jb/31-kc) before touching a note. This one originally skipped it, which was the
+ * real, live-confirmed cause of N1's failure: at the 1600x1000 viewport used below, the lead
+ * track's notes render below the fold of `.bottom-pane-body`'s own internal scroll (it's shorter
+ * than its content), so `boundingBox()` returned coordinates entirely outside the visible/hit-
+ * testable area — `document.elementFromPoint` at that spot returned null and the click landed on
+ * `<html>` instead of the note, so `onContextMenu` never fired. Confirmed live: the note's own
+ * onContextMenu/setCtxMenu/ContextMenu.tsx mount logic is completely correct — right-clicking the
+ * SAME note after a manual `scrollIntoView` opens the menu with the correct 3 items immediately. */
 async function rightClickCenter(page, selector) {
   const loc = page.locator(selector)
   await loc.waitFor({ state: 'visible', timeout: 5000 })
+  await loc.scrollIntoViewIfNeeded()
   const box = await loc.boundingBox()
   if (!box) throw new Error(`no bounding box for ${selector}`)
   const x = box.x + box.width / 2
@@ -217,6 +227,17 @@ async function main() {
     )
     await pollUntil(() => daemon.getDoc().tracks.find((t) => t.id === 'lead').notes.some((n) => n.start === 10.37), '[N4] the off-grid note to land')
     const offGridId = daemon.getDoc().tracks.find((t) => t.id === 'lead').notes.find((n) => n.start === 10.37).id
+    // The raw /edit POST above is a real daemon-side document write, but it bypasses the app's own
+    // postEdit() (bridge.ts) entirely — that's the ONLY thing that applies an edit's optimistic
+    // local mirror into `window.__store`, and the daemon deliberately does NOT re-broadcast a `doc`
+    // SSE event for its own /edit writes (writeIfChanged marks the file as already-seen so its own
+    // watcher echo is suppressed — see daemon.ts's writeIfChanged/onFileMaybeChanged). So without a
+    // reload here the frontend would never learn this note exists at all. Same "real daemon-side
+    // write, not a client-only illusion" full-reload idiom verify-phase31-stream-ka.mjs's T1/T5 and
+    // several other verify scripts already use for exactly this class of out-of-band daemon write.
+    await page.reload({ waitUntil: 'load' })
+    await page.waitForFunction(() => window.__store && window.__store.getState().doc, { timeout: 10000 })
+    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 })
     await rightClickCenter(page, `[data-note-id="${offGridId}"]`)
     await noteMenu.waitFor({ state: 'visible', timeout: 4000 })
     await noteMenu.locator('[data-ctx-item="quantize"]').click()

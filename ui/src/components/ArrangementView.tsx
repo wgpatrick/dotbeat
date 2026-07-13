@@ -2019,6 +2019,18 @@ export function ArrangementView() {
 
   const beginDrag = useCallback(
     (axis: 'ruler' | string, e: React.PointerEvent) => {
+      // Phase 32 Stream LA follow-up: right-click is handled entirely by a clip block's own
+      // onContextMenu (or, for bare lane space, the browser's native menu — nothing here to open).
+      // beginClipDrag's own `e.button === 2` bail (below) happens BEFORE its `e.stopPropagation()`
+      // call, so a right-click's pointerdown on a clip block is NOT stopped from bubbling up to
+      // THIS handler (the lane's own onPointerDown) — confirmed live: without this guard, that
+      // bubbled pointerdown fell into this function's own "plain click -> select this row's track"
+      // completion on pointerup, silently retargeting selectedTrackId/selectedSectionIndex to
+      // whichever row the right-click landed in, even while its own context menu was legitimately
+      // open. Same guard as beginClipDrag/AutomationLane's onPointerDown already use, applied here
+      // too since this handler can be reached either directly (a right-click on bare lane space) or
+      // via that bubble (a right-click on a clip block).
+      if (e.button === 2) return
       e.preventDefault()
       const laneEl = (e.currentTarget as HTMLElement).querySelector('.arr-canvas') ?? e.currentTarget
       dragRectLeft.current = (laneEl as HTMLElement).getBoundingClientRect().left
