@@ -83,7 +83,15 @@ export function VaryAffordance() {
   if (!doc || (!hasSelection && !batch && !feelBatch)) return null
 
   const scope = previewScope(selection, doc)
-  const triggerLabel = scope.group ? `vary ${scope.group}` : 'vary'
+  // Phase 29 Stream GE item 6 (docs/research/82 + the task brief that prompted these pilots): both
+  // "≈ vary X" buttons below open a 9-variant Prev/Next/Keep/Undo browser, but neither ever touches
+  // WHICH steps are hit/which notes exist — rung 1 (`triggerLabel`) varies synth TIMBRE params
+  // (hatTone/hatDecay/cutoff/etc.), rung 2 ("vary feel") varies humanized micro-timing/velocity. A
+  // real user's first guess for "vary hats" is "vary which steps are hit" (a rhythmic pattern
+  // change) — that tool is explicitly out of scope for this phase (see phase-29-plan.md's "not in
+  // scope"). The "(tone)"/"(timing)" qualifiers exist purely to set that expectation up front,
+  // without overselling what's actually a sound-design/humanize tool, not a pattern generator.
+  const triggerLabel = scope.group ? `vary ${scope.group} (tone)` : 'vary (tone)'
 
   async function trigger() {
     const current = useStore.getState().doc
@@ -244,11 +252,21 @@ export function VaryAffordance() {
   return (
     <div className="vary-bar" role="group" aria-label="vary selection">
       <span className="vary-scope-hint">selection: {selectionSummary(selection)}</span>
-      <button className="vary-btn trigger" onClick={trigger} disabled={busy} title="generate parameter variations of the selection (rung 1)">
+      <button
+        className="vary-btn trigger"
+        onClick={trigger}
+        disabled={busy}
+        title="vary synth TIMBRE (tone/decay/filter params, not which steps are hit) — 9 variants, Prev/Next/Keep/Undo"
+      >
         {busy ? 'varying…' : `≈ ${triggerLabel}`}
       </button>
-      <button className="vary-btn trigger" onClick={() => void triggerFeel()} disabled={feelBusy} title="generate humanized timing/velocity feels of the selection (rung 2)">
-        {feelBusy ? 'varying…' : '≈ vary feel'}
+      <button
+        className="vary-btn trigger"
+        onClick={() => void triggerFeel()}
+        disabled={feelBusy}
+        title="vary the humanized micro-timing/velocity feel (not which steps are hit or the notes themselves) — 9 variants, Prev/Next/Keep/Undo"
+      >
+        {feelBusy ? 'varying…' : '≈ vary feel (timing)'}
       </button>
       {kept && <span className="vary-kept">{kept}</span>}
       {error && <span className="vary-error">{error}</span>}

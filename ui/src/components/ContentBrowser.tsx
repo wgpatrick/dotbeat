@@ -13,6 +13,7 @@ import {
   type LibrarySoundfont,
 } from '../daemon/library'
 import { DRUM_LABELS } from '../types'
+import { showToast } from '../state/toastStore'
 
 // Phase 22 Stream AH — the content-browser sidebar (docs/research/18-ableton-ui-architecture.md §8
 // "Browser/sidebar"). A collapsible LEFT rail, additive to the Phase 18 layout (App.tsx's permanent
@@ -370,7 +371,7 @@ function SoundfontRow({
           e.stopPropagation()
           setAdding(true)
           installSoundfont(sf.file)
-            .catch((err) => window.alert(`Could not add instrument track: ${(err as Error).message}`))
+            .catch((err) => showToast(`Could not add instrument track: ${(err as Error).message}`))
             .finally(() => setAdding(false))
         }}
       >
@@ -415,6 +416,13 @@ export function ContentBrowser() {
           ✕
         </button>
       </div>
+      {/* Phase 29 Stream GE item 5 (docs/research/80 + 83): every other panel over-explains itself
+          with inline gray hint text (the Arrangement header's `.toolbar-tip`, the Clip editor's own
+          hint line) — this was the one major panel with none, and its real interaction model (drag
+          onto a track; a click alone only previews/highlights, it applies nothing) was invisible
+          until stumbled into or found by inspecting the DOM. Same shared `.toolbar-tip` class as
+          those other panels, just laid out for this rail's narrower width. */}
+      <div className="toolbar-tip library-hint">drag a preset, kit sample, or soundfont onto a track to apply it · ▶ previews first, without changing anything</div>
       <div className="library-rail-body">
         {error && (
           <div className="library-status error">

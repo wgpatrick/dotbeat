@@ -7,6 +7,7 @@ import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/lib
 import { makeDropTargetHandlers, DROP_TARGET_HOVER_CLASS, DRAGGING_CLASS } from '../dragDrop'
 import { ClipPropertiesPanel, primaryClipFor } from './ClipPropertiesPanel'
 import { DrumLanePanel } from './DrumLanePanel'
+import { showToast } from '../state/toastStore'
 
 // The editable event editor for BOTH synth/instrument notes and drum hits — Phase 22 Stream AB
 // (docs/research/20-drum-clip-editor-redesign.md Part 5) generalized what was originally a
@@ -551,7 +552,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
             offsetPitch,
           )
             .then((addedIds) => setSel(addedIds))
-            .catch((err) => window.alert(`Could not duplicate: ${(err as Error).message}`))
+            .catch((err) => showToast(`Could not duplicate: ${(err as Error).message}`))
         }
       }
       return
@@ -675,13 +676,13 @@ export function NoteView({ track }: { track: BeatTrack }) {
   function placeInArrangement() {
     if (!doc || placing) return
     if (!inSongMode) {
-      window.alert('Add a song section first ("+ section") — clips only play once slotted into a song-mode scene.')
+      showToast('Add a song section first ("+ section") — clips only play once slotted into a song-mode scene.')
       return
     }
     const sceneId = doc.song![0]!.scene
     setPlacing(true)
     postPlaceClip(track.id, { ...(existing ? { clipId: existing.id } : {}), sceneId })
-      .catch((err) => window.alert(`Could not place clip: ${(err as Error).message}`))
+      .catch((err) => showToast(`Could not place clip: ${(err as Error).message}`))
       .finally(() => setPlacing(false))
   }
 
@@ -734,7 +735,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
           const offsetStart = pasteStep - noteClipboard.anchorStart
           void postDuplicateNotes(track.id, noteClipboard.noteIds, offsetStart, 0)
             .then((addedIds) => setSel(addedIds))
-            .catch((err) => window.alert(`Could not paste: ${(err as Error).message}`))
+            .catch((err) => showToast(`Could not paste: ${(err as Error).message}`))
         }
         return
       }
@@ -1077,7 +1078,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
                     const payload = readDragPayload(e.dataTransfer)
                     if (!payload || payload.type !== 'kit-lane') return
                     installKitLane(track.id, payload.kit, { lane: payload.lane ?? label, targetLane: label }).catch((err) =>
-                      window.alert(`Could not install sample: ${(err as Error).message}`),
+                      showToast(`Could not install sample: ${(err as Error).message}`),
                     )
                   })
                 : null

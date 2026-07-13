@@ -114,7 +114,7 @@ import { decodeWav } from '../metrics/index.js'
 // history`/`beat restore`/`beat pin` expose. A restore/pin writes the .beat file on disk, which the
 // daemon's own directory watcher picks up and broadcasts as a `doc` SSE event, so the GUI hot-reloads
 // through the exact same external-edit path a hand edit or `beat set` uses — no special echo needed.
-import { history, collapsedHistory, restore, pin, unpin, HistoryError } from '../history/index.js'
+import { checkpoint, history, collapsedHistory, restore, pin, unpin, HistoryError } from '../history/index.js'
 // D2/D5 vary-and-audition surface over HTTP (Phase 15 Stream I): the GUI's inline "vary" affordance
 // POSTs /vary, which resolves the daemon's live pointing selection into a (track, param-group) and
 // runs core's `varyTrack` — the exact same rung-1 param-variation `beat vary <file> <track> <group>`
@@ -1550,6 +1550,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           json(res, 500, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // Phase 29 Stream GE item 4 (docs/research/80 §"Version history: a real gap"): a GUI-only new
+    // user had no discoverable way inside the app to snapshot their work — edits alone never mint a
+    // checkpoint (D3's own documented model), and the History panel's only prior actions were
+    // read-only (list/restore/pin). This is a thin HTTP wrapper around the SAME checkpoint() the
+    // CLI's `beat checkpoint`/MCP already call — no new history-layer work, just a route so the panel
+    // can trigger it. Optional {label} matches `beat checkpoint --label "..."`. Returns
+    // {skipped:true} untouched (not an error) when there's nothing to record, exactly like the CLI —
+    // a checkpoint that would record nothing is timeline noise, not a failure.
+    if (req.method === 'POST' && url.pathname === '/checkpoint') {
+      readBody(req)
+        .then((body) => {
+          const b = (body.trim() ? JSON.parse(body) : {}) as { label?: unknown }
+          if (b.label !== undefined && typeof b.label !== 'string') {
+            json(res, 400, { error: 'body must be {label?: string}' })
+            return
+          }
+          json(res, 200, checkpoint(filePath, b.label && b.label.trim() ? { label: b.label.trim() } : {}))
+        })
+        .catch((err) => {
+          const status = err instanceof HistoryError ? 400 : err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
         })
       return
     }

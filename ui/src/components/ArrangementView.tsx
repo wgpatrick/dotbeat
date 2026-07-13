@@ -9,6 +9,7 @@ import { useDropTarget } from '../dragDrop'
 import { declaredLaneNames, WARP_MODES, type AutomationInterpolation, type BeatAutomationPoint, type BeatClip, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind, type WarpMode } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 import { loadWaveform, getCachedWaveform, drawWaveform, type WaveformData } from '../audio/waveform'
+import { showToast } from '../state/toastStore'
 
 // Phase 20 Stream W — track add/delete/rename/recolor + project-folder controls. There is no BeatLab
 // component to port these from (BeatLab's tracks are lesson-defined; its store has no track
@@ -571,18 +572,18 @@ function TrackRow({
       if (!payload) return
       if (payload.type === 'preset') {
         if (payload.kind !== 'any' && payload.kind !== track.kind) {
-          window.alert(`"${payload.name}" is a ${payload.kind} preset — "${track.name}" is a ${track.kind} track.`)
+          showToast(`"${payload.name}" is a ${payload.kind} preset — "${track.name}" is a ${track.kind} track.`)
           return
         }
-        applyPresetToTrack(track.id, payload.name).catch((err) => window.alert(`Could not apply preset: ${(err as Error).message}`))
+        applyPresetToTrack(track.id, payload.name).catch((err) => showToast(`Could not apply preset: ${(err as Error).message}`))
       } else if (payload.type === 'kit-lane') {
         if (track.kind === 'drums') {
           installKitLane(track.id, payload.kit, payload.lane ? { lane: payload.lane } : {}).catch((err) =>
-            window.alert(`Could not install sample: ${(err as Error).message}`),
+            showToast(`Could not install sample: ${(err as Error).message}`),
           )
         } else if (track.kind === 'audio') {
           if (!payload.lane) {
-            window.alert('Drag a single kit sample (not a whole kit) onto an audio track — one clip, one sample.')
+            showToast('Drag a single kit sample (not a whole kit) onto an audio track — one clip, one sample.')
             return
           }
           const existingClipId = occurrences?.[0]?.clipId
@@ -590,19 +591,19 @@ function TrackRow({
           const opts: { clipId?: string; sceneId?: string } =
             existingClipId !== undefined ? { clipId: existingClipId } : firstScene && firstScene !== LOOP_SCENE_SENTINEL ? { sceneId: firstScene } : {}
           if (existingClipId === undefined && !opts.sceneId) {
-            window.alert('Add a song section first ("+ section") — audio clips only play once slotted into a song-mode scene.')
+            showToast('Add a song section first ("+ section") — audio clips only play once slotted into a song-mode scene.')
             return
           }
-          installAudioClip(track.id, payload.kit, payload.lane, opts).catch((err) => window.alert(`Could not create audio clip: ${(err as Error).message}`))
+          installAudioClip(track.id, payload.kit, payload.lane, opts).catch((err) => showToast(`Could not create audio clip: ${(err as Error).message}`))
         } else {
-          window.alert(`"${track.name}" is a ${track.kind} track — drop kit samples onto a drum or audio track.`)
+          showToast(`"${track.name}" is a ${track.kind} track — drop kit samples onto a drum or audio track.`)
         }
       } else if (payload.type === 'soundfont') {
         if (track.kind !== 'instrument') {
-          window.alert(`"${track.name}" is not an instrument track — drop a soundfont onto an instrument track.`)
+          showToast(`"${track.name}" is not an instrument track — drop a soundfont onto an instrument track.`)
           return
         }
-        installSoundfont(payload.file, { track: track.id }).catch((err) => window.alert(`Could not install soundfont: ${(err as Error).message}`))
+        installSoundfont(payload.file, { track: track.id }).catch((err) => showToast(`Could not install soundfont: ${(err as Error).message}`))
       }
     },
     [track.id, track.kind, track.name, occurrences, sections],
@@ -835,7 +836,7 @@ function TrackRow({
             title={`delete track ${track.name}`}
             onClick={() => {
               if (window.confirm(`Delete track "${track.name}"? This removes its clips, notes, and mixer settings and cannot be undone from here.`)) {
-                postRemoveTrack(track.id).catch((err) => window.alert(`Could not delete track: ${(err as Error).message}`))
+                postRemoveTrack(track.id).catch((err) => showToast(`Could not delete track: ${(err as Error).message}`))
               }
             }}
           >
@@ -950,6 +951,28 @@ function AutomationLane({
   const dragRef = useRef<DragState | null>(null)
   const dragLabelRef = useRef<HTMLDivElement>(null)
   const [popup, setPopup] = useState<{ id: string; x: number; y: number; time: number; value: number; interpolation: AutomationInterpolation } | null>(null)
+  const popupRef = useRef<HTMLDivElement>(null)
+
+  // Phase 29 Stream GE item 3 (docs/research/81 §"one more rough edge on that popup"): the popup
+  // used to close only via Escape (and only while the numeric <input> itself had keyboard focus) or
+  // a further click inside this SAME automation lane — clicking anywhere else on the page (another
+  // panel, the topbar, a different lane) left it sitting open indefinitely. Standard outside-click
+  // (+ Escape from anywhere, not just the focused input) dismissal, scoped to while a popup is open.
+  useEffect(() => {
+    if (!popup) return
+    const onPointerDownOutside = (e: PointerEvent) => {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) setPopup(null)
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPopup(null)
+    }
+    document.addEventListener('pointerdown', onPointerDownOutside)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDownOutside)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [popup])
 
   const valueToY = useCallback((v: number) => {
     const norm = Math.max(0, Math.min(1, (v - min) / (max - min || 1)))
@@ -1291,7 +1314,13 @@ function AutomationLane({
         <canvas ref={canvasRef} className="arr-auto-canvas" />
         <div ref={dragLabelRef} className="arr-auto-drag-label" style={{ display: 'none' }} />
         {popup && (
-          <div className="arr-auto-popup" style={{ left: popup.x, top: popup.y }} data-auto-popup={`${track.id}.${param}.${popup.id}`} onPointerDown={(e) => e.stopPropagation()}>
+          <div
+            ref={popupRef}
+            className="arr-auto-popup"
+            style={{ left: popup.x, top: popup.y }}
+            data-auto-popup={`${track.id}.${param}.${popup.id}`}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <input
               type="number"
               step="any"
@@ -1376,7 +1405,7 @@ function GroupHeaderRow({ group, collapsed, onToggleCollapse, onUngroup }: { gro
   const commitRename = useCallback(() => {
     setRenaming(false)
     const name = draft.trim()
-    if (name && name !== group.name) postGroupOp({ op: 'rename', id: group.id, name }).catch((err) => window.alert(`Could not rename group: ${(err as Error).message}`))
+    if (name && name !== group.name) postGroupOp({ op: 'rename', id: group.id, name }).catch((err) => showToast(`Could not rename group: ${(err as Error).message}`))
     else setDraft(group.name)
   }, [draft, group.id, group.name])
 
@@ -1769,19 +1798,19 @@ export function ArrangementView() {
       const occ = occurrencesByTrack.get(track.id) ?? []
       const hit = occ.find((o) => currentStep >= o.startBar * 16 && currentStep < (o.startBar + o.bars) * 16)
       if (!hit) {
-        window.alert('Move the playhead over this track\'s clip first (split-at-playhead needs a position inside the clip).')
+        showToast('Move the playhead over this track\'s clip first (split-at-playhead needs a position inside the clip).')
         return
       }
       const atSteps = currentStep - hit.startBar * 16
       if (atSteps <= 0) {
-        window.alert('The playhead is at the very start of the clip — nothing to split there.')
+        showToast('The playhead is at the very start of the clip — nothing to split there.')
         return
       }
       try {
         await postAudioSplit(track.id, hit.clipId, atSteps)
         postSelection({ tracks: [track.id] })
       } catch (err) {
-        window.alert(`Could not split: ${(err as Error).message}`)
+        showToast(`Could not split: ${(err as Error).message}`)
       }
     },
     [occurrencesByTrack, currentStep],
@@ -1872,13 +1901,13 @@ export function ArrangementView() {
           const fromIndex = Number(k.slice(sep + 2))
           const toIndex = fromIndex + deltaSections
           if (toIndex < 0 || toIndex >= sections.length) {
-            window.alert('Cannot move the selection that far — it would fall outside the arrangement.')
+            showToast('Cannot move the selection that far — it would fall outside the arrangement.')
             return
           }
           moves.push({ track: tid, fromIndex, toIndex })
         }
         setSelectedOcc(new Set())
-        postClipMove(moves).catch((err) => window.alert(`Could not move clip(s): ${(err as Error).message}`))
+        postClipMove(moves).catch((err) => showToast(`Could not move clip(s): ${(err as Error).message}`))
       }
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
@@ -2118,7 +2147,7 @@ export function ArrangementView() {
       if (kind === 'instrument') {
         const sample = (d.media as { id?: string }[])[0]?.id
         if (!sample) {
-          window.alert('Instrument tracks need a registered SoundFont sample. Register one with `beat sample` first.')
+          showToast('Instrument tracks need a registered SoundFont sample. Register one with `beat sample` first.')
           return
         }
         opts.soundfont = { sample, program: 0 }
@@ -2130,7 +2159,7 @@ export function ArrangementView() {
         postEdit('selected_track', id)
         postSelection({ tracks: [id] })
       } catch (err) {
-        window.alert(`Could not add track: ${(err as Error).message}`)
+        showToast(`Could not add track: ${(err as Error).message}`)
       } finally {
         setAddBusy(false)
       }
@@ -2156,7 +2185,7 @@ export function ArrangementView() {
       await postGroupOp({ op: 'create', trackIds })
       setGroupPick(new Set())
     } catch (err) {
-      window.alert(`Could not group tracks: ${(err as Error).message}`)
+      showToast(`Could not group tracks: ${(err as Error).message}`)
     } finally {
       setGroupBusy(false)
     }
@@ -2166,7 +2195,7 @@ export function ArrangementView() {
     try {
       await postGroupOp({ op: 'delete', id: groupId })
     } catch (err) {
-      window.alert(`Could not ungroup: ${(err as Error).message}`)
+      showToast(`Could not ungroup: ${(err as Error).message}`)
     }
   }, [])
 
@@ -2195,9 +2224,9 @@ export function ArrangementView() {
       })
       const body = (await res.json()) as { filePath?: string; error?: string }
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
-      window.alert(`Created ${body.filePath}.\n\n${isTauri() ? 'Use "open folder…" to switch to it.' : 'Point a beat daemon at it to open it.'}`)
+      showToast(`Created ${body.filePath}.\n\n${isTauri() ? 'Use "open folder…" to switch to it.' : 'Point a beat daemon at it to open it.'}`, 'success')
     } catch (err) {
-      window.alert(`Could not create project: ${(err as Error).message}`)
+      showToast(`Could not create project: ${(err as Error).message}`)
     } finally {
       setProjectBusy(false)
     }
@@ -2218,9 +2247,9 @@ export function ArrangementView() {
       })
       const body = (await res.json()) as { filePath?: string; error?: string }
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
-      window.alert(`Created ${body.filePath} from template ${from}.\n\n${isTauri() ? 'Use "open folder…" to switch to it.' : 'Point a beat daemon at it to open it.'}`)
+      showToast(`Created ${body.filePath} from template ${from}.\n\n${isTauri() ? 'Use "open folder…" to switch to it.' : 'Point a beat daemon at it to open it.'}`, 'success')
     } catch (err) {
-      window.alert(`Could not create project from template: ${(err as Error).message}`)
+      showToast(`Could not create project from template: ${(err as Error).message}`)
     } finally {
       setProjectBusy(false)
     }
@@ -2239,9 +2268,9 @@ export function ArrangementView() {
       })
       const body = (await res.json()) as { filePath?: string; error?: string }
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
-      window.alert(`Saved template to ${body.filePath}. This project's file is untouched.`)
+      showToast(`Saved template to ${body.filePath}. This project's file is untouched.`, 'success')
     } catch (err) {
-      window.alert(`Could not save template: ${(err as Error).message}`)
+      showToast(`Could not save template: ${(err as Error).message}`)
     } finally {
       setProjectBusy(false)
     }

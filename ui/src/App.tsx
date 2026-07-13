@@ -13,6 +13,7 @@ import { VaryAffordance } from './components/VaryAffordance'
 import { ExportButton } from './components/ExportButton'
 import { ContentBrowser } from './components/ContentBrowser'
 import { ShortcutHelp } from './components/ShortcutHelp'
+import { ToastHost } from './components/Toast'
 
 // Phase 18 — the Ableton-shaped recomposition (docs/phase-18-layout.md, driven by
 // docs/research/18-ableton-ui-architecture.md). The old four-tab switcher (Editor / Arrangement /
@@ -300,9 +301,13 @@ export function App() {
         </div>
       </div>
 
-      {/* Full mixer — an on-demand overlay, not a peer screen (research 18 Q3). */}
+      {/* Full mixer — an on-demand overlay, not a peer screen (research 18 Q3). Phase 29 Stream GE
+          item 1: the extra `mixer-scrim` modifier class (styles.css) sits BELOW the topbar's own
+          stacking context, unlike the plain `.overlay-scrim` ShortcutHelp.tsx still uses — so the
+          Mixer no longer blocks the topbar's Undo/Redo (docs/research/81), while the Shortcuts
+          panel's existing click-away-on-scrim behavior (its own verify script) is untouched. */}
       {mixerOpen && (
-        <div className="overlay-scrim" onClick={toggleMixer}>
+        <div className="overlay-scrim mixer-scrim" onClick={toggleMixer}>
           <div className="mixer-overlay" data-testid="mixer-overlay" onClick={(e) => e.stopPropagation()}>
             <div className="overlay-head">
               <span className="overlay-title section-heading">Mixer — all channel strips</span>
@@ -332,6 +337,12 @@ export function App() {
           app's whole real shortcut surface, replacing "hover this button / read this one
           sentence / spot this on-canvas label" as the only ways to discover it. */}
       {shortcutsOpen && <ShortcutHelp onClose={() => setShortcutsOpen(false)} />}
+
+      {/* Phase 29 Stream GE: the in-page toast host — success/error notifications replacing
+          window.alert()'s ~30 pure-notification call sites across ArrangementView/NoteView/
+          ContentBrowser. Rendered above everything else (styles.css's .toast-host z-index) so a
+          toast is never hidden behind the Mixer overlay or History drawer. */}
+      <ToastHost />
     </div>
   )
 }
