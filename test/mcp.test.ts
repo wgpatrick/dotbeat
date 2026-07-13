@@ -418,3 +418,58 @@ test('tools/call: beat_sample registers media relative to the .beat; beat_lane b
     mcp.close()
   }
 })
+
+// Pilot 101: two fixes. (1) Unknown argument keys are rejected at the dispatch layer instead of
+// silently ignored — an agent's plausible-but-wrong arg guess (e.g. `lanes` on beat_humanize,
+// which only exists on beat_vary) must fail loudly, not silently widen the edit to the whole
+// track. (2) beat_suggest validates track existence and passes the track's kind, matching the
+// CLI's Phase-33 fix — the drift pilot 101 caught.
+test('tools/call: unknown argument keys are rejected loudly, naming the valid ones', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-unknown-arg-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // the exact pilot-101 trap: beat_humanize has no `lanes` key (its lane scoping is `lanes` on
+    // beat_vary but `lanes` here was a guess) — must be an isError naming the valid keys, and the
+    // file must be untouched
+    const before = readFileSync(file, 'utf8')
+    const res = await mcp.request('tools/call', { name: 'beat_humanize', arguments: { file, track: 'drums', lanez: 'hat' } })
+    assert.equal(res.isError, true)
+    assert.match(res.content[0].text, /unknown argument "lanez" for beat_humanize \(valid: .*track.*\)/)
+    assert.equal(readFileSync(file, 'utf8'), before)
+
+    // valid calls still work unchanged
+    const ok = await mcp.request('tools/call', { name: 'beat_inspect', arguments: { file } })
+    assert.equal(ok.isError ?? false, false)
+  } finally {
+    mcp.close()
+  }
+})
+
+test('tools/call: beat_suggest validates the track exists (CLI parity, pilot 101)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-suggest-validate-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    const bad = await mcp.request('tools/call', { name: 'beat_suggest', arguments: { file, track: 'nope' } })
+    assert.equal(bad.isError, true)
+    assert.match(bad.content[0].text, /no track "nope" \(have: .*\)/)
+
+    // a real synth track's cold start must not recommend a drums-only group (kind-aware, like the CLI)
+    const good = await mcp.request('tools/call', { name: 'beat_suggest', arguments: { file, track: 'bass' } })
+    assert.equal(good.isError ?? false, false)
+    assert.doesNotMatch(good.content[0].text, /beat vary .* bass (kick|snare|hats)\b/)
+  } finally {
+    mcp.close()
+  }
+})

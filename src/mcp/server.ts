@@ -1335,10 +1335,18 @@ const TOOLS: ToolDef[] = [
     handler: (args) => {
       const file = str(args, 'file')
       const track = str(args, 'track')
+      // Same track-existence + kind resolution the CLI's suggestCmd gained in Phase 33
+      // (research/96) — pilot 101 caught this handler still skipping it (the CLI/MCP drift class
+      // Stream NA's shared helpers exist to prevent; suggest predates them). Kind matters: it
+      // feeds suggestNext's group-legality logic so a synth track is never cold-started onto a
+      // drums-only param group (a silent no-op).
+      const doc = parse(readFileSync(file, 'utf8'))
+      const trackObj = doc.tracks.find((t) => t.id === track)
+      if (!trackObj) throw new Error(`no track "${track}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
       const logPath = typeof args.log === 'string' ? args.log : 'beat-scores.jsonl'
       const text = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
       const entries = parseScoresLog(text)
-      const suggestion = suggestNext(entries, track, { file, ...(typeof args.target === 'string' ? { target: args.target } : {}) })
+      const suggestion = suggestNext(entries, track, { file, trackKind: trackObj.kind, ...(typeof args.target === 'string' ? { target: args.target } : {}) })
       return suggestion.reasoning.join('\n') + '\n'
     },
   },
@@ -1513,6 +1521,25 @@ export async function runMcpServer(input: NodeJS.ReadableStream = process.stdin,
       const tool = TOOLS.find((t) => t.name === name)
       if (!tool) {
         send({ jsonrpc: '2.0', id, error: { code: -32602, message: `unknown tool "${String(name)}"` } })
+        continue
+      }
+      // Reject unknown argument keys instead of silently ignoring them (pilot 101: an agent's
+      // plausible-but-wrong `lanes:` guess on beat_humanize was dropped without a word, turning an
+      // intended lane-scoped edit into an unintended full-track one). Every tool's inputSchema
+      // enumerates its real properties, so one dispatch-level check covers the whole surface —
+      // fail-loudly beats a silently different edit, and the isError text names the valid keys so
+      // the agent can self-correct on the next call.
+      const knownKeys = Object.keys((tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {})
+      const unknownKeys = Object.keys(args).filter((k) => !knownKeys.includes(k))
+      if (unknownKeys.length > 0) {
+        send({
+          jsonrpc: '2.0',
+          id,
+          result: toolResultText(
+            `unknown argument${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `"${k}"`).join(', ')} for ${tool.name} (valid: ${knownKeys.join(', ')})`,
+            true,
+          ),
+        })
         continue
       }
       try {
