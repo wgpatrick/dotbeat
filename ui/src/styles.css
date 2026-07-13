@@ -466,6 +466,24 @@ body {
      there's still a soft falloff below the hard line. */
   border-bottom: 3px solid #05060a;
   box-shadow: 0 3px 6px rgba(0, 0, 0, 0.55);
+  /* Phase 31 Stream KC item 2 (docs/research/91): GC's own scroll-margin/scroll-padding fix (bug 6
+     above) only helps PROGRAMMATIC scrollIntoView targeting of `.noteview-key-row`/`.lane-row` — the
+     row-LABEL strip on the left. It does nothing for ordinary mouse-wheel scrolling, and nothing at
+     all for `.noteview-grid`'s own clickable cells on the right, where notes/hits are actually
+     placed. Pilot 91 confirmed via direct DOM bounding-rect inspection: once scrolled far enough
+     that this sticky bar re-docks over the grid's own top rows, `.noteview-grid`'s bounding rect
+     still claims that space as its own, but `document.elementFromPoint` resolves to THIS bar
+     (z-index 5, above the grid's implicit z-index 0) — so a click there is silently swallowed, no
+     note, no error, no visual change. This bar is purely a read-only name/clip-id label (no click
+     handlers on it or its children — see the plain `<span>`s below), so the correct fix is to take
+     it out of hit-testing entirely: `pointer-events: none` lets every click pass straight through to
+     whatever's actually underneath (a grid row, an existing note, or `.noteview-key-row`),
+     regardless of scroll position — strictly more robust than a scroll-margin fix since it doesn't
+     depend on how the scroll got there. The hard border/shadow above already exists precisely
+     because content is expected to render (visually) underneath this bar once scrolled — this just
+     makes it also interactively transparent, closing the gap between "looks scrolled under" and "is
+     actually still clickable." */
+  pointer-events: none;
 }
 .noteview-titlebar-name {
   font-weight: 700;
@@ -858,6 +876,52 @@ body {
   text-transform: uppercase;
   letter-spacing: var(--label-tracking);
 }
+
+/* Phase 31 Stream KD items 1/2 (docs/research/90, 91): a knob whose param currently has no
+   audible effect — a freshly-added effect's Mix at 0%, or the filter-envelope shape knobs while
+   Fenv amount is 0 — dims instead of looking identical to every other live knob, plus a small
+   inline hint naming exactly what to raise. `.knob-slot` wraps `.knob` only where a spec opts in
+   (SynthPanel.tsx's Control), so ordinary knobs are completely unaffected. */
+.knob-slot.knob-inactive .knob {
+  opacity: 0.4;
+}
+.knob-inactive-hint {
+  font-size: 9px;
+  color: var(--text-dim);
+  max-width: 56px;
+  text-align: center;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+/* Phase 31 Stream KD item 3 (docs/research/90): a small sub-heading breaking "Filter & Envelope"'s
+   flat knob-row into "Amp Envelope" / "Filter Envelope" — `flex-basis: 100%` forces the wrapping
+   `.knob-row` (flex-wrap) onto a new line right where the sub-label sits. */
+.knob-row-sublabel {
+  flex-basis: 100%;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+  margin-top: 4px;
+}
+.knob-row-sublabel:first-child {
+  margin-top: 0;
+}
+
+/* Phase 31 Stream KD item 5 (docs/research/91): a knob whose full-range drag covers unusually much
+   ground (log-scaled, or a wide linear span — Knob.tsx's own `isSensitive`) gets a dashed
+   background arc (set inline via strokeDasharray) plus this small min-max range readout, so a user
+   can judge how much a given drag distance will move it BEFORE the first drag, without changing
+   the drag-to-value mapping itself. */
+.knob-range-hint {
+  font-size: 9px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
 .osc-select {
   display: flex;
   flex-direction: column;
@@ -3224,6 +3288,27 @@ body {
 .arr-add-section:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+/* Phase 31 Stream KE item 4: a subtle color cue reinforcing the "shares content" vs "independent
+   copy" distinction the button labels now spell out directly — `-shared` (plain "+ section") stays
+   the default dashed/dim treatment (still fully visible, not de-emphasized to the point of hiding
+   the footgun), `-independent` (insert/capture scene) gets a `--good` solid border+text so the two
+   safer options read as a matched, deliberately-different pair at a glance, not three identical
+   buttons. */
+.arr-add-section-independent {
+  border-style: solid;
+  border-color: var(--good);
+  color: var(--good);
+}
+.arr-add-section-independent:hover {
+  border-color: var(--good);
+  color: var(--good);
+  filter: brightness(1.15);
+}
+.arr-add-section-hint {
+  margin-left: 4px;
+  opacity: 0.7;
+  font-size: 10px;
 }
 /* Section right-edge resize handle sitting over the ruler. */
 .arr-section-resize {

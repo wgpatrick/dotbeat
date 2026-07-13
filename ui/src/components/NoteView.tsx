@@ -42,6 +42,22 @@ import { showToast } from '../state/toastStore'
 // of a raw `pitch`.
 
 const ROW_H = 12
+// Phase 31 Stream KC item 3 (docs/research/90): matches `.noteview-cliploop-strip`'s rendered
+// height (styles.css: `height: 14px; margin-bottom: 2px`) — the loop-range strip that renders
+// ABOVE `.noteview-grid` (inside `.noteview-lanes`) only once `primaryClip` is truthy, i.e. once
+// this track's clip has actually been placed into the arrangement/a scene. `.noteview-keys` (the
+// row-label/piano-key strip in the LEFT gutter) is a separate sibling column with no such strip, so
+// its rows never got this offset — pixel-perfect-aligned with the grid at the very start of a
+// session (loop mode, no clip placed yet), then permanently 16px out of alignment with it the
+// moment a clip gets placed (entering song mode via "+ section"/"+ capture scene"/"Place in
+// Arrangement"), for the rest of that track's session. That's exactly pilot 90's "not present at
+// the start, appears mid-session, then stays consistently one row off" repro — confirmed by
+// deliberately reproducing it live (loop mode -> place a clip -> click a key-strip row at its own
+// measured position -> the note lands one row away from what the key strip showed). Applied to
+// every key-row's own `top` below, and folded into `.noteview-keys`'s own height, whenever
+// `primaryClip` is truthy — keeping the two columns pixel-aligned in both states instead of just
+// the pre-placement one.
+const CLIPLOOP_STRIP_OFFSET = 16
 const DEFAULT_DUR = 2 // steps (an eighth note) — melodic notes only; a fresh hit has NO duration (a marker)
 const DEFAULT_VEL = 0.8
 const VEL_LANE_H = 46 // px — the velocity-lane strip below the note grid
@@ -524,6 +540,11 @@ export function NoteView({ track }: { track: BeatTrack }) {
 
   const rows = axis.rowCount
   const gridH = rows * ROW_H
+  // Phase 31 Stream KC item 3: mirrors `.noteview-cliploop-strip`'s conditional render (`{primaryClip
+  // && ...}` below, inside `.noteview-lanes`) so the key-row strip's vertical origin tracks the
+  // grid's own, in both the "no clip placed yet" and "clip placed" states — see CLIPLOOP_STRIP_OFFSET's
+  // own comment for why this was ever out of sync.
+  const keyRowOffset = primaryClip ? CLIPLOOP_STRIP_OFFSET : 0
 
   function toggleSel(id: string) {
     setSel(selSet.has(id) ? sel.filter((s) => s !== id) : [...sel, id])
@@ -613,12 +634,30 @@ export function NoteView({ track }: { track: BeatTrack }) {
     const step = Math.max(0, Math.min(totalSteps - 1, cellStep((e.clientX - m.rect.left) / stepW, freehand)))
     const row = Math.floor((e.clientY - m.rect.top) / ROW_H)
     if (row < 0 || row >= rows) return
-    setSel([])
+    // Phase 31 Stream KC item 1 (docs/research/90): `postEdit`'s local mirror (`applyLocalEdit` in
+    // bridge.ts) is SYNCHRONOUS — it mints the new note/hit's id deterministically (`u<max+1>` /
+    // `h<max+1>`) and writes it into `useStore`'s doc via `setDoc` before `postEdit` returns, well
+    // before the actual daemon round-trip lands. Previously this branch cleared the selection
+    // (`setSel([])`) and never re-populated it, so the freshly-added event only ever LOOKED selected
+    // by coincidence (e.g. a leftover marquee highlight) while the store's real `editNoteIds` — what
+    // every keyboard shortcut in this file's `onKey` handler actually reads — stayed whatever it was
+    // before the click. Pilot 90's repro: click empty grid to add a note, immediately press
+    // Shift+ArrowRight to resize it — the resize silently landed on a DIFFERENT, previously-selected
+    // note instead, with no visual sign anything was wrong. Reading the doc back off the store right
+    // after `postEdit` returns and selecting the last note/hit in that track's array (append-only,
+    // per `applyLocalEdit`'s `[...t.notes, note]` / `[...t.hits, hit]`) makes the new event
+    // authoritative for the very next keyboard action, matching what it already looked like on screen.
     if (eventKind === 'note') {
       postEdit(`${track.id}.note`, `${axis.valueOfRow(row)} ${step} ${DEFAULT_DUR} ${DEFAULT_VEL}`)
+      const t = useStore.getState().doc?.tracks.find((tt) => tt.id === track.id)
+      const added = t?.notes[t.notes.length - 1]
+      setSel(added ? [added.id] : [])
     } else {
       // A freshly-added hit has NO duration — a marker/one-shot trigger (research 20 Part 3).
       postEdit(`${track.id}.hit`, `${axis.valueOfRow(row)} ${step} ${DEFAULT_VEL}`)
+      const t = useStore.getState().doc?.tracks.find((tt) => tt.id === track.id)
+      const added = t?.hits[t.hits.length - 1]
+      setSel(added ? [added.id] : [])
     }
   }
 
@@ -1313,7 +1352,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
               auditions it through the track's live engine voice (axis.preview). */}
           <div
             className="noteview-keys"
-            style={{ position: 'sticky', left: 0, zIndex: 6, flex: '0 0 auto', width: KEY_W, height: gridH, background: '#0f1014' }}
+            style={{ position: 'sticky', left: 0, zIndex: 6, flex: '0 0 auto', width: KEY_W, height: gridH + keyRowOffset, background: '#0f1014' }}
           >
             {Array.from({ length: rows }, (_, row) => {
               const black = axis.isBlackRow(row)
@@ -1352,7 +1391,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
                   title={isDrums ? `${label} — drop a kit sample here to load it onto this lane` : pitchName(axis.valueOfRow(row) as number)}
                   style={{
                     position: 'absolute',
-                    top: row * ROW_H,
+                    top: row * ROW_H + keyRowOffset,
                     left: 0,
                     right: 0,
                     height: ROW_H,

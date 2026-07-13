@@ -507,6 +507,7 @@ function TrackRow({
   selectedOcc,
   dragPreview,
   onOccPointerDown,
+  renameRequest,
 }: {
   flat: TrackFlat
   totalBars: number
@@ -517,6 +518,11 @@ function TrackRow({
   selected: boolean
   onHeaderClick: () => void
   onRowPointerDown: (e: React.PointerEvent) => void
+  /** Phase 31 Stream KE item 1: a request (keyed by a fresh `nonce` each time, so repeat requests on
+   * the same track still re-fire) from the parent's list-level double-click coordinator (see
+   * ArrangementView's `handleArrangementClickCapture`) to open THIS track's rename field. Non-null
+   * only for the one row it targets. */
+  renameRequest?: { trackId: string; nonce: number } | null
   headerExtra?: ReactNode
   /** Phase 22 Stream AF: whether this track is currently picked (checkbox) for the next "+ group"
    * action. Undefined/omitted when grouping isn't wired up by the caller. */
@@ -566,6 +572,31 @@ function TrackRow({
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(track.name)
   const [spaceStripped, setSpaceStripped] = useState(false)
+  // Phase 31 Stream KE item 1 (docs/research/90: renaming took two double-clicks, not one).
+  //
+  // Root cause, confirmed by instrumenting a real headless run (not guessed from reading the code):
+  // the native `dblclick` event requires BOTH clicks to land on the SAME element. The first click of
+  // a double-click on an unselected track calls `onHeaderClick`, which selects the track — and
+  // selecting a track mounts App.tsx's `<VaryAffordance />` contextual toolbar, a sibling rendered
+  // ABOVE `<ArrangementView />`, which shifts the ENTIRE track list down by the toolbar's height
+  // before the second click lands. A real double-click's second click fires at the same fixed screen
+  // coordinate as the first (a physical mouse doesn't move between the two clicks of one gesture) —
+  // measured directly via a headless click-log, that second click doesn't just miss the shifted
+  // button, it typically lands in a DIFFERENT track's row entirely (whichever row's now sitting at
+  // that now-stale coordinate), so per-row same-element OR even same-row double-click detection can't
+  // catch it. The actual pairing (see `handleArrangementClickCapture` on the parent `.arrangement`
+  // container, the one ancestor whose own position is stable regardless of which descendant a
+  // deflected click lands on) lives one level up; this row just reacts to being TOLD to open rename
+  // via `renameRequest`, whichever element actually received the second click.
+  useEffect(() => {
+    if (renameRequest && renameRequest.trackId === track.id) {
+      setDraft(track.name)
+      setRenaming(true)
+    }
+    // Only the nonce should re-trigger this — `track.name` is read fresh inside, not a dependency
+    // that should itself reopen renaming.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renameRequest])
   const commitRename = useCallback(() => {
     setRenaming(false)
     setSpaceStripped(false)
@@ -868,11 +899,8 @@ function TrackRow({
           ) : (
             <button
               className="arr-track-select"
+              data-track-select={track.id}
               onClick={onHeaderClick}
-              onDoubleClick={() => {
-                setDraft(track.name)
-                setRenaming(true)
-              }}
               title={`select track ${track.name} (double-click to rename)`}
             >
               <span className="arr-track-name">{track.name}</span>
@@ -1568,6 +1596,42 @@ export function ArrangementView() {
   // 16x/bar, so it's allowed in reactive state (docs/research/15 §2); only the lightweight playhead
   // div re-renders on it — the memoized row canvases don't (their effect deps exclude currentStep).
   const currentStep = useStore((s) => s.currentStep)
+  // Phase 31 Stream KE item 1 (docs/research/90): the list-level coordinator behind the "rename
+  // takes one double-click, not two" fix — see TrackRow's own comment on `renameRequest` for the
+  // full root-cause writeup. Deliberately lives here, not per-row: a real double-click's second
+  // click, deflected by the VaryAffordance toolbar's layout shift, was measured (via a real headless
+  // click-log) landing in a DIFFERENT track's row than the first click — so pairing has to happen at
+  // an ancestor stable enough to see every row's clicks, not inside any one row.
+  const lastTrackSelectClickRef = useRef<{ trackId: string; at: number } | null>(null)
+  const [renameRequest, setRenameRequest] = useState<{ trackId: string; nonce: number } | null>(null)
+  const handleArrangementClickCapture = useCallback((e: React.MouseEvent) => {
+    const DOUBLE_CLICK_MS = 400
+    const target = e.target as HTMLElement
+    const now = Date.now()
+    const selectBtn = target.closest<HTMLElement>('.arr-track-select[data-track-select]')
+    if (selectBtn) {
+      const trackId = selectBtn.getAttribute('data-track-select')!
+      const prev = lastTrackSelectClickRef.current
+      if (prev && prev.trackId === trackId && now - prev.at < DOUBLE_CLICK_MS) {
+        lastTrackSelectClickRef.current = null
+        setRenameRequest({ trackId, nonce: now })
+      } else {
+        lastTrackSelectClickRef.current = { trackId, at: now }
+      }
+      return
+    }
+    // Deflected-click case: this click landed somewhere else entirely (often a different track's
+    // row) — if it arrives soon enough after a select-button click, treat it as that gesture's lost
+    // second click. Exclude genuinely separate, deliberate control clicks (mute/solo/delete buttons,
+    // the color swatch, the volume/pan sliders) so quickly operating one of those right after
+    // selecting a track is never misread as the second half of a rename gesture.
+    if (target.closest('button, input[type="color"], input[type="range"]')) return
+    const prev = lastTrackSelectClickRef.current
+    if (prev && now - prev.at < DOUBLE_CLICK_MS) {
+      lastTrackSelectClickRef.current = null
+      setRenameRequest({ trackId: prev.trackId, nonce: now })
+    }
+  }, [])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [laneWidth, setLaneWidth] = useState(800)
   // Timeline zoom (Phase 24 Stream CD): null = fit-to-width (default, today's behavior); a number
@@ -2313,7 +2377,17 @@ export function ArrangementView() {
       })
       const body = (await res.json()) as { filePath?: string; error?: string }
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
-      showToast(`Created ${body.filePath}.\n\n${isTauri() ? 'Use "open folder…" to switch to it.' : 'Point a beat daemon at it to open it.'}`, 'success')
+      // Phase 31 Stream KE item 3 (docs/research/92: the old browser-mode text, "Point a beat daemon
+      // at it to open it," assumed CLI knowledge a GUI-only user has no way to act on). The
+      // constraint is real either way — this running tab can't retarget its own daemon to a
+      // different file — but the wording now matches "open folder…"'s own disabled-state tooltip
+      // (`available in the desktop app — switches the daemon to another project folder`), so both
+      // surfaces explain the same underlying limitation the same honest way instead of one assuming
+      // CLI fluency.
+      showToast(
+        `Created ${body.filePath}.\n\n${isTauri() ? 'Use "open folder…" to switch to it.' : 'Switching to it is available in the desktop app (or the CLI) — this browser tab can\'t retarget the daemon to a different file.'}`,
+        'success',
+      )
     } catch (err) {
       showToast(`Could not create project: ${(err as Error).message}`)
     } finally {
@@ -2336,7 +2410,12 @@ export function ArrangementView() {
       })
       const body = (await res.json()) as { filePath?: string; error?: string }
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
-      showToast(`Created ${body.filePath} from template ${from}.\n\n${isTauri() ? 'Use "open folder…" to switch to it.' : 'Point a beat daemon at it to open it.'}`, 'success')
+      // See createNewProject's matching comment above — same honest, desktop-app/CLI-framed wording
+      // for the same browser-mode "this tab can't retarget itself" constraint.
+      showToast(
+        `Created ${body.filePath} from template ${from}.\n\n${isTauri() ? 'Use "open folder…" to switch to it.' : 'Switching to it is available in the desktop app (or the CLI) — this browser tab can\'t retarget the daemon to a different file.'}`,
+        'success',
+      )
     } catch (err) {
       showToast(`Could not create project from template: ${(err as Error).message}`)
     } finally {
@@ -2426,7 +2505,7 @@ export function ArrangementView() {
   const contentRowsHeight = visibleTrackRows.length * ROW_H + groupHeaderRows * GROUP_HEADER_H
 
   return (
-    <div className="arrangement">
+    <div className="arrangement" onClickCapture={handleArrangementClickCapture}>
       <div className="editor-toolbar">
         <span className="section-heading">arrangement</span>
         <span className="toolbar-tip">
@@ -2657,13 +2736,27 @@ export function ArrangementView() {
               </span>
               )
             })}
+            {/* Phase 31 Stream KE item 4 (docs/research/86/87/88/90/93, repeatedly): "+ section" is
+                first, most prominent, and most inviting to click, but it's also the footgun — it
+                REUSES the last section's scene by reference, so editing one section's clips silently
+                edits every other section sharing that scene. The two buttons below it are the
+                genuinely independent options, but "+ capture scene" (the one that actually gives
+                populated, independent, editable content per track — what most pilots wanted) read as
+                a performance/recording action rather than an authoring one, and sat last/least
+                prominent of the three. Existing tooltips are already accurate and specific (pilot
+                87) — left unchanged. This is a label/visual-prominence fix only: the visible button
+                text now spells out the "shares content" vs. "independent copy" distinction directly
+                (so it's legible without hovering), and `.arr-add-section-shared`/
+                `-independent` give a subtle color cue (default vs. `--good`) reinforcing the same
+                thing at a glance. DOM order and all three `data-*` selectors are unchanged — every
+                verify-*.mjs script that drives these buttons selects by attribute, not position. */}
             <button
-              className="arr-add-section"
+              className="arr-add-section arr-add-section-shared"
               data-add-section="1"
               title="append a section (duplicates the last section's content)"
               onClick={() => postSong({ op: 'append', bars: doc.song![doc.song!.length - 1]!.bars })}
             >
-              + section
+              + section <span className="arr-add-section-hint">(shares content)</span>
             </button>
             {/* Phase 26 Stream DJ: unlike "+ section" (which always REUSES the last section's scene
                 — the exact behavior that lets editing one section's clips silently edit every other
@@ -2674,20 +2767,20 @@ export function ArrangementView() {
                 Both land at the end of the timeline, same default position "+ section" itself uses
                 — the daemon route accepts an arbitrary index for scripted/future callers. */}
             <button
-              className="arr-add-section"
+              className="arr-add-section arr-add-section-independent"
               data-insert-scene="1"
               title="insert a new, empty, fully independent scene as a new section at the end of the song — no clips shared with any other section"
               onClick={() => postSong({ op: 'insert', index: doc.song!.length, bars: doc.song![doc.song!.length - 1]!.bars })}
             >
-              + insert scene
+              + insert scene <span className="arr-add-section-hint">(independent, empty)</span>
             </button>
             <button
-              className="arr-add-section"
+              className="arr-add-section arr-add-section-independent"
               data-capture-insert-scene="1"
               title="snapshot every track's current live content into a new, independent scene, inserted as a new section at the end of the song"
               onClick={() => postSong({ op: 'captureInsert', index: doc.song!.length, bars: doc.song![doc.song!.length - 1]!.bars })}
             >
-              + capture scene
+              + capture scene <span className="arr-add-section-hint">(independent copy)</span>
             </button>
           </>
         ) : (
@@ -2902,6 +2995,7 @@ export function ArrangementView() {
                 band={bandForTrack()}
                 selected={!!selTracks && selTracks.includes(flat.track.id)}
                 onHeaderClick={() => clickHeader(flat.track)}
+                renameRequest={renameRequest && renameRequest.trackId === flat.track.id ? renameRequest : null}
                 onRowPointerDown={(e) => beginDrag(flat.track.id, e)}
                 groupPickChecked={groupPick.has(flat.track.id)}
                 onToggleGroupPick={() => toggleGroupPick(flat.track.id)}
