@@ -780,6 +780,18 @@ function TrackRow({
   // A real drag/click on this block still routes through the ordinary onOccPointerDown → beginClipDrag
   // path in the parent; with only one section to land on, a drag there is always a same-section no-op
   // and a plain click just (de)selects the block — see beginClipDrag's own comment.
+  //
+  // Phase 31 Stream KA item 2(b) considered, but deliberately did NOT, synthesizing a placeholder
+  // block for every section a track has no clip in yet: Phase 24 Stream CC's own verify script
+  // (ui/verify-phase24-stream-cc.mjs, part B) depends on a track's SILENT sections staying
+  // genuinely block-free DOM space to start a marquee-select drag from (starting a drag ON any
+  // `.arr-clip-block` — even an inert placeholder — routes through onOccPointerDown/beginClipDrag
+  // instead, which stopPropagation()s and turns the gesture into a single-clip drag, not a marquee).
+  // Blanketing every empty section in a placeholder block would have silently broken that. Instead,
+  // the fix lives in `onRowPointerDown`'s own click handler (this file, the `beginDrag`/`drag` effect
+  // below) — a plain click ANYWHERE in a track's row, populated or not, now resolves and sets
+  // `selectedSectionIndex` from the click's bar position, so a genuinely silent section is still
+  // retargetable without needing new, marquee-blocking DOM chrome.
   const displayOccurrences: ClipOccurrence[] =
     occurrences && occurrences.length > 0
       ? occurrences
@@ -2114,6 +2126,25 @@ export function ArrangementView() {
             setSelectedTrack(d.axis)
             postEdit('selected_track', d.axis)
             setBottomPaneOpen(true)
+            // Phase 31 Stream KA items 2(a)/2(b): a plain click on a track's row can land either on
+            // the loop-mode synthetic block (Phase 27 Stream EA bug 1 routes its pointerdown here,
+            // not through onOccPointerDown/beginClipDrag, specifically to keep bar-range-selection
+            // dragging working on that row) or on genuinely BARE lane space over a song-mode section
+            // this track has no clip in (research/93: "+ insert scene"'s empty section had no
+            // clickable block at all — nothing DOM-present to retarget the editor with, since
+            // trackOccurrences only ever returns entries for sections a track already has a clip
+            // in). Rather than synthesizing new placeholder DOM chrome for every empty section
+            // (considered, but rejected — see displayOccurrences's own comment: it would have turned
+            // every silent section into a `.arr-clip-block`, breaking Phase 24 Stream CC's
+            // marquee-select-from-empty-space gesture, which specifically starts a drag from bare
+            // lane space), resolve which section the click's own bar position falls into and set
+            // selectedSectionIndex directly — the same "which section is the user pointed at" signal
+            // a populated clip-block click already sets (beginClipDrag's own onUp), now reachable
+            // from bare lane space too. `sections` is `[{startBar:0, bars:loopBars}]` in loop mode,
+            // so this naturally resolves to index 0 there (item 2(a)'s case) without a separate
+            // branch.
+            const clickedSection = sections.findIndex((s) => d.start >= s.startBar && d.start < s.startBar + s.bars)
+            if (clickedSection >= 0) setSelectedSection(clickedSection)
           }
           const start = Math.min(d.start, d.cur)
           const end = Math.max(d.start, d.cur) + 1 // inclusive bar → exclusive end; selection needs start < end
@@ -2144,7 +2175,7 @@ export function ArrangementView() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
-  }, [drag, barFromClientX, occurrencesByTrack, setSelectedTrack, setBottomPaneOpen])
+  }, [drag, barFromClientX, occurrencesByTrack, setSelectedTrack, setBottomPaneOpen, sections, setSelectedSection])
 
   // Phase 24 Stream CE: loop-region controls. `setLoopRange` is the one place that writes
   // `loopRegion` — no separate "push this to the engine" call is needed: engine.ts's `tick()` reads

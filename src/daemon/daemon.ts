@@ -189,21 +189,46 @@ export function resolveVaryTarget(sel: BeatSelection, doc: BeatDocument, body: V
  * (core's saveClip) and map every track to it (core's setScene). This is how loop mode becomes song
  * mode without discarding what's there — the existing loop content becomes a real, playable scene.
  *
- * Phase 23 Stream BC fix: `audio`-kind tracks are SKIPPED here — they have no live content to
- * snapshot (docs/phase-22-stream-ae.md: "BeatTrack gets no `audio` field, only `BeatClip.audio?`"),
- * and saveClip's generic "snapshot whatever's live" produces a clip with no `audio` line, which the
- * parser then rejects outright (every clip on an audio track must carry one, same fail-loud stance
- * as an instrument track missing its soundfont line) — so converting to song mode with an empty
- * audio track present used to 500 the whole /song route. Leaving it unmapped in the new scene is a
- * perfectly valid state already handled everywhere else (an unmapped track is silent that section,
- * same as any track absent from a scene's slots) — the track just starts silent until a real region
- * is created and slotted (e.g. dragging a sample onto it — ui/src/daemon/library.ts's
- * installAudioClip). */
+ * Phase 23 Stream BC fix: `audio`-kind tracks with NO clip yet are SKIPPED — they have no live
+ * content to snapshot (docs/phase-22-stream-ae.md: "BeatTrack gets no `audio` field, only
+ * `BeatClip.audio?`"), and saveClip's generic "snapshot whatever's live" produces a clip with no
+ * `audio` line, which the parser then rejects outright (every clip on an audio track must carry
+ * one, same fail-loud stance as an instrument track missing its soundfont line) — so converting to
+ * song mode with an empty audio track present used to 500 the whole /song route. Leaving such a
+ * track unmapped in the new scene is a perfectly valid state already handled everywhere else (an
+ * unmapped track is silent that section, same as any track absent from a scene's slots) — it just
+ * starts silent until a real region is created and slotted (e.g. dragging a sample onto it —
+ * ui/src/daemon/library.ts's installAudioClip).
+ *
+ * Phase 31 Stream KA item 3 (docs/research/93): the guard above used to skip EVERY audio track
+ * unconditionally, even ones with a real, already-placed clip — reproduced 5/5 times in pilot 93's
+ * session, since this function is now ALSO called by the user-triggered `captureAndInsertScene`
+ * ("+ capture scene," Phase 26 Stream DJ), not just the original loop→song bootstrap, and an audio
+ * track very often DOES already have real media worth carrying into the new scene. Narrowed to only
+ * skip a track with NO existing clip (the original 500-avoidance case, unchanged); a track that
+ * already has one mints a fresh, INDEPENDENT copy of that clip's audio region (media/in/out/gainDb/
+ * warp/rate) under the new scene's id — the same "independent copy per scene, not a shared
+ * reference" pattern `saveClip` already gives every other track kind in the loop below, via `core`'s
+ * `addAudioClip` (the same primitive `ui/src/daemon/library.ts`'s installAudioClip route uses to
+ * create/replace an audio-track clip). */
 function sceneFromLiveContent(doc: BeatDocument, sceneId: string): BeatDocument {
   let d = doc
   const slots: Record<string, string> = {}
   for (const t of d.tracks) {
-    if (t.kind === 'audio') continue
+    if (t.kind === 'audio') {
+      const existing = t.clips.find((c) => c.audio)
+      if (!existing?.audio) continue // no clip yet — nothing to snapshot, leave unmapped (the original guard's case)
+      d = addAudioClip(d, t.id, sceneId, {
+        media: existing.audio.media,
+        in: existing.audio.in,
+        out: existing.audio.out,
+        gainDb: existing.audio.gainDb,
+        warp: existing.audio.warp,
+        rate: existing.audio.rate,
+      }).doc
+      slots[t.id] = sceneId
+      continue
+    }
     d = saveClip(d, t.id, sceneId).doc
     slots[t.id] = sceneId
   }

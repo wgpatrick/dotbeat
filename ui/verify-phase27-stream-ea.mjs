@@ -166,7 +166,13 @@ async function main() {
     //   (a) the BARE .arr-lane (no clip block covering it) — the original bug's own click path.
     //       In loop mode, bug 1's fix means every row now ALWAYS has a full-width synthetic block,
     //       so this surface no longer exists there; switched to a real (tiny) song-mode section
-    //       with one track left OUT of the scene to get a genuinely block-free row again.
+    //       with one track left OUT of the scene to get a genuinely block-free row again. Phase 31
+    //       Stream KA item 2(b) (docs/research/93) considered but deliberately rejected giving this
+    //       silent row a placeholder `.arr-clip-block` too (it would break check B below — a
+    //       marquee-select drag starting ON any block, even an inert placeholder, is a single-clip
+    //       drag instead) — the fix lives in the row's own click handler instead (resolving which
+    //       section a click's bar position falls into), so this bare-lane surface is UNCHANGED by
+    //       KA and still the right thing to test here.
     //   (b) directly ON a clip block — after bug 1, this is how loop-mode rows are clicked at all,
     //       so bug 2's fix must ALSO reach beginClipDrag's own click branch, not just the bare-lane
     //       path, or the fix would be dead code for the every-row-has-a-block loop-mode case.

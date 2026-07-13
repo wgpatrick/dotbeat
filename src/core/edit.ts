@@ -1414,7 +1414,22 @@ function validateAudioRegionFields(region: { media: string; in: number; out: num
  * one-call creation path (mirrors addNote/addHit's directness). saveClip's generic "snapshot
  * whatever's live" pattern doesn't apply here: audio tracks carry no live/non-clip content in
  * this stream (see docs/phase-22-stream-ae.md's scope notes). Upserts: an existing clip id's
- * region is replaced, the same re-snapshot ergonomics saveClip gives synth/drum tracks. */
+ * region is replaced, the same re-snapshot ergonomics saveClip gives synth/drum tracks.
+ *
+ * Phase 31 Stream KA item 4 (docs/research/93): re-dropping a sample onto an audio track that
+ * ALREADY has a clip (the upsert branch below) used to silently reset `warp`/`rate`/`gainDb` back
+ * to hard defaults ('off'/1/0) whenever the caller — `ui/src/daemon/library.ts`'s installAudioClip
+ * route, the only real caller that upserts an EXISTING clip id — didn't pass them, which it never
+ * does (it only ever knows the new sample's media/in/out). Confirmed via `GET /document` before/
+ * after: a carefully-set repitch rate got silently discarded on a plain re-drop, unrelated to which
+ * sample was loaded. "Replace the clip's media on re-drop" is the documented, intentional one-
+ * clip-per-track model (unchanged here) — but warp mode/rate/gain have nothing to do with WHICH
+ * sample is loaded, so they shouldn't be collateral damage. When upserting, an omitted field now
+ * defaults to the EXISTING clip's current value instead of a hard default; the trim (`in`/`out`)
+ * still always comes from the caller — it's tied to the specific sample's length, so it can't
+ * sensibly survive a media swap the way warp/rate/gain can. A brand-new clip (no existing region to
+ * inherit from) is unaffected — omitted fields there still fall back to the same 'off'/1/0 defaults
+ * as always. */
 export function addAudioClip(
   doc: BeatDocument,
   trackId: string,
@@ -1424,17 +1439,18 @@ export function addAudioClip(
   const track = findTrack(doc, trackId)
   if (track.kind !== 'audio') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — audio-region clips only belong on audio tracks`)
   if (!/^[a-zA-Z0-9_-]+$/.test(clipId)) throw new BeatEditError(`clip ids are single alphanumeric/_/- tokens, got "${clipId}"`)
+  const existing = track.clips.findIndex((c) => c.id === clipId)
+  const existingAudio = existing === -1 ? undefined : track.clips[existing]!.audio
   const full: BeatAudioRegion = {
     media: region.media,
     in: canon(region.in),
     out: canon(region.out),
-    gainDb: canon(region.gainDb ?? 0),
-    warp: region.warp ?? 'off',
-    rate: canon(region.rate ?? 1),
+    gainDb: canon(region.gainDb ?? existingAudio?.gainDb ?? 0),
+    warp: region.warp ?? existingAudio?.warp ?? 'off',
+    rate: canon(region.rate ?? existingAudio?.rate ?? 1),
     markers: [],
   }
   validateAudioRegionFields(full, doc)
-  const existing = track.clips.findIndex((c) => c.id === clipId)
   const clip: BeatClip = existing === -1 ? { id: clipId, notes: [], hits: [], automation: [], loop: null, signature: null, audio: full } : { ...track.clips[existing]!, audio: full }
   const clips = existing === -1 ? [...track.clips, clip] : track.clips.map((c, i) => (i === existing ? clip : c))
   return { doc: replaceTrack(doc, { ...track, clips }), clip }

@@ -360,6 +360,24 @@ function liveContentIsUnsaved(track: BeatTrack): boolean {
   return !track.clips.some((c) => clipMatchesLive(track, c))
 }
 
+/** Phase 31 Stream KA (item 1): the STRICT, non-fallback counterpart to `primaryClipFor` — does
+ * `sceneId`'s scene actually map `track` to a clip right now, with no "try some other section
+ * instead" fallback? `primaryClipFor` deliberately scans every song section when the preferred one
+ * comes up empty (the right call for VIEWING: the clip-properties strip, the clip-loop drag handle,
+ * and the playhead all want a non-blank answer rather than nothing). But "does the section the user
+ * is CURRENTLY POINTED AT already own a clip for this track" is a different question — used by
+ * `placeInArrangement` below to decide whether a click should UPDATE an existing clip or MINT a
+ * fresh one for the selected section. Conflating the two was pilot 90's highest-impact finding (see
+ * `placeInArrangement`'s own comment): a newly-inserted, still-empty section's "no clip of its own
+ * yet" silently read as "already has clip X" (X borrowed from a completely different section),
+ * because primaryClipFor's fallback found X first. */
+function clipInSelectedScene(track: BeatTrack, doc: BeatDocument, sceneId: string): BeatClip | null {
+  const scene = doc.scenes.find((s) => s.id === sceneId)
+  const clipId = scene?.slots[track.id]
+  if (!clipId) return null
+  return track.clips.find((c) => c.id === clipId) ?? null
+}
+
 export function NoteView({ track }: { track: BeatTrack }) {
   const doc = useStore((s) => s.doc)
   const loopBars = doc?.loopBars ?? 1
@@ -438,12 +456,10 @@ export function NoteView({ track }: { track: BeatTrack }) {
     const d = st.doc
     const section = d?.song?.[selectedSectionIndex]
     if (!d || !section) return
-    const scene = d.scenes.find((s) => s.id === section.scene)
-    const clipId = scene?.slots[track.id]
-    if (!clipId) return // this track has no clip in the selected section — leave the live buffer alone
     const t = d.tracks.find((x) => x.id === track.id)
-    const clip = t?.clips.find((c) => c.id === clipId)
-    if (!t || !clip || clipMatchesLive(t, clip)) return // already showing it
+    const clip = t ? clipInSelectedScene(t, d, section.scene) : null
+    if (!t || !clip) return // this track has no clip in the selected section — leave the live buffer alone
+    if (clipMatchesLive(t, clip)) return // already showing it
     const proceed =
       !liveContentIsUnsaved(t) ||
       window.confirm(
@@ -828,16 +844,25 @@ export function NoteView({ track }: { track: BeatTrack }) {
   // dotbeat's single-page layout). See docs/phase-24-stream-ci.md.
   //
   // `existing` mirrors BC's own "reuse an existing occurrence if the track already has one, else
-  // mint a new clip and slot it into the target scene" precedent exactly: `primaryClipFor` is the
-  // SAME lookup ClipPropertiesPanel already uses to find "the" clip this editor's live content
-  // corresponds to once placed. Phase 29 Stream GA: both `existing` and the scene it's placed into
-  // now prefer the currently-selected section — before this, `placeInArrangement` was hardcoded to
-  // `doc.song[0]`, so it was IMPOSSIBLE to place a track's content into any section but the first
-  // from the GUI (docs/research/86's "Place in Arrangement always writes into doc.song[0]'s scene
-  // regardless of which section is in view"). Falls back to `doc.song[0]` — the old, only-ever
-  // behavior — when nothing is selected, exactly matching primaryClipFor's own fallback.
+  // mint a new clip and slot it into the target scene" precedent — but, unlike `primaryClipFor`,
+  // does NOT fall back to some OTHER section's clip when the currently-selected section has none of
+  // its own. Phase 31 Stream KA (docs/research/90's highest-impact finding): reproduced live —
+  // build content into a fresh track (auto-creates clip "X" in section 0), `+ insert scene` a
+  // genuinely empty second section (real, independent scene with `slots: {}`), select it, build
+  // different content, click "Placed (clip 'X') — update." `primaryClipFor`'s fallback-to-first-
+  // occurrence behavior (the right call for VIEWING — ClipPropertiesPanel/the loop-drag handle/the
+  // playhead all WANT a non-blank answer when the selected section has nothing of its own) meant
+  // `existing` resolved to clip X even though the SELECTED section's scene had no slot for this
+  // track at all. `postPlaceClip` was then called with `{clipId: 'X', sceneId: <new section's
+  // scene>}`, which re-saves the LIVE buffer (Part B's content) over clip X in place AND slots that
+  // same clip into the new section — exactly pilot 90's "Clip X got overwritten... the newly-
+  // selected section ended up pointing at that same overwritten clip rather than getting one of its
+  // own." `clipInSelectedScene` below is the strict, non-fallback version of the same question:
+  // does THIS scene already own a clip for this track, right now? No preferred scene selected (the
+  // "nothing explicitly selected yet" case) still uses `primaryClipFor`'s old first-occurrence
+  // fallback — unchanged, matching its own documented "falls back to `doc.song[0]`" behavior. */
   const [placing, setPlacing] = useState(false)
-  const existing = doc ? primaryClipFor(track, doc, preferredSceneId) : null
+  const existing = doc ? (preferredSceneId ? clipInSelectedScene(track, doc, preferredSceneId) : primaryClipFor(track, doc, null)) : null
   const inSongMode = !!doc?.song && doc.song.length > 0
   function placeInArrangement() {
     if (!doc || placing) return
