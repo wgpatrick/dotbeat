@@ -101,70 +101,534 @@ track drums Drums #56b6c2 drums
     hit h63 hat 122 0.4
     hit h60 kick 124 0.85
     hit h64 hat 126 0.4
-  hit h1 kick 0 0.85
-  hit h5 hat 2 0.4
-  hit h2 kick 4 0.85
-  hit h6 hat 6 0.4
-  hit h3 kick 8 0.85
-  hit h7 hat 10 0.4
-  hit h4 kick 12 0.85
-  hit h8 hat 14 0.4
-  hit h9 kick 16 0.85
-  hit h13 hat 18 0.4
-  hit h10 kick 20 0.85
-  hit h14 hat 22 0.4
-  hit h11 kick 24 0.85
-  hit h15 hat 26 0.4
-  hit h12 kick 28 0.85
-  hit h16 hat 30 0.4
-  hit h17 kick 32 0.85
-  hit h21 hat 34 0.4
-  hit h18 kick 36 0.85
-  hit h22 hat 38 0.4
-  hit h19 kick 40 0.85
-  hit h23 hat 42 0.4
-  hit h20 kick 44 0.85
-  hit h24 hat 46 0.4
-  hit h25 kick 48 0.85
-  hit h29 hat 50 0.4
-  hit h26 kick 52 0.85
-  hit h30 hat 54 0.4
-  hit h27 kick 56 0.85
-  hit h31 hat 58 0.4
-  hit h28 kick 60 0.85
-  hit h32 hat 62 0.4
-  hit h33 kick 64 0.85
-  hit h37 hat 66 0.4
-  hit h34 kick 68 0.85
-  hit h38 hat 70 0.4
-  hit h35 kick 72 0.85
-  hit h39 hat 74 0.4
-  hit h36 kick 76 0.85
-  hit h40 hat 78 0.4
-  hit h41 kick 80 0.85
-  hit h45 hat 82 0.4
-  hit h42 kick 84 0.85
-  hit h46 hat 86 0.4
-  hit h43 kick 88 0.85
-  hit h47 hat 90 0.4
-  hit h44 kick 92 0.85
-  hit h48 hat 94 0.4
-  hit h49 kick 96 0.85
-  hit h53 hat 98 0.4
-  hit h50 kick 100 0.85
-  hit h54 hat 102 0.4
-  hit h51 kick 104 0.85
-  hit h55 hat 106 0.4
-  hit h52 kick 108 0.85
-  hit h56 hat 110 0.4
-  hit h57 kick 112 0.85
-  hit h61 hat 114 0.4
-  hit h58 kick 116 0.85
-  hit h62 hat 118 0.4
-  hit h59 kick 120 0.85
-  hit h63 hat 122 0.4
-  hit h60 kick 124 0.85
-  hit h64 hat 126 0.4
+  clip pulse-lite
+    hit h1 kick 0 0.85
+    hit h33 openhat 2 0.45
+    hit h2 kick 4 0.85
+    hit h34 openhat 6 0.45
+    hit h3 kick 8 0.85
+    hit h35 openhat 10 0.45
+    hit h4 kick 12 0.85
+    hit h36 openhat 14 0.45
+    hit h5 kick 16 0.85
+    hit h37 openhat 18 0.45
+    hit h6 kick 20 0.85
+    hit h38 openhat 22 0.45
+    hit h7 kick 24 0.85
+    hit h39 openhat 26 0.45
+    hit h8 kick 28 0.85
+    hit h40 openhat 30 0.45
+    hit h9 kick 32 0.85
+    hit h41 openhat 34 0.45
+    hit h10 kick 36 0.85
+    hit h42 openhat 38 0.45
+    hit h11 kick 40 0.85
+    hit h43 openhat 42 0.45
+    hit h12 kick 44 0.85
+    hit h44 openhat 46 0.45
+    hit h13 kick 48 0.85
+    hit h45 openhat 50 0.45
+    hit h14 kick 52 0.85
+    hit h46 openhat 54 0.45
+    hit h15 kick 56 0.85
+    hit h47 openhat 58 0.45
+    hit h16 kick 60 0.85
+    hit h48 openhat 62 0.45
+    hit h17 kick 64 0.85
+    hit h49 openhat 66 0.45
+    hit h18 kick 68 0.85
+    hit h50 openhat 70 0.45
+    hit h19 kick 72 0.85
+    hit h51 openhat 74 0.45
+    hit h20 kick 76 0.85
+    hit h52 openhat 78 0.45
+    hit h21 kick 80 0.85
+    hit h53 openhat 82 0.45
+    hit h22 kick 84 0.85
+    hit h54 openhat 86 0.45
+    hit h23 kick 88 0.85
+    hit h55 openhat 90 0.45
+    hit h24 kick 92 0.85
+    hit h56 openhat 94 0.45
+    hit h25 kick 96 0.85
+    hit h57 openhat 98 0.45
+    hit h26 kick 100 0.85
+    hit h58 openhat 102 0.45
+    hit h27 kick 104 0.85
+    hit h59 openhat 106 0.45
+    hit h28 kick 108 0.85
+    hit h60 openhat 110 0.45
+    hit h29 kick 112 0.85
+    hit h61 openhat 114 0.45
+    hit h30 kick 116 0.85
+    hit h62 openhat 118 0.45
+    hit h31 kick 120 0.85
+    hit h63 openhat 122 0.45
+    hit h32 kick 124 0.85
+    hit h64 openhat 126 0.45
+  clip pulse-mid
+    hit h1 kick 0 0.85
+    hit h65 hat 0 0.4
+    hit h66 hat 1 0.22
+    hit h67 hat 2 0.5
+    hit h33 openhat 2 0.45
+    hit h68 hat 3 0.28
+    hit h2 kick 4 0.85
+    hit h69 hat 4 0.4
+    hit h70 hat 5 0.22
+    hit h71 hat 6 0.5
+    hit h34 openhat 6 0.45
+    hit h72 hat 7 0.28
+    hit h3 kick 8 0.85
+    hit h73 hat 8 0.4
+    hit h74 hat 9 0.22
+    hit h75 hat 10 0.5
+    hit h35 openhat 10 0.45
+    hit h76 hat 11 0.28
+    hit h4 kick 12 0.85
+    hit h77 hat 12 0.4
+    hit h78 hat 13 0.22
+    hit h79 hat 14 0.5
+    hit h36 openhat 14 0.45
+    hit h80 hat 15 0.28
+    hit h5 kick 16 0.85
+    hit h81 hat 16 0.4
+    hit h82 hat 17 0.22
+    hit h83 hat 18 0.5
+    hit h37 openhat 18 0.45
+    hit h84 hat 19 0.28
+    hit h6 kick 20 0.85
+    hit h85 hat 20 0.4
+    hit h86 hat 21 0.22
+    hit h87 hat 22 0.5
+    hit h38 openhat 22 0.45
+    hit h88 hat 23 0.28
+    hit h7 kick 24 0.85
+    hit h89 hat 24 0.4
+    hit h90 hat 25 0.22
+    hit h91 hat 26 0.5
+    hit h39 openhat 26 0.45
+    hit h92 hat 27 0.28
+    hit h8 kick 28 0.85
+    hit h93 hat 28 0.4
+    hit h94 hat 29 0.22
+    hit h95 hat 30 0.5
+    hit h40 openhat 30 0.45
+    hit h96 hat 31 0.28
+    hit h9 kick 32 0.85
+    hit h97 hat 32 0.4
+    hit h98 hat 33 0.22
+    hit h99 hat 34 0.5
+    hit h41 openhat 34 0.45
+    hit h100 hat 35 0.28
+    hit h10 kick 36 0.85
+    hit h101 hat 36 0.4
+    hit h102 hat 37 0.22
+    hit h103 hat 38 0.5
+    hit h42 openhat 38 0.45
+    hit h104 hat 39 0.28
+    hit h11 kick 40 0.85
+    hit h105 hat 40 0.4
+    hit h106 hat 41 0.22
+    hit h107 hat 42 0.5
+    hit h43 openhat 42 0.45
+    hit h108 hat 43 0.28
+    hit h12 kick 44 0.85
+    hit h109 hat 44 0.4
+    hit h110 hat 45 0.22
+    hit h111 hat 46 0.5
+    hit h44 openhat 46 0.45
+    hit h112 hat 47 0.28
+    hit h13 kick 48 0.85
+    hit h113 hat 48 0.4
+    hit h114 hat 49 0.22
+    hit h115 hat 50 0.5
+    hit h45 openhat 50 0.45
+    hit h116 hat 51 0.28
+    hit h14 kick 52 0.85
+    hit h117 hat 52 0.4
+    hit h118 hat 53 0.22
+    hit h119 hat 54 0.5
+    hit h46 openhat 54 0.45
+    hit h120 hat 55 0.28
+    hit h15 kick 56 0.85
+    hit h121 hat 56 0.4
+    hit h122 hat 57 0.22
+    hit h123 hat 58 0.5
+    hit h47 openhat 58 0.45
+    hit h124 hat 59 0.28
+    hit h16 kick 60 0.85
+    hit h125 hat 60 0.4
+    hit h126 hat 61 0.22
+    hit h127 hat 62 0.5
+    hit h48 openhat 62 0.45
+    hit h128 hat 63 0.28
+    hit h17 kick 64 0.85
+    hit h129 hat 64 0.4
+    hit h130 hat 65 0.22
+    hit h131 hat 66 0.5
+    hit h49 openhat 66 0.45
+    hit h132 hat 67 0.28
+    hit h18 kick 68 0.85
+    hit h133 hat 68 0.4
+    hit h134 hat 69 0.22
+    hit h135 hat 70 0.5
+    hit h50 openhat 70 0.45
+    hit h136 hat 71 0.28
+    hit h19 kick 72 0.85
+    hit h137 hat 72 0.4
+    hit h138 hat 73 0.22
+    hit h139 hat 74 0.5
+    hit h51 openhat 74 0.45
+    hit h140 hat 75 0.28
+    hit h20 kick 76 0.85
+    hit h141 hat 76 0.4
+    hit h142 hat 77 0.22
+    hit h143 hat 78 0.5
+    hit h52 openhat 78 0.45
+    hit h144 hat 79 0.28
+    hit h21 kick 80 0.85
+    hit h145 hat 80 0.4
+    hit h146 hat 81 0.22
+    hit h147 hat 82 0.5
+    hit h53 openhat 82 0.45
+    hit h148 hat 83 0.28
+    hit h22 kick 84 0.85
+    hit h149 hat 84 0.4
+    hit h150 hat 85 0.22
+    hit h151 hat 86 0.5
+    hit h54 openhat 86 0.45
+    hit h152 hat 87 0.28
+    hit h23 kick 88 0.85
+    hit h153 hat 88 0.4
+    hit h154 hat 89 0.22
+    hit h155 hat 90 0.5
+    hit h55 openhat 90 0.45
+    hit h156 hat 91 0.28
+    hit h24 kick 92 0.85
+    hit h157 hat 92 0.4
+    hit h158 hat 93 0.22
+    hit h159 hat 94 0.5
+    hit h56 openhat 94 0.45
+    hit h160 hat 95 0.28
+    hit h25 kick 96 0.85
+    hit h161 hat 96 0.4
+    hit h162 hat 97 0.22
+    hit h163 hat 98 0.5
+    hit h57 openhat 98 0.45
+    hit h164 hat 99 0.28
+    hit h26 kick 100 0.85
+    hit h165 hat 100 0.4
+    hit h166 hat 101 0.22
+    hit h167 hat 102 0.5
+    hit h58 openhat 102 0.45
+    hit h168 hat 103 0.28
+    hit h27 kick 104 0.85
+    hit h169 hat 104 0.4
+    hit h170 hat 105 0.22
+    hit h171 hat 106 0.5
+    hit h59 openhat 106 0.45
+    hit h172 hat 107 0.28
+    hit h28 kick 108 0.85
+    hit h173 hat 108 0.4
+    hit h174 hat 109 0.22
+    hit h175 hat 110 0.5
+    hit h60 openhat 110 0.45
+    hit h176 hat 111 0.28
+    hit h29 kick 112 0.85
+    hit h177 hat 112 0.4
+    hit h178 hat 113 0.22
+    hit h179 hat 114 0.5
+    hit h61 openhat 114 0.45
+    hit h180 hat 115 0.28
+    hit h30 kick 116 0.85
+    hit h181 hat 116 0.4
+    hit h182 hat 117 0.22
+    hit h183 hat 118 0.5
+    hit h62 openhat 118 0.45
+    hit h184 hat 119 0.28
+    hit h31 kick 120 0.85
+    hit h185 hat 120 0.4
+    hit h186 hat 121 0.22
+    hit h187 hat 122 0.5
+    hit h63 openhat 122 0.45
+    hit h188 hat 123 0.28
+    hit h32 kick 124 0.85
+    hit h189 hat 124 0.4
+    hit h190 hat 125 0.22
+    hit h191 hat 126 0.5
+    hit h64 openhat 126 0.45
+    hit h192 hat 127 0.28
+  clip pulse-full
+    hit h1 kick 0 0.85
+    hit h65 hat 0 0.4
+    hit h66 hat 1 0.22
+    hit h67 hat 2 0.5
+    hit h33 openhat 2 0.45
+    hit h68 hat 3 0.28
+    hit h2 kick 4 0.85
+    hit h193 clap 4 0.7
+    hit h69 hat 4 0.4
+    hit h70 hat 5 0.22
+    hit h71 hat 6 0.5
+    hit h34 openhat 6 0.45
+    hit h72 hat 7 0.28
+    hit h3 kick 8 0.85
+    hit h73 hat 8 0.4
+    hit h74 hat 9 0.22
+    hit h75 hat 10 0.5
+    hit h35 openhat 10 0.45
+    hit h76 hat 11 0.28
+    hit h4 kick 12 0.85
+    hit h194 clap 12 0.7
+    hit h77 hat 12 0.4
+    hit h78 hat 13 0.22
+    hit h79 hat 14 0.5
+    hit h36 openhat 14 0.45
+    hit h80 hat 15 0.28
+    hit h5 kick 16 0.85
+    hit h81 hat 16 0.4
+    hit h82 hat 17 0.22
+    hit h83 hat 18 0.5
+    hit h37 openhat 18 0.45
+    hit h84 hat 19 0.28
+    hit h6 kick 20 0.85
+    hit h195 clap 20 0.7
+    hit h85 hat 20 0.4
+    hit h86 hat 21 0.22
+    hit h87 hat 22 0.5
+    hit h38 openhat 22 0.45
+    hit h88 hat 23 0.28
+    hit h7 kick 24 0.85
+    hit h89 hat 24 0.4
+    hit h90 hat 25 0.22
+    hit h91 hat 26 0.5
+    hit h39 openhat 26 0.45
+    hit h92 hat 27 0.28
+    hit h8 kick 28 0.85
+    hit h196 clap 28 0.7
+    hit h93 hat 28 0.4
+    hit h94 hat 29 0.22
+    hit h95 hat 30 0.5
+    hit h40 openhat 30 0.45
+    hit h96 hat 31 0.28
+    hit h9 kick 32 0.85
+    hit h97 hat 32 0.4
+    hit h98 hat 33 0.22
+    hit h99 hat 34 0.5
+    hit h41 openhat 34 0.45
+    hit h100 hat 35 0.28
+    hit h10 kick 36 0.85
+    hit h197 clap 36 0.7
+    hit h101 hat 36 0.4
+    hit h102 hat 37 0.22
+    hit h103 hat 38 0.5
+    hit h42 openhat 38 0.45
+    hit h104 hat 39 0.28
+    hit h11 kick 40 0.85
+    hit h105 hat 40 0.4
+    hit h106 hat 41 0.22
+    hit h107 hat 42 0.5
+    hit h43 openhat 42 0.45
+    hit h108 hat 43 0.28
+    hit h12 kick 44 0.85
+    hit h198 clap 44 0.7
+    hit h109 hat 44 0.4
+    hit h110 hat 45 0.22
+    hit h111 hat 46 0.5
+    hit h44 openhat 46 0.45
+    hit h112 hat 47 0.28
+    hit h13 kick 48 0.85
+    hit h113 hat 48 0.4
+    hit h114 hat 49 0.22
+    hit h115 hat 50 0.5
+    hit h45 openhat 50 0.45
+    hit h116 hat 51 0.28
+    hit h14 kick 52 0.85
+    hit h199 clap 52 0.7
+    hit h117 hat 52 0.4
+    hit h118 hat 53 0.22
+    hit h119 hat 54 0.5
+    hit h46 openhat 54 0.45
+    hit h120 hat 55 0.28
+    hit h15 kick 56 0.85
+    hit h121 hat 56 0.4
+    hit h122 hat 57 0.22
+    hit h123 hat 58 0.5
+    hit h47 openhat 58 0.45
+    hit h124 hat 59 0.28
+    hit h16 kick 60 0.85
+    hit h200 clap 60 0.7
+    hit h125 hat 60 0.4
+    hit h126 hat 61 0.22
+    hit h127 hat 62 0.5
+    hit h48 openhat 62 0.45
+    hit h128 hat 63 0.28
+    hit h17 kick 64 0.85
+    hit h129 hat 64 0.4
+    hit h130 hat 65 0.22
+    hit h131 hat 66 0.5
+    hit h49 openhat 66 0.45
+    hit h132 hat 67 0.28
+    hit h18 kick 68 0.85
+    hit h201 clap 68 0.7
+    hit h133 hat 68 0.4
+    hit h134 hat 69 0.22
+    hit h135 hat 70 0.5
+    hit h50 openhat 70 0.45
+    hit h136 hat 71 0.28
+    hit h19 kick 72 0.85
+    hit h137 hat 72 0.4
+    hit h138 hat 73 0.22
+    hit h139 hat 74 0.5
+    hit h51 openhat 74 0.45
+    hit h140 hat 75 0.28
+    hit h20 kick 76 0.85
+    hit h202 clap 76 0.7
+    hit h141 hat 76 0.4
+    hit h142 hat 77 0.22
+    hit h143 hat 78 0.5
+    hit h52 openhat 78 0.45
+    hit h144 hat 79 0.28
+    hit h21 kick 80 0.85
+    hit h145 hat 80 0.4
+    hit h146 hat 81 0.22
+    hit h147 hat 82 0.5
+    hit h53 openhat 82 0.45
+    hit h148 hat 83 0.28
+    hit h22 kick 84 0.85
+    hit h203 clap 84 0.7
+    hit h149 hat 84 0.4
+    hit h150 hat 85 0.22
+    hit h151 hat 86 0.5
+    hit h54 openhat 86 0.45
+    hit h152 hat 87 0.28
+    hit h23 kick 88 0.85
+    hit h153 hat 88 0.4
+    hit h154 hat 89 0.22
+    hit h155 hat 90 0.5
+    hit h55 openhat 90 0.45
+    hit h156 hat 91 0.28
+    hit h24 kick 92 0.85
+    hit h204 clap 92 0.7
+    hit h157 hat 92 0.4
+    hit h158 hat 93 0.22
+    hit h159 hat 94 0.5
+    hit h56 openhat 94 0.45
+    hit h160 hat 95 0.28
+    hit h25 kick 96 0.85
+    hit h161 hat 96 0.4
+    hit h162 hat 97 0.22
+    hit h163 hat 98 0.5
+    hit h57 openhat 98 0.45
+    hit h164 hat 99 0.28
+    hit h26 kick 100 0.85
+    hit h205 clap 100 0.7
+    hit h165 hat 100 0.4
+    hit h166 hat 101 0.22
+    hit h167 hat 102 0.5
+    hit h58 openhat 102 0.45
+    hit h168 hat 103 0.28
+    hit h27 kick 104 0.85
+    hit h169 hat 104 0.4
+    hit h170 hat 105 0.22
+    hit h171 hat 106 0.5
+    hit h59 openhat 106 0.45
+    hit h172 hat 107 0.28
+    hit h28 kick 108 0.85
+    hit h206 clap 108 0.7
+    hit h173 hat 108 0.4
+    hit h174 hat 109 0.22
+    hit h175 hat 110 0.5
+    hit h60 openhat 110 0.45
+    hit h176 hat 111 0.28
+    hit h29 kick 112 0.85
+    hit h177 hat 112 0.4
+    hit h178 hat 113 0.22
+    hit h179 hat 114 0.5
+    hit h61 openhat 114 0.45
+    hit h180 hat 115 0.28
+    hit h30 kick 116 0.85
+    hit h207 clap 116 0.7
+    hit h181 hat 116 0.4
+    hit h182 hat 117 0.22
+    hit h183 hat 118 0.5
+    hit h62 openhat 118 0.45
+    hit h184 hat 119 0.28
+    hit h31 kick 120 0.85
+    hit h185 hat 120 0.4
+    hit h186 hat 121 0.22
+    hit h187 hat 122 0.5
+    hit h63 openhat 122 0.45
+    hit h188 hat 123 0.28
+    hit h32 kick 124 0.85
+    hit h208 clap 124 0.7
+    hit h189 hat 124 0.4
+    hit h190 hat 125 0.22
+    hit h191 hat 126 0.5
+    hit h64 openhat 126 0.45
+    hit h192 hat 127 0.28
+  clip break
+    hit h1 hat 2 0.28
+    hit h2 hat 6 0.28
+    hit h3 hat 10 0.28
+    hit h4 hat 14 0.28
+    hit h5 hat 18 0.28
+    hit h6 hat 22 0.28
+    hit h7 hat 26 0.28
+    hit h8 hat 30 0.28
+    hit h9 hat 34 0.28
+    hit h10 hat 38 0.28
+    hit h11 hat 42 0.28
+    hit h12 hat 46 0.28
+    hit h13 hat 50 0.28
+    hit h14 hat 54 0.28
+    hit h15 hat 58 0.28
+    hit h16 hat 62 0.28
+    hit h17 hat 66 0.28
+    hit h25 clap 68 0.4
+    hit h18 hat 70 0.28
+    hit h19 hat 74 0.28
+    hit h26 clap 76 0.45
+    hit h20 hat 78 0.28
+    hit h21 hat 82 0.28
+    hit h27 clap 84 0.4
+    hit h22 hat 86 0.28
+    hit h23 hat 90 0.28
+    hit h28 clap 92 0.45
+    hit h24 hat 94 0.28
+    hit h29 snare 96 0.28
+    hit h30 snare 97 0.3
+    hit h31 snare 98 0.32
+    hit h32 snare 99 0.34
+    hit h33 snare 100 0.36
+    hit h34 snare 101 0.38
+    hit h35 snare 102 0.4
+    hit h36 snare 103 0.42
+    hit h37 snare 104 0.44
+    hit h38 snare 105 0.46
+    hit h39 snare 106 0.48
+    hit h40 snare 107 0.5
+    hit h41 snare 108 0.52
+    hit h42 snare 109 0.54
+    hit h43 snare 110 0.56
+    hit h44 snare 111 0.58
+    hit h45 snare 112 0.6
+    hit h46 snare 113 0.62
+    hit h47 snare 114 0.64
+    hit h48 snare 115 0.66
+    hit h49 snare 116 0.68
+    hit h50 snare 117 0.7
+    hit h51 snare 118 0.72
+    hit h52 snare 119 0.74
+    hit h53 snare 120 0.76
+    hit h54 snare 121 0.78
+    hit h55 snare 122 0.8
+    hit h56 snare 123 0.82
+    hit h57 snare 124 0.84
+    hit h58 snare 125 0.86
+    hit h59 snare 126 0.88
+    hit h60 snare 127 0.9
 
 track bass Bass #f7c948 synth
   synth
@@ -209,6 +673,136 @@ track bass Bass #f7c948 synth
     note u100054 40 80 15 0.7
     note u100055 33 96 15 0.8
     note u100056 33 112 15 0.7
+  clip off-a
+    note u100081 41 2 1.6 0.7
+    note u100082 41 6 1.6 0.7
+    note u100083 41 10 1.6 0.7
+    note u100084 41 14 1.6 0.7
+    note u100085 41 18 1.6 0.7
+    note u100086 41 22 1.6 0.7
+    note u100087 41 26 1.6 0.7
+    note u100088 41 30 1.6 0.7
+    note u100089 36 34 1.6 0.7
+    note u100090 36 38 1.6 0.7
+    note u100091 36 42 1.6 0.7
+    note u100092 36 46 1.6 0.7
+    note u100093 36 50 1.6 0.7
+    note u100094 36 54 1.6 0.7
+    note u100095 36 58 1.6 0.7
+    note u100096 36 62 1.6 0.7
+    note u100097 43 66 1.6 0.7
+    note u100098 43 70 1.6 0.7
+    note u100099 43 74 1.6 0.7
+    note u100100 43 78 1.6 0.7
+    note u100101 43 82 1.6 0.7
+    note u100102 43 86 1.6 0.7
+    note u100103 43 90 1.6 0.7
+    note u100104 43 94 1.6 0.7
+    note u100105 33 98 1.6 0.7
+    note u100106 33 102 1.6 0.7
+    note u100107 33 106 1.6 0.7
+    note u100108 33 110 1.6 0.7
+    note u100109 33 114 1.6 0.7
+    note u100110 33 118 1.6 0.7
+    note u100111 33 122 1.6 0.7
+    note u100112 33 126 1.6 0.7
+  clip roll-a
+    note u100081 41 1 0.85 0.5
+    note u100082 41 2 0.85 0.72
+    note u100083 41 3 0.85 0.5
+    note u100084 41 5 0.85 0.5
+    note u100085 41 6 0.85 0.72
+    note u100086 41 7 0.85 0.5
+    note u100087 41 9 0.85 0.5
+    note u100088 41 10 0.85 0.72
+    note u100089 41 11 0.85 0.5
+    note u100090 41 13 0.85 0.5
+    note u100091 41 14 0.85 0.72
+    note u100092 41 15 0.85 0.5
+    note u100093 41 17 0.85 0.5
+    note u100094 41 18 0.85 0.72
+    note u100095 41 19 0.85 0.5
+    note u100096 41 21 0.85 0.5
+    note u100097 41 22 0.85 0.72
+    note u100098 41 23 0.85 0.5
+    note u100099 41 25 0.85 0.5
+    note u100100 41 26 0.85 0.72
+    note u100101 41 27 0.85 0.5
+    note u100102 41 29 0.85 0.5
+    note u100103 41 30 0.85 0.72
+    note u100104 41 31 0.85 0.5
+    note u100105 36 33 0.85 0.5
+    note u100106 36 34 0.85 0.72
+    note u100107 36 35 0.85 0.5
+    note u100108 36 37 0.85 0.5
+    note u100109 36 38 0.85 0.72
+    note u100110 36 39 0.85 0.5
+    note u100111 36 41 0.85 0.5
+    note u100112 36 42 0.85 0.72
+    note u100113 36 43 0.85 0.5
+    note u100114 36 45 0.85 0.5
+    note u100115 36 46 0.85 0.72
+    note u100116 36 47 0.85 0.5
+    note u100117 36 49 0.85 0.5
+    note u100118 36 50 0.85 0.72
+    note u100119 36 51 0.85 0.5
+    note u100120 36 53 0.85 0.5
+    note u100121 36 54 0.85 0.72
+    note u100122 36 55 0.85 0.5
+    note u100123 36 57 0.85 0.5
+    note u100124 36 58 0.85 0.72
+    note u100125 36 59 0.85 0.5
+    note u100126 36 61 0.85 0.5
+    note u100127 36 62 0.85 0.72
+    note u100128 36 63 0.85 0.5
+    note u100129 43 65 0.85 0.5
+    note u100130 43 66 0.85 0.72
+    note u100131 43 67 0.85 0.5
+    note u100132 43 69 0.85 0.5
+    note u100133 43 70 0.85 0.72
+    note u100134 43 71 0.85 0.5
+    note u100135 43 73 0.85 0.5
+    note u100136 43 74 0.85 0.72
+    note u100137 43 75 0.85 0.5
+    note u100138 43 77 0.85 0.5
+    note u100139 43 78 0.85 0.72
+    note u100140 43 79 0.85 0.5
+    note u100141 43 81 0.85 0.5
+    note u100142 43 82 0.85 0.72
+    note u100143 43 83 0.85 0.5
+    note u100144 43 85 0.85 0.5
+    note u100145 43 86 0.85 0.72
+    note u100146 43 87 0.85 0.5
+    note u100147 43 89 0.85 0.5
+    note u100148 43 90 0.85 0.72
+    note u100149 43 91 0.85 0.5
+    note u100150 43 93 0.85 0.5
+    note u100151 43 94 0.85 0.72
+    note u100152 43 95 0.85 0.5
+    note u100153 33 97 0.85 0.5
+    note u100154 33 98 0.85 0.72
+    note u100155 33 99 0.85 0.5
+    note u100156 33 101 0.85 0.5
+    note u100157 33 102 0.85 0.72
+    note u100158 33 103 0.85 0.5
+    note u100159 33 105 0.85 0.5
+    note u100160 33 106 0.85 0.72
+    note u100161 33 107 0.85 0.5
+    note u100162 33 109 0.85 0.5
+    note u100163 33 110 0.85 0.72
+    note u100164 33 111 0.85 0.5
+    note u100165 33 113 0.85 0.5
+    note u100166 33 114 0.85 0.72
+    note u100167 33 115 0.85 0.5
+    note u100168 33 117 0.85 0.5
+    note u100169 33 118 0.85 0.72
+    note u100170 33 119 0.85 0.5
+    note u100171 33 121 0.85 0.5
+    note u100172 33 122 0.85 0.72
+    note u100173 33 123 0.85 0.5
+    note u100174 33 125 0.85 0.5
+    note u100175 33 126 0.85 0.72
+    note u100176 33 127 0.85 0.5
 
 track keys Keys #98c379 synth
   synth
@@ -957,7 +1551,7 @@ scene groove
   slot arp arp-a
 
 scene lift
-  slot drums pulse
+  slot drums break
   slot bass d
   slot keys shim-d
   slot pad shim-d
@@ -965,16 +1559,47 @@ scene lift
   slot air air-d
 
 scene peak
-  slot drums pulse
-  slot bass a
+  slot drums pulse-full
+  slot bass roll-a
   slot keys open-a
   slot pad shim-a
   slot arp arp-a
   slot air air-a
   slot saw saw-a
 
+scene groove1
+  slot drums pulse-lite
+  slot bass off-a
+  slot keys open-a
+  slot pad open-a
+
+scene groove2
+  slot drums pulse-mid
+  slot bass roll-a
+  slot keys open-a
+  slot pad open-a
+  slot arp arp-a
+  slot air air-a
+
+scene drive
+  slot drums pulse-full
+  slot bass roll-a
+  slot keys open-a
+  slot pad open-a
+  slot arp arp-a
+  slot air air-a
+
+scene outro
+  slot keys close-a
+  slot pad shim-a
+  slot arp arp-a
+  slot air air-a
+
 song
   section intro 8
-  section groove 8
+  section groove1 8
+  section groove2 8
   section lift 8
   section peak 8
+  section drive 8
+  section outro 8
