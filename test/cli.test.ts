@@ -134,3 +134,42 @@ test('beat mcp-init errors on a missing project file', () => {
   const out = beat(['mcp-init', join(dir, 'nope.beat')], { expectExit: 2 })
   assert.match(out, /does not exist/)
 })
+
+// Phase 34 Stream NB (pilots 94 & 97): per-command help — `beat <cmd> --help` (only as the FIRST
+// arg after the command) and `beat help <cmd>` print just that command's block plus a "related:"
+// family pointer, instead of the monolithic no-args dump.
+test('beat <cmd> --help prints only that command\'s block', () => {
+  const out = beat(['quantize', '--help'])
+  assert.match(out, /^usage:\n {2}beat quantize <file> <track>/)
+  assert.match(out, /snap notes toward the grid/)
+  // ONLY the quantize block — no other command, no paths footer, and much shorter than the dump
+  assert.doesNotMatch(out, /beat init|beat humanize|paths for set/)
+  assert.ok(out.split('\n').length < 8, `expected a short block, got ${out.split('\n').length} lines`)
+  // --help is intercepted only as the first arg, so it can't shadow a command's own later args —
+  // and the full no-args dump still ends with set's paths footer as it always has
+  const dump = beat([])
+  assert.match(dump, /^usage:\n {2}beat init /)
+  assert.match(dump, /paths for set: bpm \| loop_bars/)
+})
+
+test('beat help <cmd> works and appends the command\'s "related:" family', () => {
+  const out = beat(['help', 'vary'])
+  assert.match(out, /^usage:\n {2}beat vary <file> <track> <group>/)
+  assert.match(out, /beat vary --groups/)
+  assert.match(out, /\nrelated: beat score, beat suggest\n$/)
+  // set's per-command view carries its paths footer
+  const setHelp = beat(['set', '--help'])
+  assert.match(setHelp, /paths for set: bpm \| loop_bars/)
+  // a family in the middle: pin points back at the rest of the versioning loop
+  const pinHelp = beat(['help', 'pin'])
+  assert.match(pinHelp, /related: beat checkpoint, beat history, beat restore, beat unpin, beat pins/)
+})
+
+test('beat help <unknown> is the standard unknown-command error, exit 2', () => {
+  const out = beat(['help', 'nope'], { expectExit: 2 })
+  assert.match(out, /unknown command "nope"/)
+  assert.match(out, /usage:/) // the full dump follows, same as any unknown command
+  // ...and an unknown command with --help behaves the same way
+  const out2 = beat(['bogus', '--help'], { expectExit: 2 })
+  assert.match(out2, /unknown command "bogus"/)
+})
