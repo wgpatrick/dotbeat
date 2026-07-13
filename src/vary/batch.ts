@@ -70,8 +70,12 @@ export function writeVaryBatch(opts: WriteVaryBatchOptions): VaryBatchManifest {
     ...(opts.amount !== undefined ? { amount: opts.amount } : {}),
     seed: opts.seed,
     createdAt: new Date().toISOString(),
-    // Renders are nondeterministic run-to-run (see docs/phase-5-plan.md Result) — only compare
-    // renders from the same batch, never across sessions.
+    // Renders are nondeterministic run-to-run — measured (Phase 34 NC, docs/render-determinism.md):
+    // identical re-renders differ by up to ~0.6 dB in peak-domain metrics (true peak / crest),
+    // ~1.6 band-share points, and ~1.3 dB stereo width, while LUFS stays within ~0.2 LU (tolerance
+    // constants: RENDER_RUN_VARIANCE_* in src/metrics/variance.ts). Only compare renders from the
+    // same batch, never across sessions, and treat metric deltas inside those bounds as ties, not
+    // rankings.
     variants: opts.variants.map((v, i) => ({
       file: `v${i + 1}.beat`,
       ...(v.recipe !== undefined ? { recipe: v.recipe } : { edits: (v.edits ?? []).map((e) => `${e.path} ${e.value}`) }),
