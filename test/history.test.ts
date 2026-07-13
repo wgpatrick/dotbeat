@@ -130,6 +130,33 @@ test('restore with a bogus ref fails loudly', () => {
   assert.throws(() => restore(file, 'deadbeef'), /unknown checkpoint/)
 })
 
+test('restore never discards uncommitted work — it gets auto-checkpointed first (research/97)', () => {
+  const dir = tempDir()
+  const file = starter(dir)
+  checkpoint(file, { label: 'v1' })
+  const v1Bytes = readFileSync(file, 'utf8')
+  const v1Ref = history(file).find((e) => e.label === 'v1')!.ref
+
+  // An UNCOMMITTED edit — never checkpointed before restore is called. Before the fix, this got
+  // silently and permanently discarded (git log --all -p showed zero trace of it).
+  writeFileSync(file, serialize(setValue(initDocument({ trackId: 'lead' }), 'bpm', '155')))
+  const lenBefore = history(file).length
+
+  restore(file, v1Ref)
+
+  assert.equal(readFileSync(file, 'utf8'), v1Bytes, 'the file is back to the v1 bytes')
+  // Two new entries, not one: the auto-saved pre-restore state, then the "go back to v1" checkpoint.
+  assert.equal(history(file).length, lenBefore + 2, 'the uncommitted bpm=155 edit got its own checkpoint before being overwritten')
+  const entries = history(file)
+  assert.match(entries[1]!.label, /before restore/, 'the auto-save checkpoint is the second-newest entry')
+  assert.match(entries[0]!.label, /go back to .* \(v1\)/, 'the restore checkpoint is newest')
+
+  // The uncommitted bpm=155 edit is genuinely recoverable — not just logged as having existed.
+  const preRestoreRef = entries[1]!.ref
+  const preRestoreBytes = execFileSync('git', ['-C', dir, 'show', `${preRestoreRef}:song.beat`], { encoding: 'utf8' })
+  assert.match(preRestoreBytes, /bpm 155/, 'the discarded-looking edit is really still there, one restore away')
+})
+
 test('media/ files are committed alongside the .beat', () => {
   const dir = tempDir()
   const file = starter(dir)

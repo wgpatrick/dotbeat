@@ -268,9 +268,19 @@ export function collapsedHistory(beatFilePath: string, opts: { limit?: number } 
 }
 
 /**
- * "Go back" to an earlier checkpoint: write that version's bytes, then take a fresh checkpoint
- * (append-only — the current state stays recoverable, redo is free). Fails loudly if the ref is
- * unknown or never had a version of this file.
+ * "Go back" to an earlier checkpoint: checkpoint whatever is currently on disk FIRST (so any
+ * uncommitted work never gets silently overwritten), then write that version's bytes, then take a
+ * second fresh checkpoint recording the restore itself (append-only — the current state stays
+ * recoverable, redo is free). Fails loudly if the ref is unknown or never had a version of this
+ * file.
+ *
+ * Bug fixed 2026-07-13 (docs/research/97): this used to `writeFileSync` the historical content
+ * BEFORE ever checkpointing the pre-restore state, so any uncommitted edit was silently and
+ * permanently discarded — confirmed via a controlled repro (an uncommitted bpm edit vanished with
+ * zero trace in `git log --all -p` after a restore call), directly contradicting this function's
+ * own "append-only — never destroys work" contract. The pre-restore checkpoint below is the fix:
+ * `checkpoint()` already no-ops harmlessly (`{skipped: true}`) when there's nothing uncommitted to
+ * save, so this is always safe to call unconditionally.
  */
 export function restore(beatFilePath: string, ref: string): CheckpointResult {
   const abs = realAbs(beatFilePath)
@@ -292,6 +302,7 @@ export function restore(beatFilePath: string, ref: string): CheckpointResult {
   }
   const subject = git(repoRoot, ['log', '-1', '--format=%s', fullRef]).trim()
 
+  checkpoint(abs, { label: 'before restore (auto-saved so nothing is lost)' })
   writeFileSync(abs, content)
   return checkpoint(abs, { label: `go back to ${shortRef} (${subject})` })
 }
