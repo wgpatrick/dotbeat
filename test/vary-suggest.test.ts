@@ -32,6 +32,32 @@ test('cold start: no entries for the track recommends the first vary.ts group', 
   assert.ok(s.reasoning.some((l) => l === `recommend: ${s.command}`))
 })
 
+test('cold start with trackKind "synth" recommends a group legal for synth tracks, not a drum-only one', () => {
+  // research/96: suggest's first-ever recommendation for a synth track used to be "kick" (first
+  // in VARY_GROUPS's declared order) — a drum-only param group that's a silent no-op on a synth
+  // track. With trackKind supplied, the recommendation must come from a group that's actually
+  // legal for "synth" (see vary.ts's VARY_GROUP_KINDS: kick/snare/hats are drums-only).
+  const s = suggestNext([], 'lead', { file: 'song.beat', trackKind: 'synth' })
+  assert.equal(s.coldStart, true)
+  assert.notEqual(s.recommendedGroup, 'kick')
+  assert.notEqual(s.recommendedGroup, 'snare')
+  assert.notEqual(s.recommendedGroup, 'hats')
+  assert.match(s.command, /^beat vary song\.beat lead \w+ --amount 0\.25 --seed \d+$/)
+  assert.ok(s.reasoning.some((l) => /legal for a "synth" track/.test(l)))
+})
+
+test('cold start with trackKind "drums" still recommends the first drums-legal group ("kick")', () => {
+  const s = suggestNext([], 'drums', { file: 'song.beat', trackKind: 'drums' })
+  assert.equal(s.coldStart, true)
+  assert.equal(s.recommendedGroup, 'kick')
+})
+
+test('cold start without trackKind falls back to the old kind-agnostic first-group behavior', () => {
+  const s = suggestNext([], 'lead', { file: 'song.beat' })
+  assert.equal(s.coldStart, true)
+  assert.equal(s.recommendedGroup, Object.keys(VARY_GROUPS)[0])
+})
+
 test('cold start scoped by track: entries exist, but not for this track', () => {
   const entries = [round('lead', 'filter', 3, 6)]
   const s = suggestNext(entries, 'drums', { file: 'song.beat' })

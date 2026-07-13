@@ -40,6 +40,7 @@ import {
   addAudioClip,
   splitAudioClip,
   humanize,
+  BeatHumanizeError,
   quantizeNotes,
   transposeNotes,
   timeScaleNotes,
@@ -87,7 +88,9 @@ import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.
 const USAGE = `usage:
   beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track
   beat add-track <file> <id> <synth|drums|instrument|audio> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--legacy-lanes]
-                                                          (a fresh drums track defaults to the 12-lane kit; --legacy-lanes opts back into the old implicit 5)
+                                                          (a fresh drums track defaults to the 12-lane kit; --legacy-lanes opts back into the old implicit 5;
+                                                          a fresh synth or drums track also starts with a real, already-populated default effect chain —
+                                                          eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat effect-add)
   beat rm-track <file> <id>
   beat group <file> <id> <track-id> [<track-id> ...] [--name N] [--color #hex]
                                                           fold N existing tracks into one named, colored
@@ -98,9 +101,11 @@ const USAGE = `usage:
                                                           membership list (add/remove/reorder members)
   beat inspect <file> [--json]
   beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
-  beat add-note <file> <track> <pitch> <start> <duration> <velocity>
+  beat add-note <file> <track> <pitch> <start> <duration> <velocity 0-1>
+                                                          velocity is 0.0-1.0, NOT MIDI's 0-127 (e.g. 0.8, not 100)
   beat rm-note <file> <track> <note-id>
-  beat add-hit <file> <track> <lane> <start> <velocity> [duration]   free-timed drum hit (start/duration in fractional 16th steps)
+  beat add-hit <file> <track> <lane> <start> <velocity 0-1> [duration]   free-timed drum hit (start/duration in fractional 16th steps;
+                                                          velocity is 0.0-1.0, NOT MIDI's 0-127 — e.g. 0.9, not 110)
   beat rm-hit <file> <track> <hit-id>
   beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes id,id]
                                                           snap notes toward the grid (grid in 16th steps:
@@ -145,7 +150,16 @@ const USAGE = `usage:
                                                           if it already exists, else adds it with that id;
                                                           --interpolation sets the segment-shape this point starts,
                                                           default linear — omit on a move to keep the existing shape)
-  beat clip <file> <track> <clip-id>                      snapshot the track's live content into a clip
+  beat clip <file> <track> <clip-id>                      snapshot the track's CURRENT LIVE content into a clip
+                                                          (re-snapshotting always starts from whatever's live on the
+                                                          track right now, not empty — the same "capture current live
+                                                          state" model the daemon's own "+ capture scene" uses; two
+                                                          clips saved back-to-back without clearing the track in
+                                                          between will share content, e.g. a "chorus" snapshotted on
+                                                          top of "verse" content becomes verse-plus-chorus, not an
+                                                          independent chorus — rm-note/rm-hit the live track's
+                                                          existing content first if you want a fresh, independent
+                                                          clip instead of an accumulated one)
   beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
   beat scene-set <file> <scene-id> --name N|--clear-name  rename a scene (or clear its name, back to showing
                                                           just the id) — the scene IS the reusable bundle of
@@ -196,7 +210,12 @@ const USAGE = `usage:
   beat unpin <file> <name...>                             remove a pin by name
   beat pins <file>                                        list this project's pins, newest checkpoint first
   beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon
-  beat mcp                                                MCP server over stdio (all of the above as tools)
+  beat mcp                                                MCP server over stdio: most of the above as tools (~50,
+                                                          covering track/note/hit/effect/song/preset/macro/drum-kit/
+                                                          checkpoint/render/metrics editing) — NOT 1:1 with the CLI:
+                                                          vary, score, sample, lane, and daemon have no MCP tool and
+                                                          stay CLI-only; send tools/list on a running 'beat mcp' for
+                                                          the exact, current set
   beat mcp-init <file> [--force]                          write a .mcp.json next to <file> so Claude Code
                                                           (or any MCP client) auto-discovers 'beat mcp' there
 
@@ -880,7 +899,14 @@ async function scoreCmd(argv) {
   const [dir, ...picks] = positional
   if (!dir || picks.length === 0) throw new BeatEditError('score needs <batch-dir> and 1-3 ranked picks (variant numbers, best first)')
   if (picks.length > 3) throw new BeatEditError('at most 3 ranked picks (Edisyn (3,16) pattern — ranking more adds fatigue, not signal)')
-  const manifest = JSON.parse(readFileSync(resolve(dir, 'manifest.json'), 'utf8'))
+  const manifestPath = resolve(dir, 'manifest.json')
+  let manifest
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  } catch (err) {
+    if (err.code === 'ENOENT') throw new BeatEditError(`no such batch directory or missing manifest.json: ${dir}`)
+    throw new BeatEditError(`could not read ${manifestPath}: ${err.message}`)
+  }
   const ranks = picks.map((p) => {
     // Phase 33 Stream ME (docs/research/96): variants are always DISPLAYED as v1/v2/... (printed
     // summary, manifest, suggest's "adopt" line) but historically had to be REFERENCED as bare
@@ -921,11 +947,17 @@ async function suggestCmd(argv) {
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const [file, track] = positional
   if (!file || !track) throw new BeatEditError('suggest needs <file> <track> (see beat vary --groups for group names)')
+  // Same track-existence check `vary` already gets (via varyTrack's BeatVaryError) — `suggest`
+  // used to skip it entirely and hand back a normal-looking cold-start recommendation for a
+  // track that doesn't exist (research/96).
+  const doc = readDoc(file)
+  const trackObj = doc.tracks.find((t) => t.id === track)
+  if (!trackObj) throw new BeatEditError(`no track "${track}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
   const logPath = flagValue(argv, '--log') ?? 'beat-scores.jsonl'
   const target = flagValue(argv, '--target')
   const text = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
   const entries = parseScoresLog(text)
-  const suggestion = suggestNext(entries, track, { file, ...(target ? { target } : {}) })
+  const suggestion = suggestNext(entries, track, { file, trackKind: trackObj.kind, ...(target ? { target } : {}) })
   process.stdout.write(suggestion.reasoning.join('\n') + '\n')
 }
 
@@ -1175,8 +1207,13 @@ function lintCmd(argv) {
 function gitShow(rev, file) {
   const abs = resolve(file)
   const dir = dirname(abs)
-  const prefix = execFileSync('git', ['-C', dir, 'rev-parse', '--show-prefix'], { encoding: 'utf8' }).trim()
-  return execFileSync('git', ['-C', dir, 'show', `${rev}:${prefix}${basename(abs)}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  try {
+    const prefix = execFileSync('git', ['-C', dir, 'rev-parse', '--show-prefix'], { encoding: 'utf8' }).trim()
+    return execFileSync('git', ['-C', dir, 'show', `${rev}:${prefix}${basename(abs)}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  } catch (err) {
+    const detail = (err.stderr ? String(err.stderr) : err.message).trim().split('\n')[0]
+    throw new BeatEditError(`git show ${rev}:${file} failed: ${detail}`)
+  }
 }
 
 function diffCmd(argv) {
@@ -1549,6 +1586,7 @@ main().catch((err) => {
     err instanceof BeatPresetError ||
     err instanceof BeatMacroError ||
     err instanceof BeatPitchTimeError ||
+    err instanceof BeatHumanizeError ||
     err.name === 'HistoryError'
   ) {
     console.error(`error: ${err.message}`)

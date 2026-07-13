@@ -10,7 +10,7 @@
 // Pure document -> documents; deterministic under a seed (same parent + group + amount + seed
 // -> byte-identical variants), so a scoring session is reproducible from its manifest.
 
-import type { BeatDocument, BeatSynth } from '../core/document.js'
+import type { BeatDocument, BeatSynth, TrackKind } from '../core/document.js'
 import { setValue } from '../core/edit.js'
 import { humanize } from '../core/humanize.js'
 import { formatNumber } from '../core/format.js'
@@ -105,6 +105,41 @@ export const VARY_GROUPS: Readonly<Record<string, readonly VaryParamDef[]>> = {
     { key: 'eqHigh', min: -5, max: 5, scale: 'linear' },
     { key: 'duckAmount', min: 0, max: 0.7, scale: 'linear' },
   ],
+}
+
+/** Which track kinds each VARY_GROUPS entry is actually audible on — derived from the real
+ * engine/panel wiring (ui/src/components/synthParams.ts's PARAM_GROUPS `kinds` field is the
+ * ground truth for which ParamGroup card is shown per track kind; ui/src/audio/engine.ts wires
+ * the underlying synth fields identically). kick/snare/hats are the drum-voice fields
+ * (synthParams.ts's 'drumvoice' group, kinds: ['drums']) — writing them onto a synth/instrument
+ * track's synth object is a structurally-legal but audibly-inert no-op (research/96's finding).
+ * filter/env/filterenv mirror synthParams.ts's 'filter' group (kinds: ['synth', 'drums'] — the
+ * drum bus has its own filter+envelope). osc/motion (osc2, sub, noise, unison, glide, LFOs) mirror
+ * the 'osc' and 'lfo' groups, both synth-only. fx/sends/mix mirror the insert-effect, sends, and
+ * amp/eq groups, all of which include 'drums'. Not used to reject an explicit `beat vary` call
+ * (that's a separate, bigger scope decision — see docs/phase-33-plan.md's MC item 2 note) — only
+ * to steer `suggest`'s own cold-start recommendation toward a group that will actually do
+ * something on the target track. */
+export const VARY_GROUP_KINDS: Readonly<Record<string, readonly TrackKind[]>> = {
+  kick: ['drums'],
+  snare: ['drums'],
+  hats: ['drums'],
+  filter: ['synth', 'drums'],
+  env: ['synth', 'drums'],
+  filterenv: ['synth', 'drums'],
+  osc: ['synth'],
+  motion: ['synth'],
+  fx: ['synth', 'drums'],
+  sends: ['synth', 'drums'],
+  mix: ['synth', 'drums'],
+}
+
+/** Vary groups that are actually legal (audible) for a given track kind, in VARY_GROUPS's own
+ * declared order. Falls back to every group if a kind (e.g. 'audio') has no known-legal group at
+ * all, rather than returning an empty recommendation set. */
+export function legalGroupsForKind(kind: TrackKind): string[] {
+  const legal = Object.keys(VARY_GROUPS).filter((g) => (VARY_GROUP_KINDS[g] ?? []).includes(kind))
+  return legal.length > 0 ? legal : Object.keys(VARY_GROUPS)
 }
 
 export class BeatVaryError extends Error {
