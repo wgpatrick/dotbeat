@@ -65,7 +65,7 @@ async function pollUntil(fn, what, timeoutMs = 12000, everyMs = 60) {
 function initProject() {
   const proj = mkdtempSync(join(tmpdir(), 'dotbeat-p29gf-'))
   const beatPath = join(proj, 'song.beat')
-  writeFileSync(beatPath, readFileSync(join(repoRoot, 'examples/night-shift-song.beat'), 'utf8'))
+  writeFileSync(beatPath, readFileSync(join(repoRoot, 'examples/night-shift.beat'), 'utf8'))
   git(proj, 'init', '-q')
   git(proj, 'config', 'user.email', 'verify@dotbeat.local')
   git(proj, 'config', 'user.name', 'verify')
@@ -123,9 +123,10 @@ async function main() {
     await sleep(300)
 
     // ============ T1: horizontal overflow ============
-    // night-shift-song.beat opens with "lead" selected and its clip editor already tall enough
-    // (real content + the inspector row) to need .bottom-pane-body's own vertical scrollbar —
-    // reproduces the bug on a bare fresh load, no interaction required (pilot 81's own finding).
+    // night-shift.beat (the disposable fixture — NEVER night-shift-song.beat, the owner's own live
+    // project) opens with "lead" selected and its clip editor already tall enough (real content +
+    // the inspector row) to need .bottom-pane-body's own vertical scrollbar — reproduces the bug on
+    // a bare fresh load, no interaction required (pilot 81's own finding).
     const overflow = await page.evaluate(() => ({
       bodyScrollWidth: document.body.scrollWidth,
       innerWidth: window.innerWidth,
@@ -164,9 +165,16 @@ async function main() {
     results.t3 = { hintAfterRename: hintAfterRename.trim() }
 
     // ============ T4 + T5: audio clip loop persistence + warp:complex annotation ============
-    // Add a fresh audio track, drag a real kit-lane sample onto its header (song mode already
-    // active in this fixture) to create a clip, then drive ClipPropertiesPanel's loop fields and
-    // the warp <select> exactly as a user would.
+    // Add a fresh audio track, drag a real kit-lane sample onto its header to create a clip, then
+    // drive ClipPropertiesPanel's loop fields and the warp <select> exactly as a user would.
+    // night-shift.beat starts in loop mode (no song block) — a kit-lane drop onto an audio track
+    // is refused (research/85) until the project is in song mode, so convert first, same as a real
+    // user would via "+ section".
+    const inSongModeAlready = await page.evaluate(() => !!window.__store.getState().doc.song?.length)
+    if (!inSongModeAlready) {
+      await page.locator('[data-add-section="1"]').click()
+      await pollUntil(async () => await page.evaluate(() => !!window.__store.getState().doc.song?.length), '[T4] project to enter song mode')
+    }
     const idsBefore = new Set(await page.evaluate(() => window.__store.getState().doc.tracks.map((t) => t.id)))
     await page.locator('[data-action="add-track"]').click()
     await page.locator('[data-add-kind="audio"]').click()
