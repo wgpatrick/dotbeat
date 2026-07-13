@@ -10,7 +10,7 @@
 
 import { daemonBase } from './bridge'
 import { useStore } from '../state/store'
-import type { BeatDocument } from '../types'
+import type { BeatDocument, BeatSynth } from '../types'
 
 export interface LibraryPreset {
   name: string
@@ -98,6 +98,34 @@ async function postLibrary(route: string, body: Record<string, unknown>): Promis
 export async function applyPresetToTrack(track: string, name: string): Promise<void> {
   const doc = await postLibrary('/library/apply-preset', { track, name })
   useStore.getState().setDoc(doc)
+  // Phase 29 Stream GB: the ONE place a preset actually lands on a track, whether from
+  // SynthPanel's own PresetPicker or a Content-Browser drag onto a track header (both call this
+  // function) — bump the session-only signal MacroKnob/PresetPicker use to know their displayed
+  // estimate needs re-deriving now, not just on a track switch (see state/store.ts's presetEpoch
+  // doc comment; docs/research/81, /86).
+  useStore.getState().bumpPresetEpoch(track)
+}
+
+/** Phase 29 Stream GB (docs/research/86): reverse-match a track's LIVE synth params against the
+ * preset catalog. Presets are a literal one-shot param application, never in-file indirection
+ * (format-spec.md) — the `.beat` document has no "current preset" field to read back (grepped,
+ * confirmed absent) — so "which preset is this" can only ever be an inference, and this is the
+ * one place that inference happens: a preset matches only if EVERY param it declares is still
+ * equal, in the live document, to what applying it would have written. Used to give
+ * PresetPicker's cursor (and hence its displayed name) a real starting point instead of an
+ * arbitrary index-0 default — the bug pilot 86 hit on reload, where the label reverted to
+ * whichever preset happened to sort first while the actual (correct) params sat untouched
+ * underneath. Returns -1 when nothing matches (e.g. the params have since been hand-tweaked away
+ * from any known preset) — callers should leave the previous selection alone in that case rather
+ * than snapping to 0. */
+export function findMatchingPresetIndex(presets: LibraryPreset[], synth: BeatSynth): number {
+  for (let i = 0; i < presets.length; i++) {
+    const params = presets[i]!.params
+    const keys = Object.keys(params)
+    if (keys.length === 0) continue
+    if (keys.every((k) => String(synth[k]) === String(params[k]))) return i
+  }
+  return -1
 }
 
 // ─── macros (Phase 26 Stream DD) ─────────────────────────────────────────────────────────────────

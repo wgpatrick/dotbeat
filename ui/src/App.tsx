@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { initBridge, postUndo, postRedo } from './daemon/bridge'
 import { useStore, selectedTrackId } from './state/store'
 import { TransportBar } from './components/TransportBar'
@@ -13,6 +13,7 @@ import { VaryAffordance } from './components/VaryAffordance'
 import { ExportButton } from './components/ExportButton'
 import { ContentBrowser } from './components/ContentBrowser'
 import { ShortcutHelp } from './components/ShortcutHelp'
+import { ToastHost } from './components/Toast'
 
 // Phase 18 — the Ableton-shaped recomposition (docs/phase-18-layout.md, driven by
 // docs/research/18-ableton-ui-architecture.md). The old four-tab switcher (Editor / Arrangement /
@@ -48,6 +49,29 @@ function BottomPane() {
   const setBottomPane = useStore((s) => s.setBottomPane)
   const setBottomPaneOpen = useStore((s) => s.setBottomPaneOpen)
   const height = useStore((s) => s.bottomPaneHeight)
+  // Phase 29 Stream GB (docs/research/80): pilot 80 found zero visible confirmation anywhere in
+  // the default Clip-tab view after a preset lands on a track — from either SynthPanel's own
+  // PresetPicker or a Content-Browser drag onto a track header (both funnel through
+  // daemon/library.ts's applyPresetToTrack, which bumps state/store.ts's presetEpoch for the
+  // affected track) — you had to already know to switch to Device to see it took effect. No
+  // toast/banner component exists yet (that's stream GE's build, not this one's), so this is the
+  // "simple inline flash on the Device tab button" fallback the plan calls for: flash the tab
+  // itself for a moment whenever the epoch advances for the CURRENTLY SELECTED track. Deliberately
+  // scoped to the selected track only — a drop onto some OTHER, non-selected track wouldn't have
+  // anything to show here anyway, since this pane only ever renders the selected track's sound.
+  const presetEpoch = useStore((s) => (selected ? (s.presetEpoch[selected] ?? 0) : 0))
+  const [presetFlash, setPresetFlash] = useState(false)
+  const prevPresetRef = useRef<{ id: string | null; epoch: number }>({ id: selected, epoch: presetEpoch })
+  useEffect(() => {
+    const prev = prevPresetRef.current
+    const sameTrack = prev.id === selected
+    const epochAdvanced = presetEpoch > prev.epoch
+    prevPresetRef.current = { id: selected, epoch: presetEpoch }
+    if (!sameTrack || !epochAdvanced) return
+    setPresetFlash(true)
+    const t = setTimeout(() => setPresetFlash(false), 1600)
+    return () => clearTimeout(t)
+  }, [selected, presetEpoch])
   if (!doc || !open) return null
   const track = doc.tracks.find((t) => t.id === selected)
   if (!track) return null
@@ -81,8 +105,9 @@ function BottomPane() {
             Clip
           </button>
           <button
-            className={`pane-tab ${pane === 'device' ? 'active' : ''}`}
+            className={`pane-tab ${pane === 'device' ? 'active' : ''}${presetFlash ? ' pane-tab-flash' : ''}`}
             data-pane-tab="device"
+            data-preset-flash={presetFlash}
             role="tab"
             aria-selected={pane === 'device'}
             onClick={() => setBottomPane('device')}
@@ -300,9 +325,13 @@ export function App() {
         </div>
       </div>
 
-      {/* Full mixer — an on-demand overlay, not a peer screen (research 18 Q3). */}
+      {/* Full mixer — an on-demand overlay, not a peer screen (research 18 Q3). Phase 29 Stream GE
+          item 1: the extra `mixer-scrim` modifier class (styles.css) sits BELOW the topbar's own
+          stacking context, unlike the plain `.overlay-scrim` ShortcutHelp.tsx still uses — so the
+          Mixer no longer blocks the topbar's Undo/Redo (docs/research/81), while the Shortcuts
+          panel's existing click-away-on-scrim behavior (its own verify script) is untouched. */}
       {mixerOpen && (
-        <div className="overlay-scrim" onClick={toggleMixer}>
+        <div className="overlay-scrim mixer-scrim" onClick={toggleMixer}>
           <div className="mixer-overlay" data-testid="mixer-overlay" onClick={(e) => e.stopPropagation()}>
             <div className="overlay-head">
               <span className="overlay-title section-heading">Mixer — all channel strips</span>
@@ -332,6 +361,12 @@ export function App() {
           app's whole real shortcut surface, replacing "hover this button / read this one
           sentence / spot this on-canvas label" as the only ways to discover it. */}
       {shortcutsOpen && <ShortcutHelp onClose={() => setShortcutsOpen(false)} />}
+
+      {/* Phase 29 Stream GE: the in-page toast host — success/error notifications replacing
+          window.alert()'s ~30 pure-notification call sites across ArrangementView/NoteView/
+          ContentBrowser. Rendered above everything else (styles.css's .toast-host z-index) so a
+          toast is never hidden behind the Mixer overlay or History drawer. */}
+      <ToastHost />
     </div>
   )
 }

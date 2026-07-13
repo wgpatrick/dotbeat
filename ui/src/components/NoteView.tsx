@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { declaredLaneNames, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
-import { postEdit, postSelection, postPitchTime, postPlaceClip, postDuplicateNotes, type PitchTimeOp } from '../daemon/bridge'
+import { declaredLaneNames, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
+import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
 import { makeDropTargetHandlers, DROP_TARGET_HOVER_CLASS, DRAGGING_CLASS } from '../dragDrop'
-import { ClipPropertiesPanel, primaryClipFor } from './ClipPropertiesPanel'
+import { ClipPropertiesPanel, primaryClipFor, selectedSceneId } from './ClipPropertiesPanel'
 import { DrumLanePanel } from './DrumLanePanel'
+import { showToast } from '../state/toastStore'
 
 // The editable event editor for BOTH synth/instrument notes and drum hits — Phase 22 Stream AB
 // (docs/research/20-drum-clip-editor-redesign.md Part 5) generalized what was originally a
@@ -288,8 +289,16 @@ function cellStep(raw: number, freehand: boolean): number {
 // exact same modulo math `contentOf` uses for real playback.
 //
 /** Returns the clip-relative, tiled step to render the playhead at, or `null` if no playhead
- * should render at all (stopped, or the open clip isn't the one actually playing right now). */
-function resolveClipPlayhead(track: BeatTrack, doc: BeatDocument | null, currentStep: number, loopBars: number): number | null {
+ * should render at all (stopped, or the open clip isn't the one actually playing right now).
+ * `preferredSceneId` (Phase 29 Stream GA) is store.ts's `selectedSectionIndex`, pre-resolved to a
+ * scene id by the caller — same "which clip is actually open" resolution primaryClip below uses. */
+function resolveClipPlayhead(
+  track: BeatTrack,
+  doc: BeatDocument | null,
+  currentStep: number,
+  loopBars: number,
+  preferredSceneId: string | null,
+): number | null {
   if (!doc || currentStep < 0) return null
   const song = doc.song && doc.song.length > 0 ? doc.song : null
   const loopSteps = loopBars * 16
@@ -299,7 +308,7 @@ function resolveClipPlayhead(track: BeatTrack, doc: BeatDocument | null, current
     // condition this playhead always used before song mode existed.
     return currentStep < loopSteps ? currentStep : null
   }
-  const openClip = primaryClipFor(track, doc)
+  const openClip = primaryClipFor(track, doc, preferredSceneId)
   if (!openClip) return null
   // Which section is playing right now, from the absolute step — the same cumulative-bars walk
   // engine.ts's contentOf does from `bar`.
@@ -323,6 +332,34 @@ function resolveClipPlayhead(track: BeatTrack, doc: BeatDocument | null, current
   return ((rel % loopSteps) + loopSteps) % loopSteps
 }
 
+// ---- live-buffer <-> clip sync (Phase 29 Stream GA) ----------------------------------------------
+// This editor always renders `track.notes`/`track.hits` — the track's ONE live buffer — never a
+// clip's own `.notes`/`.hits` directly (see this file's header comment). `primaryClipFor` resolving
+// to the selected section's clip is necessary but not sufficient to make clicking a later section's
+// clip block actually "open" it here: the live buffer itself has to be swapped to match. `sortById`
+// normalizes order before comparing so two arrays that happen to have been rebuilt in a different
+// order (e.g. after a round-trip through the daemon) still compare equal by content.
+function sortById<T extends { id: string }>(xs: T[]): T[] {
+  return [...xs].sort((a, b) => a.id.localeCompare(b.id))
+}
+function eventsEqual<T extends { id: string }>(a: T[], b: T[]): boolean {
+  return a.length === b.length && JSON.stringify(sortById(a)) === JSON.stringify(sortById(b))
+}
+/** Does `clip`'s saved content already match what's live on `track` right now? True also means "no
+ * load needed" — the editor is already showing this clip's content. */
+function clipMatchesLive(track: BeatTrack, clip: BeatClip): boolean {
+  return track.kind === 'drums' ? eventsEqual(track.hits, clip.hits) : eventsEqual(track.notes, clip.notes)
+}
+/** Is the track's current live content NOT backed by any existing clip? If so, loading a different
+ * clip over it would silently discard real, never-saved composition — the one case worth an
+ * explicit confirm before swapping (an empty live buffer, or one that already matches some clip,
+ * loads over silently — same "nothing at risk" bar saveClip's own re-snapshot already assumes). */
+function liveContentIsUnsaved(track: BeatTrack): boolean {
+  const live = track.kind === 'drums' ? track.hits : track.notes
+  if (live.length === 0) return false
+  return !track.clips.some((c) => clipMatchesLive(track, c))
+}
+
 export function NoteView({ track }: { track: BeatTrack }) {
   const doc = useStore((s) => s.doc)
   const loopBars = doc?.loopBars ?? 1
@@ -336,13 +373,22 @@ export function NoteView({ track }: { track: BeatTrack }) {
   // wouldn't flip this button — though in practice only one audition ever runs at a time).
   const auditioningTrackId = useStore((s) => s.auditioningTrackId)
   const auditioning = auditioningTrackId === track.id
+  // Phase 29 Stream GA: which song section the user is currently pointed at, alongside the track
+  // selection above — resolved to a scene id once here and threaded through every "which clip"
+  // lookup below (the playhead, the loop-drag handle/properties, Place in Arrangement, and the
+  // live-buffer sync effect further down), so they all agree on the same answer. `null` (nothing
+  // selected, or the index no longer resolves) falls back to the old first-occurrence behavior
+  // everywhere, unchanged.
+  const selectedSectionIndex = useStore((s) => s.selectedSectionIndex)
+  const preferredSceneId = selectedSceneId(doc, selectedSectionIndex)
   const totalSteps = loopBars * 16
-  const playheadStep = resolveClipPlayhead(track, doc, currentStep, loopBars)
+  const playheadStep = resolveClipPlayhead(track, doc, currentStep, loopBars, preferredSceneId)
   // Phase 24 Stream CJ: the SAME "primary clip" ClipPropertiesPanel.tsx's numeric loop fields
   // target — null in loop mode or when this track isn't mapped to a saved clip in any scene yet
   // (same gating the properties panel already applies; the drag handle below is hidden in that
-  // case too, since there's no clip.loop to write).
-  const primaryClip = doc ? primaryClipFor(track, doc) : null
+  // case too, since there's no clip.loop to write). Phase 29 Stream GA: now prefers the selected
+  // section's scene, same as everywhere else in this file.
+  const primaryClip = doc ? primaryClipFor(track, doc, preferredSceneId) : null
   const isDrums = track.kind === 'drums'
   const editable = true // every track kind (synth/instrument/drums) edits through this one view now
   const eventKind: 'note' | 'hit' = isDrums ? 'hit' : 'note'
@@ -373,6 +419,38 @@ export function NoteView({ track }: { track: BeatTrack }) {
         ratchetCount: n.ratchetCount,
         ratchetCurve: n.ratchetCurve,
       }))
+
+  // Phase 29 Stream GA: sync the live buffer to the selected section's clip whenever WHICH clip
+  // we're supposed to be showing changes — i.e. when the user switches track or section, not on
+  // every doc update (an in-progress edit to an already-placed clip re-saves identically each
+  // keystroke; re-running this on every doc change would otherwise re-check, and worse, could
+  // prompt, on every single edit). `lastSyncRef` remembers the last (track, section) pair actually
+  // synced so the effect body only does real work when that pair changes; deps are deliberately
+  // JUST [track.id, selectedSectionIndex] for the same reason — `doc` is read fresh from the store
+  // inside instead of as a dependency.
+  const lastSyncRef = useRef<string | null>(null)
+  useEffect(() => {
+    const key = `${track.id}::${selectedSectionIndex ?? 'none'}`
+    if (lastSyncRef.current === key) return
+    lastSyncRef.current = key
+    if (selectedSectionIndex === null) return // nothing selected — old first-occurrence behavior stands
+    const st = useStore.getState()
+    const d = st.doc
+    const section = d?.song?.[selectedSectionIndex]
+    if (!d || !section) return
+    const scene = d.scenes.find((s) => s.id === section.scene)
+    const clipId = scene?.slots[track.id]
+    if (!clipId) return // this track has no clip in the selected section — leave the live buffer alone
+    const t = d.tracks.find((x) => x.id === track.id)
+    const clip = t?.clips.find((c) => c.id === clipId)
+    if (!t || !clip || clipMatchesLive(t, clip)) return // already showing it
+    const proceed =
+      !liveContentIsUnsaved(t) ||
+      window.confirm(
+        `This track's editor has content that hasn't been placed into any clip yet. Switching to this section's clip ("${clip.id}") will replace it. Continue?`,
+      )
+    if (proceed) void postLoadClip(track.id, clip.id).catch((err) => showToast(`Could not load clip: ${(err as Error).message}`))
+  }, [track.id, selectedSectionIndex])
 
   const selSet = new Set(sel)
   // Preview overrides during a drag: a map keyed by event id (a group move/resize previews many at once).
@@ -624,7 +702,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
             offsetPitch,
           )
             .then((addedIds) => setSel(addedIds))
-            .catch((err) => window.alert(`Could not duplicate: ${(err as Error).message}`))
+            .catch((err) => showToast(`Could not duplicate: ${(err as Error).message}`))
         }
       }
       return
@@ -739,22 +817,27 @@ export function NoteView({ track }: { track: BeatTrack }) {
   // dotbeat's single-page layout). See docs/phase-24-stream-ci.md.
   //
   // `existing` mirrors BC's own "reuse an existing occurrence if the track already has one, else
-  // mint a new clip and slot it into the FIRST song section's scene" precedent exactly:
-  // `primaryClipFor` is the SAME first-occurrence lookup ClipPropertiesPanel already uses to find
-  // "the" clip this editor's live content corresponds to once placed.
+  // mint a new clip and slot it into the target scene" precedent exactly: `primaryClipFor` is the
+  // SAME lookup ClipPropertiesPanel already uses to find "the" clip this editor's live content
+  // corresponds to once placed. Phase 29 Stream GA: both `existing` and the scene it's placed into
+  // now prefer the currently-selected section — before this, `placeInArrangement` was hardcoded to
+  // `doc.song[0]`, so it was IMPOSSIBLE to place a track's content into any section but the first
+  // from the GUI (docs/research/86's "Place in Arrangement always writes into doc.song[0]'s scene
+  // regardless of which section is in view"). Falls back to `doc.song[0]` — the old, only-ever
+  // behavior — when nothing is selected, exactly matching primaryClipFor's own fallback.
   const [placing, setPlacing] = useState(false)
-  const existing = doc ? primaryClipFor(track, doc) : null
+  const existing = doc ? primaryClipFor(track, doc, preferredSceneId) : null
   const inSongMode = !!doc?.song && doc.song.length > 0
   function placeInArrangement() {
     if (!doc || placing) return
     if (!inSongMode) {
-      window.alert('Add a song section first ("+ section") — clips only play once slotted into a song-mode scene.')
+      showToast('Add a song section first ("+ section") — clips only play once slotted into a song-mode scene.')
       return
     }
-    const sceneId = doc.song![0]!.scene
+    const sceneId = preferredSceneId ?? doc.song![0]!.scene
     setPlacing(true)
     postPlaceClip(track.id, { ...(existing ? { clipId: existing.id } : {}), sceneId })
-      .catch((err) => window.alert(`Could not place clip: ${(err as Error).message}`))
+      .catch((err) => showToast(`Could not place clip: ${(err as Error).message}`))
       .finally(() => setPlacing(false))
   }
 
@@ -807,7 +890,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
           const offsetStart = pasteStep - noteClipboard.anchorStart
           void postDuplicateNotes(track.id, noteClipboard.noteIds, offsetStart, 0)
             .then((addedIds) => setSel(addedIds))
-            .catch((err) => window.alert(`Could not paste: ${(err as Error).message}`))
+            .catch((err) => showToast(`Could not paste: ${(err as Error).message}`))
         }
         return
       }
@@ -1105,7 +1188,9 @@ export function NoteView({ track }: { track: BeatTrack }) {
             title={
               existing
                 ? `already placed as clip "${existing.id}" — click to re-save this editor's current content into it`
-                : 'slot this clip into the first song section\'s scene so it plays in the arrangement'
+                : preferredSceneId
+                  ? `slot this clip into the selected section's scene so it plays in the arrangement`
+                  : 'slot this clip into the first song section\'s scene so it plays in the arrangement (click a section to target a different one)'
             }
             onClick={placeInArrangement}
           >
@@ -1150,7 +1235,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
                     const payload = readDragPayload(e.dataTransfer)
                     if (!payload || payload.type !== 'kit-lane') return
                     installKitLane(track.id, payload.kit, { lane: payload.lane ?? label, targetLane: label }).catch((err) =>
-                      window.alert(`Could not install sample: ${(err as Error).message}`),
+                      showToast(`Could not install sample: ${(err as Error).message}`),
                     )
                   })
                 : null

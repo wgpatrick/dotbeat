@@ -34,3 +34,35 @@ Don't re-derive project status from `git log` alone — read `ROADMAP.md` (thesi
 `scripts/roadmap-data.mjs`) before proposing or building anything nontrivial. See
 `docs/decisions.md` for numbered design decisions before suggesting something that might
 contradict one already made.
+
+## Usability testing is a standing practice, not a one-off
+
+See `docs/usability-testing.md` for the full methodology. Short version: alongside `ui/verify-*.mjs`
+(scripted assertions of known-correct behavior), run exploratory usability PILOTS — an agent given
+only a realistic end-user goal, no checklist, driving the real app and actually reading every
+screenshot before deciding what to do next, the way a human tester thinks aloud. This has
+repeatedly found real, high-impact bugs the scripted verify suite structurally cannot catch (see
+`docs/research/80` through `86`), because a verify script is written by someone who already believes
+the behavior it's asserting is correct.
+
+**Run one whenever a phase or stream changes GUI-facing behavior**, targeting the area that just
+shipped, as part of that work's own wrap-up — the same standing-habit footing as the
+roadmap/README refresh (below). Don't wait to be asked.
+
+## Dispatching parallel agents in worktrees: push before you dispatch
+
+`EnterWorktree`/`Agent(isolation: "worktree")` branch from `origin/<default-branch>` by default
+(`worktree.baseRef: "fresh"`), NOT from local `HEAD`. On 2026-07-12, six Phase 29 bug-fix streams
+were dispatched into worktrees right after writing an uncommitted plan doc and committing-but-not-
+pushing five research reports the streams' own prompts told them to read — the worktrees branched
+from stale `origin/main` and had none of it. **If you've committed anything local-only (or have
+anything uncommitted) that a soon-to-be-dispatched worktree agent needs to see, commit AND push to
+origin first**, then dispatch. If you discover this after the fact, fix already-created worktrees by
+`cd`-ing into each and running `git fetch origin && git merge origin/main --no-edit` — safe as long
+as the agent hasn't yet made local commits that would conflict.
+
+## Refresh the roadmap artifact on phase completion
+
+Whenever a phase/stream finishes, update `scripts/roadmap-data.mjs` and `docs/product-roadmap.md`,
+then republish the HTML dashboard artifact (splice a fresh `rows` array into it, reuse the existing
+artifact URL) — not just the markdown doc.
