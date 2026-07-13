@@ -868,14 +868,40 @@ export function NoteView({ track }: { track: BeatTrack }) {
       }
       const chosen = liveEvents.filter((ev) => ids.has(ev.id))
 
+      // Phase 30 Stream JC bug 1 (research 89, docs/phase-30-plan.md JC item 1): there was no
+      // neutral way to deselect — clicking empty grid space unconditionally adds a new event
+      // there (correct/intentional per the hint text, unchanged here) and Escape did nothing.
+      // This is the one keyboard convention this otherwise-thorough shortcut set was missing.
+      // Guarded by the same "no form control has focus" check every other shortcut in this
+      // handler already gets (the early-return at the top of `onKey`), so it never fights a text
+      // input's own Escape-to-blur behavior; a no-op (nothing selected) does nothing at all,
+      // matching every other shortcut here that's a no-op on an empty selection.
+      if (e.key === 'Escape') {
+        if (ids.size > 0) {
+          e.preventDefault()
+          setSel([])
+        }
+        return
+      }
+
       // Phase 26 Stream DG: a basic clipboard, notes only (mirrors the Alt-drag duplicate gesture
       // above — drum hits have no duplicateNotes equivalent yet). Copy just remembers WHICH ids
       // were selected (module-level `noteClipboard`, not written to the .beat file); paste
       // re-resolves those ids against the LIVE track and calls the same duplicateNotes primitive,
       // offset so the earliest copied note lands at the current playhead (clip-relative, wrapped
-      // to this clip's own step space) — or, when transport is stopped (`currentStep === -1`),
-      // right on top of the originals (offsetStart 0), same "duplicate in place" fallback the
-      // Alt-drag gesture's own zero-delta case already leaves as a no-op-safe default.
+      // to this clip's own step space) — or, when transport is stopped (`currentStep === -1`, no
+      // playhead to paste at). Phase 30 Stream JC bug 2 (research 89): that no-playhead case used
+      // to fall back to offsetStart 0 — pasting exactly on top of the originals, a perfectly
+      // overlapping, invisible-on-screen stack only detectable via note count in the store. The
+      // hint text promises "paste at the playhead"; with none, the sensible fallback is a small,
+      // definitely-nonzero offset instead of the invisible one — Alt-drag-duplicate itself has no
+      // FIXED offset (it's whatever distance the pointer actually dragged), but it shares this
+      // same "never land a duplicate at an exact zero-delta stack" principle (see its own
+      // `offsetStart !== 0 || offsetPitch !== 0` guard above, in `onPointerUp`). Reuses this
+      // file's existing DEFAULT_DUR (an eighth note, 2 steps) as that small, already-established
+      // step magnitude — the same size a freshly-clicked-in note already gets by default, rather
+      // than inventing a new arbitrary constant — so the pasted copy lands a visually obvious,
+      // still-close-by 2 steps to the right of the originals.
       if ((e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'C')) {
         if (!isDrums && chosen.length) {
           e.preventDefault()
@@ -886,7 +912,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'v' || e.key === 'V')) {
         if (!isDrums && noteClipboard && noteClipboard.trackId === track.id) {
           e.preventDefault()
-          const pasteStep = st.currentStep >= 0 ? st.currentStep % steps : noteClipboard.anchorStart
+          const pasteStep = st.currentStep >= 0 ? st.currentStep % steps : noteClipboard.anchorStart + DEFAULT_DUR
           const offsetStart = pasteStep - noteClipboard.anchorStart
           void postDuplicateNotes(track.id, noteClipboard.noteIds, offsetStart, 0)
             .then((addedIds) => setSel(addedIds))
@@ -1528,7 +1554,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
           </div>
         </div>
       </div>
-      {!isDrums && <PitchTimePanel track={track} noteIds={sel} />}
+      {!isDrums && <PitchTimePanel track={track} noteIds={sel} totalSteps={totalSteps} />}
       {!isDrums && <NoteNameReadout track={track} noteIds={sel} />}
       {editable && eventKind === 'note' && sel.length === 1 && (
         <NoteInspector key={sel[0]} note={track.notes.find((n) => n.id === sel[0])} trackId={track.id} />
@@ -1578,7 +1604,7 @@ const QUANTIZE_GRID_OPTIONS = [
   { label: 'quarters', value: 4 },
 ] as const
 
-function PitchTimePanel({ track, noteIds }: { track: BeatTrack; noteIds: string[] }) {
+function PitchTimePanel({ track, noteIds, totalSteps }: { track: BeatTrack; noteIds: string[]; totalSteps: number }) {
   const [semitones, setSemitones] = useState(1)
   const [gap, setGap] = useState(0)
   const [root, setRoot] = useState(0)
@@ -1596,12 +1622,41 @@ function PitchTimePanel({ track, noteIds }: { track: BeatTrack; noteIds: string[
   const scoped = noteIds.length > 0 ? noteIds : undefined
   const scopeLabel = noteIds.length > 0 ? `${noteIds.length} note${noteIds.length === 1 ? '' : 's'} selected` : 'whole track'
 
+  // Phase 30 Stream JC bug 3 (research 89, docs/phase-30-plan.md JC item 4): none of these ops
+  // clamp a note to the clip's own loop length (totalSteps = loopBars*16) — ×2 on a 4-bar clip was
+  // observed leaving notes ending as far as step 112 with zero warning. Clamping the transform's
+  // own math felt like the wrong call (e.g. ×2 silently truncating would distort what "double the
+  // time" actually means for a note that starts in-bounds but was always going to run long); this
+  // is the required "at minimum, warn" floor from the plan. Checks only the notes actually in this
+  // op's own scope (mirrors `scoped` above) against the CURRENT doc post-op, so it fires exactly
+  // when this specific run pushed (or left) something past the boundary — not a stale unrelated
+  // overhang from an earlier, already-acknowledged operation.
+  function warnIfOverflowing(opNoteIds: string[] | undefined) {
+    const t = useStore.getState().doc?.tracks.find((x) => x.id === track.id)
+    if (!t) return
+    const scope = opNoteIds && opNoteIds.length ? t.notes.filter((n) => opNoteIds.includes(n.id)) : t.notes
+    const overflowing = scope.filter((n) => n.start + n.duration > totalSteps)
+    if (overflowing.length > 0) {
+      showToast(
+        `${overflowing.length} note${overflowing.length === 1 ? '' : 's'} now end${overflowing.length === 1 ? 's' : ''} past this clip's ${totalSteps}-step loop length — the overhang plays once but won't repeat each loop pass.`,
+      )
+    }
+  }
+
   async function run(body: PitchTimeOp) {
     setBusy(true)
     setMsg(null)
     try {
       const changed = await postPitchTime(body)
-      setMsg(changed > 0 ? `${changed} note${changed === 1 ? '' : 's'} changed` : 'no change (already at rest)')
+      // Phase 30 Stream JC bug 2 (research 89, docs/phase-30-plan.md JC item 3): Quantize was the
+      // one op here that showed literally nothing when `changed` came back 0 (the exact case a
+      // first-time user hits by clicking Quantize at its own default "16ths" setting against
+      // already-aligned notes) — every other op already had SOME message, just a differently
+      // worded one for the zero case ("no change (already at rest)"). Unifying on the same
+      // "N notes changed" shape for every op, including 0, is simpler than keeping two message
+      // shapes AND satisfies the explicit "0 notes changed" wording the plan asks for.
+      setMsg(`${changed} note${changed === 1 ? '' : 's'} changed`)
+      if (changed > 0) warnIfOverflowing(body.noteIds)
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e))
     } finally {
