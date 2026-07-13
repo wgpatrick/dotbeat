@@ -211,10 +211,15 @@ body {
   color: var(--text);
   cursor: pointer;
 }
-.undo-btn:hover:not(:disabled) {
+.undo-btn:hover:not(.stack-empty) {
   border-color: var(--accent);
 }
-.undo-btn:disabled {
+/* Phase 30 Stream JB: dims the button when the mirrored `canUndo`/`canRedo` looks empty, WITHOUT the
+   native `disabled` attribute — a real `disabled` blocks the click event outright, which used to make
+   the button a genuine no-op whenever that mirrored flag lagged the daemon's true state (research/89).
+   The keyboard shortcut never gated on this flag at all, so matching its reliability means the click
+   handler always fires here too; this class is cosmetic only. */
+.undo-btn.stack-empty {
   opacity: 0.35;
   cursor: default;
 }
@@ -2586,48 +2591,56 @@ body {
   cursor: default;
 }
 
-/* Phase 22 Stream AE: the minimum-viable audio-region trim/gain/warp editor — numeric fields, not
- * canvas drag-handles (see ArrangementView.tsx's AudioClipInspector doc comment). Mirrors
- * .arr-auto-picker's row shape (a thin strip under the track, HEADER_W left-padded via inline
- * style so it lines up with the lane content, not the track header column). */
-.arr-audio-inspector {
+/* Phase 30 Stream JE: the audio-region trim/gain/warp editor — numeric fields, not canvas
+ * drag-handles (see AudioClipEditor.tsx's AudioClipInspector doc comment). Originally
+ * (Phase 22 Stream AE) rendered as its own small strip (`.arr-audio-inspector`) wedged between the
+ * arrangement grid and the bottom Clip/Device panel; moved into the bottom pane itself so Audio
+ * tracks get the same "one editing surface, always in the same place" treatment every other track
+ * kind already had — see AudioClipEditor.tsx and App.tsx's BottomPane routing. */
+.audio-clip-editor {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--line);
+  gap: 10px;
+}
+.audio-clip-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   background: rgba(0, 0, 0, 0.18);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 /* Phase 23 Stream BC: a basic static waveform (min/max-per-pixel-column) above the trim fields —
    makes the in/out numbers below legible against the actual sample instead of guesswork. */
-.arr-audio-waveform {
+.audio-clip-waveform {
   display: block;
   width: 100%;
   height: 48px;
   border-radius: var(--radius-sm);
   background: rgba(0, 0, 0, 0.25);
 }
-.arr-audio-inspector-fields {
+.audio-clip-inspector-fields {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-.arr-audio-inspector-label {
+.audio-clip-inspector-label {
   flex: 0 0 auto;
   font-weight: 600;
   color: var(--text);
 }
-.arr-audio-inspector label {
+.audio-clip-inspector label {
   display: flex;
   align-items: center;
   gap: 3px;
   flex: 0 0 auto;
 }
-.arr-audio-inspector input,
-.arr-audio-inspector select {
+.audio-clip-inspector input,
+.audio-clip-inspector select {
   font: inherit;
   font-size: 11px;
   width: 56px;
@@ -2637,8 +2650,33 @@ body {
   border-radius: var(--radius-md);
   padding: 1px 4px;
 }
-.arr-audio-inspector select {
+.audio-clip-inspector select {
   width: auto;
+}
+/* The empty state — no audio region placed on this track (in this section) yet. Points at the real
+ * placement gesture (drag onto the track header, research/88) instead of rendering nothing or an
+ * irrelevant note-grid. */
+.audio-clip-editor-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-dim);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-lg);
+}
+.audio-clip-editor-empty-icon {
+  font-size: 22px;
+  opacity: 0.5;
+}
+.audio-clip-editor-empty p {
+  max-width: 440px;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
 }
 
 /* ---- mixer ---- */

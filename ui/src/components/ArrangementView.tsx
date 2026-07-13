@@ -6,9 +6,8 @@ import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack,
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, installAudioClip, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
 import { useDropTarget } from '../dragDrop'
-import { declaredLaneNames, WARP_MODES, type AutomationInterpolation, type BeatAutomationPoint, type BeatClip, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind, type WarpMode } from '../types'
+import { declaredLaneNames, type AutomationInterpolation, type BeatAutomationPoint, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
-import { loadWaveform, getCachedWaveform, drawWaveform, type WaveformData } from '../audio/waveform'
 import { showToast } from '../state/toastStore'
 
 // Phase 20 Stream W — track add/delete/rename/recolor + project-folder controls. There is no BeatLab
@@ -668,8 +667,8 @@ function TrackRow({
     if (track.kind === 'audio') {
       // Phase 22 Stream AE: a flat-colored fill per clip occurrence (section), with dark edge
       // markers standing in for in/out handles — the "internal content in miniature" flavor
-      // research/30 (Ableton) calls out for audio (a stand-in for a real waveform; see
-      // AudioClipInspector's actual waveform strip for the real thing). No drag-to-trim this
+      // research/30 (Ableton) calls out for audio (a stand-in for a real waveform; see the bottom
+      // Clip panel's AudioClipInspector — AudioClipEditor.tsx — for the real thing). No drag-to-trim this
       // stream (a real lift — see docs/phase-22-stream-ae.md's honest gap note); trim via the
       // fields under the track, or `beat set`/beat_set.
       //
@@ -1501,110 +1500,6 @@ function GroupHeaderRow({ group, collapsed, onToggleCollapse, onUngroup }: { gro
         </button>
       </div>
       <div className="arr-lane arr-group-lane" />
-    </div>
-  )
-}
-
-/** Phase 22 Stream AE: the minimum-viable trim/gain/warp editor for an audio-region clip — numeric
- * fields, not canvas drag-handles (a real drag-gesture lift on top of the canvas's existing
- * pointer/hit-testing code — deliberately out of scope this stream; see the block/handle-marker
- * visual in TrackRow and docs/phase-22-stream-ae.md's honest gap note). Edits ride the ordinary
- * postEdit `<track>.clip.<id>.audio.<field>` path (core's setValue already carries it), so they're
- * optimistic + debounced exactly like every other knob in this file. Shown under a track's row for
- * its PRIMARY (first-playing) clip occurrence only — trimming a later occurrence of the same clip
- * id trims every occurrence, since they all reference one clip.
- *
- * Phase 23 Stream BC added the waveform strip above the numeric fields (ui/src/audio/waveform.ts):
- * decodes the region's referenced media independently of the playback engine's own buffer cache and
- * draws a static min/max-per-pixel-column render, dimming whatever falls outside [in, out] — closing
- * the "numeric fields only, no waveform, trim points hard to reason about" gap Stream AE's own
- * honest-gap note left open. Still no drag-to-trim on the waveform itself (same deferred lift). */
-function AudioClipInspector({ track, clip }: { track: BeatTrack; clip: BeatClip }) {
-  const region = clip.audio
-  const doc = useStore((s) => s.doc)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [waveform, setWaveform] = useState<WaveformData | null>(null)
-  const mediaPath = useMemo(() => {
-    if (!region || !doc) return undefined
-    return (doc.media as { id: string; path: string }[]).find((m) => m.id === region.media)?.path
-  }, [doc, region])
-
-  useEffect(() => {
-    if (!region || !mediaPath) {
-      setWaveform(null)
-      return
-    }
-    const cached = getCachedWaveform(region.media)
-    if (cached) {
-      setWaveform(cached)
-      return
-    }
-    let live = true
-    loadWaveform(region.media, mediaPath)
-      .then((wf) => {
-        if (live) setWaveform(wf)
-      })
-      .catch((err) => console.warn(`[waveform] could not decode "${region.media}":`, err))
-    return () => {
-      live = false
-    }
-  }, [region, mediaPath])
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !waveform || !region) return
-    drawWaveform(canvas, waveform, region.in, region.out, track.color)
-  }, [waveform, region, track.color])
-
-  if (!region) return null
-  const base = `${track.id}.clip.${clip.id}.audio`
-  return (
-    <div className="arr-audio-inspector" style={{ paddingLeft: HEADER_W }}>
-      <canvas
-        className="arr-audio-waveform"
-        data-audio-waveform={clip.id}
-        data-waveform-ready={waveform ? 'true' : 'false'}
-        ref={canvasRef}
-        width={600}
-        height={48}
-      />
-      <div className="arr-audio-inspector-fields">
-        <span className="arr-audio-inspector-label">{clip.id}:</span>
-        <label>
-          in
-          <input type="number" step="0.01" min={0} defaultValue={region.in} data-audio-in={clip.id} onBlur={(e) => postEdit(`${base}.in`, e.target.value)} />
-        </label>
-        <label>
-          out
-          <input type="number" step="0.01" min={0} defaultValue={region.out} data-audio-out={clip.id} onBlur={(e) => postEdit(`${base}.out`, e.target.value)} />
-        </label>
-        <label>
-          gain (dB)
-          <input type="number" step="0.5" defaultValue={region.gainDb} data-audio-gain={clip.id} onBlur={(e) => postEdit(`${base}.gainDb`, e.target.value)} />
-        </label>
-        <label>
-          warp
-          <select value={region.warp} data-audio-warp={clip.id} onChange={(e) => postEdit(`${base}.warp`, e.target.value)}>
-            {WARP_MODES.map((w: WarpMode) => (
-              // Phase 29 Stream GF item 5: `complex` is a legal enum value with no engine
-              // implementation yet (docs/format-spec.md documents it as a deliberate, deferred
-              // scope cut; `beat inspect` already prints "complex (unimplemented)" for it) — but
-              // selecting it here looked identical to a working mode, giving zero signal that it's
-              // a no-op (pilot 85). The label annotation is enough on its own to communicate that
-              // without blocking selection (still a legal, if inert, value to have on file).
-              <option key={w} value={w}>
-                {w === 'complex' ? `${w} (not yet implemented)` : w}
-              </option>
-            ))}
-          </select>
-        </label>
-        {region.warp === 'repitch' && (
-          <label>
-            rate
-            <input type="number" step="0.05" min={0.1} max={8} defaultValue={region.rate} data-audio-rate={clip.id} onBlur={(e) => postEdit(`${base}.rate`, e.target.value)} />
-          </label>
-        )}
-      </div>
     </div>
   )
 }
@@ -2946,12 +2841,11 @@ export function ArrangementView() {
                   onAdd={(param) => addLane(flat.track.id, param)}
                 />
               )}
-              {flat.track.kind === 'audio' &&
-                primaryClip &&
-                (() => {
-                  const clip = flat.track.clips.find((c) => c.id === primaryClip)
-                  return clip?.audio ? <AudioClipInspector track={flat.track} clip={clip} /> : null
-                })()}
+              {/* Phase 30 Stream JE: the audio-region trim/gain/warp editor no longer renders here
+                  as a separate, small, unlabeled strip wedged between the arrangement grid and the
+                  bottom panel — it's folded into the bottom Clip/Device panel itself
+                  (AudioClipEditor.tsx, routed by App.tsx's BottomPane), the same "one editing
+                  surface, always in the same place" treatment every other track kind already gets. */}
               {primaryClip &&
                 visible.map((param) => (
                   <AutomationLane

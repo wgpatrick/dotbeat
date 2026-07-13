@@ -103,7 +103,16 @@ interface DawState {
    * has anything to pop, mirrored from GET /undo-state + the `undo-state` SSE event so Ctrl+Z's
    * affordance (TransportBar's Undo/Redo buttons) can grey out without an extra round-trip per
    * keypress. This is NOT the git-backed History panel's checkpoint list — a wholly separate,
-   * ephemeral mechanism (see bridge.ts's postUndo/postRedo header comment). */
+   * ephemeral mechanism (see bridge.ts's postUndo/postRedo header comment).
+   *
+   * Phase 30 Stream JB (research/89): as of this stream, this is set from TWO sources, not just the
+   * SSE event — bridge.ts's postEdit also bumps it OPTIMISTICALLY (canUndo: true, canRedo: false) the
+   * instant a local edit is applied, the same "don't wait for the round trip" treatment the doc field
+   * itself already gets. Without that, this field could read stale (usually stale-false) for as long
+   * as postEdit's own ~60ms debounce plus a network round trip, which is exactly the window
+   * TransportBar's Undo button used to show `disabled` right after a real, undoable edit. The SSE
+   * event remains authoritative and corrects this shortly after in the rare case the optimistic guess
+   * was wrong (e.g. an edit that round-tripped to no actual canonical change). */
   canUndo: boolean
   canRedo: boolean
   /** Phase 29 Stream GA: the index into `doc.song` the user is currently "looking at" — alongside

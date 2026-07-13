@@ -216,25 +216,57 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
 }
 
 // Per-path debounce: a knob drag fires many deltas; only the latest value per path needs to land.
-const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>()
+// Phase 30 Stream JB: stores {timer, value, gestureId} rather than just the timer, so a pending
+// edit can be FLUSHED early (see flushPendingEdits) — postUndo/postRedo need to do this so an
+// Undo/Redo request never races a same-gesture edit that's still sitting in this 60ms window (see
+// their own comments below for the exact corruption this used to cause).
+const pendingEdits = new Map<string, { timer: ReturnType<typeof setTimeout>; value: string; gestureId: string | undefined }>()
 let sendQueue: Promise<unknown> = Promise.resolve()
 
-/** Actually POST one {path,value} edit, chained onto the shared send queue so the daemon never
- * has two /edit requests in flight at once — its own id-minting for the append grammar below
- * depends on processing writes in the same order they were issued. */
-function enqueueEditPost(path: string, value: string): void {
+// Phase 30 Stream JB (research/89 "Undo got interesting fast"): a monotonic per-tab counter handed
+// out to a caller that's about to fan out SEVERAL /edit calls (different paths — e.g. a diagonal
+// note move touches both `.start` and `.pitch`, a multi-note delete touches one path per note) that
+// all belong to the SAME user gesture. daemon.ts's undo-stack coalescing keys on /edit's `path` by
+// default (one coalescing bucket per field, correct for a single knob drag), which is exactly wrong
+// for a burst of DIFFERENT paths from one gesture — each lands as its own undo entry, so one Undo
+// only reverts one field/note instead of the whole gesture. Passing the SAME gestureId on every
+// call in the burst overrides that per-path bucketing with one shared bucket for the whole commit,
+// the same "collapse a burst into one undo step" mechanism a preset swap gets for free by being a
+// single request in the first place (research/81) — see NoteView.tsx's onPointerUp / Delete-key
+// handler for the call sites.
+let gestureCounter = 0
+export function newGestureId(): string {
+  gestureCounter += 1
+  return `g${gestureCounter}`
+}
+
+/** Actually POST one {path,value[,gestureId]} edit, chained onto the shared send queue so the
+ * daemon never has two /edit requests in flight at once — its own id-minting for the append
+ * grammar below depends on processing writes in the same order they were issued. */
+function enqueueEditPost(path: string, value: string, gestureId?: string): void {
   const base = daemonBase()
   sendQueue = sendQueue.then(() =>
     fetch(`${base}/edit`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path, value }),
+      body: JSON.stringify({ path, value, ...(gestureId !== undefined ? { gestureId } : {}) }),
     })
       .then(async (res) => {
         if (!res.ok) console.warn(`[daw] /edit ${path}=${value}: HTTP ${res.status}`, await res.text().catch(() => ''))
       })
       .catch((err) => console.warn('[daw] could not POST edit:', err)),
   )
+}
+
+/** Immediately sends every edit still sitting in the per-path debounce window (see postEdit),
+ * instead of waiting out its remaining ~60ms. postUndo/postRedo call this (then await sendQueue)
+ * before popping a stack — see their own comments for the exact bug this closes. */
+function flushPendingEdits(): void {
+  for (const [path, { timer, value, gestureId }] of pendingEdits) {
+    clearTimeout(timer)
+    pendingEdits.delete(path)
+    enqueueEditPost(path, value, gestureId)
+  }
 }
 
 /** Issue one edit. Applies it optimistically to the store, then sends a POST /edit.
@@ -252,27 +284,46 @@ function enqueueEditPost(path: string, value: string): void {
  * bug looked intermittent/pace-dependent rather than a hard break.
  *
  * Everything else (a knob turn, a drag) still debounces by path — there, only the LATEST value for
- * a given path is meaningful, so collapsing a burst into one send is correct and desired. */
-export function postEdit(path: string, value: string): void {
+ * a given path is meaningful, so collapsing a burst into one send is correct and desired.
+ *
+ * `gestureId`, when given, overrides daemon.ts's default per-path undo-coalescing key (see
+ * newGestureId's own comment above) so several calls here with different paths — a diagonal move's
+ * `.start`+`.pitch`, a multi-note delete's one-path-per-note — land as ONE undo entry instead of one
+ * per call. Omit it for anything that should keep today's per-path behavior (a lone knob drag).
+ *
+ * Phase 30 Stream JB (research/89): also bumps the store's `canUndo`/`canRedo` OPTIMISTICALLY, the
+ * same "don't wait for the round trip" discipline `applyLocalEdit` already uses for the document
+ * itself. Before this, `canUndo` only ever changed on the daemon's `undo-state` SSE broadcast, which
+ * can't arrive until AFTER this edit's own POST /edit lands — itself delayed up to 60ms by the
+ * debounce below. That gap is exactly what the pilot's "button shows disabled right after a fresh,
+ * undoable edit, and clicking it is a no-op" repro was hitting (TransportBar's button used to gate
+ * the click on `disabled={!canUndo}`, so a stale-false `canUndo` made the click a real no-op, not
+ * just a display glitch). Any local edit that actually changed the doc (`next` truthy) WILL push a
+ * fresh undo entry once it lands server-side (the one exception — a value that round-trips to an
+ * identical canonical write — self-corrects the instant the real `undo-state` event arrives), and a
+ * fresh edit always invalidates the redo branch (daemon.ts's `writeIfChanged`), so `canRedo: false`
+ * mirrors that immediately too. */
+export function postEdit(path: string, value: string, gestureId?: string): void {
   const state = useStore.getState()
   if (state.doc) {
     const next = applyLocalEdit(state.doc, path, value)
-    if (next) state.setDoc(next)
+    if (next) {
+      state.setDoc(next)
+      state.setUndoState({ canUndo: true, canRedo: false })
+    }
   }
   const isAppendGrammar = path.endsWith('.note') || path.endsWith('.hit')
   if (isAppendGrammar) {
-    enqueueEditPost(path, value)
+    enqueueEditPost(path, value, gestureId)
     return
   }
-  const existing = pendingTimers.get(path)
-  if (existing) clearTimeout(existing)
-  pendingTimers.set(
-    path,
-    setTimeout(() => {
-      pendingTimers.delete(path)
-      enqueueEditPost(path, value)
-    }, 60),
-  )
+  const existing = pendingEdits.get(path)
+  if (existing) clearTimeout(existing.timer)
+  const timer = setTimeout(() => {
+    pendingEdits.delete(path)
+    enqueueEditPost(path, value, gestureId)
+  }, 60)
+  pendingEdits.set(path, { timer, value, gestureId })
 }
 
 // ─── clip automation (Phase 20 Stream Z) ─────────────────────────────────────────────────────────
@@ -869,8 +920,22 @@ async function pullUndoState(base: string): Promise<void> {
 }
 
 /** Pop one step off the daemon's in-session undo stack and apply the resulting document. No-op
- * (resolves quietly) when the stack is already empty. */
+ * (resolves quietly) when the stack is already empty.
+ *
+ * Phase 30 Stream JB (research/89): flushes any edit still sitting in postEdit's 60ms debounce
+ * window, and awaits the send queue, BEFORE popping. Without this, an Undo fired quickly enough
+ * after an edit (well within human reach — the pilot's resize repro didn't need superhuman speed)
+ * could race that edit's still-pending POST /edit: the pop would land against the OLDER document
+ * the daemon actually still had on hand (reverting some earlier, unrelated edit instead of the one
+ * just made), and the delayed edit would then land a moment later ON TOP of that wrong base —
+ * visually masking the mistake (the note looks unchanged, since the late edit re-applies the same
+ * value the user just saw) while leaving the undo stack itself one entry further from what the user
+ * asked to revert. That's exactly the "button visibly flips to disabled, but the edit wasn't
+ * actually reverted — a follow-up Cmd+Z was needed" repro. Flushing first guarantees the daemon's
+ * stack already reflects every edit the user has made by the time this pops it. */
 export async function postUndo(): Promise<void> {
+  flushPendingEdits()
+  await sendQueue
   const base = daemonBase()
   try {
     const res = await fetch(`${base}/undo`, { method: 'POST' })
@@ -885,8 +950,11 @@ export async function postUndo(): Promise<void> {
 
 /** Pop one step off the daemon's in-session redo stack and apply the resulting document. No-op
  * (resolves quietly) when the stack is already empty, or when a new edit since the last undo has
- * cleared it (the daemon clears the redo stack on any new committed edit — research/28 §5.1). */
+ * cleared it (the daemon clears the redo stack on any new committed edit — research/28 §5.1).
+ * Flushes pending edits first, same reasoning as postUndo above. */
 export async function postRedo(): Promise<void> {
+  flushPendingEdits()
+  await sendQueue
   const base = daemonBase()
   try {
     const res = await fetch(`${base}/redo`, { method: 'POST' })
