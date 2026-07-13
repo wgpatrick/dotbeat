@@ -973,16 +973,41 @@ function AutomationLane({
     if (!ctx) return
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, wCss, AUTO_H)
-    ctx.fillStyle = 'rgba(255,255,255,0.02)'
+    // Phase 29 Stream GF item 6: a freshly-added, empty lane used to render as two ~6%-opacity
+    // rail lines on the dark background fill — no baseline, no current-value marker, nothing that
+    // read as "click here to add a point" (pilot 81). Raised the fill/rail opacity and, for the
+    // genuinely-empty case, added a dashed center baseline plus small "click to automate" text —
+    // a real visual invitation instead of a near-blank rectangle. Once the lane has real points the
+    // baseline/label are skipped entirely (the curve itself is the content, same as before).
+    ctx.fillStyle = 'rgba(255,255,255,0.035)'
     ctx.fillRect(0, 0, wCss, AUTO_H)
     // top / bottom rails
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)'
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)'
     ctx.lineWidth = 1
     for (const yy of [AUTO_PAD, AUTO_H - AUTO_PAD]) {
       ctx.beginPath()
       ctx.moveTo(0, yy + 0.5)
       ctx.lineTo(wCss, yy + 0.5)
       ctx.stroke()
+    }
+    if (points.length === 0) {
+      const midY = AUTO_H / 2
+      ctx.save()
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)'
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 4])
+      ctx.beginPath()
+      ctx.moveTo(0, midY + 0.5)
+      ctx.lineTo(wCss, midY + 0.5)
+      ctx.stroke()
+      ctx.setLineDash([])
+      if (wCss > 90) {
+        ctx.fillStyle = 'rgba(255,255,255,0.32)'
+        ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('click to add a point', 8, midY)
+      }
+      ctx.restore()
     }
 
     // Effective points = committed points with the active drag applied (move overrides one id; new
@@ -1336,21 +1361,37 @@ function AutomationLane({
  * picker is open — a param <select> + add button, spanning the timeline width. */
 function AutomationPicker({ track, available, onAdd }: { track: BeatTrack; available: { key: string; label: string }[]; onAdd: (param: string) => void }) {
   const [pick, setPick] = useState(available[0]?.key ?? '')
-  const chosen = available.some((a) => a.key === pick) ? pick : available[0]?.key ?? ''
+  // Phase 29 Stream GF item 7: `available` shrinks by exactly one entry every time a lane is
+  // added (the just-picked param drops out, since it's now "visible"/already added) — the OLD
+  // code recomputed `chosen` by falling back straight to `available[0]` whenever `pick` fell out
+  // of the list, which is EVERY add, so the ~100-option dropdown snapped back to the top after
+  // every single lane (pilot 84: "making multi-lane setup tedious"). Track the previous list and,
+  // when `pick` disappears, land on whatever's now at roughly the same INDEX instead — keeps the
+  // selection (and therefore the native <select>'s own scroll-into-view-on-open behavior) in the
+  // same neighborhood the user was just browsing, rather than jumping to the top of the list.
+  const prevAvailableRef = useRef(available)
+  useEffect(() => {
+    const prev = prevAvailableRef.current
+    prevAvailableRef.current = available
+    if (available.some((a) => a.key === pick)) return
+    const prevIdx = prev.findIndex((a) => a.key === pick)
+    const idx = prevIdx === -1 ? 0 : Math.min(prevIdx, available.length - 1)
+    setPick(available[idx]?.key ?? '')
+  }, [available, pick])
   return (
     <div className="arr-auto-picker" style={{ height: PICKER_H }}>
       <div className="arr-auto-picker-head" style={{ width: HEADER_W }}>
         automation
       </div>
       <div className="arr-auto-picker-body">
-        <select className="arr-auto-select" value={chosen} data-auto-select={track.id} onChange={(e) => setPick(e.target.value)}>
+        <select className="arr-auto-select" value={pick} data-auto-select={track.id} onChange={(e) => setPick(e.target.value)}>
           {available.map((a) => (
             <option key={a.key} value={a.key}>
               {laneLabel(track, a.key)}
             </option>
           ))}
         </select>
-        <button className="arr-auto-add" data-auto-add={track.id} onClick={() => chosen && onAdd(chosen)} disabled={!chosen}>
+        <button className="arr-auto-add" data-auto-add={track.id} onClick={() => pick && onAdd(pick)} disabled={!pick}>
           + add lane
         </button>
       </div>
@@ -1505,8 +1546,14 @@ function AudioClipInspector({ track, clip }: { track: BeatTrack; clip: BeatClip 
           warp
           <select value={region.warp} data-audio-warp={clip.id} onChange={(e) => postEdit(`${base}.warp`, e.target.value)}>
             {WARP_MODES.map((w: WarpMode) => (
+              // Phase 29 Stream GF item 5: `complex` is a legal enum value with no engine
+              // implementation yet (docs/format-spec.md documents it as a deliberate, deferred
+              // scope cut; `beat inspect` already prints "complex (unimplemented)" for it) — but
+              // selecting it here looked identical to a working mode, giving zero signal that it's
+              // a no-op (pilot 85). The label annotation is enough on its own to communicate that
+              // without blocking selection (still a legal, if inert, value to have on file).
               <option key={w} value={w}>
-                {w}
+                {w === 'complex' ? `${w} (not yet implemented)` : w}
               </option>
             ))}
           </select>
@@ -1596,6 +1643,17 @@ export function ArrangementView() {
   // Lanes that already carry points always show regardless — see visibleParamsFor.
   const [autoOpen, setAutoOpen] = useState<Record<string, boolean>>({})
   const [addedLanes, setAddedLanes] = useState<Record<string, string[]>>({})
+  // Phase 29 Stream GF item 6 (second half): a just-added lane's DOM row doesn't exist until the
+  // NEXT render, and `.arr-scroll` (the arrangement's own vertical scrollport, independent of the
+  // page) doesn't auto-scroll to reveal it — when the arrangement pane is short (small window, or
+  // several rows already visible), the new lane can land below the scrollport's current view with
+  // no visual cue it exists at all. Pilot 84 read this as "the lane renders BEHIND the clip-editor
+  // panel," since from a screenshot alone "exists in the document but isn't anywhere on screen" is
+  // indistinguishable from a genuine stacking/paint-order bug — confirmed via direct DOM/layout
+  // inspection that `.arr-scroll` really is just clipping it correctly (ordinary scrolled-off
+  // content, not a z-index escape). Fixing the SYMPTOM either way: scroll the new lane into view
+  // the moment it mounts, so "added but not visible" can't happen regardless of root cause.
+  const lastAddedLaneRef = useRef<{ track: string; param: string } | null>(null)
   // Add-track control (Phase 20 Stream W): a small kind-chooser menu in the toolbar.
   const [addOpen, setAddOpen] = useState(false)
   const [addBusy, setAddBusy] = useState(false)
@@ -1733,12 +1791,26 @@ export function ArrangementView() {
   )
 
   const addLane = useCallback((trackId: string, param: string) => {
+    lastAddedLaneRef.current = { track: trackId, param }
     setAddedLanes((prev) => {
       const cur = prev[trackId] ?? []
       if (cur.includes(param)) return prev
       return { ...prev, [trackId]: [...cur, param] }
     })
   }, [])
+
+  // Scrolls the just-added lane into view once its row has actually mounted (see
+  // lastAddedLaneRef's comment above). Runs after every render touching addedLanes; a no-op
+  // (element not found yet, or nothing pending) most of the time.
+  useEffect(() => {
+    const pending = lastAddedLaneRef.current
+    if (!pending) return
+    const el = document.querySelector(`[data-auto-track="${pending.track}"][data-auto-param="${pending.param}"]`)
+    if (el) {
+      el.scrollIntoView({ block: 'nearest' })
+      lastAddedLaneRef.current = null
+    }
+  }, [addedLanes])
 
   // Removing a lane clears its stored points (one /automate remove per breakpoint — an empty lane has
   // no canonical serialized form, so the last removal drops the `auto` block) and forgets it locally.

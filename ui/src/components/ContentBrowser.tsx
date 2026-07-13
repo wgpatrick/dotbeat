@@ -139,6 +139,25 @@ function TypeIcon({ type }: { type: LibraryItemType }) {
   )
 }
 
+// Phase 29 Stream GF item 9 — Phase 27 Stream EJ's `TypeIcon` already gives all five content types
+// their own glyph, but pilot 85 still dragged a genre-named drum-kit PRESET section (`808-TRAP`,
+// `TECHNO`, `BOOM-BAP`, ...) expecting a real audio loop: those rows ARE `TypeIcon type="preset-
+// drums"` (an outline drum/cylinder glyph) today, genuinely distinct from a `kit-lane` row's solid
+// three-bar glyph, but "which of five outline/solid glyphs is this" is a subtler read than the ONE
+// fact that actually matters here — "does dragging this onto a track move real sample bytes, or
+// just synth params." `AudioBadge` makes exactly that binary explicit with a small labeled pill
+// (not just another icon shape) on the rows that genuinely carry real, sha256-addressed `.wav`
+// content (`KitLaneRow`, and `KitGroup`'s own head row — dragging a whole kit is real audio too) —
+// preset rows (both synth and the drum-kit-shaped presets) get none, since neither has any audio
+// content, `kind: 'drums'` or not.
+function AudioBadge() {
+  return (
+    <span className="lib-audio-badge" title="real audio content (a .wav sample) — not a synthesized preset">
+      audio
+    </span>
+  )
+}
+
 /** A collapsible top-level section (Synth Presets / Drum Presets / Kits / SoundFonts). Local open
  * state only — this is browse-UI state, not document/session state, so it doesn't belong in the
  * shared store. */
@@ -290,6 +309,7 @@ function KitLaneRow({
         }}
       />
       <span className="lib-row-name">{(DRUM_LABELS as Record<string, string>)[lane.lane] ?? lane.lane}</span>
+      <AudioBadge />
     </div>
   )
 }
@@ -314,6 +334,7 @@ function KitGroup({
       >
         <TypeIcon type="kit" />
         <span className="lib-row-name">{kit.id}</span>
+        <AudioBadge />
         <span className="lib-row-meta">{kit.lanes.length} lanes</span>
       </div>
       {kit.lanes.map((l) => (

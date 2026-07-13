@@ -461,7 +461,13 @@ export const PARAM_GROUPS: ParamGroup[] = [
     id: 'sends',
     title: 'Sends',
     kinds: ['synth', 'drums'],
-    open: false,
+    // Phase 29 Stream GF item 10: was `open: false` — Sends sat at the bottom of a six(+)-section
+    // collapsed accordion (Filter & Envelope, Amp & Output, Ping Pong Delay, Beat Repeat,
+    // Chorus/Phaser, Saturator, ...) with no search/jump control, so reaching it meant scrolling
+    // past every other section first (pilot 86). Defaulting it open — same treatment `filter`/`amp`
+    // above already get — is the smallest fix that actually solves the discoverability complaint
+    // without a bigger effects-panel redesign (search/jump, reordering the whole accordion, etc.).
+    open: true,
     params: [k('sendReverb', 'Reverb', 0, 1, fmt.pct), k('sendDelay', 'Delay', 0, 1, fmt.pct)],
   },
   {

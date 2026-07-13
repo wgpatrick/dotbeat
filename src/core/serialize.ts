@@ -152,6 +152,17 @@ function serializeTrack(t: BeatTrack): string[] {
   if (t.kind === 'audio') {
     for (const clip of t.clips) {
       lines.push(`  clip ${clip.id}`)
+      // Phase 29 Stream GF item 4: audio clips share the same BeatClip.loop/.signature fields as
+      // every other clip kind (setClipLoop/setClipSignature in edit.ts don't gate on track kind,
+      // and parse.ts's level-2 `loop`/`signature` handling is likewise kind-agnostic) — but this
+      // branch used to skip `serializeClipProps` entirely, so an edit made through the GUI's clip
+      // properties panel (or `beat set <track>.clip.<id>.loop`) would apply and optimistically
+      // render correctly in-session, then silently vanish on the next save/reload because the
+      // field was never written to the file in the first place. Confirmed via pilot 85: filling in
+      // the loop fields visibly moved the range bar but a before/after diff of the raw `.beat` file
+      // showed no change. Matching the instrument/synth branches' own call below fixes the
+      // round-trip for real (this is a serialization gap, not audio-engine work).
+      lines.push(...serializeClipProps(clip, '    '))
       if (clip.audio) lines.push(serializeAudioLine(clip.audio, '    '))
       lines.push(...serializeAutomationLanes(t.id, clip.automation, '    '))
     }

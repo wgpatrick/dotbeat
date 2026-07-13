@@ -46,10 +46,16 @@ function feelLaneScope(sel: BeatSelection, track: string | undefined): string[] 
   return lanes && lanes.length ? lanes : undefined
 }
 
-function selectionSummary(sel: BeatSelection): string {
+// Phase 29 Stream GF item 3: `sel.tracks`/`sel.lanes[].track` hold stable track IDs, not display
+// names — a track's `.name` can be changed independently of its `id` via the inline rename
+// affordance (ArrangementView.tsx's `${track.id}.name` edit). Resolving through `doc.tracks` here
+// means this label always reflects the CURRENT name, instead of freezing whatever the id happened
+// to look like (often the original, pre-rename name) for the rest of the session.
+function selectionSummary(sel: BeatSelection, doc: BeatDocument | null): string {
+  const nameOf = (id: string) => doc?.tracks.find((t) => t.id === id)?.name ?? id
   const parts: string[] = []
-  if (sel.lanes?.length) parts.push(sel.lanes.map((l) => `${l.track}.${l.lane}`).join(' '))
-  else if (sel.tracks?.length) parts.push(sel.tracks.join(' '))
+  if (sel.lanes?.length) parts.push(sel.lanes.map((l) => `${nameOf(l.track)}.${l.lane}`).join(' '))
+  else if (sel.tracks?.length) parts.push(sel.tracks.map(nameOf).join(' '))
   if (sel.bars) parts.push(`bars ${sel.bars.start}–${sel.bars.end}`)
   if (sel.notes?.length) parts.push(`${sel.notes.length} note${sel.notes.length === 1 ? '' : 's'}`)
   return parts.join(' · ') || 'current track'
@@ -243,7 +249,7 @@ export function VaryAffordance() {
   // ── Idle trigger ────────────────────────────────────────────────────────────────────────────
   return (
     <div className="vary-bar" role="group" aria-label="vary selection">
-      <span className="vary-scope-hint">selection: {selectionSummary(selection)}</span>
+      <span className="vary-scope-hint">selection: {selectionSummary(selection, doc)}</span>
       <button className="vary-btn trigger" onClick={trigger} disabled={busy} title="generate parameter variations of the selection (rung 1)">
         {busy ? 'varying…' : `≈ ${triggerLabel}`}
       </button>

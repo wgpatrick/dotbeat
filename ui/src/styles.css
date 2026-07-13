@@ -2175,7 +2175,13 @@ body {
   top: 3px;
   bottom: 3px;
   box-sizing: border-box;
-  border: 1px solid var(--line);
+  /* Phase 29 Stream GF item 2: was `1px solid var(--line)` — the caller overrides border-COLOR
+     inline with the track's own hue (see ArrangementView.tsx's `style={{ borderColor: track.color
+     }}`), but at 1px width that colored line reads as essentially invisible at normal viewing
+     scale (pilot 80: "only the (loop) label chip reads as the whole clip," every clip looking like
+     a ~30px sliver regardless of its real, correct, full width). 2px is enough to read clearly as
+     a bounded block's edge without the block looking noticeably thicker/different in size. */
+  border: 2px solid var(--line);
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.03);
   cursor: grab;
@@ -2853,6 +2859,19 @@ body {
   gap: 6px;
   margin-bottom: 8px;
   font-size: 11px;
+  /* Phase 29 Stream GF item 1: `.arr-zoom-controls`' `margin-left: auto` push-right, combined with
+     `flex-wrap: wrap` on this row, makes Chromium report `scrollWidth` ~17px wider than the row's
+     real rendered content (verified: the last child's own `getBoundingClientRect().right` sits
+     exactly flush with this row's width — nothing is actually clipped or drawn beyond it; this is a
+     pure layout-engine scrollWidth-measurement artifact, not real overflowing content, and it
+     reproduces at every viewport width tested, not just one). Every ancestor up to `document.body`
+     has `overflow: visible`, so that phantom width silently bubbles all the way up and makes the
+     whole page's scrollWidth exceed the viewport by the same ~17px — which is what actually
+     surfaced as pilot 81's "the app shell scrolls horizontally, clipping the logo" symptom.
+     `overflow-x: hidden` here clips the phantom region at its source (verified: makes
+     `document.body.scrollWidth` match `window.innerWidth` exactly) with no visual effect, since
+     nothing real was ever drawn in that space. */
+  overflow-x: hidden;
 }
 .arr-length-label {
   color: var(--text-dim);
@@ -3133,6 +3152,26 @@ body {
 .lib-row:hover .lib-type-icon,
 .lib-row-previewing .lib-type-icon {
   color: var(--accent);
+}
+
+/* Phase 29 Stream GF item 9 — a small labeled pill on rows that carry real, sha256-addressed .wav
+   content (kit lanes + the kit-bundle head row), so "does this row move real audio, or just synth
+   params" reads at a glance instead of requiring the viewer to distinguish a family of similar
+   outline/solid glyphs. Green (var(--good)) reads as "real content present," distinct from both the
+   app's amber accent (already meaning "currently previewing" on this same row) and the neutral gray
+   every other row's meta text uses — deliberately NOT shown on preset rows (drum-kit-shaped or
+   otherwise), which never carry audio regardless of how "loop-like" their name/category sounds. */
+.lib-audio-badge {
+  flex: 0 0 auto;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--good);
+  border: 1px solid rgba(110, 201, 124, 0.45);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+  line-height: 1.3;
 }
 
 /* Phase 27 Stream EJ (research/73 §4 item 2) — a real in-place "currently previewing" indicator on
