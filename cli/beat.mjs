@@ -183,7 +183,10 @@ const USAGE = `usage:
   beat suggest <file> <track> [--target <lane-or-id>] [--log f]
                                                           read the scores log and propose the next beat-vary round
   beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
-  beat lint <file.wav> [--target <LUFS>] [--json]         deterministic mix findings (default target -14)
+  beat lint <file.wav> [--target <LUFS>] [--json] [--doc <file.beat>]
+                                                          deterministic mix findings (default target -14);
+                                                          --doc renders each track solo to name the actual
+                                                          offending track in each finding's suggestion
   beat render <file> [-o out.wav] [--tail <sec>]          render to WAV through dotbeat's own engine
                                                           (headless Chromium driving ui/; no BeatLab needed)
   beat daemon <file> [--port 8420]
@@ -479,15 +482,39 @@ function quantizeCmd(argv) {
     return i === -1 ? undefined : argv[i + 1]
   }
   const before = readDoc(file)
+  const noteIds = flagValue('--notes') !== undefined ? flagValue('--notes').split(',').filter(Boolean) : undefined
   const { doc, changed } = quantizeNotes(before, track, {
     ...(flagValue('--grid') !== undefined ? { grid: Number(flagValue('--grid')) } : {}),
     ...(flagValue('--amount') !== undefined ? { amount: Number(flagValue('--amount')) } : {}),
     ...(argv.includes('--no-starts') ? { starts: false } : {}),
     ...(argv.includes('--ends') ? { ends: true } : {}),
-    ...(flagValue('--notes') !== undefined ? { noteIds: flagValue('--notes').split(',').filter(Boolean) } : {}),
+    ...(noteIds !== undefined ? { noteIds } : {}),
   })
   writeDoc(file, before, doc)
   if (changed === 0) process.stdout.write('already on the grid — no notes moved\n')
+  if (changed > 0) warnIfPastLoopBoundary(doc, track, noteIds)
+}
+
+// Phase 33 Stream MD item 3 (research/98): quantizing a note onto a grid step can push it past the
+// loop's own end with zero warning (confirmed repro: step 62 -> 64 in a 4-bar/64-step loop, valid
+// steps 0-63). Mirrors the shape ui/src/components/NoteView.tsx's PitchTimePanel already uses for
+// the identical GUI-side bug (Phase 30 Stream KC): a post-hoc warning printed alongside the normal
+// result, not a hard clamp that would silently change what the requested quantize actually does.
+// Checked only against the notes/hits actually in THIS op's own scope (mirrors the GUI's
+// `opNoteIds` check), against the doc's own loop length (loopBars*16 — the same `loopSteps` value
+// `inspect`'s "steps X-Y of N" line already reports).
+function warnIfPastLoopBoundary(doc, trackId, scopeIds) {
+  const t = doc.tracks.find((x) => x.id === trackId)
+  if (!t) return
+  const totalSteps = doc.loopBars * 16
+  const events = t.kind === 'drums' ? t.hits : t.notes
+  const scope = scopeIds && scopeIds.length ? events.filter((e) => scopeIds.includes(e.id)) : events
+  const overflowing = scope.filter((e) => e.start + (e.duration ?? 0) > totalSteps)
+  if (overflowing.length === 0) return
+  const worst = overflowing.reduce((a, b) => (a.start + (a.duration ?? 0) >= b.start + (b.duration ?? 0) ? a : b))
+  process.stdout.write(
+    `warning: ${overflowing.length} ${t.kind === 'drums' ? 'hit' : 'note'}${overflowing.length === 1 ? '' : 's'} now end${overflowing.length === 1 ? 's' : ''} past this ${totalSteps}-step loop's own boundary (e.g. ${worst.id} at step ${worst.start + (worst.duration ?? 0)}) — the overhang plays once but won't repeat each loop pass.\n`,
+  )
 }
 
 // ---- Pitch & Time operations (Phase 22 Stream AD) — one-shot rewrites, same shape as quantize:
@@ -1152,16 +1179,43 @@ function metricsCmd(argv) {
   )
 }
 
-function lintCmd(argv) {
+// Phase 33 Stream MD item 2 (research/98): `--doc <file.beat>` lets lint name the actual offending
+// track in each finding's suggestion instead of a generic fix pattern. This is opt-in and only
+// pays for real per-track audio (one solo render per track, via render.mjs's headless-chromium
+// path — the same real engine `beat render` uses, no cheaper synthetic shortcut exists) when both
+// a doc was given AND the plain mix already has at least one finding worth naming a track for.
+async function lintCmd(argv) {
   const json = argv.includes('--json')
   const targetIdx = argv.indexOf('--target')
   const target = targetIdx !== -1 ? Number(argv[targetIdx + 1]) : undefined
-  const file = argv.find((a, i) => !a.startsWith('--') && (targetIdx === -1 || i !== targetIdx + 1))
+  const docIdx = argv.indexOf('--doc')
+  const docPath = docIdx !== -1 ? argv[docIdx + 1] : undefined
+  const file = argv.find(
+    (a, i) => !a.startsWith('--') && (targetIdx === -1 || i !== targetIdx + 1) && (docIdx === -1 || i !== docIdx + 1),
+  )
   if (!file) throw new BeatEditError('lint needs a wav file')
   const { channels, sampleRate } = decodeWav(readFileSync(file))
-  const findings = lint(analyze(channels, sampleRate), target !== undefined ? { targetLufs: target } : {})
+  const lintOpts = target !== undefined ? { targetLufs: target } : {}
+  let findings = lint(analyze(channels, sampleRate), lintOpts)
+
+  if (docPath && findings.some((f) => f.suggestion)) {
+    const doc = readDoc(docPath)
+    const { renderTrackSolosCommand } = await import('./render.mjs')
+    const trackIds = doc.tracks.map((t) => t.id)
+    const wavByTrack = await renderTrackSolosCommand(docPath, trackIds)
+    const trackMetrics = trackIds.map((id) => {
+      const { channels: c, sampleRate: sr } = decodeWav(wavByTrack.get(id))
+      return { id, name: doc.tracks.find((t) => t.id === id)?.name, metrics: analyze(c, sr) }
+    })
+    findings = lint(analyze(channels, sampleRate), { ...lintOpts, trackMetrics })
+  }
+
   process.stdout.write(json ? JSON.stringify(findings, null, 2) + '\n' : formatLint(findings))
   process.exitCode = findings.some((f) => f.level === 'warn') ? 1 : 0
+  // render.mjs leaves event-loop stragglers (chromium pipes, vite) — same fix `render`'s own case
+  // in main()'s switch needs. Only the --doc path touches chromium at all, so the fast/common path
+  // (no --doc) exits naturally exactly as it always has.
+  if (docPath) process.exit(process.exitCode ?? 0)
 }
 
 /** `git show rev:path` needs the path relative to the repo root, wherever we're invoked from. */
@@ -1498,7 +1552,7 @@ async function main() {
       metricsCmd(rest)
       break
     case 'lint':
-      lintCmd(rest)
+      await lintCmd(rest)
       break
     case 'mcp': {
       const { runMcpServer } = await import('../dist/src/mcp/server.js')

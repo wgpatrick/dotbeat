@@ -68,6 +68,82 @@ async function serveUi(preferredPort) {
   return { proc, url }
 }
 
+// Shared boot sequence for anything that needs a live, headless dotbeat UI driving the real engine
+// against a .beat file: `renderCommand` (one full-mix capture) and `renderTrackSolosCommand`
+// (Phase 33 Stream MD item 2 — one capture per track, solo'd, reusing the SAME daemon/preview/
+// browser session rather than paying the boot cost once per track). Returns everything the caller
+// needs plus a `close()` to tear it all down; the caller owns the try/finally.
+async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPort = 5899 } = {}) {
+  // Ensure the compiled repo (core + daemon) exists before importing it, so a fresh checkout that
+  // hasn't run `npm run build` still works out of the box rather than throwing on a missing dist.
+  if (!existsSync(join(repoRoot, 'dist/src/daemon/daemon.js')) || !existsSync(join(repoRoot, 'dist/src/core/index.js'))) {
+    console.error('building repo (dist/ missing)...')
+    execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
+  }
+  // Ensure ui/ is built (vite preview serves ui/dist).
+  if (!existsSync(join(uiDir, 'dist', 'index.html'))) {
+    console.error('building ui/ (ui/dist missing)...')
+    execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+  }
+
+  const { parse } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
+  const { startDaemon } = await import(pathToFileURL(join(repoRoot, 'dist/src/daemon/daemon.js')).href)
+
+  const doc = parse(readFileSync(beatPath, 'utf8'))
+  // Render length: a song block plays its full timeline (sum of section bars); otherwise one loop
+  // pass. Same math the engine uses for transport.loopEnd (ui/src/audio/engine.ts play()).
+  const renderBars = doc.song && doc.song.length > 0 ? doc.song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
+  const seconds = (renderBars * 16 * 60) / doc.bpm / 4 + tail
+  console.error(`parsed ${beatPath}: ${doc.tracks.length} track(s), bpm ${doc.bpm}, ${renderBars} bar(s) -> ${seconds.toFixed(2)}s of audio`)
+
+  const daemon = await startDaemon({ filePath: beatPath, port: daemonPort })
+  console.error(`daemon on :${daemon.port}`)
+
+  const served = await serveUi(previewPort)
+  console.error(`ui served at ${served.url}`)
+
+  const browser = await chromium.launch({
+    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
+    headless: true,
+    args: ['--autoplay-policy=no-user-gesture-required'],
+  })
+  const page = await browser.newPage()
+  const pageErrors = []
+  page.on('pageerror', (e) => pageErrors.push(String(e)))
+
+  console.error('loading dotbeat ui (headless)...')
+  await page.goto(`${served.url}/?daw=${daemon.port}`, { waitUntil: 'load' })
+  // wait for the engine to exist AND the store to have filled from the daemon
+  await page.waitForFunction(() => window.__engine && window.__store && window.__store.getState().doc, { timeout: 15000 })
+  if (pageErrors.length) throw new Error('page error(s) before render:\n' + pageErrors.join('\n'))
+
+  const close = async () => {
+    await browser.close()
+    served.proc.kill('SIGTERM')
+    await daemon.close()
+  }
+  return { page, pageErrors, doc, seconds, close }
+}
+
+/** One real-time capture of whatever's currently soloed/muted in the page's own store — the full
+ * mix when nothing's soloed. */
+async function captureWav(page, seconds, pageErrors) {
+  console.error("rendering (real-time capture through dotbeat's own engine)...")
+  const base64 = await page.evaluate(async (secs) => {
+    await window.__engine.play()
+    await new Promise((r) => setTimeout(r, 250)) // let the graph settle before capture
+    const blob = await window.__engine.recordWav(secs)
+    window.__engine.stop()
+    const buf = await blob.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+    return btoa(binary)
+  }, seconds)
+  if (pageErrors.length) throw new Error('page error(s) during render:\n' + pageErrors.join('\n'))
+  return Buffer.from(base64, 'base64')
+}
+
 export async function renderCommand(argv) {
   const args = parseArgs(argv)
   const beatPath = args._[0]
@@ -80,76 +156,42 @@ export async function renderCommand(argv) {
   const daemonPort = args.daemonPort !== undefined ? Number(args.daemonPort) : 0 // 0 => OS picks a free port
   const previewPort = args.previewPort !== undefined ? Number(args.previewPort) : 5899
 
-  // Ensure the compiled repo (core + daemon) exists before importing it, so a fresh checkout that
-  // hasn't run `npm run build` still works out of the box rather than throwing on a missing dist.
-  if (!existsSync(join(repoRoot, 'dist/src/daemon/daemon.js')) || !existsSync(join(repoRoot, 'dist/src/core/index.js'))) {
-    console.log('building repo (dist/ missing)...')
-    execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
-  }
-  // Ensure ui/ is built (vite preview serves ui/dist).
-  if (!existsSync(join(uiDir, 'dist', 'index.html'))) {
-    console.log('building ui/ (ui/dist missing)...')
-    execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
-  }
-
-  const { parse } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
-  const { startDaemon } = await import(pathToFileURL(join(repoRoot, 'dist/src/daemon/daemon.js')).href)
-
-  const doc = parse(readFileSync(beatPath, 'utf8'))
-  // Render length: a song block plays its full timeline (sum of section bars); otherwise one loop
-  // pass. Same math the engine uses for transport.loopEnd (ui/src/audio/engine.ts play()).
-  const renderBars = doc.song && doc.song.length > 0 ? doc.song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
-  const seconds = (renderBars * 16 * 60) / doc.bpm / 4 + tail
-  console.log(`parsed ${beatPath}: ${doc.tracks.length} track(s), bpm ${doc.bpm}, ${renderBars} bar(s) -> ${seconds.toFixed(2)}s of audio`)
-
-  const daemon = await startDaemon({ filePath: beatPath, port: daemonPort })
-  console.log(`daemon on :${daemon.port}`)
-
-  let preview
-  let browser
+  const session = await bootRenderSession(beatPath, { tail, daemonPort, previewPort })
   try {
-    const served = await serveUi(previewPort)
-    preview = served.proc
-    console.log(`ui served at ${served.url}`)
-
-    browser = await chromium.launch({
-      ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-      headless: true,
-      args: ['--autoplay-policy=no-user-gesture-required'],
-    })
-    const page = await browser.newPage()
-    const pageErrors = []
-    page.on('pageerror', (e) => pageErrors.push(String(e)))
-
-    console.log('loading dotbeat ui (headless)...')
-    await page.goto(`${served.url}/?daw=${daemon.port}`, { waitUntil: 'load' })
-    // wait for the engine to exist AND the store to have filled from the daemon
-    await page.waitForFunction(() => window.__engine && window.__store && window.__store.getState().doc, { timeout: 15000 })
-    if (pageErrors.length) throw new Error('page error(s) before render:\n' + pageErrors.join('\n'))
-
-    console.log("rendering (real-time capture through dotbeat's own engine)...")
-    const base64 = await page.evaluate(async (secs) => {
-      await window.__engine.play()
-      await new Promise((r) => setTimeout(r, 250)) // let the graph settle before capture
-      const blob = await window.__engine.recordWav(secs)
-      window.__engine.stop()
-      const buf = await blob.arrayBuffer()
-      const bytes = new Uint8Array(buf)
-      let binary = ''
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-      return btoa(binary)
-    }, seconds)
-
-    if (pageErrors.length) throw new Error('page error(s) during render:\n' + pageErrors.join('\n'))
-
-    const wavBytes = Buffer.from(base64, 'base64')
+    const wavBytes = await captureWav(session.page, session.seconds, session.pageErrors)
     writeFileSync(outPath, wavBytes)
-    console.log(`wrote ${outPath} (${wavBytes.length} bytes)`)
+    console.error(`wrote ${outPath} (${wavBytes.length} bytes)`)
   } finally {
-    await browser?.close()
-    preview?.kill('SIGTERM')
-    await daemon.close()
+    await session.close()
   }
+}
+
+/** Phase 33 Stream MD item 2 (research/98): one real-time solo capture per track id, reusing a
+ * single daemon/preview/browser session (booting that session is most of the fixed cost — paying
+ * it once instead of once-per-track keeps this from being N full `renderCommand` invocations).
+ * Drives the SAME mute/solo mechanism the mixer's own solo button uses (`window.__store`'s
+ * `mutes`/`solos`, gated into real audio by engine.ts's `applyMuteGates()` every 16th-step tick —
+ * see ui/src/state/store.ts's `isEffectivelyMuted`), so a "solo" capture here is genuinely what
+ * that track alone sounds like in the mix, not a synthetic approximation. Returns
+ * `Map<trackId, Buffer>` (WAV bytes); the caller decides what to do with them (e.g. `analyze()`
+ * each for `beat lint --doc`'s per-track offender naming). */
+export async function renderTrackSolosCommand(beatPath, trackIds, opts = {}) {
+  const session = await bootRenderSession(beatPath, opts)
+  const results = new Map()
+  try {
+    for (const id of trackIds) {
+      await session.page.evaluate((trackId) => {
+        window.__store.setState({ solos: { [trackId]: true }, mutes: {} })
+      }, id)
+      results.set(id, await captureWav(session.page, session.seconds, session.pageErrors))
+    }
+    await session.page.evaluate(() => {
+      window.__store.setState({ solos: {}, mutes: {} })
+    })
+  } finally {
+    await session.close()
+  }
+  return results
 }
 
 // Runs directly (node cli/render.mjs ...) or via the `beat` dispatcher (cli/beat.mjs), which

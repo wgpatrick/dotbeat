@@ -2,7 +2,7 @@
 // for humans and agents. (The CLI's --json mode doesn't come through here — it just prints the
 // parsed document; this is the human-shaped view.)
 
-import type { BeatClip, BeatDocument, BeatTrack } from './document.js'
+import type { BeatClip, BeatDocument, BeatGroup, BeatTrack } from './document.js'
 import { declaredLaneNames } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -31,10 +31,15 @@ function audioRegionSummary(c: BeatClip): string {
   return `${c.id} (${a.media} ${formatNumber(a.in)}-${formatNumber(a.out)}s, ${warp}, ${formatNumber(a.gainDb)} dB${clipAutomationSummary(c)})`
 }
 
-function describeTrack(t: BeatTrack, loopSteps: number): string[] {
+function describeTrack(t: BeatTrack, loopSteps: number, groupByTrack: Map<string, BeatGroup>): string[] {
   const lines: string[] = []
   const s = t.synth
-  lines.push(`${t.id}  "${t.name}"  ${t.kind}  ${t.color}`)
+  // v0.10 (Phase 33 Stream MD item 1): a track's group membership, when it has one — elided
+  // (matching the file's other elision conventions) for the common case of no group. research/98
+  // found the plain-text view showed no trace of groups at all even though --json and
+  // `diff --git` both correctly reflected them.
+  const group = groupByTrack.get(t.id)
+  lines.push(`${t.id}  "${t.name}"  ${t.kind}  ${t.color}${group ? `  group: ${group.id} ("${group.name}")` : ''}`)
   if (t.kind === 'instrument' && t.instrument) {
     lines.push(`  soundfont: ${t.instrument.sample} program ${formatNumber(t.instrument.program)}, ${formatNumber(t.instrument.volume)} dB, pan ${formatNumber(t.instrument.pan)}`)
   } else if (t.kind === 'audio') {
@@ -100,14 +105,23 @@ function describeTrack(t: BeatTrack, loopSteps: number): string[] {
 
 export function describeDocument(doc: BeatDocument): string {
   const loopSteps = doc.loopBars * 16
+  const groupByTrack = new Map<string, BeatGroup>()
+  for (const g of doc.groups) for (const trackId of g.tracks) groupByTrack.set(trackId, g)
   const lines: string[] = [
     `format ${doc.formatVersion} | ${formatNumber(doc.bpm)} bpm | ${doc.loopBars} bar${doc.loopBars === 1 ? '' : 's'} (${loopSteps} steps) | selected: ${doc.selectedTrack}`,
     `tracks: ${doc.tracks.length}`,
     '',
   ]
   for (const t of doc.tracks) {
-    lines.push(...describeTrack(t, loopSteps), '')
+    lines.push(...describeTrack(t, loopSteps, groupByTrack), '')
   }
+  // v0.10 (Phase 33 Stream MD item 1): groups section, canonical position after tracks/before
+  // scenes (matches document.ts's own field order comment). Same one-line-per-item, elided-when-
+  // empty style as the `scene ${s.id}: ...` lines just below.
+  for (const g of doc.groups) {
+    lines.push(`group ${g.id}: "${g.name}" ${g.color} — ${g.tracks.join(', ')}`)
+  }
+  if (doc.groups.length > 0) lines.push('')
   for (const s of doc.scenes) {
     const slots = Object.entries(s.slots).map(([tr, c]) => `${tr}=${c}`).join(' ')
     lines.push(`scene ${s.id}: ${slots || '(empty)'}`)
