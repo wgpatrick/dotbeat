@@ -83,7 +83,7 @@ import {
   BeatPresetError,
   BeatPitchTimeError,
 } from '../dist/src/core/index.js'
-import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.js'
+import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META } from '../dist/src/metrics/index.js'
 
 // ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
 // The old monolithic USAGE template literal, restructured as one entry per command so
@@ -1247,7 +1247,10 @@ function metricsCmd(argv) {
   const { channels, sampleRate } = decodeWav(readFileSync(file))
   const m = analyze(channels, sampleRate)
   if (json) {
-    process.stdout.write(JSON.stringify(m, null, 2) + '\n')
+    // Phase 34 Stream NC: identical re-renders of the same .beat differ by up to the measured
+    // amounts in RENDER_RUN_VARIANCE_META (real-time capture, phase relations shift run to run —
+    // docs/render-determinism.md). Machine consumers should treat deltas inside those bounds as noise.
+    process.stdout.write(JSON.stringify({ ...m, meta: RENDER_RUN_VARIANCE_META }, null, 2) + '\n')
     return
   }
   const b = m.spectral.bandsPct

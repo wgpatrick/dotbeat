@@ -94,6 +94,33 @@ capture starts relative to transport start) is a prime suspect distinct from tru
 5. **Document**: a short `docs/render-determinism.md` with the measurements, the diagnosis, and
    what tolerance consumers should assume; roadmap row update.
 
+### Result (2026-07-13)
+
+Measured with `scripts/measure-render-determinism.mjs` (committed): N=8 on
+`examples/real-groove.beat`, N=5 on `examples/night-shift-song.beat`, spreads = max−min.
+
+- **real-groove (N=8)**: LUFS 0.038 LU, true peak 0.587 dB, crest 0.603 dB, worst band share
+  0.36 pt, width 0.747 dB. Captures were byte-length-identical; leading-silence spread 0.1 ms.
+- **night-shift-song (N=5)**: LUFS 0.153 LU, true peak 0.080 dB (limiter pins sample peak at
+  0 dBFS), crest 0.169 dB, worst band share (sub) 1.61 pt, width 1.317 dB, correlation 0.014.
+- **Diagnosis: DSP variance, not capture alignment.** Trimming every run to its first
+  non-silent sample and equalizing lengths left every spread essentially unchanged (width
+  1.317 dB both ways; sub band 1.6 pt both ways), and leading-edge jitter was ≤0.8 ms. The
+  variance is voice/LFO **phase relationships** re-quantizing onto different 128-sample render
+  quanta each run: energy metrics (LUFS/RMS) nearly deterministic, phase-sensitive metrics
+  (peaks, width, low-band FFT shares) move. Research/96's "~1 dB" was a true-peak swing —
+  reproduced (0.59 dB at N=8); today's LUFS stability (≤0.17 LU) is far better than the
+  phase-5-era ±0.4 LU.
+- **No render.mjs change** (alignment doesn't dominate; amplitude trim would be
+  fidelity-negative and provably wouldn't reduce the spread). Tolerance encoded instead:
+  `src/metrics/variance.ts` — `RENDER_RUN_VARIANCE_LU` 0.25 / `_PEAK_DB` 1.0 / `_BAND_PCT` 2.0
+  / `_WIDTH_DB` 1.5 (measured max, rounded up). `beat lint` pads all thresholds by these (a
+  finding can't flip between identical renders; padded threshold reported in the finding);
+  `beat metrics --json` + MCP `beat_metrics` emit `meta.renderRunVariance`
+  (`RENDER_RUN_VARIANCE_META`, one shared definition); `src/vary/batch.ts`'s manifest comment
+  cites the real numbers. Full write-up: `docs/render-determinism.md`. Tests 632/632 green
+  (new: lint threshold-padding test).
+
 ## ND — multi-region audio schema: design before code
 
 Pilot 99 confirmed the one-clip-per-track-per-scene ceiling is a core data-model constraint

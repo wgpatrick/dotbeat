@@ -7,6 +7,7 @@ import { test } from 'node:test'
 import { integratedLoudness } from '../src/metrics/loudness.js'
 import { analyze } from '../src/metrics/analyze.js'
 import { lint } from '../src/metrics/lint.js'
+import { RENDER_RUN_VARIANCE_PEAK_DB } from '../src/metrics/variance.js'
 import { decodeWav } from '../src/metrics/wav.js'
 
 const FS = 44100
@@ -111,6 +112,32 @@ test('lint: fires the right rules on engineered pathologies, stays quiet on a sa
   const okFindings = lint(analyze([pulsed(997, 0.3), pulsed(1400, 0.28)], FS), { targetLufs: -14 })
   assert.ok(!okFindings.some((f) => f.rule === 'true-peak-clipping'))
   assert.ok(!okFindings.some((f) => f.rule === 'over-compressed'))
+})
+
+test('lint thresholds are padded by the measured render run variance (Phase 34 NC)', () => {
+  // A value between the NOMINAL threshold and the padded one must NOT fire: re-rendering the
+  // same .beat moves peak-domain metrics by up to RENDER_RUN_VARIANCE_PEAK_DB, so a finding
+  // there would flip on/off between identical renders (docs/render-determinism.md).
+
+  // true peak at -0.5 dBTP: above the nominal -1, inside the padded -1 + variance zone -> silent
+  const nearCeiling = sine(997, 2, Math.pow(10, -0.5 / 20))
+  const near = lint(analyze([nearCeiling, nearCeiling.slice()], FS))
+  assert.ok(!near.some((f) => f.rule === 'true-peak-clipping'), `rules: ${near.map((f) => f.rule).join(',')}`)
+
+  // crest ~5.5 dB: under the nominal 6, above the padded 6 - variance -> silent.
+  // Square wave with 71.8% of samples zeroed: crest = -10*log10(0.282) = 5.5 dB exactly.
+  const gated = new Float64Array(FS * 2)
+  for (let i = 0; i < gated.length; i++) gated[i] = i % 1000 < 718 ? 0 : Math.sign(Math.sin((2 * Math.PI * 100 * i) / FS)) * 0.5 || 0.5
+  const gm = analyze([gated, gated.slice()], FS)
+  assert.ok(gm.crestDb > 6 - RENDER_RUN_VARIANCE_PEAK_DB && gm.crestDb < 6, `crest ${gm.crestDb} should sit inside the padding zone`)
+  assert.ok(!lint(gm).some((f) => f.rule === 'over-compressed'))
+
+  // A firing finding reports the EFFECTIVE (padded) threshold it compared against.
+  const loudSquare = new Float64Array(FS * 2)
+  for (let i = 0; i < loudSquare.length; i++) loudSquare[i] = Math.sign(Math.sin((2 * Math.PI * 100 * i) / FS)) || 1
+  const clip = lint(analyze([loudSquare, loudSquare.slice()], FS)).find((f) => f.rule === 'true-peak-clipping')
+  assert.ok(clip, 'full-scale square must still fire true-peak-clipping')
+  assert.equal(clip!.threshold, -1 + RENDER_RUN_VARIANCE_PEAK_DB)
 })
 
 test('wav decode round-trips a synthesized 16-bit PCM file', () => {

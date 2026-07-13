@@ -4,6 +4,7 @@
 // (the Diff-MST lesson: analysis must map to editable parameters, not to opaque advice).
 
 import type { MixMetrics } from './analyze.js'
+import { RENDER_RUN_VARIANCE_LU, RENDER_RUN_VARIANCE_PEAK_DB, RENDER_RUN_VARIANCE_BAND_PCT, RENDER_RUN_VARIANCE_WIDTH_DB } from './variance.js'
 
 export interface LintFinding {
   rule: string
@@ -38,6 +39,13 @@ export interface LintOptions {
 
 const fmt = (x: number, digits = 1) => (Number.isFinite(x) ? x.toFixed(digits) : String(x))
 
+// Phase 34 Stream NC (docs/render-determinism.md): every threshold below is padded by the measured
+// run-to-run render variance for its metric family, so a finding only fires when the measurement
+// is outside the render noise floor — re-rendering the same unchanged .beat can't flip a finding
+// on/off for a mix sitting exactly at a nominal threshold (which is where real mixes cluster:
+// limiters aim at -1 dBTP, normalization aims at the LUFS target). The `threshold` field on each
+// finding reports the EFFECTIVE (padded) value the rule actually compared against.
+
 /** The track whose own solo metrics score highest by `score` (ties keep the first). `score`
  * returning `null` excludes that track (e.g. a mono track has no `stereo` to score). Returns
  * `undefined` when no per-track metrics were supplied, or none score. */
@@ -62,13 +70,14 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
   const target = opts.targetLufs ?? -14
   const out: LintFinding[] = []
 
-  if (m.truePeakDbtp > -1) {
+  const truePeakThreshold = -1 + RENDER_RUN_VARIANCE_PEAK_DB
+  if (m.truePeakDbtp > truePeakThreshold) {
     const offender = worstTrack(opts.trackMetrics, (x) => x.truePeakDbtp)
     out.push({
       rule: 'true-peak-clipping',
       level: 'warn',
       measured: m.truePeakDbtp,
-      threshold: -1,
+      threshold: truePeakThreshold,
       message: `true peak ${fmt(m.truePeakDbtp)} dBTP is above -1 dBTP — inter-sample clipping risk on lossy encoders`,
       suggestion: offender
         ? `${trackLabel(offender)} is the loudest contributor (true peak ${fmt(offender.metrics.truePeakDbtp)} dBTP solo) — lower its volume first (beat set song.beat ${offender.id}.volume <dB>) until the mix's true peak sits below -1 dBTP`
@@ -77,7 +86,7 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
   }
 
   const lufsDelta = m.integratedLufs - target
-  if (Number.isFinite(m.integratedLufs) && Math.abs(lufsDelta) > 1.5) {
+  if (Number.isFinite(m.integratedLufs) && Math.abs(lufsDelta) > 1.5 + RENDER_RUN_VARIANCE_LU) {
     const tooLoud = lufsDelta > 0
     const offender = worstTrack(opts.trackMetrics, (x) => (tooLoud ? x.integratedLufs : -x.integratedLufs))
     out.push({
@@ -92,24 +101,26 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
     })
   }
 
-  if (Number.isFinite(m.crestDb) && m.crestDb < 6) {
+  const crestThreshold = 6 - RENDER_RUN_VARIANCE_PEAK_DB
+  if (Number.isFinite(m.crestDb) && m.crestDb < crestThreshold) {
     out.push({
       rule: 'over-compressed',
       level: 'warn',
       measured: m.crestDb,
-      threshold: 6,
+      threshold: crestThreshold,
       message: `crest factor ${fmt(m.crestDb)} dB is under 6 dB — the mix has very little dynamic range left`,
     })
   }
 
   const lowShare = m.spectral.bandsPct.sub + m.spectral.bandsPct.bass
-  if (lowShare > 70) {
+  const lowShareThreshold = 70 + RENDER_RUN_VARIANCE_BAND_PCT
+  if (lowShare > lowShareThreshold) {
     const offender = worstTrack(opts.trackMetrics, (x) => x.spectral.bandsPct.sub + x.spectral.bandsPct.bass)
     out.push({
       rule: 'low-end-heavy',
       level: 'info',
       measured: lowShare,
-      threshold: 70,
+      threshold: lowShareThreshold,
       message: `${fmt(lowShare, 0)}% of spectral energy sits below 250 Hz — the mix likely reads as muddy on small speakers`,
       suggestion: offender
         ? `${trackLabel(offender)} carries the most low end (${fmt(offender.metrics.spectral.bandsPct.sub + offender.metrics.spectral.bandsPct.bass, 0)}% sub+bass solo) — raise its cutoff or reduce its volume first (beat set song.beat ${offender.id}.cutoff <Hz>)`
@@ -117,13 +128,14 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
     })
   }
   const highShare = m.spectral.bandsPct.presence + m.spectral.bandsPct.air
-  if (highShare < 3) {
+  const highShareThreshold = 3 - RENDER_RUN_VARIANCE_BAND_PCT
+  if (highShare < highShareThreshold) {
     const offender = worstTrack(opts.trackMetrics, (x) => -(x.spectral.bandsPct.presence + x.spectral.bandsPct.air))
     out.push({
       rule: 'dull-top-end',
       level: 'info',
       measured: highShare,
-      threshold: 3,
+      threshold: highShareThreshold,
       message: `only ${fmt(highShare, 1)}% of spectral energy sits above 2 kHz — the mix likely reads as dull/dark`,
       suggestion: offender
         ? `${trackLabel(offender)} contributes the least top end (${fmt(offender.metrics.spectral.bandsPct.presence + offender.metrics.spectral.bandsPct.air, 1)}% presence+air solo) — try opening its filter first (beat set song.beat ${offender.id}.cutoff <Hz>)`
@@ -140,13 +152,13 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
         threshold: 0,
         message: `stereo correlation ${fmt(m.stereo.correlation, 2)} is negative — parts of the mix will cancel on mono playback`,
       })
-    } else if (m.stereo.correlation > 0.995 && m.stereo.widthDb < -30) {
+    } else if (m.stereo.correlation > 0.995 && m.stereo.widthDb < -30 - RENDER_RUN_VARIANCE_WIDTH_DB) {
       const offender = worstTrack(opts.trackMetrics, (x) => (x.stereo ? -x.stereo.widthDb : null))
       out.push({
         rule: 'effectively-mono',
         level: 'info',
         measured: m.stereo.widthDb,
-        threshold: -30,
+        threshold: -30 - RENDER_RUN_VARIANCE_WIDTH_DB,
         message: `stereo width ${fmt(m.stereo.widthDb)} dB (correlation ${fmt(m.stereo.correlation, 3)}) — the mix is effectively mono`,
         suggestion: offender
           ? `${trackLabel(offender)} is the narrowest track (width ${fmt(offender.metrics.stereo?.widthDb ?? NaN)} dB solo) — try panning it first (beat set song.beat ${offender.id}.pan <-1..1>)`

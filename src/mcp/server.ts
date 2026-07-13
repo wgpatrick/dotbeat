@@ -76,7 +76,7 @@ import {
   setLaneSample,
   type BeatDocument,
 } from '../core/index.js'
-import { decodeWav, analyze, lint, formatLint } from '../metrics/index.js'
+import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META } from '../metrics/index.js'
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
 import { varyTrack, varyFeel, VARY_GROUPS } from '../vary/vary.js'
@@ -1143,7 +1143,9 @@ const TOOLS: ToolDef[] = [
     },
     handler: (args) => {
       const { channels, sampleRate } = decodeWav(readFileSync(str(args, 'file')))
-      return JSON.stringify(analyze(channels, sampleRate), null, 2)
+      // Same renderRunVariance metadata `beat metrics --json` emits (Phase 34 NC parity —
+      // docs/render-determinism.md): deltas inside these bounds are render noise.
+      return JSON.stringify({ ...analyze(channels, sampleRate), meta: RENDER_RUN_VARIANCE_META }, null, 2)
     },
   },
   {
