@@ -30,6 +30,7 @@ export {
   setGroupColor,
   setGroupTracks,
   saveClip,
+  loadClip,
   setScene,
   setSong,
   songMove,

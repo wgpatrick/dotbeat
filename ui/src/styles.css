@@ -8,6 +8,12 @@
   --accent: #e0a13c;
   --lane-w: 52px;
   --note-step-w: 14px;
+  /* Phase 29 Stream GC bug 6 (research 80): `.noteview-titlebar`'s real rendered height (10px
+     padding + ~18px line height for its 15px/700 name + 10px padding + 3px border-bottom), rounded
+     up generously. Shared by `.bottom-pane-body`'s `scroll-padding-top` and every row class that can
+     scroll underneath the sticky title bar (`.lane-row`, `.noteview-key-row`) — one source of truth
+     instead of duplicating a guessed pixel value per call site. */
+  --sticky-titlebar-h: 44px;
   /* Phase 28 Stream FB: one tracking value for every uppercase group/section label in the app,
      replacing eight mixed em/px letter-spacing values (0.02em/0.03em/0.04em/0.05em/0.3px/0.5px/1px)
      that had drifted call-site by call-site with no shared source of truth (research/79 §3.6). */
@@ -151,6 +157,23 @@ body {
   padding: 8px 14px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
+  /* Phase 29 Stream GE item 1 (docs/research/81 §"the Undo button didn't respond"): the Mixer's
+     `.overlay-scrim` (z-index 50, `position: fixed; inset: 0`) covers the ENTIRE viewport including
+     the topbar, so with the Mixer open, `document.elementFromPoint()` at the Undo/Redo buttons'
+     coordinates resolved to the scrim, not the button — silently unclickable, only Ctrl/Cmd+Z
+     worked. The Browser/History side panels never had this problem (neither uses a full-page
+     scrim). Rather than rebuild the Mixer as a non-blocking panel (it's a deliberate full "step
+     back and balance" modal, research 18 Q3, not a fit for a side-drawer shape), this gives the
+     topbar its own stacking context ABOVE the Mixer's scrim specifically (z-index 45, see
+     `.mixer-scrim` below), per the plan's documented fallback: the scrim still blocks the rest of
+     the page while the Mixer is open, but every topbar control (Undo/Redo included) now paints and
+     hit-tests above it, exactly like Browser/History already do. Deliberately NOT raised above the
+     plain `.overlay-scrim` (z-index 50, still used unmodified by ShortcutHelp.tsx) — that panel's
+     own click-away-on-scrim dismiss gesture (verify-phase28-stream-fc.mjs's FC4a) still needs the
+     scrim covering the topbar's corner, and nothing in this stream's findings asked for that to
+     change. */
+  position: relative;
+  z-index: 48;
 }
 .transport {
   display: flex;
@@ -442,6 +465,13 @@ body {
 .noteview-titlebar-name {
   font-weight: 700;
   font-size: 15px;
+}
+/* Phase 29 Stream GC bug 6: the piano-roll/lane key strip's own rows (`.noteview-keys`'s children,
+   most of whose layout is inline-styled per-row) — see `.bottom-pane-body`'s own `scroll-padding-top`
+   comment for the full story. Only `scroll-margin-top` needs a real class here since everything else
+   about these rows is already inline. */
+.noteview-key-row {
+  scroll-margin-top: var(--sticky-titlebar-h);
 }
 .noteview-titlebar-clip {
   font-size: 11px;
@@ -1655,6 +1685,23 @@ body {
   font-weight: 600;
   box-shadow: inset 0 0 0 1px var(--accent);
 }
+/* Phase 29 Stream GB: a lightweight confirmation when a preset lands on the selected track while
+   the Clip tab is showing (docs/research/80) — no toast/banner component exists yet, so this is
+   the "simple inline flash on the Device tab button" fallback, same visual idiom SynthPanel's own
+   `.param-group-flash` already uses for "an effect was just added." */
+.pane-tab-flash {
+  animation: pane-tab-flash 1.6s ease-out;
+}
+@keyframes pane-tab-flash {
+  0% {
+    color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  100% {
+    color: var(--text-dim);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
 .bottom-pane-hint {
   color: var(--text-dim);
   font-size: 11px;
@@ -1679,6 +1726,17 @@ body {
   flex: 1;
   overflow: auto;
   padding: 14px;
+  /* Phase 29 Stream GC bug 6 (research 80): `.noteview-titlebar`'s `position: sticky; top: 0` pins
+     it to THIS container's scrollport — once stuck, it re-docks directly on top of whatever content
+     row happens to be scrolled to sit right below it (measured in research 80 landing squarely on
+     the drum-lane list's "hat" row, and independently on the note editor's own pitch-row list),
+     fully hiding that row's label/controls with no visual cue. `scroll-padding-top` is the
+     container-side sibling of `scroll-margin-top` — it makes ANY scroll-into-view/focus-navigation
+     targeting a descendant (Tab into a `.lane-row`'s controls, a future scrollIntoView call, etc.)
+     stop short of the sticky header instead of landing underneath it, and generalizes to every
+     scrollable list inside this pane, not just NoteView's — a one-off z-index patch on a single
+     panel wouldn't. */
+  scroll-padding-top: var(--sticky-titlebar-h);
 }
 
 /* ---- Phase 18 overlays: the full Mixer (modal) + the History drawer ---- */
@@ -1688,6 +1746,14 @@ body {
   background: rgba(0, 0, 0, 0.5);
   z-index: 50;
   display: flex;
+}
+/* Phase 29 Stream GE item 1: the Mixer's OWN scrim only, sitting below the topbar's z-index (48,
+   see `.topbar` above) so the topbar's real controls (Undo/Redo included) stay reachable while the
+   Mixer is open — see the `.topbar` comment for the full rationale. Scoped to just this modifier
+   class (not `.overlay-scrim` itself) so ShortcutHelp.tsx's plain `.overlay-scrim` keeps blocking
+   the topbar exactly as before, preserving its own already-verified click-away dismiss gesture. */
+.mixer-scrim {
+  z-index: 45;
 }
 .overlay-head {
   display: flex;
@@ -1802,6 +1868,74 @@ body {
   border: 1px solid var(--line);
   border-bottom-width: 2px;
   border-radius: 4px;
+}
+
+/* ---- Phase 29 Stream GE item 2: the toast host (Toast.tsx) — the in-app replacement for
+   window.alert()'s ~30 pure-notification call sites. Fixed bottom-right, stacked newest-on-top,
+   z-index above EVERYTHING else in the app (the Mixer scrim/topbar included, 51 max elsewhere) so a
+   toast fired while any overlay is open is never hidden behind it. Deliberately non-blocking: unlike
+   `window.alert()`, nothing here pauses the page's own event loop or eats input (research/82's
+   Playwright-crash finding). ---- */
+.toast-host {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  width: min(92vw, 380px);
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  animation: toast-in 0.15s ease-out;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.toast-error {
+  border-left-color: var(--danger);
+}
+.toast-success {
+  border-left-color: var(--good);
+}
+.toast-message {
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.toast-close {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.toast-close:hover {
+  color: var(--text);
 }
 
 /* ---- arrangement / song view ---- */
@@ -2705,8 +2839,22 @@ body {
   gap: 12px;
   margin-bottom: 14px;
 }
-.history-toggle {
+/* Phase 29 Stream GE item 4: wraps "Save checkpoint" + the existing "Show all"/"Collapse" toggle so
+   both sit flush right as a pair, replacing the toggle's own former standalone `margin-left: auto`
+   (now redundant — the wrapper carries it instead). */
+.history-head-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.history-checkpoint {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.history-checkpoint:hover:not(:disabled) {
+  background: rgba(224, 161, 60, 0.12);
 }
 .history-title {
   font-size: 15px;
@@ -2898,6 +3046,12 @@ body {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
+/* Phase 29 Stream GA: which section the bottom Clip View / properties strip / Place-in-Arrangement
+   currently targets — set by clicking a clip block or a chip's own name (below). */
+.arr-section-chip.selected-section {
+  border-color: var(--accent);
+  background: var(--panel-3, var(--panel-2));
+}
 .arr-chip-drag-handle {
   color: var(--text-dim);
   font-size: 11px;
@@ -2909,6 +3063,34 @@ body {
   color: var(--text);
   font-weight: 600;
   margin-right: 2px;
+  cursor: pointer;
+}
+.arr-chip-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+/* Phase 29 Stream GA: "this section shares a scene with N others" badge — a small colored glyph,
+   deterministic per scene id (sceneLinkColor in ArrangementView.tsx), so two chips/labels sharing a
+   scene visibly match. Only rendered when a scene really is shared (count > 1); an independent
+   section gets no badge at all. */
+.arr-chip-linked {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  font-size: 8px;
+  color: #0b0c10;
+  margin-right: 2px;
+  cursor: default;
+}
+.arr-section-linked {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
 }
 .arr-chip-bars {
   color: var(--text-dim);
@@ -3036,6 +3218,15 @@ body {
   justify-content: space-between;
   padding: 8px 10px;
   border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+/* Phase 29 Stream GE item 5: reuses the shared `.toolbar-tip` color/size, just laid out for this
+   rail's own narrow width (the Arrangement toolbar's `.toolbar-tip` instead relies on its flex-row
+   parent for spacing — this one needs its own padding/wrap/border since it's a standalone block). */
+.library-hint {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  line-height: 1.4;
   flex: 0 0 auto;
 }
 /* Typography lives in the shared `.section-heading` rule above (Phase 28 Stream FB) —
@@ -3462,6 +3653,10 @@ body {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--panel);
+  /* Phase 29 Stream GC bug 6: see `.bottom-pane-body`'s own `scroll-padding-top` comment — this is
+     the item-side half of the same fix, for engines/paths that respect `scroll-margin` on the
+     target rather than `scroll-padding` on the scroller. */
+  scroll-margin-top: var(--sticky-titlebar-h);
 }
 .lane-row-head {
   display: flex;

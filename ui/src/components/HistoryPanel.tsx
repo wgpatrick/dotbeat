@@ -35,6 +35,10 @@ export function HistoryPanel() {
   const [busyRef, setBusyRef] = useState<string | null>(null)
   const [pinningRef, setPinningRef] = useState<string | null>(null)
   const [pinName, setPinName] = useState('')
+  // Phase 29 Stream GE item 4 (docs/research/80 §"Version history: a real gap"): whether a
+  // save-checkpoint request is in flight, mirroring busyRef's own "disable the trigger while its own
+  // request is outstanding" shape.
+  const [checkpointing, setCheckpointing] = useState(false)
   // Flat vs collapsed (product-spec-desktop.md §4: "unnamed checkpoints collapse between named
   // pins... a long timeline still skims"). Collapsed is the default — it's the spec's must-have
   // reading for a long history; flat stays one click away for when every checkpoint matters.
@@ -79,6 +83,35 @@ export function HistoryPanel() {
     }
   }
 
+  // Phase 29 Stream GE item 4: the GUI-side "save a version now" action — a thin wrapper around the
+  // daemon's new POST /checkpoint (src/daemon/daemon.ts), which itself just calls the same
+  // checkpoint() the CLI's `beat checkpoint`/MCP already use. This is the fix for the panel's own
+  // former lie ("make an edit to save one" — edits alone never mint a checkpoint, a documented,
+  // known gotcha): a GUI-only user now has a real, discoverable way to snapshot their work without
+  // reaching for the CLI. The label prompt mirrors `beat checkpoint --label "..."` (optional; Cancel
+  // or an empty string both take the auto-generated semantic-diff label, same as the CLI default).
+  async function saveCheckpoint() {
+    const label = window.prompt('Label this checkpoint (optional) — matches `beat checkpoint --label "..."`:')
+    if (label === null) return // the user cancelled the prompt — do nothing, not even clear `error`
+    setCheckpointing(true)
+    setError(null)
+    try {
+      const res = await fetch(`${daemonBase()}/checkpoint`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(label.trim() ? { label: label.trim() } : {}),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
+      if (body.skipped) setError('nothing to save — no changes since the last checkpoint')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCheckpointing(false)
+    }
+  }
+
   async function savePin(ref: string) {
     const name = pinName.trim()
     if (!name) return
@@ -104,18 +137,32 @@ export function HistoryPanel() {
           <div className="history-title">Version history</div>
           <div className="history-sub">newest first · restoring goes back without erasing work</div>
         </div>
-        <button
-          className="history-btn history-toggle"
-          onClick={() => setCollapsed((c) => !c)}
-          data-action="toggle-collapsed"
-          title={collapsed ? 'show every checkpoint' : 'fold unnamed checkpoints between pins'}
-        >
-          {collapsed ? 'Show all' : 'Collapse'}
-        </button>
+        <div className="history-head-actions">
+          <button
+            className="history-btn history-checkpoint"
+            onClick={() => void saveCheckpoint()}
+            disabled={checkpointing}
+            data-action="save-checkpoint"
+            title="save a checkpoint now — snapshots the current file so you can come back to it later"
+          >
+            {checkpointing ? 'Saving…' : 'Save checkpoint'}
+          </button>
+          <button
+            className="history-btn history-toggle"
+            onClick={() => setCollapsed((c) => !c)}
+            data-action="toggle-collapsed"
+            title={collapsed ? 'show every checkpoint' : 'fold unnamed checkpoints between pins'}
+          >
+            {collapsed ? 'Show all' : 'Collapse'}
+          </button>
+        </div>
       </div>
       {error && <div className="history-error">{error}</div>}
       {rows === null && !error && <div className="history-empty">loading history…</div>}
-      {rows !== null && rows.length === 0 && <div className="history-empty">No checkpoints yet — make an edit to save one.</div>}
+      {/* Phase 29 Stream GE item 4: the old copy ("make an edit to save one") was simply false —
+          edits alone never mint a checkpoint (a documented D3 behavior: `beat set`/`add-note`/etc.
+          never auto-checkpoint). Points at the real action now sitting right above it instead. */}
+      {rows !== null && rows.length === 0 && <div className="history-empty">No checkpoints yet — save one above.</div>}
       {rows && rows.length > 0 && (
         <ul className="history-list">
           {rows.map((row, i) =>

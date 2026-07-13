@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { declaredLaneNames, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
-import { postEdit, postSelection, postPitchTime, postPlaceClip, postDuplicateNotes, type PitchTimeOp } from '../daemon/bridge'
+import { declaredLaneNames, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
+import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
 import { makeDropTargetHandlers, DROP_TARGET_HOVER_CLASS, DRAGGING_CLASS } from '../dragDrop'
-import { ClipPropertiesPanel, primaryClipFor } from './ClipPropertiesPanel'
+import { ClipPropertiesPanel, primaryClipFor, selectedSceneId } from './ClipPropertiesPanel'
 import { DrumLanePanel } from './DrumLanePanel'
+import { showToast } from '../state/toastStore'
 
 // The editable event editor for BOTH synth/instrument notes and drum hits — Phase 22 Stream AB
 // (docs/research/20-drum-clip-editor-redesign.md Part 5) generalized what was originally a
@@ -125,10 +126,18 @@ interface RowAxis {
   preview(trackId: string, row: number): void
 }
 
-function buildPitchAxis(notes: BeatNote[]): RowAxis {
-  // Pitch window: a generous, octave-snapped range AROUND the clip's content — deliberately not
-  // clipped to the used notes (Ableton shows a scrollable full-range ruler; we render a padded
-  // window that always spans >= MIN_SPAN so a sparse clip still gets a real keyboard).
+/** The pitch window's own [lo,hi] bounds (Phase 29 Stream GC bug 2, research 80/83) — factored out of
+ * `buildPitchAxis` so the NoteView component can FREEZE it per-track (see `pitchWindowRef` below)
+ * instead of recomputing it fresh from whatever `notes` happen to exist on every render. Recomputing
+ * on every render was the actual root cause of "the visible pitch window silently shifts... each
+ * time a note lands" (research 83): before the first note existed, `usedLo`/`usedHi` both fell back
+ * to 60 (middle C); the moment the first note landed, they became that note's own pitch, snapping the
+ * whole window to a different octave out from under the user — and this kept happening on every
+ * later edit that changed the current min/max pitch in play, not just the first one. */
+function computePitchWindow(notes: BeatNote[]): { lo: number; hi: number } {
+  // A generous, octave-snapped range AROUND the clip's content — deliberately not clipped to the
+  // used notes (Ableton shows a scrollable full-range ruler; we render a padded window that always
+  // spans >= MIN_SPAN so a sparse clip still gets a real keyboard).
   const pitches = notes.map((n) => n.pitch)
   const usedLo = notes.length ? Math.min(...pitches) : 60
   const usedHi = notes.length ? Math.max(...pitches) : 60
@@ -141,6 +150,11 @@ function buildPitchAxis(notes: BeatNote[]): RowAxis {
   }
   lo = Math.max(0, lo)
   hi = Math.min(127, hi)
+  return { lo, hi }
+}
+
+function buildPitchAxis(window: { lo: number; hi: number }): RowAxis {
+  const { lo, hi } = window
   const rowCount = hi - lo + 1
   return {
     rowCount,
@@ -207,6 +221,12 @@ type Gesture = {
   // free to mean "duplicate" at gesture-start. Notes only (eventKind — drum hits have no
   // duplicateNotes equivalent yet); always false for a 'resize' gesture.
   duplicate: boolean
+  // Phase 29 Stream GC bug 4 (research 83): tracks whether the pointer has moved past DRAG_THRESHOLD
+  // since gesture-start — the SAME "was this a tap or a real drag" distinction Marquee's own `moved`
+  // flag makes. Lets `onPointerUp` tell a plain click on an already-selected note (which should
+  // narrow the selection to just that one note) apart from an actual drag (which should leave a
+  // multi-selection intact and move/resize the whole group).
+  moved: boolean
 }
 
 // Phase 26 Stream DG: a basic clipboard — remembers WHICH notes (by id, on which track) were last
@@ -239,9 +259,23 @@ function velocityFromY(rect: DOMRect, clientY: number): number {
 }
 
 /** Snap toward the nearest 16th step unless freehand-bypassed (Alt/Cmd held) — research 20 Part 1's
- * "soft, per-drag-bypassable snap." */
+ * "soft, per-drag-bypassable snap." Used for MOVE/RESIZE drags, where "nearest gridline" is the
+ * right question (an event's `start`/`duration` boundary IS a gridline). */
 function snapStep(raw: number, freehand: boolean): number {
   return freehand ? Math.round(raw * 10000) / 10000 : Math.round(raw)
+}
+
+/** Click-to-add cell resolution (Phase 29 Stream GC bug 1, research 80 — exact repro at the old
+ * NoteView.tsx:462): which STEP CELL contains this click, NOT "which gridline is nearest." A step
+ * N's visual cell spans gridline N to gridline N+1, but `snapStep`'s round-to-nearest-gridline gives
+ * a click-target region for step N centered ON gridline N (spanning N-0.5..N+0.5) — offset by half a
+ * cell from the visible grid. Clicking the right half of what looks like "step N" silently landed the
+ * note on N+1. Flooring instead of rounding makes the click-target region exactly match the visible
+ * cell (N..N+1). Freehand bypass (Alt/Cmd) is unaffected — it already returns the raw fractional
+ * position, same as `snapStep`'s own freehand branch, since there's no "nearest cell" question once
+ * grid-snapping itself is bypassed. */
+function cellStep(raw: number, freehand: boolean): number {
+  return freehand ? Math.round(raw * 10000) / 10000 : Math.floor(raw)
 }
 
 // ---- clip-view playhead resolution (Phase 24 Stream CG bug fix) --------------------------------
@@ -255,8 +289,16 @@ function snapStep(raw: number, freehand: boolean): number {
 // exact same modulo math `contentOf` uses for real playback.
 //
 /** Returns the clip-relative, tiled step to render the playhead at, or `null` if no playhead
- * should render at all (stopped, or the open clip isn't the one actually playing right now). */
-function resolveClipPlayhead(track: BeatTrack, doc: BeatDocument | null, currentStep: number, loopBars: number): number | null {
+ * should render at all (stopped, or the open clip isn't the one actually playing right now).
+ * `preferredSceneId` (Phase 29 Stream GA) is store.ts's `selectedSectionIndex`, pre-resolved to a
+ * scene id by the caller — same "which clip is actually open" resolution primaryClip below uses. */
+function resolveClipPlayhead(
+  track: BeatTrack,
+  doc: BeatDocument | null,
+  currentStep: number,
+  loopBars: number,
+  preferredSceneId: string | null,
+): number | null {
   if (!doc || currentStep < 0) return null
   const song = doc.song && doc.song.length > 0 ? doc.song : null
   const loopSteps = loopBars * 16
@@ -266,7 +308,7 @@ function resolveClipPlayhead(track: BeatTrack, doc: BeatDocument | null, current
     // condition this playhead always used before song mode existed.
     return currentStep < loopSteps ? currentStep : null
   }
-  const openClip = primaryClipFor(track, doc)
+  const openClip = primaryClipFor(track, doc, preferredSceneId)
   if (!openClip) return null
   // Which section is playing right now, from the absolute step — the same cumulative-bars walk
   // engine.ts's contentOf does from `bar`.
@@ -290,6 +332,34 @@ function resolveClipPlayhead(track: BeatTrack, doc: BeatDocument | null, current
   return ((rel % loopSteps) + loopSteps) % loopSteps
 }
 
+// ---- live-buffer <-> clip sync (Phase 29 Stream GA) ----------------------------------------------
+// This editor always renders `track.notes`/`track.hits` — the track's ONE live buffer — never a
+// clip's own `.notes`/`.hits` directly (see this file's header comment). `primaryClipFor` resolving
+// to the selected section's clip is necessary but not sufficient to make clicking a later section's
+// clip block actually "open" it here: the live buffer itself has to be swapped to match. `sortById`
+// normalizes order before comparing so two arrays that happen to have been rebuilt in a different
+// order (e.g. after a round-trip through the daemon) still compare equal by content.
+function sortById<T extends { id: string }>(xs: T[]): T[] {
+  return [...xs].sort((a, b) => a.id.localeCompare(b.id))
+}
+function eventsEqual<T extends { id: string }>(a: T[], b: T[]): boolean {
+  return a.length === b.length && JSON.stringify(sortById(a)) === JSON.stringify(sortById(b))
+}
+/** Does `clip`'s saved content already match what's live on `track` right now? True also means "no
+ * load needed" — the editor is already showing this clip's content. */
+function clipMatchesLive(track: BeatTrack, clip: BeatClip): boolean {
+  return track.kind === 'drums' ? eventsEqual(track.hits, clip.hits) : eventsEqual(track.notes, clip.notes)
+}
+/** Is the track's current live content NOT backed by any existing clip? If so, loading a different
+ * clip over it would silently discard real, never-saved composition — the one case worth an
+ * explicit confirm before swapping (an empty live buffer, or one that already matches some clip,
+ * loads over silently — same "nothing at risk" bar saveClip's own re-snapshot already assumes). */
+function liveContentIsUnsaved(track: BeatTrack): boolean {
+  const live = track.kind === 'drums' ? track.hits : track.notes
+  if (live.length === 0) return false
+  return !track.clips.some((c) => clipMatchesLive(track, c))
+}
+
 export function NoteView({ track }: { track: BeatTrack }) {
   const doc = useStore((s) => s.doc)
   const loopBars = doc?.loopBars ?? 1
@@ -303,19 +373,40 @@ export function NoteView({ track }: { track: BeatTrack }) {
   // wouldn't flip this button — though in practice only one audition ever runs at a time).
   const auditioningTrackId = useStore((s) => s.auditioningTrackId)
   const auditioning = auditioningTrackId === track.id
+  // Phase 29 Stream GA: which song section the user is currently pointed at, alongside the track
+  // selection above — resolved to a scene id once here and threaded through every "which clip"
+  // lookup below (the playhead, the loop-drag handle/properties, Place in Arrangement, and the
+  // live-buffer sync effect further down), so they all agree on the same answer. `null` (nothing
+  // selected, or the index no longer resolves) falls back to the old first-occurrence behavior
+  // everywhere, unchanged.
+  const selectedSectionIndex = useStore((s) => s.selectedSectionIndex)
+  const preferredSceneId = selectedSceneId(doc, selectedSectionIndex)
   const totalSteps = loopBars * 16
-  const playheadStep = resolveClipPlayhead(track, doc, currentStep, loopBars)
+  const playheadStep = resolveClipPlayhead(track, doc, currentStep, loopBars, preferredSceneId)
   // Phase 24 Stream CJ: the SAME "primary clip" ClipPropertiesPanel.tsx's numeric loop fields
   // target — null in loop mode or when this track isn't mapped to a saved clip in any scene yet
   // (same gating the properties panel already applies; the drag handle below is hidden in that
-  // case too, since there's no clip.loop to write).
-  const primaryClip = doc ? primaryClipFor(track, doc) : null
+  // case too, since there's no clip.loop to write). Phase 29 Stream GA: now prefers the selected
+  // section's scene, same as everywhere else in this file.
+  const primaryClip = doc ? primaryClipFor(track, doc, preferredSceneId) : null
   const isDrums = track.kind === 'drums'
   const editable = true // every track kind (synth/instrument/drums) edits through this one view now
   const eventKind: 'note' | 'hit' = isDrums ? 'hit' : 'note'
   const editPrefix = eventKind // "<track>.note.*" / "<track>.hit.*" — matches core's edit.ts exactly
 
-  const axis = isDrums ? buildLaneAxis(track) : buildPitchAxis(track.notes)
+  const pitchWindowRef = useRef<{ trackId: string; lo: number; hi: number } | null>(null)
+  // Phase 29 Stream GC bug 2 (research 80/83): freeze the pitch window per-track, in a ref, instead
+  // of recomputing it fresh from `track.notes` on every render — the recompute-every-render version
+  // silently re-centered the visible pitch range on every note add/edit that changed the current
+  // min/max pitch. Recomputes only when the SELECTED TRACK itself changes (same "recompute only on
+  // track.id change" precedent `MacroKnob`'s own display estimate already uses elsewhere in the app),
+  // which a user experiences as an intentional navigation, not an edit-triggered jump. Every pointer/
+  // keyboard mutation in this file clamps new events to the CURRENTLY rendered `rows` (0..rowCount-1)
+  // before writing them, so a frozen window can never leave an event unrepresentable.
+  if (!isDrums && pitchWindowRef.current?.trackId !== track.id) {
+    pitchWindowRef.current = { trackId: track.id, ...computePitchWindow(track.notes) }
+  }
+  const axis = isDrums ? buildLaneAxis(track) : buildPitchAxis(pitchWindowRef.current!)
   const events: EditorEvent[] = isDrums
     ? track.hits.map((h) => ({ id: h.id, start: h.start, duration: h.duration, velocity: h.velocity, row: axis.rowOfValue(h.lane) }))
     : track.notes.map((n) => ({
@@ -328,6 +419,38 @@ export function NoteView({ track }: { track: BeatTrack }) {
         ratchetCount: n.ratchetCount,
         ratchetCurve: n.ratchetCurve,
       }))
+
+  // Phase 29 Stream GA: sync the live buffer to the selected section's clip whenever WHICH clip
+  // we're supposed to be showing changes — i.e. when the user switches track or section, not on
+  // every doc update (an in-progress edit to an already-placed clip re-saves identically each
+  // keystroke; re-running this on every doc change would otherwise re-check, and worse, could
+  // prompt, on every single edit). `lastSyncRef` remembers the last (track, section) pair actually
+  // synced so the effect body only does real work when that pair changes; deps are deliberately
+  // JUST [track.id, selectedSectionIndex] for the same reason — `doc` is read fresh from the store
+  // inside instead of as a dependency.
+  const lastSyncRef = useRef<string | null>(null)
+  useEffect(() => {
+    const key = `${track.id}::${selectedSectionIndex ?? 'none'}`
+    if (lastSyncRef.current === key) return
+    lastSyncRef.current = key
+    if (selectedSectionIndex === null) return // nothing selected — old first-occurrence behavior stands
+    const st = useStore.getState()
+    const d = st.doc
+    const section = d?.song?.[selectedSectionIndex]
+    if (!d || !section) return
+    const scene = d.scenes.find((s) => s.id === section.scene)
+    const clipId = scene?.slots[track.id]
+    if (!clipId) return // this track has no clip in the selected section — leave the live buffer alone
+    const t = d.tracks.find((x) => x.id === track.id)
+    const clip = t?.clips.find((c) => c.id === clipId)
+    if (!t || !clip || clipMatchesLive(t, clip)) return // already showing it
+    const proceed =
+      !liveContentIsUnsaved(t) ||
+      window.confirm(
+        `This track's editor has content that hasn't been placed into any clip yet. Switching to this section's clip ("${clip.id}") will replace it. Continue?`,
+      )
+    if (proceed) void postLoadClip(track.id, clip.id).catch((err) => showToast(`Could not load clip: ${(err as Error).message}`))
+  }, [track.id, selectedSectionIndex])
 
   const selSet = new Set(sel)
   // Preview overrides during a drag: a map keyed by event id (a group move/resize previews many at once).
@@ -416,7 +539,13 @@ export function NoteView({ track }: { track: BeatTrack }) {
     // Only fires for empty grid space — event/handle children stopPropagation their own pointerdowns.
     const rect = e.currentTarget.getBoundingClientRect()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    gridRef.current?.focus()
+    // Phase 29 Stream GC bug 5 (research 84): `.focus()` with no options lets the browser's default
+    // "scroll the newly-focused element into view" behavior fire — for a tall grid that's only
+    // partially in the visible viewport, that can silently jump the scroll position (observed as a
+    // full-octave drift) as a pure side effect of grabbing keyboard focus, unrelated to anything the
+    // user asked to scroll. `preventScroll: true` keeps the focus-for-keyboard-shortcuts behavior
+    // without the scroll side effect.
+    gridRef.current?.focus({ preventScroll: true })
     const additive = e.shiftKey || e.metaKey || e.ctrlKey
     const m: Marquee = { rect, stepW: rect.width / totalSteps, downX: e.clientX, downY: e.clientY, curX: e.clientX, curY: e.clientY, base: additive ? [...sel] : [], additive, moved: false }
     marqueeRef.current = m
@@ -459,7 +588,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
     // and (Ableton-style) collapse any multi-selection since the click landed on empty grid.
     const stepW = m.rect.width / totalSteps
     const freehand = e.altKey || e.metaKey
-    const step = Math.max(0, Math.min(totalSteps - 1, snapStep((e.clientX - m.rect.left) / stepW, freehand)))
+    const step = Math.max(0, Math.min(totalSteps - 1, cellStep((e.clientX - m.rect.left) / stepW, freehand)))
     const row = Math.floor((e.clientY - m.rect.top) / ROW_H)
     if (row < 0 || row >= rows) return
     setSel([])
@@ -484,7 +613,11 @@ export function NoteView({ track }: { track: BeatTrack }) {
     const gridEl = e.currentTarget.closest('.noteview-grid') as HTMLElement
     const rect = gridEl.getBoundingClientRect()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    gridEl.focus()
+    // Phase 29 Stream GC bug 5 (research 84): same `preventScroll` fix as the grid's own tap/marquee
+    // focus above — this is the exact call site pilot 84 traced the resize-drag octave drift to
+    // (`gridEl.focus()`, no options, triggering the browser's default scroll-into-view for an
+    // off/partially-off-screen grid element the instant a resize-handle drag starts).
+    gridEl.focus({ preventScroll: true })
     // Pressing an UNselected event selects just it (clearing others), then drags it. Pressing an
     // event already in the selection keeps the selection and drags the whole group.
     let groupIds: Set<string>
@@ -498,12 +631,15 @@ export function NoteView({ track }: { track: BeatTrack }) {
     // Alt/Option held right now (gesture-start only — see the Gesture type's own doc comment for
     // why Cmd/Ctrl can't play this role) turns this into a duplicate-drag instead of a move.
     const duplicate = kind === 'move' && eventKind === 'note' && e.altKey
-    gesture.current = { kind, primaryId: ev.id, rect, stepW: rect.width / totalSteps, downX: e.clientX, downY: e.clientY, group, duplicate }
+    gesture.current = { kind, primaryId: ev.id, rect, stepW: rect.width / totalSteps, downX: e.clientX, downY: e.clientY, group, duplicate, moved: false }
   }
 
   function onPointerMove(e: React.PointerEvent) {
     const g = gesture.current
     if (!g) return
+    // Phase 29 Stream GC bug 4: same DRAG_THRESHOLD "was this a real drag" check Marquee's own
+    // `moved` flag uses — read by `onPointerUp` to tell a plain click apart from an actual drag.
+    if (!g.moved && (Math.abs(e.clientX - g.downX) > DRAG_THRESHOLD || Math.abs(e.clientY - g.downY) > DRAG_THRESHOLD)) g.moved = true
     const primary = g.group.find((x) => x.id === g.primaryId)!
     const freehand = e.altKey || e.metaKey
     const next: Record<string, Preview> = {}
@@ -531,7 +667,22 @@ export function NoteView({ track }: { track: BeatTrack }) {
     const p = preview
     gesture.current = null
     setPreview(null)
-    if (!g || !p) return
+    if (!g) return
+    // Phase 29 Stream GC bug 4 (research 83): a plain click (no real drag) on a note that was
+    // already part of a larger selection should narrow the selection down to just that one note —
+    // every conventional note editor treats "click an item, selected or not" this way. Previously
+    // `startGesture` only narrowed when the PRESSED note was unselected; pressing an already-selected
+    // note kept dragging the whole group, and since a non-moved gesture's move/resize deltas are all
+    // zero anyway (nothing to commit), the selection just silently stayed as the full multi-select —
+    // an empty-cell click was the only way to get back to a single-note selection. Checked BEFORE the
+    // `!p` bail-out below: a true zero-movement click never fires `onPointerMove`, so `preview` (`p`)
+    // stays null for the whole gesture — a check gated on `p` would never see this case at all. Skips
+    // this for a real drag (`g.moved`) or a single-note group (nothing to narrow).
+    if (!g.moved && g.group.length > 1) {
+      setSel([g.primaryId])
+      return
+    }
+    if (!p) return
     if (g.duplicate) {
       // Alt-drag: commit via duplicateNotes instead of commitMove — the ORIGINALS stay exactly
       // where they were, a fresh copy of the whole group lands wherever the pointer released. The
@@ -551,7 +702,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
             offsetPitch,
           )
             .then((addedIds) => setSel(addedIds))
-            .catch((err) => window.alert(`Could not duplicate: ${(err as Error).message}`))
+            .catch((err) => showToast(`Could not duplicate: ${(err as Error).message}`))
         }
       }
       return
@@ -666,22 +817,27 @@ export function NoteView({ track }: { track: BeatTrack }) {
   // dotbeat's single-page layout). See docs/phase-24-stream-ci.md.
   //
   // `existing` mirrors BC's own "reuse an existing occurrence if the track already has one, else
-  // mint a new clip and slot it into the FIRST song section's scene" precedent exactly:
-  // `primaryClipFor` is the SAME first-occurrence lookup ClipPropertiesPanel already uses to find
-  // "the" clip this editor's live content corresponds to once placed.
+  // mint a new clip and slot it into the target scene" precedent exactly: `primaryClipFor` is the
+  // SAME lookup ClipPropertiesPanel already uses to find "the" clip this editor's live content
+  // corresponds to once placed. Phase 29 Stream GA: both `existing` and the scene it's placed into
+  // now prefer the currently-selected section — before this, `placeInArrangement` was hardcoded to
+  // `doc.song[0]`, so it was IMPOSSIBLE to place a track's content into any section but the first
+  // from the GUI (docs/research/86's "Place in Arrangement always writes into doc.song[0]'s scene
+  // regardless of which section is in view"). Falls back to `doc.song[0]` — the old, only-ever
+  // behavior — when nothing is selected, exactly matching primaryClipFor's own fallback.
   const [placing, setPlacing] = useState(false)
-  const existing = doc ? primaryClipFor(track, doc) : null
+  const existing = doc ? primaryClipFor(track, doc, preferredSceneId) : null
   const inSongMode = !!doc?.song && doc.song.length > 0
   function placeInArrangement() {
     if (!doc || placing) return
     if (!inSongMode) {
-      window.alert('Add a song section first ("+ section") — clips only play once slotted into a song-mode scene.')
+      showToast('Add a song section first ("+ section") — clips only play once slotted into a song-mode scene.')
       return
     }
-    const sceneId = doc.song![0]!.scene
+    const sceneId = preferredSceneId ?? doc.song![0]!.scene
     setPlacing(true)
     postPlaceClip(track.id, { ...(existing ? { clipId: existing.id } : {}), sceneId })
-      .catch((err) => window.alert(`Could not place clip: ${(err as Error).message}`))
+      .catch((err) => showToast(`Could not place clip: ${(err as Error).message}`))
       .finally(() => setPlacing(false))
   }
 
@@ -734,7 +890,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
           const offsetStart = pasteStep - noteClipboard.anchorStart
           void postDuplicateNotes(track.id, noteClipboard.noteIds, offsetStart, 0)
             .then((addedIds) => setSel(addedIds))
-            .catch((err) => window.alert(`Could not paste: ${(err as Error).message}`))
+            .catch((err) => showToast(`Could not paste: ${(err as Error).message}`))
         }
         return
       }
@@ -1032,7 +1188,9 @@ export function NoteView({ track }: { track: BeatTrack }) {
             title={
               existing
                 ? `already placed as clip "${existing.id}" — click to re-save this editor's current content into it`
-                : 'slot this clip into the first song section\'s scene so it plays in the arrangement'
+                : preferredSceneId
+                  ? `slot this clip into the selected section's scene so it plays in the arrangement`
+                  : 'slot this clip into the first song section\'s scene so it plays in the arrangement (click a section to target a different one)'
             }
             onClick={placeInArrangement}
           >
@@ -1077,7 +1235,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
                     const payload = readDragPayload(e.dataTransfer)
                     if (!payload || payload.type !== 'kit-lane') return
                     installKitLane(track.id, payload.kit, { lane: payload.lane ?? label, targetLane: label }).catch((err) =>
-                      window.alert(`Could not install sample: ${(err as Error).message}`),
+                      showToast(`Could not install sample: ${(err as Error).message}`),
                     )
                   })
                 : null
@@ -1087,7 +1245,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
                   data-row={row}
                   data-row-value={axis.valueOfRow(row)}
                   data-drop-target={isDrums ? `lane-${label}` : undefined}
-                  className={isDrums && isRowHover ? DROP_TARGET_HOVER_CLASS : ''}
+                  className={`noteview-key-row${isDrums && isRowHover ? ` ${DROP_TARGET_HOVER_CLASS}` : ''}`}
                   onPointerDown={(e) => {
                     e.preventDefault()
                     if (editable) axis.preview(track.id, row)
