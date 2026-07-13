@@ -125,10 +125,18 @@ interface RowAxis {
   preview(trackId: string, row: number): void
 }
 
-function buildPitchAxis(notes: BeatNote[]): RowAxis {
-  // Pitch window: a generous, octave-snapped range AROUND the clip's content — deliberately not
-  // clipped to the used notes (Ableton shows a scrollable full-range ruler; we render a padded
-  // window that always spans >= MIN_SPAN so a sparse clip still gets a real keyboard).
+/** The pitch window's own [lo,hi] bounds (Phase 29 Stream GC bug 2, research 80/83) — factored out of
+ * `buildPitchAxis` so the NoteView component can FREEZE it per-track (see `pitchWindowRef` below)
+ * instead of recomputing it fresh from whatever `notes` happen to exist on every render. Recomputing
+ * on every render was the actual root cause of "the visible pitch window silently shifts... each
+ * time a note lands" (research 83): before the first note existed, `usedLo`/`usedHi` both fell back
+ * to 60 (middle C); the moment the first note landed, they became that note's own pitch, snapping the
+ * whole window to a different octave out from under the user — and this kept happening on every
+ * later edit that changed the current min/max pitch in play, not just the first one. */
+function computePitchWindow(notes: BeatNote[]): { lo: number; hi: number } {
+  // A generous, octave-snapped range AROUND the clip's content — deliberately not clipped to the
+  // used notes (Ableton shows a scrollable full-range ruler; we render a padded window that always
+  // spans >= MIN_SPAN so a sparse clip still gets a real keyboard).
   const pitches = notes.map((n) => n.pitch)
   const usedLo = notes.length ? Math.min(...pitches) : 60
   const usedHi = notes.length ? Math.max(...pitches) : 60
@@ -141,6 +149,11 @@ function buildPitchAxis(notes: BeatNote[]): RowAxis {
   }
   lo = Math.max(0, lo)
   hi = Math.min(127, hi)
+  return { lo, hi }
+}
+
+function buildPitchAxis(window: { lo: number; hi: number }): RowAxis {
+  const { lo, hi } = window
   const rowCount = hi - lo + 1
   return {
     rowCount,
@@ -207,6 +220,12 @@ type Gesture = {
   // free to mean "duplicate" at gesture-start. Notes only (eventKind — drum hits have no
   // duplicateNotes equivalent yet); always false for a 'resize' gesture.
   duplicate: boolean
+  // Phase 29 Stream GC bug 4 (research 83): tracks whether the pointer has moved past DRAG_THRESHOLD
+  // since gesture-start — the SAME "was this a tap or a real drag" distinction Marquee's own `moved`
+  // flag makes. Lets `onPointerUp` tell a plain click on an already-selected note (which should
+  // narrow the selection to just that one note) apart from an actual drag (which should leave a
+  // multi-selection intact and move/resize the whole group).
+  moved: boolean
 }
 
 // Phase 26 Stream DG: a basic clipboard — remembers WHICH notes (by id, on which track) were last
@@ -239,9 +258,23 @@ function velocityFromY(rect: DOMRect, clientY: number): number {
 }
 
 /** Snap toward the nearest 16th step unless freehand-bypassed (Alt/Cmd held) — research 20 Part 1's
- * "soft, per-drag-bypassable snap." */
+ * "soft, per-drag-bypassable snap." Used for MOVE/RESIZE drags, where "nearest gridline" is the
+ * right question (an event's `start`/`duration` boundary IS a gridline). */
 function snapStep(raw: number, freehand: boolean): number {
   return freehand ? Math.round(raw * 10000) / 10000 : Math.round(raw)
+}
+
+/** Click-to-add cell resolution (Phase 29 Stream GC bug 1, research 80 — exact repro at the old
+ * NoteView.tsx:462): which STEP CELL contains this click, NOT "which gridline is nearest." A step
+ * N's visual cell spans gridline N to gridline N+1, but `snapStep`'s round-to-nearest-gridline gives
+ * a click-target region for step N centered ON gridline N (spanning N-0.5..N+0.5) — offset by half a
+ * cell from the visible grid. Clicking the right half of what looks like "step N" silently landed the
+ * note on N+1. Flooring instead of rounding makes the click-target region exactly match the visible
+ * cell (N..N+1). Freehand bypass (Alt/Cmd) is unaffected — it already returns the raw fractional
+ * position, same as `snapStep`'s own freehand branch, since there's no "nearest cell" question once
+ * grid-snapping itself is bypassed. */
+function cellStep(raw: number, freehand: boolean): number {
+  return freehand ? Math.round(raw * 10000) / 10000 : Math.floor(raw)
 }
 
 // ---- clip-view playhead resolution (Phase 24 Stream CG bug fix) --------------------------------
@@ -315,7 +348,19 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const eventKind: 'note' | 'hit' = isDrums ? 'hit' : 'note'
   const editPrefix = eventKind // "<track>.note.*" / "<track>.hit.*" — matches core's edit.ts exactly
 
-  const axis = isDrums ? buildLaneAxis(track) : buildPitchAxis(track.notes)
+  const pitchWindowRef = useRef<{ trackId: string; lo: number; hi: number } | null>(null)
+  // Phase 29 Stream GC bug 2 (research 80/83): freeze the pitch window per-track, in a ref, instead
+  // of recomputing it fresh from `track.notes` on every render — the recompute-every-render version
+  // silently re-centered the visible pitch range on every note add/edit that changed the current
+  // min/max pitch. Recomputes only when the SELECTED TRACK itself changes (same "recompute only on
+  // track.id change" precedent `MacroKnob`'s own display estimate already uses elsewhere in the app),
+  // which a user experiences as an intentional navigation, not an edit-triggered jump. Every pointer/
+  // keyboard mutation in this file clamps new events to the CURRENTLY rendered `rows` (0..rowCount-1)
+  // before writing them, so a frozen window can never leave an event unrepresentable.
+  if (!isDrums && pitchWindowRef.current?.trackId !== track.id) {
+    pitchWindowRef.current = { trackId: track.id, ...computePitchWindow(track.notes) }
+  }
+  const axis = isDrums ? buildLaneAxis(track) : buildPitchAxis(pitchWindowRef.current!)
   const events: EditorEvent[] = isDrums
     ? track.hits.map((h) => ({ id: h.id, start: h.start, duration: h.duration, velocity: h.velocity, row: axis.rowOfValue(h.lane) }))
     : track.notes.map((n) => ({
@@ -416,7 +461,13 @@ export function NoteView({ track }: { track: BeatTrack }) {
     // Only fires for empty grid space — event/handle children stopPropagation their own pointerdowns.
     const rect = e.currentTarget.getBoundingClientRect()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    gridRef.current?.focus()
+    // Phase 29 Stream GC bug 5 (research 84): `.focus()` with no options lets the browser's default
+    // "scroll the newly-focused element into view" behavior fire — for a tall grid that's only
+    // partially in the visible viewport, that can silently jump the scroll position (observed as a
+    // full-octave drift) as a pure side effect of grabbing keyboard focus, unrelated to anything the
+    // user asked to scroll. `preventScroll: true` keeps the focus-for-keyboard-shortcuts behavior
+    // without the scroll side effect.
+    gridRef.current?.focus({ preventScroll: true })
     const additive = e.shiftKey || e.metaKey || e.ctrlKey
     const m: Marquee = { rect, stepW: rect.width / totalSteps, downX: e.clientX, downY: e.clientY, curX: e.clientX, curY: e.clientY, base: additive ? [...sel] : [], additive, moved: false }
     marqueeRef.current = m
@@ -459,7 +510,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
     // and (Ableton-style) collapse any multi-selection since the click landed on empty grid.
     const stepW = m.rect.width / totalSteps
     const freehand = e.altKey || e.metaKey
-    const step = Math.max(0, Math.min(totalSteps - 1, snapStep((e.clientX - m.rect.left) / stepW, freehand)))
+    const step = Math.max(0, Math.min(totalSteps - 1, cellStep((e.clientX - m.rect.left) / stepW, freehand)))
     const row = Math.floor((e.clientY - m.rect.top) / ROW_H)
     if (row < 0 || row >= rows) return
     setSel([])
@@ -484,7 +535,11 @@ export function NoteView({ track }: { track: BeatTrack }) {
     const gridEl = e.currentTarget.closest('.noteview-grid') as HTMLElement
     const rect = gridEl.getBoundingClientRect()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    gridEl.focus()
+    // Phase 29 Stream GC bug 5 (research 84): same `preventScroll` fix as the grid's own tap/marquee
+    // focus above — this is the exact call site pilot 84 traced the resize-drag octave drift to
+    // (`gridEl.focus()`, no options, triggering the browser's default scroll-into-view for an
+    // off/partially-off-screen grid element the instant a resize-handle drag starts).
+    gridEl.focus({ preventScroll: true })
     // Pressing an UNselected event selects just it (clearing others), then drags it. Pressing an
     // event already in the selection keeps the selection and drags the whole group.
     let groupIds: Set<string>
@@ -498,12 +553,15 @@ export function NoteView({ track }: { track: BeatTrack }) {
     // Alt/Option held right now (gesture-start only — see the Gesture type's own doc comment for
     // why Cmd/Ctrl can't play this role) turns this into a duplicate-drag instead of a move.
     const duplicate = kind === 'move' && eventKind === 'note' && e.altKey
-    gesture.current = { kind, primaryId: ev.id, rect, stepW: rect.width / totalSteps, downX: e.clientX, downY: e.clientY, group, duplicate }
+    gesture.current = { kind, primaryId: ev.id, rect, stepW: rect.width / totalSteps, downX: e.clientX, downY: e.clientY, group, duplicate, moved: false }
   }
 
   function onPointerMove(e: React.PointerEvent) {
     const g = gesture.current
     if (!g) return
+    // Phase 29 Stream GC bug 4: same DRAG_THRESHOLD "was this a real drag" check Marquee's own
+    // `moved` flag uses — read by `onPointerUp` to tell a plain click apart from an actual drag.
+    if (!g.moved && (Math.abs(e.clientX - g.downX) > DRAG_THRESHOLD || Math.abs(e.clientY - g.downY) > DRAG_THRESHOLD)) g.moved = true
     const primary = g.group.find((x) => x.id === g.primaryId)!
     const freehand = e.altKey || e.metaKey
     const next: Record<string, Preview> = {}
@@ -531,7 +589,22 @@ export function NoteView({ track }: { track: BeatTrack }) {
     const p = preview
     gesture.current = null
     setPreview(null)
-    if (!g || !p) return
+    if (!g) return
+    // Phase 29 Stream GC bug 4 (research 83): a plain click (no real drag) on a note that was
+    // already part of a larger selection should narrow the selection down to just that one note —
+    // every conventional note editor treats "click an item, selected or not" this way. Previously
+    // `startGesture` only narrowed when the PRESSED note was unselected; pressing an already-selected
+    // note kept dragging the whole group, and since a non-moved gesture's move/resize deltas are all
+    // zero anyway (nothing to commit), the selection just silently stayed as the full multi-select —
+    // an empty-cell click was the only way to get back to a single-note selection. Checked BEFORE the
+    // `!p` bail-out below: a true zero-movement click never fires `onPointerMove`, so `preview` (`p`)
+    // stays null for the whole gesture — a check gated on `p` would never see this case at all. Skips
+    // this for a real drag (`g.moved`) or a single-note group (nothing to narrow).
+    if (!g.moved && g.group.length > 1) {
+      setSel([g.primaryId])
+      return
+    }
+    if (!p) return
     if (g.duplicate) {
       // Alt-drag: commit via duplicateNotes instead of commitMove — the ORIGINALS stay exactly
       // where they were, a fresh copy of the whole group lands wherever the pointer released. The
@@ -1087,7 +1160,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
                   data-row={row}
                   data-row-value={axis.valueOfRow(row)}
                   data-drop-target={isDrums ? `lane-${label}` : undefined}
-                  className={isDrums && isRowHover ? DROP_TARGET_HOVER_CLASS : ''}
+                  className={`noteview-key-row${isDrums && isRowHover ? ` ${DROP_TARGET_HOVER_CLASS}` : ''}`}
                   onPointerDown={(e) => {
                     e.preventDefault()
                     if (editable) axis.preview(track.id, row)

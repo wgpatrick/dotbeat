@@ -8,6 +8,12 @@
   --accent: #e0a13c;
   --lane-w: 52px;
   --note-step-w: 14px;
+  /* Phase 29 Stream GC bug 6 (research 80): `.noteview-titlebar`'s real rendered height (10px
+     padding + ~18px line height for its 15px/700 name + 10px padding + 3px border-bottom), rounded
+     up generously. Shared by `.bottom-pane-body`'s `scroll-padding-top` and every row class that can
+     scroll underneath the sticky title bar (`.lane-row`, `.noteview-key-row`) — one source of truth
+     instead of duplicating a guessed pixel value per call site. */
+  --sticky-titlebar-h: 44px;
   /* Phase 28 Stream FB: one tracking value for every uppercase group/section label in the app,
      replacing eight mixed em/px letter-spacing values (0.02em/0.03em/0.04em/0.05em/0.3px/0.5px/1px)
      that had drifted call-site by call-site with no shared source of truth (research/79 §3.6). */
@@ -442,6 +448,13 @@ body {
 .noteview-titlebar-name {
   font-weight: 700;
   font-size: 15px;
+}
+/* Phase 29 Stream GC bug 6: the piano-roll/lane key strip's own rows (`.noteview-keys`'s children,
+   most of whose layout is inline-styled per-row) — see `.bottom-pane-body`'s own `scroll-padding-top`
+   comment for the full story. Only `scroll-margin-top` needs a real class here since everything else
+   about these rows is already inline. */
+.noteview-key-row {
+  scroll-margin-top: var(--sticky-titlebar-h);
 }
 .noteview-titlebar-clip {
   font-size: 11px;
@@ -1679,6 +1692,17 @@ body {
   flex: 1;
   overflow: auto;
   padding: 14px;
+  /* Phase 29 Stream GC bug 6 (research 80): `.noteview-titlebar`'s `position: sticky; top: 0` pins
+     it to THIS container's scrollport — once stuck, it re-docks directly on top of whatever content
+     row happens to be scrolled to sit right below it (measured in research 80 landing squarely on
+     the drum-lane list's "hat" row, and independently on the note editor's own pitch-row list),
+     fully hiding that row's label/controls with no visual cue. `scroll-padding-top` is the
+     container-side sibling of `scroll-margin-top` — it makes ANY scroll-into-view/focus-navigation
+     targeting a descendant (Tab into a `.lane-row`'s controls, a future scrollIntoView call, etc.)
+     stop short of the sticky header instead of landing underneath it, and generalizes to every
+     scrollable list inside this pane, not just NoteView's — a one-off z-index patch on a single
+     panel wouldn't. */
+  scroll-padding-top: var(--sticky-titlebar-h);
 }
 
 /* ---- Phase 18 overlays: the full Mixer (modal) + the History drawer ---- */
@@ -3423,6 +3447,10 @@ body {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--panel);
+  /* Phase 29 Stream GC bug 6: see `.bottom-pane-body`'s own `scroll-padding-top` comment — this is
+     the item-side half of the same fix, for engines/paths that respect `scroll-margin` on the
+     target rather than `scroll-padding` on the scroller. */
+  scroll-margin-top: var(--sticky-titlebar-h);
 }
 .lane-row-head {
   display: flex;
