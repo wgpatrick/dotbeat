@@ -928,7 +928,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     if (req.method === 'POST' && url.pathname === '/edit') {
       readBody(req)
         .then((body) => {
-          const { path, value } = JSON.parse(body) as { path?: unknown; value?: unknown }
+          const { path, value, gestureId } = JSON.parse(body) as { path?: unknown; value?: unknown; gestureId?: unknown }
           if (typeof path !== 'string' || typeof value !== 'string') {
             json(res, 400, { error: 'body must be {path: string, value: string}' })
             return
@@ -940,8 +940,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           // new entity (a fresh id), so two quick-succession adds sharing that literal path string
           // are two distinct gestures, not one continued drag; coalescing them would silently drop
           // the first add from the undo stack. Skip the key for that shape only.
+          //
+          // Phase 30 Stream JB (research/89): an optional client-supplied `gestureId` OVERRIDES the
+          // default per-path key. A single user gesture that touches several DIFFERENT paths — a
+          // diagonal note move (`.start` then `.pitch`), a multi-note delete (one `<track>.note.<id>`
+          // path per note) — used to land as one undo entry PER path/note, so one Undo only reverted a
+          // fragment of what the user actually did (research/89 "Undo got interesting fast": 2 presses
+          // for one diagonal move, 3 for a 3-note delete). The client (NoteView.tsx) mints one
+          // gestureId per commit and stamps every /edit call in that burst with it, so they all share
+          // ONE coalescing bucket regardless of differing paths — the same "one request, one undo
+          // entry" outcome a preset swap already gets for free by being a single call in the first
+          // place (research/81), just extended to a burst of several small calls. Never applies to the
+          // append grammar (bare `.note`/`.hit`) — minting a new entity is never part of a coalescable
+          // gesture, so that exception still wins even if a caller mistakenly sent a gestureId with it.
           const isAppendGrammar = path.endsWith('.note') || path.endsWith('.hit')
-          const written = writeIfChanged(setValue(doc, path, value), isAppendGrammar ? undefined : path)
+          const coalesceKey = isAppendGrammar ? undefined : typeof gestureId === 'string' && gestureId ? gestureId : path
+          const written = writeIfChanged(setValue(doc, path, value), coalesceKey)
           revalidateSelection()
           json(res, 200, { written })
         })

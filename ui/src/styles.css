@@ -211,10 +211,15 @@ body {
   color: var(--text);
   cursor: pointer;
 }
-.undo-btn:hover:not(:disabled) {
+.undo-btn:hover:not(.stack-empty) {
   border-color: var(--accent);
 }
-.undo-btn:disabled {
+/* Phase 30 Stream JB: dims the button when the mirrored `canUndo`/`canRedo` looks empty, WITHOUT the
+   native `disabled` attribute — a real `disabled` blocks the click event outright, which used to make
+   the button a genuine no-op whenever that mirrored flag lagged the daemon's true state (research/89).
+   The keyboard shortcut never gated on this flag at all, so matching its reliability means the click
+   handler always fires here too; this class is cosmetic only. */
+.undo-btn.stack-empty {
   opacity: 0.35;
   cursor: default;
 }
@@ -1130,6 +1135,22 @@ body {
   bottom: 0;
   width: 5px;
   cursor: ew-resize;
+}
+/* Phase 30 Stream JA (research/89): a durationless hit marker is a fixed MARKER_W=7px pill
+   (NoteView.tsx), so the shared 5px resize handle above — sized for bars that are usually at
+   least a full step (14px) wide, where it's a small minority of the width — ate 5 of the
+   marker's 7px, leaving only the leftmost ~2px (and per research/89's bounding-box inspection,
+   effectively ~1px once the marker's own 1px border/rounded pill corners are accounted for) as a
+   safe click target for a plain move. Dragging almost anywhere else on a hit produced an
+   unwanted gate/resize instead. Notes never render as markers (the format requires duration > 0
+   for a note — see EditorEvent's own doc comment), so this narrower handle only ever applies to
+   drum-hit markers; ordinary notes and already-gated hit bars (both wide enough for 5px to stay a
+   minority) keep the standard handle. 2px keeps the marker's resize/gate handle a real,
+   discoverable edge target while giving move back the majority (~70%) of the marker's width —
+   the same "middle triggers move, only the true edge resizes" balance the wider bars already
+   have. */
+.noteview-note.marker .noteview-resize {
+  width: 2px;
 }
 .note-del-btn {
   background: var(--danger);

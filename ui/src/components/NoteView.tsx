@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { declaredLaneNames, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
-import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, type PitchTimeOp } from '../daemon/bridge'
+import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, newGestureId, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
@@ -514,11 +514,17 @@ export function NoteView({ track }: { track: BeatTrack }) {
   }
 
   // ---- move/resize commit helpers: fan out per-event edit primitives (one .beat line per event) ----
-  function commitMove(id: string, start: number, row: number, origStart: number, origRow: number) {
-    if (start !== origStart) postEdit(`${track.id}.${editPrefix}.${id}.start`, String(start))
+  // `gestureId` (Phase 30 Stream JB, research/89): a diagonal move changes BOTH `.start` and
+  // `.pitch`/`.lane` — two separate /edit calls, two separate default undo-coalescing buckets (keyed
+  // by path) unless stamped with the same gestureId so the daemon treats them as one commit. See
+  // onPointerUp below, which mints one gestureId per commit and threads it through every call in the
+  // whole group (covers a multi-note move too — one gestureId for every note's fields, not one per
+  // note). bridge.ts's newGestureId doc comment has the full "why".
+  function commitMove(id: string, start: number, row: number, origStart: number, origRow: number, gestureId?: string) {
+    if (start !== origStart) postEdit(`${track.id}.${editPrefix}.${id}.start`, String(start), gestureId)
     if (row !== origRow) {
       const field = eventKind === 'note' ? 'pitch' : 'lane'
-      postEdit(`${track.id}.${editPrefix}.${id}.${field}`, String(axis.valueOfRow(row)))
+      postEdit(`${track.id}.${editPrefix}.${id}.${field}`, String(axis.valueOfRow(row)), gestureId)
     }
   }
 
@@ -707,21 +713,26 @@ export function NoteView({ track }: { track: BeatTrack }) {
       }
       return
     }
+    // Phase 30 Stream JB (research/89): one gestureId for the WHOLE commit below, whether it's a
+    // single diagonal move (start+pitch), a multi-note group move, or a multi-note group resize —
+    // so the daemon's undo stack collapses it to one entry regardless of how many /edit calls (how
+    // many distinct paths) it takes to express. See commitMove's own comment for the "why".
+    const commitGestureId = newGestureId()
     for (const gn of g.group) {
       const pv = p[gn.id]
       if (!pv) continue
-      if (g.kind === 'move') commitMove(gn.id, pv.start, pv.row, gn.origStart, gn.origRow)
+      if (g.kind === 'move') commitMove(gn.id, pv.start, pv.row, gn.origStart, gn.origRow, commitGestureId)
       else {
         const dur = pv.duration ?? 0
         if (eventKind === 'note') {
           // A note's duration is always > 0 (the format requires it); freehand drags may leave a
           // fine fractional length, a snapped drag lands on a whole step either way.
           const clamped = Math.max(dur, 0.0001)
-          if (clamped !== gn.origDur) postEdit(`${track.id}.note.${gn.id}.duration`, String(clamped))
+          if (clamped !== gn.origDur) postEdit(`${track.id}.note.${gn.id}.duration`, String(clamped), commitGestureId)
         } else if (dur !== (gn.origDur ?? 0)) {
           // A hit: dur === 0 clears back to a marker (empty value = clear, per core's setValue);
           // dur > 0 sets/updates the duration (marker -> bar, or resizing an existing bar).
-          postEdit(`${track.id}.hit.${gn.id}.duration`, dur > 0 ? String(dur) : '')
+          postEdit(`${track.id}.hit.${gn.id}.duration`, dur > 0 ? String(dur) : '', commitGestureId)
         }
       }
     }
@@ -947,7 +958,12 @@ export function NoteView({ track }: { track: BeatTrack }) {
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
-        for (const ev of chosen) postEdit(`${track.id}.${editPrefix}.${ev.id}`, '')
+        // Phase 30 Stream JB (research/89): a multi-select delete is one user gesture (one keypress)
+        // but fans out one /edit call per selected note/hit (each its own path, `<track>.<kind>.<id>`)
+        // — without a shared gestureId each becomes its own undo entry, so restoring a 3-note delete
+        // took 3 separate Undo presses instead of 1. Same fix as the drag-commit path above.
+        const gestureId = newGestureId()
+        for (const ev of chosen) postEdit(`${track.id}.${editPrefix}.${ev.id}`, '', gestureId)
         setSel([])
         return
       }
@@ -956,14 +972,16 @@ export function NoteView({ track }: { track: BeatTrack }) {
       e.preventDefault()
 
       if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-        // Shift+left/right = resize the selection's durations by ±1 step (uniform delta).
+        // Shift+left/right = resize the selection's durations by ±1 step (uniform delta). One
+        // keypress, one gestureId (Phase 30 Stream JB) — same multi-select coalescing fix as Delete.
         const dDur = e.key === 'ArrowRight' ? 1 : -1
+        const gestureId = newGestureId()
         for (const ev of chosen) {
           const base = ev.duration ?? 0
           const duration = Math.max(0, Math.min(steps - ev.start, base + dDur))
           if (duration === base) continue
-          if (eventKind === 'note') postEdit(`${track.id}.note.${ev.id}.duration`, String(Math.max(duration, 1)))
-          else postEdit(`${track.id}.hit.${ev.id}.duration`, duration > 0 ? String(duration) : '')
+          if (eventKind === 'note') postEdit(`${track.id}.note.${ev.id}.duration`, String(Math.max(duration, 1)), gestureId)
+          else postEdit(`${track.id}.hit.${ev.id}.duration`, duration > 0 ? String(duration) : '', gestureId)
         }
         return
       }
@@ -981,11 +999,16 @@ export function NoteView({ track }: { track: BeatTrack }) {
       const ds = Math.max(-Math.min(...starts), Math.min(steps - 1 - Math.max(...starts), dStep))
       const dr = Math.max(-Math.min(...rowsUsed), Math.min(rows - 1 - Math.max(...rowsUsed), dRow))
       if (!ds && !dr) return
+      // One keypress, one gestureId (Phase 30 Stream JB) — same reasoning as the shift+arrow resize
+      // and drag-commit fixes above: a diagonal arrow-nudge (shift+up/down moves a whole octave AND
+      // this branch can fire from a single key that touches both `.start` and pitch/lane) or a
+      // multi-note nudge would otherwise land as one undo entry per note/field.
+      const gestureId = newGestureId()
       for (const ev of chosen) {
-        if (ds) postEdit(`${track.id}.${editPrefix}.${ev.id}.start`, String(ev.start + ds))
+        if (ds) postEdit(`${track.id}.${editPrefix}.${ev.id}.start`, String(ev.start + ds), gestureId)
         if (dr) {
           const field = eventKind === 'note' ? 'pitch' : 'lane'
-          postEdit(`${track.id}.${editPrefix}.${ev.id}.${field}`, String(axis.valueOfRow(ev.row + dr)))
+          postEdit(`${track.id}.${editPrefix}.${ev.id}.${field}`, String(axis.valueOfRow(ev.row + dr)), gestureId)
         }
       }
     }
