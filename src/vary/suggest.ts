@@ -32,7 +32,8 @@
 // whether picks cluster above or below the range's midpoint. It is a simple descriptive average,
 // reported only when there are enough samples and the trend is not close to the midpoint.
 
-import { VARY_GROUPS, type VaryParamDef } from './vary.js'
+import { VARY_GROUPS, legalGroupsForKind, type VaryParamDef } from './vary.js'
+import type { TrackKind } from '../core/document.js'
 
 export interface ScorePick {
   rank: number
@@ -235,6 +236,13 @@ export interface SuggestOptions {
   file?: string
   /** Injectable clock for deterministic tests; defaults to Date.now(). */
   now?: number
+  /** The target track's actual kind (synth/drums/instrument/audio). When given, the cold-start
+   * recommendation is restricted to a group that's actually legal (audible) on that kind — see
+   * vary.ts's `legalGroupsForKind` (research/96: a synth track's first-ever suggestion used to be
+   * "kick", a drum-only param group, so the "successful" suggested command was a silent no-op).
+   * Omit only for callers that don't have a parsed document handy; falls back to the old
+   * kind-agnostic first-group behavior. */
+  trackKind?: TrackKind
 }
 
 const AMOUNT_DEFAULT = 0.25 // rung-1's own default (vary.ts)
@@ -255,8 +263,17 @@ export function suggestNext(entries: ScoreEntry[], track: string, opts: SuggestO
   const scope = opts.target ? ` matching --target ${opts.target}` : ''
 
   if (relevant.length === 0) {
-    const group = Object.keys(VARY_GROUPS)[0]! // vary.ts's declared order — "kick" today
+    // Restrict to groups that are actually legal (audible) on this track's kind, if known —
+    // otherwise every VARY_GROUPS entry is a candidate, same as before (research/96: an
+    // unfiltered "first group" pick handed a synth track "kick", a drum-only group, as its
+    // first-ever recommendation — a command that "succeeds" but never touches the audible synth
+    // params, a silent no-op).
+    const candidates = opts.trackKind ? legalGroupsForKind(opts.trackKind) : Object.keys(VARY_GROUPS)
+    const group = candidates[0]!
     const command = `beat vary ${file} ${track} ${group} --amount ${AMOUNT_DEFAULT} --seed ${seed}`
+    const kindNote = opts.trackKind
+      ? `recommending the first group legal for a "${opts.trackKind}" track (${candidates.join(', ')}): "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
+      : `recommending the first group in vary.ts's declared order (${Object.keys(VARY_GROUPS).join(', ')}): "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
     return {
       coldStart: true,
       track,
@@ -267,11 +284,7 @@ export function suggestNext(entries: ScoreEntry[], track: string, opts: SuggestO
       amount: AMOUNT_DEFAULT,
       seed,
       command,
-      reasoning: [
-        `no scored rounds found for "${track}"${scope} — cold start, nothing to bias toward yet.`,
-        `recommending the first group in vary.ts's declared order (${Object.keys(VARY_GROUPS).join(', ')}): "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`,
-        `recommend: ${command}`,
-      ],
+      reasoning: [`no scored rounds found for "${track}"${scope} — cold start, nothing to bias toward yet.`, kindNote, `recommend: ${command}`],
     }
   }
 

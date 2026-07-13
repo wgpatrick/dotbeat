@@ -11,7 +11,7 @@ import type { BeatDocument } from './document.js'
 import { AUTOMATABLE_SYNTH_PARAMS } from './document.js'
 import { setValue } from './edit.js'
 
-export type MacroCurve = 'linear' | 'exp' | 'log'
+export type MacroCurve = 'linear' | 'quadIn' | 'quadOut'
 
 export interface MacroTarget {
   /** Must be a member of AUTOMATABLE_SYNTH_PARAMS (research 27 §5) — reusing that derived table,
@@ -24,9 +24,20 @@ export interface MacroTarget {
    * (e.g. a decay that should get SHORTER at higher knob values) are expressed — no separate
    * `invert` flag needed. */
   max: number
-  /** Shape of the 0..100 -> min..max mapping. Default 'linear'. 'exp'/'log' mirror the curve math
-   * ui/src/components/Knob.tsx already uses for knob *display* scaling (toNorm/fromNorm), ported
-   * here as pure functions so core has no UI dependency. */
+  /** Shape of the 0..100 -> min..max mapping. Default 'linear'. 'quadIn' (`t^2`, slow-start
+   * ease-in) / 'quadOut' (`sqrt(t)`, fast-start ease-out) are plain quadratic eases in LINEAR
+   * min..max space — Phase 33 Stream ME (docs/research/100): this type was originally named
+   * 'exp'/'log' and its own doc comment claimed to mirror ui/src/components/Knob.tsx's real
+   * log-space toNorm/fromNorm curve (`min*(max/min)^t`), but the shipped math was always this
+   * plain quadratic — confirmed by direct reverse-engineering of a resolved macro value in
+   * research/100. Renamed rather than switched to a true log-space curve: a real exponential
+   * needs a strictly-positive `min` to be well-defined (`log(min)` blows up at `min<=0`), and one
+   * of the three real 'exp' usages in presets/macros.json (`grit`'s `distortionAmount`, min 0) is
+   * NOT a frequency-style param — a genuine log curve there would keep the resolved value within
+   * a hair of 0 for roughly the first three-quarters of the knob's travel, a real usability
+   * regression for that macro, not a correctness fix. Renaming keeps every existing macro's
+   * resolved values byte-identical (no silent re-tuning of `filter-sweep`/`grit`/`snap`) while
+   * making the label honest about what the curve actually is. */
   curve?: MacroCurve
 }
 
@@ -98,7 +109,7 @@ export function parseMacroLibrary(json: string): BeatMacro[] {
       if (typeof t.min !== 'number' || typeof t.max !== 'number') {
         throw new BeatMacroError(`macro "${m.name}": target "${t.param}" needs numeric min/max`)
       }
-      if (t.curve !== undefined && t.curve !== 'linear' && t.curve !== 'exp' && t.curve !== 'log') {
+      if (t.curve !== undefined && t.curve !== 'linear' && t.curve !== 'quadIn' && t.curve !== 'quadOut') {
         throw new BeatMacroError(`macro "${m.name}": target "${t.param}" has invalid curve ${JSON.stringify(t.curve)}`)
       }
       targets.push({ param: t.param, min: t.min, max: t.max, ...(t.curve ? { curve: t.curve } : {}) })
@@ -110,7 +121,7 @@ export function parseMacroLibrary(json: string): BeatMacro[] {
 
 function resolveTarget(t: MacroTarget, knob: number): number {
   const n = Math.min(1, Math.max(0, knob / 100))
-  const shaped = t.curve === 'exp' ? n * n : t.curve === 'log' ? Math.sqrt(n) : n
+  const shaped = t.curve === 'quadIn' ? n * n : t.curve === 'quadOut' ? Math.sqrt(n) : n
   return t.min + shaped * (t.max - t.min)
 }
 
@@ -152,7 +163,7 @@ export function formatMacroList(macros: BeatMacro[]): string {
   )
 }
 
-/** Best-effort inverse of resolveTarget's linear/exp/log shaping — used ONLY by the GUI to
+/** Best-effort inverse of resolveTarget's linear/quadIn/quadOut shaping — used ONLY by the GUI to
  * estimate where a macro's knob should visually sit from a target's current live value when a
  * track is (re)selected. Never stored, never a claim of ground truth: the file only ever records
  * resolved target values, never "this came from macro X at position N" (research 27 §6, "the
@@ -161,6 +172,6 @@ export function inverseResolveTarget(t: MacroTarget, value: number): number {
   const span = t.max - t.min
   if (span === 0) return 50
   const n = Math.min(1, Math.max(0, (value - t.min) / span))
-  const shaped = t.curve === 'exp' ? Math.sqrt(n) : t.curve === 'log' ? n * n : n
+  const shaped = t.curve === 'quadIn' ? Math.sqrt(n) : t.curve === 'quadOut' ? n * n : n
   return Math.round(shaped * 100)
 }

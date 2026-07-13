@@ -128,10 +128,34 @@ function diffEffects(trackId: string, aEffects: BeatEffect[], bEffects: BeatEffe
   const aOrder = aEffects.filter((e) => bById.has(e.id)).map((e) => e.id)
   const bOrder = bEffects.filter((e) => aById.has(e.id)).map((e) => e.id)
   if (aOrder.join('\n') !== bOrder.join('\n')) {
+    // Phase 33 Stream ME (docs/research/98): relocating ONE effect in an N-effect chain shifts the
+    // POSITION NUMBER of every effect between the old and new slot, so the naive "report every id
+    // whose index changed" approach printed one "moved from X to Y" line per shifted effect (4
+    // lines for research/98's repro) even though only one effect conceptually moved — the raw file
+    // diff for the same edit was 2 lines (one line relocated), inverting dotbeat's own "musical
+    // edit list, not line noise" pitch for this one operation. Fix: if removing exactly one id from
+    // BOTH orderings reconciles them (every other id keeps the same relative order — the "one item
+    // pulled out, the rest slide down to close the gap" shape moveEffect always produces), report
+    // only that one relocation. A genuine multi-item reshuffle (no single id reconciles both sides)
+    // falls back to the previous per-id report — this never hides a real structural change, it only
+    // collapses the common single-move case moveEffect actually produces.
+    let singleMoveId: string | undefined
     for (const id of commonIds) {
-      const ai = aOrder.indexOf(id)
-      const bi = bOrder.indexOf(id)
-      if (ai !== bi) out.push({ kind: 'effect-moved', trackId, effectId: id, before: ai, after: bi })
+      const aRest = aOrder.filter((x) => x !== id)
+      const bRest = bOrder.filter((x) => x !== id)
+      if (aRest.join('\n') === bRest.join('\n')) {
+        singleMoveId = id
+        break
+      }
+    }
+    if (singleMoveId !== undefined) {
+      out.push({ kind: 'effect-moved', trackId, effectId: singleMoveId, before: aOrder.indexOf(singleMoveId), after: bOrder.indexOf(singleMoveId) })
+    } else {
+      for (const id of commonIds) {
+        const ai = aOrder.indexOf(id)
+        const bi = bOrder.indexOf(id)
+        if (ai !== bi) out.push({ kind: 'effect-moved', trackId, effectId: id, before: ai, after: bi })
+      }
     }
   }
   for (const id of commonIds) {

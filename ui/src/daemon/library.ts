@@ -22,7 +22,10 @@ export interface LibraryPreset {
 // Phase 26 Stream DD (docs/research/27-macro-tooling-layer.md): mirrors src/core/macro.ts's
 // BeatMacro/MacroTarget exactly (hand-mirrored, not imported — ui/ is a standalone Vite app; the
 // daemon's JSON is the contract, same convention LibraryPreset above already follows).
-export type LibraryMacroCurve = 'linear' | 'exp' | 'log'
+// Phase 33 Stream ME (docs/research/100): renamed from 'exp'/'log' — those names claimed to
+// mirror Knob.tsx's real log-space curve but were actually a plain quadratic ease; see
+// src/core/macro.ts's MacroTarget.curve doc comment for the full reasoning. Same rename, mirrored.
+export type LibraryMacroCurve = 'linear' | 'quadIn' | 'quadOut'
 export interface LibraryMacroTarget {
   param: string
   min: number
@@ -140,7 +143,7 @@ export function findMatchingPresetIndex(presets: LibraryPreset[], synth: BeatSyn
 
 function resolveMacroTarget(t: LibraryMacroTarget, knob: number): number {
   const n = Math.min(1, Math.max(0, knob / 100))
-  const shaped = t.curve === 'exp' ? n * n : t.curve === 'log' ? Math.sqrt(n) : n
+  const shaped = t.curve === 'quadIn' ? n * n : t.curve === 'quadOut' ? Math.sqrt(n) : n
   return t.min + shaped * (t.max - t.min)
 }
 
@@ -158,7 +161,7 @@ export function inverseResolveMacroTarget(t: LibraryMacroTarget, value: number):
   const span = t.max - t.min
   if (span === 0) return 50
   const n = Math.min(1, Math.max(0, (value - t.min) / span))
-  const shaped = t.curve === 'exp' ? Math.sqrt(n) : t.curve === 'log' ? n * n : n
+  const shaped = t.curve === 'quadIn' ? Math.sqrt(n) : t.curve === 'quadOut' ? n * n : n
   return Math.round(shaped * 100)
 }
 

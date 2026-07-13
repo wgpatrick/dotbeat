@@ -7,7 +7,7 @@
       "category": "tone",
       "description": "The canonical one — brighter + more resonant together",
       "targets": [
-        { "param": "cutoff", "min": 80, "max": 18000, "curve": "exp" },
+        { "param": "cutoff", "min": 80, "max": 18000, "curve": "quadIn" },
         { "param": "resonance", "min": 0.1, "max": 5 }
       ]
     },
@@ -17,7 +17,7 @@
       "category": "drive",
       "description": "Add dirt",
       "targets": [
-        { "param": "distortionAmount", "min": 0, "max": 0.8, "curve": "exp" },
+        { "param": "distortionAmount", "min": 0, "max": 0.8, "curve": "quadIn" },
         { "param": "distortionMix", "min": 0, "max": 0.7 },
         { "param": "bitcrushBits", "min": 16, "max": 4 }
       ]
@@ -83,7 +83,7 @@
       "targets": [
         { "param": "hatDecay", "min": 0.12, "max": 0.02 },
         { "param": "openHatDecay", "min": 0.5, "max": 0.2 },
-        { "param": "hatTone", "min": 3000, "max": 8000, "curve": "exp" }
+        { "param": "hatTone", "min": 3000, "max": 8000, "curve": "quadIn" }
       ]
     }
   ]

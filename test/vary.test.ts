@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { initDocument, addTrack, serialize, diffDocuments } from '../src/core/index.js'
-import { VARY_GROUPS, varyTrack, makeRng, BeatVaryError } from '../src/vary/vary.js'
+import { VARY_GROUPS, VARY_GROUP_KINDS, legalGroupsForKind, varyTrack, makeRng, BeatVaryError } from '../src/vary/vary.js'
 import { SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER } from '../src/core/document.js'
 
 function project() {
@@ -24,6 +24,32 @@ test('every VARY_GROUPS param is a real synth field with a sane range', () => {
       if (def.scale === 'log') assert.ok(def.min > 0, `${group}.${def.key}: log scale needs min > 0`)
     }
   }
+})
+
+test('VARY_GROUP_KINDS covers every VARY_GROUPS entry with at least one legal kind', () => {
+  for (const group of Object.keys(VARY_GROUPS)) {
+    assert.ok(VARY_GROUP_KINDS[group] && VARY_GROUP_KINDS[group]!.length > 0, `${group} has no legal-kinds entry`)
+  }
+})
+
+test('legalGroupsForKind: drum-only groups (kick/snare/hats) are excluded for a synth track', () => {
+  const groups = legalGroupsForKind('synth')
+  assert.ok(!groups.includes('kick'), 'kick should not be legal for synth')
+  assert.ok(!groups.includes('snare'), 'snare should not be legal for synth')
+  assert.ok(!groups.includes('hats'), 'hats should not be legal for synth')
+  assert.ok(groups.includes('filter'), 'filter should be legal for synth')
+})
+
+test('legalGroupsForKind: synth-only groups (osc/motion) are excluded for a drums track', () => {
+  const groups = legalGroupsForKind('drums')
+  assert.ok(!groups.includes('osc'), 'osc should not be legal for drums')
+  assert.ok(!groups.includes('motion'), 'motion should not be legal for drums')
+  assert.ok(groups.includes('kick'), 'kick should be legal for drums')
+})
+
+test('legalGroupsForKind: an unmapped kind (e.g. audio) falls back to every group rather than an empty list', () => {
+  const groups = legalGroupsForKind('audio')
+  assert.deepEqual(groups, Object.keys(VARY_GROUPS))
 })
 
 test('varyTrack is deterministic under a seed', () => {
