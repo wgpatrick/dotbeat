@@ -1,6 +1,6 @@
 format_version 0.10
 bpm 126
-loop_bars 4
+loop_bars 8
 selected_track drums
 
 track drums Drums #56b6c2 drums
@@ -36,7 +36,7 @@ track drums Drums #56b6c2 drums
   lane crash synth:metal
   lane ride synth:metal
   lane cowbell synth:membrane
-  clip verse
+  clip pulse
     hit h1 hat 0 0.5
     hit h2 hat 4 0.5
     hit h3 hat 8 0.5
@@ -53,23 +53,22 @@ track drums Drums #56b6c2 drums
     hit h14 hat 52 0.5
     hit h15 hat 56 0.5
     hit h16 hat 60 0.5
-  clip chorus
-    hit h1 hat 0 0.5
-    hit h2 hat 4 0.5
-    hit h3 hat 8 0.5
-    hit h4 hat 12 0.5
-    hit h5 hat 16 0.5
-    hit h6 hat 20 0.5
-    hit h7 hat 24 0.5
-    hit h8 hat 28 0.5
-    hit h9 hat 32 0.5
-    hit h10 hat 36 0.5
-    hit h11 hat 40 0.5
-    hit h12 hat 44 0.5
-    hit h13 hat 48 0.5
-    hit h14 hat 52 0.5
-    hit h15 hat 56 0.5
-    hit h16 hat 60 0.5
+    hit h17 hat 64 0.5
+    hit h18 hat 68 0.5
+    hit h19 hat 72 0.5
+    hit h20 hat 76 0.5
+    hit h21 hat 80 0.5
+    hit h22 hat 84 0.5
+    hit h23 hat 88 0.5
+    hit h24 hat 92 0.5
+    hit h25 hat 96 0.5
+    hit h26 hat 100 0.5
+    hit h27 hat 104 0.5
+    hit h28 hat 108 0.5
+    hit h29 hat 112 0.5
+    hit h30 hat 116 0.5
+    hit h31 hat 120 0.5
+    hit h32 hat 124 0.5
   hit h1 hat 0 0.5
   hit h2 hat 4 0.5
   hit h3 hat 8 0.5
@@ -86,6 +85,22 @@ track drums Drums #56b6c2 drums
   hit h14 hat 52 0.5
   hit h15 hat 56 0.5
   hit h16 hat 60 0.5
+  hit h17 hat 64 0.5
+  hit h18 hat 68 0.5
+  hit h19 hat 72 0.5
+  hit h20 hat 76 0.5
+  hit h21 hat 80 0.5
+  hit h22 hat 84 0.5
+  hit h23 hat 88 0.5
+  hit h24 hat 92 0.5
+  hit h25 hat 96 0.5
+  hit h26 hat 100 0.5
+  hit h27 hat 104 0.5
+  hit h28 hat 108 0.5
+  hit h29 hat 112 0.5
+  hit h30 hat 116 0.5
+  hit h31 hat 120 0.5
+  hit h32 hat 124 0.5
 
 track bass Bass #f7c948 synth
   synth
@@ -110,20 +125,24 @@ track bass Bass #f7c948 synth
     compMix 0.5
     distortionAmount 0.15
     distortionMix 0.2
-  clip verse
-    note u100001 41 0 15 0.75
-    note u100014 36 16 15 0.75
-    note u100027 43 32 15 0.75
-    note u100040 33 48 15 0.75
-  clip chorus
-    note u100001 41 0 15 0.75
-    note u100014 43 16 15 0.75
-    note u100027 40 32 15 0.75
-    note u100040 33 48 15 0.75
-  note u100001 41 0 15 0.75
-  note u100014 43 16 15 0.75
-  note u100027 40 32 15 0.75
-  note u100040 33 48 15 0.75
+  clip a
+    note u100001 41 0 15 0.8
+    note u100002 41 16 15 0.7
+    note u100003 36 32 15 0.8
+    note u100004 36 48 15 0.7
+    note u100005 43 64 15 0.8
+    note u100006 43 80 15 0.7
+    note u100007 33 96 15 0.8
+    note u100008 33 112 15 0.7
+  clip d
+    note u100049 41 0 15 0.8
+    note u100050 41 16 15 0.7
+    note u100051 43 32 15 0.8
+    note u100052 43 48 15 0.7
+    note u100053 40 64 15 0.8
+    note u100054 40 80 15 0.7
+    note u100055 33 96 15 0.8
+    note u100056 33 112 15 0.7
 
 track keys Keys #98c379 synth
   synth
@@ -141,104 +160,233 @@ track keys Keys #98c379 synth
     eqMid 0.5
     chorusMode chorus
     chorusMix 0.3
-  clip verse
-    note u100002 53 0 3.5 0.7
+  clip open-a
+    note u100009 53 0 3.5 0.7
+    note u100013 60 0 3.5 0.7
+    note u100017 64 0 3.5 0.7
+    note u100021 69 0 3.5 0.7
+    note u100010 53 8 3.5 0.55
+    note u100014 60 8 3.5 0.55
+    note u100018 64 8 3.5 0.55
+    note u100022 69 8 3.5 0.55
+    note u100011 53 16 3.5 0.65
+    note u100015 60 16 3.5 0.65
+    note u100019 64 16 3.5 0.65
+    note u100023 69 16 3.5 0.65
+    note u100012 53 24 3.5 0.55
+    note u100016 60 24 3.5 0.55
+    note u100020 64 24 3.5 0.55
+    note u100024 69 24 3.5 0.55
+    note u100025 48 32 3.5 0.7
+    note u100029 55 32 3.5 0.7
+    note u100033 62 32 3.5 0.7
+    note u100037 64 32 3.5 0.7
+    note u100026 48 40 3.5 0.55
+    note u100030 55 40 3.5 0.55
+    note u100034 62 40 3.5 0.55
+    note u100038 64 40 3.5 0.55
+    note u100027 48 48 3.5 0.65
+    note u100031 55 48 3.5 0.65
+    note u100035 62 48 3.5 0.65
+    note u100039 64 48 3.5 0.65
+    note u100028 48 56 3.5 0.55
+    note u100032 55 56 3.5 0.55
+    note u100036 62 56 3.5 0.55
+    note u100040 64 56 3.5 0.55
+    note u100041 50 64 3.5 0.7
+    note u100045 55 64 3.5 0.7
+    note u100049 62 64 3.5 0.7
+    note u100053 71 64 3.5 0.7
+    note u100042 50 72 3.5 0.55
+    note u100046 55 72 3.5 0.55
+    note u100050 62 72 3.5 0.55
+    note u100054 71 72 3.5 0.55
+    note u100043 50 80 3.5 0.65
+    note u100047 55 80 3.5 0.65
+    note u100051 62 80 3.5 0.65
+    note u100055 71 80 3.5 0.65
+    note u100044 50 88 3.5 0.55
+    note u100048 55 88 3.5 0.55
+    note u100052 62 88 3.5 0.55
+    note u100056 71 88 3.5 0.55
+    note u100057 45 96 3.5 0.7
+    note u100061 52 96 3.5 0.7
+    note u100065 60 96 3.5 0.7
+    note u100069 67 96 3.5 0.7
+    note u100058 45 104 3.5 0.55
+    note u100062 52 104 3.5 0.55
+    note u100066 60 104 3.5 0.55
+    note u100070 67 104 3.5 0.55
+    note u100059 45 112 3.5 0.65
+    note u100063 52 112 3.5 0.65
+    note u100067 60 112 3.5 0.65
+    note u100071 67 112 3.5 0.65
+    note u100060 45 120 3.5 0.55
+    note u100064 52 120 3.5 0.55
+    note u100068 60 120 3.5 0.55
+    note u100072 67 120 3.5 0.55
+  clip close-a
+    note u100001 53 0 12 0.5
+    note u100003 57 0 12 0.5
+    note u100005 60 0 12 0.5
+    note u100007 64 0 12 0.5
+    note u100002 53 16 12 0.45
+    note u100004 57 16 12 0.45
+    note u100006 60 16 12 0.45
+    note u100008 64 16 12 0.45
+    note u100009 48 32 12 0.5
+    note u100011 52 32 12 0.5
+    note u100013 55 32 12 0.5
+    note u100015 62 32 12 0.5
+    note u100010 48 48 12 0.45
+    note u100012 52 48 12 0.45
+    note u100014 55 48 12 0.45
+    note u100016 62 48 12 0.45
+    note u100017 50 64 12 0.5
+    note u100019 55 64 12 0.5
+    note u100021 59 64 12 0.5
+    note u100023 62 64 12 0.5
+    note u100018 50 80 12 0.45
+    note u100020 55 80 12 0.45
+    note u100022 59 80 12 0.45
+    note u100024 62 80 12 0.45
+    note u100025 45 96 12 0.5
+    note u100027 52 96 12 0.5
+    note u100029 57 96 12 0.5
+    note u100031 60 96 12 0.5
+    note u100026 45 112 12 0.45
+    note u100028 52 112 12 0.45
+    note u100030 57 112 12 0.45
+    note u100032 60 112 12 0.45
+  clip shim-d
+    note u100001 57 0 3.5 0.7
     note u100005 60 0 3.5 0.7
-    note u100008 64 0 3.5 0.7
-    note u100011 69 0 3.5 0.7
-    note u100003 53 8 3.5 0.6
-    note u100006 60 8 3.5 0.6
-    note u100009 64 8 3.5 0.6
-    note u100012 69 8 3.5 0.6
-    note u100015 48 16 3.5 0.7
-    note u100018 55 16 3.5 0.7
-    note u100021 62 16 3.5 0.7
-    note u100024 64 16 3.5 0.7
-    note u100016 48 24 3.5 0.6
-    note u100019 55 24 3.5 0.6
-    note u100022 62 24 3.5 0.6
-    note u100025 64 24 3.5 0.6
-    note u100028 50 32 3.5 0.7
-    note u100031 55 32 3.5 0.7
-    note u100034 62 32 3.5 0.7
-    note u100037 71 32 3.5 0.7
-    note u100029 50 40 3.5 0.6
-    note u100032 55 40 3.5 0.6
-    note u100035 62 40 3.5 0.6
-    note u100038 71 40 3.5 0.6
-    note u100041 45 48 3.5 0.7
-    note u100044 52 48 3.5 0.7
-    note u100047 60 48 3.5 0.7
-    note u100050 67 48 3.5 0.7
-    note u100042 45 56 3.5 0.6
-    note u100045 52 56 3.5 0.6
-    note u100048 60 56 3.5 0.6
-    note u100051 67 56 3.5 0.6
-  clip chorus
-    note u100002 57 0 3.5 0.7
-    note u100005 60 0 3.5 0.7
-    note u100008 64 0 3.5 0.7
-    note u100011 67 0 3.5 0.7
-    note u100003 57 8 3.5 0.6
-    note u100006 60 8 3.5 0.6
-    note u100009 64 8 3.5 0.6
-    note u100012 67 8 3.5 0.6
-    note u100015 59 16 3.5 0.7
-    note u100018 62 16 3.5 0.7
-    note u100021 67 16 3.5 0.7
-    note u100024 69 16 3.5 0.7
-    note u100016 59 24 3.5 0.6
-    note u100019 62 24 3.5 0.6
-    note u100022 67 24 3.5 0.6
-    note u100025 69 24 3.5 0.6
-    note u100028 55 32 3.5 0.7
-    note u100031 59 32 3.5 0.7
-    note u100034 62 32 3.5 0.7
-    note u100037 66 32 3.5 0.7
-    note u100029 55 40 3.5 0.6
-    note u100032 59 40 3.5 0.6
-    note u100035 62 40 3.5 0.6
-    note u100038 66 40 3.5 0.6
-    note u100041 60 48 3.5 0.7
-    note u100044 64 48 3.5 0.7
-    note u100047 67 48 3.5 0.7
-    note u100050 71 48 3.5 0.7
-    note u100042 60 56 3.5 0.6
-    note u100045 64 56 3.5 0.6
-    note u100048 67 56 3.5 0.6
-    note u100051 71 56 3.5 0.6
-  note u100002 57 0 3.5 0.7
+    note u100009 64 0 3.5 0.7
+    note u100013 67 0 3.5 0.7
+    note u100002 57 8 3.5 0.55
+    note u100006 60 8 3.5 0.55
+    note u100010 64 8 3.5 0.55
+    note u100014 67 8 3.5 0.55
+    note u100003 57 16 3.5 0.65
+    note u100007 60 16 3.5 0.65
+    note u100011 64 16 3.5 0.65
+    note u100015 67 16 3.5 0.65
+    note u100004 57 24 3.5 0.55
+    note u100008 60 24 3.5 0.55
+    note u100012 64 24 3.5 0.55
+    note u100016 67 24 3.5 0.55
+    note u100017 59 32 3.5 0.7
+    note u100021 62 32 3.5 0.7
+    note u100025 67 32 3.5 0.7
+    note u100029 69 32 3.5 0.7
+    note u100018 59 40 3.5 0.55
+    note u100022 62 40 3.5 0.55
+    note u100026 67 40 3.5 0.55
+    note u100030 69 40 3.5 0.55
+    note u100019 59 48 3.5 0.65
+    note u100023 62 48 3.5 0.65
+    note u100027 67 48 3.5 0.65
+    note u100031 69 48 3.5 0.65
+    note u100020 59 56 3.5 0.55
+    note u100024 62 56 3.5 0.55
+    note u100028 67 56 3.5 0.55
+    note u100032 69 56 3.5 0.55
+    note u100033 55 64 3.5 0.7
+    note u100037 59 64 3.5 0.7
+    note u100041 62 64 3.5 0.7
+    note u100045 66 64 3.5 0.7
+    note u100034 55 72 3.5 0.55
+    note u100038 59 72 3.5 0.55
+    note u100042 62 72 3.5 0.55
+    note u100046 66 72 3.5 0.55
+    note u100035 55 80 3.5 0.65
+    note u100039 59 80 3.5 0.65
+    note u100043 62 80 3.5 0.65
+    note u100047 66 80 3.5 0.65
+    note u100036 55 88 3.5 0.55
+    note u100040 59 88 3.5 0.55
+    note u100044 62 88 3.5 0.55
+    note u100048 66 88 3.5 0.55
+    note u100049 60 96 3.5 0.7
+    note u100053 64 96 3.5 0.7
+    note u100057 67 96 3.5 0.7
+    note u100061 71 96 3.5 0.7
+    note u100050 60 104 3.5 0.55
+    note u100054 64 104 3.5 0.55
+    note u100058 67 104 3.5 0.55
+    note u100062 71 104 3.5 0.55
+    note u100051 60 112 3.5 0.65
+    note u100055 64 112 3.5 0.65
+    note u100059 67 112 3.5 0.65
+    note u100063 71 112 3.5 0.65
+    note u100052 60 120 3.5 0.55
+    note u100056 64 120 3.5 0.55
+    note u100060 67 120 3.5 0.55
+    note u100064 71 120 3.5 0.55
+  note u100001 57 0 3.5 0.7
   note u100005 60 0 3.5 0.7
-  note u100008 64 0 3.5 0.7
-  note u100011 67 0 3.5 0.7
-  note u100003 57 8 3.5 0.6
-  note u100006 60 8 3.5 0.6
-  note u100009 64 8 3.5 0.6
-  note u100012 67 8 3.5 0.6
-  note u100015 59 16 3.5 0.7
-  note u100018 62 16 3.5 0.7
-  note u100021 67 16 3.5 0.7
-  note u100024 69 16 3.5 0.7
-  note u100016 59 24 3.5 0.6
-  note u100019 62 24 3.5 0.6
-  note u100022 67 24 3.5 0.6
-  note u100025 69 24 3.5 0.6
-  note u100028 55 32 3.5 0.7
-  note u100031 59 32 3.5 0.7
-  note u100034 62 32 3.5 0.7
-  note u100037 66 32 3.5 0.7
-  note u100029 55 40 3.5 0.6
-  note u100032 59 40 3.5 0.6
-  note u100035 62 40 3.5 0.6
-  note u100038 66 40 3.5 0.6
-  note u100041 60 48 3.5 0.7
-  note u100044 64 48 3.5 0.7
-  note u100047 67 48 3.5 0.7
-  note u100050 71 48 3.5 0.7
-  note u100042 60 56 3.5 0.6
-  note u100045 64 56 3.5 0.6
-  note u100048 67 56 3.5 0.6
-  note u100051 71 56 3.5 0.6
+  note u100009 64 0 3.5 0.7
+  note u100013 67 0 3.5 0.7
+  note u100002 57 8 3.5 0.55
+  note u100006 60 8 3.5 0.55
+  note u100010 64 8 3.5 0.55
+  note u100014 67 8 3.5 0.55
+  note u100003 57 16 3.5 0.65
+  note u100007 60 16 3.5 0.65
+  note u100011 64 16 3.5 0.65
+  note u100015 67 16 3.5 0.65
+  note u100004 57 24 3.5 0.55
+  note u100008 60 24 3.5 0.55
+  note u100012 64 24 3.5 0.55
+  note u100016 67 24 3.5 0.55
+  note u100017 59 32 3.5 0.7
+  note u100021 62 32 3.5 0.7
+  note u100025 67 32 3.5 0.7
+  note u100029 69 32 3.5 0.7
+  note u100018 59 40 3.5 0.55
+  note u100022 62 40 3.5 0.55
+  note u100026 67 40 3.5 0.55
+  note u100030 69 40 3.5 0.55
+  note u100019 59 48 3.5 0.65
+  note u100023 62 48 3.5 0.65
+  note u100027 67 48 3.5 0.65
+  note u100031 69 48 3.5 0.65
+  note u100020 59 56 3.5 0.55
+  note u100024 62 56 3.5 0.55
+  note u100028 67 56 3.5 0.55
+  note u100032 69 56 3.5 0.55
+  note u100033 55 64 3.5 0.7
+  note u100037 59 64 3.5 0.7
+  note u100041 62 64 3.5 0.7
+  note u100045 66 64 3.5 0.7
+  note u100034 55 72 3.5 0.55
+  note u100038 59 72 3.5 0.55
+  note u100042 62 72 3.5 0.55
+  note u100046 66 72 3.5 0.55
+  note u100035 55 80 3.5 0.65
+  note u100039 59 80 3.5 0.65
+  note u100043 62 80 3.5 0.65
+  note u100047 66 80 3.5 0.65
+  note u100036 55 88 3.5 0.55
+  note u100040 59 88 3.5 0.55
+  note u100044 62 88 3.5 0.55
+  note u100048 66 88 3.5 0.55
+  note u100049 60 96 3.5 0.7
+  note u100053 64 96 3.5 0.7
+  note u100057 67 96 3.5 0.7
+  note u100061 71 96 3.5 0.7
+  note u100050 60 104 3.5 0.55
+  note u100054 64 104 3.5 0.55
+  note u100058 67 104 3.5 0.55
+  note u100062 71 104 3.5 0.55
+  note u100051 60 112 3.5 0.65
+  note u100055 64 112 3.5 0.65
+  note u100059 67 112 3.5 0.65
+  note u100063 71 112 3.5 0.65
+  note u100052 60 120 3.5 0.55
+  note u100056 64 120 3.5 0.55
+  note u100060 67 120 3.5 0.55
+  note u100064 71 120 3.5 0.55
 
 track pad Pad #c678dd synth
   synth
@@ -261,69 +409,98 @@ track pad Pad #c678dd synth
     eqMid -1
     sendReverb 0.55
     sendDelay 0.15
-  clip verse
-    note u100004 53 0 16 0.45
-    note u100007 60 0 16 0.45
-    note u100010 64 0 16 0.45
-    note u100013 69 0 16 0.45
-    note u100017 48 16 16 0.45
-    note u100020 55 16 16 0.45
-    note u100023 62 16 16 0.45
-    note u100026 64 16 16 0.45
-    note u100030 50 32 16 0.45
-    note u100033 55 32 16 0.45
-    note u100036 62 32 16 0.45
-    note u100039 71 32 16 0.45
-    note u100043 45 48 16 0.45
-    note u100046 52 48 16 0.45
-    note u100049 60 48 16 0.45
-    note u100052 67 48 16 0.45
-  clip chorus
-    note u100004 57 0 16 0.45
-    note u100007 60 0 16 0.45
-    note u100010 64 0 16 0.45
-    note u100013 67 0 16 0.45
-    note u100017 59 16 16 0.45
-    note u100020 62 16 16 0.45
-    note u100023 67 16 16 0.45
-    note u100026 69 16 16 0.45
-    note u100030 55 32 16 0.45
-    note u100033 59 32 16 0.45
-    note u100036 62 32 16 0.45
-    note u100039 66 32 16 0.45
-    note u100043 60 48 16 0.45
-    note u100046 64 48 16 0.45
-    note u100049 67 48 16 0.45
-    note u100052 71 48 16 0.45
-  note u100004 57 0 16 0.45
-  note u100007 60 0 16 0.45
-  note u100010 64 0 16 0.45
-  note u100013 67 0 16 0.45
-  note u100017 59 16 16 0.45
-  note u100020 62 16 16 0.45
-  note u100023 67 16 16 0.45
-  note u100026 69 16 16 0.45
-  note u100030 55 32 16 0.45
-  note u100033 59 32 16 0.45
-  note u100036 62 32 16 0.45
-  note u100039 66 32 16 0.45
-  note u100043 60 48 16 0.45
-  note u100046 64 48 16 0.45
-  note u100049 67 48 16 0.45
-  note u100052 71 48 16 0.45
+  clip open-a
+    note u100073 53 0 32 0.45
+    note u100074 60 0 32 0.45
+    note u100075 64 0 32 0.45
+    note u100076 69 0 32 0.45
+    note u100077 48 32 32 0.45
+    note u100078 55 32 32 0.45
+    note u100079 62 32 32 0.45
+    note u100080 64 32 32 0.45
+    note u100081 50 64 32 0.45
+    note u100082 55 64 32 0.45
+    note u100083 62 64 32 0.45
+    note u100084 71 64 32 0.45
+    note u100085 45 96 32 0.45
+    note u100086 52 96 32 0.45
+    note u100087 60 96 32 0.45
+    note u100088 67 96 32 0.45
+  clip shim-a
+    note u100033 57 0 32 0.45
+    note u100034 60 0 32 0.45
+    note u100035 64 0 32 0.45
+    note u100036 67 0 32 0.45
+    note u100037 55 32 32 0.45
+    note u100038 62 32 32 0.45
+    note u100039 64 32 32 0.45
+    note u100040 67 32 32 0.45
+    note u100041 59 64 32 0.45
+    note u100042 62 64 32 0.45
+    note u100043 67 64 32 0.45
+    note u100044 69 64 32 0.45
+    note u100045 60 96 32 0.45
+    note u100046 64 96 32 0.45
+    note u100047 67 96 32 0.45
+    note u100048 71 96 32 0.45
+  clip shim-d
+    note u100065 57 0 32 0.45
+    note u100066 60 0 32 0.45
+    note u100067 64 0 32 0.45
+    note u100068 67 0 32 0.45
+    note u100069 59 32 32 0.45
+    note u100070 62 32 32 0.45
+    note u100071 67 32 32 0.45
+    note u100072 69 32 32 0.45
+    note u100073 55 64 32 0.45
+    note u100074 59 64 32 0.45
+    note u100075 62 64 32 0.45
+    note u100076 66 64 32 0.45
+    note u100077 60 96 32 0.45
+    note u100078 64 96 32 0.45
+    note u100079 67 96 32 0.45
+    note u100080 71 96 32 0.45
+  note u100065 57 0 32 0.45
+  note u100066 60 0 32 0.45
+  note u100067 64 0 32 0.45
+  note u100068 67 0 32 0.45
+  note u100069 59 32 32 0.45
+  note u100070 62 32 32 0.45
+  note u100071 67 32 32 0.45
+  note u100072 69 32 32 0.45
+  note u100073 55 64 32 0.45
+  note u100074 59 64 32 0.45
+  note u100075 62 64 32 0.45
+  note u100076 66 64 32 0.45
+  note u100077 60 96 32 0.45
+  note u100078 64 96 32 0.45
+  note u100079 67 96 32 0.45
+  note u100080 71 96 32 0.45
 
-scene verse
-  slot drums verse
-  slot bass verse
-  slot keys verse
-  slot pad verse
+scene intro
+  slot keys close-a
+  slot pad shim-a
 
-scene chorus
-  slot drums chorus
-  slot bass chorus
-  slot keys chorus
-  slot pad chorus
+scene groove
+  slot drums pulse
+  slot bass a
+  slot keys open-a
+  slot pad open-a
+
+scene lift
+  slot drums pulse
+  slot bass d
+  slot keys shim-d
+  slot pad shim-d
+
+scene peak
+  slot drums pulse
+  slot bass a
+  slot keys open-a
+  slot pad shim-a
 
 song
-  section verse 4
-  section chorus 4
+  section intro 8
+  section groove 8
+  section lift 8
+  section peak 8
