@@ -211,10 +211,15 @@ body {
   color: var(--text);
   cursor: pointer;
 }
-.undo-btn:hover:not(:disabled) {
+.undo-btn:hover:not(.stack-empty) {
   border-color: var(--accent);
 }
-.undo-btn:disabled {
+/* Phase 30 Stream JB: dims the button when the mirrored `canUndo`/`canRedo` looks empty, WITHOUT the
+   native `disabled` attribute — a real `disabled` blocks the click event outright, which used to make
+   the button a genuine no-op whenever that mirrored flag lagged the daemon's true state (research/89).
+   The keyboard shortcut never gated on this flag at all, so matching its reliability means the click
+   handler always fires here too; this class is cosmetic only. */
+.undo-btn.stack-empty {
   opacity: 0.35;
   cursor: default;
 }

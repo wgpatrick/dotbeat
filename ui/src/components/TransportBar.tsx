@@ -17,6 +17,20 @@ import { useStore } from '../state/store'
 // one they just triggered. The buttons are a secondary affordance — Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z
 // (App.tsx's global key handler) are the primary path, same split as the History panel's "Go back"
 // button vs. no keyboard shortcut of its own.
+//
+// Phase 30 Stream JB (research/89 "Undo got interesting fast"): these buttons used to set the real
+// HTML `disabled` attribute from `canUndo`/`canRedo`, which — unlike App.tsx's Ctrl/Cmd+Z handler,
+// which always just calls postUndo() unconditionally — makes a click a genuine browser no-op
+// whenever that mirrored flag lags the true daemon state (bridge.ts's postEdit debounces the actual
+// network write up to ~60ms after the optimistic local edit, so `canUndo` could still read stale-
+// false right after a fresh, undoable edit). The keyboard shortcut never had this failure mode
+// because it never gates the call on `canUndo` in the first place. Fixed at the root in bridge.ts
+// (postEdit now bumps `canUndo`/`canRedo` optimistically, and postUndo/postRedo flush any pending
+// debounced edit before popping), but the button ALSO now matches the keyboard's own "just always
+// try, let the daemon no-op on an empty stack" behavior instead of a second, independent point of
+// failure: `aria-disabled` + a CSS class dim the button when the stack looks empty, but the native
+// `disabled` attribute (and its click-blocking) is gone, so `onClick` is exactly as reliable as
+// Ctrl/Cmd+Z — both paths now call the identical postUndo()/postRedo().
 
 export function TransportBar() {
   const doc = useStore((s) => s.doc)
@@ -49,18 +63,18 @@ export function TransportBar() {
       </button>
       <div className="undo-redo-group">
         <button
-          className="undo-btn"
+          className={`undo-btn${canUndo ? '' : ' stack-empty'}`}
           data-action="undo"
-          disabled={!canUndo}
+          aria-disabled={!canUndo}
           onClick={() => void postUndo()}
           title="Undo (Ctrl/Cmd+Z) — in-session only, separate from version history"
         >
           ↶ Undo
         </button>
         <button
-          className="undo-btn"
+          className={`undo-btn${canRedo ? '' : ' stack-empty'}`}
           data-action="redo"
-          disabled={!canRedo}
+          aria-disabled={!canRedo}
           onClick={() => void postRedo()}
           title="Redo (Ctrl/Cmd+Shift+Z) — in-session only, separate from version history"
         >
