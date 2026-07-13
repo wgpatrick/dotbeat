@@ -590,12 +590,19 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 110px;
+  /* Phase 30 Stream JD, item 2: wide enough for the Instrument row's inline unlock hint (below) to
+     wrap onto two short lines instead of one very long or truncated one. */
+  max-width: 210px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: 4px;
   gap: 2px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.arr-addtrack-item-wrap {
+  display: flex;
+  flex-direction: column;
 }
 .arr-addtrack-item {
   font: inherit;
@@ -608,6 +615,7 @@ body {
   background: transparent;
   color: var(--text);
   cursor: pointer;
+  width: 100%;
 }
 .arr-addtrack-item:hover:not(:disabled) {
   background: var(--panel-2);
@@ -616,6 +624,13 @@ body {
 .arr-addtrack-item:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.arr-addtrack-item-hint {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-dim);
+  padding: 0 8px 5px;
+  white-space: normal;
 }
 
 /* per-track-header controls: color/name/delete titlebar row */
@@ -649,8 +664,18 @@ body {
   padding: 0;
   cursor: pointer;
 }
-.arr-track-rename {
+/* Phase 30 Stream JD, item 1: the rename input's wrapper stacks the input above an inline hint
+   (shown only while spaces are being stripped from what's typed — see ArrangementView.tsx's
+   spaceStripped state) instead of the input silently mangling input with no explanation. */
+.arr-track-rename-wrap {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.arr-track-rename {
+  width: 100%;
   min-width: 0;
   font: inherit;
   font-size: 12px;
@@ -659,6 +684,11 @@ body {
   border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
+}
+.arr-track-rename-hint {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--accent);
 }
 .arr-track-del {
   flex: 0 0 auto;

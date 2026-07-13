@@ -835,6 +835,28 @@ export function NoteView({ track }: { track: BeatTrack }) {
       return
     }
     const sceneId = preferredSceneId ?? doc.song![0]!.scene
+    // Phase 30 Stream JD, item 5 (docs/research/88): dotbeat v1 deliberately shares one clip per
+    // track by reference across every scene it's slotted into (documented at this file's top and in
+    // ClipPropertiesPanel.tsx:15 — not changing that here). What's missing is warning the user BEFORE
+    // an "update" click retroactively rewrites every OTHER song section that happens to reuse this
+    // same clip, not just the one currently in view. `existing` means this track already has a saved
+    // clip; count how many song sections actually play it (via whichever scene they point at) and, if
+    // more than one, confirm before the write lands — this is exactly the kind of destructive-ish,
+    // point-of-action confirmation window.confirm() is still the right tool for (toastStore.ts's own
+    // comment: alert() was swept to toasts, confirm() wasn't).
+    if (existing) {
+      const sharingSections = doc.song!.filter((sec) => {
+        const scene = doc.scenes.find((s) => s.id === sec.scene)
+        return scene?.slots[track.id] === existing.id
+      }).length
+      if (sharingSections > 1) {
+        const otherCount = sharingSections - 1
+        const ok = window.confirm(
+          `This clip ("${existing.id}") is also used by ${otherCount} other section${otherCount === 1 ? '' : 's'} — updating it here will update all of them too. Continue?`,
+        )
+        if (!ok) return
+      }
+    }
     setPlacing(true)
     postPlaceClip(track.id, { ...(existing ? { clipId: existing.id } : {}), sceneId })
       .catch((err) => showToast(`Could not place clip: ${(err as Error).message}`))

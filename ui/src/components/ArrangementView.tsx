@@ -550,12 +550,26 @@ function TrackRow({
   const dimmed = useStore((s) => isEffectivelyMuted(s, track.id))
 
   // Inline rename (Phase 20 Stream W): double-click the track name to edit it in place, Enter/blur
-  // commits, Escape cancels. Names are single tokens in the format (no whitespace — src/core/edit.ts),
-  // so whitespace is filtered out as typed. Commit writes the existing `<track>.name` setValue path.
+  // commits, Escape cancels. Names are single tokens in the format (no whitespace — src/core/edit.ts's
+  // `if (/\s/.test(value)) throw ...`), so whitespace is filtered out as typed.
+  //
+  // Phase 30 Stream JD, item 1 (docs/research/87: renaming to "vox sample" silently became
+  // "voxsample" with zero warning). Checked whether track.id and track.name could be split apart so
+  // the DISPLAY name could carry spaces while only the internal id stays a slug — they're already two
+  // separate fields (document.ts: `id` is "document-scoped human slug (D6)", `name` is free text) —
+  // but the constraint isn't actually about id/name being the same field, it's that the WHOLE `.beat`
+  // text format is whitespace-tokenized (parse.ts: `trimmedStart.trim().split(/\s+/)`, no quoting
+  // grammar anywhere). Teaching the parser+serializer to quote one field would be a real, cross-
+  // cutting format change (parse.ts, serialize.ts, and everything that round-trips a `.beat` file),
+  // not a contained one — so this takes the (b) fallback the plan calls for: keep stripping (still the
+  // only value the format can store), but surface it inline the instant it happens instead of mangling
+  // the input in silence.
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(track.name)
+  const [spaceStripped, setSpaceStripped] = useState(false)
   const commitRename = useCallback(() => {
     setRenaming(false)
+    setSpaceStripped(false)
     const name = draft.trim()
     if (name && name !== track.name) postEdit(`${track.id}.name`, name)
     else setDraft(track.name)
@@ -812,21 +826,34 @@ function TrackRow({
             />
           </label>
           {renaming ? (
-            <input
-              className="arr-track-rename"
-              autoFocus
-              value={draft}
-              data-rename={track.id}
-              onChange={(e) => setDraft(e.target.value.replace(/\s/g, ''))}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename()
-                else if (e.key === 'Escape') {
-                  setDraft(track.name)
-                  setRenaming(false)
-                }
-              }}
-            />
+            <span className="arr-track-rename-wrap">
+              <input
+                className="arr-track-rename"
+                autoFocus
+                value={draft}
+                data-rename={track.id}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  const stripped = raw.replace(/\s/g, '')
+                  setSpaceStripped(stripped !== raw)
+                  setDraft(stripped)
+                }}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename()
+                  else if (e.key === 'Escape') {
+                    setDraft(track.name)
+                    setSpaceStripped(false)
+                    setRenaming(false)
+                  }
+                }}
+              />
+              {spaceStripped && (
+                <span className="arr-track-rename-hint" data-rename-hint={track.id}>
+                  spaces aren&apos;t allowed in track names — removed automatically
+                </span>
+              )}
+            </span>
           ) : (
             <button
               className="arr-track-select"
@@ -2013,8 +2040,37 @@ export function ArrangementView() {
           }
           moves.push({ track: tid, fromIndex, toIndex })
         }
+        // Phase 30 Stream JD, item 4 (docs/research/87): daemon.ts's applyClipMoves ALWAYS mints a
+        // fresh, private scene for every section a move touches (its own comment: "simplest way to
+        // guarantee this move never bleeds into a sibling section"), even when that section's old
+        // scene wasn't actually shared with anything. That's invisible/harmless in the common case —
+        // the only genuinely surprising outcome (what pilot 87 hit) is when a TOUCHED section's old
+        // scene WAS shared with some other section (touched or not): that shared content just got
+        // split apart into an independent copy with zero on-screen explanation. Detect that specific
+        // case up front, from the pre-move `sections` snapshot, and toast about it once the move
+        // actually lands — undo (unaffected by this change) already reverts the whole thing cleanly.
+        const sceneUseCount = new Map<string, number>()
+        for (const s of sections) sceneUseCount.set(s.scene, (sceneUseCount.get(s.scene) ?? 0) + 1)
+        const touchedIndices = new Set<number>()
+        for (const mv of moves) {
+          touchedIndices.add(mv.fromIndex)
+          touchedIndices.add(mv.toIndex)
+        }
+        const forkedSectionNums = [...touchedIndices]
+          .filter((idx) => (sceneUseCount.get(sections[idx]!.scene) ?? 0) > 1)
+          .sort((a, b) => a - b)
+          .map((idx) => idx + 1)
         setSelectedOcc(new Set())
-        postClipMove(moves).catch((err) => showToast(`Could not move clip(s): ${(err as Error).message}`))
+        postClipMove(moves)
+          .then(() => {
+            if (forkedSectionNums.length === 0) return
+            const label = forkedSectionNums.length === 1 ? `Section ${forkedSectionNums[0]}` : `Sections ${forkedSectionNums.join(', ')}`
+            showToast(
+              `Moved clip to section ${targetIndex + 1} — ${label} no longer share${forkedSectionNums.length === 1 ? 's' : ''} content with the section(s) it used to link to; each is now independent.`,
+              'success',
+            )
+          })
+          .catch((err) => showToast(`Could not move clip(s): ${(err as Error).message}`))
       }
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
@@ -2466,16 +2522,29 @@ export function ArrangementView() {
                 {TRACK_KINDS.map((k) => {
                   const needsSample = k === 'instrument' && (doc.media as unknown[]).length === 0
                   return (
-                    <button
-                      key={k}
-                      className="arr-addtrack-item"
-                      data-add-kind={k}
-                      disabled={needsSample}
-                      title={needsSample ? 'needs a registered SoundFont sample (beat sample)' : `add a ${k} track`}
-                      onClick={() => void addTrackOfKind(k)}
-                    >
-                      {k}
-                    </button>
+                    <div key={k} className="arr-addtrack-item-wrap">
+                      <button
+                        className="arr-addtrack-item"
+                        data-add-kind={k}
+                        disabled={needsSample}
+                        title={needsSample ? 'needs a registered SoundFont sample (beat sample)' : `add a ${k} track`}
+                        onClick={() => void addTrackOfKind(k)}
+                      >
+                        {k}
+                      </button>
+                      {/* Phase 30 Stream JD, item 2 (docs/research/87/88): the disabled tooltip alone
+                          ("needs a registered SoundFont sample (beat sample)") is a browser-native
+                          title, invisible without a deliberate hover, and worded in CLI vocabulary
+                          ("beat sample") a GUI-only user won't recognize. Point proactively at the
+                          real, pleasant unlock path pilot 88 confirmed works well: the Content
+                          Browser's SoundFonts section, whose own "+" button creates a ready-to-use
+                          Instrument track in one click — no separate "+ track" step needed. */}
+                      {needsSample && (
+                        <span className="arr-addtrack-item-hint" data-add-kind-hint={k}>
+                          needs a SoundFont first — add one from the Browser&apos;s SoundFonts section
+                        </span>
+                      )}
+                    </div>
                   )
                 })}
               </div>

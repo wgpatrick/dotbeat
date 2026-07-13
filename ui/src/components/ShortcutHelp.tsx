@@ -61,6 +61,19 @@ const GROUPS: ShortcutGroup[] = [
       { keys: ['Escape'], description: 'cancel a typed value without committing' },
     ],
   },
+  {
+    // Phase 30 Stream JD (docs/research/87): pilot 87 selected an arrangement clip block and tried
+    // Delete and Cmd+D, both silent no-ops — reasonable to try, since the note editor one level down
+    // supports both. Rather than leave that silence looking like a bug, say so explicitly: none of
+    // the note editor's own row above applies up here at the arrangement level yet.
+    title: 'Arrangement',
+    rows: [
+      {
+        keys: ['—'],
+        description: 'no arrangement-level shortcuts yet — selecting a clip block and pressing Delete or Cmd/Ctrl+D currently does nothing (works only inside the note/hit editor above)',
+      },
+    ],
+  },
 ]
 
 function Keycap({ label }: { label: string }) {
