@@ -2632,6 +2632,48 @@ body {
   border-color: var(--accent);
   color: var(--bg);
 }
+/* Phase 32 Stream LA: the first reusable right-click context menu (ContextMenu.tsx) — visually
+   consistent with .arr-auto-popup above (same panel/border/shadow language) but `position: fixed`
+   in viewport coordinates, since this one has to work from any scroll context, not just one lane. */
+.ctx-menu {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 148px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  cursor: default;
+}
+.ctx-menu-item {
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.ctx-menu-item:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.ctx-menu-item:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.5;
+}
+.ctx-menu-item.danger {
+  color: var(--danger);
+}
+.ctx-menu-item.danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: var(--bg);
+}
 .arr-auto-picker {
   display: flex;
   align-items: stretch;

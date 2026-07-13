@@ -59,6 +59,7 @@ export {
   addAudioClip,
   setClipAudioRegion,
   splitAudioClip,
+  duplicateClip,
   BeatEditError,
   type QuantizeOptions,
   type DuplicateNotesOptions,

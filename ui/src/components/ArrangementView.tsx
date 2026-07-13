@@ -2,13 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ReactNode } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
 import { engine } from '../audio/engine'
-import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, postClipMove, daemonBase } from '../daemon/bridge'
+import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, postClipMove, postClipRemove, postClipDuplicate, daemonBase } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, installAudioClip, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
 import { useDropTarget } from '../dragDrop'
 import { declaredLaneNames, type AutomationInterpolation, type BeatAutomationPoint, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 import { showToast } from '../state/toastStore'
+import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 
 // Phase 20 Stream W — track add/delete/rename/recolor + project-folder controls. There is no BeatLab
 // component to port these from (BeatLab's tracks are lesson-defined; its store has no track
@@ -558,6 +559,16 @@ function TrackRow({
   // Dim the whole row when the track is effectively silenced (explicitly muted, or another track is
   // soloed) — the same signal the engine's real audio gate reads (Phase 14 Stream E).
   const dimmed = useStore((s) => isEffectivelyMuted(s, track.id))
+  // Phase 32 Stream LA (docs/research/81/87/92/93): right-click a clip block -> Delete/Duplicate —
+  // see the block's own onContextMenu below and daemon.ts's removeClipFromSection/
+  // duplicateClipToNewSection for what each item actually does. `busy` disables both items for the
+  // duration of their own round-trip (each is a real write, not a debounced /edit) so a second
+  // right-click mid-flight can't fire a duplicate request against a stale sectionIndex.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; sectionIndex: number; clipId: string } | null>(null)
+  const [ctxBusy, setCtxBusy] = useState(false)
+  const setSelectedTrack = useStore((s) => s.setSelectedTrack)
+  const setSelectedSection = useStore((s) => s.setSelectedSection)
+  const setBottomPaneOpen = useStore((s) => s.setBottomPaneOpen)
 
   // Inline rename (Phase 20 Stream W): double-click the track name to edit it in place, Enter/blur
   // commits, Escape cancels. Names are single tokens in the format (no whitespace — src/core/edit.ts's
@@ -975,12 +986,66 @@ function TrackRow({
                     onRowPointerDown
                   : (e) => onOccPointerDown(occ.sectionIndex, e)
               }
+              onContextMenu={
+                occ.clipId === LOOP_SCENE_SENTINEL
+                  ? // The synthetic loop-mode block has no real clip/section to act on — Delete/
+                    // Duplicate need an actual song-mode occurrence, so it just suppresses the
+                    // browser's native menu without opening one of its own (same "nothing to do
+                    // here" stance the onPointerDown branch above already takes for this block).
+                    (e) => e.preventDefault()
+                  : (e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setCtxMenu({ x: e.clientX, y: e.clientY, sectionIndex: occ.sectionIndex, clipId: occ.clipId })
+                    }
+              }
             >
               <span className="arr-clip-label">{occ.clipId}</span>
             </div>
           )
         })}
       </div>
+      {ctxMenu &&
+        (() => {
+          const { sectionIndex, clipId } = ctxMenu
+          const items: ContextMenuItem[] = [
+            {
+              key: 'delete',
+              label: 'Delete',
+              danger: true,
+              disabled: ctxBusy,
+              onSelect: () => {
+                setCtxBusy(true)
+                postClipRemove(track.id, sectionIndex)
+                  .catch((err) => showToast(`Could not delete clip: ${(err as Error).message}`))
+                  .finally(() => setCtxBusy(false))
+              },
+            },
+            {
+              key: 'duplicate',
+              label: 'Duplicate',
+              disabled: ctxBusy,
+              title: `copy "${clipId}" into a new, independent scene in a fresh section right after this one`,
+              onSelect: () => {
+                setCtxBusy(true)
+                postClipDuplicate(track.id, sectionIndex)
+                  .then(({ index }) => {
+                    // Point every "which clip is open" bit of state at the freshly-inserted section,
+                    // same three side effects a plain click on a clip block already sets (beginClipDrag's
+                    // onUp above) — the new block is immediately the one the note editor/clip panel show.
+                    setSelectedTrack(track.id)
+                    postEdit('selected_track', track.id)
+                    setSelectedSection(index)
+                    setBottomPaneOpen(true)
+                    showToast(`Duplicated clip "${clipId}" into section ${index + 1}.`, 'success')
+                  })
+                  .catch((err) => showToast(`Could not duplicate clip: ${(err as Error).message}`))
+                  .finally(() => setCtxBusy(false))
+              },
+            },
+          ]
+          return <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={items} onClose={() => setCtxMenu(null)} testId={`${track.id}.clip.${sectionIndex}`} />
+        })()}
     </div>
   )
 }
@@ -1974,6 +2039,15 @@ export function ArrangementView() {
   // batched POST /clip-move commits the whole group as one write.
   const beginClipDrag = useCallback(
     (trackId: string, sectionIndex: number, e: React.PointerEvent) => {
+      // Phase 32 Stream LA: right-click is handled entirely by the block's own onContextMenu (its
+      // new context menu, TrackRow below) — same `e.button === 2` bail AutomationLane's onPointerDown
+      // already uses. Fixes a real pre-existing bug docs/research/87 found along the way: with no
+      // button check here, a right-click's pointerdown used to fall straight into this function's own
+      // "plain click -> select this occurrence, retarget the track/section" branch below (nothing
+      // ever moves on a right-click-release, so `moved` stayed false) — right-click silently
+      // retargeted the clip editor with no menu and no visual cue, while left-click on the identical
+      // block did NOT retarget (research 87's "genuinely strange, undiscovered asymmetry").
+      if (e.button === 2) return
       e.stopPropagation()
       e.preventDefault()
       const key = occKey(trackId, sectionIndex)

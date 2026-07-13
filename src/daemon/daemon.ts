@@ -86,6 +86,7 @@ import {
   splitAudioClip,
   addAudioClip,
   duplicateNotes,
+  duplicateClip,
   BeatEditError,
   BeatPresetError,
   BeatParseError,
@@ -373,6 +374,63 @@ export function applyClipMoves(doc: BeatDocument, moves: ClipMove[]): BeatDocume
     next,
     nextSections.map((s) => ({ scene: s.scene, bars: s.bars })),
   )
+}
+
+// ─── arrangement clip-block context menu (Phase 32 Stream LA, docs/research/81/87/92/93) ─────────
+// Right-click a clip block was previously a total dead end — no menu, no keyboard equivalent either
+// (ShortcutHelp.tsx's own Arrangement row used to say so explicitly). Delete/Duplicate both need the
+// same "fork this ONE touched section's scene, don't bleed into any sibling section that happens to
+// reuse the same scene id" discipline applyClipMoves already established above — reused here rather
+// than inventing a second policy for what's fundamentally the same shared-scene hazard.
+
+/** "Delete" on a clip block: removes just THIS track's slot from THIS section's scene — the
+ * "remove this track's clip from this one section" primitive nothing in the app exposed before this
+ * stream (confirmed by Phase 30 Stream JD's own Shortcuts-panel copy: Delete/Cmd+D on a selected
+ * clip block were documented no-ops). Mints a fresh, private scene for the touched section (same
+ * fork-on-touch call applyClipMoves makes) so any OTHER section still sharing the old scene id is
+ * completely unaffected; if that was the last section referencing the old scene, pruneOrphanedScenes
+ * drops it, same cleanup songDelete already does. Refuses when the track has no clip in this section
+ * (nothing to delete) rather than silently no-op-ing. */
+export function removeClipFromSection(doc: BeatDocument, trackId: string, sectionIndex: number): BeatDocument {
+  if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no sections to remove a clip from')
+  if (!Number.isInteger(sectionIndex) || sectionIndex < 0 || sectionIndex >= doc.song.length) {
+    throw new BeatEditError(`section index ${sectionIndex} out of range (0-${doc.song.length - 1})`)
+  }
+  const section = doc.song[sectionIndex]!
+  const scene = doc.scenes.find((s) => s.id === section.scene)
+  if (!scene || !(trackId in scene.slots)) throw new BeatEditError(`track "${trackId}" has no clip playing in section ${sectionIndex}`)
+  const slots = { ...scene.slots }
+  delete slots[trackId]
+  const newId = nextSceneId(doc)
+  const withScene = setScene(doc, newId, slots)
+  const nextSections = doc.song.map((s, i) => (i === sectionIndex ? { scene: newId, bars: s.bars } : s))
+  return pruneOrphanedScenes(setSong(withScene, nextSections))
+}
+
+/** "Duplicate" on a clip block: the single-clip counterpart to `captureAndInsertScene` ("+ capture
+ * scene") above — that captures EVERY track's live content into a brand-new scene; this forks just
+ * ONE track's already-placed clip (core's `duplicateClip` — an exact content snapshot, independent
+ * of the original from the moment it's created) and slots the copy into a brand-new scene that
+ * otherwise matches this section's current scene exactly (every other track's slot stays shared,
+ * same as any two sections that legitimately reuse one scene today), then inserts a new song section
+ * playing it immediately after this one — so the result is a second, visually adjacent clip block
+ * that starts out sounding identical to the original but is genuinely independently editable for
+ * this one track, without touching the section being duplicated FROM at all. */
+export function duplicateClipToNewSection(doc: BeatDocument, trackId: string, sectionIndex: number): { doc: BeatDocument; index: number; sceneId: string; clipId: string } {
+  if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no section to duplicate a clip from')
+  if (!Number.isInteger(sectionIndex) || sectionIndex < 0 || sectionIndex >= doc.song.length) {
+    throw new BeatEditError(`section index ${sectionIndex} out of range (0-${doc.song.length - 1})`)
+  }
+  const section = doc.song[sectionIndex]!
+  const scene = doc.scenes.find((s) => s.id === section.scene)
+  const clipId = scene?.slots[trackId]
+  if (!scene || !clipId) throw new BeatEditError(`track "${trackId}" has no clip playing in section ${sectionIndex}`)
+  const { doc: withClip, clip } = duplicateClip(doc, trackId, clipId)
+  const newSceneId = nextSceneId(withClip)
+  const slots = { ...scene.slots, [trackId]: clip.id }
+  const withScene = setScene(withClip, newSceneId, slots)
+  const { doc: next, index } = songInsert(withScene, sectionIndex + 1, newSceneId, section.bars)
+  return { doc: next, index, sceneId: newSceneId, clipId: clip.id }
 }
 
 // ─── overlapping-region resolution policy (Phase 22 Stream AG) ──────────────────────────────────
@@ -1115,6 +1173,54 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           const written = writeIfChanged(next)
           revalidateSelection()
           json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // Phase 32 Stream LA: the arrangement clip-block context menu's "Delete" — removeClipFromSection's
+    // doc comment above has the full "why this needs its own fork-on-touch route rather than a plain
+    // {path,value} /edit on the scene's slots (shared-scene bleed, same hazard /clip-move guards).
+    //   { track: string, sectionIndex: number } -> { written, doc }
+    if (req.method === 'POST' && url.pathname === '/clip-remove') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; sectionIndex?: unknown }
+          if (typeof b.track !== 'string' || typeof b.sectionIndex !== 'number') {
+            json(res, 400, { error: 'body must be {track: string, sectionIndex: number}' })
+            return
+          }
+          const next = removeClipFromSection(doc, b.track, b.sectionIndex)
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // Phase 32 Stream LA: the arrangement clip-block context menu's "Duplicate" —
+    // duplicateClipToNewSection's doc comment above has the full "why". Returns the new section's
+    // index/scene/clip ids so the GUI can select the fresh clip block without re-deriving them.
+    //   { track: string, sectionIndex: number } -> { written, index, sceneId, clipId, doc }
+    if (req.method === 'POST' && url.pathname === '/clip-duplicate') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; sectionIndex?: unknown }
+          if (typeof b.track !== 'string' || typeof b.sectionIndex !== 'number') {
+            json(res, 400, { error: 'body must be {track: string, sectionIndex: number}' })
+            return
+          }
+          const { doc: next, index, sceneId, clipId } = duplicateClipToNewSection(doc, b.track, b.sectionIndex)
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, index, sceneId, clipId, doc })
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
