@@ -40,6 +40,7 @@ import {
   addAudioClip,
   splitAudioClip,
   humanize,
+  BeatHumanizeError,
   quantizeNotes,
   transposeNotes,
   timeScaleNotes,
@@ -879,7 +880,14 @@ async function scoreCmd(argv) {
   const [dir, ...picks] = positional
   if (!dir || picks.length === 0) throw new BeatEditError('score needs <batch-dir> and 1-3 ranked picks (variant numbers, best first)')
   if (picks.length > 3) throw new BeatEditError('at most 3 ranked picks (Edisyn (3,16) pattern — ranking more adds fatigue, not signal)')
-  const manifest = JSON.parse(readFileSync(resolve(dir, 'manifest.json'), 'utf8'))
+  const manifestPath = resolve(dir, 'manifest.json')
+  let manifest
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  } catch (err) {
+    if (err.code === 'ENOENT') throw new BeatEditError(`no such batch directory or missing manifest.json: ${dir}`)
+    throw new BeatEditError(`could not read ${manifestPath}: ${err.message}`)
+  }
   const ranks = picks.map((p) => {
     const n = Number(p)
     if (!Number.isInteger(n) || n < 1 || n > manifest.variants.length) throw new BeatEditError(`pick "${p}" is not a variant number 1-${manifest.variants.length}`)
@@ -914,11 +922,17 @@ async function suggestCmd(argv) {
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const [file, track] = positional
   if (!file || !track) throw new BeatEditError('suggest needs <file> <track> (see beat vary --groups for group names)')
+  // Same track-existence check `vary` already gets (via varyTrack's BeatVaryError) — `suggest`
+  // used to skip it entirely and hand back a normal-looking cold-start recommendation for a
+  // track that doesn't exist (research/96).
+  const doc = readDoc(file)
+  const trackObj = doc.tracks.find((t) => t.id === track)
+  if (!trackObj) throw new BeatEditError(`no track "${track}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
   const logPath = flagValue(argv, '--log') ?? 'beat-scores.jsonl'
   const target = flagValue(argv, '--target')
   const text = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
   const entries = parseScoresLog(text)
-  const suggestion = suggestNext(entries, track, { file, ...(target ? { target } : {}) })
+  const suggestion = suggestNext(entries, track, { file, trackKind: trackObj.kind, ...(target ? { target } : {}) })
   process.stdout.write(suggestion.reasoning.join('\n') + '\n')
 }
 
@@ -1168,8 +1182,13 @@ function lintCmd(argv) {
 function gitShow(rev, file) {
   const abs = resolve(file)
   const dir = dirname(abs)
-  const prefix = execFileSync('git', ['-C', dir, 'rev-parse', '--show-prefix'], { encoding: 'utf8' }).trim()
-  return execFileSync('git', ['-C', dir, 'show', `${rev}:${prefix}${basename(abs)}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  try {
+    const prefix = execFileSync('git', ['-C', dir, 'rev-parse', '--show-prefix'], { encoding: 'utf8' }).trim()
+    return execFileSync('git', ['-C', dir, 'show', `${rev}:${prefix}${basename(abs)}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  } catch (err) {
+    const detail = (err.stderr ? String(err.stderr) : err.message).trim().split('\n')[0]
+    throw new BeatEditError(`git show ${rev}:${file} failed: ${detail}`)
+  }
 }
 
 function diffCmd(argv) {
@@ -1542,6 +1561,7 @@ main().catch((err) => {
     err instanceof BeatPresetError ||
     err instanceof BeatMacroError ||
     err instanceof BeatPitchTimeError ||
+    err instanceof BeatHumanizeError ||
     err.name === 'HistoryError'
   ) {
     console.error(`error: ${err.message}`)
