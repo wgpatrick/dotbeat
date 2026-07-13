@@ -1,5 +1,6 @@
 // Phase 23 Stream BC — a tiny standalone decode-and-cache utility for the audio-clip inspector's
-// waveform render (ui/src/components/ArrangementView.tsx's AudioClipInspector). Deliberately
+// waveform render (ui/src/components/AudioClipEditor.tsx's AudioClipInspector — moved out of
+// ArrangementView.tsx in Phase 30 Stream JE, folded into the bottom Clip panel). Deliberately
 // independent of engine.ts's own `audioBuffers` cache (Phase 22 Stream AE's decode-for-PLAYBACK
 // path): that cache is private, populated lazily off the engine's tick-driven sync(), and has no
 // "decode this specific media right now, regardless of whether the engine currently has any track

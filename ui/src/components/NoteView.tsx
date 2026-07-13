@@ -95,7 +95,7 @@ const pitchName = (pitch: number) => `${NOTE_NAMES[pc(pitch)]}${Math.floor(pitch
 // small colored text buried in .editor-title. Picks readable text (near-black or near-white)
 // against the track's own color rather than hardcoding one, since track.color is user-set and can
 // land anywhere on the lightness scale.
-function readableTextOn(hex: string): string {
+export function readableTextOn(hex: string): string {
   const h = hex.replace('#', '')
   if (h.length !== 6) return '#0b0c10'
   const r = parseInt(h.slice(0, 2), 16)

@@ -5,6 +5,7 @@ import { TransportBar } from './components/TransportBar'
 import { SynthPanel } from './components/SynthPanel'
 import { InstrumentPanel } from './components/InstrumentPanel'
 import { NoteView } from './components/NoteView'
+import { AudioClipEditor } from './components/AudioClipEditor'
 import { Scope } from './components/Scope'
 import { ArrangementView } from './components/ArrangementView'
 import { MixerView } from './components/MixerView'
@@ -37,10 +38,15 @@ import { ToastHost } from './components/Toast'
 //     existing `.workspace` column unchanged — nothing inside ArrangementView/BottomPane moved.
 
 /** The bottom detail pane — Ableton's Clip View / Device View for the selected track. Clip View is
- * NoteView for every track kind (Phase 22 Stream AB retired StepSequencer — NoteView now takes a
- * row-axis adapter and handles drum tracks via a named-lane adapter, the same "one editor, two row
- * models" shape Ableton itself uses for its Drum Rack — see NoteView.tsx's header comment); Device
- * View is the sound (InstrumentPanel for SoundFont tracks, SynthPanel otherwise). */
+ * NoteView for every note/hit-based track kind (Phase 22 Stream AB retired StepSequencer — NoteView
+ * now takes a row-axis adapter and handles drum tracks via a named-lane adapter, the same "one
+ * editor, two row models" shape Ableton itself uses for its Drum Rack — see NoteView.tsx's header
+ * comment) — EXCEPT Audio, which gets its own AudioClipEditor (Phase 30 Stream JE, docs/research/88):
+ * an Audio track has no notes/hits at all, so NoteView's note-grid used to render as a permanently
+ * empty, meaningless "0 notes · click a key to preview" editor for it — the same track-kind-specific
+ * bottom-panel-content precedent Drums already established, just gated on `kind === 'audio'` instead
+ * of `kind === 'drums'` (Drums still shares NoteView's own lane-axis branch). Device View is the
+ * sound (InstrumentPanel for SoundFont tracks, SynthPanel otherwise). */
 function BottomPane() {
   const doc = useStore((s) => s.doc)
   const selected = useStore(selectedTrackId)
@@ -76,7 +82,7 @@ function BottomPane() {
   const track = doc.tracks.find((t) => t.id === selected)
   if (!track) return null
 
-  const clip = <NoteView track={track} />
+  const clip = track.kind === 'audio' ? <AudioClipEditor track={track} /> : <NoteView track={track} />
   const device = track.kind === 'instrument' ? <InstrumentPanel track={track} /> : <SynthPanel track={track} />
 
   return (
