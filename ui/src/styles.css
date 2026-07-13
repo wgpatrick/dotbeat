@@ -858,6 +858,52 @@ body {
   text-transform: uppercase;
   letter-spacing: var(--label-tracking);
 }
+
+/* Phase 31 Stream KD items 1/2 (docs/research/90, 91): a knob whose param currently has no
+   audible effect — a freshly-added effect's Mix at 0%, or the filter-envelope shape knobs while
+   Fenv amount is 0 — dims instead of looking identical to every other live knob, plus a small
+   inline hint naming exactly what to raise. `.knob-slot` wraps `.knob` only where a spec opts in
+   (SynthPanel.tsx's Control), so ordinary knobs are completely unaffected. */
+.knob-slot.knob-inactive .knob {
+  opacity: 0.4;
+}
+.knob-inactive-hint {
+  font-size: 9px;
+  color: var(--text-dim);
+  max-width: 56px;
+  text-align: center;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+/* Phase 31 Stream KD item 3 (docs/research/90): a small sub-heading breaking "Filter & Envelope"'s
+   flat knob-row into "Amp Envelope" / "Filter Envelope" — `flex-basis: 100%` forces the wrapping
+   `.knob-row` (flex-wrap) onto a new line right where the sub-label sits. */
+.knob-row-sublabel {
+  flex-basis: 100%;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+  margin-top: 4px;
+}
+.knob-row-sublabel:first-child {
+  margin-top: 0;
+}
+
+/* Phase 31 Stream KD item 5 (docs/research/91): a knob whose full-range drag covers unusually much
+   ground (log-scaled, or a wide linear span — Knob.tsx's own `isSensitive`) gets a dashed
+   background arc (set inline via strokeDasharray) plus this small min-max range readout, so a user
+   can judge how much a given drag distance will move it BEFORE the first drag, without changing
+   the drag-to-value mapping itself. */
+.knob-range-hint {
+  font-size: 9px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
 .osc-select {
   display: flex;
   flex-direction: column;
