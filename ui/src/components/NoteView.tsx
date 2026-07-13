@@ -8,6 +8,7 @@ import { makeDropTargetHandlers, DROP_TARGET_HOVER_CLASS, DRAGGING_CLASS } from 
 import { ClipPropertiesPanel, primaryClipFor, selectedSceneId } from './ClipPropertiesPanel'
 import { DrumLanePanel } from './DrumLanePanel'
 import { showToast } from '../state/toastStore'
+import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 
 // The editable event editor for BOTH synth/instrument notes and drum hits — Phase 22 Stream AB
 // (docs/research/20-drum-clip-editor-redesign.md Part 5) generalized what was originally a
@@ -485,6 +486,12 @@ export function NoteView({ track }: { track: BeatTrack }) {
   }, [track.id, selectedSectionIndex])
 
   const selSet = new Set(sel)
+  // Phase 32 Stream LA (docs/research/81/87/92/93): right-click a note/hit -> a small context menu
+  // (Delete, Duplicate for notes, Quantize to grid) — see the note div's own onContextMenu below and
+  // ContextMenu.tsx for the reusable menu component. `ids` is captured once, at open time (the
+  // right-clicked event's own id if it wasn't already part of the selection, else the WHOLE current
+  // selection) — same "act on the multi-selection you right-clicked into" rule most editors use.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null)
   // Preview overrides during a drag: a map keyed by event id (a group move/resize previews many at once).
   const [preview, setPreview] = useState<Record<string, Preview> | null>(null)
   const gesture = useRef<Gesture | null>(null)
@@ -579,6 +586,12 @@ export function NoteView({ track }: { track: BeatTrack }) {
   // ---- marquee (drag on empty grid) + tap-to-add ----
   function onGridPointerDown(e: React.PointerEvent) {
     if (!editable) return
+    // Phase 32 Stream LA: right-click is handled entirely by the grid's own onContextMenu below.
+    // Previously ungated here, a right-click-release on empty grid space fell straight into the
+    // tap-to-add branch below (nothing in this function ever checked `button`) — a genuine latent
+    // bug this stream's own right-click feature would otherwise collide with head-on: right-clicking
+    // empty grid space to open a menu would have silently ALSO added a note under the cursor.
+    if (e.button === 2) return
     // Only fires for empty grid space — event/handle children stopPropagation their own pointerdowns.
     const rect = e.currentTarget.getBoundingClientRect()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
@@ -664,6 +677,10 @@ export function NoteView({ track }: { track: BeatTrack }) {
   // ---- move / resize (drag an event or its right edge) ----
   function startGesture(kind: 'move' | 'resize', ev: EditorEvent, e: React.PointerEvent) {
     if (!editable) return
+    // Phase 32 Stream LA: right-click is handled entirely by the note div's own onContextMenu below
+    // — same `e.button === 2` bail AutomationLane's onPointerDown already uses for the identical
+    // reason (a right-click's pointerdown must not ALSO start/narrow a drag gesture).
+    if (e.button === 2) return
     e.stopPropagation()
     // Modifier + press on an event is a selection toggle, not a drag (Ableton shift/cmd-click).
     if (e.shiftKey || e.metaKey || e.ctrlKey) {
@@ -1488,6 +1505,13 @@ export function NoteView({ track }: { track: BeatTrack }) {
               onPointerDown={onGridPointerDown}
               onPointerMove={onGridPointerMove}
               onPointerUp={onGridPointerUp}
+              onContextMenu={(e) => {
+                // Right-click on empty grid space (a note/hit's own onContextMenu above already
+                // stopPropagation()s so this never double-fires for those) — same "close whatever's
+                // open, don't open anything new" precedent the automation lane's popup already sets.
+                e.preventDefault()
+                setCtxMenu(null)
+              }}
             >
               {/* Row shading + section dividers, painted behind the events and pointer-transparent
                   so grid add/marquee are unaffected. Melodic: black-key shading + octave (C)
@@ -1570,6 +1594,18 @@ export function NoteView({ track }: { track: BeatTrack }) {
                 onPointerDown={(e) => startGesture('move', ev, e)}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (!editable) return
+                  // Right-clicking a note already part of a multi-selection acts on the WHOLE
+                  // selection; right-clicking anything else collapses the selection to just this one
+                  // event first (same "narrow, then act" rule a plain click on an unselected event
+                  // already follows elsewhere in this file).
+                  const ids = selSet.has(ev.id) ? sel : [ev.id]
+                  if (!selSet.has(ev.id)) setSel([ev.id])
+                  setCtxMenu({ x: e.clientX, y: e.clientY, ids })
+                }}
               >
                 {ticks.map((t, i) => (
                   <div key={`rt${i}`} className="noteview-ratchet-tick" style={{ left: `${t * 100}%` }} />
@@ -1668,6 +1704,50 @@ export function NoteView({ track }: { track: BeatTrack }) {
       {editable && eventKind === 'note' && sel.length === 1 && (
         <NoteInspector key={sel[0]} note={track.notes.find((n) => n.id === sel[0])} trackId={track.id} />
       )}
+      {ctxMenu &&
+        (() => {
+          const ids = ctxMenu.ids
+          const count = ids.length
+          const noun = count > 1 ? `${count} ${eventKind === 'note' ? 'notes' : 'hits'}` : eventKind
+          const items: ContextMenuItem[] = [
+            {
+              key: 'delete',
+              label: `Delete ${noun}`,
+              danger: true,
+              onSelect: () => {
+                const gestureId = newGestureId()
+                for (const id of ids) postEdit(`${track.id}.${editPrefix}.${id}`, '', gestureId)
+                setSel(sel.filter((s) => !ids.includes(s)))
+              },
+            },
+            // Duplicate mirrors Alt-drag-duplicate exactly, so it shares that gesture's own scope:
+            // notes only (drum hits have no duplicateNotes equivalent — see this file's Phase 26
+            // Stream DG comment on the clipboard copy/paste handler above, same reasoning).
+            ...(eventKind === 'note'
+              ? [
+                  {
+                    key: 'duplicate',
+                    label: `Duplicate ${noun}`,
+                    onSelect: () => {
+                      // Same small, definitely-nonzero offset the no-playhead paste fallback uses
+                      // (DEFAULT_DUR steps, no pitch shift) — an exact on-top copy would be invisible.
+                      void postDuplicateNotes(track.id, ids, DEFAULT_DUR, 0)
+                        .then((addedIds) => setSel(addedIds))
+                        .catch((err) => showToast(`Could not duplicate: ${(err as Error).message}`))
+                    },
+                  },
+                ]
+              : []),
+            {
+              key: 'quantize',
+              label: `Quantize ${noun} to grid`,
+              onSelect: () => {
+                void postPitchTime({ op: 'quantize', track: track.id, noteIds: ids }).catch((err) => showToast(`Could not quantize: ${(err as Error).message}`))
+              },
+            },
+          ]
+          return <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={items} onClose={() => setCtxMenu(null)} testId={`${track.id}.${eventKind}`} />
+        })()}
     </div>
   )
 }

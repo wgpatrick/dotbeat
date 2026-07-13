@@ -52,6 +52,10 @@ const GROUPS: ShortcutGroup[] = [
       { keys: ['↑', '↓'], description: 'move the selection one row up/down (pitch or lane)' },
       { keys: ['Shift', '←/→'], description: "resize the selection's duration by one step" },
       { keys: ['Shift', '↑/↓'], description: 'move the selection an octave up/down (pitch axis only)' },
+      // Phase 32 Stream LA (docs/research/81/87/92/93): the first right-click context menu in the
+      // app — four separate pilots independently tried right-clicking a note expecting one (the
+      // automation lane's own breakpoint popup was the only working precedent) and got nothing.
+      { keys: ['Right-click'], description: 'open a context menu for the note/hit (or the current multi-selection): Delete, Duplicate (notes only), Quantize to grid' },
     ],
   },
   {
@@ -62,15 +66,17 @@ const GROUPS: ShortcutGroup[] = [
     ],
   },
   {
-    // Phase 30 Stream JD (docs/research/87): pilot 87 selected an arrangement clip block and tried
-    // Delete and Cmd+D, both silent no-ops — reasonable to try, since the note editor one level down
-    // supports both. Rather than leave that silence looking like a bug, say so explicitly: none of
-    // the note editor's own row above applies up here at the arrangement level yet.
+    // Phase 30 Stream JD (docs/research/87) found Delete/Cmd+D on a selected clip block were both
+    // silent no-ops; that's still true as plain keyboard shortcuts. Phase 32 Stream LA adds the
+    // first REAL affordance for both operations — a right-click context menu, matching the note
+    // editor's own new one above — rather than wiring the keys themselves (out of this stream's
+    // scope; see docs/phase-32-plan.md's LA section).
     title: 'Arrangement',
     rows: [
+      { keys: ['Right-click'], description: 'open a context menu for a clip block: Delete (removes this track\'s clip from this section), Duplicate (copies it into a new section right after)' },
       {
-        keys: ['—'],
-        description: 'no arrangement-level shortcuts yet — selecting a clip block and pressing Delete or Cmd/Ctrl+D currently does nothing (works only inside the note/hit editor above)',
+        keys: ['Delete', 'Ctrl/Cmd+D'],
+        description: 'still do nothing on a selected clip block — use the right-click menu above for Delete/Duplicate instead',
       },
     ],
   },

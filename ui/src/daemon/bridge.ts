@@ -623,6 +623,48 @@ export async function postClipMove(moves: ClipMove[]): Promise<void> {
   useStore.getState().setDoc(doc)
 }
 
+// ─── arrangement clip-block context menu: Delete / Duplicate (Phase 32 Stream LA) ────────────────
+// The right-click menu's two real GUI-affordance-free operations (docs/research/81/87/92/93) — see
+// daemon.ts's removeClipFromSection/duplicateClipToNewSection doc comments for the full "why each
+// needs its own route" (same per-section scene-forking hazard postClipMove's own comment covers).
+
+/** Removes `track`'s clip from the scene playing at song section `sectionIndex` — the clip-block
+ * context menu's "Delete." Throws with the daemon's error message on a 4xx (e.g. the track has no
+ * clip in that section already). */
+export async function postClipRemove(track: string, sectionIndex: number): Promise<void> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/clip-remove`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ track, sectionIndex }),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc } = (await res.json()) as { written: boolean; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
+}
+
+/** Forks `track`'s clip at song section `sectionIndex` into an independent copy, bundled into a
+ * brand-new scene, inserted as a new section immediately after — the clip-block context menu's
+ * "Duplicate." Returns the new section's index so the caller can select it. */
+export async function postClipDuplicate(track: string, sectionIndex: number): Promise<{ index: number; sceneId: string; clipId: string }> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/clip-duplicate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ track, sectionIndex }),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc, index, sceneId, clipId } = (await res.json()) as { written: boolean; doc: BeatDocument; index: number; sceneId: string; clipId: string }
+  useStore.getState().setDoc(doc)
+  return { index, sceneId, clipId }
+}
+
 // ─── place a clip into the arrangement for the first time (Phase 24 Stream CI) ──────────────────
 // The synth/drums/instrument generalization of Phase 23 Stream BC's installAudioClip
 // (ui/src/daemon/library.ts): NoteView.tsx edits a track's LIVE content, not a saved BeatClip, so

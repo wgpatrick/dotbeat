@@ -1541,3 +1541,38 @@ export function splitAudioClip(doc: BeatDocument, trackId: string, clipId: strin
   const clips = [...track.clips.slice(0, idx), first, second, ...track.clips.slice(idx + 1)]
   return { doc: replaceTrack(doc, { ...track, clips }), first, second }
 }
+
+/** Phase 32 Stream LA ("Duplicate" on an arrangement clip block, docs/research/81/87/92/93):
+ * copies one clip on the SAME track under a fresh id — the single-clip counterpart to
+ * saveClip/addAudioClip's "one clip per slot" discipline, letting a caller fork just THIS track's
+ * clip into a genuinely independent copy without touching any other track. Deep-copies
+ * notes/hits/automation/loop/signature/audio exactly as they stand right now (an exact snapshot —
+ * same "copy, don't reference" stance as duplicateNotes above); the ORIGINAL clip, and every
+ * scene/section that still references it, are completely untouched — this only appends a new clip
+ * to the track's own clip list. `newClipId` uses the same auto-numbered `<id>-2`, `<id>-3`, ...
+ * minting scheme as splitAudioClip's own default, unless the caller gives an explicit id. Works for
+ * every track kind (synth/instrument/drums/audio) — whichever of notes/hits/audio the source clip
+ * actually carries just comes along in the copy. */
+export function duplicateClip(doc: BeatDocument, trackId: string, clipId: string, opts: { newClipId?: string } = {}): { doc: BeatDocument; clip: BeatClip } {
+  const track = findTrack(doc, trackId)
+  const source = findClip(track, clipId)
+  let newId = opts.newClipId
+  if (newId === undefined) {
+    let n = 2
+    while (track.clips.some((c) => c.id === `${clipId}-${n}`)) n++
+    newId = `${clipId}-${n}`
+  } else if (track.clips.some((c) => c.id === newId)) {
+    throw new BeatEditError(`clip id "${newId}" already exists on track "${trackId}"`)
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(newId)) throw new BeatEditError(`clip ids are single alphanumeric/_/- tokens, got "${newId}"`)
+  const clip: BeatClip = {
+    id: newId,
+    notes: source.notes.map((n) => ({ ...n })),
+    hits: source.hits.map((h) => ({ ...h })),
+    automation: source.automation.map((l) => ({ ...l, points: l.points.map((p) => ({ ...p })) })),
+    loop: source.loop ? { ...source.loop } : null,
+    signature: source.signature ? { ...source.signature } : null,
+    ...(source.audio ? { audio: { ...source.audio, markers: source.audio.markers.map((m) => ({ ...m })) } } : {}),
+  }
+  return { doc: replaceTrack(doc, { ...track, clips: [...track.clips, clip] }), clip }
+}
