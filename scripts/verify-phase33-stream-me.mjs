@@ -37,7 +37,7 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 
-const repoRoot = fileURLToPath(new URL('.', import.meta.url))
+const repoRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 const beatCli = join(repoRoot, 'cli', 'beat.mjs')
 
 function beat(args, opts = {}) {
