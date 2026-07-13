@@ -88,7 +88,9 @@ import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.
 const USAGE = `usage:
   beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track
   beat add-track <file> <id> <synth|drums|instrument|audio> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--legacy-lanes]
-                                                          (a fresh drums track defaults to the 12-lane kit; --legacy-lanes opts back into the old implicit 5)
+                                                          (a fresh drums track defaults to the 12-lane kit; --legacy-lanes opts back into the old implicit 5;
+                                                          a fresh synth or drums track also starts with a real, already-populated default effect chain —
+                                                          eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat effect-add)
   beat rm-track <file> <id>
   beat group <file> <id> <track-id> [<track-id> ...] [--name N] [--color #hex]
                                                           fold N existing tracks into one named, colored
@@ -99,9 +101,11 @@ const USAGE = `usage:
                                                           membership list (add/remove/reorder members)
   beat inspect <file> [--json]
   beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
-  beat add-note <file> <track> <pitch> <start> <duration> <velocity>
+  beat add-note <file> <track> <pitch> <start> <duration> <velocity 0-1>
+                                                          velocity is 0.0-1.0, NOT MIDI's 0-127 (e.g. 0.8, not 100)
   beat rm-note <file> <track> <note-id>
-  beat add-hit <file> <track> <lane> <start> <velocity> [duration]   free-timed drum hit (start/duration in fractional 16th steps)
+  beat add-hit <file> <track> <lane> <start> <velocity 0-1> [duration]   free-timed drum hit (start/duration in fractional 16th steps;
+                                                          velocity is 0.0-1.0, NOT MIDI's 0-127 — e.g. 0.9, not 110)
   beat rm-hit <file> <track> <hit-id>
   beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes id,id]
                                                           snap notes toward the grid (grid in 16th steps:
@@ -146,7 +150,16 @@ const USAGE = `usage:
                                                           if it already exists, else adds it with that id;
                                                           --interpolation sets the segment-shape this point starts,
                                                           default linear — omit on a move to keep the existing shape)
-  beat clip <file> <track> <clip-id>                      snapshot the track's live content into a clip
+  beat clip <file> <track> <clip-id>                      snapshot the track's CURRENT LIVE content into a clip
+                                                          (re-snapshotting always starts from whatever's live on the
+                                                          track right now, not empty — the same "capture current live
+                                                          state" model the daemon's own "+ capture scene" uses; two
+                                                          clips saved back-to-back without clearing the track in
+                                                          between will share content, e.g. a "chorus" snapshotted on
+                                                          top of "verse" content becomes verse-plus-chorus, not an
+                                                          independent chorus — rm-note/rm-hit the live track's
+                                                          existing content first if you want a fresh, independent
+                                                          clip instead of an accumulated one)
   beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
   beat scene-set <file> <scene-id> --name N|--clear-name  rename a scene (or clear its name, back to showing
                                                           just the id) — the scene IS the reusable bundle of
@@ -196,7 +209,12 @@ const USAGE = `usage:
   beat unpin <file> <name...>                             remove a pin by name
   beat pins <file>                                        list this project's pins, newest checkpoint first
   beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon
-  beat mcp                                                MCP server over stdio (all of the above as tools)
+  beat mcp                                                MCP server over stdio: most of the above as tools (~50,
+                                                          covering track/note/hit/effect/song/preset/macro/drum-kit/
+                                                          checkpoint/render/metrics editing) — NOT 1:1 with the CLI:
+                                                          vary, score, sample, lane, and daemon have no MCP tool and
+                                                          stay CLI-only; send tools/list on a running 'beat mcp' for
+                                                          the exact, current set
   beat mcp-init <file> [--force]                          write a .mcp.json next to <file> so Claude Code
                                                           (or any MCP client) auto-discovers 'beat mcp' there
 
