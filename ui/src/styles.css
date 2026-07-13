@@ -1655,6 +1655,23 @@ body {
   font-weight: 600;
   box-shadow: inset 0 0 0 1px var(--accent);
 }
+/* Phase 29 Stream GB: a lightweight confirmation when a preset lands on the selected track while
+   the Clip tab is showing (docs/research/80) — no toast/banner component exists yet, so this is
+   the "simple inline flash on the Device tab button" fallback, same visual idiom SynthPanel's own
+   `.param-group-flash` already uses for "an effect was just added." */
+.pane-tab-flash {
+  animation: pane-tab-flash 1.6s ease-out;
+}
+@keyframes pane-tab-flash {
+  0% {
+    color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  100% {
+    color: var(--text-dim);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
 .bottom-pane-hint {
   color: var(--text-dim);
   font-size: 11px;

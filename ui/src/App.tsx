@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { initBridge, postUndo, postRedo } from './daemon/bridge'
 import { useStore, selectedTrackId } from './state/store'
 import { TransportBar } from './components/TransportBar'
@@ -48,6 +48,29 @@ function BottomPane() {
   const setBottomPane = useStore((s) => s.setBottomPane)
   const setBottomPaneOpen = useStore((s) => s.setBottomPaneOpen)
   const height = useStore((s) => s.bottomPaneHeight)
+  // Phase 29 Stream GB (docs/research/80): pilot 80 found zero visible confirmation anywhere in
+  // the default Clip-tab view after a preset lands on a track — from either SynthPanel's own
+  // PresetPicker or a Content-Browser drag onto a track header (both funnel through
+  // daemon/library.ts's applyPresetToTrack, which bumps state/store.ts's presetEpoch for the
+  // affected track) — you had to already know to switch to Device to see it took effect. No
+  // toast/banner component exists yet (that's stream GE's build, not this one's), so this is the
+  // "simple inline flash on the Device tab button" fallback the plan calls for: flash the tab
+  // itself for a moment whenever the epoch advances for the CURRENTLY SELECTED track. Deliberately
+  // scoped to the selected track only — a drop onto some OTHER, non-selected track wouldn't have
+  // anything to show here anyway, since this pane only ever renders the selected track's sound.
+  const presetEpoch = useStore((s) => (selected ? (s.presetEpoch[selected] ?? 0) : 0))
+  const [presetFlash, setPresetFlash] = useState(false)
+  const prevPresetRef = useRef<{ id: string | null; epoch: number }>({ id: selected, epoch: presetEpoch })
+  useEffect(() => {
+    const prev = prevPresetRef.current
+    const sameTrack = prev.id === selected
+    const epochAdvanced = presetEpoch > prev.epoch
+    prevPresetRef.current = { id: selected, epoch: presetEpoch }
+    if (!sameTrack || !epochAdvanced) return
+    setPresetFlash(true)
+    const t = setTimeout(() => setPresetFlash(false), 1600)
+    return () => clearTimeout(t)
+  }, [selected, presetEpoch])
   if (!doc || !open) return null
   const track = doc.tracks.find((t) => t.id === selected)
   if (!track) return null
@@ -81,8 +104,9 @@ function BottomPane() {
             Clip
           </button>
           <button
-            className={`pane-tab ${pane === 'device' ? 'active' : ''}`}
+            className={`pane-tab ${pane === 'device' ? 'active' : ''}${presetFlash ? ' pane-tab-flash' : ''}`}
             data-pane-tab="device"
+            data-preset-flash={presetFlash}
             role="tab"
             aria-selected={pane === 'device'}
             onClick={() => setBottomPane('device')}

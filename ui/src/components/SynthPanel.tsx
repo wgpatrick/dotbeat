@@ -3,7 +3,15 @@ import { Knob } from './Knob'
 import { PARAM_GROUPS, isParamLegalForKind, type ParamGroup, type ParamSpec, type TrackKind } from './synthParams'
 import { EFFECT_TYPES, EFFECT_LABELS, type BeatEffect, type BeatTrack, type EffectType } from '../types'
 import { postEdit, postEffectAdd, postEffectRemove, postEffectMove, postEffectEnabled } from '../daemon/bridge'
-import { fetchLibrary, applyPresetToTrack, resolveMacro, inverseResolveMacroTarget, type LibraryPreset, type LibraryMacro } from '../daemon/library'
+import {
+  fetchLibrary,
+  applyPresetToTrack,
+  resolveMacro,
+  inverseResolveMacroTarget,
+  findMatchingPresetIndex,
+  type LibraryPreset,
+  type LibraryMacro,
+} from '../daemon/library'
 import { useStore } from '../state/store'
 import { engine } from '../audio/engine'
 import { onAnimationFrame } from '../audio/animationFrame'
@@ -291,6 +299,10 @@ function PresetPicker({ track }: { track: BeatTrack }) {
   const [cursor, setCursor] = useState(0)
   const [applying, setApplying] = useState(false)
   const [applied, setApplied] = useState<string | null>(null)
+  // Phase 29 Stream GB: the same signal MacroKnob depends on (see its own comment) — bumped once
+  // per actual preset apply, whether from this component's own controls or a Content-Browser
+  // drag onto the track header elsewhere in the app.
+  const presetEpoch = useStore((s) => s.presetEpoch[track.id] ?? 0)
 
   useEffect(() => {
     let cancelled = false
@@ -307,6 +319,27 @@ function PresetPicker({ track }: { track: BeatTrack }) {
       cancelled = true
     }
   }, [track.kind])
+
+  // Phase 29 Stream GB (docs/research/86): "current preset" has no ground-truth field in the
+  // .beat document (same root cause MacroKnob's own comment documents) — `cursor` is local
+  // browsing state that otherwise starts at 0 on every mount with zero relation to what's
+  // actually applied. On a fresh mount (page reload) that showed a stray, unrelated preset's name
+  // while the real (correct) params sat untouched underneath — pilot 86's "the preset label
+  // itself can revert to the wrong kit name." Once the catalog loads, and again whenever a preset
+  // is actually (re-)applied (`presetEpoch`), reverse-match the track's LIVE params against the
+  // catalog and point the cursor at whichever preset's params are still an exact match. Only
+  // moves the cursor on an actual match — hand-tweaked params that no longer match any preset
+  // leave the cursor (and displayed label) exactly where they were, rather than snapping to 0.
+  useEffect(() => {
+    if (!presets) return
+    const idx = findMatchingPresetIndex(presets, track.synth)
+    if (idx !== -1) setCursor(idx)
+    // track.synth is deliberately excluded: this should resolve once per load/apply, not re-scan
+    // the whole catalog on every knob tick (presetEpoch already fires on every real apply, and by
+    // the time it fires `track` has already re-rendered with the fresh params — see this effect's
+    // closure over the current `track` prop).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presets, presetEpoch, track.id])
 
   if (track.kind !== 'synth' && track.kind !== 'drums') return null
 
@@ -398,13 +431,24 @@ function MacroKnob({ track, macro }: { track: BeatTrack; macro: LibraryMacro }) 
   const liveValue = (): number => Number(track.synth[firstTarget.param] ?? firstTarget.min)
   const [knob, setKnob] = useState(() => inverseResolveMacroTarget(firstTarget, liveValue()))
 
-  // Re-estimate the knob's visual position whenever the SELECTED TRACK changes (a best-effort
-  // display estimate re-derived from the first target's live value, never a stored truth —
-  // research 27 §6's "knob-position display problem, stated honestly"). Deliberately NOT
-  // re-estimated on every param tick — once the human starts turning this knob, its own local
-  // state is authoritative until they select a different track.
+  // Re-estimate the knob's visual position whenever the SELECTED TRACK changes, OR the track's
+  // PRESET was just (re-)applied (a best-effort display estimate re-derived from the first
+  // target's live value, never a stored truth — research 27 §6's "knob-position display problem,
+  // stated honestly"). Phase 29 Stream GB (docs/research/81, /86): switching a track's preset
+  // replaces its underlying params just as wholesale as switching tracks does, but the original
+  // `[track.id]`-only dependency below had no way to know that happened — pilot 81 found all six
+  // macro knobs showing IDENTICAL numbers before/after a preset swap, and pilot 86 found it worse
+  // under a reload (the display could end up matching NEITHER the old nor the new preset).
+  // `presetEpoch` (state/store.ts) is bumped in exactly one place — daemon/library.ts's
+  // applyPresetToTrack, itself the one function both SynthPanel's own PresetPicker and a
+  // Content-Browser preset drag funnel through — so it only ever advances on an actual preset
+  // apply, never on an ordinary param edit (this knob's own drag, or any other knob's). That's
+  // what keeps this fix from reopening the original bug it's built next to: the human's own
+  // in-progress drag on THIS knob still wins against every other kind of re-render, because
+  // nothing here re-fires on a plain param tick — only a real track switch or a real preset swap.
+  const presetEpoch = useStore((s) => s.presetEpoch[track.id] ?? 0)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => setKnob(inverseResolveMacroTarget(firstTarget, liveValue())), [track.id])
+  useEffect(() => setKnob(inverseResolveMacroTarget(firstTarget, liveValue())), [track.id, presetEpoch])
 
   return (
     <div className="macro-knob" data-macro-knob={macro.name} title={`${macro.description} (${macro.targets.map((t) => t.param).join(', ')})`}>
