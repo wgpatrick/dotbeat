@@ -1100,6 +1100,26 @@ export function saveClip(doc: BeatDocument, trackId: string, clipId: string): { 
   return { doc: replaceTrack(doc, { ...track, clips }), created: existing === -1 }
 }
 
+/** The inverse of `saveClip`: loads an already-saved clip's notes/hits back into the track's LIVE
+ * buffer, overwriting whatever's there now. Phase 29 Stream GA — before this existed, `saveClip`
+ * (live -> clip) had no counterpart (clip -> live) anywhere in core, which was the deeper reason
+ * docs/research/83/84/86's "clicking a later section's clip block never retargets the note editor"
+ * bug was a real dead end from the GUI: even once the GUI knew WHICH clip a click meant, there was
+ * no primitive to actually load that clip's content back into the one live buffer the note editor
+ * always renders (track.notes/track.hits — see NoteView.tsx's header comment). Automation/loop/
+ * signature stay on the clip untouched (there's no live-track automation to overwrite them with —
+ * same v0.9 clip-scoped-only stance saveClip's own doc comment already establishes). */
+export function loadClip(doc: BeatDocument, trackId: string, clipId: string): BeatDocument {
+  const track = findTrack(doc, trackId)
+  const clip = track.clips.find((c) => c.id === clipId)
+  if (!clip) throw new BeatEditError(`track "${trackId}" has no clip "${clipId}" (have: ${track.clips.map((c) => c.id).join(', ') || 'none'})`)
+  return replaceTrack(doc, {
+    ...track,
+    notes: clip.notes.map((n) => ({ ...n })),
+    hits: track.kind === 'drums' ? clip.hits.map((h) => ({ ...h })) : [],
+  })
+}
+
 /** Sets (or creates) a scene's slot map. Every slot must reference an existing clip on an
  * existing track — same fail-loudly stance as the parser. */
 export function setScene(doc: BeatDocument, sceneId: string, slots: Record<string, string>): BeatDocument {

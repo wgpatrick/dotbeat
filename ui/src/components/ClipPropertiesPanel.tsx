@@ -26,9 +26,26 @@ import { TIME_SIG_DENOMINATORS, type BeatClip, type BeatDocument, type BeatTrack
  * (Phase 24 Stream CI) by NoteView.tsx's "Place in Arrangement" affordance for the SAME "does this
  * track already have an occurrence?" check this panel already makes — NoteView already imports
  * this file for <ClipPropertiesPanel>, so importing one more helper from it doesn't add real
- * coupling, unlike pulling from ArrangementView's much larger module. */
-export function primaryClipFor(track: BeatTrack, doc: BeatDocument): BeatClip | null {
+ * coupling, unlike pulling from ArrangementView's much larger module.
+ *
+ * Phase 29 Stream GA: `preferredSceneId` — store.ts's new `selectedSectionIndex`, resolved to a
+ * scene id by the caller — lets the user's own "which section am I looking at" choice win over the
+ * unconditional first-occurrence scan below. Before this parameter existed, this function (and
+ * everything built on it: the clip-properties strip, NoteView's loop-drag handle, and Place in
+ * Arrangement) could only ever resolve to the FIRST song section's clip for a track, which is
+ * exactly the bug docs/research/83, 84, and 86 all independently reproduced — once a song had a
+ * second section, there was no way to view, edit, or place into it from the GUI at all. When the
+ * preferred scene doesn't map this track to a clip (an empty section, or nothing selected yet),
+ * this falls straight through to the old first-occurrence scan — the documented fallback for loop
+ * mode and "no clip in the selected section" alike. */
+export function primaryClipFor(track: BeatTrack, doc: BeatDocument, preferredSceneId?: string | null): BeatClip | null {
   if (!doc.song) return null
+  if (preferredSceneId) {
+    const scene = doc.scenes.find((s) => s.id === preferredSceneId)
+    const clipId = scene?.slots[track.id]
+    const clip = clipId ? track.clips.find((c) => c.id === clipId) : undefined
+    if (clip) return clip
+  }
   for (const section of doc.song) {
     const scene = doc.scenes.find((s) => s.id === section.scene)
     const clipId = scene?.slots[track.id]
@@ -39,10 +56,21 @@ export function primaryClipFor(track: BeatTrack, doc: BeatDocument): BeatClip | 
   return null
 }
 
+/** The scene id `selectedSectionIndex` currently points at, or null when nothing's selected or the
+ * index doesn't resolve (loop mode, or a stale index store.ts's setDoc hasn't reset yet mid-render).
+ * One tiny helper so every consumer (this panel, NoteView's three primaryClipFor call sites, its
+ * live-buffer sync effect) derives the SAME scene id from the SAME store field instead of
+ * re-deriving it slightly differently in three places. */
+export function selectedSceneId(doc: BeatDocument | null, selectedSectionIndex: number | null): string | null {
+  if (!doc?.song || selectedSectionIndex === null) return null
+  return doc.song[selectedSectionIndex]?.scene ?? null
+}
+
 export function ClipPropertiesPanel({ track }: { track: BeatTrack }) {
   const doc = useStore((s) => s.doc)
+  const selectedSectionIndex = useStore((s) => s.selectedSectionIndex)
   if (!doc) return null
-  const clip = primaryClipFor(track, doc)
+  const clip = primaryClipFor(track, doc, selectedSceneId(doc, selectedSectionIndex))
   if (!clip) {
     return (
       <div className="clip-props" data-clip-props="none">

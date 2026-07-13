@@ -218,6 +218,41 @@ test('POST /song resize and delete edit the section list; delete refuses the las
   })
 })
 
+// Phase 29 Stream GA: deleting a section used to leave its scene orphaned in doc.scenes forever
+// (docs/research/83's pilot confirmed this via `beat inspect`) — songDelete now prunes any scene no
+// longer referenced by any remaining section, but leaves a scene alone if another surviving section
+// still points at it (the ordinary, intentional "+ section" sharing case).
+test('POST /song delete prunes a scene no longer referenced by any remaining section, but keeps one still shared', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    await postSong(daemon.port, { op: 'append', bars: 4 }) // -> 2 sections, section 1 REUSES section 0's scene
+    const sharedScene = daemon.getDoc().song![0]!.scene
+    assert.equal(daemon.getDoc().song![1]!.scene, sharedScene, 'append reuses the previous scene (intentional)')
+
+    // Mint a genuinely independent scene as a third section.
+    const insertRes = await postSong(daemon.port, { op: 'insert', index: 2, bars: 2 })
+    const { sceneId: independentScene } = (await insertRes.json()) as { sceneId: string }
+    assert.ok(independentScene && independentScene !== sharedScene)
+    assert.ok(daemon.getDoc().scenes.some((s) => s.id === independentScene), 'the new scene exists')
+
+    // Delete the independent section (index 2) — its scene has no other referrer, so it's pruned.
+    await postSong(daemon.port, { op: 'delete', index: 2 })
+    let doc = daemon.getDoc()
+    assert.equal(doc.song!.length, 2)
+    assert.ok(!doc.scenes.some((s) => s.id === independentScene), 'the orphaned scene was pruned')
+    assert.ok(doc.scenes.some((s) => s.id === sharedScene), 'the still-referenced scene survives')
+
+    // Delete section 1 (still referencing sharedScene, shared with section 0) — sharedScene survives
+    // because section 0 still references it.
+    await postSong(daemon.port, { op: 'delete', index: 1 })
+    doc = daemon.getDoc()
+    assert.equal(doc.song!.length, 1)
+    assert.ok(doc.scenes.some((s) => s.id === sharedScene), 'a scene shared by a surviving section is never pruned')
+
+    // Persisted to disk and re-parses identically (in-memory === disk invariant).
+    assert.deepEqual(parse(readFileSync(filePath, 'utf8')), doc)
+  })
+})
+
 // Phase 24 Stream CB: POST /song move — reorder a section without deleting/re-adding it, verified
 // end-to-end through the daemon route (the unit-level splice logic itself is covered by
 // songMove's own tests in test/format-v04.test.ts).
