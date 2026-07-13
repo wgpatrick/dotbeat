@@ -49,6 +49,7 @@ import {
   setGroupColor,
   setGroupTracks,
   initDocument,
+  defaultDrumKitLanes,
   diffDocuments,
   formatDiff,
   describeDocument,
@@ -197,7 +198,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_add_track',
     description:
-      'Add a new track (synth, drums, instrument, or audio) to a .beat file with the format init patch — the way an agent builds a project up from beat_init. An instrument track is a sampled SF2 voice: pass soundfont_sample (a media id already registered via beat_sample) and optionally soundfont_program (the SF2 program number, default 0) — see beat_inspect on an instrument track for the bank\'s full preset list. An audio track (format v0.10, Phase 22 Stream AE) starts with no clips — add audio-region clips afterward with beat_audio_clip. Returns the edit list.',
+      'Add a new track (synth, drums, instrument, or audio) to a .beat file with the format init patch — the way an agent builds a project up from beat_init. A fresh drums track defaults to the full 12-lane GM-aligned kit (kick/snare/rimshot/clap/hat/openhat/tom_lo/tom_mid/tom_hi/crash/ride/cowbell), matching the CLI\'s own `beat add-track ... drums` default (there is no legacy-5-lane opt-out over MCP). A fresh synth or drums track also starts with a real, already-populated default effect chain — eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat_effect_add/beat_effect_rm to change it. An instrument track is a sampled SF2 voice: pass soundfont_sample (a media id already registered via beat_sample) and optionally soundfont_program (the SF2 program number, default 0) — see beat_inspect on an instrument track for the bank\'s full preset list. An audio track (format v0.10, Phase 22 Stream AE) starts with no clips — add audio-region clips afterward with beat_audio_clip. Returns the edit list.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -221,6 +222,12 @@ const TOOLS: ToolDef[] = [
         ...(typeof args.name === 'string' ? { name: args.name } : {}),
         ...(typeof args.color === 'string' ? { color: args.color } : {}),
         ...(kind === 'instrument' ? { soundfont: { sample: str(args, 'soundfont_sample'), program: typeof args.soundfont_program === 'number' ? args.soundfont_program : 0 } } : {}),
+        // Phase 33 Stream MB: the CLI's own `add-track` defaults a fresh drums track to the real
+        // 12-lane kit (defaultDrumKitLanes()) unless --legacy-lanes is passed; this handler used to
+        // omit `lanes` entirely, silently falling back to the old implicit 5-lane shape with no way
+        // to opt in (research/95's headline finding). Match the CLI's default here — MCP has no
+        // legacy-lanes escape hatch, since nothing over MCP asked for the old behavior.
+        ...(kind === 'drums' ? { lanes: defaultDrumKitLanes() } : {}),
       })
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
@@ -380,7 +387,7 @@ const TOOLS: ToolDef[] = [
         pitch: { type: 'number', description: 'MIDI pitch 0-127' },
         start: { type: 'number' },
         duration: { type: 'number' },
-        velocity: { type: 'number' },
+        velocity: { type: 'number', description: '0..1, NOT MIDI 0-127 (e.g. 0.8, not 100)' },
       },
       required: ['file', 'track', 'pitch', 'start', 'duration', 'velocity'],
     },
@@ -424,7 +431,7 @@ const TOOLS: ToolDef[] = [
         track: { type: 'string' },
         lane: { type: 'string' },
         start: { type: 'number' },
-        velocity: { type: 'number' },
+        velocity: { type: 'number', description: '0..1, NOT MIDI 0-127 (e.g. 0.9, not 110)' },
         duration: { type: 'number' },
       },
       required: ['file', 'track', 'lane', 'start', 'velocity'],
@@ -865,7 +872,8 @@ const TOOLS: ToolDef[] = [
         clips: {
           type: 'array',
           items: { type: 'object', properties: { track: { type: 'string' }, clip: { type: 'string' } }, required: ['track', 'clip'] },
-          description: 'snapshot each track\'s current live notes/pattern into a named clip',
+          description:
+            'snapshot each track\'s CURRENT LIVE notes/pattern into a named clip. Always starts from whatever\'s live on the track right now, not empty — re-using this on the same track without clearing its live content first accumulates rather than resets (e.g. a "chorus" clip captured on top of still-present "verse" content becomes verse-plus-chorus)',
         },
         scenes: {
           type: 'array',
@@ -1183,7 +1191,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_checkpoint',
     description:
-      'Save a restorable version of a .beat project. Call this after each batch of edits that fulfils one user request — pass the user\'s request verbatim as `intent` so the version can later be found by what was asked for. Without a `label` the checkpoint auto-labels itself from the semantic diff ("lead: cutoff 3200 -> 900"). Storage is a local git repo in the project folder (created invisibly); no git knowledge or setup is needed. Returns the new checkpoint\'s ref, or reports that nothing changed since the last one.',
+      'Save a restorable version of a .beat project. Call this after each batch of edits that fulfils one user request — pass the user\'s request verbatim as `intent` so the version can later be found by what was asked for. Without a `label` the checkpoint auto-labels itself from the semantic diff ("lead: cutoff 3200 -> 900") — EXCEPT the very first checkpoint of a project\'s history, which always auto-labels as the bare word "checkpoint" regardless of how much changed, since there is no prior checkpoint to diff against; pass an explicit `label` on a first call if you want it to be self-describing. Storage is a local git repo in the project folder (created invisibly); no git knowledge or setup is needed. Returns the new checkpoint\'s ref, or reports that nothing changed since the last one.',
     inputSchema: {
       type: 'object',
       properties: {
