@@ -369,6 +369,12 @@ export const rows = [
     core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
     research: 'research/76-ux-clip-view-midi-editing-round2.md', plan: null,
   },
+  {
+    area: 'Note editing (piano roll)', feature: 'Right-click context menus (notes, clip blocks)',
+    description: 'Shipped in Phase 32 Stream LA. No context menu existed anywhere for notes or arrangement clip blocks — right-click on either did nothing (confirmed exhaustively across research/81, 87, 92, 93). The automation lane\'s own breakpoint popup (Phase 26 Stream DI) was the one working precedent for the interaction pattern; this generalizes it via a new reusable `ContextMenu.tsx` (`position: fixed` in viewport coordinates rather than the automation popup\'s lane-local absolute positioning, so it works from any component regardless of its own scroll/zoom context). Notes: right-click → Delete, Duplicate, Quantize to grid. Clip blocks: right-click → Delete (previously a total no-op anywhere in the app) and Duplicate (an independent copy of just that one clip in a new scene). Live debugging of the stream\'s own verify script also caught and fixed a real, pre-existing app bug along the way: a missing button-2 guard on the arrangement lane\'s plain-click handler let a right-click\'s pointerdown silently retarget the selected track/section even while the context menu was correctly open (research/87\'s documented left-click-vs-right-click asymmetry).',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/93-usability-pilot-tutorial-abletonlessons.md', plan: 'phase-32-plan.md',
+  },
 
   // ── Drum programming ─────────────────────────────────────────────────────
   {
@@ -681,9 +687,9 @@ export const rows = [
   },
   {
     area: 'Arrangement / song structure', feature: 'Section/scene naming',
-    description: 'Sections and scenes have no `name` field in the document model (`BeatScene`/`BeatSongSection`, confirmed by reading the types directly) — the only visible label is the auto-generated scene id (`s1`, `s2`, ...) forever. A user building a real song with distinct parts (research/90\'s "Part A"/"Part B" chord progressions) has no way to label them except renaming the underlying track, which doesn\'t scale once a track plays multiple different parts across a song. Real format/parser/serializer work (a new optional field on the scene or section grammar), scoped out of Phase 30 Stream JD (research/87) as too large for a fix-phase item.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/90-usability-pilot-dnb-song.md', plan: null,
+    description: 'Shipped in Phase 32 Stream LB. An optional `name` field on `BeatScene` (a nested `name <token>` line, matching the format\'s existing nested-field convention rather than inventing quoted-string parsing) — a scene is dotbeat\'s unit of distinct musical content, so "Part A"/"Part B" belongs there, not on `BeatSongSection`; the same scene reused across sections shows the same name in both places. Fully optional and backward-compatible — every pre-existing `.beat` file keeps parsing/round-tripping unchanged. Format/parser/serializer/core edit primitive, a `beat scene-set --name/--clear-name` CLI surface, an MCP tool, and GUI rename via a single double-click on a section chip (matching Phase 31 Stream KE\'s track-rename convention). Originally scoped out of Phase 30 Stream JD (research/87) as too large for a fix-phase item; promoted to a real stream once research/90 and others kept rediscovering the same gap.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/90-usability-pilot-dnb-song.md', plan: 'phase-32-plan.md',
   },
 
   // ── Synth sound design ──────────────────────────────────────────────────
@@ -1678,13 +1684,9 @@ export const rows = [
   // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
   // feature) or too cross-cutting (spans many components) to fold into a single fix-phase stream.
   // Reviewed alongside each new pilot batch — promoted into a real phase stream once scoped down,
-  // not left to rot here indefinitely.
-  {
-    area: 'Known usability gaps (backlog)', feature: 'Right-click context menus (notes, clip blocks)',
-    description: 'No context menu exists anywhere for notes or arrangement clip blocks — right-click on either does nothing at all (confirmed exhaustively across multiple pilots: research/81, 87, 92, 93). The one place right-click DOES do something is the automation lane\'s own breakpoint popup (Phase 26 Stream DI) — a real, working precedent for the interaction pattern, just not extended anywhere else. A first-time user discovering that convention on automation would reasonably expect it on notes/clips too. Cross-cutting (spans NoteView.tsx and ArrangementView.tsx, and implies real design decisions about what belongs in a menu vs. the existing toolbar-driven model) rather than a single-stream fix.',
-    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
-    research: 'research/93-usability-pilot-tutorial-abletonlessons.md', plan: null,
-  },
+  // not left to rot here indefinitely. Empty as of Phase 32 (its one entry, right-click context
+  // menus, got promoted into a real stream — see "Note editing (piano roll)" below) — stays ready
+  // for whatever the next pilot batch surfaces.
 
   // ── Desktop app / packaging ──────────────────────────────────────────────
   {

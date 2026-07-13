@@ -11,7 +11,7 @@ blob you hope merges.
 
 ```bash
 npm install
-npm test                          # 608 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
+npm test                          # 620 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat bass.cutoff 900   # prints "bass: cutoff 700 -> 900"
@@ -66,11 +66,11 @@ the full thesis and prior-art comparison.
 | `ui/` | dotbeat's own GUI (Vite + React + Tone.js) — arrangement view, piano-roll/drum-lane clip editing, mixer, effects chain, content browser. Its own product design, not a wrapped teaching app (see `docs/decisions.md` D12). |
 | `desktop/` | Tauri desktop shell — early-stage, working toward a native Mac app (`docs/product-spec-desktop.md`). |
 | `cli/beat.mjs` | The unified `beat` CLI — run with no args for the full, current command list. |
-| `test/` | 608 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
+| `test/` | 620 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
 | `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
 | `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
 | `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
-| [`docs/research/`](docs/research/) | 93 research passes — landscape/prior-art, engine architecture, three full passes against Ableton Live's own reference manual (feature-by-feature 50-69, implementation-level UI/UX 70-74, round-2 live re-verification 75-79), and fourteen exploratory usability pilots (80-93, see `docs/usability-testing.md`) — an agent driving the real app via Playwright with no pre-scripted checklist, reading its own screenshots and reacting like a human tester. Covers realistic musical workflows, focused audits of core feature areas, and — a newer variant — following real, independently-published Ableton beginner tutorials step by step in dotbeat instead of Ableton, measuring against an external standard rather than the project's own assumptions. |
+| [`docs/research/`](docs/research/) | 100 research passes — landscape/prior-art, engine architecture, three full passes against Ableton Live's own reference manual (feature-by-feature 50-69, implementation-level UI/UX 70-74, round-2 live re-verification 75-79), and twenty-one exploratory usability pilots (80-100, see `docs/usability-testing.md`) — an agent driving the real app (or, for the CLI/MCP variant, its own command output) with no pre-scripted checklist, reacting like a human tester. Covers realistic musical workflows, focused GUI audits, following real published Ableton tutorials step by step in dotbeat instead of Ableton, and — the newest variant — testing the `beat` CLI and MCP tool surface directly, no GUI at all, since that's dramatically cheaper (~4 minutes per pilot vs. 15-50+ for a GUI one) and tests dotbeat's actual agent-native thesis. |
 | [`docs/decisions.md`](docs/decisions.md) | 15 numbered design decisions with rationale and "revisit when" — check before proposing something that might contradict one. |
 | [`docs/usability-testing.md`](docs/usability-testing.md) | The exploratory usability-pilot methodology — no checklist, an agent reads its own screenshots (or, for the CLI/MCP variant, every command's real output) and reacts like a human tester. A standing practice, run alongside `ui/verify-*.mjs`'s scripted assertions whenever GUI-facing behavior changes — and, since CLI/MCP pilots run in minutes rather than tens of minutes, whenever a `beat` subcommand or MCP tool changes too. |
 | [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format grammar. |
@@ -115,9 +115,15 @@ dotbeat instead of Ableton — which surfaced a genuine "Place in Arrangement" m
 client/daemon desync on rejected edits, and `+ capture scene` silently skipping Audio tracks; Phase
 31 fixed all of it, verifying two "sounds serious" findings against a stable checkout before touching
 anything (one turned out real, one didn't reproduce and got a regression guard instead of a guess).
-Bigger findings that don't fit a fix phase — a real reverse-audio action, section/scene naming, right-
-click context menus — go straight into the roadmap as ordinary not-started rows rather than a second
-tracking system. `docs/product-roadmap.md` tracks every feature's real status;
+Bigger findings that don't fit a fix phase go straight into the roadmap as ordinary not-started rows
+rather than a second tracking system — and get promoted into a real stream once independently
+rediscovered enough times to be worth it rather than deferred again. Section/scene naming and
+right-click context menus (found by four and two separate pilots respectively) crossed that bar and
+shipped in Phase 32. A fourth pilot round (94-100) tried something new: testing the `beat` CLI and
+MCP tool surface directly instead of the GUI, cheap enough (~4 minutes per pilot) to run in volume —
+it found a genuine data-loss bug in `beat restore` (contradicting its own "never destroys work"
+guarantee), an MCP/CLI parity gap in drum-kit defaults, and several smaller correctness and
+error-handling gaps. `docs/product-roadmap.md` tracks every feature's real status;
 `ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
 built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a
 CLI, and an AI agent, all at once — turn a knob in the GUI and `git diff` shows exactly one changed
