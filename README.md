@@ -55,7 +55,7 @@ the full thesis and prior-art comparison.
 
 | Path | What |
 |---|---|
-| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (279 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
+| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (284 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, prior-art comparison, research provenance. |
 | `src/core/` | The `.beat` format: types, parser, serializer, converter, semantic diff, edit primitives (quantize/humanize/transpose/fit-to-scale/groove/…), inspect. Pure TS, no GUI deps. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over HTTP/SSE, echo suppression by canonical-text comparison. |
@@ -103,8 +103,13 @@ actual state after a preset swap, a clip editor that got stuck on a song's first
 more than one, rapid grid clicks silently losing data, and a Mixer modal that quietly ate the
 topbar Undo button, among others. Phase 29 fixed all of it in six parallel streams, independently
 re-verified, catching one real cross-stream regression along the way (two streams' fixes to the
-same file shipped correctly in isolation but collided once merged). `docs/product-roadmap.md`
-tracks every feature's real status;
+same file shipped correctly in isolation but collided once merged). A follow-up round of pilots
+(87-89) audited core feature areas in breadth rather than end-to-end workflows; Phase 30 fixed what
+was real from those too — an unreliable Undo button, non-atomic multi-entity undo, a drum-hit-marker
+click target, several note-editor UX gaps, and Audio tracks' bottom panel showing an empty note-grid
+instead of real controls — while also catching that some of those pilots' findings were artifacts of
+testing against a checkout mid-merge, not real gaps, and leaving those alone rather than "fixing"
+something that wasn't broken. `docs/product-roadmap.md` tracks every feature's real status;
 `ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
 built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a
 CLI, and an AI agent, all at once — turn a knob in the GUI and `git diff` shows exactly one changed

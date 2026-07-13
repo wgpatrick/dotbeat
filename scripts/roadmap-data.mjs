@@ -1582,6 +1582,42 @@ export const rows = [
     research: 'research/81-usability-pilot-existing-song.md', plan: 'phase-29-plan.md',
   },
 
+  // ── Reliability & usability fixes (Phase 30) ──────────────────────────────
+  // Source: three core-area usability pilots (research/87-89), independently re-verified against
+  // current stable main before this plan was written — several pilot findings turned out to be
+  // artifacts of testing against a moving-target checkout while Phase 29 was still being merged
+  // into it, and are noted as such rather than "fixed" (nothing to fix — see phase-30-plan.md).
+  {
+    area: 'Reliability & usability fixes (Phase 30)', feature: 'Drum-hit marker move-hitbox imbalance',
+    description: 'A durationless hit marker renders as a fixed 7px pill, but the shared resize/gate handle (sized for full-width note/hit bars) ate 5 of those 7px, leaving only ~1-2px as a safe move target — dragging almost anywhere else on a hit produced an unwanted gate/resize instead (research/89). Scoped a narrower 2px handle to markers specifically; ordinary notes are untouched. The drum-hit persistence and marquee-select bugs research/89 also reported did not reproduce on current main after extensive re-testing — locked in with regression tests rather than left unverified.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/89-usability-pilot-clip-editing.md', plan: 'phase-30-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 30)', feature: 'Undo button reliability + atomic multi-entity undo',
+    description: 'The toolbar Undo button\'s displayed state didn\'t reliably track the real undo stack (root cause: canUndo/canRedo only updated on a delayed SSE broadcast, while the button used a hard `disabled` attribute that blocked clicks outright) — Cmd/Ctrl+Z was reliable, the button wasn\'t (research/89). Also: a single user gesture touching multiple properties or entities (a diagonal note move, a multi-note delete/paste) pushed one undo entry per field/note instead of one per gesture, so one Undo press only partially reverted it. Fixed both: the button now updates optimistically in the same tick as the edit and drops the hard `disabled` attribute; a client-supplied gesture id now overrides the daemon\'s default per-path undo coalescing so a whole gesture reverts in exactly one press.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/89-usability-pilot-clip-editing.md', plan: 'phase-30-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 30)', feature: 'Note editor: deselect, paste offset, Quantize feedback, transform-overflow warning',
+    description: 'Four independent note-editor gaps (research/89): no way to deselect without adding a note or clicking another note (Escape now clears selection); pasting with no active playhead silently stacked exact duplicates, invisible on screen (now offsets by one default note-length, matching Alt-drag-duplicate\'s convention); Quantize showed zero feedback when the grid already matched the clip\'s native step size, looking broken (now always shows "N notes changed," including "0"); pitch/time transforms like ×2 could push notes past the clip\'s own loop length with no warning (now surfaces a toast naming the overhang).',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/89-usability-pilot-clip-editing.md', plan: 'phase-30-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 30)', feature: 'Track/section management discoverability',
+    description: 'Five independent gaps (research/87, 88): track rename silently stripped spaces with no explanation (now shows an inline hint); "Instrument" track kind was disabled with only a hover-tooltip explanation in CLI vocabulary (now an inline hint points at the real, pleasant unlock path — the Content Browser\'s SoundFonts section); dragging a clip block across sections that forks anonymous new scenes gave zero feedback (now a toast names what happened); updating an already-placed clip shared by multiple sections gave no warning the edit would retroactively change all of them (now confirms first, naming the count). "Place in Arrangement" silently no-opping in loop mode turned out already fixed by Phase 29 Stream GE — re-verified rather than touched again.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/87-usability-pilot-arrangement-view.md', plan: 'phase-30-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 30)', feature: 'Audio track bottom-panel coherence',
+    description: 'The bottom Clip/Device panel — the one consistent editing surface every other track kind uses — showed an empty, meaningless note-grid for Audio tracks even after a real clip was placed with working content; the actual controls (waveform, in/out/gain/warp) lived in a separate small unlabeled strip most users would never look at first (research/88). Folded that strip\'s functionality into the bottom panel proper (a new `AudioClipEditor` component, following the same track-kind-specific routing precedent Drums already used) — Audio tracks now get one coherent, correctly-labeled editing surface in the same place every other track kind uses.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/88-usability-pilot-clip-creation.md', plan: 'phase-30-plan.md',
+  },
+
   // ── Desktop app / packaging ──────────────────────────────────────────────
   {
     area: 'Desktop app / packaging', feature: 'Tauri shell, compiled sidecar, bundled starter',
