@@ -215,7 +215,12 @@ async function main() {
     results.t2 = { row0ValueBefore, row0ValueAfter }
 
     // ================================================================================================
-    // T3 — BUG 3: clicking empty grid space while a note is selected both deselects AND adds a note.
+    // T3 — BUG 3: clicking empty grid space while a note is selected both deselects the OLD note AND
+    // adds a new one. Phase 31 Stream KC item 1 (docs/research/90) changed what the selection should
+    // be AFTER that add: the click used to leave editNoteIds empty (the new note only ever LOOKED
+    // selected, never was); now the newly-added note itself becomes the sole selection, so it's
+    // actually authoritative for the very next keyboard shortcut (e.g. Shift+ArrowRight resize) —
+    // pilot 90's exact repro was that very shortcut silently resizing a stale, different note instead.
     // ================================================================================================
     console.log('\n[T3] click on empty grid while a note is selected...')
     await selectTrack(page, daemon, 'lead')
@@ -240,11 +245,15 @@ async function main() {
     await pollUntil(() => track('lead').notes.length === notesBeforeT3 + 1, 'the empty-grid click to add a new note, not just deselect')
     await sleep(100)
     const selAfterT3 = (await storeState()).editNoteIds
+    const leadNote3 = track('lead').notes.find((n) => n.id !== leadNote1.id)
     console.log(`  notes: ${notesBeforeT3} -> ${track('lead').notes.length}; selection after click: ${JSON.stringify(selAfterT3)}`)
     assert(track('lead').notes.length === notesBeforeT3 + 1, `[T3] expected a new note to be added, count stayed at ${track('lead').notes.length}`)
-    assert(selAfterT3.length === 0, `[T3] expected the click to also clear the prior selection, got ${JSON.stringify(selAfterT3)}`)
-    console.log('[T3] PASS: clicking empty grid while a note was selected added a new note (not just a silent deselect)')
-    const leadNote3 = track('lead').notes.find((n) => n.id !== leadNote1.id)
+    assert(leadNote3, '[T3] could not find the newly-added note by id-diff against leadNote1')
+    assert(
+      selAfterT3.length === 1 && selAfterT3[0] === leadNote3.id,
+      `[T3] expected the click to clear the OLD selection and select just the NEW note (id ${leadNote3.id}), got ${JSON.stringify(selAfterT3)}`,
+    )
+    console.log('[T3] PASS: clicking empty grid while a note was selected cleared the old selection and made the new note the sole, active one')
     results.t3 = { notesBefore: notesBeforeT3, notesAfter: track('lead').notes.length, selAfter: selAfterT3 }
 
     // ================================================================================================
