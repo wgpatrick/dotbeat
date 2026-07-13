@@ -219,12 +219,50 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let sendQueue: Promise<unknown> = Promise.resolve()
 
-/** Issue one edit. Applies it optimistically to the store, then debounces a POST /edit. */
+/** Actually POST one {path,value} edit, chained onto the shared send queue so the daemon never
+ * has two /edit requests in flight at once — its own id-minting for the append grammar below
+ * depends on processing writes in the same order they were issued. */
+function enqueueEditPost(path: string, value: string): void {
+  const base = daemonBase()
+  sendQueue = sendQueue.then(() =>
+    fetch(`${base}/edit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, value }),
+    })
+      .then(async (res) => {
+        if (!res.ok) console.warn(`[daw] /edit ${path}=${value}: HTTP ${res.status}`, await res.text().catch(() => ''))
+      })
+      .catch((err) => console.warn('[daw] could not POST edit:', err)),
+  )
+}
+
+/** Issue one edit. Applies it optimistically to the store, then sends a POST /edit.
+ *
+ * Bare `<track>.note` / `<track>.hit` — the ADD grammar (core's setValue, edit.ts; the same
+ * `isAppendGrammar` shape daemon.ts's undo-coalescing already special-cases) — go straight to the
+ * send queue, no debounce. Every call there mints a brand-new entity, so two quick-succession adds
+ * sharing that identical literal path string are two independent writes, not one continued
+ * gesture. Debouncing them by path used to `clearTimeout` an earlier add's still-pending POST the
+ * moment a later one landed within the 60ms window, so a rapid burst of grid clicks silently
+ * dropped every add but the last one whose timer survived to fire — confirmed data-loss bug,
+ * research/82 (~24 rapid hits, only ~4 persisted, even though every intermediate screenshot
+ * rendered them all — the LOCAL optimistic mirror just above was never debounced, only the network
+ * write was). Clicks paced >=1.1-1.5s apart never collided with the 60ms window, which is why the
+ * bug looked intermittent/pace-dependent rather than a hard break.
+ *
+ * Everything else (a knob turn, a drag) still debounces by path — there, only the LATEST value for
+ * a given path is meaningful, so collapsing a burst into one send is correct and desired. */
 export function postEdit(path: string, value: string): void {
   const state = useStore.getState()
   if (state.doc) {
     const next = applyLocalEdit(state.doc, path, value)
     if (next) state.setDoc(next)
+  }
+  const isAppendGrammar = path.endsWith('.note') || path.endsWith('.hit')
+  if (isAppendGrammar) {
+    enqueueEditPost(path, value)
+    return
   }
   const existing = pendingTimers.get(path)
   if (existing) clearTimeout(existing)
@@ -232,18 +270,7 @@ export function postEdit(path: string, value: string): void {
     path,
     setTimeout(() => {
       pendingTimers.delete(path)
-      const base = daemonBase()
-      sendQueue = sendQueue.then(() =>
-        fetch(`${base}/edit`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ path, value }),
-        })
-          .then(async (res) => {
-            if (!res.ok) console.warn(`[daw] /edit ${path}=${value}: HTTP ${res.status}`, await res.text().catch(() => ''))
-          })
-          .catch((err) => console.warn('[daw] could not POST edit:', err)),
-      )
+      enqueueEditPost(path, value)
     }, 60),
   )
 }
