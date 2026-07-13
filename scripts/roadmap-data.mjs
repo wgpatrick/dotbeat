@@ -1715,6 +1715,26 @@ export const rows = [
     research: 'research/100-usability-pilot-cli-macro-effects.md', plan: 'phase-33-plan.md',
   },
 
+  // ── Agent surface & foundations (Phase 34) ───────────────────────────────
+  {
+    area: 'Agent surface & foundations (Phase 34)', feature: 'MCP taste-loop coverage: beat_vary / beat_score / beat_sample / beat_lane',
+    description: 'The four CLI commands an MCP-only agent couldn\'t reach (research/95\'s headline gap, deferred by Phase 33 MB which only made the coverage *claim* honest): `beat_vary` (both rungs — param groups and "feel", same defaults and manifest bytes as the CLI, optional render with an honest real-time-cost warning), `beat_score` ("N"/"vN" picks, same jsonl entry shape), `beat_sample`, `beat_lane`. Parity is enforced structurally this time, not by review: the manifest-write/score-entry/render-batch logic moved into a shared `src/vary/batch.ts` both surfaces import, so the pilot-95 class of drift (two hand-rolled implementations of the same semantics) can\'t recur for the taste loop. Cross-surface round-trip tested in both directions (CLI scores an MCP-generated batch, MCP scores a CLI batch, `beat_suggest` reads the merged log). Only `daemon` remains CLI-only — structurally a long-running process, not a tool call.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/95-usability-pilot-mcp-agent.md', plan: 'phase-34-plan.md',
+  },
+  {
+    area: 'Agent surface & foundations (Phase 34)', feature: 'Per-command help: `beat <cmd> --help` / `beat help <cmd>`',
+    description: 'Pilots 94 and 97 both hit the same wall: the only help was the monolithic no-args dump ("more man page than onboarding") and `beat <cmd> --help` wasn\'t recognized. The USAGE dump is now generated from a per-command table (byte-identical output to before, zero doc churn), and `beat <cmd> --help` / `beat help <cmd>` print just that command\'s block plus a "related:" line for natural families (vary/score/suggest, the checkpoint/history family, effect-*, the clip/scene/song family, add/rm-note/hit). `--help` is only intercepted as the first argument after the command name, so argument values can never be shadowed by it.',
+    core: 'na', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/94-usability-pilot-cli-song.md', plan: 'phase-34-plan.md',
+  },
+  {
+    area: 'Agent surface & foundations (Phase 34)', feature: 'Render run-to-run determinism: measured, diagnosed, honest tolerance',
+    description: 'Pilot 96 measured ~1 dB LUFS variance between identical re-renders; phase-5\'s result doc measured ±0.4 LU and guessed at event-loop scheduling. Load-bearing for the thesis: lint thresholds and vary/score comparisons are only trustworthy if run-to-run variance is known and accounted for. Stream NC: a reusable measurement script (N renders → per-metric min/max/stddev + leading-silence deltas), an alignment-vs-DSP diagnosis (a trimmed-comparison mode separates capture-start jitter from true engine variance), a capture-alignment fix in cli/render.mjs if cheap and fidelity-neutral, and whatever variance remains encoded as a named constant consumed by lint\'s thresholds and cited in the vary manifest\'s "same batch only" note.',
+    core: 'progress', cli: 'progress', gui: 'na', status: 'progress',
+    research: 'research/96-usability-pilot-cli-vary-loop.md', plan: 'phase-34-plan.md',
+  },
+
   // ── Known usability gaps (backlog) ────────────────────────────────────────
   // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
   // feature) or too cross-cutting (spans many components) to fold into a single fix-phase stream.
@@ -1755,6 +1775,12 @@ export const rows = [
     description: 'Static gainDb field (default 0) plus a \'gain\' automation lane reusing the v0.9 BeatAutomationLane/BeatAutomationPoint machinery UNCHANGED (confirmed research 16 §3\'s prediction) — only a new AUDIO_AUTOMATABLE_PARAMS=[\'gain\'] set and a track-kind branch in checkAutomatableParam. Verified live: both static gain and a gain ramp measurably change rendered level.',
     core: 'done', cli: 'done', gui: 'done', status: 'done',
     research: 'research/16-audio-clip-editing.md', plan: 'phase-22-stream-ae.md',
+  },
+  {
+    area: 'Audio-region clip editing', feature: 'Multi-region placement (multiple audio clips per track per section)',
+    description: 'The one-clip-per-track-per-scene data-model ceiling, confirmed as a core constraint by pilot 99 (CLI repro) after research/85 hit it from the GUI: a scene slot maps track → ONE clip, an audio clip carries ONE region, and the engine only starts a region at the section boundary — so a riser at bar 3, two one-shots in one section, or hearing both halves of an `audio-split` in place are all structurally impossible today. Full design proposal with three options, blast radius, and a recommendation (repeated `slot` lines with an optional `at <steps>` — one grammar, byte-identical round-trip for every existing file, one added line per placement in diffs, audio-only validation for v1, and `audio-split` auto-placing its second half, which retroactively fixes the orphaned-split GUI bug class) in docs/multi-region-audio-design.md — awaiting the owner\'s call on its §5 questions before any implementation phase.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/99-usability-pilot-cli-audio.md', plan: 'multi-region-audio-design.md',
   },
   {
     area: 'Audio-region clip editing', feature: 'Region-level fade in/out handles',
