@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Knob } from './Knob'
 import { PARAM_GROUPS, isParamLegalForKind, type ParamGroup, type ParamSpec, type TrackKind } from './synthParams'
 import { EFFECT_TYPES, EFFECT_LABELS, type BeatEffect, type BeatTrack, type EffectType } from '../types'
@@ -78,17 +78,35 @@ function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec;
   }
 
   // knob
-  return (
+  const value = Number(p[spec.key] ?? spec.min ?? 0)
+  // Phase 31 Stream KD items 1/2 (pilots 90/91): a knob whose param currently has no audible effect
+  // gets a visual cue instead of silence — see synthParams.ts's ParamSpec.dimAtZero/dimUnless for
+  // the two gating shapes this covers (a self-zeroed effect Mix knob; the filter-envelope shape
+  // knobs gated by a separate Fenv amount knob).
+  let inactiveHint: string | null = null
+  if (spec.dimAtZero && value === 0) inactiveHint = 'inactive at 0% — turn up to hear it'
+  else if (spec.dimUnless && Number(p[spec.dimUnless.key] ?? 0) <= 0) inactiveHint = `inactive until ${spec.dimUnless.label} > 0`
+
+  const knob = (
     <Knob
       label={spec.label}
-      value={Number(p[spec.key] ?? spec.min ?? 0)}
+      value={value}
       min={spec.min!}
       max={spec.max!}
       log={spec.log}
       format={spec.format}
-      hint={spec.hint}
+      hint={inactiveHint ? `${spec.hint ? spec.hint + ' — ' : ''}${inactiveHint}` : spec.hint}
       onChange={(v) => postEdit(path, String(v))}
     />
+  )
+  // Only the handful of gated knobs (filter-env shape knobs, effect Mix knobs) get the extra
+  // wrapper div — every other knob in the app renders exactly as before, unaffected by this change.
+  if (!inactiveHint) return knob
+  return (
+    <div className="knob-slot knob-inactive" data-knob-inactive={spec.key}>
+      {knob}
+      <div className="knob-inactive-hint">{inactiveHint}</div>
+    </div>
   )
 }
 
@@ -296,7 +314,15 @@ export function EffectChain({ track, onAdded }: { track: BeatTrack; onAdded: (ty
 function PresetPicker({ track }: { track: BeatTrack }) {
   const [presets, setPresets] = useState<LibraryPreset[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [cursor, setCursor] = useState(0)
+  // Phase 31 Stream KD item 4 (docs/research/91 — "PRESET dropdown shows a stale/misleading label
+  // on a fresh track"): -1 is a real sentinel, not "index 0" — it means "no real preset has ever
+  // matched this track's live params since mount." Starting at 0 used to make a FRESH track (whose
+  // `beat init` defaults match no catalog preset) display whatever preset the filtered catalog
+  // happened to list first (pilot 91: "deep-sub-bass — bass" on a fresh sawtooth lead) as though it
+  // were an applied, real selection. The effect below only ever moves `cursor` OFF -1 on an actual
+  // match (`idx !== -1`) — see that effect's own comment for why a no-longer-matching AFTER a real
+  // match stays at the last real match rather than reverting to -1/"custom".
+  const [cursor, setCursor] = useState(-1)
   const [applying, setApplying] = useState(false)
   const [applied, setApplied] = useState<string | null>(null)
   // Phase 29 Stream GB: the same signal MacroKnob depends on (see its own comment) — bumped once
@@ -322,14 +348,19 @@ function PresetPicker({ track }: { track: BeatTrack }) {
 
   // Phase 29 Stream GB (docs/research/86): "current preset" has no ground-truth field in the
   // .beat document (same root cause MacroKnob's own comment documents) — `cursor` is local
-  // browsing state that otherwise starts at 0 on every mount with zero relation to what's
-  // actually applied. On a fresh mount (page reload) that showed a stray, unrelated preset's name
-  // while the real (correct) params sat untouched underneath — pilot 86's "the preset label
-  // itself can revert to the wrong kit name." Once the catalog loads, and again whenever a preset
-  // is actually (re-)applied (`presetEpoch`), reverse-match the track's LIVE params against the
-  // catalog and point the cursor at whichever preset's params are still an exact match. Only
-  // moves the cursor on an actual match — hand-tweaked params that no longer match any preset
-  // leave the cursor (and displayed label) exactly where they were, rather than snapping to 0.
+  // browsing state that otherwise starts at -1 (Phase 31 Stream KD: was 0) on every mount with zero
+  // relation to what's actually applied. On a fresh mount (page reload) that showed a stray,
+  // unrelated preset's name while the real (correct) params sat untouched underneath — pilot 86's
+  // "the preset label itself can revert to the wrong kit name," and pilot 91's "deep-sub-bass —
+  // bass" on a never-touched fresh track. Once the catalog loads, and again whenever a preset is
+  // actually (re-)applied (`presetEpoch`), reverse-match the track's LIVE params against the
+  // catalog and point the cursor at whichever preset's params are still an exact match. Only moves
+  // the cursor on an actual match — hand-tweaked params that no longer match any preset leave the
+  // cursor (and displayed label) exactly where they were, rather than snapping back to -1/"custom".
+  // That's the specific distinction Phase 31 Stream KD's own fix has to preserve: -1 is now the
+  // INITIAL/never-matched state's display value, not a value this effect ever re-enters once a real
+  // match has moved `cursor` off it — `idx !== -1` here is the same one-directional guard it always
+  // was, just starting from a sentinel that renders honestly instead of "index 0's real name."
   useEffect(() => {
     if (!presets) return
     const idx = findMatchingPresetIndex(presets, track.synth)
@@ -361,17 +392,23 @@ function PresetPicker({ track }: { track: BeatTrack }) {
   if (!presets) return <div className="preset-picker">loading presets…</div>
   if (presets.length === 0) return null
 
-  const current = presets[cursor]
+  // Phase 31 Stream KD item 4: cursor === -1 means "no real preset has matched yet" — render an
+  // honest "custom" placeholder instead of a real (but wrong) preset name. `base` gives Prev/Next a
+  // sane anchor (0) to step from while showing "custom", instead of NaN/negative-index math on -1.
+  const isCustom = cursor === -1
+  const current = isCustom ? null : presets[cursor]
+  const base = isCustom ? 0 : cursor
+  const CUSTOM_VALUE = '__custom__'
 
   return (
-    <div className="preset-picker" data-testid="preset-picker">
+    <div className="preset-picker" data-testid="preset-picker" data-preset-cursor={cursor}>
       <span className="preset-picker-label section-heading">preset</span>
       <button
         type="button"
         data-preset-prev
         disabled={applying}
         onClick={() => {
-          const next = (cursor - 1 + presets.length) % presets.length
+          const next = (base - 1 + presets.length) % presets.length
           setCursor(next)
           void apply(presets[next]!.name)
         }}
@@ -381,15 +418,24 @@ function PresetPicker({ track }: { track: BeatTrack }) {
       </button>
       <select
         data-preset-select
-        value={current?.name ?? ''}
+        value={isCustom ? CUSTOM_VALUE : (current?.name ?? '')}
         disabled={applying}
         onChange={(e) => {
+          if (e.target.value === CUSTOM_VALUE) return
           const i = presets.findIndex((p) => p.name === e.target.value)
           if (i === -1) return
           setCursor(i)
           void apply(presets[i]!.name)
         }}
       >
+        {/* Only present while cursor is the never-matched sentinel — picking a real preset below
+            always moves cursor off -1, so this option disappears the moment a real selection (or
+            reverse-match) happens; it's never a persistent extra catalog entry. */}
+        {isCustom && (
+          <option value={CUSTOM_VALUE} disabled>
+            custom (no matching preset)
+          </option>
+        )}
         {presets.map((p) => (
           <option key={p.name} value={p.name}>
             {p.name} — {p.category}
@@ -401,7 +447,7 @@ function PresetPicker({ track }: { track: BeatTrack }) {
         data-preset-next
         disabled={applying}
         onClick={() => {
-          const next = (cursor + 1) % presets.length
+          const next = (base + 1) % presets.length
           setCursor(next)
           void apply(presets[next]!.name)
         }}
@@ -558,7 +604,14 @@ export function Group({ track, group, trackIds, highlight }: { track: BeatTrack;
       <summary className="param-group-title section-heading">{group.title}</summary>
       <div className="knob-row">
         {group.params.map((spec) => (
-          <Control key={spec.key} track={track} spec={spec} trackIds={trackIds} />
+          <Fragment key={spec.key}>
+            {/* Phase 31 Stream KD item 3 (pilots 90/91): "Filter & Envelope" holds two full ADSRs
+                with no heading distinguishing them — a `subLabel` on a spec renders a small,
+                full-width sub-heading right before it, breaking the flat knob-row without a second
+                <details> card. `flex-basis: 100%` (styles.css) is what forces the row break. */}
+            {spec.subLabel && <div className="knob-row-sublabel">{spec.subLabel}</div>}
+            <Control track={track} spec={spec} trackIds={trackIds} />
+          </Fragment>
         ))}
       </div>
     </details>

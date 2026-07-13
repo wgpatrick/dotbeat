@@ -64,6 +64,22 @@ export interface ParamSpec {
   // enum
   values?: readonly string[]
   hint?: string
+  // Phase 31 Stream KD item 3 (docs/research/90 §"FILTER & ENVELOPE"): when set, Group renders a
+  // small sub-heading ("Amp Envelope" / "Filter Envelope") immediately before this control,
+  // breaking the flat knob-row into visually distinct sub-sections without a second <details> card.
+  subLabel?: string
+  // Phase 31 Stream KD items 1/2 (docs/research/90, 91 — pilots 90 AND 91 independently hit both):
+  // a knob whose param has no audible effect at its current value gets no visual signal today, so a
+  // user tweaking it concludes the feature is broken. Two gating shapes, both dim the knob and show
+  // a small inline "inactive" hint (SynthPanel.tsx's Control):
+  //  - `dimAtZero`: dim THIS knob whenever its own live value reads 0 — a freshly-added effect's Mix
+  //    knob (item 2).
+  //  - `dimUnless`: dim THIS knob whenever a NAMED SIBLING param (by key, same track.synth) reads 0
+  //    — the filter envelope's FenvA/FenvD/FenvS/FenvR shape knobs, gated by `filterEnvAmount`
+  //    (item 1). Carries the gating knob's own label so the hint can name it ("inactive until
+  //    Fenv > 0") without a second lookup.
+  dimAtZero?: boolean
+  dimUnless?: { key: string; label: string }
 }
 
 export interface ParamGroup {
@@ -175,15 +191,22 @@ export const PARAM_GROUPS: ParamGroup[] = [
       e('filterType', 'Type', ['lowpass', 'bandpass', 'highpass']),
       k('cutoff', 'Cutoff', 20, 18000, fmt.hz, true),
       k('resonance', 'Res', 0, 20, fmt.num1),
-      k('attack', 'Attack', 0.001, 2, fmt.sec, true),
+      // Phase 31 Stream KD item 3 (pilots 90/91): this card holds TWO full ADSRs with no heading
+      // telling them apart — `subLabel` on the first knob of each group renders a small "Amp
+      // Envelope" / "Filter Envelope" heading right above it (SynthPanel.tsx's Group).
+      { ...k('attack', 'Attack', 0.001, 2, fmt.sec, true), subLabel: 'Amp Envelope' },
       k('decay', 'Decay', 0.001, 2, fmt.sec, true),
       k('sustain', 'Sustain', 0, 1, fmt.num2),
       k('release', 'Release', 0.001, 4, fmt.sec, true),
-      k('filterEnvAmount', 'Fenv', 0, 1, fmt.pct),
-      k('filterEnvAttack', 'FenvA', 0.001, 2, fmt.sec, true),
-      k('filterEnvDecay', 'FenvD', 0.001, 2, fmt.sec, true),
-      k('filterEnvSustain', 'FenvS', 0, 1, fmt.num2),
-      k('filterEnvRelease', 'FenvR', 0.001, 2, fmt.sec, true),
+      { ...k('filterEnvAmount', 'Fenv', 0, 1, fmt.pct), subLabel: 'Filter Envelope' },
+      // Phase 31 Stream KD item 1 (pilots 90/91 — both independently spent time tweaking these four
+      // "shape" knobs at 0% amount, heard nothing, and concluded the feature was broken):
+      // FenvA/FenvD/FenvS/FenvR are silently inert whenever `filterEnvAmount` is 0. `dimUnless` dims
+      // them and shows an inline "inactive until Fenv > 0" hint in that state.
+      { ...k('filterEnvAttack', 'FenvA', 0.001, 2, fmt.sec, true), dimUnless: { key: 'filterEnvAmount', label: 'Fenv' } },
+      { ...k('filterEnvDecay', 'FenvD', 0.001, 2, fmt.sec, true), dimUnless: { key: 'filterEnvAmount', label: 'Fenv' } },
+      { ...k('filterEnvSustain', 'FenvS', 0, 1, fmt.num2), dimUnless: { key: 'filterEnvAmount', label: 'Fenv' } },
+      { ...k('filterEnvRelease', 'FenvR', 0.001, 2, fmt.sec, true), dimUnless: { key: 'filterEnvAmount', label: 'Fenv' } },
       k('velToFilterAmount', 'Vel→F', 0, 1, fmt.pct),
     ],
   },
@@ -497,6 +520,20 @@ export const PARAM_GROUPS: ParamGroup[] = [
     ],
   },
 ]
+
+// Phase 31 Stream KD item 2 (pilot 90): "adding an effect via the chain's own add-effect flow
+// defaults its Mix control to 0% — audibly inert — with no visual cue." Every effectType group's
+// own Mix knob is the last param in its `params` array and its label is always exactly 'Mix'
+// (grep above: pingPongMix/chorusMix/phaserMix/saturatorMix/autoFilterMix/autoPanMix/tremoloMix/
+// grainDelayMix/vinylMix/resonatorMix, plus CompMix/DrvMix/CrushMix on the always-present
+// comp/distortion/bitcrush groups) — tag every one generically here instead of hand-editing each
+// `k(...)` call site above, so a future new effect's Mix knob is covered automatically as long as
+// it follows the same 'xMix' naming convention the rest of the file already uses.
+for (const group of PARAM_GROUPS) {
+  for (const spec of group.params) {
+    if (spec.kind === 'knob' && /mix$/i.test(spec.key)) spec.dimAtZero = true
+  }
+}
 
 // Phase 27 Stream EA bug 4: instrument tracks carry a real BeatSynth object like every other kind
 // (so a raw field READ never crashes), but src/core/edit.ts's setValue only actually ACCEPTS the

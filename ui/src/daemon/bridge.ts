@@ -242,7 +242,19 @@ export function newGestureId(): string {
 
 /** Actually POST one {path,value[,gestureId]} edit, chained onto the shared send queue so the
  * daemon never has two /edit requests in flight at once — its own id-minting for the append
- * grammar below depends on processing writes in the same order they were issued. */
+ * grammar below depends on processing writes in the same order they were issued.
+ *
+ * Phase 31 Stream KB (docs/phase-31-plan.md, docs/research/93): postEdit's optimistic local mirror
+ * (applyLocalEdit) faithfully replicates core's setValue GRAMMAR but not its VALIDATION — it has no
+ * idea an audio clip's `rate` must be 0.1-8, or any of core's other range/shape checks
+ * (validateAudioRegionFields etc., src/core/edit.ts). When the daemon's own validation rejects an
+ * edit (a non-ok /edit response), the store had ALREADY applied the rejected value — and until now,
+ * a rejection only logged a console.warn, leaving that now-wrong optimistic value sitting in the
+ * store indefinitely. That's exactly pilot 93's second repro: typing an out-of-range `rate` (-1)
+ * updated the on-screen clip label (driven by store.doc) and stayed that way — GET /document never
+ * matched it — until a full page reload re-pulled the real document from scratch. Re-pulling
+ * GET /document right here, the instant a rejection is known, closes that gap generally (for any
+ * validation the client's mirror doesn't itself replicate), not just for `rate`. */
 function enqueueEditPost(path: string, value: string, gestureId?: string): void {
   const base = daemonBase()
   sendQueue = sendQueue.then(() =>
@@ -252,7 +264,13 @@ function enqueueEditPost(path: string, value: string, gestureId?: string): void 
       body: JSON.stringify({ path, value, ...(gestureId !== undefined ? { gestureId } : {}) }),
     })
       .then(async (res) => {
-        if (!res.ok) console.warn(`[daw] /edit ${path}=${value}: HTTP ${res.status}`, await res.text().catch(() => ''))
+        if (!res.ok) {
+          console.warn(`[daw] /edit ${path}=${value}: HTTP ${res.status}`, await res.text().catch(() => ''))
+          // The daemon rejected this edit, so its document never changed — but our optimistic mirror
+          // already applied it. Reconcile the store back to ground truth instead of leaving a value
+          // on screen the server never actually wrote.
+          void pullDocument(base)
+        }
       })
       .catch((err) => console.warn('[daw] could not POST edit:', err)),
   )

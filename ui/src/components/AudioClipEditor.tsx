@@ -81,17 +81,50 @@ function AudioClipInspector({ track, clip }: { track: BeatTrack; clip: BeatClip 
       />
       <div className="audio-clip-inspector-fields">
         <span className="audio-clip-inspector-label">{clip.id}:</span>
+        {/* Phase 31 Stream KB: each numeric field is `key`ed on its own current store value, not just
+            `clip.id`. These are uncontrolled inputs (`defaultValue`, not `value`) — deliberately, so
+            typing isn't fought by a re-render on every keystroke — but that means a value change that
+            originates OUTSIDE this input (an external SSE doc update, or bridge.ts's postEdit
+            reconciling the store back to ground truth after the daemon REJECTS an out-of-range edit,
+            e.g. rate=-1 or out<=in) would otherwise never reach the DOM: React only honors
+            `defaultValue` at mount. Keying on the value forces a remount when it changes for any
+            reason other than this input's own onBlur, so a rejected edit's revert is visible on
+            screen immediately — not just after a page reload (research/93's second repro: the
+            display kept showing the rejected value until a hard reload). */}
         <label>
           in
-          <input type="number" step="0.01" min={0} defaultValue={region.in} data-audio-in={clip.id} onBlur={(e) => postEdit(`${base}.in`, e.target.value)} />
+          <input
+            key={`in-${region.in}`}
+            type="number"
+            step="0.01"
+            min={0}
+            defaultValue={region.in}
+            data-audio-in={clip.id}
+            onBlur={(e) => postEdit(`${base}.in`, e.target.value)}
+          />
         </label>
         <label>
           out
-          <input type="number" step="0.01" min={0} defaultValue={region.out} data-audio-out={clip.id} onBlur={(e) => postEdit(`${base}.out`, e.target.value)} />
+          <input
+            key={`out-${region.out}`}
+            type="number"
+            step="0.01"
+            min={0}
+            defaultValue={region.out}
+            data-audio-out={clip.id}
+            onBlur={(e) => postEdit(`${base}.out`, e.target.value)}
+          />
         </label>
         <label>
           gain (dB)
-          <input type="number" step="0.5" defaultValue={region.gainDb} data-audio-gain={clip.id} onBlur={(e) => postEdit(`${base}.gainDb`, e.target.value)} />
+          <input
+            key={`gain-${region.gainDb}`}
+            type="number"
+            step="0.5"
+            defaultValue={region.gainDb}
+            data-audio-gain={clip.id}
+            onBlur={(e) => postEdit(`${base}.gainDb`, e.target.value)}
+          />
         </label>
         <label>
           warp
@@ -116,7 +149,16 @@ function AudioClipInspector({ track, clip }: { track: BeatTrack; clip: BeatClip 
           // it couples pitch and speed together, unlike a real semitone knob).
           <label title="dotbeat's transpose equivalent: multiplies playback speed and pitch together (1 = unchanged, 2 = one octave up + double speed, 0.5 = one octave down + half speed).">
             rate (pitch + speed, ≈ transpose)
-            <input type="number" step="0.05" min={0.1} max={8} defaultValue={region.rate} data-audio-rate={clip.id} onBlur={(e) => postEdit(`${base}.rate`, e.target.value)} />
+            <input
+              key={`rate-${region.rate}`}
+              type="number"
+              step="0.05"
+              min={0.1}
+              max={8}
+              defaultValue={region.rate}
+              data-audio-rate={clip.id}
+              onBlur={(e) => postEdit(`${base}.rate`, e.target.value)}
+            />
           </label>
         )}
       </div>
