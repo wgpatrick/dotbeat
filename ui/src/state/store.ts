@@ -118,6 +118,19 @@ interface DawState {
    * Session-only, like `selectedTrackId` — not written to the .beat file, and (see `setDoc` below)
    * reset to null whenever it stops resolving against the live doc (song shrinks/clears). */
   selectedSectionIndex: number | null
+  /** Phase 29 Stream GB (docs/research/81, /86): bumped once per track each time a PRESET is
+   * actually applied to it — the in-panel PresetPicker (SynthPanel.tsx) and a Content-Browser
+   * drag-drop onto a track header both funnel through daemon/library.ts's applyPresetToTrack,
+   * which is the single place this increments. Neither "current preset" nor "macro dial
+   * position" is a real field in the `.beat` document (both are inferred client-side from raw
+   * synth params — see MacroKnob's own comment in SynthPanel.tsx) — this counter is the signal
+   * that inference needs to distinguish "a preset just replaced this track's params wholesale,
+   * re-derive my display" from "an ordinary param edit ticked by, my own in-progress state stays
+   * authoritative." Keyed by track id; the number itself is meaningless, only a CHANGE in it is —
+   * same idiom `currentStep` already uses for "did a tick happen," just keyed and manual instead
+   * of a shared clock. Session-only, like every other GUI-inference field here; resets on reload
+   * (a fresh mount re-derives straight from the live document instead, see MacroKnob/PresetPicker). */
+  presetEpoch: Record<string, number>
 
   setDoc: (doc: BeatDocument) => void
   setConnected: (c: boolean) => void
@@ -140,6 +153,7 @@ interface DawState {
   setLoopRegion: (r: { start: number; end: number } | null) => void
   setAuditioning: (trackId: string | null) => void
   setUndoState: (s: { canUndo: boolean; canRedo: boolean }) => void
+  bumpPresetEpoch: (trackId: string) => void
 }
 
 export const useStore = create<DawState>((set) => ({
@@ -166,6 +180,7 @@ export const useStore = create<DawState>((set) => ({
   canUndo: false,
   canRedo: false,
   selectedSectionIndex: null,
+  presetEpoch: {},
 
   setDoc: (doc) =>
     set((s) => ({
@@ -199,6 +214,7 @@ export const useStore = create<DawState>((set) => ({
   setLoopRegion: (loopRegion) => set({ loopRegion }),
   setAuditioning: (auditioningTrackId) => set({ auditioningTrackId }),
   setUndoState: ({ canUndo, canRedo }) => set({ canUndo, canRedo }),
+  bumpPresetEpoch: (trackId) => set((s) => ({ presetEpoch: { ...s.presetEpoch, [trackId]: (s.presetEpoch[trackId] ?? 0) + 1 } })),
 }))
 
 /** A track is effectively silenced iff it is explicitly muted, OR any track is soloed and this one
