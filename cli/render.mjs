@@ -106,7 +106,14 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   const browser = await chromium.launch({
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
     headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required'],
+    // The throttling flags matter for real-time capture: a headless page counts as backgrounded,
+    // and background throttling slows the audio graph's driving timers, worsening capture underrun.
+    args: [
+      '--autoplay-policy=no-user-gesture-required',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+    ],
   })
   const page = await browser.newPage()
   const pageErrors = []

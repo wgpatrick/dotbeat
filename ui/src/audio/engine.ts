@@ -3900,7 +3900,15 @@ class Engine {
       recorder.onstop = () => resolve()
     })
     recorder.start()
-    await new Promise((r) => setTimeout(r, Math.ceil(seconds * 1000) + 150))
+    // Wait in AUDIO time, not wall-clock time: on an overloaded machine a realtime context
+    // produces samples slower than wall clock (underrun), so a setTimeout(seconds)-style wait
+    // stops the recorder with only part of the music captured — observed truncating a 55s
+    // 7-track render to 22s on a loaded headless container. currentTime only advances as
+    // samples are actually produced, so gating on it is machine-speed-independent.
+    const recCtx = Tone.getContext().rawContext
+    const recStart = recCtx.currentTime
+    while (recCtx.currentTime - recStart < seconds) await new Promise((r) => setTimeout(r, 100))
+    await new Promise((r) => setTimeout(r, 150))
     recorder.stop()
     await stopped
     const captured = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
