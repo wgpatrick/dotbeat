@@ -1528,6 +1528,60 @@ export const rows = [
     research: 'research/79-ux-overall-patterns-round2.md', plan: 'phase-28-plan.md',
   },
 
+  // ── Reliability & usability fixes (Phase 29) ──────────────────────────────
+  // Source: seven exploratory usability pilots (research/80-86), an agent driving the real app
+  // with no pre-scripted checklist, actually reading its own screenshots — a methodology distinct
+  // from ui/verify-*.mjs's scripted assertions (see docs/usability-testing.md). Found ~30 real
+  // bugs/friction points scripted verify scripts structurally couldn't catch; this phase fixed them.
+  {
+    area: 'Reliability & usability fixes (Phase 29)', feature: 'Scene/clip-editor targeting — edit any section\'s clip, not just the first',
+    description: 'The single highest-impact pilot finding: once a song had more than one section, `primaryClipFor` and `placeInArrangement` both always resolved to `doc.song[0]`\'s scene, so there was no GUI way to view or place into any but the first section\'s clip content (research/83, 84, 86 all independently hit this and gave up on the GUI). Added a real "selected section" concept to the store, wired to clip-block/section-chip clicks, with bidirectional retargeting confirmed live. Also: a visual "linked scene" indicator when sections share a scene, and orphaned scenes are pruned on section delete.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/83-usability-pilot-bass-loop-variation.md', plan: 'phase-29-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 29)', feature: 'Macro knob display re-syncs after a preset switch',
+    description: 'Macro knobs re-derived their displayed position only on a track switch, not a preset switch, so applying a new preset left the macro row showing stale numbers from the old one — worse under a page reload, where the preset label itself could revert while the macro knobs showed a third, unrelated set of values (research/81, 86). A `presetEpoch` counter, bumped once per real preset apply, now drives the re-sync without clobbering a user\'s own in-progress knob drag.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/86-usability-pilot-song-structure-mix.md', plan: 'phase-29-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 29)', feature: 'Note/drum grid click precision + view stability',
+    description: 'Click-to-add snapped to the nearest gridline instead of the containing cell, silently placing hits one step late (research/80, confirmed across 24 real hits). Also fixed: the piano roll auto-recentering (up to a full octave) after every note add, a click on empty grid while a note was selected only deselecting instead of adding, marquee selection not narrowing on a plain click, drag-resize causing scroll drift, and a sticky title bar re-docking over real content rows.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/80-usability-pilot-fresh-project.md', plan: 'phase-29-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 29)', feature: 'Rapid-edit data loss + daemon crash logging',
+    description: 'Rapid successive grid clicks (a musician tapping out a beat at a natural pace) silently lost most of the hits — ~24 clicks 300-400ms apart persisted only ~4 (research/82) — a debounce collision where a bare note/hit ADD\'s pending POST got clearTimeout\'d by the next click in the same window. Append-grammar edits now enqueue immediately instead of debouncing. Also added uncaughtException/unhandledRejection handlers to the daemon process (observed dying silently, zero log output, three separate times across pilots) so a crash now leaves a real stack trace.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/82-usability-pilot-drum-variation.md', plan: 'phase-29-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 29)', feature: 'In-app toast notifications, replacing raw window.alert()',
+    description: 'Roughly 25 error/confirmation call sites across the GUI used raw, unstyled native `window.alert()` — jarring against the rest of the dark theme, and outright hostile to any automated driver (a Playwright pilot\'s default dialog auto-dismiss ate one before it could be read, crashing the driver). A new dismissable, styled toast component now covers every pure-notification alert() site; `window.confirm()` is untouched for genuine destructive-action confirmations.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/85-usability-pilot-audio-sample-layering.md', plan: 'phase-29-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 29)', feature: 'In-app checkpoint creation (History panel)',
+    description: 'A GUI-only user had no discoverable way to snapshot their work — the History panel\'s own copy ("make an edit to save one") was actively false, since edits alone never create a checkpoint, and no button existed to make one (research/80, after dozens of real edits in one session). Added a real "Save checkpoint" button (optional label, matching `beat checkpoint --label`) as a thin wrapper around the existing checkpoint machinery, plus a new `POST /checkpoint` daemon route.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/80-usability-pilot-fresh-project.md', plan: 'phase-29-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 29)', feature: 'Content Browser drag-and-drop discoverability',
+    description: 'The Content Browser was the one major panel with zero inline usage hint — every other panel over-explains itself in gray hint text, this one under-explained itself, and its actual interaction model (drag onto a track; click alone does nothing) was invisible until stumbled into or found via DOM inspection (research/80, independently reconfirmed in 83). Added an inline hint line matching the rest of the app\'s convention; also added a visual "audio" badge distinguishing real sample rows from synthesized-preset rows that visually read as loops but aren\'t.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/80-usability-pilot-fresh-project.md', plan: 'phase-29-plan.md',
+  },
+  {
+    area: 'Reliability & usability fixes (Phase 29)', feature: 'Layout/visual polish sweep (10 items)',
+    description: 'Mixer\'s modal scrim silently blocked the topbar Undo button (only Ctrl/Cmd+Z worked); a genuine horizontal body-overflow bug on tall note selections; a near-invisible arrangement clip-block border; a stale track-name label after rename; an audio clip\'s loop fields visually responding but never persisting (`serializeClipProps` wasn\'t called for the audio branch); `warp: complex` selectable with no "not yet implemented" signal; an empty automation lane rendering near-invisibly with no click affordance; an automation-parameter dropdown resetting to the top of its list on every add; and effect Sends buried at the bottom of a six-section accordion now defaulting open.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/81-usability-pilot-existing-song.md', plan: 'phase-29-plan.md',
+  },
+
   // ── Desktop app / packaging ──────────────────────────────────────────────
   {
     area: 'Desktop app / packaging', feature: 'Tauri shell, compiled sidecar, bundled starter',

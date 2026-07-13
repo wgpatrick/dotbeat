@@ -11,7 +11,7 @@ blob you hope merges.
 
 ```bash
 npm install
-npm test                          # 603 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
+npm test                          # 608 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat bass.cutoff 900   # prints "bass: cutoff 700 -> 900"
@@ -55,7 +55,7 @@ the full thesis and prior-art comparison.
 
 | Path | What |
 |---|---|
-| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (271 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
+| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (279 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, prior-art comparison, research provenance. |
 | `src/core/` | The `.beat` format: types, parser, serializer, converter, semantic diff, edit primitives (quantize/humanize/transpose/fit-to-scale/groove/…), inspect. Pure TS, no GUI deps. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over HTTP/SSE, echo suppression by canonical-text comparison. |
@@ -66,12 +66,13 @@ the full thesis and prior-art comparison.
 | `ui/` | dotbeat's own GUI (Vite + React + Tone.js) — arrangement view, piano-roll/drum-lane clip editing, mixer, effects chain, content browser. Its own product design, not a wrapped teaching app (see `docs/decisions.md` D12). |
 | `desktop/` | Tauri desktop shell — early-stage, working toward a native Mac app (`docs/product-spec-desktop.md`). |
 | `cli/beat.mjs` | The unified `beat` CLI — run with no args for the full, current command list. |
-| `test/` | 603 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
+| `test/` | 608 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
 | `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
 | `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
 | `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
-| [`docs/research/`](docs/research/) | 86 research passes — landscape/prior-art, engine architecture, three full passes against Ableton Live's own reference manual (feature-by-feature 50-69, implementation-level UI/UX 70-74, round-2 live re-verification 75-79), and a batch of exploratory usability pilots (80-86) — an agent driving the real app via Playwright with no pre-scripted checklist, reading its own screenshots and reacting like a human tester, across realistic musical workflows (fresh-project build, existing-song editing, drum-clip variation, bass loop authoring, chord/automation, audio-sample layering, song structuring + mixing). |
+| [`docs/research/`](docs/research/) | 89 research passes — landscape/prior-art, engine architecture, three full passes against Ableton Live's own reference manual (feature-by-feature 50-69, implementation-level UI/UX 70-74, round-2 live re-verification 75-79), and ten exploratory usability pilots (80-89, see `docs/usability-testing.md`) — an agent driving the real app via Playwright with no pre-scripted checklist, reading its own screenshots and reacting like a human tester, across realistic musical workflows and, in a second round, focused audits of core feature areas (arrangement view, clip creation, clip editing). |
 | [`docs/decisions.md`](docs/decisions.md) | 15 numbered design decisions with rationale and "revisit when" — check before proposing something that might contradict one. |
+| [`docs/usability-testing.md`](docs/usability-testing.md) | The exploratory usability-pilot methodology — no checklist, an agent reads its own screenshots and reacts like a human tester. A standing practice, run alongside `ui/verify-*.mjs`'s scripted assertions whenever GUI-facing behavior changes. |
 | [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format grammar. |
 | [`docs/architecture.md`](docs/architecture.md) | Component architecture (daemon, engine, CLI, MCP, GUI/desktop tiers). |
 
@@ -79,7 +80,7 @@ the full thesis and prior-art comparison.
 
 Well past the original v0 proof-of-concept: dotbeat now has its own GUI (arrangement view, clip
 authoring, mixer, effects chain, content browser — not a wrapped version of the BeatLab teaching
-app it started from), a 603-test suite, a session-local undo/redo stack alongside the git-backed
+app it started from), a 608-test suite, a session-local undo/redo stack alongside the git-backed
 checkpoint/restore history system, and a growing library of adversarially-researched design docs.
 Three research passes against Ableton Live 12's own reference manual have directly shaped recent
 work. A feature-by-feature comparison drove a batch of P0 shipments: in-session undo/redo, a real
@@ -96,9 +97,13 @@ cross-cutting design-token/typography pass plus a keyboard-shortcut reference pa
 follow-up re-verified all of it live and caught real regressions between independently-shipped
 fixes before they could ship broken. A newer, complementary thread — exploratory usability pilots
 with no pre-scripted checklist, an agent driving the real app and reading its own screenshots
-like a human tester — has since surfaced bugs the scripted verify suite structurally can't catch
-(a grid-click off-by-one, macro knobs desyncing from actual state after a preset swap, a clip
-editor that gets stuck on the first scene once a song has more than one). `docs/product-roadmap.md`
+like a human tester (`docs/usability-testing.md`) — surfaced ~30 real bugs and friction points the
+scripted verify suite structurally can't catch: a grid-click off-by-one, macro knobs desyncing from
+actual state after a preset swap, a clip editor that got stuck on a song's first scene once it had
+more than one, rapid grid clicks silently losing data, and a Mixer modal that quietly ate the
+topbar Undo button, among others. Phase 29 fixed all of it in six parallel streams, independently
+re-verified, catching one real cross-stream regression along the way (two streams' fixes to the
+same file shipped correctly in isolation but collided once merged). `docs/product-roadmap.md`
 tracks every feature's real status;
 `ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
 built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a
