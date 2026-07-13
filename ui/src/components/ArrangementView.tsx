@@ -86,14 +86,19 @@ function previewResizeSections(sections: Section[], index: number, bars: number,
  * resize/delete. Phase 26 Stream DJ adds 'insert' (a brand-new EMPTY scene spliced in at `index`)
  * and 'captureInsert' (a brand-new scene pre-populated by snapshotting every track's current live
  * content, same position) — unlike 'append', neither ever reuses an existing scene id, so the
- * resulting section starts genuinely independent rather than sharing state with a sibling. */
+ * resulting section starts genuinely independent rather than sharing state with a sibling. Phase 32
+ * Stream LB adds 'renameScene' ({id, name}) — sets or (name omitted/undefined) clears a scene's
+ * display name; named on the scene (not the section), so it travels with every section that
+ * reuses it, same op-dispatch shape as the rest. */
 async function postSong(body: {
-  op: 'append' | 'resize' | 'delete' | 'move' | 'insert' | 'captureInsert'
+  op: 'append' | 'resize' | 'delete' | 'move' | 'insert' | 'captureInsert' | 'renameScene'
   index?: number
   bars?: number
   policy?: OverlapPolicy
   from?: number
   to?: number
+  id?: string
+  name?: string
 }): Promise<void> {
   const base = daemonBase()
   try {
@@ -1604,6 +1609,21 @@ export function ArrangementView() {
   // an ancestor stable enough to see every row's clicks, not inside any one row.
   const lastTrackSelectClickRef = useRef<{ trackId: string; at: number } | null>(null)
   const [renameRequest, setRenameRequest] = useState<{ trackId: string; nonce: number } | null>(null)
+  // Phase 32 Stream LB: inline rename for a section chip's scene name, double-click to open — same
+  // one-double-click convention as track rename (KE), just not the deflected-click coordinator
+  // dance track rename needed: selecting a section (`setSelectedSection`) is a plain state set with
+  // no sibling toolbar mounting above the chips, so there's no analogous layout-shift-mid-gesture
+  // bug here for a plain per-chip onDoubleClick to worry about.
+  const [sceneRename, setSceneRename] = useState<{ sceneId: string; draft: string } | null>(null)
+  const commitSceneRename = useCallback(() => {
+    setSceneRename((cur) => {
+      if (!cur) return null
+      const trimmed = cur.draft.trim()
+      const sanitized = trimmed.replace(/[^a-zA-Z0-9_-]/g, '')
+      void postSong({ op: 'renameScene', id: cur.sceneId, ...(sanitized ? { name: sanitized } : {}) })
+      return null
+    })
+  }, [])
   const handleArrangementClickCapture = useCallback((e: React.MouseEvent) => {
     const DOUBLE_CLICK_MS = 400
     const target = e.target as HTMLElement
@@ -2614,6 +2634,13 @@ export function ArrangementView() {
               const isDragging = sectionDrag.draggingIndex === i
               const isDropTarget = sectionDrag.overIndex === i && sectionDrag.draggingIndex !== null && sectionDrag.draggingIndex !== i
               const shareCount = sceneShareCounts.get(s.scene) ?? 1
+              // Phase 32 Stream LB: the chip shows the scene's own display name when it has one
+              // (underscores rendered as spaces — the internal slug/display-label split other
+              // per-id fields in this format already lean on), falling back to the raw scene id —
+              // never blank, matching the existing "section chips show something" contract.
+              const sceneObj = doc.scenes.find((sc) => sc.id === s.scene)
+              const sceneDisplayName = (sceneObj?.name ?? s.scene).replace(/_/g, ' ')
+              const isRenamingThis = sceneRename?.sceneId === s.scene
               const chipClasses = [
                 'arr-section-chip',
                 isDragging && 'dragging',
@@ -2650,14 +2677,37 @@ export function ArrangementView() {
                 <span className="arr-chip-drag-handle" data-section-drag-handle={i} title="drag to reorder">
                   ⠿
                 </span>
-                <span
-                  className="arr-chip-name"
-                  data-section-select={i}
-                  title={`scene "${s.scene}" — click to view/edit this section's content in the bottom panel`}
-                  onClick={() => setSelectedSection(i)}
-                >
-                  {s.scene}
-                </span>
+                {isRenamingThis ? (
+                  <input
+                    className="arr-chip-name-input"
+                    data-rename-scene={s.scene}
+                    autoFocus
+                    value={sceneRename!.draft}
+                    onChange={(e) => setSceneRename({ sceneId: s.scene, draft: e.target.value })}
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.currentTarget.blur()
+                      } else if (e.key === 'Escape') {
+                        setSceneRename(null)
+                      }
+                    }}
+                    onBlur={commitSceneRename}
+                  />
+                ) : (
+                  <span
+                    className="arr-chip-name"
+                    data-section-select={i}
+                    title={`scene "${s.scene}"${sceneObj?.name ? ` (named "${sceneDisplayName}")` : ''} — click to view/edit this section's content below, double-click to rename`}
+                    onClick={() => setSelectedSection(i)}
+                    onDoubleClick={() => {
+                      setSelectedSection(i)
+                      setSceneRename({ sceneId: s.scene, draft: sceneObj?.name ?? '' })
+                    }}
+                  >
+                    {sceneDisplayName}
+                  </span>
+                )}
                 {shareCount > 1 && (
                   <span
                     className="arr-chip-linked"
@@ -2897,6 +2947,11 @@ export function ArrangementView() {
           >
             {renderSections.map((s, i) => {
               const shareCount = sceneShareCounts.get(s.scene) ?? 1
+              // Phase 32 Stream LB: same name-with-id-fallback the SECTIONS toolbar chip uses
+              // (above) — a read-only display here (rename lives on the chip, not the ruler), but
+              // showing the raw id in one place and the name in the other would read as two
+              // different sections at a glance, so both surfaces stay in sync.
+              const rulerSceneName = (doc.scenes.find((sc) => sc.id === s.scene)?.name ?? s.scene).replace(/_/g, ' ')
               return (
               <div
                 key={i}
@@ -2904,14 +2959,14 @@ export function ArrangementView() {
                 style={{ left: s.startBar * renderPxPerBar, width: s.bars * renderPxPerBar, height: RULER_H - TICK_ROW_H }}
                 title={
                   shareCount > 1
-                    ? `${s.scene} · ${s.bars} bars · shares this scene with ${shareCount - 1} other section${shareCount - 1 === 1 ? '' : 's'}`
-                    : `${s.scene} · ${s.bars} bars`
+                    ? `${rulerSceneName} · ${s.bars} bars · shares this scene with ${shareCount - 1} other section${shareCount - 1 === 1 ? '' : 's'}`
+                    : `${rulerSceneName} · ${s.bars} bars`
                 }
               >
                 {shareCount > 1 && (
                   <span className="arr-section-linked" style={{ background: sceneLinkColor(s.scene) }} />
                 )}
-                <span className="arr-section-name">{s.scene}</span>
+                <span className="arr-section-name">{rulerSceneName}</span>
                 <span className="arr-section-bars">{s.bars}</span>
               </div>
               )

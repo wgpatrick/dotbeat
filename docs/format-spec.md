@@ -815,6 +815,61 @@ independently enabled.
   addition), diff, `beat inspect` — needed ZERO special-casing: `eq7` is table-driven through the
   same `SYNTH_FIELDS`/`EFFECT_TYPES` machinery every other type already uses.
 
+### v0.10 additions — scene/section naming (Phase 32 Stream LB, docs/research/90)
+
+Sections/scenes had no `name` field at all — only the auto-generated scene id (`s1`, `s2`, ...)
+forever (docs/research/90: a pilot building "Part A"/"Part B" chord progressions had no way to
+label them except renaming the underlying track, since that was the only real "call this Part A"
+naming surface in the whole document model). An optional `name` line, nested inside a `scene`
+block, same shape as `slot`:
+
+```
+scene s1
+  name partA
+  slot lead clip1
+```
+
+- **Named on the SCENE, not the SECTION.** Confirmed against docs/research/93's "scene vs section"
+  comparison, which spells the distinction out explicitly: "a 'scene' is the reusable bundle of
+  clips; a 'section' is one placement of a scene into the timeline." research/90's own pilot
+  built two DISTINCT scenes for Part A and Part B (`s1`=A, `s2`=B, later `s3`=copy of A, `s4`=copy
+  of B) — a scene already IS dotbeat's unit of distinct musical content, so a name naturally
+  attaches to the content, not to wherever it's placed. The tradeoff this doesn't cover — the same
+  scene reused as, say, both an "Intro" and an "Outro" wanting two different display names — is a
+  real but narrower case (research/93 raises it as a hypothetical, not an observed pilot need);
+  scene-level naming is the smaller, more natural v1, and section-level override is a clean
+  additive extension later if that case turns out to matter in practice.
+- **A slug-like token (`SLUG_RE`: alphanumeric/_/-), not free text** — the format has no
+  quoted-string mechanism anywhere (confirmed by grep before this stream: every field is
+  whitespace-tokenized), and inventing one just for this field would be a real, cross-cutting
+  parser/serializer change for a single cosmetic label. The GUI renders underscores as spaces for
+  display (`partA` / `part_a` -> "part a"), matching the internal-slug/display-label split other
+  tools use, the same way track `name` already tolerates no whitespace but the GUI surfaces
+  space-stripping inline (Phase 30 Stream JD) rather than silently mangling input.
+- **Canonical elision (D9), no version bump.** Omitting `name` is exactly today's behavior — every
+  pre-existing scene id keeps doubling as its own label, and the `name` line is entirely absent
+  from a scene with no name (parses and round-trips unchanged, zero-diff for every existing
+  `.beat` file). Filed as a v0.10 addition, not a fresh `0.11`, matching this format's established
+  practice since Phase 22: `BEAT_FORMAT_VERSION` only bumps for a genuinely load-bearing grammar
+  shift (the audio-region addition above); a single optional field with full backward compatibility
+  is the same class of change as eq7/grain-delay/open-lane-list above, all filed under "v0.10
+  additions" without a further bump.
+- **Edit primitive** (`src/core/edit.ts`): `renameScene(doc, sceneId, name: string | null)` sets or
+  (with `name = null`) clears a scene's name — same shape as `renameGroup`. `setScene` (the
+  slot-map setter) now preserves an existing scene's name across a re-set, the same "structural
+  edit doesn't wipe unrelated metadata" discipline `saveClip` already follows for automation/loop.
+- **CLI/MCP**: `beat scene-set <file> <scene-id> --name N|--clear-name` / MCP `beat_scene_set`
+  (mirrors `beat group-set`'s `--name` flag / `beat_group_set`). The daemon's own `/song` route
+  (where the rest of the scene-minting ops — `insert`/`captureInsert` — already live) gained a
+  `renameScene` op for the GUI.
+- **Diff**: a scene's name change reports as `scene <id>: name <before> -> <after>` (`(none)` for
+  absent), a new `scene-meta` `DiffEntry` kind alongside the existing `scene-added`/`scene-removed`/
+  `scene-slot`.
+- **GUI** (`ArrangementView.tsx`): section chips show the scene's name (falling back to the raw id
+  when absent — the existing "section chips show something" contract is unconditional either way);
+  double-click the chip's name to rename in place, one double-click whether or not the section was
+  already selected (the Phase 31 Stream KE convention).
+
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
 Clips/scenes (shipped v0.4), arrangement (shipped v0.4), multi-device chains beyond the

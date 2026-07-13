@@ -1121,17 +1121,43 @@ export function loadClip(doc: BeatDocument, trackId: string, clipId: string): Be
 }
 
 /** Sets (or creates) a scene's slot map. Every slot must reference an existing clip on an
- * existing track — same fail-loudly stance as the parser. */
+ * existing track — same fail-loudly stance as the parser. Preserves the scene's existing `name`
+ * (v0.10, Phase 32 Stream LB) when re-setting an already-named scene, the same "re-snapshot
+ * doesn't wipe unrelated metadata" discipline `saveClip` already follows for automation/loop —
+ * this is a slot-map edit, not a rename. */
 export function setScene(doc: BeatDocument, sceneId: string, slots: Record<string, string>): BeatDocument {
   if (!/^[a-zA-Z0-9_-]+$/.test(sceneId)) throw new BeatEditError(`scene ids are single alphanumeric/_/- tokens, got "${sceneId}"`)
   for (const [trackId, clipId] of Object.entries(slots)) {
     const track = findTrack(doc, trackId)
     if (!track.clips.some((c) => c.id === clipId)) throw new BeatEditError(`track "${trackId}" has no clip "${clipId}" (have: ${track.clips.map((c) => c.id).join(', ') || 'none'})`)
   }
-  const scene = { id: sceneId, slots: { ...slots } }
   const existing = doc.scenes.findIndex((s) => s.id === sceneId)
+  const existingName = existing === -1 ? undefined : doc.scenes[existing]!.name
+  const scene = { id: sceneId, ...(existingName !== undefined ? { name: existingName } : {}), slots: { ...slots } }
   const scenes = existing === -1 ? [...doc.scenes, scene] : doc.scenes.map((s, i) => (i === existing ? scene : s))
   return { ...doc, scenes }
+}
+
+/** Sets (or clears, with name = null) a scene's display name (Phase 32 Stream LB — the GUI's
+ * double-click-to-rename affordance on a section chip, mirroring `renameGroup`/track rename).
+ * Named on the SCENE, not the section: a scene is dotbeat's unit of distinct musical content, and
+ * the same scene reused across multiple sections should read as the same name everywhere (see
+ * BeatScene's own doc comment for the full scene-vs-section reasoning). */
+export function renameScene(doc: BeatDocument, sceneId: string, name: string | null): BeatDocument {
+  const scene = doc.scenes.find((s) => s.id === sceneId)
+  if (!scene) throw new BeatEditError(`no scene "${sceneId}" (have: ${doc.scenes.map((s) => s.id).join(', ') || 'none'})`)
+  if (name !== null && !/^[a-zA-Z0-9_-]+$/.test(name)) throw new BeatEditError(`scene names are single alphanumeric/_/- tokens, got "${name}"`)
+  return {
+    ...doc,
+    scenes: doc.scenes.map((s) => {
+      if (s.id !== sceneId) return s
+      if (name === null) {
+        const { name: _drop, ...rest } = s
+        return rest
+      }
+      return { ...s, name }
+    }),
+  }
 }
 
 /** Replaces the song's section list (the whole timeline is one statement — sections are few and

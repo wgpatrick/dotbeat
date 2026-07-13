@@ -20,6 +20,7 @@ import {
   parse,
   saveClip,
   setScene,
+  renameScene,
   setSong,
   songMove,
   insertScene,
@@ -146,6 +147,10 @@ const USAGE = `usage:
                                                           default linear — omit on a move to keep the existing shape)
   beat clip <file> <track> <clip-id>                      snapshot the track's live content into a clip
   beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
+  beat scene-set <file> <scene-id> --name N|--clear-name  rename a scene (or clear its name, back to showing
+                                                          just the id) — the scene IS the reusable bundle of
+                                                          content, so its name follows it into every section
+                                                          that reuses it
   beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
   beat song-move <file> <from-index> <to-index>           reorder a section — a two-line diff, not a rewrite
   beat song-insert <file> <index> <bars>                  insert a NEW section with a fresh, empty, independent scene at
@@ -941,6 +946,20 @@ function sceneCmd(argv) {
   writeDoc(file, before, setScene(before, sceneId, slots))
 }
 
+// Phase 32 Stream LB: renames (or clears) a scene's display name — the CLI/agent face on
+// renameScene, same shape as group-set's --name flag.
+function sceneSetCmd(argv) {
+  const [file, sceneId, ...rest] = argv
+  if (!file || !sceneId) throw new BeatEditError('scene-set needs <file> <scene-id> --name N|--clear-name')
+  const nameIdx = rest.indexOf('--name')
+  const clearName = rest.includes('--clear-name')
+  if (nameIdx === -1 && !clearName) throw new BeatEditError('scene-set needs at least one of --name/--clear-name')
+  if (nameIdx !== -1 && clearName) throw new BeatEditError('scene-set: pass either --name or --clear-name, not both')
+  const before = readDoc(file)
+  const name = clearName ? null : rest[nameIdx + 1]
+  writeDoc(file, before, renameScene(before, sceneId, name))
+}
+
 function songCmd(argv) {
   const [file, ...rest] = argv
   if (!file) throw new BeatEditError('song needs <file> [<scene> <bars> ...]')
@@ -1420,6 +1439,9 @@ async function main() {
       break
     case 'scene':
       sceneCmd(rest)
+      break
+    case 'scene-set':
+      sceneSetCmd(rest)
       break
     case 'song':
       songCmd(rest)

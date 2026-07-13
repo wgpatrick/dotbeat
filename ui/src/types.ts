@@ -202,6 +202,7 @@ export interface BeatClip {
 
 export interface BeatScene {
   id: string
+  name?: string // v0.10 (Phase 32 Stream LB) — optional display name; falls back to id when absent
   slots: Record<string, string> // trackId -> clipId
 }
 

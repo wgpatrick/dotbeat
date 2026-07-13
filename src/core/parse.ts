@@ -585,6 +585,19 @@ export function parse(text: string): BeatDocument {
         continue
       }
       // scene and song sub-lines
+      // v0.10 (Phase 32 Stream LB): an optional nested `name <token>` line, same shape as other
+      // nested per-scene/per-track fields (e.g. `lane <name> <backing>` inside a track block).
+      // Slug-like token (SLUG_RE) — the format has no quoted-string mechanism (confirmed by grep
+      // before this stream: every field is whitespace-tokenized), so this reuses the existing
+      // id-style convention rather than inventing one just for this field.
+      if (currentScene && keyword === 'name') {
+        if (tokens.length !== 2) throw new BeatParseError('name expects exactly 1 value: <name>', lineNo)
+        const name = tokens[1]!
+        if (!SLUG_RE.test(name)) throw new BeatParseError(`scene names are single alphanumeric/_/- tokens, got "${name}"`, lineNo)
+        if (currentScene.name !== undefined) throw new BeatParseError(`scene "${currentScene.id}" already has a name`, lineNo)
+        currentScene.name = name
+        continue
+      }
       if (currentScene && keyword === 'slot') {
         if (tokens.length !== 3) throw new BeatParseError('slot expects exactly 2 values: <track> <clip>', lineNo)
         const [, trackId, clipId] = tokens as [string, string, string]

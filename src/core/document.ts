@@ -646,9 +646,18 @@ export interface BeatClip {
 export const TIME_SIG_DENOMINATORS: readonly number[] = [1, 2, 4, 8, 16, 32]
 
 /** v0.4: a scene maps tracks to clips — one complete statement of "what plays". Mirrors
- * beatlab's Scene.clipIds. Serialized as one `slot` line per mapping, in track order. */
+ * beatlab's Scene.clipIds. Serialized as one `slot` line per mapping, in track order.
+ * v0.10 (Phase 32 Stream LB, docs/research/90): an optional human-facing `name` — a scene is
+ * dotbeat's unit of distinct musical content (research/93's "scene vs section" comparison: "a
+ * 'scene' is the reusable bundle of clips; a 'section' is one placement of a scene into the
+ * timeline"), so a label like "Part A"/"Part B" belongs here, not on `BeatSongSection` — the same
+ * scene reused across two sections shows the same name in both places. Optional and elided when
+ * absent (canonical form D9): every pre-existing scene id doubles as its own label until a `name`
+ * line opts in, exactly today's behavior. Slug-like token (`SLUG_RE`), not free text — see
+ * parse.ts/serialize.ts's `name` handling. */
 export interface BeatScene {
   id: string
+  name?: string
   slots: Record<string, string> // trackId -> clipId
 }
 

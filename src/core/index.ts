@@ -32,6 +32,7 @@ export {
   saveClip,
   loadClip,
   setScene,
+  renameScene,
   setSong,
   songMove,
   nextSceneId,

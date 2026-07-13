@@ -46,6 +46,7 @@ import {
   saveClip,
   loadClip,
   setScene,
+  renameScene,
   setSong,
   songMove,
   nextSceneId,
@@ -1053,7 +1054,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     if (req.method === 'POST' && url.pathname === '/song') {
       readBody(req)
         .then((body) => {
-          const b = JSON.parse(body) as { op?: unknown; index?: unknown; bars?: unknown; policy?: unknown; from?: unknown; to?: unknown }
+          const b = JSON.parse(body) as { op?: unknown; index?: unknown; bars?: unknown; policy?: unknown; from?: unknown; to?: unknown; id?: unknown; name?: unknown }
           let next: BeatDocument
           let sceneId: string | undefined
           if (b.op === 'append') next = songAppend(doc, Number(b.bars))
@@ -1068,8 +1069,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             const r = captureAndInsertScene(doc, Number(b.index), Number(b.bars))
             next = r.doc
             sceneId = r.sceneId
+          } else if (b.op === 'renameScene') {
+            // Phase 32 Stream LB: renames (or, with name === null/omitted, clears) a scene's
+            // display name — lives on /song alongside the rest of the arrangement/scene structural
+            // ops (insert/captureInsert already mint scene ids here too) rather than a new route.
+            if (typeof b.id !== 'string') {
+              json(res, 400, { error: "op 'renameScene' needs a string id" })
+              return
+            }
+            next = renameScene(doc, b.id, typeof b.name === 'string' ? b.name : null)
           } else {
-            json(res, 400, { error: `unknown song op "${String(b.op)}" (expected append|resize|delete|move|insert|captureInsert)` })
+            json(res, 400, { error: `unknown song op "${String(b.op)}" (expected append|resize|delete|move|insert|captureInsert|renameScene)` })
             return
           }
           const written = writeIfChanged(next)

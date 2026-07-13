@@ -54,6 +54,7 @@ import {
   describeDocument,
   saveClip,
   setScene,
+  renameScene,
   setSong,
   songMove,
   insertScene,
@@ -890,6 +891,29 @@ const TOOLS: ToolDef[] = [
       for (const c of (args.clips as { track: string; clip: string }[] | undefined) ?? []) doc = saveClip(doc, c.track, c.clip).doc
       for (const s of (args.scenes as { id: string; slots: Record<string, string> }[] | undefined) ?? []) doc = setScene(doc, s.id, s.slots)
       if (args.song !== undefined) doc = setSong(doc, args.song as { scene: string; bars: number }[])
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_scene_set',
+    description:
+      'Rename (or clear) a scene\'s display name. Named on the SCENE, not the section: a scene is dotbeat\'s unit of distinct musical content (e.g. "Part A"), and the same scene reused across multiple sections shows the same name in every section that reuses it. A slug-like token (letters/digits/_/-), like scene/track ids — pass name to set it, or omit name/pass an empty value to clear it back to showing just the id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        id: { type: 'string', description: 'the scene id (e.g. "s1")' },
+        name: { type: 'string', description: 'omit or pass "" to clear the name back to just the id' },
+      },
+      required: ['file', 'id'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const id = str(args, 'id')
+      const name = typeof args.name === 'string' && args.name.length > 0 ? args.name : null
+      const doc = renameScene(before, id, name)
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
     },

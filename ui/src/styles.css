@@ -3217,6 +3217,20 @@ body {
   color: var(--accent);
   text-decoration: underline;
 }
+/* Phase 32 Stream LB: inline rename for a section chip's scene name (double-click .arr-chip-name
+   to open) — same visual treatment as .arr-track-rename's inline track-name edit. */
+.arr-chip-name-input {
+  width: 90px;
+  font: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  padding: 0 3px;
+  margin-right: 2px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+}
 /* Phase 29 Stream GA: "this section shares a scene with N others" badge — a small colored glyph,
    deterministic per scene id (sceneLinkColor in ArrangementView.tsx), so two chips/labels sharing a
    scene visibly match. Only rendered when a scene really is shared (count > 1); an independent

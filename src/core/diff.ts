@@ -52,6 +52,9 @@ export type DiffEntry =
   | { kind: 'scene-added'; sceneId: string }
   | { kind: 'scene-removed'; sceneId: string }
   | { kind: 'scene-slot'; sceneId: string; trackId: string; before: string | null; after: string | null }
+  // v0.10 (Phase 32 Stream LB): a scene's optional display name changed, absent -> present, or
+  // present -> absent (before/after null = "no name"), same shape as scene-slot's null-for-empty.
+  | { kind: 'scene-meta'; sceneId: string; field: 'name'; before: string | null; after: string | null }
   | { kind: 'song-changed'; before: { scene: string; bars: number }[] | null; after: { scene: string; bars: number }[] | null }
   // v0.5 media + lane samples
   | { kind: 'media-added'; sampleId: string; path: string }
@@ -302,6 +305,9 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
       out.push({ kind: 'scene-added', sceneId: sid })
       continue
     }
+    const nameBefore = sa.name ?? null
+    const nameAfter = sb.name ?? null
+    if (nameBefore !== nameAfter) out.push({ kind: 'scene-meta', sceneId: sid, field: 'name', before: nameBefore, after: nameAfter })
     const trackIds = new Set([...Object.keys(sa.slots), ...Object.keys(sb.slots)])
     for (const tid of trackIds) {
       const before = sa.slots[tid] ?? null
@@ -463,6 +469,9 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'scene-slot':
         lines.push(`scene ${e.sceneId}: ${e.trackId} ${e.before ?? '(empty)'} -> ${e.after ?? '(empty)'}`)
+        break
+      case 'scene-meta':
+        lines.push(`scene ${e.sceneId}: name ${e.before ?? '(none)'} -> ${e.after ?? '(none)'}`)
         break
       case 'media-added':
         lines.push(`media: sample added "${e.sampleId}" (${e.path})`)

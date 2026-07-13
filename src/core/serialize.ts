@@ -268,9 +268,12 @@ function serializeGroup(g: BeatGroup): string[] {
 }
 
 // v0.4: scene slots serialize in TRACK order (not insertion order) — one canonical form, and a
-// re-mapped slot is a one-line diff.
+// re-mapped slot is a one-line diff. v0.10 (Phase 32 Stream LB): an optional `name` line comes
+// right after the header, before the slots — canonical elision (D9): omitted entirely when
+// absent, so every pre-existing scene (no name) round-trips byte-identically.
 function serializeScene(scene: BeatScene, trackOrder: string[]): string[] {
   const lines = [`scene ${scene.id}`]
+  if (scene.name !== undefined) lines.push(`  name ${scene.name}`)
   for (const trackId of trackOrder) {
     const clipId = scene.slots[trackId]
     if (clipId !== undefined) lines.push(`  slot ${trackId} ${clipId}`)
