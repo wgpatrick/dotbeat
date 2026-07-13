@@ -85,72 +85,141 @@ import {
 } from '../dist/src/core/index.js'
 import { decodeWav, analyze, lint, formatLint } from '../dist/src/metrics/index.js'
 
-const USAGE = `usage:
-  beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track
-  beat add-track <file> <id> <synth|drums|instrument|audio> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--legacy-lanes]
+// ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
+// The old monolithic USAGE template literal, restructured as one entry per command so
+// `beat <cmd> --help` and `beat help <cmd>` can print just that command's block (plus a
+// "related:" pointer to its natural family). The no-args full dump is regenerated from the same
+// entries below, so there is exactly one source of truth and the dump reads as it always has.
+
+const PATHS_NOTE = `paths for set: bpm | loop_bars | selected_track | <track>.<synth param> | <track>.name |
+               <track>.color | <track>.pattern.<lane>[<step>]`
+
+// Natural command families, surfaced as a "related:" line under per-command help — the loop a
+// command belongs to is half of understanding it (vary is meaningless without score/suggest).
+const HELP_FAMILIES = [
+  ['vary', 'score', 'suggest'],
+  ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
+  ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
+  ['clip', 'scene', 'scene-set', 'song', 'song-move', 'song-insert'],
+  ['add-note', 'rm-note', 'add-hit', 'rm-hit'],
+]
+
+/** One entry per command, in the exact order the full dump prints them. `text` is the command's
+ * whole usage block verbatim (2-space indent, aligned description column), covering every form
+ * of the command (e.g. vary's three invocations and --groups live in the one `vary` entry). */
+const HELP = [
+  { cmd: 'init', text: `  beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track` },
+  {
+    cmd: 'add-track',
+    text: `  beat add-track <file> <id> <synth|drums|instrument|audio> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--legacy-lanes]
                                                           (a fresh drums track defaults to the 12-lane kit; --legacy-lanes opts back into the old implicit 5;
                                                           a fresh synth or drums track also starts with a real, already-populated default effect chain —
-                                                          eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat effect-add)
-  beat rm-track <file> <id>
-  beat group <file> <id> <track-id> [<track-id> ...] [--name N] [--color #hex]
+                                                          eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat effect-add)`,
+  },
+  { cmd: 'rm-track', text: `  beat rm-track <file> <id>` },
+  {
+    cmd: 'group',
+    text: `  beat group <file> <id> <track-id> [<track-id> ...] [--name N] [--color #hex]
                                                           fold N existing tracks into one named, colored
-                                                          group (a track belongs to at most one group)
-  beat rm-group <file> <id>                                ungroup (member tracks are kept, untouched)
-  beat group-set <file> <id> [--name N] [--color #hex] [--tracks id,id,...]
+                                                          group (a track belongs to at most one group)`,
+  },
+  { cmd: 'rm-group', text: `  beat rm-group <file> <id>                                ungroup (member tracks are kept, untouched)` },
+  {
+    cmd: 'group-set',
+    text: `  beat group-set <file> <id> [--name N] [--color #hex] [--tracks id,id,...]
                                                           rename/recolor a group or replace its whole
-                                                          membership list (add/remove/reorder members)
-  beat inspect <file> [--json]
-  beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
-  beat add-note <file> <track> <pitch> <start> <duration> <velocity 0-1>
-                                                          velocity is 0.0-1.0, NOT MIDI's 0-127 (e.g. 0.8, not 100)
-  beat rm-note <file> <track> <note-id>
-  beat add-hit <file> <track> <lane> <start> <velocity 0-1> [duration]   free-timed drum hit (start/duration in fractional 16th steps;
-                                                          velocity is 0.0-1.0, NOT MIDI's 0-127 — e.g. 0.9, not 110)
-  beat rm-hit <file> <track> <hit-id>
-  beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes id,id]
+                                                          membership list (add/remove/reorder members)`,
+  },
+  { cmd: 'inspect', text: `  beat inspect <file> [--json]` },
+  { cmd: 'set', text: `  beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124` },
+  {
+    cmd: 'add-note',
+    text: `  beat add-note <file> <track> <pitch> <start> <duration> <velocity 0-1>
+                                                          velocity is 0.0-1.0, NOT MIDI's 0-127 (e.g. 0.8, not 100)`,
+  },
+  { cmd: 'rm-note', text: `  beat rm-note <file> <track> <note-id>` },
+  {
+    cmd: 'add-hit',
+    text: `  beat add-hit <file> <track> <lane> <start> <velocity 0-1> [duration]   free-timed drum hit (start/duration in fractional 16th steps;
+                                                          velocity is 0.0-1.0, NOT MIDI's 0-127 — e.g. 0.9, not 110)`,
+  },
+  { cmd: 'rm-hit', text: `  beat rm-hit <file> <track> <hit-id>` },
+  {
+    cmd: 'quantize',
+    text: `  beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes id,id]
                                                           snap notes toward the grid (grid in 16th steps:
-                                                          1=16ths 2=8ths 4=quarters 0.5=32nds; amount<1 = partial)
-  beat humanize <file> <track> [--timing 0.15] [--velocity 0.06] [--push-late 0] [--swing 0] [--seed N] [--lanes hat,oh | --ids a,b]
+                                                          1=16ths 2=8ths 4=quarters 0.5=32nds; amount<1 = partial)`,
+  },
+  {
+    cmd: 'humanize',
+    text: `  beat humanize <file> <track> [--timing 0.15] [--velocity 0.06] [--push-late 0] [--swing 0] [--seed N] [--lanes hat,oh | --ids a,b]
                                                           make a stiff part feel played: seeded timing/velocity
-                                                          jitter, behind-the-beat drag, offbeat swing; scope by lane/id
-  beat transpose <file> <track> <semitones> [--notes id,id]      shift pitch (clamped to MIDI 0-127)
-  beat time-scale <file> <track> <factor> [--notes id,id]        stretch time (2 = x2, 0.5 = ÷2), anchored at the
-                                                          earliest scoped note so a selection stretches in place
-  beat fit-scale <file> <track> <root 0-11> <scale> [--notes id,id]   snap pitches to the nearest tone in a scale
+                                                          jitter, behind-the-beat drag, offbeat swing; scope by lane/id`,
+  },
+  { cmd: 'transpose', text: `  beat transpose <file> <track> <semitones> [--notes id,id]      shift pitch (clamped to MIDI 0-127)` },
+  {
+    cmd: 'time-scale',
+    text: `  beat time-scale <file> <track> <factor> [--notes id,id]        stretch time (2 = x2, 0.5 = ÷2), anchored at the
+                                                          earliest scoped note so a selection stretches in place`,
+  },
+  {
+    cmd: 'fit-scale',
+    text: `  beat fit-scale <file> <track> <root 0-11> <scale> [--notes id,id]   snap pitches to the nearest tone in a scale
                                                           (root: 0=C..11=B; see --list-scales)
-  beat fit-scale --list-scales                            list the valid <scale> names
-  beat invert <file> <track> [axis-pitch] [--notes id,id]  mirror pitch around axis (default: selection's own mean)
-  beat reverse <file> <track> [--notes id,id]              tape-reverse the scoped notes' time span
-  beat legato <file> <track> [--gap 0] [--notes id,id]     extend each note to the next note's start
-  beat consolidate <file> <track> [--notes id,id]          bake ratcheted notes (ratchetCount>1) back into
-                                                          discrete notes (the ratchet "consolidate" action)
-  beat diff <a.beat> <b.beat>
-  beat diff --git <rev1> <rev2> <file>
-  beat presets [--json] [--category <cat>]                list the factory preset library (optionally
+  beat fit-scale --list-scales                            list the valid <scale> names`,
+  },
+  { cmd: 'invert', text: `  beat invert <file> <track> [axis-pitch] [--notes id,id]  mirror pitch around axis (default: selection's own mean)` },
+  { cmd: 'reverse', text: `  beat reverse <file> <track> [--notes id,id]              tape-reverse the scoped notes' time span` },
+  { cmd: 'legato', text: `  beat legato <file> <track> [--gap 0] [--notes id,id]     extend each note to the next note's start` },
+  {
+    cmd: 'consolidate',
+    text: `  beat consolidate <file> <track> [--notes id,id]          bake ratcheted notes (ratchetCount>1) back into
+                                                          discrete notes (the ratchet "consolidate" action)`,
+  },
+  {
+    cmd: 'diff',
+    text: `  beat diff <a.beat> <b.beat>
+  beat diff --git <rev1> <rev2> <file>`,
+  },
+  {
+    cmd: 'presets',
+    text: `  beat presets [--json] [--category <cat>]                list the factory preset library (optionally
                                                           filtered to one taxonomy category — see
                                                           --list-categories for the enumerated set)
-  beat presets --list-categories                          list the valid --category values
-  beat preset <file> <track> <name>                       apply a preset to a track (a bag of set edits)
-  beat macro list [--json]                                 list the factory macro library (a knob -> N target params)
+  beat presets --list-categories                          list the valid --category values`,
+  },
+  { cmd: 'preset', text: `  beat preset <file> <track> <name>                       apply a preset to a track (a bag of set edits)` },
+  {
+    cmd: 'macro',
+    text: `  beat macro list [--json]                                 list the factory macro library (a knob -> N target params)
   beat macro apply <file> <track> <name> <value>           apply a macro to a track at knob position 0..100
-                                                          (resolves to literal set edits, same discipline as presets)
-  beat drum-kits [--json]                                  list the factory drum-kit library (kit-808/kit-909/kit-acoustic)
-  beat drum-kit <file> <track> <name>                      apply a drum kit to a track (replaces its whole lane list)
-  beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render]
+                                                          (resolves to literal set edits, same discipline as presets)`,
+  },
+  { cmd: 'drum-kits', text: `  beat drum-kits [--json]                                  list the factory drum-kit library (kit-808/kit-909/kit-acoustic)` },
+  { cmd: 'drum-kit', text: `  beat drum-kit <file> <track> <name>                      apply a drum kit to a track (replaces its whole lane list)` },
+  {
+    cmd: 'vary',
+    text: `  beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render]
                                                           batch-generate small-diff variants of one param group
   beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,oh | --ids a,b] [--render]
                                                           batch humanized FEEL variants (content variation) to audition + score
   beat vary <file> <track> feel --scope selection --port <p> [...same feel flags, minus --lanes/--ids]
                                                           scope to the GUI selection held by a running daemon instead of
                                                           typing --lanes/--ids by hand (lanes -> --lanes, bars/notes -> --ids)
-  beat vary --groups                                      list the mutation groups
-  beat automate <file> <track> <clip> <param> <time> <value> [--id p1] [--interpolation linear|hold|curve]
+  beat vary --groups                                      list the mutation groups`,
+  },
+  {
+    cmd: 'automate',
+    text: `  beat automate <file> <track> <clip> <param> <time> <value> [--id p1] [--interpolation linear|hold|curve]
                                                           add or move a clip automation point (time in fractional
                                                           16th steps from the clip's start; --id moves that point
                                                           if it already exists, else adds it with that id;
                                                           --interpolation sets the segment-shape this point starts,
-                                                          default linear — omit on a move to keep the existing shape)
-  beat clip <file> <track> <clip-id>                      snapshot the track's CURRENT LIVE content into a clip
+                                                          default linear — omit on a move to keep the existing shape)`,
+  },
+  {
+    cmd: 'clip',
+    text: `  beat clip <file> <track> <clip-id>                      snapshot the track's CURRENT LIVE content into a clip
                                                           (re-snapshotting always starts from whatever's live on the
                                                           track right now, not empty — the same "capture current live
                                                           state" model the daemon's own "+ capture scene" uses; two
@@ -159,71 +228,124 @@ const USAGE = `usage:
                                                           top of "verse" content becomes verse-plus-chorus, not an
                                                           independent chorus — rm-note/rm-hit the live track's
                                                           existing content first if you want a fresh, independent
-                                                          clip instead of an accumulated one)
-  beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map
-  beat scene-set <file> <scene-id> --name N|--clear-name  rename a scene (or clear its name, back to showing
+                                                          clip instead of an accumulated one)`,
+  },
+  { cmd: 'scene', text: `  beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map` },
+  {
+    cmd: 'scene-set',
+    text: `  beat scene-set <file> <scene-id> --name N|--clear-name  rename a scene (or clear its name, back to showing
                                                           just the id) — the scene IS the reusable bundle of
                                                           content, so its name follows it into every section
-                                                          that reuses it
-  beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
-  beat song-move <file> <from-index> <to-index>           reorder a section — a two-line diff, not a rewrite
-  beat song-insert <file> <index> <bars>                  insert a NEW section with a fresh, empty, independent scene at
+                                                          that reuses it`,
+  },
+  { cmd: 'song', text: `  beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)` },
+  { cmd: 'song-move', text: `  beat song-move <file> <from-index> <to-index>           reorder a section — a two-line diff, not a rewrite` },
+  {
+    cmd: 'song-insert',
+    text: `  beat song-insert <file> <index> <bars>                  insert a NEW section with a fresh, empty, independent scene at
                                                           <index> (0-based; song.length appends) — unlike song-move/song,
                                                           never reuses an existing scene id, so it can't share content with
                                                           any other section (docs/product-roadmap.md's "Independent
                                                           per-section scene editing" row); place clips into it afterward
-                                                          via beat scene/beat_song. Requires song mode already.
-  beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)
-  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample
-  beat effect-add <file> <track> <eq3|comp|distortion|bitcrush|eq7|autoFilter|autoPan|tremolo|utility|grainDelay|vinylDistortion|resonator> [--id id] [--index n] [--bypassed]
+                                                          via beat scene/beat_song. Requires song mode already.`,
+  },
+  { cmd: 'sample', text: `  beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)` },
+  { cmd: 'lane', text: `  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample` },
+  {
+    cmd: 'effect-add',
+    text: `  beat effect-add <file> <track> <eq3|comp|distortion|bitcrush|eq7|autoFilter|autoPan|tremolo|utility|grainDelay|vinylDistortion|resonator> [--id id] [--index n] [--bypassed]
                                                           add an insert to a synth track's effect chain
-                                                          (default: appended, enabled; order in the file IS chain order)
-  beat effect-rm <file> <track> <effect-id>               remove an insert by id
-  beat effect-move <file> <track> <effect-id> <new-index>  reorder — a two-line diff, not a rewrite
-  beat effect-bypass <file> <track> <effect-id> <true|false>  bypass/re-enable one insert (real routing
+                                                          (default: appended, enabled; order in the file IS chain order)`,
+  },
+  { cmd: 'effect-rm', text: `  beat effect-rm <file> <track> <effect-id>               remove an insert by id` },
+  { cmd: 'effect-move', text: `  beat effect-move <file> <track> <effect-id> <new-index>  reorder — a two-line diff, not a rewrite` },
+  {
+    cmd: 'effect-bypass',
+    text: `  beat effect-bypass <file> <track> <effect-id> <true|false>  bypass/re-enable one insert (real routing
                                                           bypass, not just its own mix knob — see beat_set's
-                                                          <track>.effect.<id>.enabled path for the same edit)
-  beat audio-clip <file> <track> <clip-id> <media-id> <in> <out> [gain] [warp off|repitch|complex] [rate]
+                                                          <track>.effect.<id>.enabled path for the same edit)`,
+  },
+  {
+    cmd: 'audio-clip',
+    text: `  beat audio-clip <file> <track> <clip-id> <media-id> <in> <out> [gain] [warp off|repitch|complex] [rate]
                                                           create/replace an audio-region clip on an
                                                           'audio' track (in/out are seconds into the
                                                           source media); trim an existing clip's fields
-                                                          with beat set <track>.clip.<id>.audio.<field> <v>
-  beat audio-split <file> <track> <clip-id> <at-step> [--id new-clip-id]
+                                                          with beat set <track>.clip.<id>.audio.<field> <v>`,
+  },
+  {
+    cmd: 'audio-split',
+    text: `  beat audio-split <file> <track> <clip-id> <at-step> [--id new-clip-id]
                                                           split-at-point: cuts one audio-region clip into
                                                           two at a timeline position (fractional 16th
                                                           steps from the clip's start), same media,
-                                                          adjusted in/out — no DSP
-  beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
-                                                          (pick is a variant number, "1" or "v1" both work)
-  beat suggest <file> <track> [--target <lane-or-id>] [--log f]
-                                                          read the scores log and propose the next beat-vary round
-  beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
-  beat lint <file.wav> [--target <LUFS>] [--json] [--doc <file.beat>]
+                                                          adjusted in/out — no DSP`,
+  },
+  {
+    cmd: 'score',
+    text: `  beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
+                                                          (pick is a variant number, "1" or "v1" both work)`,
+  },
+  {
+    cmd: 'suggest',
+    text: `  beat suggest <file> <track> [--target <lane-or-id>] [--log f]
+                                                          read the scores log and propose the next beat-vary round`,
+  },
+  { cmd: 'metrics', text: `  beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo` },
+  {
+    cmd: 'lint',
+    text: `  beat lint <file.wav> [--target <LUFS>] [--json] [--doc <file.beat>]
                                                           deterministic mix findings (default target -14);
                                                           --doc renders each track solo to name the actual
-                                                          offending track in each finding's suggestion
-  beat render <file> [-o out.wav] [--tail <sec>]          render to WAV through dotbeat's own engine
-                                                          (headless Chromium driving ui/; no BeatLab needed)
-  beat daemon <file> [--port 8420]
-  beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)
-  beat history <file> [--limit N] [--collapsed]           list checkpoints, newest first (--collapsed folds
-                                                          unnamed runs between pins into "N more checkpoints")
-  beat restore <file> <ref>                               go back to a checkpoint (append-only — never destroys work)
-  beat pin <file> <ref> <name...>                         name a checkpoint (<=25 chars), e.g. beat pin song.beat a1b2c3 rough mix v1
-  beat unpin <file> <name...>                             remove a pin by name
-  beat pins <file>                                        list this project's pins, newest checkpoint first
-  beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon
-  beat mcp                                                MCP server over stdio: most of the above as tools (~50,
+                                                          offending track in each finding's suggestion`,
+  },
+  {
+    cmd: 'render',
+    text: `  beat render <file> [-o out.wav] [--tail <sec>]          render to WAV through dotbeat's own engine
+                                                          (headless Chromium driving ui/; no BeatLab needed)`,
+  },
+  { cmd: 'daemon', text: `  beat daemon <file> [--port 8420]` },
+  { cmd: 'checkpoint', text: `  beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)` },
+  {
+    cmd: 'history',
+    text: `  beat history <file> [--limit N] [--collapsed]           list checkpoints, newest first (--collapsed folds
+                                                          unnamed runs between pins into "N more checkpoints")`,
+  },
+  { cmd: 'restore', text: `  beat restore <file> <ref>                               go back to a checkpoint (append-only — never destroys work)` },
+  { cmd: 'pin', text: `  beat pin <file> <ref> <name...>                         name a checkpoint (<=25 chars), e.g. beat pin song.beat a1b2c3 rough mix v1` },
+  { cmd: 'unpin', text: `  beat unpin <file> <name...>                             remove a pin by name` },
+  { cmd: 'pins', text: `  beat pins <file>                                        list this project's pins, newest checkpoint first` },
+  { cmd: 'selection', text: `  beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon` },
+  {
+    cmd: 'mcp',
+    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (~54,
                                                           covering track/note/hit/effect/song/preset/macro/drum-kit/
-                                                          checkpoint/render/metrics editing) — NOT 1:1 with the CLI:
-                                                          vary, score, sample, lane, and daemon have no MCP tool and
-                                                          stay CLI-only; send tools/list on a running 'beat mcp' for
-                                                          the exact, current set
-  beat mcp-init <file> [--force]                          write a .mcp.json next to <file> so Claude Code
-                                                          (or any MCP client) auto-discovers 'beat mcp' there
+                                                          vary/score/sample/lane/checkpoint/render/metrics editing) —
+                                                          only daemon (a long-running process, structurally not a
+                                                          tool call) stays CLI-only; send tools/list on a running
+                                                          'beat mcp' for the exact, current set`,
+  },
+  {
+    cmd: 'mcp-init',
+    text: `  beat mcp-init <file> [--force]                          write a .mcp.json next to <file> so Claude Code
+                                                          (or any MCP client) auto-discovers 'beat mcp' there`,
+  },
+]
 
-paths for set: bpm | loop_bars | selected_track | <track>.<synth param> | <track>.name |
-               <track>.color | <track>.pattern.<lane>[<step>]`
+const USAGE = `usage:\n${HELP.map((e) => e.text).join('\n')}\n\n${PATHS_NOTE}`
+
+/** The `beat <cmd> --help` / `beat help <cmd>` view: just that command's block, plus set's own
+ * paths note and the command's family as a "related:" pointer. Returns null for unknown names
+ * (callers print the standard unknown-command error, exit 2). */
+function commandHelp(name) {
+  const entry = HELP.find((e) => e.cmd === name || (e.aliases ?? []).includes(name))
+  if (!entry) return null
+  let out = `usage:\n${entry.text}`
+  if (entry.cmd === 'set') out += `\n\n${PATHS_NOTE}`
+  const family = HELP_FAMILIES.find((f) => f.includes(entry.cmd))
+  if (family) out += `\n\nrelated: ${family.filter((c) => c !== entry.cmd).map((c) => `beat ${c}`).join(', ')}`
+  return out
+}
 
 function readDoc(path) {
   return parse(readFileSync(path, 'utf8'))
@@ -768,47 +890,21 @@ async function varyCmd(argv) {
     throw err
   }
 
-  const { mkdirSync } = await import('node:fs')
-  const { createHash } = await import('node:crypto')
-  mkdirSync(outDir, { recursive: true })
-  const manifest = {
-    parent: file,
-    parentSha256: createHash('sha256').update(text).digest('hex'),
-    track,
-    group,
-    count,
-    amount,
-    seed,
-    createdAt: new Date().toISOString(),
-    // Renders are nondeterministic run-to-run (see docs/phase-5-plan.md Result) — only compare
-    // renders from the same batch, never across sessions.
-    variants: variants.map((v, i) => ({
-      file: `v${i + 1}.beat`,
-      edits: v.edits.map((e) => `${e.path} ${e.value}`),
-    })),
-  }
-  for (let i = 0; i < variants.length; i++) {
-    writeFileSync(resolve(outDir, `v${i + 1}.beat`), serialize(variants[i].doc))
-  }
-  writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
+  // Manifest write + render shaping live in src/vary/batch.ts, shared with beat_vary over MCP
+  // (Phase 34 Stream NA) — the manifest shape is the contract `beat score`/`beat_score` read.
+  const { writeVaryBatch, renderVaryBatch } = await import('../dist/src/vary/batch.js')
+  const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group, count, amount, seed, outDir, variants })
   process.stdout.write(`${outDir}/: ${variants.length} variants of ${track}.${group} (amount ${amount}, seed ${seed})\n`)
   for (let i = 0; i < variants.length; i++) {
     process.stdout.write(`  v${i + 1}: ${manifest.variants[i].edits.join(', ')}\n`)
   }
 
   if (argv.includes('--render')) {
-    const { execFileSync } = await import('node:child_process')
-    const { fileURLToPath } = await import('node:url')
     // D15: the one render path is dotbeat's own engine driven headless (cli/render.mjs). It's a
     // real-time capture per variant, so a batch of N takes ~N * loop-length plus browser startup —
     // slower than the retired faster-than-realtime offline path. Correct output, honest cost; a
     // dedicated fast batch renderer for dotbeat's own engine is future work (see D15 / phase-17 doc).
-    const renderCli = fileURLToPath(new URL('./render.mjs', import.meta.url))
-    for (let i = 0; i < variants.length; i++) {
-      const beatFile = resolve(outDir, `v${i + 1}.beat`)
-      process.stdout.write(`rendering v${i + 1}/${variants.length}...\n`)
-      execFileSync(process.execPath, [renderCli, beatFile, '-o', resolve(outDir, `v${i + 1}.wav`)], { stdio: ['ignore', 'ignore', 'inherit'] })
-    }
+    renderVaryBatch(outDir, variants.length, { onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
   }
 }
@@ -881,42 +977,19 @@ async function varyFeelCmd(argv, file, track) {
     if (err instanceof BeatVaryError) throw new BeatEditError(err.message)
     throw err
   }
-  const { mkdirSync } = await import('node:fs')
-  const { createHash } = await import('node:crypto')
-  mkdirSync(outDir, { recursive: true })
-  const manifest = {
-    parent: file,
-    parentSha256: createHash('sha256').update(text).digest('hex'),
-    track,
-    group: 'feel',
-    count,
-    seed,
-    createdAt: new Date().toISOString(),
-    variants: variants.map((v, i) => ({ file: `v${i + 1}.beat`, recipe: v.recipe })),
-  }
-  for (let i = 0; i < variants.length; i++) writeFileSync(resolve(outDir, `v${i + 1}.beat`), serialize(variants[i].doc))
-  writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
+  // Manifest write + render shaping live in src/vary/batch.ts, shared with beat_vary over MCP
+  // (Phase 34 Stream NA) — the manifest shape is the contract `beat score`/`beat_score` read.
+  const { writeVaryBatch, renderVaryBatch } = await import('../dist/src/vary/batch.js')
+  const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group: 'feel', count, seed, outDir, variants })
   process.stdout.write(`${outDir}/: ${variants.length} feel variants of ${track} (seed ${seed})\n`)
   for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
 
   if (argv.includes('--render')) {
-    const { execFileSync } = await import('node:child_process')
-    const { fileURLToPath } = await import('node:url')
-    const { existsSync, symlinkSync } = await import('node:fs')
-    // variant .beat files reference media relative to themselves; the parent's media/ dir sits
-    // next to the parent, so link it into the batch dir before rendering.
-    const parentMedia = resolve(dirname(resolve(file)), 'media')
-    const batchMedia = resolve(outDir, 'media')
-    if (existsSync(parentMedia) && !existsSync(batchMedia)) {
-      try { symlinkSync(parentMedia, batchMedia, 'dir') } catch { /* best-effort; render will report a missing sample */ }
-    }
     // D15: render through dotbeat's own engine (cli/render.mjs) — real-time per variant (see the
     // matching note in varyCmd above; a fast batch renderer for the canonical engine is future work).
-    const renderCli = fileURLToPath(new URL('./render.mjs', import.meta.url))
-    for (let i = 0; i < variants.length; i++) {
-      process.stdout.write(`rendering v${i + 1}/${variants.length}...\n`)
-      execFileSync(process.execPath, [renderCli, resolve(outDir, `v${i + 1}.beat`), '-o', resolve(outDir, `v${i + 1}.wav`)], { stdio: ['ignore', 'ignore', 'inherit'] })
-    }
+    // linkMediaFrom: variant .beat files reference media relative to themselves; the parent's
+    // media/ dir sits next to the parent, so batch.ts links it into the batch dir before rendering.
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
   }
 }
@@ -925,47 +998,19 @@ async function scoreCmd(argv) {
   const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--log')
   const [dir, ...picks] = positional
   if (!dir || picks.length === 0) throw new BeatEditError('score needs <batch-dir> and 1-3 ranked picks (variant numbers, best first)')
-  if (picks.length > 3) throw new BeatEditError('at most 3 ranked picks (Edisyn (3,16) pattern — ranking more adds fatigue, not signal)')
-  const manifestPath = resolve(dir, 'manifest.json')
-  let manifest
+  // Pick normalization ("N" or "vN", Phase 33 Stream ME), manifest read, jsonl entry shape, and
+  // the adopt-hint output all live in src/vary/batch.ts, shared verbatim with beat_score over MCP
+  // (Phase 34 Stream NA) — a batch generated on either surface scores on either surface.
+  const { scoreBatch, formatScoreResult, BeatBatchError, DEFAULT_SCORES_LOG } = await import('../dist/src/vary/batch.js')
+  const logPath = flagValue(argv, '--log') ?? DEFAULT_SCORES_LOG
+  let result
   try {
-    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    result = scoreBatch(dir, picks, logPath)
   } catch (err) {
-    if (err.code === 'ENOENT') throw new BeatEditError(`no such batch directory or missing manifest.json: ${dir}`)
-    throw new BeatEditError(`could not read ${manifestPath}: ${err.message}`)
+    if (err instanceof BeatBatchError) throw new BeatEditError(err.message)
+    throw err
   }
-  const ranks = picks.map((p) => {
-    // Phase 33 Stream ME (docs/research/96): variants are always DISPLAYED as v1/v2/... (printed
-    // summary, manifest, suggest's "adopt" line) but historically had to be REFERENCED as bare
-    // integers only — a real discoverability gap (a user typing the natural "v2" hit a wall).
-    // Accept either form here, normalizing to the bare integer everywhere below; bare integers
-    // keep working exactly as before.
-    const normalized = /^[vV](\d+)$/.test(p) ? p.slice(1) : p
-    const n = Number(normalized)
-    if (!Number.isInteger(n) || n < 1 || n > manifest.variants.length) throw new BeatEditError(`pick "${p}" is not a variant number 1-${manifest.variants.length} (accepts "N" or "vN")`)
-    return n
-  })
-  if (new Set(ranks).size !== ranks.length) throw new BeatEditError('picks must be distinct')
-  const logPath = flagValue(argv, '--log') ?? 'beat-scores.jsonl'
-  // param batches carry replayable `edits`; feel batches carry a `recipe` (the whole variant
-  // file IS the result, since humanize isn't a set-replayable edit).
-  const isFeel = manifest.group === 'feel'
-  const entry = {
-    t: new Date().toISOString(),
-    batch: dir,
-    track: manifest.track,
-    group: manifest.group,
-    amount: manifest.amount,
-    seed: manifest.seed,
-    parentSha256: manifest.parentSha256,
-    picks: ranks.map((n, i) => ({ rank: i + 1, variant: `v${n}.beat`, ...(isFeel ? { recipe: manifest.variants[n - 1].recipe } : { edits: manifest.variants[n - 1].edits }) })),
-    rejected: manifest.variants.map((_, i) => i + 1).filter((n) => !ranks.includes(n)).map((n) => `v${n}.beat`),
-  }
-  const { appendFileSync } = await import('node:fs')
-  appendFileSync(logPath, JSON.stringify(entry) + '\n')
-  process.stdout.write(`scored ${dir}: ${ranks.map((n) => `v${n}`).join(' > ')} -> ${logPath}\n`)
-  if (isFeel) process.stdout.write(`to adopt the winner (${entry.picks[0].recipe}): cp ${resolve(dir, `v${ranks[0]}.beat`)} ${manifest.parent}\n`)
-  else process.stdout.write(`to adopt the winner: beat set ${manifest.parent} ${entry.picks[0].edits.join(' ')}\n`)
+  process.stdout.write(formatScoreResult(result))
 }
 
 async function suggestCmd(argv) {
@@ -1438,6 +1483,28 @@ function mcpInitCmd(argv) {
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2)
+  // Per-command help (Phase 34 Stream NB): `beat help <cmd>` and `beat <cmd> --help`. The --help
+  // form is intercepted ONLY as the first argument after the command name, so a command whose own
+  // later args could be a literal "--help" is never shadowed; `beat help <unknown>` gets the
+  // standard unknown-command error (exit 2), and an unknown `beat <cmd> --help` falls through to
+  // the switch's own default case for the same error.
+  if (cmd === 'help' && rest[0] !== undefined) {
+    const text = commandHelp(rest[0])
+    if (text === null) {
+      console.error(`unknown command "${rest[0]}"\n\n${USAGE}`)
+      process.exitCode = 2
+    } else {
+      console.log(text)
+    }
+    return
+  }
+  if (rest[0] === '--help') {
+    const text = commandHelp(cmd)
+    if (text !== null) {
+      console.log(text)
+      return
+    }
+  }
   switch (cmd) {
     case 'init':
       initCmd(rest)
