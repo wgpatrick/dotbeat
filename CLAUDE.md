@@ -61,6 +61,18 @@ origin first**, then dispatch. If you discover this after the fact, fix already-
 `cd`-ing into each and running `git fetch origin && git merge origin/main --no-edit` — safe as long
 as the agent hasn't yet made local commits that would conflict.
 
+## Usability findings that don't fit a fix phase go in the roadmap, not a separate doc
+
+Not every pilot finding is fixable in the phase it's found. Bigger features (a real reverse-audio
+action, section/scene naming) and genuinely cross-cutting gaps (no context menus anywhere) belong in
+`scripts/roadmap-data.mjs` as ordinary `not-started` rows, citing the source research doc — there's
+a "Known usability gaps (backlog)" area for findings that don't fit an existing feature area, but
+prefer an existing area (e.g. reverse-audio under "Audio-region clip editing") when one fits. Decided
+2026-07-12 rather than inventing a second tracking system: the roadmap already has done/not-started
+status, research citations, and a published dashboard — a separate backlog doc would just fork that.
+Review the backlog area alongside each new pilot batch and promote items into a real phase stream
+once they're scoped down enough to fit one, rather than letting them sit indefinitely.
+
 ## Refresh the roadmap artifact on phase completion
 
 Whenever a phase/stream finishes, update `scripts/roadmap-data.mjs` and `docs/product-roadmap.md`,

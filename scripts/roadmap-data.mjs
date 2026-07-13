@@ -679,6 +679,12 @@ export const rows = [
     core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
     research: 'research/75-ux-arrangement-view-round2.md', plan: null,
   },
+  {
+    area: 'Arrangement / song structure', feature: 'Section/scene naming',
+    description: 'Sections and scenes have no `name` field in the document model (`BeatScene`/`BeatSongSection`, confirmed by reading the types directly) — the only visible label is the auto-generated scene id (`s1`, `s2`, ...) forever. A user building a real song with distinct parts (research/90\'s "Part A"/"Part B" chord progressions) has no way to label them except renaming the underlying track, which doesn\'t scale once a track plays multiple different parts across a song. Real format/parser/serializer work (a new optional field on the scene or section grammar), scoped out of Phase 30 Stream JD (research/87) as too large for a fix-phase item.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/90-usability-pilot-dnb-song.md', plan: null,
+  },
 
   // ── Synth sound design ──────────────────────────────────────────────────
   {
@@ -1618,6 +1624,18 @@ export const rows = [
     research: 'research/88-usability-pilot-clip-creation.md', plan: 'phase-30-plan.md',
   },
 
+  // ── Known usability gaps (backlog) ────────────────────────────────────────
+  // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
+  // feature) or too cross-cutting (spans many components) to fold into a single fix-phase stream.
+  // Reviewed alongside each new pilot batch — promoted into a real phase stream once scoped down,
+  // not left to rot here indefinitely.
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Right-click context menus (notes, clip blocks)',
+    description: 'No context menu exists anywhere for notes or arrangement clip blocks — right-click on either does nothing at all (confirmed exhaustively across multiple pilots: research/81, 87, 92, 93). The one place right-click DOES do something is the automation lane\'s own breakpoint popup (Phase 26 Stream DI) — a real, working precedent for the interaction pattern, just not extended anywhere else. A first-time user discovering that convention on automation would reasonably expect it on notes/clips too. Cross-cutting (spans NoteView.tsx and ArrangementView.tsx, and implies real design decisions about what belongs in a menu vs. the existing toolbar-driven model) rather than a single-stream fix.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/93-usability-pilot-tutorial-abletonlessons.md', plan: null,
+  },
+
   // ── Desktop app / packaging ──────────────────────────────────────────────
   {
     area: 'Desktop app / packaging', feature: 'Tauri shell, compiled sidecar, bundled starter',
@@ -1770,6 +1788,12 @@ export const rows = [
     description: 'Ableton\'s Duplicate Loop doubles the loop\'s length AND content, sliding trailing MIDI notes to preserve their position relative to the new end (manual ch.8 p.214). No dotbeat equivalent — `timeScale` (×2 in `PitchTimePanel`) rescales note positions but does not touch `clip.loop.end` itself. New `src/core/edit.ts` primitive: double `clip.loop.end - clip.loop.start`, duplicate the bar-range worth of notes/hits, shift any trailing content past the old end. Natural pairing with the P0 loop-resize UX (Note editing area).',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
     research: 'research/55-ableton-vs-dotbeat-clip-view.md', plan: null,
+  },
+  {
+    area: 'Audio-region clip editing', feature: 'Reverse an audio clip',
+    description: 'No reverse action exists anywhere for audio clips — checked exhaustively (right-click, the clip properties panel, the Device tab, the full Keyboard Shortcuts reference text) with zero hits (research/93, "Workflow Example 2"). A real, common sample-editing move (Ableton: Cmd/Ctrl+R) with no dotbeat equivalent, core or GUI. Likely a `warp`-adjacent field or a negative-rate convention in `src/core/edit.ts`\'s audio-clip primitives, surfaced as a button/shortcut in `AudioClipEditor.tsx`.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/93-usability-pilot-tutorial-abletonlessons.md', plan: null,
   },
 
   // ── Agent onboarding ──────────────────────────────────────────────────────
