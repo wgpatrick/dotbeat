@@ -404,7 +404,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
       window.confirm(
         `This track's editor has content that hasn't been placed into any clip yet. Switching to this section's clip ("${clip.id}") will replace it. Continue?`,
       )
-    if (proceed) void postLoadClip(track.id, clip.id).catch((err) => window.alert(`Could not load clip: ${(err as Error).message}`))
+    if (proceed) void postLoadClip(track.id, clip.id).catch((err) => showToast(`Could not load clip: ${(err as Error).message}`))
   }, [track.id, selectedSectionIndex])
 
   const selSet = new Set(sel)
