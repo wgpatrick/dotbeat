@@ -345,6 +345,17 @@ function occKey(trackId: string, sectionIndex: number): string {
   return `${trackId}::${sectionIndex}`
 }
 
+/** Phase 29 Stream GA: a deterministic small color for a scene id, used ONLY as the "these sections
+ * share a scene" badge (sceneShareCounts above) — never track.color, no palette to maintain, no
+ * meaning beyond "same color = same scene id." A cheap string hash is plenty; collisions between
+ * two DIFFERENT scene ids landing on a similar hue are a cosmetic non-issue (the badge only shows up
+ * when a scene is shared, and the tooltip always names the scene explicitly too). */
+function sceneLinkColor(sceneId: string): string {
+  let h = 0
+  for (let i = 0; i < sceneId.length; i++) h = (h * 31 + sceneId.charCodeAt(i)) >>> 0
+  return `hsl(${h % 360}, 65%, 55%)`
+}
+
 /** The section whose startBar is closest to `targetStartBar` — how a drag's continuous bar delta
  * snaps to the section grid a clip occurrence can actually live on (occurrences are 1:1 with
  * sections; there is no in-between bar position to land on). */
@@ -1527,6 +1538,11 @@ export function ArrangementView() {
   const selection = useStore((s) => s.selection)
   const setSelectedTrack = useStore((s) => s.setSelectedTrack)
   const setBottomPaneOpen = useStore((s) => s.setBottomPaneOpen)
+  // Phase 29 Stream GA: which song section is "in view" for the bottom Clip View / properties strip
+  // / Place-in-Arrangement targeting — set by clicking a clip block (below, beginClipDrag's click
+  // branch) or a section chip's name (the sections toolbar further down).
+  const selectedSectionIndex = useStore((s) => s.selectedSectionIndex)
+  const setSelectedSection = useStore((s) => s.setSelectedSection)
   // Phase 22 Stream AG: the overlap-resolution preference every resize (chip +/- and the drag
   // handle) reads and sends to the daemon's POST /song resize op.
   const overlapPolicy = useStore((s) => s.overlapPolicy)
@@ -1634,6 +1650,18 @@ export function ArrangementView() {
     // Loop mode: one implicit section over loop_bars.
     return [{ scene: LOOP_SCENE_SENTINEL, bars: doc?.loopBars ?? 4, startBar: 0 }]
   }, [doc])
+
+  // Phase 29 Stream GA: how many VISIBLE sections reference each scene id — "+ section" duplicates
+  // by REUSING the previous section's scene (correct, intentional: docs/phase-6-plan.md's own
+  // "starting content" default), but nothing distinguished that from an independent section, a real
+  // footgun pilot 86 called out explicitly (editing one silently edits every section sharing that
+  // scene). A count > 1 drives the "linked" badge on both the section chips and the ruler labels
+  // below.
+  const sceneShareCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const s of sections) m.set(s.scene, (m.get(s.scene) ?? 0) + 1)
+    return m
+  }, [sections])
 
   const totalBars = useMemo(() => sections.reduce((n, s) => n + s.bars, 0), [sections])
   const fitPxPerBar = totalBars > 0 ? laneWidth / totalBars : 0
@@ -1857,6 +1885,13 @@ export function ArrangementView() {
           setSelectedTrack(trackId)
           postEdit('selected_track', trackId)
           setBottomPaneOpen(true)
+          // Phase 29 Stream GA: a plain click on a clip block also points the "which section" state
+          // at this occurrence's section — the missing half of "which clip is open" (the other half,
+          // track selection, is set just above). sectionIndex is -1 for nothing real to point at
+          // (there isn't one today — every real occurrence carries its own index — but guards the
+          // synthetic loop-mode block if that path is ever routed through here instead of
+          // onRowPointerDown).
+          if (sectionIndex >= 0) setSelectedSection(sectionIndex)
           return
         }
         if (deltaBars === 0) return
@@ -2312,7 +2347,7 @@ export function ArrangementView() {
       <div className="editor-toolbar">
         <span className="section-heading">arrangement</span>
         <span className="toolbar-tip">
-          {totalBars} bars · {sections.length} section{sections.length === 1 ? '' : 's'} · {modeLabel} · drag the ruler or a track to select bars · click a track name to select it · double-click a name to rename
+          {totalBars} bars · {sections.length} section{sections.length === 1 ? '' : 's'} · {modeLabel} · drag the ruler or a track to select bars · click a track name to select it, double-click to rename it · click a section's name or clip to view/edit its content below
         </span>
         <div className="arr-project-controls">
           <div className="arr-addtrack">
@@ -2403,7 +2438,15 @@ export function ArrangementView() {
             {doc.song!.map((s, i) => {
               const isDragging = sectionDrag.draggingIndex === i
               const isDropTarget = sectionDrag.overIndex === i && sectionDrag.draggingIndex !== null && sectionDrag.draggingIndex !== i
-              const chipClasses = ['arr-section-chip', isDragging && 'dragging', isDropTarget && 'drop-target'].filter(Boolean).join(' ')
+              const shareCount = sceneShareCounts.get(s.scene) ?? 1
+              const chipClasses = [
+                'arr-section-chip',
+                isDragging && 'dragging',
+                isDropTarget && 'drop-target',
+                selectedSectionIndex === i && 'selected-section',
+              ]
+                .filter(Boolean)
+                .join(' ')
               return (
               <span
                 className={chipClasses}
@@ -2432,7 +2475,24 @@ export function ArrangementView() {
                 <span className="arr-chip-drag-handle" data-section-drag-handle={i} title="drag to reorder">
                   ⠿
                 </span>
-                <span className="arr-chip-name" title={`scene "${s.scene}"`}>{s.scene}</span>
+                <span
+                  className="arr-chip-name"
+                  data-section-select={i}
+                  title={`scene "${s.scene}" — click to view/edit this section's content in the bottom panel`}
+                  onClick={() => setSelectedSection(i)}
+                >
+                  {s.scene}
+                </span>
+                {shareCount > 1 && (
+                  <span
+                    className="arr-chip-linked"
+                    data-linked-scene={s.scene}
+                    style={{ background: sceneLinkColor(s.scene) }}
+                    title={`shares scene "${s.scene}" with ${shareCount - 1} other section${shareCount - 1 === 1 ? '' : 's'} — editing one edits all of them (sections with a matching dot share content)`}
+                  >
+                    ⛓
+                  </span>
+                )}
                 <button
                   className="arr-chip-btn"
                   data-section-move-left={i}
@@ -2646,17 +2706,27 @@ export function ArrangementView() {
             style={{ width: renderTotalBars * renderPxPerBar, touchAction: 'none' }}
             onPointerDown={(e) => beginDrag('ruler', e)}
           >
-            {renderSections.map((s, i) => (
+            {renderSections.map((s, i) => {
+              const shareCount = sceneShareCounts.get(s.scene) ?? 1
+              return (
               <div
                 key={i}
                 className="arr-section-label"
                 style={{ left: s.startBar * renderPxPerBar, width: s.bars * renderPxPerBar, height: RULER_H - TICK_ROW_H }}
-                title={`${s.scene} · ${s.bars} bars`}
+                title={
+                  shareCount > 1
+                    ? `${s.scene} · ${s.bars} bars · shares this scene with ${shareCount - 1} other section${shareCount - 1 === 1 ? '' : 's'}`
+                    : `${s.scene} · ${s.bars} bars`
+                }
               >
+                {shareCount > 1 && (
+                  <span className="arr-section-linked" style={{ background: sceneLinkColor(s.scene) }} />
+                )}
                 <span className="arr-section-name">{s.scene}</span>
                 <span className="arr-section-bars">{s.bars}</span>
               </div>
-            ))}
+              )
+            })}
             {/* Bar-number ticks (Phase 24 Stream CD): a thin strip along the bottom of the ruler,
                 below the section-label row, one tick per `tickInterval` bars (zoom-aware — see
                 tickIntervalFor). pointer-events:none (styles.css) so they never intercept the

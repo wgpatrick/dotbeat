@@ -44,6 +44,7 @@ import {
   AUTOMATION_INTERPOLATIONS,
   validateSelection,
   saveClip,
+  loadClip,
   setScene,
   setSong,
   songMove,
@@ -248,7 +249,23 @@ export function songDelete(doc: BeatDocument, index: number): BeatDocument {
   if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no section to delete')
   if (!Number.isInteger(index) || index < 0 || index >= doc.song.length) throw new BeatEditError(`section index ${index} out of range (0-${doc.song.length - 1})`)
   if (doc.song.length === 1) throw new BeatEditError('cannot delete the last remaining section')
-  return setSong(doc, doc.song.filter((_, i) => i !== index))
+  const next = setSong(doc, doc.song.filter((_, i) => i !== index))
+  return pruneOrphanedScenes(next)
+}
+
+/** Phase 29 Stream GA: drop any scene no longer referenced by any remaining song section — deleting
+ * a section used to leave its scene orphaned in `doc.scenes` forever (confirmed via `beat inspect`
+ * in docs/research/83's usability pilot: "deleting an empty, unused song section... `beat inspect`
+ * afterward still showed the underlying empty scene object lingering"). Nothing else in the
+ * document reads `doc.scenes` independent of `song` (grepped: inspect/diff/convert/mcp all key off
+ * scene ids a `song` section, or an explicit caller-supplied scene, already names), so "no remaining
+ * section references it" is an honest, unambiguous "this scene is now dead" signal — not a
+ * heuristic that could false-positive on a scene someone meant to keep around unreferenced. */
+function pruneOrphanedScenes(doc: BeatDocument): BeatDocument {
+  if (!doc.song) return doc // loop mode has no song to check references against — leave scenes alone
+  const referenced = new Set(doc.song.map((s) => s.scene))
+  const scenes = doc.scenes.filter((s) => referenced.has(s.id))
+  return scenes.length === doc.scenes.length ? doc : { ...doc, scenes }
 }
 
 // ─── cross-section clip move (Phase 24 Stream CC) ────────────────────────────────────────────────
@@ -2118,6 +2135,33 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           const written = writeIfChanged(next)
           revalidateSelection()
           json(res, 200, { written, doc, clipId })
+        })
+        .catch((err) => {
+          const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
+          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // POST /load-clip {track, clipId} — Phase 29 Stream GA. The inverse of /place-clip above: loads
+    // an already-saved clip's notes/hits back into the track's LIVE buffer (core's loadClip), so the
+    // note editor can actually show/edit a section OTHER than the one that first placed the track's
+    // content. Overwrites whatever's currently live, same "the live buffer is a single scratchpad"
+    // discipline /place-clip's saveClip call already leans on — the GUI side (NoteView.tsx's sync
+    // effect) is responsible for warning before this would discard content that isn't backed by any
+    // existing clip; this route itself just performs the swap.
+    if (req.method === 'POST' && url.pathname === '/load-clip') {
+      readBody(req)
+        .then((body) => {
+          const b = JSON.parse(body) as { track?: unknown; clipId?: unknown }
+          if (typeof b.track !== 'string' || typeof b.clipId !== 'string' || !b.clipId) {
+            json(res, 400, { error: 'body must be {track: string, clipId: string}' })
+            return
+          }
+          const next = loadClip(doc, b.track, b.clipId)
+          const written = writeIfChanged(next)
+          revalidateSelection()
+          json(res, 200, { written, doc })
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500

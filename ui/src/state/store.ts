@@ -106,11 +106,24 @@ interface DawState {
    * ephemeral mechanism (see bridge.ts's postUndo/postRedo header comment). */
   canUndo: boolean
   canRedo: boolean
+  /** Phase 29 Stream GA: the index into `doc.song` the user is currently "looking at" — alongside
+   * `selectedTrackId` above, this is the second half of "which clip should the bottom Clip View / the
+   * ClipPropertiesPanel strip / Place-in-Arrangement target." Before this field existed, nothing in the
+   * GUI had ANY notion of "which section" — `primaryClipFor` (ClipPropertiesPanel.tsx) and
+   * `placeInArrangement` (NoteView.tsx) both always resolved to the FIRST song section's scene for a
+   * track, so once a song had more than one section there was no way to view or edit any but the
+   * first (docs/research/83, 84, 86 — the single highest-impact usability-pilot finding this session).
+   * `null` = nothing explicitly selected, which every consumer treats as "fall back to the old
+   * first-occurrence behavior" (loop mode, or before the user has clicked any section/clip block yet).
+   * Session-only, like `selectedTrackId` — not written to the .beat file, and (see `setDoc` below)
+   * reset to null whenever it stops resolving against the live doc (song shrinks/clears). */
+  selectedSectionIndex: number | null
 
   setDoc: (doc: BeatDocument) => void
   setConnected: (c: boolean) => void
   setParseError: (m: string | null) => void
   setSelectedTrack: (id: string) => void
+  setSelectedSection: (index: number | null) => void
   setPlaying: (p: boolean) => void
   setBottomPane: (p: BottomPane) => void
   toggleBottomPane: () => void
@@ -152,6 +165,7 @@ export const useStore = create<DawState>((set) => ({
   auditioningTrackId: null,
   canUndo: false,
   canRedo: false,
+  selectedSectionIndex: null,
 
   setDoc: (doc) =>
     set((s) => ({
@@ -159,10 +173,16 @@ export const useStore = create<DawState>((set) => ({
       parseError: null,
       // Keep a local selection if it still resolves; otherwise clear to fall back to the doc's.
       selectedTrackId: s.selectedTrackId && doc.tracks.some((t) => t.id === s.selectedTrackId) ? s.selectedTrackId : null,
+      // Same "keep it if it still resolves" discipline as selectedTrackId above — a section index
+      // stops being meaningful the instant the song shrinks below it (a delete, or leaving song mode
+      // entirely), so a stale index doesn't silently keep pointing at some OTHER section post-edit.
+      selectedSectionIndex:
+        s.selectedSectionIndex !== null && doc.song && s.selectedSectionIndex < doc.song.length ? s.selectedSectionIndex : null,
     })),
   setConnected: (connected) => set({ connected }),
   setParseError: (parseError) => set({ parseError }),
   setSelectedTrack: (selectedTrackId) => set({ selectedTrackId }),
+  setSelectedSection: (selectedSectionIndex) => set({ selectedSectionIndex }),
   setPlaying: (playing) => set({ playing }),
   setBottomPane: (bottomPane) => set({ bottomPane, bottomPaneOpen: true }),
   toggleBottomPane: () => set((s) => ({ bottomPane: s.bottomPane === 'clip' ? 'device' : 'clip', bottomPaneOpen: true })),

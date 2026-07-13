@@ -10,6 +10,7 @@ import {
   diffDocuments,
   formatDiff,
   saveClip,
+  loadClip,
   setScene,
   setSong,
   songMove,
@@ -190,6 +191,37 @@ test('saveClip snapshots live content; setScene and setSong validate and round-t
   assert.throws(() => setSong(doc, [{ scene: 'outro', bars: 0 }]), BeatEditError)
   // clearing the song
   assert.equal(setSong(doc, []).song, null)
+})
+
+// Phase 29 Stream GA: loadClip is the inverse of saveClip — before it existed there was no way to
+// pull an already-saved clip's content back into the track's live buffer, which was the deeper
+// reason the note editor could only ever show/edit the FIRST song section's clip (docs/research/
+// 83, 84, 86 — a click could resolve WHICH clip it meant, but nothing could actually load it).
+test('loadClip loads a saved clip\'s notes/hits into the track\'s live buffer, leaving the clip itself untouched', () => {
+  const doc = parse(SONG_EXAMPLE)
+  const busyNotesBefore = doc.tracks[0]!.clips.find((c) => c.id === 'busy')!.notes
+  assert.notDeepEqual(doc.tracks[0]!.notes, busyNotesBefore, 'live content starts out different from the "busy" clip')
+
+  const loaded = loadClip(doc, 'lead', 'busy')
+  const lead = loaded.tracks[0]!
+  assert.deepEqual(lead.notes, busyNotesBefore, 'live buffer now matches the loaded clip')
+  // the clip itself is untouched — loadClip only overwrites the LIVE buffer, never a clip.
+  assert.deepEqual(
+    lead.clips.find((c) => c.id === 'busy')!.notes,
+    busyNotesBefore,
+  )
+  assert.deepEqual(lead.clips.map((c) => c.id), ['quiet', 'busy'], 'no clip was created or removed')
+
+  // drums track's live hits load from its own clip; notes stay empty for a drums track.
+  const loadedDrums = loadClip(doc, 'drums', 'four')
+  assert.deepEqual(loadedDrums.tracks[1]!.hits, [{ id: 'kick0', lane: 'kick', start: 0, velocity: 0.9 }])
+  assert.deepEqual(loadedDrums.tracks[1]!.notes, [])
+
+  assert.throws(() => loadClip(doc, 'lead', 'no-such-clip'), BeatEditError)
+  assert.throws(() => loadClip(doc, 'no-such-track', 'busy'), BeatEditError)
+
+  // round-trips through the canonical serializer (the live buffer is real, serializable content).
+  assert.equal(serialize(parse(serialize(loaded))), serialize(loaded))
 })
 
 test('removeTrack drops the removed track from scene slots (no dangling refs)', () => {

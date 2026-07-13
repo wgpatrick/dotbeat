@@ -558,6 +558,27 @@ export async function postPlaceClip(track: string, opts: { clipId?: string; scen
   return clipId
 }
 
+/** Phase 29 Stream GA — the inverse of postPlaceClip: loads an already-saved clip's notes/hits back
+ * into `track`'s LIVE buffer, overwriting whatever's there now. This is what actually makes
+ * clicking a later song section's clip block "open" that section's content in the note editor —
+ * without it, the editor could resolve WHICH clip a click meant (primaryClipFor) but had no way to
+ * load that clip's saved content back into the one live buffer NoteView always renders. See
+ * NoteView.tsx's sync effect (keyed on selectedTrackId + selectedSectionIndex) for the caller. */
+export async function postLoadClip(track: string, clipId: string): Promise<void> {
+  const base = daemonBase()
+  const res = await fetch(`${base}/load-clip`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ track, clipId }),
+  })
+  if (!res.ok) {
+    const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+    throw new Error(msg || `HTTP ${res.status}`)
+  }
+  const { doc } = (await res.json()) as { written: boolean; doc: BeatDocument }
+  useStore.getState().setDoc(doc)
+}
+
 // ─── Pitch & Time operations + Consolidate (Phase 23 Stream BA) ─────────────────────────────────
 // The six Ableton-style one-shot ops (src/core/pitchtime.ts) plus ratchet's Consolidate action.
 // Phase 22 Stream AD shipped these CLI/MCP-only ("no daemon route needed"); this stream adds POST
