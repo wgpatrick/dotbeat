@@ -161,7 +161,11 @@ export interface ScoreBatchResult {
   manifest: VaryBatchManifest
   ranks: number[]
   entry: ScoreEntry
-  isFeel: boolean
+  /** True when this batch's variants carry a `recipe` (a whole-doc result — feel humanize batches
+   * AND Phase 37 automation-shape batches) rather than replayable `edits` (param/lane batches). The
+   * adopt-vs-`beat set`-replay branch keys off this, not off any specific group name, so a new
+   * whole-doc vary target scores and adopts for free by simply producing recipe'd variants. */
+  usesRecipe: boolean
 }
 
 /** Read + parse a batch dir's manifest.json — shared by scoreBatch and adoptVariant so the
@@ -217,9 +221,11 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   const resolvedLog = logPath ?? defaultScoresLog(resolveBatchParent(dir, manifest))
   const ranks = picks.map((p) => normalizePick(p, manifest.variants.length))
   if (new Set(ranks).size !== ranks.length) throw new BeatBatchError('picks must be distinct')
-  // param batches carry replayable `edits`; feel batches carry a `recipe` (the whole variant
-  // file IS the result, since humanize isn't a set-replayable edit).
-  const isFeel = manifest.group === 'feel'
+  // param batches carry replayable `edits`; whole-doc batches (feel humanize, Phase 37 automation-
+  // shape) carry a `recipe` (the variant file IS the result, not a set-replayable edit). Key off the
+  // variant shape itself, not any group name, so any future whole-doc target works without touching
+  // this: a batch is recipe-shaped iff its (homogeneous) variants carry recipe rather than edits.
+  const usesRecipe = manifest.variants.length > 0 && manifest.variants[0]!.recipe !== undefined
   const entry: ScoreEntry = {
     t: new Date().toISOString(),
     batch: dir,
@@ -231,12 +237,12 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
     picks: ranks.map((n, i) => ({
       rank: i + 1,
       variant: `v${n}.beat`,
-      ...(isFeel ? { recipe: manifest.variants[n - 1]!.recipe } : { edits: manifest.variants[n - 1]!.edits }),
+      ...(usesRecipe ? { recipe: manifest.variants[n - 1]!.recipe } : { edits: manifest.variants[n - 1]!.edits }),
     })),
     rejected: manifest.variants.map((_, i) => i + 1).filter((n) => !ranks.includes(n)).map((n) => `v${n}.beat`),
   }
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
-  return { dir, logPath: resolvedLog, manifest, ranks, entry, isFeel }
+  return { dir, logPath: resolvedLog, manifest, ranks, entry, usesRecipe }
 }
 
 /** The human-facing summary both surfaces emit after a score: the scored line plus the
@@ -245,7 +251,7 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
  * MCP-only agent); param batches keep the `beat set` replay, which survives the parent moving on. */
 export function formatScoreResult(r: ScoreBatchResult): string {
   let out = `scored ${r.dir}: ${r.ranks.map((n) => `v${n}`).join(' > ')} -> ${r.logPath}\n`
-  if (r.isFeel) out += `to adopt the winner (${r.entry.picks[0]!.recipe}): beat adopt ${r.dir} v${r.ranks[0]} (or the beat_adopt tool)\n`
+  if (r.usesRecipe) out += `to adopt the winner (${r.entry.picks[0]!.recipe}): beat adopt ${r.dir} v${r.ranks[0]} (or the beat_adopt tool)\n`
   else out += `to adopt the winner: beat adopt ${r.dir} v${r.ranks[0]} (or replay just its edits: beat set ${r.manifest.parent} ${r.entry.picks[0]!.edits!.join(' ')})\n`
   return out
 }

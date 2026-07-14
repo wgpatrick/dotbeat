@@ -25,6 +25,7 @@ import {
   addHit,
   removeHit,
   setAutomationPoint,
+  applyAutomationShape,
   addEffect,
   removeEffect,
   moveEffect,
@@ -85,7 +86,8 @@ import {
 import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile } from '../metrics/index.js'
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
-import { varyTrack, varyFeel, VARY_GROUPS } from '../vary/vary.js'
+import { varyTrack, varyFeel, varyAutomation, VARY_GROUPS } from '../vary/vary.js'
+import { AUTOMATION_SHAPES } from '../core/automation-shape.js'
 import {
   writeVaryBatch,
   renderVaryBatch,
@@ -550,6 +552,42 @@ const TOOLS: ToolDef[] = [
       return formatDiff(diffDocuments(before, doc))
     },
   },
+  // === Phase 37 Stream RC begin ===
+  {
+    name: 'beat_automate_shape',
+    description:
+      "Fill a clip's automation lane for one param with a predefined SHAPE (Phase 37 Stream RC — the \"Predefined automation shapes\" roadmap row made a generator): ramp = linear from->to; sine/triangle = `cycles` oscillations between from and to (each starts at from, rises to to, returns); exp = an eased (exponential) from->to curve; adsr = a fixed-proportion attack/decay/sustain/release envelope whose peak is to and floor is from. Emits `points` breakpoints (default 16) uniformly across the clip span, so points applies to every shape uniformly. The span (how many 16th steps the points spread across) is resolved: bars override -> the clip's own loop range -> an audio-region clip's length in seconds -> the document's loop_bars. This REPLACES any existing lane for that param on the clip (a shape is the whole lane, not an addition). param is gated exactly like beat_automate: a synth/drums/instrument clip automates any AUTOMATABLE_SYNTH_PARAM; an audio clip automates only 'gain'. Returns the musical edit list.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        clip: { type: 'string' },
+        param: { type: 'string', description: 'a numeric synth param (cutoff, resonance, volume, pan, …) or "gain" on an audio clip' },
+        shape: { type: 'string', description: AUTOMATION_SHAPES.join(' | ') },
+        from: { type: 'number', description: "the shape's start value, in the param's own units" },
+        to: { type: 'number', description: "the shape's target/peak value" },
+        cycles: { type: 'number', description: 'sine/triangle only: oscillations across the span; default 1' },
+        points: { type: 'number', description: 'breakpoints to emit, uniformly spaced; default 16, min 2' },
+        bars: { type: 'number', description: 'explicit clip span in bars; overrides the clip loop / audio length / doc loop_bars' },
+      },
+      required: ['file', 'track', 'clip', 'param', 'shape', 'from', 'to'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = applyAutomationShape(before, str(args, 'track'), str(args, 'clip'), str(args, 'param'), str(args, 'shape') as never, {
+        from: num(args, 'from'),
+        to: num(args, 'to'),
+        ...(typeof args.cycles === 'number' ? { cycles: args.cycles } : {}),
+        ...(typeof args.points === 'number' ? { points: args.points } : {}),
+        ...(typeof args.bars === 'number' ? { bars: args.bars } : {}),
+      })
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  // === Phase 37 Stream RC end ===
   {
     name: 'beat_effect_add',
     description:
@@ -1391,7 +1429,7 @@ const TOOLS: ToolDef[] = [
       properties: {
         file: { type: 'string' },
         track: { type: 'string' },
-        group: { type: 'string', description: `a declared lane name (drums tracks with lanes — targets that lane's own backing params) | ${Object.keys(VARY_GROUPS).join(' | ')} | feel` },
+        group: { type: 'string', description: `a declared lane name (drums tracks with lanes — targets that lane's own backing params) | ${Object.keys(VARY_GROUPS).join(' | ')} | feel | automation:<param> (Phase 37: batch movement/shape variants of a clip's automation lane for that param, e.g. automation:cutoff)` },
         count: { type: 'number', description: 'variants per batch, 1-32, default 9' },
         amount: { type: 'number', description: 'param groups only: mutation strength (0, 1], default 0.25' },
         seed: { type: 'number', description: 'RNG seed; default from the clock (recorded in the manifest)' },
@@ -1400,6 +1438,8 @@ const TOOLS: ToolDef[] = [
         velocity: { type: 'number', description: 'feel only: velocity jitter 0..1, default 0.06' },
         push_late: { type: 'number', description: 'feel only: constant behind-the-beat drag in steps, default 0' },
         swing: { type: 'number', description: 'feel only: offbeat swing 0..1, default 0' },
+        points: { type: 'number', description: 'automation:<param> only: breakpoints per generated lane, default 16' },
+        bars: { type: 'number', description: 'automation:<param> only: clip span in bars for the generated lane; overrides the clip loop / doc loop_bars' },
         lanes: { type: 'array', items: { type: 'string' }, description: 'feel only, drum tracks: scope to these lanes' },
         ids: { type: 'array', items: { type: 'string' }, description: 'feel only: scope to these note/hit ids (alternative to lanes)' },
         scope: { type: 'string', description: 'feel only: "selection" scopes the batch to the user\'s live GUI selection, read from the daemon on `port` (mutually exclusive with lanes/ids)' },
@@ -1445,6 +1485,28 @@ const TOOLS: ToolDef[] = [
               : 'scope: selection -> whole track (selection had nothing narrowing it)',
         )
       }
+      // === Phase 37 Stream RC begin === automation:<param> — whole-doc movement variants of a clip
+      // lane, scored/adopted through the same recipe-carrying harness feel uses.
+      if (group.startsWith('automation:')) {
+        const param = group.slice('automation:'.length)
+        const outDir = typeof args.out_dir === 'string' ? args.out_dir : defaultBatchDir(file, `automation-${param}`, seed)
+        const variants = varyAutomation(doc, track, param, {
+          count,
+          seed,
+          ...(typeof args.points === 'number' ? { points: args.points } : {}),
+          ...(typeof args.bars === 'number' ? { bars: args.bars } : {}),
+        })
+        const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group, count, seed, outDir, variants })
+        lines.push(`${outDir}/: ${variants.length} automation variants of ${track}.${param} (seed ${seed})`)
+        for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.recipe}`)
+        if (render) {
+          renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
+          lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
+        }
+        return lines.join('\n') + '\n'
+      }
+      // === Phase 37 Stream RC end ===
       if (group === 'feel') {
         const outDir = typeof args.out_dir === 'string' ? args.out_dir : defaultBatchDir(file, 'feel', seed)
         const variants = varyFeel(doc, track, {

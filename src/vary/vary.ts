@@ -12,9 +12,10 @@
 
 import type { BeatDocument, BeatDrumLaneDecl, BeatSynth, BeatTrack, DrumVoiceType, TrackKind } from '../core/document.js'
 import { DRUM_VOICE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS } from '../core/document.js'
-import { setValue } from '../core/edit.js'
+import { setValue, applyAutomationShape } from '../core/edit.js'
 import { humanize } from '../core/humanize.js'
 import { formatNumber } from '../core/format.js'
+import { AUTOMATION_SHAPES, type AutomationShape } from '../core/automation-shape.js'
 
 export type VaryScale = 'linear' | 'log'
 
@@ -440,6 +441,79 @@ export function varyFeel(doc: BeatDocument, trackId: string, opts: FeelVaryOptio
     if (swing) parts.push(`swing=${formatNumber(swing)}`)
     if (opts.lanes && opts.lanes.length) parts.push(`lanes=${opts.lanes.join('+')}`)
     variants.push({ doc: next, recipe: `humanize ${parts.join(' ')}` })
+  }
+  return variants
+}
+
+export interface AutomationVaryOptions {
+  count?: number // default 9
+  seed?: number // base seed; deterministic under it
+  points?: number // points per generated lane, default 16
+  bars?: number // explicit clip span override, forwarded to applyAutomationShape
+  clip?: string // which clip to write the lane on; default the track's first clip
+}
+
+export interface AutomationVariant {
+  doc: BeatDocument
+  /** The exact replayable `automate-shape` command (sans the file arg, like feel's `humanize …`
+   * recipe) that reproduces this variant's movement — stored as the batch's recipe. */
+  recipe: string
+}
+
+/** Phase 37 Stream RC — automation as a VARY TARGET (`beat vary <track> automation:<param>`): batch
+ * `count` movement variants of one clip's `param` lane, each a distinct predefined SHAPE + depth +
+ * rate + phase, for auditioning/scoring in the existing writeVaryBatch -> score -> adopt harness.
+ * Whole-doc variants (like feel — a generated lane isn't a single set-replayable edit), so each
+ * carries a `recipe` (the replayable automate-shape command) rather than `edits`. Deterministic
+ * under (parent, track, param, options, seed); re-rolls a variant whose movement collides with an
+ * earlier one (mutateVariants' distinctness discipline), so a batch is `count` genuinely different
+ * lanes. The clip written is `opts.clip` or the track's first clip (automation is clip-scoped —
+ * errors if the track has none). */
+export function varyAutomation(doc: BeatDocument, trackId: string, param: string, opts: AutomationVaryOptions = {}): AutomationVariant[] {
+  const track = doc.tracks.find((t) => t.id === trackId)
+  if (!track) throw new BeatVaryError(`no track "${trackId}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
+  const count = opts.count ?? 9
+  if (count < 1 || count > 32) throw new BeatVaryError(`count must be 1-32, got ${count}`)
+  if (track.clips.length === 0) throw new BeatVaryError(`track "${trackId}" has no clips — automation is clip-scoped, so there is nothing to vary; snapshot a clip first (beat clip) or add notes to one`)
+  const clipId = opts.clip ?? track.clips[0]!.id
+  const clip = track.clips.find((c) => c.id === clipId)
+  if (!clip) throw new BeatVaryError(`no clip "${clipId}" on track "${trackId}" (have: ${track.clips.map((c) => c.id).join(', ')})`)
+  const points = opts.points ?? 16
+
+  // The param's current value anchors the sweep's center (so the movement stays in a musical
+  // neighborhood of what's already there). checkAutomatableParam inside applyAutomationShape is the
+  // real gate; here we just read a base to sweep around.
+  let base: number
+  if (track.kind === 'audio') base = clip.audio?.gainDb ?? 0
+  else base = (track.synth as unknown as Record<string, number>)[param] ?? 0
+
+  const rng = makeRng(opts.seed ?? 1)
+  const variants: AutomationVariant[] = []
+  const seenRecipes = new Set<string>()
+  for (let i = 0; i < count; i++) {
+    let variant: AutomationVariant | null = null
+    for (let attempt = 0; attempt < 16 && variant === null; attempt++) {
+      const shape: AutomationShape = AUTOMATION_SHAPES[Math.floor(rng() * AUTOMATION_SHAPES.length)] ?? 'ramp'
+      const depth = 0.3 + rng() * 0.6 // 0.3..0.9 — how far the sweep reaches from center
+      const cycles = 1 + Math.floor(rng() * 3) // 1..3 — the "rate" of oscillating shapes
+      const invert = rng() < 0.5 // "phase": sweep up-then-down vs down-then-up
+      // Magnitude to sweep across: multiplicative around a positive base (cutoff Hz etc.), additive
+      // around a zero/negative base (gain dB, pan). Floor a positive `from` above zero so a
+      // frequency-like param never sweeps to/through 0.
+      const magnitude = base !== 0 ? Math.abs(base) : 1000
+      let lo = base - depth * magnitude
+      const hi = base + depth * magnitude
+      if (base > 0) lo = Math.max(lo, base * 0.05)
+      const from = invert ? hi : lo
+      const to = invert ? lo : hi
+      const recipe = `automate-shape ${clipId} ${param} ${shape} --from ${formatNumber(from)} --to ${formatNumber(to)} --cycles ${cycles} --points ${points}${opts.bars !== undefined ? ` --bars ${formatNumber(opts.bars)}` : ''}`
+      if (seenRecipes.has(recipe)) continue // re-roll — keep the batch's movements distinct
+      const next = applyAutomationShape(doc, trackId, clipId, param, shape, { from, to, cycles, points, ...(opts.bars !== undefined ? { bars: opts.bars } : {}) }).doc
+      seenRecipes.add(recipe)
+      variant = { doc: next, recipe }
+    }
+    if (variant === null) throw new BeatVaryError(`could not produce ${count} distinct automation variants for "${trackId}.${param}" (try a smaller count)`)
+    variants.push(variant)
   }
   return variants
 }
