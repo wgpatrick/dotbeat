@@ -473,3 +473,61 @@ test('tools/call: beat_suggest validates the track exists (CLI parity, pilot 101
     mcp.close()
   }
 })
+
+// Phase 35 Stream OD: reference mix profile over MCP — beat_metrics' save_profile and beat_lint's
+// ref ride the same src/metrics/profile.ts code path as the CLI flags, so a profile written on
+// either surface reads on either.
+test('tools/call: beat_metrics save_profile writes a profile; beat_lint ref compares against it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-profile-test-'))
+  const wav = (path: string, amp: number) => {
+    // tiny 16-bit PCM stereo 997 Hz sine — enough for metrics, no render involved
+    const FS = 44100
+    const n = FS
+    const dataSize = n * 2 * 2
+    const buf = Buffer.alloc(44 + dataSize)
+    buf.write('RIFF', 0); buf.writeUInt32LE(36 + dataSize, 4); buf.write('WAVE', 8)
+    buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(2, 22)
+    buf.writeUInt32LE(FS, 24); buf.writeUInt32LE(FS * 4, 28); buf.writeUInt16LE(4, 32); buf.writeUInt16LE(16, 34)
+    buf.write('data', 36); buf.writeUInt32LE(dataSize, 40)
+    let o = 44
+    for (let i = 0; i < n; i++) {
+      const v = Math.round(amp * Math.sin((2 * Math.PI * 997 * i) / FS) * 32767)
+      buf.writeInt16LE(v, o); buf.writeInt16LE(v, o + 2); o += 4
+    }
+    writeFileSync(path, buf)
+  }
+  wav(join(dir, 'ref.wav'), 0.4)
+  wav(join(dir, 'mix.wav'), 0.1) // 12 dB quieter, same spectrum
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    const metrics = await mcp.request('tools/call', {
+      name: 'beat_metrics',
+      arguments: { file: join(dir, 'ref.wav'), save_profile: join(dir, 'ref.json') },
+    })
+    const parsed = JSON.parse(metrics.content[0].text)
+    assert.equal(parsed.savedProfile, join(dir, 'ref.json'))
+    const profile = JSON.parse(readFileSync(join(dir, 'ref.json'), 'utf8')) as { format: string; source: string }
+    assert.equal(profile.format, 'dotbeat-mix-profile')
+    assert.equal(profile.source, 'ref.wav')
+
+    const lintRes = await mcp.request('tools/call', {
+      name: 'beat_lint',
+      arguments: { file: join(dir, 'mix.wav'), ref: join(dir, 'ref.json') },
+    })
+    assert.match(lintRes.content[0].text, /\[ref-loudness\].*12\.0 LU quieter than the reference \(ref\.wav/)
+
+    // one comparison frame at a time — tool-level error, agent-visible
+    const conflict = await mcp.request('tools/call', {
+      name: 'beat_lint',
+      arguments: { file: join(dir, 'mix.wav'), ref: join(dir, 'ref.json'), target_lufs: -14 },
+    })
+    assert.equal(conflict.isError, true)
+    assert.match(conflict.content[0].text, /pick one comparison frame/)
+  } finally {
+    mcp.close()
+  }
+})

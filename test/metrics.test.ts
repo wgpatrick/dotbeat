@@ -7,6 +7,7 @@ import { test } from 'node:test'
 import { integratedLoudness } from '../src/metrics/loudness.js'
 import { analyze } from '../src/metrics/analyze.js'
 import { lint } from '../src/metrics/lint.js'
+import { buildProfile, serializeProfile, parseProfile, BeatProfileError, PROFILE_FORMAT } from '../src/metrics/profile.js'
 import { RENDER_RUN_VARIANCE_PEAK_DB } from '../src/metrics/variance.js'
 import { decodeWav } from '../src/metrics/wav.js'
 
@@ -138,6 +139,99 @@ test('lint thresholds are padded by the measured render run variance (Phase 34 N
   const clip = lint(analyze([loudSquare, loudSquare.slice()], FS)).find((f) => f.rule === 'true-peak-clipping')
   assert.ok(clip, 'full-scale square must still fire true-peak-clipping')
   assert.equal(clip!.threshold, -1 + RENDER_RUN_VARIANCE_PEAK_DB)
+})
+
+// ---- Phase 35 Stream OD: reference mix profile ---------------------------------------------
+
+/** 25% duty-cycle pulsed tone — the same "sane groove" shape the lint test above uses: crest
+ * ~9 dB, so scaling it only moves energy metrics, keeping known-answer deltas clean. */
+function pulsedTone(freq: number, amp: number): Float64Array {
+  const out = sine(freq, 3, amp)
+  for (let i = 0; i < out.length; i++) if (i % FS >= FS / 4) out[i] = 0
+  return out
+}
+
+test('mix profile round-trips through JSON, including non-finite values (Phase 35 OD)', () => {
+  const ch = sine(997, 2, 0.5)
+  const m = analyze([ch, ch.slice()], FS)
+  // dual-mono: widthDb is exactly -Infinity — the value plain JSON.stringify would destroy
+  assert.equal(m.stereo!.widthDb, -Infinity)
+  const profile = buildProfile(m, 'ref.wav')
+  const back = parseProfile(serializeProfile(profile))
+  assert.deepEqual(back, profile)
+  assert.equal(back.format, PROFILE_FORMAT)
+  assert.equal(back.source, 'ref.wav')
+  assert.ok(!Number.isNaN(Date.parse(back.createdAt)), `createdAt "${back.createdAt}" should be an ISO date`)
+  assert.equal(back.metrics.stereo!.widthDb, -Infinity)
+})
+
+test('parseProfile rejects non-profiles with actionable errors', () => {
+  assert.throws(() => parseProfile('not json at all'), BeatProfileError)
+  assert.throws(() => parseProfile('{"some":"json"}'), /not a dotbeat mix profile/)
+  const good = buildProfile(analyze([sine(997, 1, 0.5), sine(997, 1, 0.5)], FS), 'ref.wav')
+  assert.throws(() => parseProfile(serializeProfile({ ...good, version: 99 })), /version 99/)
+  assert.throws(() => parseProfile(JSON.stringify({ ...good, metrics: {} })), /missing measured metrics/)
+})
+
+test('ref-mode lint: a 6 dB quieter mix fires ref-loudness naming both values; identical spectrum stays quiet', () => {
+  const ref = buildProfile(analyze([pulsedTone(997, 0.4), pulsedTone(997, 0.4)], FS), 'ref.wav')
+  const findings = lint(analyze([pulsedTone(997, 0.2), pulsedTone(997, 0.2)], FS), { ref })
+  const loud = findings.find((f) => f.rule === 'ref-loudness')
+  assert.ok(loud, `rules: ${findings.map((f) => f.rule).join(',')}`)
+  assert.match(loud!.message, /6\.0 LU quieter than the reference \(ref\.wav: -\d+\.\d LUFS\)/)
+  assert.match(loud!.suggestion!, /raise all track volumes by ~6\.0 dB \(beat set song\.beat <track>\.volume <dB> per track\)/)
+  // same signal shape: band shares and crest match the reference — no delta findings there,
+  // and the ABSOLUTE taste rules are off in ref mode (this mix is 20 LU under the -14 target)
+  assert.ok(!findings.some((f) => f.rule.startsWith('ref-band-')), `rules: ${findings.map((f) => f.rule).join(',')}`)
+  assert.ok(!findings.some((f) => f.rule === 'ref-crest'))
+  assert.ok(!findings.some((f) => f.rule === 'loudness-vs-target'))
+})
+
+test('ref-mode lint: band-share deltas fire per band with direction (bass-heavy ref vs bright mix)', () => {
+  const ref = buildProfile(analyze([sine(100, 2, 0.5), sine(100, 2, 0.5)], FS), 'bassy.wav')
+  const findings = lint(analyze([sine(8000, 2, 0.5), sine(8000, 2, 0.5)], FS), { ref })
+  const bass = findings.find((f) => f.rule === 'ref-band-bass')
+  const air = findings.find((f) => f.rule === 'ref-band-air')
+  assert.ok(bass && air, `rules: ${findings.map((f) => f.rule).join(',')}`)
+  assert.match(bass!.message, /vs the reference's \d+% \(bassy\.wav\) — \d+ points less/)
+  assert.match(bass!.suggestion!, /add bass energy/)
+  assert.match(air!.message, /points more/)
+  assert.match(air!.suggestion!, /tame the top end/)
+  // absolute spectral rules stay out of ref mode
+  assert.ok(!findings.some((f) => f.rule === 'low-end-heavy' || f.rule === 'dull-top-end'))
+})
+
+test('ref-mode lint: a much narrower mix than the reference fires ref-width', () => {
+  // reference: fully decorrelated L/R (width ~0 dB); mix: R = 0.9 L + 0.1 other (~-23 dB)
+  const s = sine(997, 2, 0.4)
+  const t = sine(1400, 2, 0.4)
+  const ref = buildProfile(analyze([s, t], FS), 'wide.wav')
+  const narrowR = new Float64Array(s.length)
+  for (let i = 0; i < s.length; i++) narrowR[i] = 0.9 * s[i]! + 0.1 * t[i]!
+  const findings = lint(analyze([s.slice(), narrowR], FS), { ref: ref })
+  const width = findings.find((f) => f.rule === 'ref-width')
+  assert.ok(width, `rules: ${findings.map((f) => f.rule).join(',')}`)
+  assert.match(width!.message, /narrower than the reference/)
+  assert.match(width!.suggestion!, /pan tracks apart/)
+})
+
+test('ref-mode thresholds are padded by the render run variance, and --ref/--target is a hard conflict', () => {
+  const ref = buildProfile(analyze([pulsedTone(997, 0.4), pulsedTone(997, 0.4)], FS), 'ref.wav')
+  // 1.6 LU quieter: outside the nominal 1.5 LU tolerance, inside the variance-padded 1.75 —
+  // must stay silent, or re-rendering an unchanged .beat could flip the finding on/off
+  const amp = 0.4 * Math.pow(10, -1.6 / 20)
+  const nearMiss = lint(analyze([pulsedTone(997, amp), pulsedTone(997, amp)], FS), { ref })
+  assert.ok(!nearMiss.some((f) => f.rule === 'ref-loudness'), `rules: ${nearMiss.map((f) => f.rule).join(',')}`)
+
+  // the SAFETY rules stay absolute in ref mode: clipping vs a reference is still clipping
+  const loudSquare = new Float64Array(FS * 2)
+  for (let i = 0; i < loudSquare.length; i++) loudSquare[i] = Math.sign(Math.sin((2 * Math.PI * 100 * i) / FS)) || 1
+  const clipping = lint(analyze([loudSquare, loudSquare.slice()], FS), { ref })
+  assert.ok(clipping.some((f) => f.rule === 'true-peak-clipping'))
+
+  // one comparison frame at a time
+  const m = analyze([pulsedTone(997, 0.2), pulsedTone(997, 0.2)], FS)
+  assert.throws(() => lint(m, { ref, targetLufs: -14 }), /one comparison frame/)
 })
 
 test('wav decode round-trips a synthesized 16-bit PCM file', () => {
