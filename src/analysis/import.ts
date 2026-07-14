@@ -365,6 +365,10 @@ export function formatSkeletonReport(report: SkeletonReport, outFile: string): s
   }
   for (const note of report.droppedNotes) lines.push(note)
   const sceneCount = new Set(report.sections.map((s) => s.scene)).size
-  if (sceneCount > 0) lines.push(`next: beat clip / beat place to fill the ${sceneCount} scene(s) with content`)
+  if (sceneCount > 0) {
+    lines.push(`next: fill the ${sceneCount} scene(s) — song mode plays only scene-placed content, so a`)
+    lines.push(`      groove added to a track is SILENT until you snapshot it (beat clip) and place it`)
+    lines.push(`      into a scene (beat scene / beat place).`)
+  }
   return lines.join('\n')
 }

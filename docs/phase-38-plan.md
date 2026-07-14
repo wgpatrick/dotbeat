@@ -1,9 +1,13 @@
 # Phase 38 — learn from real songs: audio-structure import via the first Python sidecar
 
-> **STATUS 2026-07-14:** Owner approved (defaults: adopt the Python sidecar; defer Stable Audio
-> Open `beat source gen` to Phase 39). Streams SA / SB / SD build in parallel worktrees; SE is
-> serial after merge. This doc is the **source of truth**; the frozen contract in §"analysis.json
-> contract" is built against verbatim by both SA and SB.
+> **STATUS 2026-07-14 — COMPLETE.** Owner approved (defaults: adopt the Python sidecar; defer
+> Stable Audio Open `beat source gen` to Phase 39). All streams shipped and merged to `main`
+> (798 tests green): SA (contract/loader/`beat skeleton`), SB (`beat analyze` Python sidecar),
+> SD (pilot-104 papercuts), SE (end-to-end showcase + pilot 105 + wrap-up). The chained
+> `analyze → skeleton` flow was verified live, and pilot 105 (`docs/research/105-…`) reached an
+> audible render via the full pipeline; four of its findings were fixed same-day, the rest
+> backlogged in `scripts/roadmap-data.mjs`. This doc was the **source of truth** during the build;
+> the frozen contract in §"analysis.json contract" was built against verbatim by SA and SB.
 
 ## Context
 

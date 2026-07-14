@@ -103,7 +103,7 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   const served = await serveUi(previewPort)
   console.error(`ui served at ${served.url}`)
 
-  const browser = await chromium.launch({
+  const launchOpts = {
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
     headless: true,
     // The throttling flags matter for real-time capture: a headless page counts as backgrounded,
@@ -114,7 +114,24 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
       '--disable-backgrounding-occluded-windows',
       '--disable-renderer-backgrounding',
     ],
-  })
+  }
+  let browser
+  try {
+    browser = await chromium.launch(launchOpts)
+  } catch (err) {
+    // The default `channel: 'chrome'` needs a system Chrome install, which many locked-down /
+    // proxied environments (incl. this one) can't get — `npx playwright install chrome` 403s.
+    // Point at the fix instead of leaking Playwright's raw "distribution not found" error.
+    if (!process.env.CHROME_PATH) {
+      throw new Error(
+        `could not launch Chrome: ${err && err.message ? err.message.split('\n')[0] : err}\n` +
+          `  set CHROME_PATH to an existing Chromium/Chrome binary and re-run, e.g.:\n` +
+          `    CHROME_PATH=/opt/pw-browsers/chromium node cli/render.mjs ...\n` +
+          `  (a Playwright chromium from \`npx playwright install chromium\` works too).`,
+      )
+    }
+    throw err
+  }
   const page = await browser.newPage()
   const pageErrors = []
   page.on('pageerror', (e) => pageErrors.push(String(e)))

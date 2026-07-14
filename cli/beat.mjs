@@ -470,7 +470,13 @@ const HELP = [
                                                           (headless Chromium driving ui/; no BeatLab needed)
   beat render <file> --stems [--out-dir d]                Phase 37: one solo WAV per track into an out dir
                                                           (default stems-<file> next to the .beat) — stems for
-                                                          external mixing or per-track metrics`,
+                                                          external mixing or per-track metrics
+  env CHROME_PATH=<binary>                                use a specific Chromium/Chrome instead of a system
+                                                          Chrome install — required in locked-down/proxied
+                                                          environments where \`playwright install chrome\` is
+                                                          blocked (a \`playwright install chromium\` binary works).
+  note: song mode renders only scene-placed content — a groove on a track that isn't placed in any
+        scene renders SILENT. Snapshot with beat clip and place it with beat scene / beat place first.`,
   },
   // ---- Phase 37 Stream RA begin: feedback help entry --------------------------------------
   {
@@ -798,6 +804,10 @@ async function analyzeCmd(argv) {
   const b = artifact.backend
   const out = []
   out.push(`analyzed ${artifact.source.file} (backend ${b.name}${b.version ? ` ${b.version}` : ''}${b.model ? `/${b.model}` : ''})`)
+  if (b.name === 'stub') {
+    out.push(`  ⚠ stub backend — a synthetic fixed 120-BPM intro/loop/outro grid, NOT detected from your audio.`)
+    out.push(`    install a real backend for true tempo/section detection: beat analyze --doctor`)
+  }
   out.push(`  bpm ${Number(artifact.bpm).toFixed(2)} (${artifact.bpmMethod})`)
   out.push(`  duration ${artifact.source.durationSeconds.toFixed(2)}s · ${artifact.beats.length} beats · ${artifact.downbeats.length} downbeats`)
   if (artifact.sections.length > 0) {

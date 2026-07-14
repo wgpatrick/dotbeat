@@ -73,6 +73,8 @@ test('beat analyze --backend stub writes a deterministic, well-formed, correctly
   const out = beat(['analyze', wav, '--backend', 'stub'])
   assert.equal(out.status, 0, out.stderr)
   assert.match(out.stdout, /backend stub/)
+  // pilot 105: the stub result is badged as synthetic so it can't be mistaken for real detection.
+  assert.match(out.stdout, /stub backend — a synthetic/)
   assert.match(out.stdout, /bpm 120\.00 \(backend\)/)
   assert.match(out.stdout, /wrote .*ref\.analysis\.json/)
 
@@ -156,6 +158,8 @@ test('--backend beatthis without torch exits non-zero with the doctor hint (the 
   const combined = out.stdout + out.stderr
   assert.match(combined, /pip install -r python\/requirements-beatthis\.txt/)
   assert.match(combined, /beat analyze --doctor/)
+  // pilot 105: the default-backend failure names the no-deps escape hatch.
+  assert.match(combined, /--backend stub/)
   // No cache file should have been written on the failure.
   assert.ok(!existsSync(wav.replace(/\.wav$/, '.analysis.json')))
 })

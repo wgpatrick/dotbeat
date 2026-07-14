@@ -194,7 +194,10 @@ export async function runAnalysis(opts: RunAnalysisOptions): Promise<RunAnalysis
   if (res.code !== 0) {
     const detail = lastNonEmptyLine(res.stderr) || `exit code ${res.code}`
     let message = `beat analyze (${backend}) failed: ${detail}`
-    if (res.code === 3) message += ' — run `beat analyze --doctor` to check the Python backends'
+    if (res.code === 3) {
+      message += ' — run `beat analyze --doctor` to check the Python backends'
+      if (backend !== 'stub') message += ', or `--backend stub` for a dependency-free scaffold grid'
+    }
     throw new BeatAnalysisError(message)
   }
 

@@ -1832,6 +1832,12 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: 'research/104-usability-pilot-phase37-surface.md', plan: 'phase-38-plan.md',
   },
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Pilot 105 leftovers (audio-import surface)',
+    description: 'Remainder of pilot 105 after four same-day Phase-38-SE fixes (stub-result badge, --backend stub escape-hatch hint in the default-backend failure, a song-mode silent-render warning in beat skeleton\'s next-hint + render --help, and an actionable CHROME_PATH message on the render Chrome-not-found failure): (1) the fuller silent-render fix — render/inspect should DETECT a populated track that appears in zero scenes of the active song and warn (currently a groove on an unplaced track renders a valid, silent WAV with no cross-warning); (2) render should auto-fall-back to a bundled Playwright chromium when the chrome channel is missing, not just document CHROME_PATH; (3) the two importer MCP tools use inconsistent arg names (beat_analyze_audio file/out vs beat_skeleton out_file/analysis_file) and beat_analyze_audio marks nothing required though file is essential unless doctor; (4) add-track instrument errors for a missing soundfont without nudging "use synth for a quick part". All ergonomic; (1) is the load-bearing one and spans the arrangement/song content model.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/105-usability-pilot-audio-import.md', plan: null,
+  },
 
   // ── Known usability gaps (backlog) ────────────────────────────────────────
   // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
