@@ -312,6 +312,24 @@ const HELP = [
                                                           via beat scene/beat_song. Requires song mode already.`,
   },
   { cmd: 'sample', text: `  beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)` },
+  // ==== Phase 37 Stream RD begin ====
+  {
+    cmd: 'source',
+    text: `  beat source search <query> [--max N] [--dur-min V] [--dur-max V] [--out-dir d]
+                                                          find CC0 (public-domain) sounds on Freesound, top-rated first
+                                                          (--out-dir also downloads each preview for auditioning);
+                                                          NEEDS FREESOUND_API_KEY + network egress to freesound.org
+  beat source add <file.beat> <sample-id> <local-audio-file> [--license L] [--note N]
+                                                          OFFLINE: prep a file you already have (trim/fade/normalize)
+                                                          and register it as media, writing an enforced provenance
+                                                          sidecar media/<id>.wav.json. --license defaults to
+                                                          "unspecified" (you assert the license; only the --freesound
+                                                          path labels media "CC0-1.0")
+  beat source add <file.beat> <sample-id> --freesound <id> [--note N]
+                                                          GATED: fetch a specific CC0 sound from Freesound by id and
+                                                          register it (label "CC0-1.0"); needs the key + egress. CC0
+                                                          is the only license ever fetched (zero redistribution risk)` },
+  // ==== Phase 37 Stream RD end ====
   {
     cmd: 'lane',
     text: `  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample ("none" reverts the lane
@@ -1411,6 +1429,67 @@ async function sampleCmd(argv) {
   process.stdout.write(`registered ${id}: sha256:${sha256.slice(0, 12)}... ${samplePath}\n`)
 }
 
+// ==== Phase 37 Stream RD begin ====
+// `beat source` — find/ingest real sounds into the taste loop (docs/phase-37-plan.md §RD). Backed
+// by scripts/source-lib.mjs, imported at call time via a runtime dynamic import (shared verbatim
+// with the MCP surface). SourceError is mapped to BeatEditError HERE so the shared main().catch
+// prints a clean `error: ...` (exit 2) with no stack — never leaking through as an uncaught throw.
+async function sourceCmd(argv) {
+  const [sub, ...rest] = argv
+  const flag = (name, dflt) => {
+    const i = rest.indexOf(name)
+    return i !== -1 ? rest[i + 1] : dflt
+  }
+  const VALUE_FLAGS = new Set(['--max', '--dur-min', '--dur-max', '--out-dir', '--license', '--note', '--freesound'])
+  const positionals = rest.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(rest[i - 1]))
+  const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
+  try {
+    if (sub === 'search') {
+      const [query] = positionals
+      const outDir = flag('--out-dir')
+      const opts = {
+        query,
+        max: flag('--max') !== undefined ? Number(flag('--max')) : 10,
+        durMin: flag('--dur-min') !== undefined ? Number(flag('--dur-min')) : 0.05,
+        durMax: flag('--dur-max') !== undefined ? Number(flag('--dur-max')) : 5,
+      }
+      const { total, results } = await lib.freesoundSearchCC0(opts)
+      process.stdout.write(`${total} CC0 result${total === 1 ? '' : 's'} for "${query}" — top ${results.length} by rating:\n`)
+      for (const r of results) {
+        process.stdout.write(`  #${r.id}  ${r.name} by ${r.by}  (${Number(r.duration).toFixed(2)}s, rating ${r.rating ?? 'n/a'})  ${r.url}\n`)
+      }
+      if (outDir) {
+        const saved = await lib.downloadPreviews({ results, outDir })
+        process.stdout.write(`downloaded ${saved.length} preview${saved.length === 1 ? '' : 's'} into ${outDir}/ for auditioning\n`)
+      }
+      process.stdout.write(`register one with: beat source add <file.beat> <id> --freesound <#>\n`)
+      return
+    }
+    if (sub === 'add') {
+      const [file, id, audioFile] = positionals
+      const freesoundId = flag('--freesound')
+      const note = flag('--note')
+      let result
+      if (freesoundId !== undefined) {
+        result = await lib.addFreesoundSource({ beatFile: file, id, freesoundId, note })
+      } else {
+        result = await lib.addLocalSource({ beatFile: file, id, audioFile, license: flag('--license', 'unspecified'), note })
+      }
+      process.stdout.write(
+        `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +
+        `(${result.durationSeconds}s, license ${result.license})\n` +
+        `provenance sidecar: ${result.relPath}.json\n`,
+      )
+      return
+    }
+    throw new BeatEditError('source needs a subcommand: `beat source search <query>` or `beat source add <file.beat> <id> <local-audio-file>` (see `beat help source`)')
+  } catch (err) {
+    if (err && err.name === 'SourceError') throw new BeatEditError(err.message)
+    throw err
+  }
+}
+// ==== Phase 37 Stream RD end ====
+
 function laneCmd(argv) {
   // Phase 35 Stream OB: `--clear-legacy` is the one-shot explicit cleanup for stale v0.5
   // laneSamples lines on a declared-lane track (inspect flags them; playback ignores them there).
@@ -2073,6 +2152,11 @@ async function main() {
     case 'sample':
       await sampleCmd(rest)
       break
+    // ==== Phase 37 Stream RD begin ====
+    case 'source':
+      await sourceCmd(rest)
+      break
+    // ==== Phase 37 Stream RD end ====
     case 'lane':
       laneCmd(rest)
       break
