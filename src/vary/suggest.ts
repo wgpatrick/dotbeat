@@ -32,8 +32,8 @@
 // whether picks cluster above or below the range's midpoint. It is a simple descriptive average,
 // reported only when there are enough samples and the trend is not close to the midpoint.
 
-import { VARY_GROUPS, legalGroupsForKind, type VaryParamDef } from './vary.js'
-import type { TrackKind } from '../core/document.js'
+import { VARY_GROUPS, laneVaryDefs, legalGroupsForKind, legalVaryTargets, type VaryRangeDef } from './vary.js'
+import type { BeatDrumLaneDecl, TrackKind } from '../core/document.js'
 
 export interface ScorePick {
   rank: number
@@ -138,17 +138,18 @@ function matchesTarget(entry: ScoreEntry, target: string): boolean {
   return false
 }
 
-/** Split one manifest-style edit string ("<trackId>.<param> <value>") into its param key and
- * numeric value. Returns undefined if it isn't a bare "path value" pair or the value isn't
- * numeric (enum params like osc2Type aren't part of any VARY_GROUPS range, so they're skipped
- * rather than guessed at). */
+/** Split one manifest-style edit string ("<trackId>.<param> <value>" or, for lane-targeted
+ * rounds, "<trackId>.lane.<lane>.<param> <value>") into its param key (the LAST path segment,
+ * covering both spellings) and numeric value. Returns undefined if it isn't a bare "path value"
+ * pair or the value isn't numeric (enum params like osc2Type aren't part of any VARY_GROUPS
+ * range, so they're skipped rather than guessed at). */
 function parseEdit(edit: string): { param: string; value: number } | undefined {
   const sp = edit.indexOf(' ')
   if (sp === -1) return undefined
   const path = edit.slice(0, sp)
   const value = Number(edit.slice(sp + 1))
   if (!Number.isFinite(value)) return undefined
-  const dot = path.indexOf('.')
+  const dot = path.lastIndexOf('.')
   if (dot === -1) return undefined
   return { param: path.slice(dot + 1), value }
 }
@@ -182,7 +183,7 @@ function computeGroupStats(entries: ScoreEntry[]): GroupStat[] {
   return stats
 }
 
-function toNorm(value: number, def: VaryParamDef): number {
+function toNorm(value: number, def: VaryRangeDef): number {
   if (def.scale === 'log') {
     const lo = Math.log(Math.max(def.min, 1e-9))
     const hi = Math.log(Math.max(def.max, 1e-9))
@@ -195,8 +196,7 @@ function toNorm(value: number, def: VaryParamDef): number {
 const MIN_DIRECTION_SAMPLES = 3
 const DIRECTION_DEADBAND = 0.15 // mean position must be at least this far from the 0.5 midpoint
 
-function computeDirections(entries: ScoreEntry[], group: string): DirectionHint[] {
-  const defs = VARY_GROUPS[group]
+function computeDirections(entries: ScoreEntry[], group: string, defs: readonly (VaryRangeDef & { key: string })[] | undefined): DirectionHint[] {
   if (!defs) return []
   const byParam = new Map<string, number[]>()
   for (const e of entries) {
@@ -243,6 +243,12 @@ export interface SuggestOptions {
    * Omit only for callers that don't have a parsed document handy; falls back to the old
    * kind-agnostic first-group behavior. */
   trackKind?: TrackKind
+  /** Phase 35 Stream OA: the drums track's declared `lanes` list, when it has one. Makes the
+   * whole suggestion lane-aware (pilot 101: suggest kept steering deeper into the provably
+   * inaudible kick group): cold start recommends a REAL lane, and a historically-winning group
+   * that would no-op on this track (the legacy kick/snare/hats, or an sf-backed lane) is never
+   * recommended. Pass alongside trackKind; ignored for non-drums kinds and empty lists. */
+  trackLanes?: readonly BeatDrumLaneDecl[]
 }
 
 const AMOUNT_DEFAULT = 0.25 // rung-1's own default (vary.ts)
@@ -262,18 +268,35 @@ export function suggestNext(entries: ScoreEntry[], track: string, opts: SuggestO
   if (opts.target) relevant = relevant.filter((e) => matchesTarget(e, opts.target!))
   const scope = opts.target ? ` matching --target ${opts.target}` : ''
 
+  // Phase 35 Stream OA: resolve the track's ACTUAL vary targets. On a declared-lane drums track
+  // the legal set is its own lane names (sf-backed excluded) plus the track-wide bus groups —
+  // the legacy kick/snare/hats groups are audio no-ops there and must never be recommended
+  // (pilot 101: suggest kept steering deeper into the inaudible kick group).
+  const declaredLanes = opts.trackKind === 'drums' && opts.trackLanes && opts.trackLanes.length > 0 ? opts.trackLanes : undefined
+  const candidates = declaredLanes
+    ? legalVaryTargets({ kind: 'drums', lanes: [...declaredLanes] })
+    : opts.trackKind
+      ? legalGroupsForKind(opts.trackKind)
+      : undefined
+  // "feel" (content variation) is legal on any track; group legality only applies when we know
+  // enough about the track to judge (candidates undefined = old kind-agnostic behavior).
+  const isLegal = (group: string): boolean => group === 'feel' || candidates === undefined || candidates.includes(group)
+  /** Direction hints need the group's mutation ranges: a declared lane's own defs when the group
+   * names a lane (lane precedence matches varyTrack's), else the static VARY_GROUPS entry. */
+  const defsFor = (group: string) => {
+    const lane = declaredLanes?.find((l) => l.name === group)
+    return lane ? laneVaryDefs(lane) : VARY_GROUPS[group]
+  }
+
   if (relevant.length === 0) {
-    // Restrict to groups that are actually legal (audible) on this track's kind, if known —
-    // otherwise every VARY_GROUPS entry is a candidate, same as before (research/96: an
-    // unfiltered "first group" pick handed a synth track "kick", a drum-only group, as its
-    // first-ever recommendation — a command that "succeeds" but never touches the audible synth
-    // params, a silent no-op).
-    const candidates = opts.trackKind ? legalGroupsForKind(opts.trackKind) : Object.keys(VARY_GROUPS)
-    const group = candidates[0]!
+    const coldCandidates = candidates ?? Object.keys(VARY_GROUPS)
+    const group = coldCandidates[0]!
     const command = `beat vary ${file} ${track} ${group} --amount ${AMOUNT_DEFAULT} --seed ${seed}`
-    const kindNote = opts.trackKind
-      ? `recommending the first group legal for a "${opts.trackKind}" track (${candidates.join(', ')}): "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
-      : `recommending the first group in vary.ts's declared order (${Object.keys(VARY_GROUPS).join(', ')}): "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
+    const kindNote = declaredLanes
+      ? `this is a declared-lane drums track, so its REAL vary targets are its own lanes (each lane's backing params are what actually sound) plus the track-wide bus groups (${coldCandidates.join(', ')}): recommending lane "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
+      : opts.trackKind
+        ? `recommending the first group legal for a "${opts.trackKind}" track (${coldCandidates.join(', ')}): "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
+        : `recommending the first group in vary.ts's declared order (${Object.keys(VARY_GROUPS).join(', ')}): "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
     return {
       coldStart: true,
       track,
@@ -289,8 +312,29 @@ export function suggestNext(entries: ScoreEntry[], track: string, opts: SuggestO
   }
 
   const stats = computeGroupStats(relevant)
-  const top = stats[0]!
-  const directions = top.group === 'feel' ? [] : computeDirections(relevant, top.group)
+  // Recommend the highest-ranked group that is still a live target on this track — never one
+  // that would no-op (legacy drum-voice groups on a declared-lane track, or an sf-backed lane).
+  const topIdx = stats.findIndex((s) => isLegal(s.group))
+  const top = topIdx === -1 ? undefined : stats[topIdx]!
+  // Everything ranked above the first legal group was skipped as a dead target — name each one,
+  // so the "why not the group I liked last week" question answers itself.
+  const skipped = topIdx === -1 ? [] : stats.slice(0, topIdx)
+
+  if (!top) {
+    // Every scored round targets a group that's dead on this track (e.g. the whole history is
+    // pre-Phase-35 no-op kick rounds on a declared-lane track): fall back to a cold-start-style
+    // recommendation of a real target rather than endorsing a no-op.
+    const group = (candidates ?? Object.keys(VARY_GROUPS))[0]!
+    const command = `beat vary ${file} ${track} ${group} --amount ${AMOUNT_DEFAULT} --seed ${seed}`
+    const reasoning = [
+      `found ${relevant.length} scored round(s) for "${track}"${scope}, but every scored group (${stats.map((s) => s.group).join(', ')}) is a dead target on this track — on a declared-lane drums track the legacy kick/snare/hats groups mutate track-wide params the engine never plays, so those rounds carried no audible signal.`,
+      `starting fresh on a real target instead: ${declaredLanes ? `lane "${group}"` : `"${group}"`} (live targets: ${(candidates ?? []).join(', ')}${candidates ? ', feel' : ''}).`,
+      `recommend: ${command}`,
+    ]
+    return { coldStart: true, track, totalRounds: relevant.length, stats, recommendedGroup: group, directions: [], amount: AMOUNT_DEFAULT, seed, command, reasoning }
+  }
+
+  const directions = top.group === 'feel' ? [] : computeDirections(relevant, top.group, defsFor(top.group))
 
   let amount = AMOUNT_DEFAULT
   if (top.rounds >= CONFIDENT_ROUNDS && top.pickRate >= CONFIDENT_PICK_RATE) amount = AMOUNT_CONFIDENT
@@ -302,8 +346,13 @@ export function suggestNext(entries: ScoreEntry[], track: string, opts: SuggestO
   for (const s of stats) {
     reasoning.push(`  ${s.group}: ${s.wins}/${s.wins + s.losses} variants picked across ${s.rounds} round(s) (pick rate ${(s.pickRate * 100).toFixed(0)}%)`)
   }
+  for (const s of skipped) {
+    reasoning.push(
+      `skipping "${s.group}" despite its record: it is not a live vary target on this track (on a declared-lane drums track the legacy drum-voice groups mutate params the engine never plays — those wins were rated on inaudible differences).`,
+    )
+  }
   reasoning.push(
-    `"${top.group}" ranks highest by picked-vs-rejected odds (Bradley-Terry odds-form against an implicit "not picked" baseline — groups never appear in the same batch by rung-1's design, so this is a ranking signal, not a proven head-to-head win; see suggest.ts's module doc).`,
+    `"${top.group}" ranks highest${skipped.length ? " among this track's LIVE targets" : ''} by picked-vs-rejected odds (Bradley-Terry odds-form against an implicit "not picked" baseline — groups never appear in the same batch by rung-1's design, so this is a ranking signal, not a proven head-to-head win; see suggest.ts's module doc).`,
   )
   if (directions.length) {
     for (const d of directions) {

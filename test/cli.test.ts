@@ -154,7 +154,7 @@ test('beat <cmd> --help prints only that command\'s block', () => {
 
 test('beat help <cmd> works and appends the command\'s "related:" family', () => {
   const out = beat(['help', 'vary'])
-  assert.match(out, /^usage:\n {2}beat vary <file> <track> <group>/)
+  assert.match(out, /^usage:\n {2}beat vary <file> <track> <group-or-lane>/)
   assert.match(out, /beat vary --groups/)
   assert.match(out, /\nrelated: beat score, beat suggest\n$/)
   // set's per-command view carries its paths footer
@@ -172,4 +172,45 @@ test('beat help <unknown> is the standard unknown-command error, exit 2', () => 
   // ...and an unknown command with --help behaves the same way
   const out2 = beat(['bogus', '--help'], { expectExit: 2 })
   assert.match(out2, /unknown command "bogus"/)
+})
+
+// Phase 35 Stream OA — lane-aware drum vary over the real CLI (pilot 101's high finding). The
+// unit-level guarantees live in test/vary-lanes.test.ts; these check the end-to-end story: a
+// fresh CLI drums track is declared-lane, `vary <lane>` writes a batch whose manifest edits
+// replay through `beat set` byte-identically (the adopt contract), the legacy group name errors
+// loudly, and `--groups` is track-aware when given a file+track.
+test('beat vary <lane> end-to-end: batch, loud legacy error, and beat-set adopt replay', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-cli-lane-vary-'))
+  const file = join(dir, 'groove.beat')
+  beat(['init', file])
+  beat(['add-track', file, 'drums', 'drums']) // CLI default: the declared 12-lane GM kit
+  const err = beat(['vary', file, 'drums', 'hats', '--seed', '7'], { expectExit: 2 })
+  assert.match(err, /legacy track-wide drum-voice params/)
+  assert.match(err, /kick, snare, rimshot/)
+  const out = beat(['vary', file, 'drums', 'kick', '--seed', '7', '--count', '3', '--out-dir', join(dir, 'batch')])
+  assert.match(out, /3 variants of drums\.kick/)
+  assert.match(out, /drums\.lane\.kick\./)
+  const manifest = JSON.parse(readFileSync(join(dir, 'batch', 'manifest.json'), 'utf8')) as { variants: { file: string; edits: string[] }[] }
+  // adopt the "winner" exactly the way `beat score`'s hint says to: beat set <file> <edits...>
+  const pairs = manifest.variants[0]!.edits.flatMap((e) => {
+    const sp = e.indexOf(' ')
+    return [e.slice(0, sp), e.slice(sp + 1)]
+  })
+  beat(['set', file, ...pairs])
+  assert.equal(readFileSync(file, 'utf8'), readFileSync(join(dir, 'batch', 'v1.beat'), 'utf8'), 'beat set replay must reproduce the variant file byte-identically')
+})
+
+test('beat vary --groups is track-aware with a file+track, and documents both modes without', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-cli-lane-groups-'))
+  const file = join(dir, 'groove.beat')
+  beat(['init', file])
+  beat(['add-track', file, 'drums', 'drums'])
+  const aware = beat(['vary', file, 'drums', '--groups'])
+  assert.match(aware, /declared-lane drums track "drums"/)
+  assert.match(aware, /^kick {6}/m)
+  assert.match(aware, /^tom_lo {4}/m)
+  assert.match(aware, /legacy groups kick\/snare\/hats error on this track/)
+  const stat = beat(['vary', '--groups'])
+  assert.match(stat, /^kick {6}/m)
+  assert.match(stat, /LEGACY drums tracks only/)
 })

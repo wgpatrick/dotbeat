@@ -10,19 +10,33 @@
 // Pure document -> documents; deterministic under a seed (same parent + group + amount + seed
 // -> byte-identical variants), so a scoring session is reproducible from its manifest.
 
-import type { BeatDocument, BeatSynth, TrackKind } from '../core/document.js'
+import type { BeatDocument, BeatDrumLaneDecl, BeatSynth, BeatTrack, DrumVoiceType, TrackKind } from '../core/document.js'
+import { DRUM_VOICE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS } from '../core/document.js'
 import { setValue } from '../core/edit.js'
 import { humanize } from '../core/humanize.js'
 import { formatNumber } from '../core/format.js'
 
 export type VaryScale = 'linear' | 'log'
 
-export interface VaryParamDef {
-  key: keyof BeatSynth
+/** The mutation-range shape mutateValue works off — min/max bound the MUSICAL region, scale picks
+ * the jitter space (log for frequency/time-like params). Shared by the track-wide VARY_GROUPS defs
+ * (key: keyof BeatSynth) and the Phase 35 per-lane defs (key: an open lane-param name). */
+export interface VaryRangeDef {
   min: number
   max: number
   scale: VaryScale
   integer?: boolean
+}
+
+export interface VaryParamDef extends VaryRangeDef {
+  key: keyof BeatSynth
+}
+
+/** A declared drum lane's own backing-param mutation def — same musical-range discipline as
+ * VaryParamDef, but keyed by the lane grammar's open param names (tune/punch/decay/tone for synth
+ * voices; start/length/attack/hold/decay/cutoff/resonance plus gainDb/tune for samples). */
+export interface LaneVaryParamDef extends VaryRangeDef {
+  key: string
 }
 
 /** Musically-scoped mutation groups. Ranges are deliberately NARROWER than what the engine
@@ -136,10 +150,97 @@ export const VARY_GROUP_KINDS: Readonly<Record<string, readonly TrackKind[]>> = 
 
 /** Vary groups that are actually legal (audible) for a given track kind, in VARY_GROUPS's own
  * declared order. Falls back to every group if a kind (e.g. 'audio') has no known-legal group at
- * all, rather than returning an empty recommendation set. */
+ * all, rather than returning an empty recommendation set. NOTE: kind-level only — on a
+ * declared-lane drums track the kick/snare/hats entries this returns are still dead (pilot 101);
+ * use `legalVaryTargets` when the actual track (with its `lanes` list) is in hand. */
 export function legalGroupsForKind(kind: TrackKind): string[] {
   const legal = Object.keys(VARY_GROUPS).filter((g) => (VARY_GROUP_KINDS[g] ?? []).includes(kind))
   return legal.length > 0 ? legal : Object.keys(VARY_GROUPS)
+}
+
+/** The three VARY_GROUPS entries that mutate the LEGACY track-wide drum-voice synth params
+ * (kickTune/snareTone/hatDecay/...). Correct on a legacy drums track (empty `lanes`); provably
+ * inaudible on a declared-lane track — the engine plays those fields only while `lanes` is empty
+ * (pilot 101, verified against ui/src/audio/engine.ts), so on declared-lane tracks these names
+ * ERROR loudly instead of generating no-op variants. */
+export const LEGACY_DRUM_VOICE_GROUPS: ReadonlySet<string> = new Set(['kick', 'snare', 'hats'])
+
+/** Per-voice-type mutation ranges for a SYNTH-backed declared lane's own params bag — the
+ * per-lane analog of the legacy kick/snare/hats groups, same musically-nonlinear-range
+ * discipline. Ranges span the factory kits' actual values (presets/drum-kits.json: membrane tune
+ * 20 (808 tom_lo) to 58 (909 cowbell); metal decay 0.03 (909 hat) to 1.1 (808 ride)) with
+ * headroom, since ANY declared lane — toms, cowbell, ride — can be targeted now, not just the
+ * historic five names. */
+export const DRUM_VOICE_VARY_DEFS: Readonly<Record<DrumVoiceType, readonly LaneVaryParamDef[]>> = {
+  membrane: [
+    { key: 'tune', min: 18, max: 90, scale: 'log' },
+    { key: 'punch', min: 0, max: 0.25, scale: 'linear' },
+    { key: 'decay', min: 0.1, max: 1.1, scale: 'log' },
+  ],
+  noise: [
+    { key: 'tone', min: 0, max: 1, scale: 'linear' },
+    { key: 'decay', min: 0.03, max: 0.35, scale: 'log' },
+  ],
+  metal: [
+    { key: 'tone', min: 2500, max: 11000, scale: 'log' },
+    { key: 'decay', min: 0.015, max: 1.3, scale: 'log' },
+  ],
+}
+
+/** Mutation ranges for a SAMPLE-backed declared lane: the full Phase-26 drum-sampler surface
+ * (SAMPLE_LANE_PARAM_KEYS — Start/Length trim, AHD envelope, filter) plus the backing's own
+ * gainDb/tune. Ranges bound the useful region, not the legal one, same as every group above:
+ * tune legal span is -24..24 but +/-12 covers musical retuning; cutoff's max IS the format's
+ * wide-open default (18000) so the filter can always sweep back open. */
+export const SAMPLE_LANE_VARY_DEFS: readonly LaneVaryParamDef[] = [
+  { key: 'gainDb', min: -9, max: 6, scale: 'linear' },
+  { key: 'tune', min: -12, max: 12, scale: 'linear' },
+  { key: 'start', min: 0, max: 0.05, scale: 'linear' },
+  { key: 'length', min: 0, max: 0.8, scale: 'linear' },
+  { key: 'attack', min: 0.0005, max: 0.05, scale: 'log' },
+  { key: 'hold', min: 0, max: 0.25, scale: 'linear' },
+  { key: 'decay', min: 0, max: 0.8, scale: 'linear' },
+  { key: 'cutoff', min: 400, max: 18000, scale: 'log' },
+  { key: 'resonance', min: 0.2, max: 3.5, scale: 'log' },
+]
+
+/** The mutation defs for one declared lane's own backing params, or undefined for sf-backed lanes
+ * (their two fields, program/note, are identity, not shaping — nothing to vary). Shared by
+ * varyTrack's lane targeting and suggest's direction-hint computation so both read the same
+ * ranges. */
+export function laneVaryDefs(lane: BeatDrumLaneDecl): readonly LaneVaryParamDef[] | undefined {
+  if (lane.backing.type === 'synth') return DRUM_VOICE_VARY_DEFS[lane.backing.voice]
+  if (lane.backing.type === 'sample') return SAMPLE_LANE_VARY_DEFS
+  return undefined
+}
+
+/** A lane param's CURRENT sounding value — the declared override if present, else that backing's
+ * own default (DRUM_VOICE_PARAM_DEFAULTS / SAMPLE_LANE_PARAM_DEFAULTS / the backing's gainDb-tune
+ * fields). This is the mutation basis, so variants jitter around what the lane actually plays —
+ * pilot 101 caught the legacy groups centering on the track-wide default (32.7) instead of the
+ * lane's declared tune (28.5). */
+export function laneParamCurrent(lane: BeatDrumLaneDecl, key: string): number {
+  if (lane.backing.type === 'synth') return lane.backing.params[key] ?? DRUM_VOICE_PARAM_DEFAULTS[lane.backing.voice][key] ?? 0
+  if (lane.backing.type === 'sample') {
+    if (key === 'gainDb') return lane.backing.gainDb
+    if (key === 'tune') return lane.backing.tune
+    return lane.backing.params[key] ?? SAMPLE_LANE_PARAM_DEFAULTS[key as keyof typeof SAMPLE_LANE_PARAM_DEFAULTS] ?? 0
+  }
+  return 0
+}
+
+/** Every vary target that is actually AUDIBLE on this specific track, in a stable order. For a
+ * declared-lane drums track: its own lane names (sf-backed excluded — nothing to vary) followed
+ * by the track-wide bus groups (filter/env/fx/... — real on the drum bus) with the dead legacy
+ * drum-voice groups removed. For everything else: `legalGroupsForKind`. The "feel" pseudo-group
+ * is always additionally legal on any track and is not listed here. */
+export function legalVaryTargets(track: Pick<BeatTrack, 'kind' | 'lanes'>): string[] {
+  if (track.kind === 'drums' && track.lanes.length > 0) {
+    const laneNames = track.lanes.filter((l) => l.backing.type !== 'sf').map((l) => l.name)
+    const busGroups = legalGroupsForKind('drums').filter((g) => !LEGACY_DRUM_VOICE_GROUPS.has(g))
+    return [...laneNames, ...busGroups.filter((g) => !laneNames.includes(g))]
+  }
+  return legalGroupsForKind(track.kind)
 }
 
 export class BeatVaryError extends Error {
@@ -161,12 +262,12 @@ export function makeRng(seed: number): () => number {
   }
 }
 
-const toSpace = (v: number, d: VaryParamDef) => (d.scale === 'log' ? Math.log(Math.max(v, d.min > 0 ? d.min : 1e-4)) : v)
-const fromSpace = (s: number, d: VaryParamDef) => (d.scale === 'log' ? Math.exp(s) : s)
+const toSpace = (v: number, d: VaryRangeDef) => (d.scale === 'log' ? Math.log(Math.max(v, d.min > 0 ? d.min : 1e-4)) : v)
+const fromSpace = (s: number, d: VaryRangeDef) => (d.scale === 'log' ? Math.exp(s) : s)
 
 /** One mutated value: jitter in scale space by (gaussian * amount * span), clamped to the
  * musical range. amount 0.25 ~= gentle neighborhood; 1 ~= anywhere-in-range leaps. */
-function mutateValue(current: number, def: VaryParamDef, amount: number, rng: () => number): number {
+function mutateValue(current: number, def: VaryRangeDef, amount: number, rng: () => number): number {
   const lo = toSpace(def.min, def)
   const hi = toSpace(def.max, def)
   const span = hi - lo
@@ -194,14 +295,18 @@ export interface VaryVariant {
   edits: { path: string; value: string }[]
 }
 
-/** Generates `count` variants of one track by mutating one parameter group. Deterministic under
- * (parent, trackId, group, options). Guarantees every variant differs from the parent in at
- * least one param (re-rolls a variant's mutation pass if the jitter rounds to no-op). */
-export function varyTrack(doc: BeatDocument, trackId: string, group: string, opts: VaryOptions = {}): VaryVariant[] {
-  const defs = VARY_GROUPS[group]
-  if (!defs) throw new BeatVaryError(`unknown group "${group}" (have: ${Object.keys(VARY_GROUPS).join(', ')})`)
-  const track = doc.tracks.find((t) => t.id === trackId)
-  if (!track) throw new BeatVaryError(`no track "${trackId}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
+/** The shared mutation loop behind both targeting modes: `defs` bound the ranges, `current` reads
+ * each param's basis value, `path` spells the replayable `beat set` path. Deterministic under the
+ * options — the rng call order is exactly the pre-Phase-35 loop's, so legacy batches stay
+ * byte-identical under the same seed. */
+function mutateVariants(
+  doc: BeatDocument,
+  target: string,
+  defs: readonly LaneVaryParamDef[] | readonly VaryParamDef[],
+  current: (key: string) => number,
+  path: (key: string) => string,
+  opts: VaryOptions,
+): VaryVariant[] {
   const count = opts.count ?? 9
   const amount = opts.amount ?? 0.25
   const probability = opts.mutationProbability ?? 0.8
@@ -215,19 +320,63 @@ export function varyTrack(doc: BeatDocument, trackId: string, group: string, opt
     for (let attempt = 0; attempt < 8 && edits.length === 0; attempt++) {
       for (const def of defs) {
         if (rng() > probability) continue
-        const current = track.synth[def.key] as number
-        const next = mutateValue(current, def, amount, rng)
+        const before = current(def.key)
+        const next = mutateValue(before, def, amount, rng)
         const text = formatNumber(next)
-        if (text === formatNumber(current)) continue // no-op after canonical rounding
-        edits.push({ path: `${trackId}.${def.key}`, value: text })
+        if (text === formatNumber(before)) continue // no-op after canonical rounding
+        edits.push({ path: path(def.key), value: text })
       }
     }
-    if (edits.length === 0) throw new BeatVaryError(`could not produce a distinct variant for "${group}" (amount too small?)`)
+    if (edits.length === 0) throw new BeatVaryError(`could not produce a distinct variant for "${target}" (amount too small?)`)
     let next = doc
     for (const e of edits) next = setValue(next, e.path, e.value)
     variants.push({ doc: next, edits })
   }
   return variants
+}
+
+/** Generates `count` variants of one track by mutating one parameter group — or, on a
+ * declared-lane drums track, one NAMED LANE's own backing params (Phase 35 Stream OA, pilot
+ * 101's high finding: the legacy kick/snare/hats groups mutate track-wide fields the engine
+ * never plays once `lanes` is declared, so there `group` is a lane name and the mutations land
+ * on the lane's own params via the `<track>.lane.<name>.<key>` set path). Deterministic under
+ * (parent, trackId, group, options). Guarantees every variant differs from the parent in at
+ * least one param (re-rolls a variant's mutation pass if the jitter rounds to no-op). */
+export function varyTrack(doc: BeatDocument, trackId: string, group: string, opts: VaryOptions = {}): VaryVariant[] {
+  const track = doc.tracks.find((t) => t.id === trackId)
+  if (!track) throw new BeatVaryError(`no track "${trackId}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
+
+  if (track.kind === 'drums' && track.lanes.length > 0) {
+    const laneNames = track.lanes.map((l) => l.name)
+    const lane = track.lanes.find((l) => l.name === group)
+    if (lane) {
+      // A declared lane name takes precedence over any same-named group: on a declared-lane
+      // track the lane params are what actually sound.
+      const defs = laneVaryDefs(lane)
+      if (!defs) {
+        throw new BeatVaryError(
+          `lane "${group}" on track "${trackId}" is sf-backed — its two fields (program/note) are identity, not shaping, so there is nothing to vary; target a synth- or sample-backed lane instead (have: ${legalVaryTargets(track).join(', ')})`,
+        )
+      }
+      return mutateVariants(doc, `${trackId} lane ${group}`, defs, (key) => laneParamCurrent(lane, key), (key) => `${trackId}.lane.${group}.${key}`, opts)
+    }
+    if (LEGACY_DRUM_VOICE_GROUPS.has(group)) {
+      // Never generate no-op variants: these groups mutate the legacy track-wide drum-voice
+      // params, which the engine ignores on every declared-lane track (pilot 101).
+      throw new BeatVaryError(
+        `group "${group}" mutates the legacy track-wide drum-voice params, which a declared-lane drums track never plays — target one of this track's lanes instead: ${laneNames.join(', ')} (track-wide groups that still apply: ${legalGroupsForKind('drums')
+          .filter((g) => !LEGACY_DRUM_VOICE_GROUPS.has(g))
+          .join(', ')})`,
+      )
+    }
+    if (!VARY_GROUPS[group]) {
+      throw new BeatVaryError(`unknown vary target "${group}" on declared-lane drums track "${trackId}" (lanes: ${laneNames.join(', ')}; track-wide groups: ${Object.keys(VARY_GROUPS).filter((g) => !LEGACY_DRUM_VOICE_GROUPS.has(g)).join(', ')})`)
+    }
+  }
+
+  const defs = VARY_GROUPS[group]
+  if (!defs) throw new BeatVaryError(`unknown group "${group}" (have: ${Object.keys(VARY_GROUPS).join(', ')})`)
+  return mutateVariants(doc, group, defs, (key) => track.synth[key as keyof BeatSynth] as number, (key) => `${trackId}.${key}`, opts)
 }
 
 export interface FeelVaryOptions {
