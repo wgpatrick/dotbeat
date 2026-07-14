@@ -18,11 +18,43 @@
 //
 // Requires `npm run build` (compiled ../dist/src). The ui/ build is produced on demand.
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawn, execFileSync } from 'node:child_process'
 import { chromium } from 'playwright-core'
+
+// Phase 39 Stream UA (pilot 105): the first EXISTING bundled-Playwright-chromium binary, or
+// undefined if none is found. `chromium.executablePath()` is playwright-core's programmatic path to
+// the chromium revision IT expects — the primary, correct source. But when browsers are
+// pre-provisioned (as in locked-down/proxied CI images) their revision can predate this
+// playwright-core, so executablePath() names a build that was never installed; we then scan
+// PLAYWRIGHT_BROWSERS_PATH for whatever chromium build IS present (the stable `chromium` symlink
+// first, then any chromium-<rev> dir). All candidates are existsSync-gated, so a wholly missing
+// bundle simply yields undefined and the caller degrades to its actionable CHROME_PATH hint.
+function bundledChromiumPath() {
+  const candidates = []
+  try {
+    const p = chromium.executablePath()
+    if (p) candidates.push(p)
+  } catch {
+    /* no bundled chromium registered with playwright-core */
+  }
+  const base = process.env.PLAYWRIGHT_BROWSERS_PATH
+  if (base) {
+    candidates.push(join(base, 'chromium')) // stable symlink some provisioned images provide
+    try {
+      for (const d of readdirSync(base)) {
+        if (/^chromium-\d+$/.test(d)) {
+          candidates.push(join(base, d, 'chrome-linux', 'chrome'), join(base, d, 'chrome-linux64', 'chrome'))
+        }
+      }
+    } catch {
+      /* PLAYWRIGHT_BROWSERS_PATH unreadable — skip the scan */
+    }
+  }
+  return candidates.find((p) => existsSync(p))
+}
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const uiDir = join(repoRoot, 'ui')
@@ -87,7 +119,7 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
     execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
   }
 
-  const { parse } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
+  const { parse, unplacedContentTracks, unplacedContentWarning } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
   const { startDaemon } = await import(pathToFileURL(join(repoRoot, 'dist/src/daemon/daemon.js')).href)
 
   const doc = parse(readFileSync(beatPath, 'utf8'))
@@ -96,6 +128,11 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   const renderBars = doc.song && doc.song.length > 0 ? doc.song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
   const seconds = (renderBars * 16 * 60) / doc.bpm / 4 + tail
   console.error(`parsed ${beatPath}: ${doc.tracks.length} track(s), bpm ${doc.bpm}, ${renderBars} bar(s) -> ${seconds.toFixed(2)}s of audio`)
+
+  // Phase 39 Stream UA (pilot 105 HIGH): in song mode a track with real content that's placed in no
+  // scene the song plays renders SILENT with no other warning. Surface it before rendering so a
+  // silent part is never a surprise — warn only; still render (the render is otherwise correct).
+  for (const t of unplacedContentTracks(doc)) console.error(unplacedContentWarning(t))
 
   const daemon = await startDaemon({ filePath: beatPath, port: daemonPort })
   console.error(`daemon on :${daemon.port}`)
@@ -119,10 +156,27 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   try {
     browser = await chromium.launch(launchOpts)
   } catch (err) {
+    // An explicit CHROME_PATH that fails to launch is a real, user-supplied error — surface it
+    // as-is rather than silently ignoring their choice.
+    if (process.env.CHROME_PATH) throw err
     // The default `channel: 'chrome'` needs a system Chrome install, which many locked-down /
     // proxied environments (incl. this one) can't get — `npx playwright install chrome` 403s.
-    // Point at the fix instead of leaking Playwright's raw "distribution not found" error.
-    if (!process.env.CHROME_PATH) {
+    // Phase 39 Stream UA (pilot 105): before surfacing the CHROME_PATH hint, try Playwright's OWN
+    // bundled chromium (the binary `npx playwright install chromium` downloads — which, unlike
+    // `chrome`, this environment CAN fetch). Launch order end-to-end: explicit CHROME_PATH →
+    // system `chrome` channel → bundled chromium → actionable error. The whole probe+relaunch is
+    // guarded so a MISSING or unlaunchable bundle degrades to the hint below, never a raw throw.
+    let bundled = bundledChromiumPath()
+    if (bundled) {
+      try {
+        console.error(`system Chrome unavailable; falling back to Playwright's bundled chromium (${bundled})`)
+        browser = await chromium.launch({ ...launchOpts, executablePath: bundled })
+      } catch {
+        bundled = undefined // bundled binary present but unlaunchable — surface the hint too
+      }
+    }
+    if (!browser) {
+      // Point at the fix instead of leaking Playwright's raw "distribution not found" error.
       throw new Error(
         `could not launch Chrome: ${err && err.message ? err.message.split('\n')[0] : err}\n` +
           `  set CHROME_PATH to an existing Chromium/Chrome binary and re-run, e.g.:\n` +
@@ -130,7 +184,6 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
           `  (a Playwright chromium from \`npx playwright install chromium\` works too).`,
       )
     }
-    throw err
   }
   const page = await browser.newPage()
   const pageErrors = []

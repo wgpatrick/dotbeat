@@ -448,7 +448,9 @@ const TOOLS: ToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        file: { type: 'string', description: 'path to a reference audio .wav to analyze' },
+        // ==== Phase 39 Stream UA begin ==== (pilot 105: file is optional in the schema only because doctor omits it)
+        file: { type: 'string', description: 'path to a reference audio .wav to analyze — REQUIRED unless doctor:true (doctor probes deps with no input file)' },
+        // ==== Phase 39 Stream UA end ====
         backend: { type: 'string', description: "detection backend: 'beatthis' (default), 'stub' (deterministic, no deps), or 'allin1' (spike, adds labels)" },
         force: { type: 'boolean', description: 're-analyze even if a matching cached .analysis.json exists' },
         out: { type: 'string', description: 'output path for the analysis JSON (default: <audio>.analysis.json beside the input)' },
@@ -1469,15 +1471,28 @@ const TOOLS: ToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        out_file: { type: 'string', description: 'the .beat project to create (must not already exist)' },
-        analysis_file: { type: 'string', description: 'path to a *.analysis.json artifact from beat_analyze_audio' },
+        out_file: { type: 'string', description: 'the .beat project to create (must not already exist); alias: out' },
+        analysis_file: { type: 'string', description: 'path to a *.analysis.json artifact from beat_analyze_audio; alias: analysis' },
         section_bars: { type: 'number', description: 'uniform chunk size (bars) for the labelless fallback; default 8, integer 1-64' },
+        // ==== Phase 39 Stream UA begin ==== (pilot 105: accept the natural-guess arg names too)
+        out: { type: 'string', description: 'alias for out_file' },
+        analysis: { type: 'string', description: 'alias for analysis_file' },
+        // ==== Phase 39 Stream UA end ====
       },
-      required: ['out_file', 'analysis_file'],
+      // out_file/analysis_file are logically required, but each accepts an alias, so presence is
+      // enforced in-handler (like beat_analyze_audio's file) rather than by this advisory list.
+      required: [],
     },
     handler: (args) => {
-      const outFile = str(args, 'out_file')
-      const analysisFile = str(args, 'analysis_file')
+      // ==== Phase 39 Stream UA begin ==== (pilot 105: read out_file OR out, analysis_file OR analysis)
+      const strAlias = (primary: string, alias: string): string => {
+        const v = args[primary] ?? args[alias]
+        if (typeof v !== 'string' || v === '') throw new Error(`missing required string argument "${primary}" (alias: "${alias}")`)
+        return v
+      }
+      const outFile = strAlias('out_file', 'out')
+      const analysisFile = strAlias('analysis_file', 'analysis')
+      // ==== Phase 39 Stream UA end ====
       if (existsSync(outFile)) throw new Error(`${outFile} already exists — refusing to overwrite (skeleton scaffolds a NEW project; delete it or choose another path)`)
       if (!existsSync(analysisFile)) throw new Error(`no analysis file at ${analysisFile} — produce one with beat_analyze_audio first`)
       let raw: unknown

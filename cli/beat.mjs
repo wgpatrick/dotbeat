@@ -587,6 +587,14 @@ function addTrackCmd(argv) {
   // (research 19 Part VII) — --legacy-lanes opts back into the old implicit-5, empty-lanes[] shape
   // for a caller/script that specifically wants pre-v0.10 behavior.
   const legacyLanes = rest.includes('--legacy-lanes')
+  // Phase 39 Stream UA (pilot 105 leftover): an instrument track with no --soundfont fails in core
+  // (edit.ts addTrack). Intercept here to add the synth-track nudge to the message — the same
+  // "instrument tracks need a soundfont" guard, plus a way forward for a quick part with no sample.
+  if (kind === 'instrument' && rest.indexOf('--soundfont') === -1) {
+    throw new BeatEditError(
+      'instrument tracks need a soundfont: pass --soundfont <sample-id> [--program N] (register the .sf2 with beat sample first) — or use a synth track for a quick part with no sample',
+    )
+  }
   const before = readDoc(file)
   const { doc } = addTrack(before, {
     id,

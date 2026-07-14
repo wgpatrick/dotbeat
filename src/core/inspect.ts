@@ -6,6 +6,7 @@ import type { BeatClip, BeatDocument, BeatDrumHit, BeatGroup, BeatTrack, DrumVoi
 import { DRUM_LANES, SYNTH_FIELDS, declaredLaneNames, sortPlacements } from './document.js'
 import { serializeLaneBacking } from './serialize.js'
 import { formatNumber } from './format.js'
+import { unplacedContentTracks, unplacedContentWarning } from './coverage.js'
 
 // v0.9: ", auto: cutoff(3), volume(2)" — lane names + point counts, in lane order; empty when
 // the clip has no automation (the common case, and every v0.8-and-earlier file).
@@ -210,6 +211,15 @@ export function describeDocument(doc: BeatDocument): string {
   if (doc.song) {
     const total = doc.song.reduce((sum, x) => sum + x.bars, 0)
     lines.push(`song: ${doc.song.map((x) => `${x.scene}(${x.bars})`).join(' ')} — ${total} bars total`)
+  }
+  // Phase 39 Stream UA (pilot 105 HIGH): the silent-render trap — in song mode, a track with real
+  // content that's placed in no scene the song plays renders silent with no other warning anywhere.
+  // One ⚠ line per such track, after the scenes/song block. Loop mode never trips this (see
+  // coverage.ts) so the block is empty and prints nothing.
+  const silent = unplacedContentTracks(doc)
+  if (silent.length > 0) {
+    lines.push('')
+    for (const t of silent) lines.push(unplacedContentWarning(t))
   }
   return lines.join('\n').replace(/\n+$/, '\n')
 }
