@@ -1043,7 +1043,10 @@ export function setMediaSample(doc: BeatDocument, id: string, sha256: string, pa
   return { ...doc, media }
 }
 
-/** v0.5: assigns (or clears, with ref = null) a drum lane's one-shot sample. */
+/** v0.5: assigns (or clears, with ref = null) a drum lane's one-shot sample. Deliberately still
+ * closed to the legacy 5 DRUM_LANES (see DRUM_LANES's comment) — on a v0.10 declared-lane track
+ * the engine dispatches from lanes[].backing instead, and `beat lane`/callers should go through
+ * setLaneBacking there. */
 export function setLaneSample(
   doc: BeatDocument,
   trackId: string,

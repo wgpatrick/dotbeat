@@ -26,6 +26,8 @@ import {
   insertScene,
   setMediaSample,
   setLaneSample,
+  setLaneBacking,
+  DEFAULT_DRUM_KIT,
   addEffect,
   removeEffect,
   moveEffect,
@@ -1104,6 +1106,22 @@ function laneCmd(argv) {
   const [file, track, lane, sampleId, gain, tune] = argv
   if (!file || !track || !lane || !sampleId) throw new BeatEditError('lane needs <file> <track> <lane> <sample-id|none> [gain dB] [tune semitones]')
   const before = readDoc(file)
+  const trackDoc = before.tracks.find((t) => t.id === track)
+  if (trackDoc && trackDoc.kind === 'drums' && trackDoc.lanes.length > 0) {
+    // v0.10 declared-lane track: the ENGINE dispatches from the lane DECLARATION's backing, not
+    // the legacy laneSamples record (which it ignores on declared tracks) — write the backing so
+    // `beat lane` actually changes what plays. `none` reverts to the default kit's synth voice.
+    let tokens
+    if (sampleId === 'none') {
+      const kit = DEFAULT_DRUM_KIT.find((k) => k.name === lane)
+      if (!kit) throw new BeatEditError(`lane "${lane}" has no default synth voice to revert to — set an explicit sample instead`)
+      tokens = [`synth:${kit.voice}`]
+    } else {
+      tokens = ['sample', sampleId, String(gain !== undefined ? Number(gain) : 0), String(tune !== undefined ? Number(tune) : 0)]
+    }
+    writeDoc(file, before, setLaneBacking(before, track, lane, tokens).doc)
+    return
+  }
   const ref = sampleId === 'none' ? null : { sample: sampleId, gainDb: gain !== undefined ? Number(gain) : 0, tune: tune !== undefined ? Number(tune) : 0 }
   writeDoc(file, before, setLaneSample(before, track, lane, ref))
 }
