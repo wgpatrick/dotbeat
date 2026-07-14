@@ -581,6 +581,149 @@ test('POST /clip-move outside song mode is rejected with a 400', async () => {
   })
 })
 
+// ─── Phase 36 Stream PD: placement-granular clip-move / clip-remove / clip-duplicate ─────────────
+// v0.11 multi-region placements (D16): an audio track's slot can hold SEVERAL placements — these
+// three daemon ops must target the RIGHT one (the arrangement's per-placement blocks pass the
+// block's own `at`), not blindly the first, and must never destroy a sibling placement they weren't
+// aimed at. Fixture: audio track "fx" with clips "hit"/"riser" (each 1s = 8 steps at 120bpm),
+// scene "a" placing hit@0 + riser@32 in a 4-bar (64-step) section, scene "b" fx-less.
+async function placedAudioSong(): Promise<{ daemon: Daemon; filePath: string }> {
+  const { initDocument, addTrack, setMediaSample, addAudioClip, saveClip, setScene, setSong, serialize: ser } = await import('../src/core/index.js')
+  let doc = initDocument({ trackId: 'lead', bpm: 120 })
+  doc = addTrack(doc, { id: 'fx', kind: 'audio' }).doc
+  doc = setMediaSample(doc, 'smp', 'a'.repeat(64), 'media/smp.wav')
+  doc = addAudioClip(doc, 'fx', 'hit', { media: 'smp', in: 0, out: 1 }).doc
+  doc = addAudioClip(doc, 'fx', 'riser', { media: 'smp', in: 0, out: 1 }).doc
+  doc = saveClip(doc, 'lead', 'leadClip').doc
+  doc = setScene(doc, 'a', { lead: 'leadClip', fx: [{ clip: 'hit', at: 0 }, { clip: 'riser', at: 32 }] })
+  doc = setScene(doc, 'b', { lead: 'leadClip' })
+  doc = setSong(doc, [
+    { scene: 'a', bars: 4 }, // 0 — two fx placements
+    { scene: 'b', bars: 4 }, // 1 — no fx
+  ])
+  const dir = mkdtempSync(join(tmpdir(), 'beat-daemon-placement-test-'))
+  const filePath = join(dir, 'song.beat')
+  writeFileSync(filePath, ser(doc))
+  const daemon = await startDaemon({ filePath, port: 0 })
+  return { daemon, filePath }
+}
+const fxSlot = (daemon: Daemon, sectionIndex: number) => {
+  const doc = daemon.getDoc()
+  return doc.scenes.find((s) => s.id === doc.song![sectionIndex]!.scene)!.slots.fx
+}
+
+test('POST /clip-remove with `at` removes just that ONE placement; without `at` it clears the whole slot', async () => {
+  const { daemon, filePath } = await placedAudioSong()
+  try {
+    // Remove the riser@32 placement only — hit@0 must survive.
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/clip-remove`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'fx', sectionIndex: 0, at: 32 }),
+    })
+    assert.equal(res.status, 200)
+    assert.deepEqual(fxSlot(daemon, 0), [{ clip: 'hit', at: 0 }], 'only the at-32 placement dies; the at-0 one survives')
+    // A wrong `at` fails loudly, naming what IS placed there.
+    const miss = await fetch(`http://127.0.0.1:${daemon.port}/clip-remove`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'fx', sectionIndex: 0, at: 7 }),
+    })
+    assert.equal(miss.status, 400)
+    assert.match(((await miss.json()) as { error: string }).error, /no placement at 7/)
+    // No `at` = the pre-v0.11 whole-slot clear.
+    const all = await fetch(`http://127.0.0.1:${daemon.port}/clip-remove`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'fx', sectionIndex: 0 }),
+    })
+    assert.equal(all.status, 200)
+    assert.equal(fxSlot(daemon, 0), undefined, 'whole slot cleared')
+    assert.deepEqual(parse(readFileSync(filePath, 'utf8')), daemon.getDoc())
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('POST /clip-duplicate with `at` forks THAT placement\'s clip and keeps the track\'s other placements as shared references', async () => {
+  const { daemon } = await placedAudioSong()
+  try {
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/clip-duplicate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'fx', sectionIndex: 0, at: 32 }),
+    })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { index: number; sceneId: string; clipId: string; at: number }
+    assert.equal(body.index, 1, 'new section inserted right after the duplicated one')
+    assert.equal(body.at, 32, 'the duplicated placement keeps its own at')
+    assert.notEqual(body.clipId, 'riser', 'the fork is a NEW clip id')
+    const doc = daemon.getDoc()
+    assert.equal(doc.song!.length, 3)
+    // The new scene keeps BOTH placements — hit@0 still a shared reference, riser@32 swapped for the fork.
+    assert.deepEqual(fxSlot(daemon, 1), [{ clip: 'hit', at: 0 }, { clip: body.clipId, at: 32 }])
+    // The section duplicated FROM is untouched.
+    assert.deepEqual(fxSlot(daemon, 0), [{ clip: 'hit', at: 0 }, { clip: 'riser', at: 32 }])
+    // The fork is a real content copy of the RIGHT clip (riser's region, not hit's).
+    const fx = doc.tracks.find((t) => t.id === 'fx')!
+    assert.deepEqual(fx.clips.find((c) => c.id === body.clipId)!.audio, fx.clips.find((c) => c.id === 'riser')!.audio)
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('POST /clip-move with `at` moves ONE placement (keeping its at), leaves the source\'s sibling placement, and replaces only what it overlaps at the destination', async () => {
+  const { daemon } = await placedAudioSong()
+  try {
+    // Move riser@32 from section 0 to section 1 (fx-empty there): source keeps hit@0, destination
+    // gains riser at the SAME at (32).
+    const res = await postClipMove(daemon.port, [{ track: 'fx', fromIndex: 0, toIndex: 1, at: 32 }])
+    assert.equal(res.status, 200)
+    assert.deepEqual(fxSlot(daemon, 0), [{ clip: 'hit', at: 0 }], 'the sibling placement survives at the source')
+    assert.deepEqual(fxSlot(daemon, 1), [{ clip: 'riser', at: 32 }], 'the moved placement keeps its own at')
+    // Now move hit@0 across too: it does NOT overlap riser@32 (8 steps long), so both coexist.
+    const res2 = await postClipMove(daemon.port, [{ track: 'fx', fromIndex: 0, toIndex: 1 }]) // no at = the at-0/first placement
+    assert.equal(res2.status, 200)
+    assert.equal(fxSlot(daemon, 0), undefined)
+    assert.deepEqual(fxSlot(daemon, 1), [{ clip: 'hit', at: 0 }, { clip: 'riser', at: 32 }], 'a non-overlapping landing merges instead of wiping the slot')
+    // A wrong `at` fails loudly, without writing.
+    const miss = await postClipMove(daemon.port, [{ track: 'fx', fromIndex: 1, toIndex: 0, at: 5 }])
+    assert.equal(miss.status, 400)
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('POST /clip-move landing on an OVERLAPPING placement replaces it (the pre-v0.11 whole-slot replace, generalized)', async () => {
+  const { initDocument, addTrack, setMediaSample, addAudioClip, setScene, setSong, serialize: ser } = await import('../src/core/index.js')
+  let doc = initDocument({ trackId: 'lead', bpm: 120 })
+  doc = addTrack(doc, { id: 'fx', kind: 'audio' }).doc
+  doc = setMediaSample(doc, 'smp', 'b'.repeat(64), 'media/smp.wav')
+  doc = addAudioClip(doc, 'fx', 'hit', { media: 'smp', in: 0, out: 1 }).doc
+  doc = addAudioClip(doc, 'fx', 'stab', { media: 'smp', in: 0, out: 1 }).doc
+  doc = setScene(doc, 'a', { fx: [{ clip: 'hit', at: 0 }] })
+  doc = setScene(doc, 'b', { fx: [{ clip: 'stab', at: 0 }, { clip: 'hit', at: 32 }] })
+  doc = setSong(doc, [
+    { scene: 'a', bars: 4 },
+    { scene: 'b', bars: 4 },
+  ])
+  const dir = mkdtempSync(join(tmpdir(), 'beat-daemon-placement-overlap-test-'))
+  const filePath = join(dir, 'song.beat')
+  writeFileSync(filePath, ser(doc))
+  const daemon = await startDaemon({ filePath, port: 0 })
+  try {
+    // hit@0 moved from section 0 onto section 1: it overlaps stab@0 (both 0..8) -> stab is
+    // replaced (Ableton's drop rule / the old single-slot replace), but hit@32 (32..40, no
+    // overlap) survives untouched.
+    const res = await postClipMove(daemon.port, [{ track: 'fx', fromIndex: 0, toIndex: 1 }])
+    assert.equal(res.status, 200)
+    assert.equal(fxSlot(daemon, 0), undefined)
+    assert.deepEqual(fxSlot(daemon, 1), [{ clip: 'hit', at: 0 }, { clip: 'hit', at: 32 }], 'the overlapped stab@0 is replaced; the non-overlapping hit@32 survives')
+  } finally {
+    await daemon.close()
+  }
+})
+
 // Phase 20 Stream W: track structure add/remove over HTTP (the GUI's track-management surface).
 test('POST /add-track appends a track, writes it to the file, and returns the fresh document', async () => {
   await withDaemon(async (daemon, filePath) => {

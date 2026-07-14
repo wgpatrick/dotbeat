@@ -664,9 +664,12 @@ export function sortPlacements(placements: readonly BeatPlacement[]): BeatPlacem
 
 /** The single clip id consumers that predate multi-placement want from a track's slot: the
  * placement at `at 0` if there is one, else the first placement in canonical order, else
- * undefined. Engine scheduling (Phase 36 PC) and GUI rendering (Phase 36 PD) will replace their
- * calls to this with real per-placement handling — until then, single-placement projects (every
- * pre-v0.11 document) behave exactly as before, because their one placement IS the at-0 one. */
+ * undefined. GUI rendering (Phase 36 PD) now does real per-placement handling (one arrangement
+ * block per placement; placement-granular move/remove/duplicate in the daemon) — remaining
+ * callers are either exact by construction (non-audio tracks are single-placement-at-0 by the D16
+ * scope guard) or documented fallbacks. Engine scheduling (Phase 36 PC) replaces its call with
+ * per-placement retriggering; until then, single-placement projects (every pre-v0.11 document)
+ * behave exactly as before, because their one placement IS the at-0 one. */
 export function firstPlacementClip(slots: Record<string, BeatPlacement[]>, trackId: string): string | undefined {
   const placements = slots[trackId]
   if (!placements || placements.length === 0) return undefined

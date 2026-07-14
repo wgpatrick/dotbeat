@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { postEdit } from '../daemon/bridge'
 import { loadWaveform, getCachedWaveform, drawWaveform, type WaveformData } from '../audio/waveform'
-import { WARP_MODES, type BeatClip, type BeatTrack, type WarpMode } from '../types'
+import { audioRegionTimelineSteps, WARP_MODES, type BeatClip, type BeatDocument, type BeatTrack, type WarpMode } from '../types'
 import { ClipPropertiesPanel, primaryClipFor, selectedSceneId } from './ClipPropertiesPanel'
 import { readableTextOn } from './NoteView'
 
@@ -166,16 +166,67 @@ function AudioClipInspector({ track, clip }: { track: BeatTrack; clip: BeatClip 
   )
 }
 
+/** v0.11 (Phase 36 PD): which placement's clip should the audio editor target, when a track's slot
+ * can hold SEVERAL placements per section (D16 multi-region)? In priority order:
+ *   1. the placement the user explicitly CLICKED in the arrangement (store.selectedPlacement —
+ *      set by beginClipDrag's click branch, pruned by setDoc the moment it stops resolving);
+ *   2. the placement whose own time range CONTAINS THE PLAYHEAD right now (only within the
+ *      selected section — or, with no section selected, whichever section is playing), so hitting
+ *      play walks the editor onto whichever region is actually sounding;
+ *   3. nothing — the caller falls back to `primaryClipFor`'s at-0/first placement, which for every
+ *      single-placement slot (all pre-v0.11 documents) is the only answer anyway. */
+function placementTargetedClip(
+  track: BeatTrack,
+  doc: BeatDocument,
+  selectedSectionIndex: number | null,
+  selectedPlacement: { track: string; clip: string; at: number } | null,
+  currentStep: number,
+): BeatClip | null {
+  if (!doc.song || doc.song.length === 0) return null
+  if (selectedPlacement && selectedPlacement.track === track.id) {
+    const clip = track.clips.find((c) => c.id === selectedPlacement.clip)
+    if (clip) return clip
+  }
+  if (currentStep >= 0) {
+    let cursor = 0
+    for (let i = 0; i < doc.song.length; i++) {
+      const sec = doc.song[i]!
+      const sectionSteps = sec.bars * 16
+      if (currentStep < cursor + sectionSteps) {
+        if (selectedSectionIndex === null || selectedSectionIndex === i) {
+          const scene = doc.scenes.find((s) => s.id === sec.scene)
+          const rel = currentStep - cursor
+          for (const p of scene?.slots[track.id] ?? []) {
+            const clip = track.clips.find((c) => c.id === p.clip)
+            if (!clip?.audio) continue
+            if (rel >= p.at && rel < p.at + audioRegionTimelineSteps(clip.audio, doc.bpm)) return clip
+          }
+        }
+        break
+      }
+      cursor += sectionSteps
+    }
+  }
+  return null
+}
+
 /** The bottom-pane Clip View for an Audio-kind track — App.tsx's BottomPane routes here instead of
- * NoteView whenever the selected track is `kind === 'audio'`. Resolves "the" clip the exact same way
+ * NoteView whenever the selected track is `kind === 'audio'`. Resolves "the" clip the same way
  * every other clip-aware surface in the app does (`primaryClipFor`, the same helper
- * ClipPropertiesPanel/NoteView already share), so this always agrees with what's actually placed in
- * the currently-selected song section — no separate/duplicated clip-resolution logic. */
+ * ClipPropertiesPanel/NoteView already share) — with one audio-only refinement layered on top
+ * (v0.11, Phase 36 PD): when the track carries MULTIPLE placements in the viewed section, the
+ * clicked placement (or, playing, the one under the playhead) wins over the blind at-0/first pick
+ * — see `placementTargetedClip` above. The resolved clip is passed down into ClipPropertiesPanel
+ * (its `clipOverride`) so the properties strip and this editor always name the SAME clip. */
 export function AudioClipEditor({ track }: { track: BeatTrack }) {
   const doc = useStore((s) => s.doc)
   const selectedSectionIndex = useStore((s) => s.selectedSectionIndex)
+  const selectedPlacement = useStore((s) => s.selectedPlacement)
+  const currentStep = useStore((s) => s.currentStep)
   if (!doc) return null
-  const clip = primaryClipFor(track, doc, selectedSceneId(doc, selectedSectionIndex))
+  const clip =
+    placementTargetedClip(track, doc, selectedSectionIndex, selectedPlacement, currentStep) ??
+    primaryClipFor(track, doc, selectedSceneId(doc, selectedSectionIndex))
   const inSongMode = !!doc.song && doc.song.length > 0
 
   return (
@@ -184,7 +235,7 @@ export function AudioClipEditor({ track }: { track: BeatTrack }) {
         <span className="noteview-titlebar-name">{track.name}</span>
         {clip && <span className="noteview-titlebar-clip">clip &quot;{clip.id}&quot;</span>}
       </div>
-      <ClipPropertiesPanel track={track} />
+      <ClipPropertiesPanel track={track} clipOverride={clip} />
       {clip?.audio ? (
         <AudioClipInspector track={track} clip={clip} />
       ) : (
