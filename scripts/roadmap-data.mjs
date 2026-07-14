@@ -1233,9 +1233,9 @@ export const rows = [
   },
   {
     area: 'Vary / audition loop', feature: 'Lane-aware drum vary groups (kick/snare/hats groups are an audio no-op on declared-lane tracks)',
-    description: 'Pilot 101\'s high-severity finding, verified three ways (raw variant diffs, mutation-basis analysis, engine read): the kick/snare/hats vary groups mutate LEGACY track-wide drum-voice params (src/vary/vary.ts) that ui/src/audio/engine.ts provably never plays for a track with declared lanes — and declared 12-lane kits are what every fresh drums track gets since Phase 25, so the flagship "vary the kick" use case generates variants that all sound identical. Worse, the whole loop reinforces the illusion: score records the fake picks, suggest recommends more of the winning no-op group, and no inspect surface shows per-lane params that would reveal it. Fix needs lane-aware mutation groups (vary targets a lane\'s own voice params on declared-lane tracks, legacy params only on legacy tracks) plus a lane-param edit surface and inspect visibility — a real stream, not a patch. Until then the loop is honest only for synth tracks and "feel".',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
-    research: 'research/101-usability-pilot-mcp-taste-loop.md', plan: null,
+    description: 'Pilot 101\'s high-severity finding, verified three ways (raw variant diffs, mutation-basis analysis, engine read): the kick/snare/hats vary groups mutate LEGACY track-wide drum-voice params (src/vary/vary.ts) that ui/src/audio/engine.ts provably never plays for a track with declared lanes — and declared 12-lane kits are what every fresh drums track gets since Phase 25, so the flagship "vary the kick" use case generates variants that all sound identical. Worse, the whole loop reinforces the illusion: score records the fake picks, suggest recommends more of the winning no-op group, and no inspect surface shows per-lane params that would reveal it. Fix needs lane-aware mutation groups (vary targets a lane\'s own voice params on declared-lane tracks, legacy params only on legacy tracks) plus a lane-param edit surface and inspect visibility — a real stream, not a patch. Fixed (Phase 35 Stream OA): on declared-lane tracks `beat vary`/beat_vary target a NAMED LANE\'s own backing params (synth voice tune/punch/decay/tone or sample start/length/AHD/filter/gainDb/tune — any declared lane, not just the historic five), emitted as replayable `<track>.lane.<name>.<param>` beat-set paths (a new core set-path, closing that gap too); legacy group names ERROR loudly there, naming the real lanes; legacy tracks bit-for-bit unchanged; suggest is lane-aware and skips history rated on inaudible differences. Verified end-to-end: adopt replay via beat set reproduces the variant byte-identically.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/101-usability-pilot-mcp-taste-loop.md', plan: 'phase-35-plan.md',
   },
   {
     area: 'Vary / audition loop', feature: 'Rung-2 "feel" content variation, wired into the GUI',
@@ -1750,8 +1750,27 @@ export const rows = [
 
   {
     area: 'Drum programming', feature: 'Multiple drums tracks actually sound (engine wires only the first)',
-    description: 'Found by the owner\'s music agent mid-song (2026-07-14): the engine binds exactly ONE drums track — `doc.tracks.find(kind === \'drums\')` at ui/src/audio/engine.ts:2615, one global drumLanes map, one drum bus, one drumTrackId. A second drums track parses, serializes, edits, and inspects perfectly and is pure silence at playback — the worst silent-failure class this project tracks. The session\'s workaround was burning the main kit\'s unused tom/crash/ride lanes for vocal chops. Format has no such limit; engine-only. Fix: per-drums-track lane maps/bus/declared-mode/sf-voice, triggerDrum keyed by (track, lane), per-track choke groups and trigger guards, plus a committed two-drums-track render proof that both tracks sound. Phase 35 Stream OF.',
-    core: 'done', cli: 'done', gui: 'missing', status: 'progress',
+    description: 'Found by the owner\'s music agent mid-song (2026-07-14): the engine binds exactly ONE drums track — `doc.tracks.find(kind === \'drums\')` at ui/src/audio/engine.ts:2615, one global drumLanes map, one drum bus, one drumTrackId. A second drums track parses, serializes, edits, and inspects perfectly and is pure silence at playback — the worst silent-failure class this project tracks. The session\'s workaround was burning the main kit\'s unused tom/crash/ride lanes for vocal chops. Format has no such limit; engine-only. Fixed (Phase 35 Stream OF): per-drums-track engine state (lane maps, bus, declared-mode, sf voice) keyed by track id, triggerDrum(trackId, lane), per-track choke groups and trigger guards; legacy implicit-5-lane mode also works per-track. Proof committed (ui/verify-phase35-stream-of.mjs, run against merged main): kit solo -24 LUFS at 96 Hz centroid, chops solo -17 LUFS at 10.4 kHz centroid, mix carries both with all 8 onsets audible.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: null, plan: 'phase-35-plan.md',
+  },
+
+  {
+    area: 'Vary / audition loop', feature: 'One-WAV audition (contact sheet) + first-class adopt',
+    description: 'Owner\'s #1 ergonomic ask from the first dogfood session: `beat vary --audition` / beat_vary audition:true (implies render) stitches every rendered variant into ONE audition.wav — 0.5s gaps, printed timecode index (v1 @ 0:00.0, ...), same map in audition.json — instead of N files to juggle. And adopting a winner is a real verb now: `beat adopt <batch-dir> <pick>` / beat_adopt copies the picked variant over the parent through the manifest, refusing if the parent\'s sha256 no longer matches the batch\'s parentSha256 (the parent moved on) unless forced — pilot 101\'s "a feel winner is unadoptable MCP-only" gap closed with data-safety included.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/101-usability-pilot-mcp-taste-loop.md', plan: 'phase-35-plan.md',
+  },
+  {
+    area: 'Agent onboarding', feature: 'Music-session scaffold + GUI-selection-aware vary over MCP',
+    description: 'The fix for "the agent started updating the README": `beat mcp-init` now also writes a 27-line music-session CLAUDE.md next to the .beat (never overwrites without --force) — you are here to MAKE MUSIC, run metrics+lint after every render and say what changed, taste goes through vary→audition→score→adopt, checkpoint at milestones, velocity is 0-1, lane gain is dB, never touch the dotbeat repo. Plus the GUI-interop bridge: beat_vary accepts scope "selection" + port, resolving the user\'s live GUI selection off the running daemon exactly like the CLI\'s --scope selection — "vary this" now means what the human highlighted.',
+    core: 'na', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/101-usability-pilot-mcp-taste-loop.md', plan: 'phase-35-plan.md',
+  },
+  {
+    area: 'Metrics / critique loop', feature: 'Reference mix profile (critique against a track you love)',
+    description: 'Phase 35 Stream OD: `beat metrics ref.wav --save-profile ref.json` saves the full metric set with provenance; `beat lint mix.wav --ref ref.json` reports LUFS/band/width/crest DELTAS from the reference (padded by the Phase-34 render-variance constants so findings can\'t flip between identical renders), each finding naming reference value, measured value, and the .beat edit to try. Reference-distance findings are info (taste), safety rules (true-peak clipping, phase cancellation) stay absolute warns. MCP parity via the same src/metrics/profile.ts. Honest limits in the help text: full-mix statics — a profile can\'t hear arrangement, sections, or masking.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: 'phase-35-plan.md',
   },
 
@@ -1763,8 +1782,8 @@ export const rows = [
   // promoted into a real stream — see "Note editing (piano roll)".)
   {
     area: 'Known usability gaps (backlog)', feature: 'Drum-track legibility + MCP ergonomics cluster (pilot 101 mediums)',
-    description: 'The contained-but-real remainder of pilot 101, bundled for a future fix phase (its two bugs — silent unknown-arg drop and beat_suggest validation drift — were fixed same-day): (1) `beat inspect`\'s pattern grid silently truncates to 16 steps while its own hit counts say more, actively misleading on longer loops; (2) no inspect surface anywhere shows a drum lane\'s own voice params, sample backing, or hit ids — the invisibility that let the lane-aware-vary no-op hide; (3) beat_vary/beat_score\'s "to adopt the winner" hints emit CLI/shell strings (`cp ...`, `beat set ...`) that an MCP-only agent can\'t execute — a feel winner is unadoptable over MCP without shelling out; (4) batch/log default paths resolve against the MCP server\'s cwd, not the .beat file, unlike every file argument (pass explicit paths as the workaround). Also carried: pilot 94/96\'s standing cosmetics (drums tracks showing a bogus `synth:` line, duplicate `lane` display lines when sample-backed).',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    description: 'The contained-but-real remainder of pilot 101, bundled for a future fix phase (its two bugs — silent unknown-arg drop and beat_suggest validation drift — were fixed same-day): (1) `beat inspect`\'s pattern grid silently truncates to 16 steps while its own hit counts say more, actively misleading on longer loops; (2) no inspect surface anywhere shows a drum lane\'s own voice params, sample backing, or hit ids — the invisibility that let the lane-aware-vary no-op hide; (3) beat_vary/beat_score\'s "to adopt the winner" hints emit CLI/shell strings (`cp ...`, `beat set ...`) that an MCP-only agent can\'t execute — a feel winner is unadoptable over MCP without shelling out; (4) batch/log default paths resolve against the MCP server\'s cwd, not the .beat file, unlike every file argument (pass explicit paths as the workaround). ALL FIXED in Phase 35: (1)+(2) Stream OB — full-loop grids, per-lane truth in inspect, honest bus: line, stale-legacy flag + `--clear-legacy`; (3)+(4) Stream OC — beat_adopt/`beat adopt` with a parentSha256 safety check, and batch/log defaults now resolve next to the .beat on both surfaces.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: 'research/101-usability-pilot-mcp-taste-loop.md', plan: null,
   },
 
