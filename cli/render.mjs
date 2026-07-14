@@ -233,6 +233,23 @@ export async function renderCommand(argv) {
   }
 }
 
+/** Phase 37 Stream RA: one full-mix real-time capture returned IN MEMORY as WAV bytes (Buffer),
+ * instead of written to disk — for callers that decode/slice/analyze the render rather than keeping
+ * the file (e.g. `beat feedback`: render once, slice at section boundaries, analyze each slice).
+ * Reuses the exact bootRenderSession + captureWav path `renderCommand` uses, so the bytes are the
+ * same real-engine post-limiter master capture, just never touching the filesystem. Returns
+ * `{ bytes, doc, seconds }` — `doc` (parsed) and `seconds` (render length) save the caller a
+ * re-parse for the section bar math. */
+export async function renderToBuffer(beatPath, opts = {}) {
+  const session = await bootRenderSession(beatPath, opts)
+  try {
+    const bytes = await captureWav(session.page, session.seconds, session.pageErrors)
+    return { bytes, doc: session.doc, seconds: session.seconds }
+  } finally {
+    await session.close()
+  }
+}
+
 /** Phase 33 Stream MD item 2 (research/98): one real-time solo capture per track id, reusing a
  * single daemon/preview/browser session (booting that session is most of the fixed cost — paying
  * it once instead of once-per-track keeps this from being N full `renderCommand` invocations).
