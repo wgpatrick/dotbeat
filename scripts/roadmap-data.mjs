@@ -1806,11 +1806,31 @@ export const rows = [
     research: 'research/103-generative-audio-apis.md', plan: null,
   },
 
+  // \u2500\u2500 Audio-structure import (Phase 38) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   {
-    area: 'Known usability gaps (backlog)', feature: 'Pilot 104 low-severity leftovers (Phase 37 surface)',
-    description: 'The low/minor remainder of pilot 104 (its two mediums \u2014 undiscoverable `vary automation:<param>` and the automate-shape CLI stack-trace leak \u2014 were fixed same-day): (1) `vary automation:<param>` is hardwired to the track\'s FIRST clip with no clip selector, and invents a lane for a param that has no existing automation (arguably fine, but undocumented); (2) render paths emit a harmless `404 Not Found` page error to stderr; (3) `source add` registers byte-identical content under two ids with no dedup note. All cosmetic/ergonomic, none affect correctness.',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
-    research: 'research/104-usability-pilot-phase37-surface.md', plan: null,
+    area: 'Audio-structure import (Phase 38)', feature: 'Audio-structure analysis (`beat analyze`, first Python sidecar)',
+    description: 'Phase 38 Stream SB: `beat analyze <song.wav> [--backend beatthis|stub|allin1] [--force] [-o out.json] [--json]` and `beat analyze --doctor`. dotbeat\'s FIRST non-Node dependency, structured as a child-process sidecar with a frozen JSON contract (D17): python/analyze.py emits raw analysis in seconds on stdout (stdlib-only top level; torch/beat_this import lazily); src/analysis/sidecar.ts owns sha256/interpreter-resolution/exit-code-contract/envelope/atomic-cache next to the audio. Real models (Beat This, MIT code+weights) run owner-side \u2014 this container/CI have no torch and blocked PyPI/HF egress, so a deterministic stdlib `stub` backend exercises identical plumbing green (python3-gated integration tests actually run here). Backends beyond stub degrade with copy-pasteable `pip install` fixes surfaced through --doctor. CLI + beat_analyze_audio MCP.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/102-track-analysis-tooling.md', plan: 'phase-38-plan.md',
+  },
+  {
+    area: 'Audio-structure import (Phase 38)', feature: 'Structure-matched scaffolding (`beat skeleton`)',
+    description: 'Phase 38 Stream SA: `beat skeleton <out.beat> <analysis.json> [--section-bars N]` turns an analyze artifact into an empty structure-matched .beat \u2014 integer tempo (detected value shown), one scene per distinct section label (repeats reference the same scene; per-entry bars on the song timeline), all seconds\u2192bars math loader-owned (barSeconds from the downbeat grid or 4\u00b760/bpm; round-to-0 sections dropped, >64-bar sections split into 32-bar repeats to satisfy setSong, empty-sections artifacts fall back to uniform --section-bars chunks). src/analysis/import.ts is the sole AnalysisArtifact validation authority. The reference audio is NEVER registered as media (D18). Round-trips: buildSkeleton output re-parses and analyzeStructure sees the same sections \u2014 closing the loop RB\'s vocabulary promised. CLI + beat_skeleton MCP.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/102-track-analysis-tooling.md', plan: 'phase-38-plan.md',
+  },
+  {
+    area: 'Audio-structure import (Phase 38)', feature: 'Sample generation (`beat source gen`, Stable Audio Open) \u2014 deferred to Phase 39',
+    description: 'Deferred from Phase 38 (owner-approved default): local Stable Audio Open generation of short one-shots/vocal-chops via a second Python sidecar (python/gen.py), registering into media with a provenance sidecar carrying prompt/model/seed/license. The shared spawn/JSON/doctor/venv conventions (D17) are documented in python/README.md so gen.py copies them at near-zero cost. Held back because it would ship a second owner-side-only feature before the first (beat analyze) has run on a real machine, and its commercial-use registration condition (research 103) needs its own decision entry. Near-term generative substitute remains the CC0 Freesound path.',
+    core: 'na', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/103-generative-audio-apis.md', plan: null,
+  },
+
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Pilot 104 low-severity leftovers (Phase 37 surface) \u2014 resolved in Phase 38 SD',
+    description: 'The low/minor remainder of pilot 104, all three cleared by Phase 38 Stream SD: (1) `vary automation:<param>` gained an explicit `--clip <id>` selector (CLI + beat_vary MCP), documented in help/--groups (default still targets the first clip); (2) the harmless `404 Not Found` render page-error is now filtered from console forwarding while genuine JS exceptions and engine media-load warnings still surface; (3) `source add`/`ingest` now prints an explicit re-register note (replaced sha256 abc\u2026\u2192def\u2026, or "already registered (unchanged)") instead of silently replacing. Kept as a done-row for the citation trail.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/104-usability-pilot-phase37-surface.md', plan: 'phase-38-plan.md',
   },
 
   // ── Known usability gaps (backlog) ────────────────────────────────────────

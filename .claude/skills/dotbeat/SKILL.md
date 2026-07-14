@@ -42,9 +42,8 @@ node <dotbeat-repo>/cli/beat.mjs mcp-init <file.beat>   # writes .mcp.json next 
 then start a fresh Claude Code session in that project folder (MCP config is discovered at
 startup, not hot-reloaded).
 
-**The MCP server does NOT expose every CLI command.** Verified live against `src/mcp/server.ts`
-(27 tools total, confirmed by driving a real `initialize` → `tools/list` round trip over stdio —
-not just reading source). Concretely, these must go through the raw CLI even inside an MCP
+**The MCP server does NOT expose every CLI command.** Verified against `src/mcp/server.ts`
+(65 tools total as of Phase 38). Concretely, these must go through the raw CLI even inside an MCP
 session:
 
 - `beat vary` / `beat score` / `beat adopt` / `beat suggest` — the variation-and-taste loop, fully mirrored over MCP (beat_vary/beat_score/beat_adopt/beat_suggest). On declared-lane drums tracks, vary targets a LANE NAME (kick, hat, tom_lo, ...) — its own audible params — not the legacy kick/snare/hats groups (those error there). Pass `--audition` (or audition:true) for ONE stitched audition.wav with a timecode index instead of N files; adopt the winner with `beat adopt <batch-dir> <pick>`. Batch dirs and beat-scores.jsonl default NEXT TO the .beat file.
@@ -130,6 +129,21 @@ checkout). `docs/decisions.md` D15 / `docs/phase-17-plan.md` Stream L is retarge
 to dotbeat's own `ui/` engine (no BeatLab dependency) — check whether that has landed before
 assuming render "just works" in a given environment; if it hasn't, treat a silent/short WAV or a
 `--beatlab-dir` error as expected, not a mystery bug.
+
+## Learn from a real song: `beat analyze` → `beat skeleton`
+
+To start a project from an existing track's structure (Phase 38): `beat analyze <song.wav>`
+(`beat_analyze_audio`) runs a Python sidecar that detects tempo, beats/downbeats, and section
+boundaries and caches a `<song>.analysis.json` next to the audio; `beat skeleton <out.beat>
+<analysis.json>` (`beat_skeleton`) scaffolds an empty, structure-matched `.beat` (tempo + one scene
+per section + a song timeline) to fill in. **This is dotbeat's only non-Node dependency and it is
+opt-in**: real models (Beat This) run only where the owner has installed the venv
+(`python/README.md`) — everywhere else, pass `--backend stub` for a deterministic scaffold with zero
+Python packages, and run `beat analyze --doctor` to see what's installed and get copy-pasteable
+install fixes. The analyzed audio is never registered into the project, only the JSON of derived
+facts (decisions.md D17/D18). Don't confuse `beat analyze <wav>` (audio) with `beat analyze-structure
+<file.beat>` (symbolic, no audio) — passing a `.beat` to `beat analyze` prints a pointer to the
+right command.
 
 ## Common mistakes — see `references/mistakes.md`
 

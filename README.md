@@ -80,7 +80,7 @@ the full thesis and prior-art comparison.
 
 Well past the original v0 proof-of-concept: dotbeat now has its own GUI (arrangement view, clip
 authoring, mixer, effects chain, content browser — not a wrapped version of the BeatLab teaching
-app it started from), a 773-test suite, a session-local undo/redo stack alongside the git-backed
+app it started from), a 798-test suite, a session-local undo/redo stack alongside the git-backed
 checkpoint/restore history system, and a growing library of adversarially-researched design docs.
 Three research passes against Ableton Live 12's own reference manual have directly shaped recent
 work. A feature-by-feature comparison drove a batch of P0 shipments: in-session undo/redo, a real
@@ -161,6 +161,20 @@ movement into the same audition/score/adopt loop, `beat render --stems` writes p
 sidecars; live search egress-gated). Research/103 mapped the generative-audio direction and — with an
 owner-supplied primary-source correction on the ElevenLabs Music terms — landed on Stable Audio Open
 (local) as the licensing-clean path, deferred to sit alongside `beat analyze` in a later phase.
+Phase 38 then built that "learn from a real song" slice, introducing the project's first non-Node
+dependency in the most contained way possible: `beat analyze <song.wav>` runs a Python sidecar
+(`python/analyze.py`) that emits nothing but a JSON artifact of derived facts — tempo, beat/downbeat
+times, section boundaries — which `beat skeleton` turns into an empty, structure-matched `.beat` to
+write into. The Python surface is deliberately tiny and dumb (stdlib-only entry point, real models
+like Beat This importing lazily and running only on the owner's machine); all the sha256/caching,
+interpreter resolution, exit-code handling, and unit conversion live in TypeScript, and a
+deterministic stdlib `stub` backend exercises the identical plumbing so CI and dev containers stay
+green with zero Python packages installed and no network (`beat analyze --doctor` reports what's
+missing with copy-pasteable fixes). The analyzed audio is never registered into the project — only
+the JSON of numbers and labels is (decisions.md D17/D18). Stable Audio Open generation (`beat source
+gen`) is now formally deferred to a follow-up phase to reuse that same sidecar template. The same
+phase cleared the last pilot-104 papercuts (a `--clip` selector for automation vary, quieter render
+output, an explicit sample re-register note).
 `docs/product-roadmap.md` tracks every feature's real status;
 `ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
 built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a

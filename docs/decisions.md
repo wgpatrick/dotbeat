@@ -9,6 +9,48 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D18 — a reference track analyzed for structure never enters the project as media (2026-07-14)
+
+**The decision.** `beat analyze <song.wav>` (Phase 38) reads a reference track and emits a
+`*.analysis.json` of numbers and labels (tempo, beat/downbeat times, section boundaries) — and the
+source audio is **never registered into the `.beat` project** as a media clip. `beat skeleton`
+scaffolds an empty structure-matched project from that JSON; the JSON path is the only trail back
+to the reference. There is deliberately no `--register-source` shortcut.
+
+**Why.** Research 102's copyright posture: an analysis artifact that is purely derived facts
+(BPM, section labels) is safe to commit, diff, and share; the analyzed audio itself is someone
+else's copyrighted recording and has no business living inside a user's MIT-licensed project. Keeping
+the two apart at the tool boundary makes the safe thing the default and the unsafe thing something a
+user has to do on purpose (they still can, explicitly, via `beat source add` with their own file and
+an asserted license). This mirrors D-series "make the canonical/safe form the path of least
+resistance" reasoning.
+
+## D17 — the Python-sidecar JSON contract: TS owns all I/O and unit conversion, Python emits raw analysis in seconds (2026-07-14)
+
+**The decision.** dotbeat's first non-Node dependency (Phase 38 audio analysis) is structured as a
+**child-process sidecar with a frozen JSON contract**, not an embedded runtime or an FFI binding.
+`python/analyze.py` imports stdlib only at module top (backend deps — torch, beat_this, allin1 —
+import lazily inside their run functions), takes `--backend`/`--input` (or `--doctor`), and writes
+the analysis **core** (`{backend, bpm|null, beats, downbeats, sections}`, all times in **seconds**)
+to **stdout only** — no file writes, no dotbeat knowledge. The TypeScript wrapper
+(`src/analysis/sidecar.ts`) owns everything else: it computes the audio sha256, resolves the Python
+interpreter (`$BEAT_PYTHON` → `python/.venv/bin/python3` → PATH), enforces the exit-code contract
+(0 ok · 2 bad input · 3 missing dep · 4 failure) with copy-pasteable degrade messages, wraps the
+core in the versioned envelope, and atomically caches it next to the audio. All **seconds→bars**
+math and the canonical `AnalysisArtifact` validation live on the TS side (`src/analysis/import.ts`),
+which is the sole validation authority. A stdlib-only `stub` backend produces a deterministic grid
+so CI and dev containers exercise the identical plumbing with zero Python packages installed.
+
+**Why.** (1) The MIR ecosystem is Python/PyTorch (research 102) — a sidecar is the only realistic
+shape, and a frozen JSON boundary keeps that dependency at arm's length: everything dotbeat-specific
+stays testable in TypeScript. (2) Putting sha256/caching/unit-conversion/validation on the TS side
+means the Python surface is tiny, dumb, and swappable — a future backend (allin1, or `gen.py` for
+Stable Audio Open in Phase 39) copies the same argv/exit/doctor conventions at near-zero cost. (3)
+The `stub` backend + skip-gated integration tests keep the suite green everywhere, including the CI
+and dev environments where PyPI/HuggingFace egress is blocked and torch can never install — real
+models run only on the owner's machine, validated via `beat analyze --doctor`. The conventions are
+documented in `python/README.md` as the shared template for later sidecars.
+
 ## D16 — multi-region audio placement: repeated `slot` lines with `at <steps>` (2026-07-14, owner)
 
 **The decision.** Lift the one-clip-per-track-per-scene ceiling via Option A of
