@@ -243,6 +243,11 @@ const HELP = [
   beat vary <file> <track> feel --scope selection --port <p> [...same feel flags, minus --lanes/--ids]
                                                           scope to the GUI selection held by a running daemon instead of
                                                           typing --lanes/--ids by hand (lanes -> --lanes, bars/notes -> --ids)
+  beat vary <file> <track> automation:<param> [--count 9] [--seed N] [--render] [--audition]
+                                                          batch MOVEMENT variants of a clip's automation on <param>
+                                                          (varies shape/depth/rate/phase, e.g. automation:cutoff) —
+                                                          each variant carries a replayable beat automate-shape recipe;
+                                                          scores/adopts through the same loop (see beat automate-shape)
   beat vary --groups                                      list the mutation groups (static; both modes documented)
   beat vary <file> <track> --groups                       list THAT track's real targets (lanes + live groups)`,
   },
@@ -1060,6 +1065,8 @@ async function varyCmd(argv) {
     for (const [name, defs] of Object.entries(VARY_GROUPS)) {
       process.stdout.write(`${name.padEnd(10)} ${defs.map((d) => d.key).join(', ')}\n`)
     }
+    process.stdout.write(`feel       humanized timing/velocity content variation (see beat vary <file> <track> feel)\n`)
+    process.stdout.write(`automation:<param>  movement/shape variants of a clip's automation lane, e.g. automation:cutoff (see beat automate-shape)\n`)
     process.stdout.write(`(kick/snare/hats apply to LEGACY drums tracks only — on a declared-lane drums track, target a lane NAME instead; run beat vary <file> <track> --groups for that track's real targets)\n`)
     return
   }
@@ -2350,7 +2357,8 @@ main().catch((err) => {
     err instanceof BeatProfileError ||
     err instanceof BeatAnalysisError ||
     err.name === 'HistoryError' ||
-    err.name === 'WavDecodeError'
+    err.name === 'WavDecodeError' ||
+    err.name === 'AutomationShapeError'
   ) {
     console.error(`error: ${err.message}`)
     process.exitCode = 2

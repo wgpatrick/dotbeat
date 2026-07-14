@@ -1806,6 +1806,13 @@ export const rows = [
     research: 'research/103-generative-audio-apis.md', plan: null,
   },
 
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Pilot 104 low-severity leftovers (Phase 37 surface)',
+    description: 'The low/minor remainder of pilot 104 (its two mediums \u2014 undiscoverable `vary automation:<param>` and the automate-shape CLI stack-trace leak \u2014 were fixed same-day): (1) `vary automation:<param>` is hardwired to the track\'s FIRST clip with no clip selector, and invents a lane for a param that has no existing automation (arguably fine, but undocumented); (2) render paths emit a harmless `404 Not Found` page error to stderr; (3) `source add` registers byte-identical content under two ids with no dedup note. All cosmetic/ergonomic, none affect correctness.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/104-usability-pilot-phase37-surface.md', plan: null,
+  },
+
   // ── Known usability gaps (backlog) ────────────────────────────────────────
   // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
   // feature) or too cross-cutting (spans many components) to fold into a single fix-phase stream.
