@@ -154,9 +154,18 @@ async function ingest({ beatFile, id, inPath, license, source, query, extra }) {
   } catch (err) {
     throw new SourceError(`could not parse ${beatFile}: ${err instanceof Error ? err.message : String(err)}`)
   }
+  // Re-registration note: registering an id already present in the media block silently REPLACES
+  // it (setMediaSample is an upsert). Pilot 104 flagged that silence as surprising — surface it.
+  // Detected BEFORE the upsert, reported through the return value so each surface (CLI stdout, MCP
+  // result string) can print it without this shared library ever writing to stdout (which would
+  // corrupt the MCP stdio JSON-RPC channel).
+  const existing = before.media.find((m) => m.id === id)
+  const reregistered = existing
+    ? { changed: existing.sha256 !== sha256, previousSha256: existing.sha256 }
+    : null
   doc = setMediaSample(before, id, sha256, relPath)
   writeFileSync(beatFile, serialize(doc))
-  return { id, sha256, relPath, sidecarPath, durationSeconds, license, source }
+  return { id, sha256, relPath, sidecarPath, durationSeconds, license, source, reregistered }
 }
 
 /** OFFLINE path: ingest a local audio file you already have. License defaults to "unspecified"

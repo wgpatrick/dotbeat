@@ -243,9 +243,10 @@ const HELP = [
   beat vary <file> <track> feel --scope selection --port <p> [...same feel flags, minus --lanes/--ids]
                                                           scope to the GUI selection held by a running daemon instead of
                                                           typing --lanes/--ids by hand (lanes -> --lanes, bars/notes -> --ids)
-  beat vary <file> <track> automation:<param> [--count 9] [--seed N] [--render] [--audition]
+  beat vary <file> <track> automation:<param> [--clip id] [--count 9] [--seed N] [--render] [--audition]
                                                           batch MOVEMENT variants of a clip's automation on <param>
                                                           (varies shape/depth/rate/phase, e.g. automation:cutoff) —
+                                                          --clip picks WHICH clip's lane (default the track's first clip);
                                                           each variant carries a replayable beat automate-shape recipe;
                                                           scores/adopts through the same loop (see beat automate-shape)
   beat vary --groups                                      list the mutation groups (static; both modes documented)
@@ -1029,7 +1030,7 @@ function flagValue(argv, flag) {
 
 async function varyCmd(argv) {
   const { VARY_GROUPS, LEGACY_DRUM_VOICE_GROUPS, laneVaryDefs, varyTrack, BeatVaryError } = await import('../dist/src/vary/vary.js')
-  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids', '--scope', '--port']
+  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids', '--scope', '--port', '--clip', '--points', '--bars']
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   if (argv.includes('--groups') || argv.length === 0) {
     // Track-aware when a file+track are given (Phase 35 Stream OA): a declared-lane drums
@@ -1066,7 +1067,7 @@ async function varyCmd(argv) {
       process.stdout.write(`${name.padEnd(10)} ${defs.map((d) => d.key).join(', ')}\n`)
     }
     process.stdout.write(`feel       humanized timing/velocity content variation (see beat vary <file> <track> feel)\n`)
-    process.stdout.write(`automation:<param>  movement/shape variants of a clip's automation lane, e.g. automation:cutoff (see beat automate-shape)\n`)
+    process.stdout.write(`automation:<param>  movement/shape variants of a clip's automation lane, e.g. automation:cutoff (--clip id targets a specific clip; default the track's first; see beat automate-shape)\n`)
     process.stdout.write(`(kick/snare/hats apply to LEGACY drums tracks only — on a declared-lane drums track, target a lane NAME instead; run beat vary <file> <track> --groups for that track's real targets)\n`)
     return
   }
@@ -1247,6 +1248,11 @@ async function varyAutomationCmd(argv, file, track, param) {
     seed,
     ...(flagValue(argv, '--points') !== undefined ? { points: Number(flagValue(argv, '--points')) } : {}),
     ...(flagValue(argv, '--bars') !== undefined ? { bars: Number(flagValue(argv, '--bars')) } : {}),
+    // --clip picks WHICH clip's automation lane to vary; omit for the track's first clip (the prior
+    // implicit behavior). Pilot 104: with automation on more than one clip the target was silent
+    // and unreachable; this makes it explicit without changing the default. varyAutomation errors
+    // cleanly (BeatVaryError) if the named clip isn't on the track.
+    ...(flagValue(argv, '--clip') !== undefined ? { clip: flagValue(argv, '--clip') } : {}),
   }
   const text = readFileSync(file, 'utf8')
   const doc = parse(text)
@@ -1571,6 +1577,14 @@ async function sourceCmd(argv) {
         `(${result.durationSeconds}s, license ${result.license})\n` +
         `provenance sidecar: ${result.relPath}.json\n`,
       )
+      // Pilot 104 minor: re-registering an existing id silently replaced it. Say so explicitly.
+      if (result.reregistered) {
+        process.stdout.write(
+          result.reregistered.changed
+            ? `note: re-registered ${result.id} (replaced sha256:${result.reregistered.previousSha256.slice(0, 7)}... -> ${result.sha256.slice(0, 7)}...)\n`
+            : `note: ${result.id} already registered (unchanged)\n`,
+        )
+      }
       return
     }
     throw new BeatEditError('source needs a subcommand: `beat source search <query>` or `beat source add <file.beat> <id> <local-audio-file>` (see `beat help source`)')
