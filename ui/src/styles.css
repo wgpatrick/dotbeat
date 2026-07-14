@@ -446,11 +446,17 @@ body {
    `overflow: auto` container — .noteview itself has no overflow of its own) for as long as
    .noteview, its containing block, is still in view — i.e. it stays visible for the entire time
    any part of this clip's editor is scrolled into the bottom pane, only scrolling away once the
-   whole editor does. z-index keeps it above the grid/panels stacked below during that overlap. */
+   whole editor does. z-index keeps it above the grid/panels stacked below during that overlap.
+   Must outrank the piano-roll's own left-sticky key column (NoteView.tsx's inline zIndex: 6 on
+   the KEY_W column) — both dock at the top-left corner when scrollTop is 0, and without this the
+   key column's higher z-index painted over the title bar's clip-name text there (confirmed via a
+   live screenshot: a sliver of piano key rendering on top of the "clip …" label). The title bar
+   already has `pointer-events: none` below, so raising it here can't break click-through to the
+   grid/keys underneath. */
 .noteview-titlebar {
   position: sticky;
   top: 0;
-  z-index: 5;
+  z-index: 7;
   margin: -14px -14px 10px -14px;
   padding: 10px 14px;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -995,6 +1001,22 @@ body {
   font: inherit;
   font-size: 11px;
   max-width: 74px;
+}
+/* An enum control gated inactive by its sibling state (the LFO's tempo-sync Rate dropdown while
+   Sync is off, and vice versa for the Hz knob) — same dim + inline-hint treatment the knobs use
+   (.knob-inactive above), so the two mutually-exclusive controls read as "one live, one waiting"
+   rather than both equally active. Only the label+select dim; the control stays interactive. */
+.param-enum.param-inactive .knob-label,
+.param-enum.param-inactive select {
+  opacity: 0.4;
+}
+.param-inactive-hint {
+  font-size: 9px;
+  color: var(--text-dim);
+  max-width: 74px;
+  text-align: center;
+  line-height: 1.2;
+  margin-top: 2px;
 }
 
 /* ---- effect chain (Phase 22 Stream AA: ordered, reorderable per-track effect chain) ---- */

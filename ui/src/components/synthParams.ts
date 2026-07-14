@@ -80,6 +80,15 @@ export interface ParamSpec {
   //    Fenv > 0") without a second lookup.
   dimAtZero?: boolean
   dimUnless?: { key: string; label: string }
+  // A control (knob OR enum) that only drives the sound while a named BOOLEAN sibling is in a
+  // particular state — dims it and shows an inline hint otherwise. Unlike dimUnless (a numeric
+  // sibling reading > 0), this gates on an exact true/false. Used for the LFO's mutually-exclusive
+  // pair: the free-Hz rate knob (`lfoRate`) is live only when `lfoSync` is OFF, and the tempo-sync
+  // note-division dropdown (`lfoSyncRate`) is live only when `lfoSync` is ON — before this, both
+  // looked equally active regardless of the Sync toggle, so it was unclear which one the LFO
+  // actually followed (owner feedback, 2026-07-13, with a screenshot of an unsynced LFO still
+  // showing a live-looking "1/1" Rate dropdown). `hint` is the full inline text to show when dimmed.
+  dimIfBool?: { key: string; equals: boolean; hint: string }
 }
 
 export interface ParamGroup {
@@ -235,17 +244,20 @@ export const PARAM_GROUPS: ParamGroup[] = [
     kinds: ['synth'],
     open: false,
     params: [
-      k('lfoRate', 'LFO1', 0.01, 20, fmt.hz, true),
+      // LFO1's rate is set EITHER by the free-Hz knob (Sync off) OR the note-division dropdown
+      // (Sync on) — never both. Each dims when it's the inactive one so the Sync toggle's effect is
+      // visible at a glance (owner feedback, 2026-07-13).
+      { ...k('lfoRate', 'LFO1', 0.01, 20, fmt.hz, true), dimIfBool: { key: 'lfoSync', equals: true, hint: 'Sync1 on — Rate1 sets the rate' } },
       k('lfoDepth', 'Depth1', 0, 1, fmt.pct),
       e('lfoDest', 'Dest1', LFO_DESTS),
       b('lfoSync', 'Sync1', 'tempo-sync LFO1 to a note division (Rate1) instead of free Hz'),
-      e('lfoSyncRate', 'Rate1', LFO_SYNC_RATES),
+      { ...e('lfoSyncRate', 'Rate1', LFO_SYNC_RATES), dimIfBool: { key: 'lfoSync', equals: false, hint: 'Sync1 off — LFO1 Hz sets the rate' } },
       e('lfoShape', 'Shape1', ['sine', 'custom']),
-      k('lfo2Rate', 'LFO2', 0.01, 20, fmt.hz, true),
+      { ...k('lfo2Rate', 'LFO2', 0.01, 20, fmt.hz, true), dimIfBool: { key: 'lfo2Sync', equals: true, hint: 'Sync2 on — Rate2 sets the rate' } },
       k('lfo2Depth', 'Depth2', 0, 1, fmt.pct),
       e('lfo2Dest', 'Dest2', LFO_DESTS),
       b('lfo2Sync', 'Sync2', 'tempo-sync LFO2 to a note division (Rate2) instead of free Hz'),
-      e('lfo2SyncRate', 'Rate2', LFO_SYNC_RATES),
+      { ...e('lfo2SyncRate', 'Rate2', LFO_SYNC_RATES), dimIfBool: { key: 'lfo2Sync', equals: false, hint: 'Sync2 off — LFO2 Hz sets the rate' } },
     ],
   },
   {
