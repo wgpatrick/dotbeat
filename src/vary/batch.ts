@@ -246,7 +246,7 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
 export function formatScoreResult(r: ScoreBatchResult): string {
   let out = `scored ${r.dir}: ${r.ranks.map((n) => `v${n}`).join(' > ')} -> ${r.logPath}\n`
   if (r.isFeel) out += `to adopt the winner (${r.entry.picks[0]!.recipe}): beat adopt ${r.dir} v${r.ranks[0]} (or the beat_adopt tool)\n`
-  else out += `to adopt the winner: beat set ${r.manifest.parent} ${r.entry.picks[0]!.edits!.join(' ')}\n`
+  else out += `to adopt the winner: beat adopt ${r.dir} v${r.ranks[0]} (or replay just its edits: beat set ${r.manifest.parent} ${r.entry.picks[0]!.edits!.join(' ')})\n`
   return out
 }
 
@@ -286,7 +286,7 @@ export function adoptVariant(dir: string, pick: string, opts: { force?: boolean 
   if (mismatch && opts.force !== true) {
     throw new BeatBatchError(
       `${parentPath} has changed since this batch was generated (sha256 ${parentSha.slice(0, 12)}... vs the manifest's ${manifest.parentSha256.slice(0, 12)}...) — ` +
-        `adopting would overwrite that newer work. Re-vary from the current file, or pass force to overwrite anyway`,
+        `adopting would overwrite that newer work. Re-vary from the current file, or force the overwrite ("beat adopt ... --force" / beat_adopt force:true)`,
     )
   }
   writeFileSync(parentPath, readFileSync(variantPath, 'utf8'))

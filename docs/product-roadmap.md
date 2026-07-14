@@ -24,9 +24,9 @@ data file, not this file directly, so it stays in sync with the matching artifac
 A feature with links in both columns but status "Not started" means: fully scoped, ready for a
 stream to pick up — not guesswork, a decision away from being built.
 
-## Snapshot — 310 features tracked
+## Snapshot — 311 features tracked
 
-**124** Done · **4** In progress · **182** Not started
+**124** Done · **4** In progress · **183** Not started
 
 ---
 
@@ -462,6 +462,7 @@ stream to pick up — not guesswork, a decision away from being built.
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
 | Drum-track legibility + MCP ergonomics cluster (pilot 101 mediums) | The contained-but-real remainder of pilot 101, bundled for a future fix phase (its two bugs — silent unknown-arg drop and beat_suggest validation drift — were fixed same-day): (1) `beat inspect`'s pattern grid silently truncates to 16 steps while its own hit counts say more, actively misleading on longer loops; (2) no inspect surface anywhere shows a drum lane's own voice params, sample backing, or hit ids — the invisibility that let the lane-aware-vary no-op hide; (3) beat_vary/beat_score's "to adopt the winner" hints emit CLI/shell strings (`cp ...`, `beat set ...`) that an MCP-only agent can't execute — a feel winner is unadoptable over MCP without shelling out; (4) batch/log default paths resolve against the MCP server's cwd, not the .beat file, unlike every file argument (pass explicit paths as the workaround). ALL FIXED in Phase 35: (1)+(2) Stream OB — full-loop grids, per-lane truth in inspect, honest bus: line, stale-legacy flag + `--clear-legacy`; (3)+(4) Stream OC — beat_adopt/`beat adopt` with a parentSha256 safety check, and batch/log defaults now resolve next to the .beat on both surfaces. | ✅ done | ✅ done | — | ✅ Done | [`101-usability-pilot-mcp-taste-loop.md`](research/101-usability-pilot-mcp-taste-loop.md) | — |
+| Pilot 103 polish leftovers | The polish-level remainder of pilot 103 (its two bugs — the synth-track no-op vary group and the metrics WavDecodeError stack trace — were fixed same-day, along with the adopt-refusal flag wording, the score hint now leading with `beat adopt`, and the `--lanes hat,openhat` help example): (1) `beat mcp-init --force` is all-or-nothing — it overwrites a customized music-session CLAUDE.md just to refresh .mcp.json; needs per-file granularity; (2) lint findings are uniformly INFO with a placeholder `song.beat` in fix lines instead of the real filename; (3) mix-profile JSON serializes dual-mono width as the string "-Infinity" among numeric fields (documented but surprising); (4) multi-word `--name` rejection cites stale "v0.2" text; (5) `beat suggest` output leaks its source filename (fourth pilot to note it). | ❌ missing | ❌ missing | — | ⬜ Not started | [`103-usability-pilot-lane-taste-loop.md`](research/103-usability-pilot-lane-taste-loop.md) | — |
 
 ## Desktop app / packaging
 

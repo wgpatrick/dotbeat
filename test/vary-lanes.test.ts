@@ -325,3 +325,11 @@ test('suggest without lane info keeps the old kind-level behavior (legacy drums 
   assert.equal(s.coldStart, true)
   assert.equal(s.recommendedGroup, 'kick') // correct on a LEGACY drums track — those params play there
 })
+
+// Pilot 103: the declared-lane guard alone wasn't enough — a drums-only group on a SYNTH track
+// (vary lead kick) silently mutated lead.kickTune/..., params a synth track never plays. Same
+// inaudible-no-op family, one track-kind over. Kind-illegal groups now error loudly.
+test('varyTrack rejects a kind-illegal group (drums-only group on a synth track)', () => {
+  const doc = initDocument({ bpm: 120 })
+  assert.throws(() => varyTrack(doc, 'lead', 'kick'), /mutates drums-track params that a synth track never plays.*legal groups for "lead"/)
+})

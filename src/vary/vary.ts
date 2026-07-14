@@ -376,6 +376,15 @@ export function varyTrack(doc: BeatDocument, trackId: string, group: string, opt
 
   const defs = VARY_GROUPS[group]
   if (!defs) throw new BeatVaryError(`unknown group "${group}" (have: ${Object.keys(VARY_GROUPS).join(', ')})`)
+  // Pilot 103: the declared-lane guard above wasn't enough — a drums-only group on a SYNTH track
+  // (e.g. `beat vary song lead kick`) mutated lead.kickTune/... , params a synth track never
+  // plays: the same inaudible-no-op family, one track-kind over. Never generate no-op variants.
+  const legalKinds = VARY_GROUP_KINDS[group]
+  if (legalKinds && !legalKinds.includes(track.kind)) {
+    throw new BeatVaryError(
+      `group "${group}" mutates ${legalKinds.join('/')}-track params that a ${track.kind} track never plays — an inaudible no-op batch; legal groups for "${trackId}": ${legalGroupsForKind(track.kind).join(', ')}${track.kind === 'synth' ? ' (or "feel")' : ''}`,
+    )
+  }
   return mutateVariants(doc, group, defs, (key) => track.synth[key as keyof BeatSynth] as number, (key) => `${trackId}.${key}`, opts)
 }
 

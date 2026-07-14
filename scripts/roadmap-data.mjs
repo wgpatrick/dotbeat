@@ -1787,6 +1787,13 @@ export const rows = [
     research: 'research/101-usability-pilot-mcp-taste-loop.md', plan: null,
   },
 
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Pilot 103 polish leftovers',
+    description: 'The polish-level remainder of pilot 103 (its two bugs — the synth-track no-op vary group and the metrics WavDecodeError stack trace — were fixed same-day, along with the adopt-refusal flag wording, the score hint now leading with `beat adopt`, and the `--lanes hat,openhat` help example): (1) `beat mcp-init --force` is all-or-nothing — it overwrites a customized music-session CLAUDE.md just to refresh .mcp.json; needs per-file granularity; (2) lint findings are uniformly INFO with a placeholder `song.beat` in fix lines instead of the real filename; (3) mix-profile JSON serializes dual-mono width as the string "-Infinity" among numeric fields (documented but surprising); (4) multi-word `--name` rejection cites stale "v0.2" text; (5) `beat suggest` output leaks its source filename (fourth pilot to note it).',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/103-usability-pilot-lane-taste-loop.md', plan: null,
+  },
+
   // ── Desktop app / packaging ──────────────────────────────────────────────
   {
     area: 'Desktop app / packaging', feature: 'Tauri shell, compiled sidecar, bundled starter',

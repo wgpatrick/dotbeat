@@ -316,7 +316,7 @@ test('tools/call: beat_vary -> beat_score round trip; batches are CLI-compatible
     // score it over MCP: "vN" and bare-"N" pick forms both accepted (Phase 33 ME normalization)
     const score = await mcp.request('tools/call', { name: 'beat_score', arguments: { dir: paramDir, picks: ['v2', '1'], log: logPath } })
     assert.match(score.content[0].text, /scored .*batch-filter: v2 > v1 -> /)
-    assert.match(score.content[0].text, /to adopt the winner: beat set .* lead\./)
+    assert.match(score.content[0].text, /to adopt the winner: beat adopt .* \(or replay just its edits: beat set .* lead\./)
     const entries = readFileSync(logPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
     assert.equal(entries.length, 1)
     assert.deepEqual(entries[0].picks.map((p: { rank: number; variant: string }) => [p.rank, p.variant]), [[1, 'v2.beat'], [2, 'v1.beat']])

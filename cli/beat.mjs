@@ -160,7 +160,7 @@ const HELP = [
   },
   {
     cmd: 'humanize',
-    text: `  beat humanize <file> <track> [--timing 0.15] [--velocity 0.06] [--push-late 0] [--swing 0] [--seed N] [--lanes hat,oh | --ids a,b]
+    text: `  beat humanize <file> <track> [--timing 0.15] [--velocity 0.06] [--push-late 0] [--swing 0] [--seed N] [--lanes hat,openhat | --ids a,b]
                                                           make a stiff part feel played: seeded timing/velocity
                                                           jitter, behind-the-beat drag, offbeat swing; scope by lane/id`,
   },
@@ -220,7 +220,7 @@ const HELP = [
                                                           --out-dir defaults to vary-<target>-<seed> NEXT TO the
                                                           .beat file, not the cwd; --audition implies --render and
                                                           stitches the wavs into one audition.wav + timecode index.
-  beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,oh | --ids a,b] [--render] [--audition]
+  beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,openhat | --ids a,b] [--render] [--audition]
                                                           batch humanized FEEL variants (content variation) to audition + score
   beat vary <file> <track> feel --scope selection --port <p> [...same feel flags, minus --lanes/--ids]
                                                           scope to the GUI selection held by a running daemon instead of
@@ -1941,7 +1941,8 @@ main().catch((err) => {
     err instanceof BeatPitchTimeError ||
     err instanceof BeatHumanizeError ||
     err instanceof BeatProfileError ||
-    err.name === 'HistoryError'
+    err.name === 'HistoryError' ||
+    err.name === 'WavDecodeError'
   ) {
     console.error(`error: ${err.message}`)
     process.exitCode = 2

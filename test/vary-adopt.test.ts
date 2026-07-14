@@ -47,7 +47,7 @@ test('beat adopt copies the picked variant over the parent (score -> adopt round
   // idempotent from the same batch requires force now: adopting v2 changed the parent's sha
   const refused = beat(['adopt', batch, '1'], { expectExit: 2 })
   assert.match(refused, /has changed since this batch was generated \(sha256 [0-9a-f]{12}\.\.\. vs the manifest's [0-9a-f]{12}\.\.\.\)/)
-  assert.match(refused, /pass force to overwrite anyway/)
+  assert.match(refused, /force the overwrite \("beat adopt \.\.\. --force" . beat_adopt force:true\)/)
   assert.equal(readFileSync(file, 'utf8'), readFileSync(join(batch, 'v2.beat'), 'utf8'), 'refusal leaves the parent untouched')
 
   const forced = beat(['adopt', batch, '1', '--force'])
