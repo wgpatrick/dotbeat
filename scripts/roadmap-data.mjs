@@ -1253,9 +1253,9 @@ export const rows = [
   },
   {
     area: 'Render / export', feature: 'Per-track stem rendering (`beat render --stems`)',
-    description: '`ROADMAP.md` §5 already floats `beat render project.beat -o mix.wav --stems` as a near-term capability, but it doesn\'t exist — `cli/render.mjs`\'s actual arg parser accepts only `-o/--tail/--daemon-port/--preview-port`, no stems flag. Ableton\'s own export matrix treats Main / All Individual Tracks / Selected Tracks Only as first-class render modes (manual ch.5 pp.122-127). Add a per-track solo-render loop (mute every other track, render, repeat) over the existing render path — small, and directly feeds the D2 metrics/lint loop with per-stem signal, not just mix-bus.',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
-    research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: null,
+    description: 'DONE (Phase 37 Stream RA): `beat render <file> --stems [--out-dir d]` writes one solo WAV per track, reusing the existing `renderTrackSolosCommand` store-solo session (one browser boot for all stems). Feeds the D2 metrics/lint loop with per-stem signal, not just mix-bus.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: 'phase-37-plan.md',
   },
 
   // ── Metrics / critique loop ──────────────────────────────────────────────
@@ -1772,6 +1772,38 @@ export const rows = [
     description: 'Phase 35 Stream OD: `beat metrics ref.wav --save-profile ref.json` saves the full metric set with provenance; `beat lint mix.wav --ref ref.json` reports LUFS/band/width/crest DELTAS from the reference (padded by the Phase-34 render-variance constants so findings can\'t flip between identical renders), each finding naming reference value, measured value, and the .beat edit to try. Reference-distance findings are info (taste), safety rules (true-peak clipping, phase cancellation) stay absolute warns. MCP parity via the same src/metrics/profile.ts. Honest limits in the help text: full-mix statics — a profile can\'t hear arrangement, sections, or masking.',
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: 'phase-35-plan.md',
+  },
+
+  // ── Feedback, generation & sound sources (Phase 37) ──────────────────────
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Section-aware feedback (`beat feedback --sections`)',
+    description: 'Phase 37 Stream RA: renders the song ONCE, slices the captured WAV at section boundaries (cumulative-bars math), analyze()s each slice → a per-section energy-arc report (LUFS / band shares / width / crest per section + section-to-section deltas, flagged only when they clear the Phase-34 render-variance floor), with optional per-section-vs-reference-profile (--ref). The structural critique nobody else can do cheaply — for a dotbeat song the section boundaries are IN the file, so no audio inference is needed. Reuses analyze/worstTrack/variance. CLI + beat_feedback MCP. Honest limits: per-section statics only, no masking/transition analysis. Proven live: a dark intro (-46 LUFS, 113 Hz centroid) vs a bright drop (-20 LUFS, 1640 Hz) reported as "+26 LU louder, +15pt brighter".',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: null, plan: 'phase-37-plan.md',
+  },
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Symbolic song analysis (`beat analyze-structure`)',
+    description: 'Phase 37 Stream RB: pure deterministic functions over notes/hits/scenes/placements (src/analysis/, no rendering) — onset density & syncopation per section, pitch-class histogram vs the declared scale (reusing core SCALES), and repetition/novelty across sections (per-section clip-content signatures → Jaccard + exact-repeat linkage + novel-section detection). Reads a song\'s arrangement without audio (e.g. "§3 is the drop; §4-6 repeat the intro"). Feeds beat feedback\'s arrangement-level critique AND establishes the internal StructureAnalysis vocabulary Phase 38\'s audio-structure import (research/102) will emit into. CLI + beat_analyze_structure MCP.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/102-track-analysis-tooling.md', plan: 'phase-37-plan.md',
+  },
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Automation-shape generator + automation as a vary target',
+    description: 'Phase 37 Stream RC: `beat automate-shape <file> <track> <clip> <param> <ramp|sine|triangle|exp|adsr> [--from --to --cycles --points --bars]` fills an automation lane by sampling the shape into points and replaying the existing setAutomationPoint primitive (no new grammar — the "Predefined automation shapes" roadmap row, made a generator). And `beat vary <track> automation:<param>` generates whole-doc movement variants (vary shape/depth/rate/phase), each carrying a replayable automate-shape recipe, into the existing writeVaryBatch → score → adopt → audition harness — closing the "vary can\'t touch automation" gap so movement is now a first-class taste-loop candidate. CLI + beat_automate_shape MCP + beat_vary automation routing. Proven live: a sine cutoff sweep moved the spectral centroid across a 148 Hz range vs 4 Hz flat baseline (37x).',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: null, plan: 'phase-37-plan.md',
+  },
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Freesound CC0 into the taste loop (`beat source`)',
+    description: 'Phase 37 Stream RD: wires the already-built CC0 search→prep→register pipeline into first-class verbs. `beat source search <query>` (CC0-hard-filtered Freesound discovery, top-rated first) and `beat source add <file.beat> <sample-id> <local-audio-file>` (offline: prep-oneshot trim/normalize/16-bit → register into media → enforced provenance sidecar media/<id>.wav.json) + a gated `--freesound <id>` download path. CLI + beat_source_search/add MCP. License default "unspecified" for local files (honest — can\'t verify), "CC0-1.0" only on the Freesound path. Network verified BLOCKED through the proxy (no key + CONNECT 403), so search/--freesound are env-gated with clean actionable errors; the offline add path is fully working and tested. Zero licensing risk.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/103-generative-audio-apis.md', plan: 'phase-37-plan.md',
+  },
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Generative-audio direction (research 103) — deferred build',
+    description: 'Research 103: generative-audio API landscape for the vocal-chop/SFX pain. Verdict (with an owner-supplied primary-source correction on the ElevenLabs Music terms): ElevenLabs splits by product — SFX distribution-banned (avoid), Music undetermined-and-wrong-shape (full songs, not chops), Voice/TTS the actually-relevant product for vocal chops (needs its own terms fetched). MusicGen/AudioCraft weights are non-commercial. The clean path is Stable Audio Open run LOCALLY (own outputs, purpose-built for short 44.1kHz one-shots, zero egress/cost) — but it inherits the Phase-38 Python-sidecar plumbing, so build AFTER beat analyze. Near-term generative substitute: the CC0 Freesound path above. No build this phase.',
+    core: 'na', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/103-generative-audio-apis.md', plan: null,
   },
 
   // ── Known usability gaps (backlog) ────────────────────────────────────────
