@@ -156,7 +156,7 @@ test('beat help <cmd> works and appends the command\'s "related:" family', () =>
   const out = beat(['help', 'vary'])
   assert.match(out, /^usage:\n {2}beat vary <file> <track> <group>/)
   assert.match(out, /beat vary --groups/)
-  assert.match(out, /\nrelated: beat score, beat suggest\n$/)
+  assert.match(out, /\nrelated: beat score, beat adopt, beat suggest\n$/)
   // set's per-command view carries its paths footer
   const setHelp = beat(['set', '--help'])
   assert.match(setHelp, /paths for set: bpm \| loop_bars/)

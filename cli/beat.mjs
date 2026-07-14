@@ -98,7 +98,7 @@ const PATHS_NOTE = `paths for set: bpm | loop_bars | selected_track | <track>.<s
 // Natural command families, surfaced as a "related:" line under per-command help — the loop a
 // command belongs to is half of understanding it (vary is meaningless without score/suggest).
 const HELP_FAMILIES = [
-  ['vary', 'score', 'suggest'],
+  ['vary', 'score', 'adopt', 'suggest'],
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'song', 'song-move', 'song-insert'],
@@ -200,9 +200,12 @@ const HELP = [
   { cmd: 'drum-kit', text: `  beat drum-kit <file> <track> <name>                      apply a drum kit to a track (replaces its whole lane list)` },
   {
     cmd: 'vary',
-    text: `  beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render]
+    text: `  beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render] [--audition]
                                                           batch-generate small-diff variants of one param group
-  beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,oh | --ids a,b] [--render]
+                                                          (--out-dir defaults to vary-<group>-<seed> NEXT TO the
+                                                          .beat file, not the cwd; --audition implies --render and
+                                                          stitches the wavs into one audition.wav + timecode index)
+  beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,oh | --ids a,b] [--render] [--audition]
                                                           batch humanized FEEL variants (content variation) to audition + score
   beat vary <file> <track> feel --scope selection --port <p> [...same feel flags, minus --lanes/--ids]
                                                           scope to the GUI selection held by a running daemon instead of
@@ -293,12 +296,22 @@ const HELP = [
   {
     cmd: 'score',
     text: `  beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
-                                                          (pick is a variant number, "1" or "v1" both work)`,
+                                                          (pick is a variant number, "1" or "v1" both work;
+                                                          --log defaults to beat-scores.jsonl NEXT TO the
+                                                          batch's parent .beat file, not the cwd)`,
+  },
+  {
+    cmd: 'adopt',
+    text: `  beat adopt <batch-dir> <pick> [--force]                 copy the picked variant over the batch's parent .beat
+                                                          (refuses if the parent changed since the batch was
+                                                          generated — sha256 guard — unless --force; a running
+                                                          daemon/GUI hot-reloads the adopted file automatically)`,
   },
   {
     cmd: 'suggest',
     text: `  beat suggest <file> <track> [--target <lane-or-id>] [--log f]
-                                                          read the scores log and propose the next beat-vary round`,
+                                                          read the scores log and propose the next beat-vary round
+                                                          (--log defaults to beat-scores.jsonl next to the .beat)`,
   },
   {
     cmd: 'metrics',
@@ -337,9 +350,9 @@ const HELP = [
   { cmd: 'selection', text: `  beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon` },
   {
     cmd: 'mcp',
-    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (~54,
+    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (~55,
                                                           covering track/note/hit/effect/song/preset/macro/drum-kit/
-                                                          vary/score/sample/lane/checkpoint/render/metrics editing) —
+                                                          vary/score/adopt/sample/lane/checkpoint/render/metrics editing) —
                                                           only daemon (a long-running process, structurally not a
                                                           tool call) stays CLI-only; send tools/list on a running
                                                           'beat mcp' for the exact, current set`,
@@ -347,7 +360,11 @@ const HELP = [
   {
     cmd: 'mcp-init',
     text: `  beat mcp-init <file> [--force]                          write a .mcp.json next to <file> so Claude Code
-                                                          (or any MCP client) auto-discovers 'beat mcp' there`,
+                                                          (or any MCP client) auto-discovers 'beat mcp' there,
+                                                          plus a music-session CLAUDE.md scaffold (you're making
+                                                          music, not developing dotbeat; render->metrics->lint;
+                                                          vary/score for taste; units) — an existing CLAUDE.md
+                                                          is never overwritten without --force`,
   },
 ]
 
@@ -897,7 +914,10 @@ async function varyCmd(argv) {
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
   const amount = flagValue(argv, '--amount') ? Number(flagValue(argv, '--amount')) : 0.25
   const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
-  const outDir = flagValue(argv, '--out-dir') ?? `vary-${group}-${seed}`
+  // Default out-dir sits NEXT TO the .beat file, not under the process cwd (Phase 35 OC,
+  // pilot 101 medium 4) — an explicit --out-dir still resolves exactly as written.
+  const { defaultBatchDir } = await import('../dist/src/vary/batch.js')
+  const outDir = flagValue(argv, '--out-dir') ?? defaultBatchDir(file, group, seed)
 
   const text = readFileSync(file, 'utf8')
   const doc = parse(text)
@@ -918,13 +938,27 @@ async function varyCmd(argv) {
     process.stdout.write(`  v${i + 1}: ${manifest.variants[i].edits.join(', ')}\n`)
   }
 
-  if (argv.includes('--render')) {
+  if (argv.includes('--render') || argv.includes('--audition')) {
     // D15: the one render path is dotbeat's own engine driven headless (cli/render.mjs). It's a
     // real-time capture per variant, so a batch of N takes ~N * loop-length plus browser startup —
     // slower than the retired faster-than-realtime offline path. Correct output, honest cost; a
     // dedicated fast batch renderer for dotbeat's own engine is future work (see D15 / phase-17 doc).
     renderVaryBatch(outDir, variants.length, { onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
+    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length)
+  }
+}
+
+/** `--audition` (Phase 35 OC): stitch the just-rendered vN.wavs into one contact-sheet
+ * audition.wav with a printed timecode index (+ audition.json) — shared by both vary rungs. */
+async function auditionAfterRender(outDir, count) {
+  const { stitchAudition, formatAuditionIndex } = await import('../dist/src/vary/audition.js')
+  const { BeatBatchError } = await import('../dist/src/vary/batch.js')
+  try {
+    process.stdout.write(formatAuditionIndex(stitchAudition(outDir, count)))
+  } catch (err) {
+    if (err instanceof BeatBatchError) throw new BeatEditError(err.message)
+    throw err
   }
 }
 
@@ -954,7 +988,9 @@ async function varyFeelCmd(argv, file, track) {
   const { varyFeel, BeatVaryError } = await import('../dist/src/vary/vary.js')
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
   const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
-  const outDir = flagValue(argv, '--out-dir') ?? `vary-feel-${seed}`
+  // Same next-to-the-.beat out-dir default as the param rung above (Phase 35 OC).
+  const { defaultBatchDir } = await import('../dist/src/vary/batch.js')
+  const outDir = flagValue(argv, '--out-dir') ?? defaultBatchDir(file, 'feel', seed)
   const scope = flagValue(argv, '--scope')
   if (scope !== undefined && scope !== 'selection') throw new BeatEditError(`vary --scope only supports "selection", got "${scope}"`)
   if (scope === 'selection' && (flagValue(argv, '--lanes') !== undefined || flagValue(argv, '--ids') !== undefined)) {
@@ -1003,13 +1039,14 @@ async function varyFeelCmd(argv, file, track) {
   process.stdout.write(`${outDir}/: ${variants.length} feel variants of ${track} (seed ${seed})\n`)
   for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
 
-  if (argv.includes('--render')) {
+  if (argv.includes('--render') || argv.includes('--audition')) {
     // D15: render through dotbeat's own engine (cli/render.mjs) — real-time per variant (see the
     // matching note in varyCmd above; a fast batch renderer for the canonical engine is future work).
     // linkMediaFrom: variant .beat files reference media relative to themselves; the parent's
     // media/ dir sits next to the parent, so batch.ts links it into the batch dir before rendering.
     renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
+    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length)
   }
 }
 
@@ -1019,9 +1056,10 @@ async function scoreCmd(argv) {
   if (!dir || picks.length === 0) throw new BeatEditError('score needs <batch-dir> and 1-3 ranked picks (variant numbers, best first)')
   // Pick normalization ("N" or "vN", Phase 33 Stream ME), manifest read, jsonl entry shape, and
   // the adopt-hint output all live in src/vary/batch.ts, shared verbatim with beat_score over MCP
-  // (Phase 34 Stream NA) — a batch generated on either surface scores on either surface.
-  const { scoreBatch, formatScoreResult, BeatBatchError, DEFAULT_SCORES_LOG } = await import('../dist/src/vary/batch.js')
-  const logPath = flagValue(argv, '--log') ?? DEFAULT_SCORES_LOG
+  // (Phase 34 Stream NA) — a batch generated on either surface scores on either surface. Without
+  // --log the log defaults NEXT TO the batch's parent .beat file (Phase 35 OC), not the cwd.
+  const { scoreBatch, formatScoreResult, BeatBatchError } = await import('../dist/src/vary/batch.js')
+  const logPath = flagValue(argv, '--log')
   let result
   try {
     result = scoreBatch(dir, picks, logPath)
@@ -1030,6 +1068,23 @@ async function scoreCmd(argv) {
     throw err
   }
   process.stdout.write(formatScoreResult(result))
+}
+
+// Phase 35 Stream OC (pilot 101 medium 3): adopt a scored winner as a real verb — copies the
+// picked variant over the batch's parent .beat, with the sha256 guard in src/vary/batch.ts
+// refusing to clobber a parent that has moved on since the batch was generated. Same core
+// function as the beat_adopt MCP tool, so the two surfaces cannot drift.
+async function adoptCmd(argv) {
+  const positional = argv.filter((a) => !a.startsWith('--'))
+  const [dir, pick] = positional
+  if (!dir || !pick) throw new BeatEditError('adopt needs <batch-dir> <pick> (a variant number from beat score, "2" or "v2" both work)')
+  const { adoptVariant, formatAdoptResult, BeatBatchError } = await import('../dist/src/vary/batch.js')
+  try {
+    process.stdout.write(formatAdoptResult(adoptVariant(dir, pick, { force: argv.includes('--force') })))
+  } catch (err) {
+    if (err instanceof BeatBatchError) throw new BeatEditError(err.message)
+    throw err
+  }
 }
 
 async function suggestCmd(argv) {
@@ -1044,7 +1099,10 @@ async function suggestCmd(argv) {
   const doc = readDoc(file)
   const trackObj = doc.tracks.find((t) => t.id === track)
   if (!trackObj) throw new BeatEditError(`no track "${track}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
-  const logPath = flagValue(argv, '--log') ?? 'beat-scores.jsonl'
+  // Same next-to-the-.beat default as score's log (Phase 35 OC) — the two must agree or
+  // suggest reads an empty exhaust while score keeps appending somewhere else.
+  const { defaultScoresLog } = await import('../dist/src/vary/batch.js')
+  const logPath = flagValue(argv, '--log') ?? defaultScoresLog(file)
   const target = flagValue(argv, '--target')
   const text = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
   const entries = parseScoresLog(text)
@@ -1529,6 +1587,42 @@ async function selectionCmd(argv) {
 // command, the right absolute path to this repo's beat.mjs). This writes the one-file config
 // Claude Code (or any MCP client) auto-discovers on startup, so opening the project folder is
 // the entire setup step.
+
+/** The music-session CLAUDE.md scaffold `beat mcp-init` writes next to the .beat (Phase 35 OC —
+ * "the agent started updating the README"): a screenful telling the helper agent it is here to
+ * make music, not develop dotbeat. Exported via mcp-init only; kept as one template so tests can
+ * assert the shipped text. */
+function musicSessionScaffold(beatFileName) {
+  return `# Music session — ${beatFileName}
+
+You are here to MAKE MUSIC with dotbeat, not to develop dotbeat itself. Work
+through the "beat" MCP tools (or the \`beat\` CLI). Never edit the dotbeat repo,
+its README, or its source — the only files that should change here are this
+project's .beat file, its media/, and files the beat tools write themselves.
+
+The loop:
+- After EVERY render, run metrics and lint on the wav and say in one line what
+  changed musically and what the numbers did — never claim it sounds better
+  without them.
+- Taste decisions go through vary -> audition -> score. Pass audition
+  (\`--audition\` / audition:true) to get ONE audition.wav with a timecode index
+  instead of N files to juggle. Adopt a winner with beat_adopt /
+  \`beat adopt <batch-dir> <pick>\`.
+- Checkpoint at musical milestones ("drums locked", "rough mix"), not after
+  every edit — restore is always safe and append-only.
+
+Units, so edits land as intended:
+- velocity is 0..1 (0.8, not MIDI 100)
+- lane/clip gain is in dB (0 = unity, negative = quieter)
+- note/hit start and duration are 16th-note steps; fractional = off-grid feel
+- vary batch dirs (vary-*/) and beat-scores.jsonl live next to the .beat file
+
+GUI interop: if the dotbeat GUI/daemon is running (default port 8420), the
+user's live selection is readable — beat_selection reads it, and beat_vary
+with scope "selection" plus that port varies exactly what they highlighted.
+`
+}
+
 function mcpInitCmd(argv) {
   const file = argv.find((a) => !a.startsWith('--'))
   if (!file) throw new BeatEditError('mcp-init needs a <file> — the .beat project to point an MCP client at')
@@ -1540,8 +1634,19 @@ function mcpInitCmd(argv) {
   if (existsSync(configPath) && !force) throw new BeatEditError(`${configPath} already exists — pass --force to overwrite`)
   const config = { mcpServers: { beat: { command: 'node', args: [beatScript, 'mcp'] } } }
   writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n')
+  // Phase 35 OC: also scaffold a music-session CLAUDE.md next to the project. An existing
+  // CLAUDE.md is the user's own (or an earlier scaffold they may have edited) — never
+  // overwritten without --force, but its presence doesn't block the .mcp.json half above.
+  const claudePath = resolve(projectDir, 'CLAUDE.md')
+  let claudeNote
+  if (existsSync(claudePath) && !force) {
+    claudeNote = `${claudePath} already exists — left untouched (--force overwrites it with the music-session scaffold)`
+  } else {
+    writeFileSync(claudePath, musicSessionScaffold(basename(file)))
+    claudeNote = `wrote ${claudePath} (music-session ground rules for the agent)`
+  }
   process.stdout.write(
-    `wrote ${configPath}\n\n` +
+    `wrote ${configPath}\n${claudeNote}\n\n` +
       `next: open ${projectDir} in Claude Code (or any MCP client that reads .mcp.json) — the\n` +
       `"beat" server is auto-discovered. Try a tool call: beat_inspect on "${basename(file)}".\n`,
   )
@@ -1709,6 +1814,9 @@ async function main() {
       break
     case 'score':
       await scoreCmd(rest)
+      break
+    case 'adopt':
+      await adoptCmd(rest)
       break
     case 'suggest':
       await suggestCmd(rest)
