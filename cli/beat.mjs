@@ -26,6 +26,7 @@ import {
   insertScene,
   setMediaSample,
   setLaneSample,
+  clearLegacyLaneSamples,
   addEffect,
   removeEffect,
   moveEffect,
@@ -250,7 +251,15 @@ const HELP = [
                                                           via beat scene/beat_song. Requires song mode already.`,
   },
   { cmd: 'sample', text: `  beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)` },
-  { cmd: 'lane', text: `  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample` },
+  {
+    cmd: 'lane',
+    text: `  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample ("none" reverts the lane
+                                                          to its synth voice)
+  beat lane <file> <track> --clear-legacy                 drop stale v0.5 \`lane\` sample lines from a DECLARED-lane track
+                                                          (dead data there — playback reads the declarations; inspect
+                                                          flags them). Errors on a legacy 5-lane track, where those
+                                                          lines are live.`,
+  },
   {
     cmd: 'effect-add',
     text: `  beat effect-add <file> <track> <eq3|comp|distortion|bitcrush|eq7|autoFilter|autoPan|tremolo|utility|grainDelay|vinylDistortion|resonator> [--id id] [--index n] [--bypassed]
@@ -1146,8 +1155,21 @@ async function sampleCmd(argv) {
 }
 
 function laneCmd(argv) {
+  // Phase 35 Stream OB: `--clear-legacy` is the one-shot explicit cleanup for stale v0.5
+  // laneSamples lines on a declared-lane track (inspect flags them; playback ignores them there).
+  // Deliberately its own flag rather than an overload of `none`, which now means "revert the
+  // DECLARED backing to its synth voice."
+  if (argv.includes('--clear-legacy')) {
+    const [file, track] = argv.filter((a) => a !== '--clear-legacy')
+    if (!file || !track || argv.length !== 3) throw new BeatEditError('lane --clear-legacy needs exactly <file> <track>')
+    const before = readDoc(file)
+    const { doc, cleared } = clearLegacyLaneSamples(before, track)
+    writeDoc(file, before, doc)
+    process.stdout.write(`cleared ${cleared.length} stale legacy lane line${cleared.length === 1 ? '' : 's'} on ${track}: ${cleared.join(', ')}\n`)
+    return
+  }
   const [file, track, lane, sampleId, gain, tune] = argv
-  if (!file || !track || !lane || !sampleId) throw new BeatEditError('lane needs <file> <track> <lane> <sample-id|none> [gain dB] [tune semitones]')
+  if (!file || !track || !lane || !sampleId) throw new BeatEditError('lane needs <file> <track> <lane> <sample-id|none> [gain dB] [tune semitones] (or <file> <track> --clear-legacy)')
   const before = readDoc(file)
   const ref = sampleId === 'none' ? null : { sample: sampleId, gainDb: gain !== undefined ? Number(gain) : 0, tune: tune !== undefined ? Number(tune) : 0 }
   writeDoc(file, before, setLaneSample(before, track, lane, ref))

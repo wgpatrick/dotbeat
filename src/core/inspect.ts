@@ -2,8 +2,9 @@
 // for humans and agents. (The CLI's --json mode doesn't come through here — it just prints the
 // parsed document; this is the human-shaped view.)
 
-import type { BeatClip, BeatDocument, BeatGroup, BeatTrack } from './document.js'
-import { declaredLaneNames } from './document.js'
+import type { BeatClip, BeatDocument, BeatDrumHit, BeatGroup, BeatTrack, DrumVoiceType } from './document.js'
+import { DRUM_LANES, SYNTH_FIELDS, declaredLaneNames } from './document.js'
+import { serializeLaneBacking } from './serialize.js'
 import { formatNumber } from './format.js'
 
 // v0.9: ", auto: cutoff(3), volume(2)" — lane names + point counts, in lane order; empty when
@@ -20,6 +21,66 @@ function clipPropsSummary(c: BeatClip): string {
   if (c.loop) parts.push(`loop ${formatNumber(c.loop.start)}-${formatNumber(c.loop.end)}`)
   if (c.signature) parts.push(`sig ${formatNumber(c.signature.numerator)}/${formatNumber(c.signature.denominator)}`)
   return parts.length ? `, ${parts.join(', ')}` : ''
+}
+
+// Phase 35 Stream OB (pilot 94 cosmetic; pilot 101 medium 2): drums tracks no longer get the
+// misleading full `synth:` header line — osc/ADSR mean nothing to a drum track. What the drums
+// track's shared synth block DOES drive is the drum BUS (volume/pan fader, bus filter, and the
+// per-type effect knob values — see ui/src/audio/engine.ts applyDrumBusParams), so that subset is
+// shown honestly as a `bus:` line, and per-lane truth gets its own `lanes:` section below.
+//
+// Legacy implicit-5-lane tracks (empty `lanes` list): each lane is synth-backed by the old
+// track-wide drum voice unless a v0.5 laneSamples entry overrides it. The voice + the track-wide
+// param fields that shape it, per lane, with defaults from SYNTH_FIELDS elided — the same
+// name=value spelling `beat set <file> <track>.<field> <value>` accepts.
+const LEGACY_LANE_VOICES: Record<string, { voice: DrumVoiceType; params: string[] }> = {
+  kick: { voice: 'membrane', params: ['kickTune', 'kickPunch', 'kickDecay'] },
+  snare: { voice: 'noise', params: ['snareTone', 'snareDecay'] },
+  clap: { voice: 'noise', params: [] },
+  hat: { voice: 'metal', params: ['hatDecay', 'hatTone'] },
+  openhat: { voice: 'metal', params: ['openHatDecay', 'hatTone'] },
+}
+const SYNTH_FIELD_DEFAULTS: Map<string, unknown> = new Map(SYNTH_FIELDS.map((f) => [f.key, f.default]))
+
+// One lane's backing truth. Declared lanes reuse serializeLaneBacking verbatim (the inspect view
+// and the file's own `lane` line are the same string, so they can never drift); legacy lanes get
+// the equivalent spelling built from the track-wide fields / laneSamples bag their playback
+// actually reads.
+function legacyLaneBackingSummary(t: BeatTrack, lane: string): string {
+  const ls = t.laneSamples[lane as keyof typeof t.laneSamples]
+  if (ls) return `sample ${ls.sample} ${formatNumber(ls.gainDb)} ${formatNumber(ls.tune)}`
+  const v = LEGACY_LANE_VOICES[lane]
+  if (!v) return 'synth' // unreachable for real legacy tracks (closed 5-lane set)
+  const synth = t.synth as unknown as Record<string, number>
+  const overrides = v.params
+    .filter((key) => formatNumber(synth[key] ?? Number.NaN) !== formatNumber((SYNTH_FIELD_DEFAULTS.get(key) as number) ?? Number.NaN))
+    .map((key) => `${key}=${formatNumber(synth[key]!)}`)
+  return [`synth:${v.voice}`, ...overrides].join(' ')
+}
+
+// Phase 35 Stream OB (pilot 101 medium 1): the pattern grid renders the REAL loop length — one
+// cell per 16th step across all loop bars, bars separated by a space, wrapped to a fresh row
+// every 4 bars (64 cells) so long loops chunk instead of overflowing — never silently truncated
+// to the first 16 steps contradicting its own hit count.
+function drumGridLines(lane: string, pad: number, laneHits: BeatDrumHit[], gridSteps: number): string[] {
+  const grid = Array<number>(gridSteps).fill(0)
+  let offGrid = 0
+  let withDuration = 0
+  for (const h of laneHits) {
+    if (!Number.isInteger(h.start)) offGrid++
+    if (h.duration !== undefined) withDuration++
+    const cell = ((Math.round(h.start) % gridSteps) + gridSteps) % gridSteps
+    if (h.velocity > grid[cell]!) grid[cell] = h.velocity
+  }
+  const cells = grid.map((v) => (v === 0 ? '.' : v >= 0.75 ? 'X' : 'x'))
+  const bars: string[] = []
+  for (let i = 0; i < gridSteps; i += 16) bars.push(cells.slice(i, i + 16).join(''))
+  const rows: string[] = []
+  for (let i = 0; i < bars.length; i += 4) rows.push(bars.slice(i, i + 4).join(' '))
+  const off = offGrid > 0 ? `, ${offGrid} off-grid` : ''
+  const dur = withDuration > 0 ? `, ${withDuration} with duration` : ''
+  const suffix = `  (${laneHits.length} hit${laneHits.length === 1 ? '' : 's'}${off}${dur})`
+  return rows.map((row, i) => `  ${(i === 0 ? lane : '').padEnd(pad)} ${row}${i === rows.length - 1 ? suffix : ''}`)
 }
 
 // Phase 22 Stream AE: "smp_drumloop 0-8s (repitch x1.5, -3 dB)" — the audio-region equivalent of
@@ -47,6 +108,10 @@ function describeTrack(t: BeatTrack, loopSteps: number, groupByTrack: Map<string
     // audio-region clip is listed below, same as the `clips:` line other kinds get.
     lines.push(`  clips: ${t.clips.length === 0 ? 'none' : t.clips.map(audioRegionSummary).join(', ')}`)
     return lines
+  } else if (t.kind === 'drums') {
+    // Phase 35 Stream OB: the subset of the shared synth block a drums track actually plays
+    // through (the drum bus) — no osc/ADSR line pretending the track is a synth (pilot 94/101).
+    lines.push(`  bus: ${formatNumber(s.volume)} dB, cutoff ${formatNumber(s.cutoff)} Hz, res ${formatNumber(s.resonance)}, pan ${formatNumber(s.pan)}`)
   } else {
     lines.push(`  synth: ${s.osc}, ${formatNumber(s.volume)} dB, cutoff ${formatNumber(s.cutoff)} Hz, res ${formatNumber(s.resonance)}, ADSR ${formatNumber(s.attack)}/${formatNumber(s.decay)}/${formatNumber(s.sustain)}/${formatNumber(s.release)}, pan ${formatNumber(s.pan)}`)
   }
@@ -58,26 +123,37 @@ function describeTrack(t: BeatTrack, loopSteps: number, groupByTrack: Map<string
     lines.push(`  effects: ${chain || '(none)'}`)
   }
   if (t.kind === 'drums') {
-    // v0.8: hits are free-timed events. Render the first bar as a 16-step grid VIEW (X >= 0.75,
-    // x > 0, . = off — a hit shows in the cell nearest its start) and count off-grid hits (a
-    // fractional start) separately, so loose/tapped timing is visible without the grid lying.
-    // Phase 22 Stream AB: iterate the track's own declared lanes (or the implicit 5 DRUM_LANES
-    // for a legacy/migrated track) instead of the closed enum, so a custom-named lane's hits show.
-    for (const lane of declaredLaneNames(t)) {
-      const laneHits = t.hits.filter((h) => h.lane === lane)
-      const grid = Array<number>(16).fill(0)
-      let offGrid = 0
-      let withDuration = 0
-      for (const h of laneHits) {
-        if (!Number.isInteger(h.start)) offGrid++
-        if (h.duration !== undefined) withDuration++
-        const cell = ((Math.round(h.start) % 16) + 16) % 16
-        if (h.velocity > grid[cell]!) grid[cell] = h.velocity
+    const laneNames = declaredLaneNames(t)
+    const pad = Math.max(7, ...laneNames.map((n) => n.length))
+    // Phase 35 Stream OB (pilot 101 medium 2): per-lane TRUTH — name + the backing that actually
+    // plays (synth voice / sample id gain tune / sf) with non-default params, before the grids.
+    // Declared lanes print their decl's exact canonical backing string; legacy tracks print the
+    // equivalent built from what their playback path reads (track-wide voice fields, laneSamples).
+    lines.push(`  lanes:${t.lanes.length === 0 ? ' (implicit legacy 5-lane kit)' : ''}`)
+    if (t.lanes.length > 0) {
+      for (const decl of t.lanes) lines.push(`    ${decl.name.padEnd(pad)} ${serializeLaneBacking(decl.backing)}`)
+    } else {
+      for (const lane of laneNames) lines.push(`    ${lane.padEnd(pad)} ${legacyLaneBackingSummary(t, lane)}`)
+    }
+    // Phase 35 Stream OB (pilot 101 low): on a DECLARED-lane track the v0.5 laneSamples bag is
+    // dead data — playback reads only the declarations above. The serializer keeps round-tripping
+    // it (D4: never destroy content silently), so flag it here and point at the explicit one-shot
+    // cleanup. (`beat lane <track> <lane> none` is NOT that cleanup — it reverts the DECLARED
+    // backing to its synth voice.)
+    if (t.lanes.length > 0) {
+      const stale = DRUM_LANES.filter((lane) => t.laneSamples[lane])
+      if (stale.length > 0) {
+        lines.push(`  legacy lane lines (ignored by playback): ${stale.join(', ')} — stale v0.5 sample assignments; the declared lanes above are what plays. Remove with \`beat lane <file> ${t.id} --clear-legacy\`.`)
       }
-      const strip = grid.map((v) => (v === 0 ? '.' : v >= 0.75 ? 'X' : 'x')).join('')
-      const off = offGrid > 0 ? `, ${offGrid} off-grid` : ''
-      const dur = withDuration > 0 ? `, ${withDuration} with duration` : ''
-      lines.push(`  ${lane.padEnd(7)} ${strip}  (${laneHits.length} hit${laneHits.length === 1 ? '' : 's'}${off}${dur})`)
+    }
+    // v0.8: hits are free-timed events, rendered as a step-grid VIEW (X >= 0.75, x > 0, . = off —
+    // a hit shows in the cell nearest its start) with off-grid hits (fractional start) counted
+    // separately, so loose/tapped timing is visible without the grid lying. Phase 22 Stream AB:
+    // iterate the track's own declared lanes (or the implicit 5 DRUM_LANES for a legacy/migrated
+    // track) instead of the closed enum, so a custom-named lane's hits show. Phase 35 Stream OB:
+    // the grid spans the WHOLE loop (chunked; see drumGridLines), not a silent first-16-steps cut.
+    for (const lane of laneNames) {
+      lines.push(...drumGridLines(lane, pad, t.hits.filter((h) => h.lane === lane), loopSteps))
     }
   } else {
     const n = t.notes.length

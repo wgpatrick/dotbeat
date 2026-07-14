@@ -419,6 +419,72 @@ test('tools/call: beat_sample registers media relative to the .beat; beat_lane b
   }
 })
 
+// Phase 35 Stream OB: the stale-legacy cleanup is reachable MCP-natively (beat_lane clear_legacy),
+// so an MCP-only agent that sees beat_inspect's flag isn't stranded with a CLI-only fix.
+test('tools/call: beat_lane clear_legacy drops stale v0.5 lane lines on a declared-lane track, refuses on legacy', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-clear-legacy-test-'))
+  const file = join(dir, 'song.beat')
+  writeFileSync(
+    file,
+    `format_version 0.10
+bpm 120
+loop_bars 1
+selected_track dr
+
+media
+  sample kick-909 sha256:${'d'.repeat(64)} media/kick.wav
+
+track dr Drums #e06c75 drums
+  synth
+    osc sawtooth
+    volume -10
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+  lane kick synth:membrane
+  lane snare synth:noise
+  lane kick kick-909 -2 -3
+  hit h1 kick 0 0.9
+`,
+  )
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // beat_inspect flags the stale line (same text surface as the CLI)
+    const inspect = await mcp.request('tools/call', { name: 'beat_inspect', arguments: { file } })
+    assert.match(inspect.content[0].text, /legacy lane lines \(ignored by playback\): kick/)
+
+    // mutually exclusive with lane/sample_id — loud, not silently ignored
+    const mixed = await mcp.request('tools/call', { name: 'beat_lane', arguments: { file, track: 'dr', lane: 'kick', sample_id: 'none', clear_legacy: true } })
+    assert.equal(mixed.isError, true)
+    assert.match(mixed.content[0].text, /do not pass lane\/sample_id/)
+
+    // the cleanup, phrased as stale-data removal (not a voice change)
+    const cleared = await mcp.request('tools/call', { name: 'beat_lane', arguments: { file, track: 'dr', clear_legacy: true } })
+    assert.match(cleared.content[0].text, /dr: stale legacy lane line kick \(ignored by playback\) kick-909 \(-2 dB, -3 st\) -> \(removed\)/)
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /lane kick kick-909/)
+    assert.match(readFileSync(file, 'utf8'), /^ {2}lane kick synth:membrane$/m)
+    const after = await mcp.request('tools/call', { name: 'beat_inspect', arguments: { file } })
+    assert.doesNotMatch(after.content[0].text, /legacy lane lines/)
+
+    // legacy implicit-5-lane track: those lines are live — refuse with the core's own message
+    const legacyFile = join(dir, 'legacy.beat')
+    copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), legacyFile)
+    const refused = await mcp.request('tools/call', { name: 'beat_lane', arguments: { file: legacyFile, track: 'drums', clear_legacy: true } })
+    assert.equal(refused.isError, true)
+    assert.match(refused.content[0].text, /declares no lanes/)
+  } finally {
+    mcp.close()
+  }
+})
+
 // Pilot 101: two fixes. (1) Unknown argument keys are rejected at the dispatch layer instead of
 // silently ignored — an agent's plausible-but-wrong arg guess (e.g. `lanes` on beat_humanize,
 // which only exists on beat_vary) must fail loudly, not silently widen the edit to the whole

@@ -1097,6 +1097,26 @@ export function setLaneSample(
   return replaceTrack(doc, { ...track, laneSamples })
 }
 
+/** Phase 35 Stream OB: the one-shot, EXPLICIT cleanup for stale v0.5 `laneSamples` lines on a
+ * DECLARED-lane track, where they are dead data (declared-mode playback reads only the lane
+ * declarations). `beat inspect` flags them and points here; the serializer itself keeps
+ * round-tripping them untouched (D4 — content is never destroyed silently, only by this
+ * deliberate command). Deliberately refuses on a legacy implicit-5-lane track, where the same
+ * lines ARE the live sample assignments — clearing those would change the sound, and the
+ * per-lane `setLaneSample(..., null)` path already covers detaching them one at a time. */
+export function clearLegacyLaneSamples(doc: BeatDocument, trackId: string): { doc: BeatDocument; cleared: DrumLane[] } {
+  const track = findTrack(doc, trackId)
+  if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — lane samples only belong on drum tracks`)
+  if (track.lanes.length === 0) {
+    throw new BeatEditError(
+      `track "${trackId}" declares no lanes — its \`lane\` lines are live v0.5 sample assignments (playback reads them), not stale data. To detach one, use \`beat lane <file> ${trackId} <lane> none\`.`,
+    )
+  }
+  const cleared = DRUM_LANES.filter((lane) => track.laneSamples[lane])
+  if (cleared.length === 0) throw new BeatEditError(`track "${trackId}" has no legacy lane-sample lines to clear`)
+  return { doc: replaceTrack(doc, { ...track, laneSamples: {} }), cleared }
+}
+
 /** A fresh document with one starter synth track — what `beat init` writes. */
 export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: string } = {}): BeatDocument {
   const bpm = opts.bpm ?? 120

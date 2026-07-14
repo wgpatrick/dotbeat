@@ -223,5 +223,14 @@ test('describeDocument gives a compact, exact overview of the real project', () 
   assert.match(text, /tracks: 4\n/)
   assert.match(text, /^lead {2}"Lead" {2}synth/m)
   assert.match(text, /cutoff 3200 Hz/)
-  assert.match(text, /^ {2}kick {4}[.xX]{16} {2}\(\d+ hits?\)$/m)
+  // Phase 35 Stream OB: drums show a bus line (not a bogus synth: line), per-lane backing truth,
+  // and a grid spanning the WHOLE 4-bar loop (four 16-step bars, space-separated) — not a silent
+  // 16-step truncation.
+  const drumsBlock = text.split('\n\n').find((b) => b.startsWith('drums '))
+  assert.ok(drumsBlock, 'drums track block present')
+  assert.ok(!/^ {2}synth: /m.test(drumsBlock), 'no synth: header line on the drums track')
+  assert.match(text, /^ {2}bus: -10 dB, cutoff 9000 Hz, res 0\.8, pan 0$/m)
+  assert.match(text, /^ {2}lanes: \(implicit legacy 5-lane kit\)$/m)
+  assert.match(text, /^ {4}kick {4}synth:membrane$/m)
+  assert.match(text, /^ {2}kick {4}[.xX]{16} [.xX]{16} [.xX]{16} [.xX]{16} {2}\(\d+ hits?\)$/m)
 })

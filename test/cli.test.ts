@@ -173,3 +173,66 @@ test('beat help <unknown> is the standard unknown-command error, exit 2', () => 
   const out2 = beat(['bogus', '--help'], { expectExit: 2 })
   assert.match(out2, /unknown command "bogus"/)
 })
+
+// Phase 35 Stream OB: stale-legacy laneSamples surface — inspect flags them (text AND --json stay
+// consistent), `beat lane --clear-legacy` is the explicit one-shot cleanup, and the file keeps
+// round-tripping them untouched until that command runs (D4).
+test('beat inspect flags stale legacy lane lines; beat lane --clear-legacy removes them explicitly', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-cli-test-'))
+  const file = join(dir, 'song.beat')
+  writeFileSync(
+    file,
+    `format_version 0.10
+bpm 120
+loop_bars 1
+selected_track dr
+
+media
+  sample kick-909 sha256:${'d'.repeat(64)} media/kick.wav
+
+track dr Drums #e06c75 drums
+  synth
+    osc sawtooth
+    volume -10
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+  lane kick synth:membrane
+  lane snare synth:noise
+  lane kick kick-909 -2 -3
+  hit h1 kick 0 0.9
+`,
+  )
+  const before = readFileSync(file, 'utf8')
+
+  // Text view: per-lane truth + the stale flag; no bogus synth: header on the drums track.
+  const text = beat(['inspect', file])
+  assert.match(text, /^ {2}bus: -10 dB/m)
+  assert.doesNotMatch(text, /^ {2}synth: /m)
+  assert.match(text, /^ {4}kick {4}synth:membrane$/m)
+  assert.match(text, /legacy lane lines \(ignored by playback\): kick — .*beat lane <file> dr --clear-legacy/)
+  // --json view carries the same facts structurally: declared lanes + the stale laneSamples bag.
+  const json = JSON.parse(beat(['inspect', file, '--json'])) as { tracks: { id: string; lanes: { name: string }[]; laneSamples: Record<string, unknown> }[] }
+  const dr = json.tracks.find((t) => t.id === 'dr')!
+  assert.deepEqual(dr.lanes.map((l) => l.name), ['kick', 'snare'])
+  assert.deepEqual(Object.keys(dr.laneSamples), ['kick'])
+  // Reading never mutates: the stale line survives inspect (D4 — only the explicit cleanup drops it).
+  assert.equal(readFileSync(file, 'utf8'), before)
+
+  const out = beat(['lane', file, 'dr', '--clear-legacy'])
+  // The edit list phrases this as stale-data removal, NOT a voice change ("-> synth voice" would
+  // contradict the 2026-07-13 setLaneSample fix: on declared-lane tracks playback never read this).
+  assert.match(out, /dr: stale legacy lane line kick \(ignored by playback\) kick-909 \(-2 dB, -3 st\) -> \(removed\)/)
+  assert.match(out, /cleared 1 stale legacy lane line on dr: kick/)
+  assert.doesNotMatch(readFileSync(file, 'utf8'), /lane kick kick-909/)
+  assert.match(readFileSync(file, 'utf8'), /^ {2}lane kick synth:membrane$/m)
+  assert.doesNotMatch(beat(['inspect', file]), /legacy lane lines/)
+
+  // Nothing left to clear -> loud error, exit 2 (never a silent no-op).
+  const err = beat(['lane', file, 'dr', '--clear-legacy'], { expectExit: 2 })
+  assert.match(err, /no legacy lane-sample lines to clear/)
+})
