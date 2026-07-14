@@ -88,6 +88,9 @@ import {
   BeatPitchTimeError,
 } from '../dist/src/core/index.js'
 import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile, BeatProfileError } from '../dist/src/metrics/index.js'
+// --- Phase 37 Stream RB begin ---
+import { analyzeStructure, formatStructure, BeatAnalysisError } from '../dist/src/analysis/index.js'
+// --- Phase 37 Stream RB end ---
 
 // ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
 // The old monolithic USAGE template literal, restructured as one entry per command so
@@ -135,6 +138,16 @@ const HELP = [
                                                           membership list (add/remove/reorder members)`,
   },
   { cmd: 'inspect', text: `  beat inspect <file> [--json]` },
+  // --- Phase 37 Stream RB begin ---
+  {
+    cmd: 'analyze-structure',
+    text: `  beat analyze-structure <file> [--json] [--root N] [--scale name]
+                                                          symbolic song analysis (no rendering): per-section onset
+                                                          density, syncopation, pitch-class vs scale, repetition/novelty.
+                                                          --root 0-11 (0=C) + --scale (major/minor/dorian/…) enable the
+                                                          in-scale readout; omit both for scale-agnostic histograms`,
+  },
+  // --- Phase 37 Stream RB end ---
   {
     cmd: 'set',
     text: `  beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
@@ -622,6 +635,26 @@ async function inspectCmd(argv) {
     process.stdout.write(describeDocument(doc) + formatInstrumentPresets(doc, presetInfo))
   }
 }
+
+// --- Phase 37 Stream RB begin ---
+async function analyzeStructureCmd(argv) {
+  const json = argv.includes('--json')
+  const rootIdx = argv.indexOf('--root')
+  const scaleIdx = argv.indexOf('--scale')
+  const root = rootIdx >= 0 ? Number(argv[rootIdx + 1]) : undefined
+  const scale = scaleIdx >= 0 ? argv[scaleIdx + 1] : undefined
+  // Positional file is the first arg that isn't a flag or a flag's value.
+  const file = argv.find((a, i) => a !== '--json' && a !== '--root' && a !== '--scale' && !(rootIdx >= 0 && i === rootIdx + 1) && !(scaleIdx >= 0 && i === scaleIdx + 1))
+  if (!file) throw new BeatEditError('analyze-structure needs a file')
+  const doc = readDoc(file)
+  const analysis = analyzeStructure(doc, { root, scale })
+  if (json) {
+    process.stdout.write(JSON.stringify(analysis, null, 2) + '\n')
+  } else {
+    process.stdout.write(formatStructure(analysis) + '\n')
+  }
+}
+// --- Phase 37 Stream RB end ---
 
 function setCmd(argv) {
   const [file, ...pairs] = argv
@@ -1835,6 +1868,11 @@ async function main() {
     case 'inspect':
       await inspectCmd(rest)
       break
+    // --- Phase 37 Stream RB begin ---
+    case 'analyze-structure':
+      await analyzeStructureCmd(rest)
+      break
+    // --- Phase 37 Stream RB end ---
     case 'set':
       setCmd(rest)
       break
@@ -2026,6 +2064,7 @@ main().catch((err) => {
     err instanceof BeatPitchTimeError ||
     err instanceof BeatHumanizeError ||
     err instanceof BeatProfileError ||
+    err instanceof BeatAnalysisError ||
     err.name === 'HistoryError' ||
     err.name === 'WavDecodeError'
   ) {

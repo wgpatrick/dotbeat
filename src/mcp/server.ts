@@ -83,6 +83,9 @@ import {
   type BeatSlotsInput,
 } from '../core/index.js'
 import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile } from '../metrics/index.js'
+// --- Phase 37 Stream RB begin ---
+import { analyzeStructure, formatStructure } from '../analysis/index.js'
+// --- Phase 37 Stream RB end ---
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
 import { varyTrack, varyFeel, VARY_GROUPS } from '../vary/vary.js'
@@ -404,6 +407,31 @@ const TOOLS: ToolDef[] = [
       return describeDocument(doc) + formatInstrumentPresets(doc, presetInfo)
     },
   },
+  // --- Phase 37 Stream RB begin ---
+  {
+    name: 'beat_analyze_structure',
+    description:
+      'Read-only SYMBOLIC analysis of a .beat song\'s arrangement — no rendering, no audio. Complements beat_metrics (which measures a rendered WAV): this reads what\'s written. Per song section it reports onset density (onsets/bar, tiling each clip across the section), syncopation (fraction of onsets off the quarter grid), and a 12-bin pitch-class histogram; across sections it reports pairwise self-similarity, exact repeats, and which sections are novel — the arrangement-level view (repetition vs variation, energy arc) the WAV metrics can\'t see. Pass root (0-11, 0=C) + scale (major/minor/dorian/phrygian/lydian/mixolydian/locrian/harmonicMinor/melodicMinor/majorPentatonic/minorPentatonic/blues) to get an in-scale fraction per section; omit both for scale-agnostic histograms. A loop-mode file (no song block) has no sections. Returns the human-readable structure view; pass json:true for the raw StructureAnalysis object.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'path to the .beat file' },
+        root: { type: 'number', description: 'tonic pitch class 0-11 (0=C); only meaningful with scale' },
+        scale: { type: 'string', description: 'scale name from core\'s SCALES table (major, minor, dorian, …); unknown names error' },
+        json: { type: 'boolean', description: 'return the raw StructureAnalysis JSON instead of the formatted text view' },
+      },
+      required: ['file'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const doc = parse(readFileSync(file, 'utf8'))
+      const root = typeof args.root === 'number' ? args.root : undefined
+      const scale = typeof args.scale === 'string' && args.scale !== '' ? args.scale : undefined
+      const analysis = analyzeStructure(doc, { root, scale })
+      return args.json === true ? JSON.stringify(analysis, null, 2) : formatStructure(analysis)
+    },
+  },
+  // --- Phase 37 Stream RB end ---
   {
     name: 'beat_set',
     description:
