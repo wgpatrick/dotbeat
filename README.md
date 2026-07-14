@@ -80,7 +80,7 @@ the full thesis and prior-art comparison.
 
 Well past the original v0 proof-of-concept: dotbeat now has its own GUI (arrangement view, clip
 authoring, mixer, effects chain, content browser — not a wrapped version of the BeatLab teaching
-app it started from), a 798-test suite, a session-local undo/redo stack alongside the git-backed
+app it started from), an 809-test suite, a session-local undo/redo stack alongside the git-backed
 checkpoint/restore history system, and a growing library of adversarially-researched design docs.
 Three research passes against Ableton Live 12's own reference manual have directly shaped recent
 work. A feature-by-feature comparison drove a batch of P0 shipments: in-session undo/redo, a real
@@ -174,7 +174,14 @@ missing with copy-pasteable fixes). The analyzed audio is never registered into 
 the JSON of numbers and labels is (decisions.md D17/D18). Stable Audio Open generation (`beat source
 gen`) is now formally deferred to a follow-up phase to reuse that same sidecar template. The same
 phase cleared the last pilot-104 papercuts (a `--clip` selector for automation vary, quieter render
-output, an explicit sample re-register note).
+output, an explicit sample re-register note). Phase 39 then added the second Python sidecar —
+`beat source gen "<prompt>"` generates a custom one-shot locally via Stable Audio Open and registers
+it into `media/` with full provenance, reusing the exact analyze-sidecar template (stub backend for
+CI, real model owner-side; outputs are the user's under the Stability AI Community License) — and
+made the fill-and-hear loop trustworthy by fixing pilot 105's top trap: song mode plays only
+scene-placed content, so a groove on a track placed in no scene used to render **silent with no
+warning**, and now `inspect` and every `render` detect and flag it. That phase also made `render`
+auto-find a bundled Chromium instead of only documenting `CHROME_PATH`.
 `docs/product-roadmap.md` tracks every feature's real status;
 `ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
 built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a

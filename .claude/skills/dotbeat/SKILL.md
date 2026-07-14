@@ -43,7 +43,7 @@ then start a fresh Claude Code session in that project folder (MCP config is dis
 startup, not hot-reloaded).
 
 **The MCP server does NOT expose every CLI command.** Verified against `src/mcp/server.ts`
-(65 tools total as of Phase 38). Concretely, these must go through the raw CLI even inside an MCP
+(66 tools total as of Phase 39). Concretely, these must go through the raw CLI even inside an MCP
 session:
 
 - `beat vary` / `beat score` / `beat adopt` / `beat suggest` — the variation-and-taste loop, fully mirrored over MCP (beat_vary/beat_score/beat_adopt/beat_suggest). On declared-lane drums tracks, vary targets a LANE NAME (kick, hat, tom_lo, ...) — its own audible params — not the legacy kick/snare/hats groups (those error there). Pass `--audition` (or audition:true) for ONE stitched audition.wav with a timecode index instead of N files; adopt the winner with `beat adopt <batch-dir> <pick>`. Batch dirs and beat-scores.jsonl default NEXT TO the .beat file.
@@ -144,6 +144,19 @@ install fixes. The analyzed audio is never registered into the project, only the
 facts (decisions.md D17/D18). Don't confuse `beat analyze <wav>` (audio) with `beat analyze-structure
 <file.beat>` (symbolic, no audio) — passing a `.beat` to `beat analyze` prints a pointer to the
 right command.
+
+## Generate a custom sound: `beat source gen`
+
+`beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio]`
+(`beat_source_gen`) generates a one-shot from a text prompt via Stable Audio Open (Phase 39, the
+second Python sidecar) and registers it into `media/` with a provenance sidecar recording
+prompt/provider/model/seed/license. **Same opt-in shape as `beat analyze`**: real generation needs
+the owner-side venv (`python/requirements-stableaudio.txt`); everywhere else pass `--backend stub`
+for a deterministic placeholder WAV so the pipeline is exercisable with zero packages. Outputs are
+the user's under the Stability AI Community License (decisions.md D19). Then treat the generated
+sample like any other: put it on an audio track, snapshot with `beat clip`, and **place it in a
+scene** — in song mode an unplaced track is silent (`inspect`/`render` now warn about this via the
+Phase 39 unplaced-content detector).
 
 ## Common mistakes — see `references/mistakes.md`
 

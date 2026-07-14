@@ -1819,11 +1819,18 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: 'research/102-track-analysis-tooling.md', plan: 'phase-38-plan.md',
   },
+  // \u2500\u2500 Generative sound & render trust (Phase 39) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   {
-    area: 'Audio-structure import (Phase 38)', feature: 'Sample generation (`beat source gen`, Stable Audio Open) \u2014 deferred to Phase 39',
-    description: 'Deferred from Phase 38 (owner-approved default): local Stable Audio Open generation of short one-shots/vocal-chops via a second Python sidecar (python/gen.py), registering into media with a provenance sidecar carrying prompt/model/seed/license. The shared spawn/JSON/doctor/venv conventions (D17) are documented in python/README.md so gen.py copies them at near-zero cost. Held back because it would ship a second owner-side-only feature before the first (beat analyze) has run on a real machine, and its commercial-use registration condition (research 103) needs its own decision entry. Near-term generative substitute remains the CC0 Freesound path.',
-    core: 'na', cli: 'na', gui: 'na', status: 'not-started',
-    research: 'research/103-generative-audio-apis.md', plan: null,
+    area: 'Generative sound & render trust (Phase 39)', feature: 'Text-to-audio sample generation (`beat source gen`, Stable Audio Open)',
+    description: 'Phase 39 Stream UB: dotbeat\'s SECOND Python sidecar. `beat source gen <file.beat> <id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio]` (+ beat_source_gen MCP) generates a one-shot locally via Stable Audio Open and registers it into media through the existing source-lib ingest path \u2014 same prep/sha256/enforced-provenance-sidecar/rollback as beat source add, with a `generated` block recording prompt/provider/model/seconds/seed/license. Contract variation from D17 (decisions.md D19): gen writes the WAV to a told --output path + JSON metadata on stdout (audio isn\'t a stdout JSON line); TS/source-lib owns registration. A deterministic stdlib `stub` backend keeps CI/dev green with zero packages; real Stable Audio Open runs owner-side (torch + ~couple-GB HF weights, egress-blocked here). Stability AI Community License posture: outputs are the user\'s, free commercial use <$1M revenue with Stability registration, "Powered by Stability AI" attribution in dotbeat docs. Placeholders to confirm owner-side: HF repo stabilityai/stable-audio-open-1.0, stable-audio-tools==0.0.16.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/103-generative-audio-apis.md', plan: 'phase-39-plan.md',
+  },
+  {
+    area: 'Generative sound & render trust (Phase 39)', feature: 'Silent-render warning (unplaced-content detector)',
+    description: 'Phase 39 Stream UA (pilot 105 HIGH): song mode plays only scene-placed content, so a groove added to a track that is placed in no scene rendered a valid, SILENT WAV with no warning anywhere. New src/core/coverage.ts unplacedContentTracks(doc) detects \u2014 in song mode only \u2014 tracks with sounding content (live notes/hits, or a clip carrying notes/hits/audio) referenced by no scene the song plays (resolution mirrors structure.ts firstPlacementClip). Warned from beat inspect and before every render (warn-only; still renders). Also this stream: render now auto-falls-back to a bundled Playwright chromium (executablePath() then a PLAYWRIGHT_BROWSERS_PATH scan) instead of only documenting CHROME_PATH; beat_skeleton accepts out/analysis aliases; add-track instrument nudges toward synth.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/105-usability-pilot-audio-import.md', plan: 'phase-39-plan.md',
   },
 
   {
@@ -1833,10 +1840,10 @@ export const rows = [
     research: 'research/104-usability-pilot-phase37-surface.md', plan: 'phase-38-plan.md',
   },
   {
-    area: 'Known usability gaps (backlog)', feature: 'Pilot 105 leftovers (audio-import surface)',
-    description: 'Remainder of pilot 105 after four same-day Phase-38-SE fixes (stub-result badge, --backend stub escape-hatch hint in the default-backend failure, a song-mode silent-render warning in beat skeleton\'s next-hint + render --help, and an actionable CHROME_PATH message on the render Chrome-not-found failure): (1) the fuller silent-render fix — render/inspect should DETECT a populated track that appears in zero scenes of the active song and warn (currently a groove on an unplaced track renders a valid, silent WAV with no cross-warning); (2) render should auto-fall-back to a bundled Playwright chromium when the chrome channel is missing, not just document CHROME_PATH; (3) the two importer MCP tools use inconsistent arg names (beat_analyze_audio file/out vs beat_skeleton out_file/analysis_file) and beat_analyze_audio marks nothing required though file is essential unless doctor; (4) add-track instrument errors for a missing soundfont without nudging "use synth for a quick part". All ergonomic; (1) is the load-bearing one and spans the arrangement/song content model.',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
-    research: 'research/105-usability-pilot-audio-import.md', plan: null,
+    area: 'Known usability gaps (backlog)', feature: 'Pilot 105 leftovers (audio-import surface) — resolved in Phase 39 UA',
+    description: 'All four pilot-105 leftovers cleared by Phase 39 Stream UA (on top of the four Phase-38-SE same-day fixes): (1) the load-bearing silent-render fix — inspect/render now DETECT a populated track placed in zero scenes of the active song and warn (src/core/coverage.ts); (2) render auto-falls-back to a bundled Playwright chromium instead of only documenting CHROME_PATH; (3) beat_skeleton now accepts out/analysis aliases and beat_analyze_audio documents file-required-unless-doctor; (4) add-track instrument nudges toward synth. Kept as a done-row for the citation trail.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/105-usability-pilot-audio-import.md', plan: 'phase-39-plan.md',
   },
 
   // ── Known usability gaps (backlog) ────────────────────────────────────────
