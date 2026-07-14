@@ -4,7 +4,7 @@
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -1043,23 +1043,56 @@ export function setMediaSample(doc: BeatDocument, id: string, sha256: string, pa
   return { ...doc, media }
 }
 
-/** v0.5: assigns (or clears, with ref = null) a drum lane's one-shot sample. */
+/** v0.5: assigns (or clears, with ref = null) a drum lane's one-shot sample.
+ *
+ * Declared-lane tracks (every fresh drums track since the 12-lane default kit): the lane's
+ * DECLARATION carries its backing, and declared-mode playback reads only that — the legacy
+ * laneSamples bag below is invisible to it. Until 2026-07-13 this function wrote ONLY
+ * laneSamples, so `beat lane`/`beat_lane` on a modern track "succeeded" while the render
+ * silently kept the synth voice (owner's dogfood session; the same v0.5-vs-declared split
+ * behind research/101's drum-vary no-op). Now it edits the declaration itself: sample backing
+ * becomes the canonical `lane <name> sample <id> <gain> <tune>` decl line, and `none` restores
+ * the synth voice (the default kit's voice for that name; membrane for custom lane names). */
 export function setLaneSample(
   doc: BeatDocument,
   trackId: string,
-  lane: DrumLane,
+  lane: string,
   ref: { sample: string; gainDb: number; tune: number } | null,
 ): BeatDocument {
   const track = findTrack(doc, trackId)
   if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — lane samples only belong on drum tracks`)
+
+  if (track.lanes.length > 0) {
+    const decl = track.lanes.find((l) => l.name === lane)
+    if (!decl) throw new BeatEditError(`no lane "${lane}" declared on track "${trackId}" (have: ${track.lanes.map((l) => l.name).join(', ')})`)
+    let backing: BeatLaneBacking
+    if (ref === null) {
+      const kitDefault = DEFAULT_DRUM_KIT.find((v) => v.name === lane)
+      backing = { type: 'synth', voice: kitDefault ? kitDefault.voice : 'membrane', params: {} }
+    } else {
+      if (!doc.media.some((m) => m.id === ref.sample)) throw new BeatEditError(`no sample "${ref.sample}" in the media block (have: ${doc.media.map((m) => m.id).join(', ') || 'none'}) — register it with beat sample first`)
+      if (ref.tune < -24 || ref.tune > 24) throw new BeatEditError(`lane tune must be -24..24 semitones, got ${ref.tune}`)
+      // Re-backing an already-sample-backed lane keeps its Start/Length/AHD/filter/effects
+      // shaping (lane character, not sample identity); coming from a synth voice starts clean
+      // with the same defaults a parsed bare `lane <name> sample ...` decl line gets.
+      const keep = decl.backing.type === 'sample'
+        ? { params: decl.backing.params, filterType: decl.backing.filterType, effects: decl.backing.effects }
+        : { params: {}, filterType: 'lowpass' as SampleLaneFilterType, effects: [] }
+      backing = { type: 'sample', sample: ref.sample, gainDb: ref.gainDb, tune: ref.tune, ...keep }
+    }
+    const lanes = track.lanes.map((l) => (l.name === lane ? { ...l, backing } : l))
+    return replaceTrack(doc, { ...track, lanes })
+  }
+
+  // Legacy implicit-5-lane tracks: laneSamples is what their playback path actually reads.
   if (!(DRUM_LANES as readonly string[]).includes(lane)) throw new BeatEditError(`unknown drum lane "${lane}" (expected one of ${DRUM_LANES.join('|')})`)
   const laneSamples = { ...track.laneSamples }
   if (ref === null) {
-    delete laneSamples[lane]
+    delete laneSamples[lane as DrumLane]
   } else {
     if (!doc.media.some((m) => m.id === ref.sample)) throw new BeatEditError(`no sample "${ref.sample}" in the media block (have: ${doc.media.map((m) => m.id).join(', ') || 'none'}) — register it with beat sample first`)
     if (ref.tune < -24 || ref.tune > 24) throw new BeatEditError(`lane tune must be -24..24 semitones, got ${ref.tune}`)
-    laneSamples[lane] = { ...ref }
+    laneSamples[lane as DrumLane] = { ...ref }
   }
   return replaceTrack(doc, { ...track, laneSamples })
 }

@@ -11,6 +11,9 @@ import {
   setMediaSample,
   setLaneSample,
   beatDocumentToPartialTracks,
+  addTrack,
+  defaultDrumKitLanes,
+  initDocument,
   BeatParseError,
   BeatEditError,
 } from '../src/core/index.js'
@@ -141,4 +144,40 @@ test('media and laneSamples ride the partials for the bridge/renderer', () => {
     kick: { sample: 'kick-909', gainDb: -2, tune: -3 },
     snare: { sample: 'snare-x', gainDb: 0, tune: 0 },
   })
+})
+
+// 2026-07-13 (owner dogfood session): on a DECLARED-lane track, setLaneSample must edit the
+// lane DECLARATION's backing — the only thing declared-mode playback reads — not the legacy
+// laneSamples bag, which is invisible to it. Before this fix, `beat lane` on every modern
+// drums track "succeeded" while the render silently kept the synth voice.
+test('setLaneSample on a declared-lane track edits the declaration backing (not legacy laneSamples)', () => {
+  let doc = initDocument({ bpm: 120 })
+  doc = addTrack(doc, { id: 'drums', kind: 'drums', lanes: defaultDrumKitLanes() }).doc
+  doc = setMediaSample(doc, 'vox', SHA, 'media/vox.wav')
+
+  doc = setLaneSample(doc, 'drums', 'kick', { sample: 'vox', gainDb: -2, tune: 3 })
+  const track = doc.tracks.find((t) => t.id === 'drums')!
+  const kick = track.lanes.find((l) => l.name === 'kick')!
+  assert.equal(kick.backing.type, 'sample')
+  assert.deepEqual(track.laneSamples, {}, 'legacy bag stays untouched on a declared-lane track')
+  assert.match(serialize(doc), /^ {2}lane kick sample vox -2 3$/m)
+
+  // round-trips as a declaration, not a legacy line
+  const rt = parse(serialize(doc)).tracks.find((t) => t.id === 'drums')!
+  assert.equal(rt.lanes.find((l) => l.name === 'kick')!.backing.type, 'sample')
+
+  // re-backing keeps declared shaping fields structure (fresh backing from synth has clean defaults)
+  const backing = kick.backing as { type: 'sample'; params: Record<string, number>; filterType: string; effects: unknown[] }
+  assert.deepEqual(backing.params, {})
+  assert.equal(backing.filterType, 'lowpass')
+  assert.deepEqual(backing.effects, [])
+
+  // "none" restores the default kit's synth voice for that lane name
+  doc = setLaneSample(doc, 'drums', 'kick', null)
+  const reverted = doc.tracks.find((t) => t.id === 'drums')!.lanes.find((l) => l.name === 'kick')!
+  assert.deepEqual(reverted.backing, { type: 'synth', voice: 'membrane', params: {} })
+  assert.match(serialize(doc), /^ {2}lane kick synth:membrane$/m)
+
+  // unknown declared lane fails loudly with the real lane list
+  assert.throws(() => setLaneSample(doc, 'drums', 'nope', { sample: 'vox', gainDb: 0, tune: 0 }), /no lane "nope" declared on track "drums" \(have: kick, snare/)
 })

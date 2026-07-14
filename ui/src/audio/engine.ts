@@ -3879,6 +3879,17 @@ class Engine {
     }, time)
   }
 
+  /** Media loads still in flight: drum one-shot lane samples, the shared drum soundfont voice,
+   * instrument soundfonts, and audio-clip buffers — everything that streams from the daemon's
+   * /media route after a doc lands. A live GUI user never sees these mid-flight (they resolve in
+   * milliseconds against a local daemon, long before a human presses play), but a headless render
+   * that starts the transport before they land gets the silent fallback instead of the sample —
+   * a sample-backed lane played its synth voice with zero signal (owner's dogfood session,
+   * 2026-07-13). cli/render.mjs polls this to zero before playing. */
+  pendingMediaCount(): number {
+    return this.drumSamplePending.size + this.instrumentPending.size + this.audioBufferPending.size + (this.drumSfPending ? 1 : 0)
+  }
+
   /** Records `seconds` of the live master output (post-limiter — exactly what plays) as a WAV blob.
    * Playback must already be running or the capture is silence. Ported from BeatLab's recordWav:
    * MediaRecorder can only record a lossy codec, so decode the webm/opus back to raw samples and

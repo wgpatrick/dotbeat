@@ -1741,6 +1741,13 @@ export const rows = [
     research: 'research/96-usability-pilot-cli-vary-loop.md', plan: 'phase-34-plan.md',
   },
 
+  {
+    area: 'Agent surface & foundations (Phase 34)', feature: 'Sample-backed drum lanes actually sound: setLaneSample declared-mode fix + render media wait',
+    description: 'Owner\'s dogfood session hit "audio sample failed" — three stacked causes, all silent. (1) The real bug: `setLaneSample` (behind `beat lane`/`beat_lane`) wrote the LEGACY v0.5 `laneSamples` bag, which declared-mode playback never reads — on every modern 12-lane drums track the edit "succeeded" while the engine kept the synth voice (the same v0.5-vs-declared split behind research/101\'s vary no-op). Now it edits the lane declaration\'s own backing (`lane <name> sample <id> <gain> <tune>`, the canonical decl form), validates against the track\'s real declared lane list, preserves Start/Length/AHD/filter/effects shaping across a re-back, and `none` restores the default kit\'s synth voice. Proven end-to-end: the fixed render\'s spectrum flipped from 99.6% sub/bass (kick fallback) to 93% presence/air at a 5 kHz centroid (the actual vowel sample). (2) Headless renders started the transport before fire-and-forget media loads landed — engine now exposes pendingMediaCount() and cli/render.mjs waits for zero (30s timeout with an honest warning). (3) The engine\'s own "sample failed to load" console warnings vanished in headless renders — the render now forwards page warnings/errors to stderr.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/101-usability-pilot-mcp-taste-loop.md', plan: null,
+  },
+
   // ── Known usability gaps (backlog) ────────────────────────────────────────
   // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
   // feature) or too cross-cutting (spans many components) to fold into a single fix-phase stream.
