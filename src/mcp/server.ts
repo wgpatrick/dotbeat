@@ -55,6 +55,9 @@ import {
   describeDocument,
   saveClip,
   setScene,
+  placeClip,
+  unplaceClip,
+  formatNumber,
   renameScene,
   setSong,
   songMove,
@@ -77,6 +80,7 @@ import {
   setLaneSample,
   clearLegacyLaneSamples,
   type BeatDocument,
+  type BeatSlotsInput,
 } from '../core/index.js'
 import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile } from '../metrics/index.js'
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
@@ -123,6 +127,43 @@ const num = (args: Record<string, unknown>, key: string): number => {
   if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`missing required number argument "${key}"`)
   return v
 }
+
+/** v0.11 (Phase 36 PB): the wire shape of a scene's slot map — per track, either a bare clip id
+ * (one placement at step 0, the pre-v0.11 shape) or an explicit placement list. Normalized here
+ * (at defaults to 0, liberal in) and handed straight to core's setScene, which owns ALL the
+ * validation (clip-exists, audio-only-for-v1, overlap) — same call the CLI's `beat scene` makes. */
+type SlotsArg = Record<string, string | { clip: string; at?: number }[]>
+const normalizeSlotsArg = (slots: SlotsArg): BeatSlotsInput =>
+  Object.fromEntries(
+    Object.entries(slots).map(([track, entry]) => [
+      track,
+      typeof entry === 'string' ? entry : entry.map((p) => ({ clip: String(p.clip), at: p.at === undefined ? 0 : Number(p.at) })),
+    ]),
+  )
+
+/** The JSON schema fragment for a slot map, shared by beat_scene and beat_song's scenes arg. */
+const SLOTS_SCHEMA = {
+  type: 'object',
+  additionalProperties: {
+    oneOf: [
+      { type: 'string', description: 'a clip id — one placement at step 0 (the pre-v0.11 shape, still canonical for “the clip plays at the section start”)' },
+      {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            clip: { type: 'string' },
+            at: { type: 'number', description: 'fractional 16th steps from the section start; default 0' },
+          },
+          required: ['clip'],
+        },
+        description: 'explicit placement list (v0.11) — the same clip may appear more than once at different at offsets',
+      },
+    ],
+  },
+  description:
+    'track id -> clip id, or track id -> [{clip, at}] placements. Multiple placements / at > 0 are AUDIO tracks only for v1 — synth/drum clips tile from the section start (anything else is a validation error).',
+} as const
 
 type InstrumentPresetResult = { presets: { program: number; bankMSB: number; bankLSB: number; name: string }[] } | { error: string }
 
@@ -622,7 +663,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_audio_split',
     description:
-      'Split-at-point (format v0.10, Phase 22 Stream AE, docs/research/16-audio-clip-editing.md §2): cuts one audio-region clip into two at a timeline position, no DSP. at is in fractional 16th steps from the CLIP\'s own start (the same unit note/hit start and automation point time already use). Both halves reference the same media with adjusted in/out points; gain-automation points partition by time (before the split stay on the first clip, at/after move to the second, retimed relative to its own new start). The first half keeps the original clip id; the second is auto-numbered ("<clip>-2", "<clip>-3", ...) unless new_clip_id is given. Returns the musical edit list.',
+      'Split-at-point (format v0.10, Phase 22 Stream AE, docs/research/16-audio-clip-editing.md §2): cuts one audio-region clip into two at a timeline position, no DSP. at is in fractional 16th steps from the CLIP\'s own start (the same unit note/hit start and automation point time already use). Both halves reference the same media with adjusted in/out points; gain-automation points partition by time (before the split stay on the first clip, at/after move to the second, retimed relative to its own new start). The first half keeps the original clip id; the second is auto-numbered ("<clip>-2", "<clip>-3", ...) unless new_clip_id is given. v0.11 (Phase 36): the second half is AUTO-PLACED right after the first (at parent placement + split offset) in every scene that placed the original — including multi-placement parents — so a split never orphans arrangement; the output reports each auto-placement. Returns the musical edit list.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -637,9 +678,13 @@ const TOOLS: ToolDef[] = [
     handler: (args) => {
       const file = str(args, 'file')
       const before = parse(readFileSync(file, 'utf8'))
-      const { doc, first, second } = splitAudioClip(before, str(args, 'track'), str(args, 'clip'), num(args, 'at'), typeof args.new_clip_id === 'string' ? { newClipId: args.new_clip_id } : {})
+      const { doc, first, second, placements } = splitAudioClip(before, str(args, 'track'), str(args, 'clip'), num(args, 'at'), typeof args.new_clip_id === 'string' ? { newClipId: args.new_clip_id } : {})
       writeFileSync(file, serialize(doc))
-      return formatDiff(diffDocuments(before, doc)) + `split into "${first.id}" and "${second.id}"\n`
+      return (
+        formatDiff(diffDocuments(before, doc)) +
+        `split into "${first.id}" and "${second.id}"\n` +
+        placements.map((p) => `auto-placed "${p.clip}" at ${formatNumber(p.at)} in scene "${p.sceneId}"\n`).join('')
+      )
     },
   },
   {
@@ -896,10 +941,10 @@ const TOOLS: ToolDef[] = [
           type: 'array',
           items: {
             type: 'object',
-            properties: { id: { type: 'string' }, slots: { type: 'object', additionalProperties: { type: 'string' } } },
+            properties: { id: { type: 'string' }, slots: SLOTS_SCHEMA },
             required: ['id', 'slots'],
           },
-          description: 'each scene maps track ids to clip ids',
+          description: 'each scene maps track ids to clip ids (or, v0.11, to placement lists — see beat_scene)',
         },
         song: {
           type: 'array',
@@ -914,8 +959,76 @@ const TOOLS: ToolDef[] = [
       const before = parse(readFileSync(file, 'utf8'))
       let doc = before
       for (const c of (args.clips as { track: string; clip: string }[] | undefined) ?? []) doc = saveClip(doc, c.track, c.clip).doc
-      for (const s of (args.scenes as { id: string; slots: Record<string, string> }[] | undefined) ?? []) doc = setScene(doc, s.id, s.slots)
+      for (const s of (args.scenes as { id: string; slots: SlotsArg }[] | undefined) ?? []) doc = setScene(doc, s.id, normalizeSlotsArg(s.slots))
       if (args.song !== undefined) doc = setSong(doc, args.song as { scene: string; bars: number }[])
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_scene',
+    description:
+      'Create or wholesale-replace ONE scene\'s slot map — the tool that MINTS a scene id (beat_place only edits scenes that already exist). Per track, slots takes either a bare clip id (one placement at step 0 — exactly the pre-v0.11 shape) or a placement list [{clip, at}] with at in fractional 16th steps from the section start (v0.11, Phase 36); the same clip may be placed more than once. v1 scope caveat: multi-placement and at > 0 are AUDIO tracks only for now — synth/drum clips tile from the section start, and placing them anywhere else is a validation error. Overlapping placements on one audio track (region length from in/out/rate and the document bpm) are an error too. Same core call as `beat scene`. Returns the musical edit list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        id: { type: 'string', description: 'the scene id to create or replace (e.g. "s1")' },
+        slots: SLOTS_SCHEMA,
+      },
+      required: ['file', 'id', 'slots'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      if (typeof args.slots !== 'object' || args.slots === null || Array.isArray(args.slots)) throw new Error('missing required object argument "slots"')
+      const doc = setScene(before, str(args, 'id'), normalizeSlotsArg(args.slots as SlotsArg))
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_place',
+    description:
+      'Add ONE placement of an already-saved clip into an EXISTING scene (v0.11, Phase 36): the clip sounds at `at` fractional 16th steps from the section start. The scene must already exist — beat_scene (or beat_song\'s scenes arg) mints scenes; this tool edits one placement. v1 scope caveat: multi-placement and at > 0 are AUDIO tracks only for now — synth/drum clips tile from the section start. Placements that would overlap in time on one track are an error (fail-loudly). The same clip may be placed more than once at different offsets. Same core call as `beat place`. Returns the musical edit list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        scene: { type: 'string', description: 'an EXISTING scene id' },
+        track: { type: 'string' },
+        clip: { type: 'string', description: 'a clip id that exists on that track' },
+        at: { type: 'number', description: 'fractional 16th steps from the section start, >= 0' },
+      },
+      required: ['file', 'scene', 'track', 'clip', 'at'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = placeClip(before, str(args, 'scene'), str(args, 'track'), str(args, 'clip'), num(args, 'at'))
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_unplace',
+    description:
+      'Remove ONE placement of a clip from a scene\'s track slot (v0.11, Phase 36). `at` is optional when the clip is placed exactly once on that track; when it\'s placed more than once, `at` is REQUIRED to say which placement to remove — omitting it fails loudly and the error lists the candidate at values. Removing a track\'s last placement drops the track from the scene entirely. Same core call as `beat unplace`. Returns the musical edit list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        scene: { type: 'string' },
+        track: { type: 'string' },
+        clip: { type: 'string' },
+        at: { type: 'number', description: 'the placement\'s step offset; only required when the clip is placed more than once on that track' },
+      },
+      required: ['file', 'scene', 'track', 'clip'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc } = unplaceClip(before, str(args, 'scene'), str(args, 'track'), str(args, 'clip'), args.at === undefined ? undefined : num(args, 'at'))
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
     },

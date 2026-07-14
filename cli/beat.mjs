@@ -20,6 +20,8 @@ import {
   parse,
   saveClip,
   setScene,
+  placeClip,
+  unplaceClip,
   renameScene,
   setSong,
   songMove,
@@ -79,6 +81,7 @@ import {
   serializeSelection,
   selectionToVaryScope,
   BeatSelectionError,
+  formatNumber,
   BeatEditError,
   BeatParseError,
   BeatPresetError,
@@ -101,7 +104,7 @@ const HELP_FAMILIES = [
   ['vary', 'score', 'adopt', 'suggest'],
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
-  ['clip', 'scene', 'scene-set', 'song', 'song-move', 'song-insert'],
+  ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
   ['add-note', 'rm-note', 'add-hit', 'rm-hit'],
 ]
 
@@ -250,13 +253,38 @@ const HELP = [
                                                           existing content first if you want a fresh, independent
                                                           clip instead of an accumulated one)`,
   },
-  { cmd: 'scene', text: `  beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map` },
+  {
+    cmd: 'scene',
+    text: `  beat scene <file> <scene-id> [<track>=<clip>[@<steps>] ...]
+                                                          create/replace a scene's slot map — the command that MINTS a
+                                                          scene (beat place only edits existing ones). Repeat a track for
+                                                          multiple placements (v0.11), e.g. fx=riser1 fx=impact1@48;
+                                                          @<steps> is fractional 16th steps from the section start
+                                                          (omitted = 0). Multi-placement / @>0 is AUDIO tracks only for
+                                                          now — synth/drum clips tile from the section start`,
+  },
   {
     cmd: 'scene-set',
     text: `  beat scene-set <file> <scene-id> --name N|--clear-name  rename a scene (or clear its name, back to showing
                                                           just the id) — the scene IS the reusable bundle of
                                                           content, so its name follows it into every section
                                                           that reuses it`,
+  },
+  {
+    cmd: 'place',
+    text: `  beat place <file> <scene> <track> <clip> <at-steps>     add ONE placement of an already-saved clip to a scene's
+                                                          track slot at <at-steps> (fractional 16th steps from the
+                                                          section start). The scene must already EXIST — beat scene
+                                                          mints scenes, place edits one placement. Audio tracks only
+                                                          for at > 0 / multiple placements (v1); overlapping
+                                                          placements on one track are an error`,
+  },
+  {
+    cmd: 'unplace',
+    text: `  beat unplace <file> <scene> <track> <clip>[@<at>]       remove ONE placement. @<at> is only required when the
+                                                          same clip is placed more than once on that track (the
+                                                          error lists the candidate at values); removing the last
+                                                          placement drops the track from the scene entirely`,
   },
   { cmd: 'song', text: `  beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)` },
   { cmd: 'song-move', text: `  beat song-move <file> <from-index> <to-index>           reorder a section — a two-line diff, not a rewrite` },
@@ -307,7 +335,10 @@ const HELP = [
                                                           split-at-point: cuts one audio-region clip into
                                                           two at a timeline position (fractional 16th
                                                           steps from the clip's start), same media,
-                                                          adjusted in/out — no DSP`,
+                                                          adjusted in/out — no DSP. v0.11: the second half
+                                                          is auto-placed right after the first in every
+                                                          scene that placed the original (reported in the
+                                                          output), so a split never orphans arrangement`,
   },
   {
     cmd: 'score',
@@ -369,9 +400,9 @@ const HELP = [
   { cmd: 'selection', text: `  beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon` },
   {
     cmd: 'mcp',
-    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (~55,
-                                                          covering track/note/hit/effect/song/preset/macro/drum-kit/
-                                                          vary/score/adopt/sample/lane/checkpoint/render/metrics editing) —
+    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (~58,
+                                                          covering track/note/hit/effect/scene/place/song/preset/macro/
+                                                          drum-kit/vary/score/adopt/sample/lane/checkpoint/render/metrics editing) —
                                                           only daemon (a long-running process, structurally not a
                                                           tool call) stays CLI-only; send tools/list on a running
                                                           'beat mcp' for the exact, current set`,
@@ -1181,15 +1212,60 @@ function clipCmd(argv) {
 
 function sceneCmd(argv) {
   const [file, sceneId, ...pairs] = argv
-  if (!file || !sceneId) throw new BeatEditError('scene needs <file> <scene-id> [<track>=<clip> ...]')
+  if (!file || !sceneId) throw new BeatEditError('scene needs <file> <scene-id> [<track>=<clip>[@<steps>] ...]')
+  // v0.11 (Phase 36 PB): each pair is one PLACEMENT — the same track may repeat, and a trailing
+  // @<steps> (fractional 16th steps from the section start, default 0) says where it sounds.
+  // Everything funnels into core's setScene placement lists; all validation (audio-only-for-v1,
+  // overlap, clip-exists) lives there, shared with the parser and MCP.
   const slots = {}
   for (const pair of pairs) {
     const eq = pair.indexOf('=')
-    if (eq === -1) throw new BeatEditError(`slot "${pair}" must be <track>=<clip>`)
-    slots[pair.slice(0, eq)] = pair.slice(eq + 1)
+    if (eq === -1) throw new BeatEditError(`slot "${pair}" must be <track>=<clip>[@<steps>]`)
+    const track = pair.slice(0, eq)
+    const rhs = pair.slice(eq + 1)
+    const sep = rhs.lastIndexOf('@') // clip ids are alphanumeric/_/- tokens, so '@' is unambiguous
+    let placement
+    if (sep === -1) {
+      placement = { clip: rhs, at: 0 }
+    } else {
+      const at = Number(rhs.slice(sep + 1))
+      if (rhs.slice(sep + 1) === '' || Number.isNaN(at)) throw new BeatEditError(`slot "${pair}": @ must be followed by a step offset (fractional 16th steps), e.g. fx=impact1@48`)
+      placement = { clip: rhs.slice(0, sep), at }
+    }
+    ;(slots[track] ??= []).push(placement)
   }
   const before = readDoc(file)
   writeDoc(file, before, setScene(before, sceneId, slots))
+}
+
+// v0.11 (Phase 36 PB): the friendlier single-placement verbs over core's placeClip/unplaceClip.
+// `place` requires the scene to already exist (beat scene mints scenes); `unplace` needs @<at>
+// only when the same clip is placed more than once on that track — core fail-louds on ambiguity
+// and we surface its error verbatim.
+function placeCmd(argv) {
+  const [file, sceneId, track, clip, at] = argv
+  if (!file || !sceneId || !track || !clip || at === undefined) {
+    throw new BeatEditError('place needs <file> <scene> <track> <clip> <at-steps> (the scene must already exist — beat scene mints scenes)')
+  }
+  const before = readDoc(file)
+  const { doc } = placeClip(before, sceneId, track, clip, Number(at))
+  writeDoc(file, before, doc)
+}
+
+function unplaceCmd(argv) {
+  const [file, sceneId, track, clipArg] = argv
+  if (!file || !sceneId || !track || !clipArg) throw new BeatEditError('unplace needs <file> <scene> <track> <clip>[@<at>]')
+  const sep = clipArg.lastIndexOf('@')
+  let clip = clipArg
+  let at
+  if (sep !== -1) {
+    at = Number(clipArg.slice(sep + 1))
+    if (clipArg.slice(sep + 1) === '' || Number.isNaN(at)) throw new BeatEditError(`unplace "${clipArg}": @ must be followed by the placement's step offset, e.g. riser1@56.5`)
+    clip = clipArg.slice(0, sep)
+  }
+  const before = readDoc(file)
+  const { doc } = unplaceClip(before, sceneId, track, clip, at)
+  writeDoc(file, before, doc)
 }
 
 // Phase 32 Stream LB: renames (or clears) a scene's display name — the CLI/agent face on
@@ -1379,9 +1455,12 @@ function audioSplitCmd(argv) {
   const [file, track, clip, at] = positional
   if (!file || !track || !clip || at === undefined) throw new BeatEditError('audio-split needs <file> <track> <clip> <at-step> [--id new-clip-id]')
   const before = readDoc(file)
-  const { doc, first, second } = splitAudioClip(before, track, clip, Number(at), newId !== undefined ? { newClipId: newId } : {})
+  const { doc, first, second, placements } = splitAudioClip(before, track, clip, Number(at), newId !== undefined ? { newClipId: newId } : {})
   writeDoc(file, before, doc)
   process.stdout.write(`split "${clip}" into "${first.id}" and "${second.id}"\n`)
+  // v0.11 (Phase 36): the split auto-places the second half right after the first in every scene
+  // that placed the original (D16 q3) — say where, so the arrangement effect is never a surprise.
+  for (const p of placements) process.stdout.write(`auto-placed "${p.clip}" at ${formatNumber(p.at)} in scene "${p.sceneId}"\n`)
 }
 
 function fmtDb(x, unit = '') {
@@ -1836,6 +1915,12 @@ async function main() {
       break
     case 'scene-set':
       sceneSetCmd(rest)
+      break
+    case 'place':
+      placeCmd(rest)
+      break
+    case 'unplace':
+      unplaceCmd(rest)
       break
     case 'song':
       songCmd(rest)
