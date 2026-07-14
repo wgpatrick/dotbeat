@@ -14,7 +14,7 @@ import { createInterface } from 'node:readline'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { dirname, join, resolve as pathResolve } from 'node:path'
+import { basename, dirname, join, resolve as pathResolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   parse,
@@ -72,11 +72,28 @@ import {
   formatDrumKitList,
   parseSelection,
   serializeSelection,
+  selectionToVaryScope,
+  setMediaSample,
+  setLaneSample,
+  clearLegacyLaneSamples,
   type BeatDocument,
 } from '../core/index.js'
-import { decodeWav, analyze, lint, formatLint } from '../metrics/index.js'
+import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile } from '../metrics/index.js'
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
+import { varyTrack, varyFeel, VARY_GROUPS } from '../vary/vary.js'
+import {
+  writeVaryBatch,
+  renderVaryBatch,
+  scoreBatch,
+  formatScoreResult,
+  adoptVariant,
+  formatAdoptResult,
+  defaultBatchDir,
+  defaultScoresLog,
+  DEFAULT_SCORES_LOG,
+} from '../vary/batch.js'
+import { stitchAudition, formatAuditionIndex } from '../vary/audition.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -349,7 +366,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_set',
     description:
-      'Apply one or more surgical edits to a .beat file and write it back canonically. Paths use the file\'s own field names: "bpm", "loop_bars", "selected_track", "<track>.<param>", "<track>.name", "<track>.color", "<track>.pattern.<lane>[<step>]" (lanes: kick, snare, clap, hat, openhat), "<track>.shuffleAmount"/"<track>.shuffleGrid" (v0.10 groove — a reversible time-warp applied at playback, 0 amount = off), "<track>.note.<id>.chance" (0-100, v0.10 per-note trigger probability, default 100 = always fires), "<track>.note.<id>.cent" (-50..50, v0.10 per-note micro-tuning independent of pitch), "<track>.note.<id>.ratchetCount"/"ratchetCurve"/"ratchetLength" (v0.10 note ratchet/repeat — see beat_consolidate to bake a ratchet back into discrete notes). Params: the core 9 (osc, volume, cutoff, resonance, attack, decay, sustain, release, pan) plus the full v0.3 shaped surface — osc2Type/osc2Level/osc2Detune, subLevel, noiseLevel, fm*, unisonVoices/unisonWidth, filterType, filterEnv*, lfo*/lfo2*, glide, eq*, comp*, distortion*, bitcrush*, pingPong* (ping pong delay), beatRepeat* (grid/gate/chance/mode scheduling-layer stutter), chorus*/phaser* (per-track chorus-ensemble and phaser-flanger inserts), saturator* (curve/drive/mix), grainDelay* (time/feedback/size/pitch/mix — a hand-built granular pitch-shifting delay, Phase 23 Stream BF), vinyl* (drive/noiseLevel/tone/mix — WaveShaper harmonic saturation + a seeded, reproducible surface-noise/crackle bed), resonator* (freq/chord/q/mix — a bank of up to 5 tuned bandpass filters approximating physical resonance; chord is one of fifths|major|minor|octaves|harmonic), sendReverb/sendDelay, duckSource (a track id or "none") + duckAmount, and drum-voice shaping (kickTune/kickPunch/kickDecay, snareTone/snareDecay, hatTone/hatDecay/openHatDecay). Fields at their default are elided from the file. Returns the musical edit list of what changed.',
+      'Apply one or more surgical edits to a .beat file and write it back canonically. Paths use the file\'s own field names: "bpm", "loop_bars", "selected_track", "<track>.<param>", "<track>.name", "<track>.color", "<track>.pattern.<lane>[<step>]" (lanes: kick, snare, clap, hat, openhat), "<track>.shuffleAmount"/"<track>.shuffleGrid" (v0.10 groove — a reversible time-warp applied at playback, 0 amount = off), "<track>.note.<id>.chance" (0-100, v0.10 per-note trigger probability, default 100 = always fires), "<track>.note.<id>.cent" (-50..50, v0.10 per-note micro-tuning independent of pitch), "<track>.note.<id>.ratchetCount"/"ratchetCurve"/"ratchetLength" (v0.10 note ratchet/repeat — see beat_consolidate to bake a ratchet back into discrete notes). Params: the core 9 (osc, volume, cutoff, resonance, attack, decay, sustain, release, pan) plus the full v0.3 shaped surface — osc2Type/osc2Level/osc2Detune, subLevel, noiseLevel, fm*, unisonVoices/unisonWidth, filterType, filterEnv*, lfo*/lfo2*, glide, eq*, comp*, distortion*, bitcrush*, pingPong* (ping pong delay), beatRepeat* (grid/gate/chance/mode scheduling-layer stutter), chorus*/phaser* (per-track chorus-ensemble and phaser-flanger inserts), saturator* (curve/drive/mix), grainDelay* (time/feedback/size/pitch/mix — a hand-built granular pitch-shifting delay, Phase 23 Stream BF), vinyl* (drive/noiseLevel/tone/mix — WaveShaper harmonic saturation + a seeded, reproducible surface-noise/crackle bed), resonator* (freq/chord/q/mix — a bank of up to 5 tuned bandpass filters approximating physical resonance; chord is one of fifths|major|minor|octaves|harmonic), sendReverb/sendDelay, duckSource (a track id or "none") + duckAmount, and drum-voice shaping (kickTune/kickPunch/kickDecay, snareTone/snareDecay, hatTone/hatDecay/openHatDecay — LEGACY drums tracks only: a declared-lane drums track never plays these, edit its lanes instead). Declared drum lanes: "<track>.lane.<name>.<param>" edits one lane\'s own backing params — synth-backed lanes take that voice\'s params (tune/punch/decay for membrane, tone/decay for noise, decay/tone for metal), sample-backed lanes take start/length/attack/hold/decay/cutoff/resonance plus gainDb/tune; an empty value reverts a param to its default. Fields at their default are elided from the file. Returns the musical edit list of what changed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1074,32 +1091,117 @@ const TOOLS: ToolDef[] = [
     },
   },
   {
-    name: 'beat_metrics',
+    name: 'beat_sample',
     description:
-      'Deterministic DSP measurements of a rendered WAV: integrated LUFS (ITU-R BS.1770), sample/true peak, crest factor, spectral band balance + centroid, stereo correlation/width. These numbers are the ground truth for any mix judgment — trust them over any impression of what the audio "probably" sounds like.',
+      'Register a media file (WAV or SF2) in a .beat project\'s media block under a stable sample id — the prerequisite for sample-backed drum lanes (beat_lane), instrument tracks (beat_add_track\'s soundfont_sample), and audio-region clips (beat_audio_clip\'s media). Computes the sha256 content hash for you and stores the path RELATIVE TO THE .BEAT FILE (the path argument is resolved against the .beat file\'s own directory, not the server\'s working directory — put the audio next to the project first, e.g. in a media/ folder beside it). Registering an existing id updates it. Same semantics as `beat sample`. Returns the edit list plus the computed hash.',
     inputSchema: {
       type: 'object',
-      properties: { file: { type: 'string', description: 'path to a .wav file (render one with beat_render)' } },
+      properties: {
+        file: { type: 'string' },
+        sample_id: { type: 'string', description: 'a stable id for this media, e.g. "smp_kick" or "muldjordkit"' },
+        path: { type: 'string', description: 'path to the audio file, RELATIVE to the .beat file (e.g. "media/kick.wav")' },
+      },
+      required: ['file', 'sample_id', 'path'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const id = str(args, 'sample_id')
+      const samplePath = str(args, 'path')
+      const beatDir = dirname(pathResolve(file))
+      const abs = pathResolve(beatDir, samplePath)
+      if (!existsSync(abs)) throw new Error(`no file at ${samplePath} (relative to ${beatDir}) — put the audio next to the project first`)
+      const sha256 = createHash('sha256').update(readFileSync(abs)).digest('hex')
+      const before = parse(readFileSync(file, 'utf8'))
+      const doc = setMediaSample(before, id, sha256, samplePath.replace(/\\/g, '/'))
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc)) + `registered ${id}: sha256:${sha256.slice(0, 12)}... ${samplePath}\n`
+    },
+  },
+  {
+    name: 'beat_lane',
+    description:
+      'Back a drum lane with a registered sample — the lane plays that audio (with optional gain in dB and tune in semitones) instead of its built-in synthesized voice. sample_id must already be in the media block (register it with beat_sample first; fails loudly otherwise), or pass the literal string "none" to clear the lane back to its synthesized voice. Same semantics as `beat lane` (gain defaults 0 dB, tune defaults 0 semitones). Or pass clear_legacy: true (no lane/sample_id) to drop stale v0.5 `lane` sample lines from a declared-lane track — dead data there (playback reads the lane declarations; beat_inspect flags them); errors on a legacy 5-lane track where those lines are live. Returns the edit list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string', description: 'a drums track id' },
+        lane: { type: 'string', description: 'one of the track\'s lanes, e.g. "kick" (required unless clear_legacy)' },
+        sample_id: { type: 'string', description: 'a media id from beat_sample, or "none" to revert to the synthesized voice (required unless clear_legacy)' },
+        gain_db: { type: 'number', description: 'playback gain in dB, default 0' },
+        tune: { type: 'number', description: 'pitch offset in semitones, default 0' },
+        clear_legacy: { type: 'boolean', description: 'one-shot cleanup: remove ALL stale legacy lane-sample lines from a declared-lane track (ignored by playback there). Mutually exclusive with lane/sample_id.' },
+      },
+      required: ['file', 'track'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      // Phase 35 Stream OB: the explicit stale-legacy cleanup — see clearLegacyLaneSamples.
+      if (args.clear_legacy === true) {
+        if (args.lane !== undefined || args.sample_id !== undefined) throw new Error('clear_legacy is a one-shot track-level cleanup — do not pass lane/sample_id with it')
+        const { doc } = clearLegacyLaneSamples(before, str(args, 'track'))
+        writeFileSync(file, serialize(doc))
+        return formatDiff(diffDocuments(before, doc))
+      }
+      const sampleId = str(args, 'sample_id')
+      const ref = sampleId === 'none' ? null : { sample: sampleId, gainDb: typeof args.gain_db === 'number' ? args.gain_db : 0, tune: typeof args.tune === 'number' ? args.tune : 0 }
+      // lane is validated at runtime by setLaneSample itself (unknown-lane -> friendly error),
+      // same as the CLI, which passes the raw argv string — the cast just satisfies the compiler.
+      const doc = setLaneSample(before, str(args, 'track'), str(args, 'lane') as Parameters<typeof setLaneSample>[2], ref)
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_metrics',
+    description:
+      'Deterministic DSP measurements of a rendered WAV: integrated LUFS (ITU-R BS.1770), sample/true peak, crest factor, spectral band balance + centroid, stereo correlation/width. These numbers are the ground truth for any mix judgment — trust them over any impression of what the audio "probably" sounds like. Pass save_profile to also write the measured numbers as a reusable reference profile (JSON with provenance: source file, date, tool) for beat_lint\'s ref argument — measure a track you love once, then critique your own mixes against it. Honest limits: a profile captures full-mix statics only; it does not hear arrangement, sections, or masking.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'path to a .wav file (render one with beat_render)' },
+        save_profile: { type: 'string', description: 'path to write a reference profile JSON (e.g. "ref.json"), usable as beat_lint\'s ref' },
+      },
       required: ['file'],
     },
     handler: (args) => {
-      const { channels, sampleRate } = decodeWav(readFileSync(str(args, 'file')))
-      return JSON.stringify(analyze(channels, sampleRate), null, 2)
+      const file = str(args, 'file')
+      const { channels, sampleRate } = decodeWav(readFileSync(file))
+      const m = analyze(channels, sampleRate)
+      // Phase 35 Stream OD: same profile shape + code path as `beat metrics --save-profile`
+      // (src/metrics/profile.ts) — a profile written on either surface reads on either.
+      const saved = typeof args.save_profile === 'string' && args.save_profile !== '' ? args.save_profile : undefined
+      if (saved) writeFileSync(saved, serializeProfile(buildProfile(m, basename(file))))
+      // Same renderRunVariance metadata `beat metrics --json` emits (Phase 34 NC parity —
+      // docs/render-determinism.md): deltas inside these bounds are render noise.
+      return JSON.stringify({ ...m, meta: RENDER_RUN_VARIANCE_META, ...(saved ? { savedProfile: saved } : {}) }, null, 2)
     },
   },
   {
     name: 'beat_lint',
     description:
-      'Run the deterministic mix-lint rules over a rendered WAV: true-peak clipping risk, loudness vs target (default -14 LUFS), over-compression, spectral imbalance, mono/phase issues. Findings include the measured value, the threshold, and — where expressible — the .beat edit to try.',
+      'Run the deterministic mix-lint rules over a rendered WAV: true-peak clipping risk, loudness vs target (default -14 LUFS), over-compression, spectral imbalance, mono/phase issues. Findings include the measured value, the threshold, and — where expressible — the .beat edit to try. Pass ref (a profile saved by beat_metrics\' save_profile) to critique against a reference mix instead of absolute targets: findings then report loudness / band-share / width / crest deltas from the reference, padded by the measured render-run variance, while the safety rules (true-peak clipping, phase cancellation) stay absolute. ref and target_lufs are mutually exclusive — pick one comparison frame. Honest limits: the ref comparison is full-mix statics only; it does not hear arrangement, sections, or masking.',
     inputSchema: {
       type: 'object',
-      properties: { file: { type: 'string' }, target_lufs: { type: 'number', description: 'loudness target, default -14' } },
+      properties: {
+        file: { type: 'string' },
+        target_lufs: { type: 'number', description: 'loudness target, default -14 (absolute mode only; mutually exclusive with ref)' },
+        ref: { type: 'string', description: 'path to a reference profile JSON from beat_metrics\' save_profile (mutually exclusive with target_lufs)' },
+      },
       required: ['file'],
     },
     handler: (args) => {
+      const refPath = typeof args.ref === 'string' && args.ref !== '' ? args.ref : undefined
+      if (refPath !== undefined && typeof args.target_lufs === 'number') {
+        throw new Error('pick one comparison frame: ref (compare against a reference mix profile) or target_lufs (absolute loudness target) — not both')
+      }
+      if (refPath !== undefined && !existsSync(refPath)) {
+        throw new Error(`no profile at ${refPath} — write one with beat_metrics' save_profile first`)
+      }
       const { channels, sampleRate } = decodeWav(readFileSync(str(args, 'file')))
-      const findings = lint(analyze(channels, sampleRate), typeof args.target_lufs === 'number' ? { targetLufs: args.target_lufs } : {})
-      return formatLint(findings)
+      const opts = refPath !== undefined ? { ref: parseProfile(readFileSync(refPath, 'utf8'), refPath) } : typeof args.target_lufs === 'number' ? { targetLufs: args.target_lufs } : {}
+      return formatLint(lint(analyze(channels, sampleRate), opts))
     },
   },
   {
@@ -1164,27 +1266,182 @@ const TOOLS: ToolDef[] = [
         })
       }),
   },
+  // ---- variation-and-taste loop (Phase 34 Stream NA — pilot 95's headline gap): beat_vary
+  // generates, beat_score records picks, beat_suggest reads the exhaust. Same core functions,
+  // same defaults, and the same manifest/jsonl shapes as `beat vary`/`beat score` — the shared
+  // shaping lives in src/vary/batch.ts so a batch made on either surface scores on either.
+  {
+    name: 'beat_vary',
+    description:
+      `Batch-generate small-diff variants of one track into an out-dir — the generate half of dotbeat's vary -> audition -> score taste loop (beat_score records ranked picks; beat_adopt takes a winner; beat_suggest proposes the next round). Same semantics and defaults as \`beat vary\`. Choosing the target: on a DECLARED-LANE drums track (every drums track this server creates — beat_add_track/beat_drum_kit declare lanes), group is a LANE NAME (e.g. kick, hat, tom_lo — any declared lane): variants mutate that lane's OWN backing params, the ones the engine actually plays (synth-backed: the voice's tune/punch/decay/tone; sample-backed: start/length/attack/hold/decay/cutoff/resonance plus gainDb/tune), written as replayable beat_set lane paths (<track>.lane.<name>.<param>); the legacy kick/snare/hats groups ERROR there because they mutate track-wide params a declared-lane track never plays (an inaudible no-op batch, pilot 101's headline bug). Track-wide bus groups (filter, env, filterenv, fx, sends, mix) still apply to any drums track, and on legacy tracks and synth tracks group is a param group as before (${Object.keys(VARY_GROUPS).join(', ')} — seeded mutations of that group's synth params, strength set by amount 0-1, default 0.25). The special group "feel" batches humanized timing/velocity variants of the track's own notes/hits — content variation, not param variation. Writes v1.beat..vN.beat plus manifest.json into out_dir (default "vary-<group>-<seed>" NEXT TO the .beat file — NOT the server's working directory; an explicit out_dir resolves as written) — the exact manifest \`beat score\`/beat_score read, so a batch generated here can be scored from either surface. count defaults to 9, seed to the clock (pass one for reproducibility; it's recorded in the manifest either way). feel-only options: timing/velocity/push_late/swing (humanize knobs, defaults 0.15/0.06/0/0) and ONE way to scope the variation — lanes, ids, or scope "selection" with port (reads the user's live GUI selection off the daemon running on that port and resolves it to lanes/ids, exactly like the CLI's --scope selection: what the user has highlighted IS the referent of "vary this"). Pass render true to also render each variant to vN.wav through dotbeat's real engine — honest cost warning: that is a REAL-TIME capture per variant in headless Chromium, so a batch takes roughly count x loop-length plus a few seconds of browser startup each; a 9-variant batch of an 8-second loop is well over a minute. Pass audition true (implies render) to additionally stitch the rendered variants into ONE audition.wav in pick order with 0.5s gaps, returning a timecode index ("v1 @ 0:00.0, v2 @ 0:09.2, ...") and writing the same map to audition.json — one file to listen through instead of count files to juggle. Returns the batch summary, one line per variant (its edits, or its feel recipe).`,    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        group: { type: 'string', description: `a declared lane name (drums tracks with lanes — targets that lane's own backing params) | ${Object.keys(VARY_GROUPS).join(' | ')} | feel` },
+        count: { type: 'number', description: 'variants per batch, 1-32, default 9' },
+        amount: { type: 'number', description: 'param groups only: mutation strength (0, 1], default 0.25' },
+        seed: { type: 'number', description: 'RNG seed; default from the clock (recorded in the manifest)' },
+        out_dir: { type: 'string', description: 'batch directory to create; default "vary-<group>-<seed>" next to the .beat file (not the server cwd)' },
+        timing: { type: 'number', description: 'feel only: timing jitter in 16th steps, default 0.15' },
+        velocity: { type: 'number', description: 'feel only: velocity jitter 0..1, default 0.06' },
+        push_late: { type: 'number', description: 'feel only: constant behind-the-beat drag in steps, default 0' },
+        swing: { type: 'number', description: 'feel only: offbeat swing 0..1, default 0' },
+        lanes: { type: 'array', items: { type: 'string' }, description: 'feel only, drum tracks: scope to these lanes' },
+        ids: { type: 'array', items: { type: 'string' }, description: 'feel only: scope to these note/hit ids (alternative to lanes)' },
+        scope: { type: 'string', description: 'feel only: "selection" scopes the batch to the user\'s live GUI selection, read from the daemon on `port` (mutually exclusive with lanes/ids)' },
+        port: { type: 'number', description: 'the running daemon\'s port — required with scope "selection" (same convention as beat_selection; default GUI port is 8420)' },
+        render: { type: 'boolean', description: 'also render each variant to vN.wav — SLOW: real-time capture per variant in headless Chromium' },
+        audition: { type: 'boolean', description: 'implies render: also stitch the rendered variants into one audition.wav (0.5s gaps) + timecode index + audition.json' },
+      },
+      required: ['file', 'track', 'group'],
+    },
+    handler: async (args) => {
+      const file = str(args, 'file')
+      const track = str(args, 'track')
+      const group = str(args, 'group')
+      const count = typeof args.count === 'number' ? args.count : 9
+      // Same seed default as the CLI: the clock, folded to a 31-bit int.
+      const seed = typeof args.seed === 'number' ? args.seed : Date.now() % 2147483647
+      const render = args.render === true || args.audition === true // audition implies render
+      const text = readFileSync(file, 'utf8')
+      const doc = parse(text)
+      // scope "selection" — same rules and error texts as the CLI's --scope selection glue.
+      if (args.scope !== undefined && args.scope !== 'selection') throw new Error(`vary scope only supports "selection", got "${String(args.scope)}"`)
+      if (args.scope === 'selection' && group !== 'feel') {
+        throw new Error('vary scope "selection" only applies to "feel" (param groups mutate whole-track synth params, not per-note/lane content)')
+      }
+      if (args.scope === 'selection' && (args.lanes !== undefined || args.ids !== undefined)) {
+        throw new Error('vary scope "selection" cannot be combined with lanes/ids — pick one way to scope')
+      }
+      const lines: string[] = []
+      let selectionScope: { lanes?: string[]; ids?: string[] } = {}
+      if (args.scope === 'selection') {
+        if (typeof args.port !== 'number') throw new Error('vary scope "selection" needs port (the running daemon — same convention as beat_selection)')
+        const res = await fetch(`http://127.0.0.1:${args.port}/selection`)
+        if (!res.ok) {
+          const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+          throw new Error(`could not read selection from daemon on port ${args.port}: ${msg}`)
+        }
+        selectionScope = selectionToVaryScope((await res.json()) as Parameters<typeof selectionToVaryScope>[0], doc, track)
+        lines.push(
+          selectionScope.lanes
+            ? `scope: selection -> lanes ${selectionScope.lanes.join(', ')}`
+            : selectionScope.ids
+              ? `scope: selection -> ${selectionScope.ids.length} id(s): ${selectionScope.ids.join(', ')}`
+              : 'scope: selection -> whole track (selection had nothing narrowing it)',
+        )
+      }
+      if (group === 'feel') {
+        const outDir = typeof args.out_dir === 'string' ? args.out_dir : defaultBatchDir(file, 'feel', seed)
+        const variants = varyFeel(doc, track, {
+          count,
+          seed,
+          ...(args.timing !== undefined ? { timing: num(args, 'timing') } : {}),
+          ...(args.velocity !== undefined ? { velocity: num(args, 'velocity') } : {}),
+          ...(args.push_late !== undefined ? { pushLate: num(args, 'push_late') } : {}),
+          ...(args.swing !== undefined ? { swing: num(args, 'swing') } : {}),
+          ...(Array.isArray(args.lanes) ? { lanes: (args.lanes as unknown[]).map(String) } : {}),
+          ...(Array.isArray(args.ids) ? { ids: (args.ids as unknown[]).map(String) } : {}),
+          ...selectionScope,
+        })
+        const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group: 'feel', count, seed, outDir, variants })
+        lines.push(`${outDir}/: ${variants.length} feel variants of ${track} (seed ${seed})`)
+        for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.recipe}`)
+        if (render) {
+          renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
+          lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
+        }
+      } else {
+        const amount = typeof args.amount === 'number' ? args.amount : 0.25
+        const outDir = typeof args.out_dir === 'string' ? args.out_dir : defaultBatchDir(file, group, seed)
+        const variants = varyTrack(doc, track, group, { count, amount, seed })
+        const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group, count, amount, seed, outDir, variants })
+        lines.push(`${outDir}/: ${variants.length} variants of ${track}.${group} (amount ${amount}, seed ${seed})`)
+        for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.edits!.join(', ')}`)
+        if (render) {
+          renderVaryBatch(outDir, variants.length)
+          lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
+        }
+      }
+      return lines.join('\n') + '\n'
+    },
+  },
+  {
+    name: 'beat_score',
+    description:
+      'Record 1-3 ranked picks against a vary batch (from beat_vary or `beat vary`) into the append-only scores log — the taste-capture half of the loop, and the exhaust beat_suggest reads to propose the next round. picks is an ordered array, best first; each pick names a variant as "3" or "v3" (both accepted), and picks must be distinct — at most 3, because ranking more adds fatigue, not signal (the Edisyn pattern). Appends one jsonl entry (identical shape to `beat score`\'s, so CLI- and MCP-recorded picks share one log/history) recording the batch\'s track/group/seed, each pick\'s replayable edits (param batches) or feel recipe, and which variants were rejected. Returns the scored summary plus how to adopt the winner (beat_adopt takes it MCP-natively).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'the batch directory (contains manifest.json, written by beat_vary)' },
+        picks: { type: 'array', items: { type: 'string' }, description: 'ranked picks, best first, 1-3 distinct variant numbers ("N" or "vN")' },
+        log: { type: 'string', description: `scores log path to append to; default "${DEFAULT_SCORES_LOG}" NEXT TO the batch's parent .beat file (not the server cwd)` },
+      },
+      required: ['dir', 'picks'],
+    },
+    handler: (args) => {
+      const dir = str(args, 'dir')
+      if (!Array.isArray(args.picks) || !(args.picks as unknown[]).every((p) => typeof p === 'string' || typeof p === 'number')) {
+        throw new Error('picks must be an array of variant numbers ("N" or "vN"), best first')
+      }
+      const picks = (args.picks as unknown[]).map(String)
+      return formatScoreResult(scoreBatch(dir, picks, typeof args.log === 'string' ? args.log : undefined))
+    },
+  },
+  {
+    name: 'beat_adopt',
+    description:
+      'Adopt a winner from a vary batch: copies the picked vN.beat over the batch\'s parent .beat file — the MCP-native way to take a variant after auditioning/scoring (no shell `cp` needed; this is the ONLY adopt path for feel batches, whose humanize recipe is not replayable via beat_set). pick accepts "3" or "v3". Data safety: if the parent file has changed since the batch was generated (its current sha256 no longer matches the manifest\'s parentSha256 — the project may have moved on through other edits), this REFUSES rather than silently overwriting that newer work; either re-run beat_vary from the current file, or pass force true to overwrite anyway. Writing the file is the whole operation — a running daemon/GUI on the project hot-reloads it automatically. Consider beat_checkpoint afterwards to keep the adopted state as a restorable version.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'the batch directory (contains manifest.json, written by beat_vary)' },
+        pick: { type: 'string', description: 'the variant to adopt ("N" or "vN")' },
+        force: { type: 'boolean', description: 'overwrite the parent even though it changed since the batch was generated (sha256 mismatch) — destroys those newer edits' },
+      },
+      required: ['dir', 'pick'],
+    },
+    handler: (args) => formatAdoptResult(adoptVariant(str(args, 'dir'), str(args, 'pick'), { force: args.force === true })),
+  },
   {
     name: 'beat_suggest',
     description:
-      'Read a track\'s beat-scores.jsonl exhaust (written by beat_score / `beat score`) and propose the next `beat vary` round, biased toward the mutation group that has scored best so far. Aggregates picked-vs-rejected counts per group (Bradley-Terry odds-form against an implicit "not picked" baseline — a ranking signal, not a proven head-to-head result, since each vary round tests only one group) and, where enough picks share a numeric param, reports whether picks trend toward one end of that param\'s vary.ts range (e.g. brighter/darker on filter.cutoff). With no scored rounds yet for the track (cold start), says so and recommends a sensible first round instead of guessing. Returns the reasoning as plain text ending in a copy-pasteable `beat vary` command; never a bare score.',
+      'Read a track\'s beat-scores.jsonl exhaust (written by beat_score / `beat score`) and propose the next `beat vary` round, biased toward the mutation group that has scored best so far. Lane-aware (Phase 35): on a declared-lane drums track the recommendation targets the track\'s REAL vary surface — its own lane names (whose backing params are what actually sound) plus the track-wide bus groups — a cold start recommends an actual lane, and a group that would be an audio no-op on that track (the legacy kick/snare/hats, whose params a declared-lane track never plays) is never recommended even if it scored well historically (those wins were rated on inaudible differences). Aggregates picked-vs-rejected counts per group (Bradley-Terry odds-form against an implicit "not picked" baseline — a ranking signal, not a proven head-to-head result, since each vary round tests only one group) and, where enough picks share a numeric param, reports whether picks trend toward one end of that param\'s mutation range (e.g. brighter/darker on filter.cutoff). With no scored rounds yet for the track (cold start), says so and recommends a sensible first round instead of guessing. Returns the reasoning as plain text ending in a copy-pasteable `beat vary` command; never a bare score.',
     inputSchema: {
       type: 'object',
       properties: {
         file: { type: 'string', description: 'path shown in the recommended command (the project this suggestion is for)' },
         track: { type: 'string' },
         target: { type: 'string', description: 'optional lane/id/param focus filter over the scores log (matched against round group names and picks\' edit paths / feel recipes)' },
-        log: { type: 'string', description: 'path to beat-scores.jsonl, default "beat-scores.jsonl"' },
+        log: { type: 'string', description: 'path to beat-scores.jsonl; default "beat-scores.jsonl" NEXT TO the .beat file (not the server cwd) — the same place beat_score appends by default' },
       },
       required: ['file', 'track'],
     },
     handler: (args) => {
       const file = str(args, 'file')
       const track = str(args, 'track')
-      const logPath = typeof args.log === 'string' ? args.log : 'beat-scores.jsonl'
+      // Same track-existence + kind resolution the CLI's suggestCmd gained in Phase 33
+      // (research/96) — pilot 101 caught this handler still skipping it (the CLI/MCP drift class
+      // Stream NA's shared helpers exist to prevent; suggest predates them). Kind matters: it
+      // feeds suggestNext's group-legality logic so a synth track is never cold-started onto a
+      // drums-only param group (a silent no-op).
+      const doc = parse(readFileSync(file, 'utf8'))
+      const trackObj = doc.tracks.find((t) => t.id === track)
+      if (!trackObj) throw new Error(`no track "${track}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
+      const logPath = typeof args.log === 'string' ? args.log : defaultScoresLog(file)
       const text = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
       const entries = parseScoresLog(text)
-      const suggestion = suggestNext(entries, track, { file, ...(typeof args.target === 'string' ? { target: args.target } : {}) })
+      const suggestion = suggestNext(entries, track, {
+        file,
+        trackKind: trackObj.kind,
+        // Lane-awareness (Phase 35 Stream OA): on a declared-lane drums track, cold start must
+        // recommend a real lane and a dead legacy drum-voice group must never be recommended.
+        ...(trackObj.kind === 'drums' && trackObj.lanes.length > 0 ? { trackLanes: trackObj.lanes } : {}),
+        ...(typeof args.target === 'string' ? { target: args.target } : {}),
+      })
       return suggestion.reasoning.join('\n') + '\n'
     },
   },
@@ -1359,6 +1616,25 @@ export async function runMcpServer(input: NodeJS.ReadableStream = process.stdin,
       const tool = TOOLS.find((t) => t.name === name)
       if (!tool) {
         send({ jsonrpc: '2.0', id, error: { code: -32602, message: `unknown tool "${String(name)}"` } })
+        continue
+      }
+      // Reject unknown argument keys instead of silently ignoring them (pilot 101: an agent's
+      // plausible-but-wrong `lanes:` guess on beat_humanize was dropped without a word, turning an
+      // intended lane-scoped edit into an unintended full-track one). Every tool's inputSchema
+      // enumerates its real properties, so one dispatch-level check covers the whole surface —
+      // fail-loudly beats a silently different edit, and the isError text names the valid keys so
+      // the agent can self-correct on the next call.
+      const knownKeys = Object.keys((tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {})
+      const unknownKeys = Object.keys(args).filter((k) => !knownKeys.includes(k))
+      if (unknownKeys.length > 0) {
+        send({
+          jsonrpc: '2.0',
+          id,
+          result: toolResultText(
+            `unknown argument${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `"${k}"`).join(', ')} for ${tool.name} (valid: ${knownKeys.join(', ')})`,
+            true,
+          ),
+        })
         continue
       }
       try {

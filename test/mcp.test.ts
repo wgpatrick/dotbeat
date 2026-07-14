@@ -2,8 +2,8 @@
 // over stdio, exactly as an MCP client would.
 
 import assert from 'node:assert/strict'
-import { spawn, type ChildProcess } from 'node:child_process'
-import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -86,6 +86,11 @@ test('beat mcp speaks the MCP handshake and serves the tool suite', async () => 
       'beat_pins',
       'beat_audio_clip',
       'beat_audio_split',
+      'beat_vary',
+      'beat_score',
+      'beat_adopt',
+      'beat_sample',
+      'beat_lane',
     ]) {
       assert.ok(names.includes(expected), `missing tool ${expected}`)
     }
@@ -265,6 +270,455 @@ track lead Lead #c678dd synth
     // 2 steps @ 120bpm = 0.25s of timeline; rate 1.5 (repitch) -> 0.375s of source material
     assert.match(after, /clip c1\n {4}audio smp_kick 0 0\.375/)
     assert.match(after, /clip c1-2\n {4}audio smp_kick 0\.375 0\.5/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Phase 34 Stream NA: the taste loop over MCP — beat_vary generates a batch whose manifest is
+// byte-compatible with the CLI's, beat_score records ranked picks into the same jsonl shape, and
+// the two surfaces are interchangeable per batch (the whole point: an MCP-generated batch scores
+// from the CLI and vice versa). No render:true coverage here — real-time Chromium capture per
+// variant is far too slow for CI; the flag's plumbing is the same renderVaryBatch the CLI's
+// long-standing --render path uses.
+test('tools/call: beat_vary -> beat_score round trip; batches are CLI-compatible both ways', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-vary-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+  const logPath = join(dir, 'scores.jsonl')
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // rung 1: param-group batch — deterministic under seed, manifest carries replayable edits
+    const paramDir = join(dir, 'batch-filter')
+    const vary = await mcp.request('tools/call', {
+      name: 'beat_vary',
+      arguments: { file, track: 'lead', group: 'filter', count: 3, amount: 0.3, seed: 7, out_dir: paramDir },
+    })
+    assert.match(vary.content[0].text, /3 variants of lead\.filter \(amount 0\.3, seed 7\)/)
+    assert.match(vary.content[0].text, /^ {2}v1: lead\./m)
+    for (const f of ['v1.beat', 'v2.beat', 'v3.beat', 'manifest.json']) assert.ok(existsSync(join(paramDir, f)), `missing ${f}`)
+    const manifest = JSON.parse(readFileSync(join(paramDir, 'manifest.json'), 'utf8'))
+    assert.equal(manifest.parent, file)
+    assert.equal(manifest.track, 'lead')
+    assert.equal(manifest.group, 'filter')
+    assert.equal(manifest.count, 3)
+    assert.equal(manifest.amount, 0.3)
+    assert.equal(manifest.seed, 7)
+    assert.equal(manifest.variants.length, 3)
+    for (const v of manifest.variants) assert.ok(Array.isArray(v.edits) && v.edits.length > 0, 'param variants carry replayable edits')
+    // the parent file itself is untouched — variants are copies in the batch dir
+    assert.equal(readFileSync(file, 'utf8'), readFileSync(join(repoRoot, 'examples', 'real-groove.beat'), 'utf8'))
+
+    // score it over MCP: "vN" and bare-"N" pick forms both accepted (Phase 33 ME normalization)
+    const score = await mcp.request('tools/call', { name: 'beat_score', arguments: { dir: paramDir, picks: ['v2', '1'], log: logPath } })
+    assert.match(score.content[0].text, /scored .*batch-filter: v2 > v1 -> /)
+    assert.match(score.content[0].text, /to adopt the winner: beat adopt .* \(or replay just its edits: beat set .* lead\./)
+    const entries = readFileSync(logPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+    assert.equal(entries.length, 1)
+    assert.deepEqual(entries[0].picks.map((p: { rank: number; variant: string }) => [p.rank, p.variant]), [[1, 'v2.beat'], [2, 'v1.beat']])
+    assert.ok(Array.isArray(entries[0].picks[0].edits), 'picks carry the manifest edits')
+    assert.deepEqual(entries[0].rejected, ['v3.beat'])
+    assert.equal(entries[0].group, 'filter')
+    assert.equal(entries[0].seed, 7)
+    assert.equal(entries[0].parentSha256, manifest.parentSha256)
+
+    // cross-surface: the CLI scores the SAME MCP-generated batch into the same log
+    const cliOut = execFileSync(process.execPath, [join(repoRoot, 'cli', 'beat.mjs'), 'score', paramDir, '3', '--log', logPath], { encoding: 'utf8' })
+    assert.match(cliOut, /scored .*batch-filter: v3 -> /)
+    const after = readFileSync(logPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+    assert.equal(after.length, 2)
+    assert.deepEqual(Object.keys(after[1]), Object.keys(after[0]), 'CLI and MCP write the identical entry shape')
+
+    // ...and beat_suggest parses the combined log (the jsonl really is one shared exhaust)
+    const suggest = await mcp.request('tools/call', { name: 'beat_suggest', arguments: { file, track: 'lead', log: logPath } })
+    assert.match(suggest.content[0].text, /filter/)
+
+    // rung 2: feel batch — recipe manifest, lane scoping, cp-style adopt hint
+    const feelDir = join(dir, 'batch-feel')
+    const feel = await mcp.request('tools/call', {
+      name: 'beat_vary',
+      arguments: { file, track: 'drums', group: 'feel', count: 2, seed: 5, timing: 0.2, lanes: ['hat'], out_dir: feelDir },
+    })
+    assert.match(feel.content[0].text, /2 feel variants of drums \(seed 5\)/)
+    const feelManifest = JSON.parse(readFileSync(join(feelDir, 'manifest.json'), 'utf8'))
+    assert.equal(feelManifest.group, 'feel')
+    assert.ok(!('amount' in feelManifest), 'feel manifests carry no amount key (same as the CLI)')
+    assert.match(feelManifest.variants[0].recipe, /humanize seed=5 timing=0\.2 .*lanes=hat/)
+    const feelScore = await mcp.request('tools/call', { name: 'beat_score', arguments: { dir: feelDir, picks: ['2'], log: logPath } })
+    assert.match(feelScore.content[0].text, /to adopt the winner \(humanize seed=6 .*\): beat adopt .*batch-feel v2 \(or the beat_adopt tool\)/)
+
+    // ...and the reverse cross-surface direction: beat_score reads a CLI-generated batch
+    const cliBatch = join(dir, 'batch-cli')
+    execFileSync(process.execPath, [join(repoRoot, 'cli', 'beat.mjs'), 'vary', file, 'lead', 'env', '--count', '2', '--seed', '11', '--out-dir', cliBatch], { encoding: 'utf8' })
+    const cliScored = await mcp.request('tools/call', { name: 'beat_score', arguments: { dir: cliBatch, picks: ['v1'], log: logPath } })
+    assert.match(cliScored.content[0].text, /scored .*batch-cli: v1 -> /)
+
+    // error paths surface as isError tool results with the CLI's own messages
+    const badPick = await mcp.request('tools/call', { name: 'beat_score', arguments: { dir: paramDir, picks: ['9'], log: logPath } })
+    assert.equal(badPick.isError, true)
+    assert.match(badPick.content[0].text, /pick "9" is not a variant number 1-3 \(accepts "N" or "vN"\)/)
+    const dupPicks = await mcp.request('tools/call', { name: 'beat_score', arguments: { dir: paramDir, picks: ['1', 'v1'], log: logPath } })
+    assert.equal(dupPicks.isError, true)
+    assert.match(dupPicks.content[0].text, /picks must be distinct/)
+    const noBatch = await mcp.request('tools/call', { name: 'beat_score', arguments: { dir: join(dir, 'nope'), picks: ['1'] } })
+    assert.equal(noBatch.isError, true)
+    assert.match(noBatch.content[0].text, /no such batch directory or missing manifest\.json/)
+    const badGroup = await mcp.request('tools/call', { name: 'beat_vary', arguments: { file, track: 'lead', group: 'wobble' } })
+    assert.equal(badGroup.isError, true)
+    assert.match(badGroup.content[0].text, /unknown group "wobble"/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Phase 34 Stream NA: media registration + sample-backed lanes over MCP — beat_sample mirrors
+// `beat sample` (sha256 computed server-side, path stored/resolved RELATIVE to the .beat file,
+// same exists-check message) and beat_lane mirrors `beat lane` (gain/tune defaults, "none" to
+// revert, register-first enforcement).
+test('tools/call: beat_sample registers media relative to the .beat; beat_lane backs a drum lane with it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-sample-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+  mkdirSync(join(dir, 'media'))
+  writeFileSync(join(dir, 'media', 'kick.wav'), 'RIFF-not-really-a-wav — format edits never decode audio')
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // happy path: path is relative to the .beat file (NOT the server cwd, which is elsewhere)
+    const reg = await mcp.request('tools/call', { name: 'beat_sample', arguments: { file, sample_id: 'smp_kick', path: 'media/kick.wav' } })
+    assert.match(reg.content[0].text, /registered smp_kick: sha256:[0-9a-f]{12}\.\.\. media\/kick\.wav/)
+    assert.match(readFileSync(file, 'utf8'), /^ {2}sample smp_kick sha256:[0-9a-f]{64} media\/kick\.wav$/m)
+
+    // error: missing file — the CLI's own message, as an isError result
+    const missing = await mcp.request('tools/call', { name: 'beat_sample', arguments: { file, sample_id: 'smp_ghost', path: 'media/ghost.wav' } })
+    assert.equal(missing.isError, true)
+    assert.match(missing.content[0].text, /no file at media\/ghost\.wav \(relative to .*\) — put the audio next to the project first/)
+
+    // happy path: back a lane with the registered sample (explicit gain/tune)
+    const lane = await mcp.request('tools/call', { name: 'beat_lane', arguments: { file, track: 'drums', lane: 'kick', sample_id: 'smp_kick', gain_db: -3, tune: 2 } })
+    assert.match(lane.content[0].text, /drums: kick lane synth voice -> smp_kick \(-3 dB, 2 st\)/)
+    assert.match(readFileSync(file, 'utf8'), /^ {2}lane kick smp_kick -3 2$/m)
+
+    // ..."none" reverts to the synthesized voice
+    const cleared = await mcp.request('tools/call', { name: 'beat_lane', arguments: { file, track: 'drums', lane: 'kick', sample_id: 'none' } })
+    assert.match(cleared.content[0].text, /drums: kick lane smp_kick \(-3 dB, 2 st\) -> synth voice/)
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /^ {2}lane kick /m)
+
+    // error: unregistered sample id — register-first is enforced with the core's own message
+    const badLane = await mcp.request('tools/call', { name: 'beat_lane', arguments: { file, track: 'drums', lane: 'kick', sample_id: 'smp_ghost' } })
+    assert.equal(badLane.isError, true)
+    assert.match(badLane.content[0].text, /no sample "smp_ghost" in the media block/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Pilot 101: two fixes. (1) Unknown argument keys are rejected at the dispatch layer instead of
+// silently ignored — an agent's plausible-but-wrong arg guess (e.g. `lanes` on beat_humanize,
+// which only exists on beat_vary) must fail loudly, not silently widen the edit to the whole
+// track. (2) beat_suggest validates track existence and passes the track's kind, matching the
+// CLI's Phase-33 fix — the drift pilot 101 caught.
+test('tools/call: unknown argument keys are rejected loudly, naming the valid ones', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-unknown-arg-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // the exact pilot-101 trap: beat_humanize has no `lanes` key (its lane scoping is `lanes` on
+    // beat_vary but `lanes` here was a guess) — must be an isError naming the valid keys, and the
+    // file must be untouched
+    const before = readFileSync(file, 'utf8')
+    const res = await mcp.request('tools/call', { name: 'beat_humanize', arguments: { file, track: 'drums', lanez: 'hat' } })
+    assert.equal(res.isError, true)
+    assert.match(res.content[0].text, /unknown argument "lanez" for beat_humanize \(valid: .*track.*\)/)
+    assert.equal(readFileSync(file, 'utf8'), before)
+
+    // valid calls still work unchanged
+    const ok = await mcp.request('tools/call', { name: 'beat_inspect', arguments: { file } })
+    assert.equal(ok.isError ?? false, false)
+  } finally {
+    mcp.close()
+  }
+})
+
+test('tools/call: beat_suggest validates the track exists (CLI parity, pilot 101)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-suggest-validate-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    const bad = await mcp.request('tools/call', { name: 'beat_suggest', arguments: { file, track: 'nope' } })
+    assert.equal(bad.isError, true)
+    assert.match(bad.content[0].text, /no track "nope" \(have: .*\)/)
+
+    // a real synth track's cold start must not recommend a drums-only group (kind-aware, like the CLI)
+    const good = await mcp.request('tools/call', { name: 'beat_suggest', arguments: { file, track: 'bass' } })
+    assert.equal(good.isError ?? false, false)
+    assert.doesNotMatch(good.content[0].text, /beat vary .* bass (kick|snare|hats)\b/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Phase 35 Stream OC: the MCP-native adopt (pilot 101's "a feel winner is unadoptable MCP-only"),
+// the next-to-the-.beat out_dir default (pilot 101 medium 4 — the server cwd is invisible to a
+// typical MCP client), and beat_vary's selection-scope argument validation. The happy selection
+// path (a real daemon serving a real selection) is covered in vary-scope-selection.test.ts,
+// which owns the daemon harness — here we prove the argument contract mirrors the CLI's.
+test('tools/call: beat_adopt round trip with sha guard; out_dir defaults next to the .beat; scope args validate', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-adopt-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // out_dir default: no out_dir given, server cwd is the repo — the batch must land NEXT TO
+    // the .beat file, not wherever the server happens to be running
+    const vary = await mcp.request('tools/call', { name: 'beat_vary', arguments: { file, track: 'lead', group: 'filter', count: 3, seed: 21 } })
+    assert.equal(vary.isError ?? false, false, vary.content[0].text)
+    const batch = join(dir, 'vary-filter-21')
+    assert.ok(existsSync(join(batch, 'manifest.json')), 'default out_dir sits next to the .beat file')
+    assert.ok(!existsSync(join(repoRoot, 'vary-filter-21')), 'nothing scattered into the server cwd')
+
+    // adopt v2: parent bytes become the picked variant, response reports the adopted edits
+    const adopt = await mcp.request('tools/call', { name: 'beat_adopt', arguments: { dir: batch, pick: 'v2' } })
+    assert.equal(adopt.isError ?? false, false, adopt.content[0].text)
+    assert.match(adopt.content[0].text, /adopted v2 -> .*song\.beat \(lead\./)
+    assert.equal(readFileSync(file, 'utf8'), readFileSync(join(batch, 'v2.beat'), 'utf8'))
+
+    // the parent has now moved on relative to the manifest — a second adopt must refuse...
+    const refused = await mcp.request('tools/call', { name: 'beat_adopt', arguments: { dir: batch, pick: '1' } })
+    assert.equal(refused.isError, true)
+    assert.match(refused.content[0].text, /has changed since this batch was generated/)
+    assert.equal(readFileSync(file, 'utf8'), readFileSync(join(batch, 'v2.beat'), 'utf8'), 'refusal leaves the parent untouched')
+
+    // ...unless forced
+    const forced = await mcp.request('tools/call', { name: 'beat_adopt', arguments: { dir: batch, pick: '1', force: true } })
+    assert.equal(forced.isError ?? false, false, forced.content[0].text)
+    assert.match(forced.content[0].text, /\(forced: the parent had changed/)
+    assert.equal(readFileSync(file, 'utf8'), readFileSync(join(batch, 'v1.beat'), 'utf8'))
+
+    // adopt error paths use the shared batch error texts
+    const badPick = await mcp.request('tools/call', { name: 'beat_adopt', arguments: { dir: batch, pick: 'v9' } })
+    assert.equal(badPick.isError, true)
+    assert.match(badPick.content[0].text, /pick "v9" is not a variant number 1-3/)
+    const noBatch = await mcp.request('tools/call', { name: 'beat_adopt', arguments: { dir: join(dir, 'nope'), pick: '1' } })
+    assert.equal(noBatch.isError, true)
+    assert.match(noBatch.content[0].text, /no such batch directory or missing manifest\.json/)
+
+    // selection-scope argument contract, mirroring the CLI's own rules and error texts
+    const noPort = await mcp.request('tools/call', { name: 'beat_vary', arguments: { file, track: 'drums', group: 'feel', scope: 'selection', seed: 1 } })
+    assert.equal(noPort.isError, true)
+    assert.match(noPort.content[0].text, /scope "selection" needs port/)
+    const withLanes = await mcp.request('tools/call', {
+      name: 'beat_vary',
+      arguments: { file, track: 'drums', group: 'feel', scope: 'selection', port: 9999, lanes: ['hat'], seed: 1 },
+    })
+    assert.equal(withLanes.isError, true)
+    assert.match(withLanes.content[0].text, /cannot be combined with lanes\/ids/)
+    const paramScope = await mcp.request('tools/call', { name: 'beat_vary', arguments: { file, track: 'lead', group: 'filter', scope: 'selection', port: 9999, seed: 1 } })
+    assert.equal(paramScope.isError, true)
+    assert.match(paramScope.content[0].text, /only applies to "feel"/)
+    const badScope = await mcp.request('tools/call', { name: 'beat_vary', arguments: { file, track: 'drums', group: 'feel', scope: 'bars', port: 9999, seed: 1 } })
+    assert.equal(badScope.isError, true)
+    assert.match(badScope.content[0].text, /scope only supports "selection"/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Phase 35 Stream OB: the stale-legacy cleanup is reachable MCP-natively (beat_lane clear_legacy),
+// so an MCP-only agent that sees beat_inspect's flag isn't stranded with a CLI-only fix.
+test('tools/call: beat_lane clear_legacy drops stale v0.5 lane lines on a declared-lane track, refuses on legacy', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-clear-legacy-test-'))
+  const file = join(dir, 'song.beat')
+  writeFileSync(
+    file,
+    `format_version 0.10
+bpm 120
+loop_bars 1
+selected_track dr
+
+media
+  sample kick-909 sha256:${'d'.repeat(64)} media/kick.wav
+
+track dr Drums #e06c75 drums
+  synth
+    osc sawtooth
+    volume -10
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+  lane kick synth:membrane
+  lane snare synth:noise
+  lane kick kick-909 -2 -3
+  hit h1 kick 0 0.9
+`,
+  )
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // beat_inspect flags the stale line (same text surface as the CLI)
+    const inspect = await mcp.request('tools/call', { name: 'beat_inspect', arguments: { file } })
+    assert.match(inspect.content[0].text, /legacy lane lines \(ignored by playback\): kick/)
+
+    // mutually exclusive with lane/sample_id — loud, not silently ignored
+    const mixed = await mcp.request('tools/call', { name: 'beat_lane', arguments: { file, track: 'dr', lane: 'kick', sample_id: 'none', clear_legacy: true } })
+    assert.equal(mixed.isError, true)
+    assert.match(mixed.content[0].text, /do not pass lane\/sample_id/)
+
+    // the cleanup, phrased as stale-data removal (not a voice change)
+    const cleared = await mcp.request('tools/call', { name: 'beat_lane', arguments: { file, track: 'dr', clear_legacy: true } })
+    assert.match(cleared.content[0].text, /dr: stale legacy lane line kick \(ignored by playback\) kick-909 \(-2 dB, -3 st\) -> \(removed\)/)
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /lane kick kick-909/)
+    assert.match(readFileSync(file, 'utf8'), /^ {2}lane kick synth:membrane$/m)
+    const after = await mcp.request('tools/call', { name: 'beat_inspect', arguments: { file } })
+    assert.doesNotMatch(after.content[0].text, /legacy lane lines/)
+
+    // legacy implicit-5-lane track: those lines are live — refuse with the core's own message
+    const legacyFile = join(dir, 'legacy.beat')
+    copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), legacyFile)
+    const refused = await mcp.request('tools/call', { name: 'beat_lane', arguments: { file: legacyFile, track: 'drums', clear_legacy: true } })
+    assert.equal(refused.isError, true)
+    assert.match(refused.content[0].text, /declares no lanes/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Pilot 101: two fixes. (1) Unknown argument keys are rejected at the dispatch layer instead of
+// silently ignored — an agent's plausible-but-wrong arg guess (e.g. `lanes` on beat_humanize,
+// which only exists on beat_vary) must fail loudly, not silently widen the edit to the whole
+// track. (2) beat_suggest validates track existence and passes the track's kind, matching the
+// CLI's Phase-33 fix — the drift pilot 101 caught.
+test('tools/call: unknown argument keys are rejected loudly, naming the valid ones', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-unknown-arg-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // the exact pilot-101 trap: beat_humanize has no `lanes` key (its lane scoping is `lanes` on
+    // beat_vary but `lanes` here was a guess) — must be an isError naming the valid keys, and the
+    // file must be untouched
+    const before = readFileSync(file, 'utf8')
+    const res = await mcp.request('tools/call', { name: 'beat_humanize', arguments: { file, track: 'drums', lanez: 'hat' } })
+    assert.equal(res.isError, true)
+    assert.match(res.content[0].text, /unknown argument "lanez" for beat_humanize \(valid: .*track.*\)/)
+    assert.equal(readFileSync(file, 'utf8'), before)
+
+    // valid calls still work unchanged
+    const ok = await mcp.request('tools/call', { name: 'beat_inspect', arguments: { file } })
+    assert.equal(ok.isError ?? false, false)
+  } finally {
+    mcp.close()
+  }
+})
+
+test('tools/call: beat_suggest validates the track exists (CLI parity, pilot 101)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-suggest-validate-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    const bad = await mcp.request('tools/call', { name: 'beat_suggest', arguments: { file, track: 'nope' } })
+    assert.equal(bad.isError, true)
+    assert.match(bad.content[0].text, /no track "nope" \(have: .*\)/)
+
+    // a real synth track's cold start must not recommend a drums-only group (kind-aware, like the CLI)
+    const good = await mcp.request('tools/call', { name: 'beat_suggest', arguments: { file, track: 'bass' } })
+    assert.equal(good.isError ?? false, false)
+    assert.doesNotMatch(good.content[0].text, /beat vary .* bass (kick|snare|hats)\b/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Phase 35 Stream OD: reference mix profile over MCP — beat_metrics' save_profile and beat_lint's
+// ref ride the same src/metrics/profile.ts code path as the CLI flags, so a profile written on
+// either surface reads on either.
+test('tools/call: beat_metrics save_profile writes a profile; beat_lint ref compares against it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-profile-test-'))
+  const wav = (path: string, amp: number) => {
+    // tiny 16-bit PCM stereo 997 Hz sine — enough for metrics, no render involved
+    const FS = 44100
+    const n = FS
+    const dataSize = n * 2 * 2
+    const buf = Buffer.alloc(44 + dataSize)
+    buf.write('RIFF', 0); buf.writeUInt32LE(36 + dataSize, 4); buf.write('WAVE', 8)
+    buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(2, 22)
+    buf.writeUInt32LE(FS, 24); buf.writeUInt32LE(FS * 4, 28); buf.writeUInt16LE(4, 32); buf.writeUInt16LE(16, 34)
+    buf.write('data', 36); buf.writeUInt32LE(dataSize, 40)
+    let o = 44
+    for (let i = 0; i < n; i++) {
+      const v = Math.round(amp * Math.sin((2 * Math.PI * 997 * i) / FS) * 32767)
+      buf.writeInt16LE(v, o); buf.writeInt16LE(v, o + 2); o += 4
+    }
+    writeFileSync(path, buf)
+  }
+  wav(join(dir, 'ref.wav'), 0.4)
+  wav(join(dir, 'mix.wav'), 0.1) // 12 dB quieter, same spectrum
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    const metrics = await mcp.request('tools/call', {
+      name: 'beat_metrics',
+      arguments: { file: join(dir, 'ref.wav'), save_profile: join(dir, 'ref.json') },
+    })
+    const parsed = JSON.parse(metrics.content[0].text)
+    assert.equal(parsed.savedProfile, join(dir, 'ref.json'))
+    const profile = JSON.parse(readFileSync(join(dir, 'ref.json'), 'utf8')) as { format: string; source: string }
+    assert.equal(profile.format, 'dotbeat-mix-profile')
+    assert.equal(profile.source, 'ref.wav')
+
+    const lintRes = await mcp.request('tools/call', {
+      name: 'beat_lint',
+      arguments: { file: join(dir, 'mix.wav'), ref: join(dir, 'ref.json') },
+    })
+    assert.match(lintRes.content[0].text, /\[ref-loudness\].*12\.0 LU quieter than the reference \(ref\.wav/)
+
+    // one comparison frame at a time — tool-level error, agent-visible
+    const conflict = await mcp.request('tools/call', {
+      name: 'beat_lint',
+      arguments: { file: join(dir, 'mix.wav'), ref: join(dir, 'ref.json'), target_lufs: -14 },
+    })
+    assert.equal(conflict.isError, true)
+    assert.match(conflict.content[0].text, /pick one comparison frame/)
   } finally {
     mcp.close()
   }

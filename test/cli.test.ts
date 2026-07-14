@@ -134,3 +134,207 @@ test('beat mcp-init errors on a missing project file', () => {
   const out = beat(['mcp-init', join(dir, 'nope.beat')], { expectExit: 2 })
   assert.match(out, /does not exist/)
 })
+
+// Phase 34 Stream NB (pilots 94 & 97): per-command help — `beat <cmd> --help` (only as the FIRST
+// arg after the command) and `beat help <cmd>` print just that command's block plus a "related:"
+// family pointer, instead of the monolithic no-args dump.
+test('beat <cmd> --help prints only that command\'s block', () => {
+  const out = beat(['quantize', '--help'])
+  assert.match(out, /^usage:\n {2}beat quantize <file> <track>/)
+  assert.match(out, /snap notes toward the grid/)
+  // ONLY the quantize block — no other command, no paths footer, and much shorter than the dump
+  assert.doesNotMatch(out, /beat init|beat humanize|paths for set/)
+  assert.ok(out.split('\n').length < 8, `expected a short block, got ${out.split('\n').length} lines`)
+  // --help is intercepted only as the first arg, so it can't shadow a command's own later args —
+  // and the full no-args dump still ends with set's paths footer as it always has
+  const dump = beat([])
+  assert.match(dump, /^usage:\n {2}beat init /)
+  assert.match(dump, /paths for set: bpm \| loop_bars/)
+})
+
+test('beat help <cmd> works and appends the command\'s "related:" family', () => {
+  const out = beat(['help', 'vary'])
+  assert.match(out, /^usage:\n {2}beat vary <file> <track> <group-or-lane>/)
+  assert.match(out, /beat vary --groups/)
+  assert.match(out, /\nrelated: beat score, beat adopt, beat suggest\n$/)
+  // set's per-command view carries its paths footer
+  const setHelp = beat(['set', '--help'])
+  assert.match(setHelp, /paths for set: bpm \| loop_bars/)
+  // a family in the middle: pin points back at the rest of the versioning loop
+  const pinHelp = beat(['help', 'pin'])
+  assert.match(pinHelp, /related: beat checkpoint, beat history, beat restore, beat unpin, beat pins/)
+})
+
+test('beat help <unknown> is the standard unknown-command error, exit 2', () => {
+  const out = beat(['help', 'nope'], { expectExit: 2 })
+  assert.match(out, /unknown command "nope"/)
+  assert.match(out, /usage:/) // the full dump follows, same as any unknown command
+  // ...and an unknown command with --help behaves the same way
+  const out2 = beat(['bogus', '--help'], { expectExit: 2 })
+  assert.match(out2, /unknown command "bogus"/)
+})
+
+// ---- Phase 35 Stream OD: reference mix profile (save-profile / lint --ref) ------------------
+
+/** Tiny 16-bit PCM stereo wav of a sine tone — enough signal for metrics, no renders involved. */
+function writeTestWav(path: string, freq: number, amp: number, seconds = 1): void {
+  const FS = 44100
+  const n = Math.round(seconds * FS)
+  const ch = 2
+  const dataSize = n * ch * 2
+  const buf = Buffer.alloc(44 + dataSize)
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + dataSize, 4); buf.write('WAVE', 8)
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(ch, 22)
+  buf.writeUInt32LE(FS, 24); buf.writeUInt32LE(FS * ch * 2, 28); buf.writeUInt16LE(ch * 2, 32); buf.writeUInt16LE(16, 34)
+  buf.write('data', 36); buf.writeUInt32LE(dataSize, 40)
+  let o = 44
+  for (let i = 0; i < n; i++) {
+    const v = Math.round(amp * Math.sin((2 * Math.PI * freq * i) / FS) * 32767)
+    for (let c = 0; c < ch; c++) { buf.writeInt16LE(v, o); o += 2 }
+  }
+  writeFileSync(path, buf)
+}
+
+test('beat metrics --save-profile writes a provenance-carrying profile; beat lint --ref compares against it', () => {
+  const dir = dirname(tempProject())
+  const refWav = join(dir, 'ref.wav')
+  const mixWav = join(dir, 'mix.wav')
+  writeTestWav(refWav, 997, 0.4)
+  writeTestWav(mixWav, 997, 0.1) // 12 dB quieter, same spectrum
+
+  const out = beat(['metrics', refWav, '--save-profile', join(dir, 'ref.json')])
+  assert.match(out, /reference profile saved to .*ref\.json/)
+  assert.match(out, /LUFS integrated/) // the ordinary metrics readout still prints
+  const profile = JSON.parse(readFileSync(join(dir, 'ref.json'), 'utf8')) as { format: string; source: string; createdAt: string; tool: string }
+  assert.equal(profile.format, 'dotbeat-mix-profile')
+  assert.equal(profile.source, 'ref.wav')
+  assert.ok(profile.createdAt && profile.tool, 'provenance fields present')
+
+  // ref-mode findings name the reference value, the measured value, and the edit to try
+  const lintOut = beat(['lint', mixWav, '--ref', join(dir, 'ref.json')])
+  assert.match(lintOut, /\[ref-loudness\] integrated loudness -\d+\.\d LUFS is 12\.0 LU quieter than the reference \(ref\.wav: -\d+\.\d LUFS\)/)
+  assert.match(lintOut, /fix: raise all track volumes/)
+  // --json carries the same findings for machine consumers
+  const json = JSON.parse(beat(['lint', mixWav, '--ref', join(dir, 'ref.json'), '--json'])) as { rule: string }[]
+  assert.ok(json.some((f) => f.rule === 'ref-loudness'))
+})
+
+test('beat lint --ref with --target errors: one comparison frame at a time', () => {
+  const dir = dirname(tempProject())
+  const mixWav = join(dir, 'mix.wav')
+  writeTestWav(mixWav, 997, 0.3)
+  writeTestWav(join(dir, 'ref.wav'), 997, 0.4)
+  beat(['metrics', join(dir, 'ref.wav'), '--save-profile', join(dir, 'ref.json')])
+  const out = beat(['lint', mixWav, '--ref', join(dir, 'ref.json'), '--target', '-14'], { expectExit: 2 })
+  assert.match(out, /pick one comparison frame: --ref .* or --target/)
+  // and a missing/garbage profile fails with pointers, not a stack trace
+  const missing = beat(['lint', mixWav, '--ref', join(dir, 'nope.json')], { expectExit: 2 })
+  assert.match(missing, /no profile at .*nope\.json — write one with: beat metrics/)
+  writeFileSync(join(dir, 'garbage.json'), '{"some":"json"}')
+  const garbage = beat(['lint', mixWav, '--ref', join(dir, 'garbage.json')], { expectExit: 2 })
+  assert.match(garbage, /not a dotbeat mix profile/)
+})
+
+// Phase 35 Stream OB: stale-legacy laneSamples surface — inspect flags them (text AND --json stay
+// consistent), `beat lane --clear-legacy` is the explicit one-shot cleanup, and the file keeps
+// round-tripping them untouched until that command runs (D4).
+test('beat inspect flags stale legacy lane lines; beat lane --clear-legacy removes them explicitly', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-cli-test-'))
+  const file = join(dir, 'song.beat')
+  writeFileSync(
+    file,
+    `format_version 0.10
+bpm 120
+loop_bars 1
+selected_track dr
+
+media
+  sample kick-909 sha256:${'d'.repeat(64)} media/kick.wav
+
+track dr Drums #e06c75 drums
+  synth
+    osc sawtooth
+    volume -10
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+  lane kick synth:membrane
+  lane snare synth:noise
+  lane kick kick-909 -2 -3
+  hit h1 kick 0 0.9
+`,
+  )
+  const before = readFileSync(file, 'utf8')
+
+  // Text view: per-lane truth + the stale flag; no bogus synth: header on the drums track.
+  const text = beat(['inspect', file])
+  assert.match(text, /^ {2}bus: -10 dB/m)
+  assert.doesNotMatch(text, /^ {2}synth: /m)
+  assert.match(text, /^ {4}kick {4}synth:membrane$/m)
+  assert.match(text, /legacy lane lines \(ignored by playback\): kick — .*beat lane <file> dr --clear-legacy/)
+  // --json view carries the same facts structurally: declared lanes + the stale laneSamples bag.
+  const json = JSON.parse(beat(['inspect', file, '--json'])) as { tracks: { id: string; lanes: { name: string }[]; laneSamples: Record<string, unknown> }[] }
+  const dr = json.tracks.find((t) => t.id === 'dr')!
+  assert.deepEqual(dr.lanes.map((l) => l.name), ['kick', 'snare'])
+  assert.deepEqual(Object.keys(dr.laneSamples), ['kick'])
+  // Reading never mutates: the stale line survives inspect (D4 — only the explicit cleanup drops it).
+  assert.equal(readFileSync(file, 'utf8'), before)
+
+  const out = beat(['lane', file, 'dr', '--clear-legacy'])
+  // The edit list phrases this as stale-data removal, NOT a voice change ("-> synth voice" would
+  // contradict the 2026-07-13 setLaneSample fix: on declared-lane tracks playback never read this).
+  assert.match(out, /dr: stale legacy lane line kick \(ignored by playback\) kick-909 \(-2 dB, -3 st\) -> \(removed\)/)
+  assert.match(out, /cleared 1 stale legacy lane line on dr: kick/)
+  assert.doesNotMatch(readFileSync(file, 'utf8'), /lane kick kick-909/)
+  assert.match(readFileSync(file, 'utf8'), /^ {2}lane kick synth:membrane$/m)
+  assert.doesNotMatch(beat(['inspect', file]), /legacy lane lines/)
+
+  // Nothing left to clear -> loud error, exit 2 (never a silent no-op).
+  const err = beat(['lane', file, 'dr', '--clear-legacy'], { expectExit: 2 })
+  assert.match(err, /no legacy lane-sample lines to clear/)
+})
+
+// Phase 35 Stream OA — lane-aware drum vary over the real CLI (pilot 101's high finding). The
+// unit-level guarantees live in test/vary-lanes.test.ts; these check the end-to-end story: a
+// fresh CLI drums track is declared-lane, `vary <lane>` writes a batch whose manifest edits
+// replay through `beat set` byte-identically (the adopt contract), the legacy group name errors
+// loudly, and `--groups` is track-aware when given a file+track.
+test('beat vary <lane> end-to-end: batch, loud legacy error, and beat-set adopt replay', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-cli-lane-vary-'))
+  const file = join(dir, 'groove.beat')
+  beat(['init', file])
+  beat(['add-track', file, 'drums', 'drums']) // CLI default: the declared 12-lane GM kit
+  const err = beat(['vary', file, 'drums', 'hats', '--seed', '7'], { expectExit: 2 })
+  assert.match(err, /legacy track-wide drum-voice params/)
+  assert.match(err, /kick, snare, rimshot/)
+  const out = beat(['vary', file, 'drums', 'kick', '--seed', '7', '--count', '3', '--out-dir', join(dir, 'batch')])
+  assert.match(out, /3 variants of drums\.kick/)
+  assert.match(out, /drums\.lane\.kick\./)
+  const manifest = JSON.parse(readFileSync(join(dir, 'batch', 'manifest.json'), 'utf8')) as { variants: { file: string; edits: string[] }[] }
+  // adopt the "winner" exactly the way `beat score`'s hint says to: beat set <file> <edits...>
+  const pairs = manifest.variants[0]!.edits.flatMap((e) => {
+    const sp = e.indexOf(' ')
+    return [e.slice(0, sp), e.slice(sp + 1)]
+  })
+  beat(['set', file, ...pairs])
+  assert.equal(readFileSync(file, 'utf8'), readFileSync(join(dir, 'batch', 'v1.beat'), 'utf8'), 'beat set replay must reproduce the variant file byte-identically')
+})
+
+test('beat vary --groups is track-aware with a file+track, and documents both modes without', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-cli-lane-groups-'))
+  const file = join(dir, 'groove.beat')
+  beat(['init', file])
+  beat(['add-track', file, 'drums', 'drums'])
+  const aware = beat(['vary', file, 'drums', '--groups'])
+  assert.match(aware, /declared-lane drums track "drums"/)
+  assert.match(aware, /^kick {6}/m)
+  assert.match(aware, /^tom_lo {4}/m)
+  assert.match(aware, /legacy groups kick\/snare\/hats error on this track/)
+  const stat = beat(['vary', '--groups'])
+  assert.match(stat, /^kick {6}/m)
+  assert.match(stat, /LEGACY drums tracks only/)
+})

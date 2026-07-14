@@ -47,7 +47,7 @@ startup, not hot-reloaded).
 not just reading source). Concretely, these must go through the raw CLI even inside an MCP
 session:
 
-- `beat vary` / `beat score` — the variation-and-audition loop (no MCP equivalent yet).
+- `beat vary` / `beat score` / `beat adopt` / `beat suggest` — the variation-and-taste loop, fully mirrored over MCP (beat_vary/beat_score/beat_adopt/beat_suggest). On declared-lane drums tracks, vary targets a LANE NAME (kick, hat, tom_lo, ...) — its own audible params — not the legacy kick/snare/hats groups (those error there). Pass `--audition` (or audition:true) for ONE stitched audition.wav with a timecode index instead of N files; adopt the winner with `beat adopt <batch-dir> <pick>`. Batch dirs and beat-scores.jsonl default NEXT TO the .beat file.
 - `beat sample` / `beat lane` — registering/assigning media.
 - `beat daemon` — starting the daemon that the selection protocol and `--scope selection` need.
 - `beat clip` / `beat scene` (the MCP tool `beat_song` covers clip-snapshot + scene + song

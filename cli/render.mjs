@@ -118,11 +118,30 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   const page = await browser.newPage()
   const pageErrors = []
   page.on('pageerror', (e) => pageErrors.push(String(e)))
+  // Surface the page's own warnings/errors on stderr — the engine reports media-load failures
+  // via console.warn ("drum lane X sample failed to load"), which used to vanish in headless
+  // renders, leaving a sample-backed lane to fall back to its synth voice with zero signal
+  // anywhere (owner's dogfood session, 2026-07-13).
+  page.on('console', (msg) => {
+    const type = msg.type()
+    if (type === 'warning' || type === 'error') console.error(`[page ${type}] ${msg.text()}`)
+  })
 
   console.error('loading dotbeat ui (headless)...')
   await page.goto(`${served.url}/?daw=${daemon.port}`, { waitUntil: 'load' })
   // wait for the engine to exist AND the store to have filled from the daemon
   await page.waitForFunction(() => window.__engine && window.__store && window.__store.getState().doc, { timeout: 15000 })
+  // ...AND for in-flight media (drum one-shot samples, soundfonts, audio-clip buffers) to finish
+  // loading. The GUI never needs this wait — media resolves long before a human presses play —
+  // but a headless render plays ~immediately, and anything still pending sounds as its silent
+  // fallback (synth voice / nothing) instead of the sample. Timeout = warn and render anyway (an
+  // honest degraded render beats a hang; the console forwarding above names the failed load).
+  try {
+    await page.waitForFunction(() => typeof window.__engine.pendingMediaCount === 'function' && window.__engine.pendingMediaCount() === 0, { timeout: 30000 })
+  } catch {
+    const n = await page.evaluate(() => (typeof window.__engine.pendingMediaCount === 'function' ? window.__engine.pendingMediaCount() : -1)).catch(() => -1)
+    console.error(`warning: ${n} media load(s) still pending after 30s — sample-backed lanes/clips may play their fallback voice or silence in this render`)
+  }
   if (pageErrors.length) throw new Error('page error(s) before render:\n' + pageErrors.join('\n'))
 
   const close = async () => {
