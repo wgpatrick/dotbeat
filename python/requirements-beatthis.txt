@@ -1,0 +1,14 @@
+# dotbeat `beat analyze --backend beatthis` dependencies (Phase 38 Stream SB).
+#
+# Beat This (CPJKU) — beats + downbeats, no tempo/sections. See python/README.md for the venv
+# install story. pip is BLOCKED in the dev/CI container, so this file is validated OWNER-SIDE via
+# `beat analyze --doctor` after you install it into python/.venv.
+
+torch>=2.0,<3
+
+# beat_this is not on PyPI — install from the project's git repo pinned to an exact commit.
+# NOTE: the sha below is a PLACEHOLDER of the correct 40-hex shape. It MUST be confirmed owner-side
+# against https://github.com/CPJKU/beat_this/commits/main (pip is blocked here, so it could not be
+# verified from the build container). Replace with a real recent commit, then re-run
+# `beat analyze --doctor` to confirm the import resolves.
+beat_this @ git+https://github.com/CPJKU/beat_this@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678  # pin verified owner-side
