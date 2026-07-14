@@ -60,6 +60,42 @@ test('recipes carry --points and --bars when given', () => {
   }
 })
 
+test('--clip targets a named clip; omitting it defaults to the track\'s first clip (pilot 104)', () => {
+  // A track with TWO clips: c1 (first) and c2. Before the --clip selector, automation vary was
+  // hardwired to the first clip, leaving c2's lane unreachable (pilot 104 finding 3).
+  let doc = initDocument({ trackId: 'lead', loopBars: 2 })
+  doc = addNote(doc, 'lead', { pitch: 60, start: 0, duration: 4, velocity: 0.8, id: 'n1' }).doc
+  doc = saveClip(doc, 'lead', 'c1').doc
+  doc = addNote(doc, 'lead', { pitch: 67, start: 8, duration: 4, velocity: 0.8, id: 'n2' }).doc
+  doc = saveClip(doc, 'lead', 'c2').doc
+
+  const laneOn = (v: { doc: typeof doc }, clipId: string) =>
+    v.doc.tracks.find((t) => t.id === 'lead')!.clips.find((c) => c.id === clipId)!.automation.find((l) => l.param === 'cutoff')
+
+  // default: first clip (c1) gets the lane, c2 stays untouched — prior behavior preserved.
+  const dflt = varyAutomation(doc, 'lead', 'cutoff', { count: 2, seed: 5 })
+  for (const v of dflt) {
+    assert.ok(laneOn(v, 'c1'), 'default targets the first clip c1')
+    assert.equal(laneOn(v, 'c2'), undefined, 'default leaves c2 alone')
+    assert.match(v.recipe, /^automate-shape c1 cutoff /)
+  }
+
+  // --clip c2: the SECOND clip gets the lane, c1 stays untouched.
+  const onC2 = varyAutomation(doc, 'lead', 'cutoff', { count: 2, seed: 5, clip: 'c2' })
+  for (const v of onC2) {
+    assert.ok(laneOn(v, 'c2'), '--clip c2 targets c2')
+    assert.equal(laneOn(v, 'c1'), undefined, '--clip c2 leaves c1 alone')
+    assert.match(v.recipe, /^automate-shape c2 cutoff /)
+  }
+
+  // a clip that isn't on the track errors cleanly (BeatVaryError), listing the real clips.
+  assert.throws(() => varyAutomation(doc, 'lead', 'cutoff', { clip: 'nope' }), (err: unknown) => {
+    assert.ok(err instanceof BeatVaryError)
+    assert.match((err as Error).message, /no clip "nope" on track "lead" \(have: c1, c2\)/)
+    return true
+  })
+})
+
 test('varyAutomation guards: no clips, missing track, count range, bad param', () => {
   // a track with no clips has nothing to automate
   const noClip = initDocument({ trackId: 'lead', loopBars: 2 })

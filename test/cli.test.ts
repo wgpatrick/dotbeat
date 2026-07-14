@@ -370,6 +370,25 @@ test('beat source add: offline ingest preps, registers, writes an enforced sidec
   assert.match(readFileSync(file, 'utf8'), /audio smp_src 0 0\.2/)
 })
 
+test('beat source add: re-registering an existing id prints an explicit note (pilot 104)', () => {
+  const file = tempProject()
+  const snareWav = join(repoRoot, 'presets', 'kit-init', 'snare.wav') // a DIFFERENT real wav
+
+  // first registration: no note (fresh id)
+  const first = beat(['source', 'add', file, 'smp_dup', sampleWav])
+  assert.doesNotMatch(first, /note:/, 'a first-time registration has no re-register note')
+
+  // same id, SAME bytes -> quieter "unchanged" note
+  const same = beat(['source', 'add', file, 'smp_dup', sampleWav])
+  assert.match(same, /note: smp_dup already registered \(unchanged\)/)
+
+  // same id, DIFFERENT bytes -> explicit "re-registered ... replaced sha256:... -> ..." note
+  const replaced = beat(['source', 'add', file, 'smp_dup', snareWav])
+  assert.match(replaced, /note: re-registered smp_dup \(replaced sha256:[0-9a-f]{7}\.\.\. -> [0-9a-f]{7}\.\.\.\)/)
+  // and the media block now carries the new sha (the replacement really landed)
+  assert.match(readFileSync(file, 'utf8'), /sample smp_dup sha256:[0-9a-f]{64} media\/smp_dup\.wav/)
+})
+
 test('beat source add: --license passes through to the sidecar (only the Freesound path forces CC0-1.0)', () => {
   const file = tempProject()
   const dir = dirname(file)

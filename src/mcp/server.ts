@@ -1358,9 +1358,16 @@ const TOOLS: ToolDef[] = [
       const result = freesoundId !== undefined
         ? await lib.addFreesoundSource({ beatFile: file, id, freesoundId, note })
         : await lib.addLocalSource({ beatFile: file, id, audioFile: typeof args.audio_file === 'string' ? args.audio_file : undefined, license: typeof args.license === 'string' ? args.license : 'unspecified', note })
+      // Pilot 104 minor: re-registering an existing id silently replaced it. Say so explicitly.
+      const reregisterNote = result.reregistered
+        ? result.reregistered.changed
+          ? `note: re-registered ${result.id} (replaced sha256:${result.reregistered.previousSha256.slice(0, 7)}... -> ${result.sha256.slice(0, 7)}...)\n`
+          : `note: ${result.id} already registered (unchanged)\n`
+        : ''
       return (
         `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +
-        `(${result.durationSeconds}s, license ${result.license})\nprovenance sidecar: ${result.relPath}.json\n`
+        `(${result.durationSeconds}s, license ${result.license})\nprovenance sidecar: ${result.relPath}.json\n` +
+        reregisterNote
       )
     },
   },
@@ -1569,6 +1576,7 @@ const TOOLS: ToolDef[] = [
         swing: { type: 'number', description: 'feel only: offbeat swing 0..1, default 0' },
         points: { type: 'number', description: 'automation:<param> only: breakpoints per generated lane, default 16' },
         bars: { type: 'number', description: 'automation:<param> only: clip span in bars for the generated lane; overrides the clip loop / doc loop_bars' },
+        clip: { type: 'string', description: 'automation:<param> only: WHICH clip on the track to vary the lane on (default the track\'s first clip). Use it when a track has automation on more than one clip so the target is explicit rather than implicitly the first.' },
         lanes: { type: 'array', items: { type: 'string' }, description: 'feel only, drum tracks: scope to these lanes' },
         ids: { type: 'array', items: { type: 'string' }, description: 'feel only: scope to these note/hit ids (alternative to lanes)' },
         scope: { type: 'string', description: 'feel only: "selection" scopes the batch to the user\'s live GUI selection, read from the daemon on `port` (mutually exclusive with lanes/ids)' },
@@ -1624,6 +1632,7 @@ const TOOLS: ToolDef[] = [
           seed,
           ...(typeof args.points === 'number' ? { points: args.points } : {}),
           ...(typeof args.bars === 'number' ? { bars: args.bars } : {}),
+          ...(typeof args.clip === 'string' ? { clip: args.clip } : {}),
         })
         const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group, count, seed, outDir, variants })
         lines.push(`${outDir}/: ${variants.length} automation variants of ${track}.${param} (seed ${seed})`)

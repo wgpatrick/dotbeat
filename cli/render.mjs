@@ -124,7 +124,16 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   // anywhere (owner's dogfood session, 2026-07-13).
   page.on('console', (msg) => {
     const type = msg.type()
-    if (type === 'warning' || type === 'error') console.error(`[page ${type}] ${msg.text()}`)
+    if (type !== 'warning' && type !== 'error') return
+    const text = msg.text()
+    // Pilot 104 low: a benign resource-load 404 (a missing favicon/asset the headless render never
+    // needs) logs to the console as an `error` and clutters render output, reading like a failure.
+    // Drop ONLY that specific "Failed to load resource: ... 404" line. Genuine JS exceptions arrive
+    // via 'pageerror' (thrown, not routed here); the engine's own media-load failures arrive as
+    // console.warn ("... sample failed to load", type 'warning') and are not this pattern, so both
+    // still surface untouched.
+    if (type === 'error' && /Failed to load resource:.*\b404\b/.test(text)) return
+    console.error(`[page ${type}] ${text}`)
   })
 
   console.error('loading dotbeat ui (headless)...')
