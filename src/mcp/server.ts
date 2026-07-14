@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve as pathResolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   parse,
   serialize,
@@ -1230,6 +1230,75 @@ const TOOLS: ToolDef[] = [
       return formatDiff(diffDocuments(before, doc)) + `registered ${id}: sha256:${sha256.slice(0, 12)}... ${samplePath}\n`
     },
   },
+  // ==== Phase 37 Stream RD begin ====
+  {
+    name: 'beat_source_search',
+    description:
+      'Find real, redistributable sounds on Freesound to bring into a project, HARD-FILTERED to Creative Commons 0 (public domain — the only license safe to ship inside a user\'s MIT .beat project; no other license is ever returned). Top-rated first. This is the DISCOVERY step: it returns candidate ids/names/durations/ratings; register a chosen one with beat_source_add (freesound_id). GATED: needs a FREESOUND_API_KEY in the server environment AND network egress to freesound.org — if either is missing it returns an actionable isError telling you which (no stack trace). To ingest audio you already have instead of searching, use beat_source_add with audio_file (no key/network needed).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'what to search for, e.g. "vinyl crackle" or "808 kick"' },
+        max: { type: 'number', description: 'max results to return (default 10)' },
+        dur_min: { type: 'number', description: 'minimum duration in seconds (default 0.05)' },
+        dur_max: { type: 'number', description: 'maximum duration in seconds (default 5)' },
+        out_dir: { type: 'string', description: 'optional: also download each result\'s HQ preview into this dir for auditioning (needs egress)' },
+      },
+      required: ['query'],
+    },
+    handler: async (args) => {
+      const lib = await import(pathToFileURL(join(repoRoot, 'scripts', 'source-lib.mjs')).href)
+      const query = str(args, 'query')
+      const { total, results } = await lib.freesoundSearchCC0({
+        query,
+        max: typeof args.max === 'number' ? args.max : 10,
+        durMin: typeof args.dur_min === 'number' ? args.dur_min : 0.05,
+        durMax: typeof args.dur_max === 'number' ? args.dur_max : 5,
+      })
+      let out = `${total} CC0 result${total === 1 ? '' : 's'} for "${query}" — top ${results.length} by rating:\n`
+      for (const r of results as { id: number; name: string; by: string; duration: number; rating: number | null; url: string }[]) {
+        out += `  #${r.id}  ${r.name} by ${r.by}  (${Number(r.duration).toFixed(2)}s, rating ${r.rating ?? 'n/a'})  ${r.url}\n`
+      }
+      if (typeof args.out_dir === 'string' && args.out_dir !== '') {
+        const saved = await lib.downloadPreviews({ results, outDir: args.out_dir })
+        out += `downloaded ${saved.length} preview${saved.length === 1 ? '' : 's'} into ${args.out_dir}/ for auditioning\n`
+      }
+      out += `register one with beat_source_add (freesound_id)\n`
+      return out
+    },
+  },
+  {
+    name: 'beat_source_add',
+    description:
+      'Ingest a real sound into a .beat project as registered media, prepped through the same trim/fade/peak-normalize pipeline as every bundled one-shot, and write an ENFORCED provenance sidecar (media/<id>.wav.json with source, license, sha256, preparedAt). Two paths: (1) OFFLINE (always available, no key/network) — pass audio_file, a path to audio you already have; its license defaults to "unspecified" (you assert the real license via the license argument — we never guess it). (2) GATED — pass freesound_id (from beat_source_search) to fetch a specific CC0 sound from Freesound and register it with the "CC0-1.0" label; needs FREESOUND_API_KEY + egress, and returns an actionable isError if either is missing. The "CC0-1.0" label is applied ONLY on the Freesound path. Once registered, use the sample id in beat_audio_clip / beat_lane / beat_add_track just like a beat_sample id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'the .beat project file' },
+        sample_id: { type: 'string', description: 'a stable media id, e.g. "smp_crackle"' },
+        audio_file: { type: 'string', description: 'OFFLINE path: a local audio file to prep and ingest' },
+        freesound_id: { type: 'string', description: 'GATED path: a Freesound sound id (from beat_source_search) — mutually exclusive with audio_file' },
+        license: { type: 'string', description: 'offline path only: the license you assert for this file (default "unspecified"); ignored on the Freesound path, which is always CC0-1.0' },
+        note: { type: 'string', description: 'optional human note recorded in the provenance sidecar' },
+      },
+      required: ['file', 'sample_id'],
+    },
+    handler: async (args) => {
+      const lib = await import(pathToFileURL(join(repoRoot, 'scripts', 'source-lib.mjs')).href)
+      const file = str(args, 'file')
+      const id = str(args, 'sample_id')
+      const note = typeof args.note === 'string' ? args.note : undefined
+      const freesoundId = typeof args.freesound_id === 'string' && args.freesound_id !== '' ? args.freesound_id : undefined
+      const result = freesoundId !== undefined
+        ? await lib.addFreesoundSource({ beatFile: file, id, freesoundId, note })
+        : await lib.addLocalSource({ beatFile: file, id, audioFile: typeof args.audio_file === 'string' ? args.audio_file : undefined, license: typeof args.license === 'string' ? args.license : 'unspecified', note })
+      return (
+        `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +
+        `(${result.durationSeconds}s, license ${result.license})\nprovenance sidecar: ${result.relPath}.json\n`
+      )
+    },
+  },
+  // ==== Phase 37 Stream RD end ====
   {
     name: 'beat_lane',
     description:

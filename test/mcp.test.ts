@@ -91,6 +91,8 @@ test('beat mcp speaks the MCP handshake and serves the tool suite', async () => 
       'beat_adopt',
       'beat_sample',
       'beat_lane',
+      'beat_source_search',
+      'beat_source_add',
     ]) {
       assert.ok(names.includes(expected), `missing tool ${expected}`)
     }
@@ -723,3 +725,50 @@ test('tools/call: beat_metrics save_profile writes a profile; beat_lint ref comp
     mcp.close()
   }
 })
+
+// ==== Phase 37 Stream RD begin ====
+// beat_source_* mirrors the CLI `beat source`: offline ingest is fully exercised end-to-end; the
+// gated Freesound path is asserted for its clean, agent-visible isError (no key / no egress here).
+test('tools/call: beat_source_add offline ingest + enforced sidecar; beat_source_search no-key is a clean isError', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-source-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+  const sampleWav = join(repoRoot, 'presets', 'kit-init', 'kick.wav')
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // offline: prep + register + enforced provenance sidecar, license default "unspecified"
+    const add = await mcp.request('tools/call', {
+      name: 'beat_source_add',
+      arguments: { file, sample_id: 'smp_src', audio_file: sampleWav, note: 'mcp e2e' },
+    })
+    assert.equal(add.isError, undefined)
+    assert.match(add.content[0].text, /registered smp_src: sha256:[0-9a-f]{12}\.\.\. media\/smp_src\.wav \(0\.\d+s, license unspecified\)/)
+    assert.match(readFileSync(file, 'utf8'), /sample smp_src sha256:[0-9a-f]{64} media\/smp_src\.wav/)
+    const sidecar = JSON.parse(readFileSync(join(dir, 'media', 'smp_src.wav.json'), 'utf8'))
+    assert.equal(sidecar.license, 'unspecified')
+    assert.match(sidecar.sha256, /^[0-9a-f]{64}$/)
+    assert.equal(sidecar.note, 'mcp e2e')
+
+    // custom license passes through
+    const add2 = await mcp.request('tools/call', {
+      name: 'beat_source_add',
+      arguments: { file, sample_id: 'smp_cc', audio_file: sampleWav, license: 'CC-BY-4.0' },
+    })
+    assert.equal(add2.isError, undefined)
+    assert.equal(JSON.parse(readFileSync(join(dir, 'media', 'smp_cc.wav.json'), 'utf8')).license, 'CC-BY-4.0')
+
+    // gated search with no key: agent-visible isError, actionable, no stack trace / class name leak
+    const search = await mcp.request('tools/call', { name: 'beat_source_search', arguments: { query: 'kick' } })
+    assert.equal(search.isError, true)
+    assert.match(search.content[0].text, /^Freesound needs an API key/)
+    assert.doesNotMatch(search.content[0].text, /\n\s+at /)
+    assert.doesNotMatch(search.content[0].text, /SourceError/)
+  } finally {
+    mcp.close()
+  }
+})
+// ==== Phase 37 Stream RD end ====

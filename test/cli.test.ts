@@ -338,3 +338,51 @@ test('beat vary --groups is track-aware with a file+track, and documents both mo
   assert.match(stat, /^kick {6}/m)
   assert.match(stat, /LEGACY drums tracks only/)
 })
+
+// ==== Phase 37 Stream RD begin ====
+// `beat source` — real sound sources into the taste loop. The OFFLINE path (source add of a file
+// you already have) is fully exercised; the GATED Freesound path is asserted only for its clean,
+// stack-trace-free key/egress error (this environment has no key and blocks egress to freesound.org).
+const sampleWav = join(repoRoot, 'presets', 'kit-init', 'kick.wav') // a real 16-bit PCM wav in-repo
+
+test('beat source add: offline ingest preps, registers, writes an enforced sidecar; sample is then usable in an audio-clip', () => {
+  const file = tempProject()
+  const dir = dirname(file)
+  const out = beat(['source', 'add', file, 'smp_src', sampleWav, '--note', 'e2e'])
+  assert.match(out, /registered smp_src: sha256:[0-9a-f]{12}\.\.\. media\/smp_src\.wav \(0\.\d+s, license unspecified\)/)
+  assert.match(out, /provenance sidecar: media\/smp_src\.wav\.json/)
+
+  // registered into the media block with a content hash
+  assert.match(readFileSync(file, 'utf8'), /sample smp_src sha256:[0-9a-f]{64} media\/smp_src\.wav/)
+
+  // ENFORCED provenance sidecar with the required fields; default license is "unspecified"
+  const sidecar = JSON.parse(readFileSync(join(dir, 'media', 'smp_src.wav.json'), 'utf8'))
+  assert.equal(sidecar.license, 'unspecified', 'offline add license defaults to "unspecified"')
+  assert.equal(typeof sidecar.source, 'string')
+  assert.match(sidecar.sha256, /^[0-9a-f]{64}$/)
+  assert.equal(typeof sidecar.preparedAt, 'string')
+  assert.equal(sidecar.note, 'e2e')
+
+  // the registered sample is a first-class media id: usable in an audio-region clip
+  beat(['add-track', file, 'atrk', 'audio'])
+  const clip = beat(['audio-clip', file, 'atrk', 'c1', 'smp_src', '0', '0.2'])
+  assert.match(clip, /atrk: clip added "c1"/)
+  assert.match(readFileSync(file, 'utf8'), /audio smp_src 0 0\.2/)
+})
+
+test('beat source add: --license passes through to the sidecar (only the Freesound path forces CC0-1.0)', () => {
+  const file = tempProject()
+  const dir = dirname(file)
+  beat(['source', 'add', file, 'smp_cc', sampleWav, '--license', 'CC-BY-4.0'])
+  const sidecar = JSON.parse(readFileSync(join(dir, 'media', 'smp_cc.wav.json'), 'utf8'))
+  assert.equal(sidecar.license, 'CC-BY-4.0', 'custom --license is recorded verbatim')
+})
+
+test('beat source search without a key fails with an actionable error and NO stack trace (exit 2)', () => {
+  const out = beat(['source', 'search', 'kick'], { expectExit: 2 })
+  assert.match(out, /^error: Freesound needs an API key/)
+  assert.match(out, /FREESOUND_API_KEY/)
+  assert.doesNotMatch(out, /\n\s+at /, 'must not leak a JS stack trace')
+  assert.doesNotMatch(out, /SourceError/, 'must not leak the internal error class name')
+})
+// ==== Phase 37 Stream RD end ====
