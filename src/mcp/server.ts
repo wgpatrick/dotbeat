@@ -1417,6 +1417,50 @@ const TOOLS: ToolDef[] = [
     },
   },
   // ==== Phase 37 Stream RD end ====
+  // ==== Phase 39 Stream UB begin ====
+  {
+    name: 'beat_source_gen',
+    description:
+      'GENERATE an audio one-shot from a text prompt with Stable Audio Open (local text-to-audio) and register it into a .beat project as media, prepped through the same trim/fade/peak-normalize pipeline as every other source and written with an ENFORCED provenance sidecar (media/<id>.wav.json recording the prompt, provider, model, seconds, seed, and the Stability AI Community License). Two backends: "stableaudio" (default) runs Stable Audio Open locally — needs torch + the model weights installed server-side (see python/README.md), and returns an actionable isError with a `beat source gen --doctor` hint if they are missing; "stub" is a deterministic, dependency-free tone bed (same seed+seconds → byte-identical audio) that proves the pipeline everywhere. You OWN the generated output; free commercial use under $1M revenue with Stability registration; "Powered by Stability AI". Once registered, use the sample id in beat_audio_clip / beat_lane / beat_add_track just like any media id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'the .beat project file' },
+        sample_id: { type: 'string', description: 'a stable media id, e.g. "gen_pad"' },
+        prompt: { type: 'string', description: 'the text prompt to generate from, e.g. "warm analog pad" or "punchy 808 kick"' },
+        seconds: { type: 'number', description: 'clip length in seconds (default 2; Stable Audio Open caps ~47)' },
+        seed: { type: 'number', description: 'integer seed for reproducible generation (default 0); recorded in the provenance sidecar' },
+        backend: { type: 'string', description: '"stableaudio" (default, local model) or "stub" (deterministic dependency-free tone bed)' },
+        provider: { type: 'string', description: 'provider label recorded in provenance (default "stable-audio-open")' },
+        license: { type: 'string', description: 'license label for the generated media (default "Stability-AI-Community")' },
+      },
+      required: ['file', 'sample_id', 'prompt'],
+    },
+    handler: async (args) => {
+      const lib = await import(pathToFileURL(join(repoRoot, 'scripts', 'source-lib.mjs')).href)
+      const result = await lib.addGeneratedSource({
+        beatFile: str(args, 'file'),
+        id: str(args, 'sample_id'),
+        prompt: str(args, 'prompt'),
+        seconds: typeof args.seconds === 'number' ? args.seconds : 2,
+        ...(typeof args.seed === 'number' ? { seed: args.seed } : {}),
+        backend: typeof args.backend === 'string' ? args.backend : 'stableaudio',
+        provider: typeof args.provider === 'string' ? args.provider : 'stable-audio-open',
+        ...(typeof args.license === 'string' ? { license: args.license } : {}),
+      })
+      const reregisterNote = result.reregistered
+        ? result.reregistered.changed
+          ? `note: re-registered ${result.id} (replaced sha256:${result.reregistered.previousSha256.slice(0, 7)}... -> ${result.sha256.slice(0, 7)}...)\n`
+          : `note: ${result.id} already registered (unchanged)\n`
+        : ''
+      return (
+        `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +
+        `(${result.durationSeconds}s, license ${result.license})\nprovenance sidecar: ${result.relPath}.json\n` +
+        reregisterNote
+      )
+    },
+  },
+  // ==== Phase 39 Stream UB end ====
   // ==== Phase 38 Stream SA begin ====
   {
     name: 'beat_skeleton',

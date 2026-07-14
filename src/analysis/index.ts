@@ -41,3 +41,17 @@ export {
   type RunAnalysisResult,
 } from './sidecar.js'
 // ==== Phase 38 Stream SB end ====
+// ==== Phase 39 Stream UB begin ====
+// Generative-audio sidecar (`beat source gen`): spawns python/gen.py, which WRITES the generated
+// WAV to a told --output path and returns metadata on stdout. source-lib.mjs registers + owns
+// provenance. See src/analysis/gen.ts and decisions.md D19.
+export {
+  runGen,
+  genDoctor,
+  BeatGenError,
+  type GenBackend,
+  type GenMeta,
+  type RunGenOptions,
+  type RunGenResult,
+} from './gen.js'
+// ==== Phase 39 Stream UB end ====

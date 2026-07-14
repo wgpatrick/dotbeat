@@ -9,6 +9,43 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D19 — the gen sidecar writes the WAV to a told path; TS owns registration + the Stability license posture (2026-07-14)
+
+**The decision (contract variation).** `beat source gen` (Phase 39, Stable Audio Open local
+text-to-audio) is the SECOND Python sidecar and reuses the D17 template verbatim — with one
+deliberate variation. Analysis emits its whole result as stdout JSON and writes no files; generation
+produces **binary audio**, so `python/gen.py` **writes the generated WAV to the `--output` path it
+is told** and prints only a small JSON **metadata** doc (`{backend, provider, model, seconds, seed,
+sampleRate}`) on stdout (chatter → stderr). Everything else is identical: stdlib-only top level with
+lazy backend imports (`stable_audio_tools`, `torch`), the `0/2/3/4` exit codes with a copy-pasteable
+`pip install -r python/requirements-stableaudio.txt` as the last stderr line on a missing dep, the
+`$BEAT_PYTHON` → `python/.venv` → `python3` resolution, and a `--doctor` probe via
+`importlib.util.find_spec`. The TypeScript/`scripts/source-lib.mjs` side owns ALL of registration:
+`addGeneratedSource` generates to a temp `media/.<id>.gen.wav`, then routes through the existing
+private `ingest()` tail, so prep (normalize/sha256/duration), media registration, the ENFORCED
+provenance sidecar `media/<id>.wav.json` (recording prompt/provider/model/seconds/seed under
+`generated`), and rollback-on-failure all come for free — the temp file is removed in a `finally`. A
+stdlib-only `stub` backend writes a deterministic seed-derived tone bed so CI/the dev container
+exercise the whole pipeline with zero packages.
+
+**Why.** Gen can't fit analyze's stdout-only rule (a WAV isn't a JSON line), but keeping the Python
+side dumb — "write bytes here, print metadata" — preserves D17's core property: everything
+dotbeat-specific (provenance, media block, rollback) stays in testable TypeScript, and the Python
+surface is tiny and swappable. Reusing `ingest()` rather than a parallel registration path means the
+generative provenance record is the same shape as RD's Freesound one.
+
+**The license posture (Stability AI Community License, research 103).** Stable Audio Open 1.0 is the
+one licensing-clean, egress-free generative path for dotbeat's shareable-project thesis. You **own**
+the generated outputs; commercial use is free for individuals/orgs under **$1M annual revenue**
+provided you register a Community License with Stability (it terminates above $1M → Enterprise). The
+license's distribution/attribution obligations (ship a copy of the license, display **"Powered by
+Stability AI"**) attach to redistributing the **model/Materials/derivatives**, NOT to the individual
+generated output `.wav` files — so committing generated one-shots into a public `.beat` project's
+`media/` folder is clean. dotbeat carries the "Powered by Stability AI" attribution in its docs
+(`python/README.md`) as the tool-integration obligation; per-output files need no attribution. The
+HF weights repo id (`stabilityai/stable-audio-open-1.0`) and the `stable-audio-tools` version pin
+are placeholders to confirm owner-side (HF/PyPI unreachable from the build container).
+
 ## D18 — a reference track analyzed for structure never enters the project as media (2026-07-14)
 
 **The decision.** `beat analyze <song.wav>` (Phase 38) reads a reference track and emits a
