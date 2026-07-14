@@ -223,7 +223,10 @@ function mkDoc({ in: inP, out, gainDb = 0, warp = 'off', rate = 1, gainPoints, l
       },
     ],
     groups: [],
-    scenes: [{ id: 's1', slots: { atrk: 'c1' } }],
+    // v0.11 (Phase 36): slots hold placement LISTS — this in-memory doc must use the shape the
+    // ENGINE reads (ui/src/types.ts BeatScene), not the pre-v0.11 bare clip id it was written with
+    // (which the engine would now resolve to no clip at all, i.e. silence).
+    scenes: [{ id: 's1', slots: { atrk: [{ clip: 'c1', at: 0 }] } }],
     song: [{ scene: 's1', bars: loopBars }],
   }
 }

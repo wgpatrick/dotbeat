@@ -569,6 +569,20 @@ function interpolateAutomation(points: AutoPoint[], posSteps: number, log: boole
   return pts[pts.length - 1].value
 }
 
+// Phase 36 Stream PC: how many 16th steps of ARRANGEMENT time an audio region occupies — hand-
+// mirrors src/core/document.ts's audioRegionTimelineSteps (ui/ can't import src/core, the same
+// convention as types.ts's firstPlacementClip), except it takes stepSeconds directly (tick()
+// already has it from the live transport bpm) and uses the region's EFFECTIVE playback rate —
+// `rate` only applies in warp='repitch'; 'off'/'complex' play at native rate (see the audio
+// branch of tick()), so the audible window this bounds matches what the player actually does.
+// Used for the "which placement's region covers this step" test behind placement-relative gain
+// automation; PA's overlap VALIDATION (core-side) uses region.rate unconditionally, which only
+// differs for non-repitch regions with rate != 1 — a state the GUI/CLI never produce.
+function audioRegionTimelineStepsUi(region: BeatAudioRegion, stepSeconds: number): number {
+  const rate = region.warp === 'repitch' ? region.rate : 1
+  return (region.out - region.in) / (stepSeconds * rate)
+}
+
 // Phase 22 Stream AA: the ordered, reorderable per-track effect chain — mirrors
 // src/core/document.ts's EffectType/BeatEffect exactly (ui/ hand-mirrors core constants, same
 // convention as LFO_DESTS/LFO_SYNC_RATES above). Replaces the old fixed
@@ -1749,6 +1763,14 @@ interface Content {
   // kind tracks in song mode (audio-region clips have no live/non-clip form this stream — see
   // docs/phase-22-stream-ae.md — so loop mode and every other track kind always gets null here).
   audio: BeatAudioRegion | null
+  // Phase 36 Stream PC (v0.11, D16 Option A): EVERY placement of this track's slot in the active
+  // section, resolved to its clip's region + gain lane, with `startStep` ABSOLUTE (fractional 16th
+  // steps within the whole song: sectionStartBar*16 + placement.at) so tick()'s per-placement
+  // retrigger check compares it straight against its own absolute `step`. Sorted by startStep
+  // (contentOf's canonical placement sort). Only ever set for 'audio'-kind tracks in song mode —
+  // same scope rule as `audio` above; the audio branch of tick() schedules from THIS list, `audio`
+  // stays populated (at-0/first placement) for any consumer still wanting the single-clip shape.
+  audioPlacements?: { region: BeatAudioRegion; gain: AutoPoint[] | null; startStep: number }[]
 }
 
 /** One live instrument (SoundFont) track. `synth` is a spessasynth_lib WorkletSynthesizer running
@@ -3639,10 +3661,12 @@ class Engine {
       cursor += section.bars
     }
     if (sceneId === null) return null
-    // Phase 36 PC/PD: v0.11 slots are placement LISTS ({clip, at}[]) — scheduling still takes the
-    // at-0/first placement's clip, so every single-placement project (all pre-v0.11 documents)
-    // plays exactly as before. Per-placement retrigger scheduling (region starts at
-    // sectionStart + at, a clip placed twice plays twice) is Stream PC's work.
+    // Phase 36 PC/PD: v0.11 slots are placement LISTS ({clip, at}[]). Stream PC: audio-kind
+    // tracks get the FULL list resolved into `audioPlacements` below (per-placement scheduling in
+    // tick(): region starts at sectionStart + at, a clip placed twice plays twice); the
+    // notes/hits/automation/`audio` fields still come from the at-0/first placement's clip, so
+    // every non-audio track and every single-placement consumer behaves exactly as pre-v0.11.
+    // Per-placement GUI rendering is Stream PD's work.
     const scene = (scenes as { id: string; slots: Record<string, { clip: string; at: number }[]> }[]).find((sc) => sc.id === sceneId)
     const placements = [...(scene?.slots?.[track.id] ?? [])].sort((a, b) => a.at - b.at || a.clip.localeCompare(b.clip))
     const clipId = placements.length > 0 ? (placements.find((p) => p.at === 0) ?? placements[0]!).clip : undefined
@@ -3670,6 +3694,23 @@ class Engine {
     // "no override = today's behavior, unchanged" default — see BeatClipLoop's own doc comment).
     const loopStartSteps = clip.loop ? clip.loop.start * 16 : 0
     const loopSteps = clip.loop ? (clip.loop.end - clip.loop.start) * 16 : loopBars * 16
+    // Phase 36 Stream PC: for audio tracks, resolve EVERY placement (not just the at-0/first one)
+    // to its clip's region + gain lane, at an ABSOLUTE start step (sectionStartBar*16 + at,
+    // fractional 16ths — the design doc's `sectionStart + at`). A clip placed twice contributes
+    // two entries sharing the same region object (shared decoded buffer, independent triggers).
+    // A placement whose clip is missing or has no audio line is skipped — same silence the old
+    // single-clip path produced for it. Gated on kind === 'audio' so no other track kind's
+    // Content changes shape at all.
+    let audioPlacements: Content['audioPlacements']
+    if (track.kind === 'audio') {
+      audioPlacements = []
+      for (const pl of placements) {
+        const c = (track.clips as { id: string; automation?: { param: string; points: AutoPoint[] }[]; audio?: BeatAudioRegion }[]).find((cc) => cc.id === pl.clip)
+        if (!c?.audio) continue
+        const gain = (c.automation ?? []).find((l) => l.param === 'gain')?.points ?? null
+        audioPlacements.push({ region: c.audio, gain, startStep: sectionStartBar * 16 + pl.at })
+      }
+    }
     return {
       notes: clip.notes,
       hits: clip.hits,
@@ -3677,6 +3718,7 @@ class Engine {
       contentStep: loopStartSteps + (((rel % loopSteps) + loopSteps) % loopSteps),
       cycleStart: loopStartSteps,
       audio: clip.audio ?? null,
+      ...(audioPlacements ? { audioPlacements } : {}),
     }
   }
 
@@ -3714,9 +3756,9 @@ class Engine {
       // notes/hits (the exact data NoteView.tsx edits), tiled every doc.loopBars bars, exactly like
       // loop-mode content, regardless of whether the document is actually in song mode right now.
       // Every other track is silenced outright (content = null), not just muted — real isolation.
-      const content = this.auditionTrackId
+      const content: Content | null = this.auditionTrackId
         ? track.id === this.auditionTrackId
-          ? { notes: track.notes, hits: track.hits, automation: new Map<string, AutoPoint[]>(), contentStep: step % (doc.loopBars * 16), audio: null }
+          ? { notes: track.notes, hits: track.hits, automation: new Map<string, AutoPoint[]>(), contentStep: step % (doc.loopBars * 16), cycleStart: 0, audio: null }
           : null
         : this.contentOf(track, step, doc.loopBars, song, doc.scenes, bar)
       if (!content) continue // song mode: this track is silent this section (or audition: not the auditioned track)
@@ -3797,30 +3839,62 @@ class Engine {
         // the native AudioBufferSourceNode.start(when, offset, duration) semantics Tone.Player
         // wraps), playbackRate set from `rate` only in warp='repitch' (off/complex play at native
         // rate — complex has no stretch implementation yet, see BeatAudioRegion's doc comment).
+        // Phase 36 Stream PC (v0.11, D16 Option A): schedule EVERY placement in the active
+        // section, not just the at-0/first clip. Each placement's region starts at
+        // sectionStart + at (content.audioPlacements carries that as an ABSOLUTE fractional step,
+        // see contentOf) — the trigger check is "this tick's integer step is the one the
+        // placement's start falls in" (floor(startStep) === step), which fires exactly once per
+        // pass of the playhead across that point (tick runs once per 16th step; sub-step
+        // fractional `at` becomes a sub-step time offset, the same frac-scheduling drum hits use).
+        // This REPLACES the old single `contentStep === cycleStart` check, which retriggered the
+        // one active clip at the start of every content-tiling cycle (every loopBars — or
+        // clip.loop — steps) within the section: a placement now sounds ONCE per section pass at
+        // its own position, the design doc's Ableton-style arrangement semantics. For every
+        // committed project and verify doc (section bars == tiling cycle, single placement at 0)
+        // the two rules fire at identical times, so single-placement renders are unchanged.
+        //
+        // ONE Tone.Player per audio track (Stream AE's model) — placements can't overlap (PA's
+        // core validates that), and Tone.Source.start() on an already-started player restarts it,
+        // so a back-to-back placement truncates the previous region at its own start time and
+        // begins cleanly: start-while-previous-finishes works, the tail past the next placement's
+        // start (only possible via section-end spill, since overlap is rejected) is cut. A region
+        // spilling past the SECTION end is not truncated — exactly as before this stream.
+        //
+        // Gain automation is PLACEMENT-RELATIVE: the clip's gain lane evaluates at
+        // (step - startStep), i.e. steps since THIS placement began — lane time 0 is the
+        // placement's own start, wherever it sits in the section. For an at-0 placement that's
+        // the same clip-relative position the old contentStep lookup produced.
         const voice = this.audioTracks.get(track.id)
-        const region = content.audio
-        if (voice && region) {
-          const buf = this.audioBuffers.get(region.media)
-          const gainAuto = content.automation.get('gain')
-          if (content.contentStep === content.cycleStart && buf) {
-            // A clip re-triggers at the start of every pass through its own content (contentStep
-            // wraps back to cycleStart — 0, or Phase 24 Stream CJ's loop.start*16 when the clip has
-            // its own loop override — the same tiling `contentOf` already gives notes/hits, reused
-            // as-is).
-            if (voice.player.buffer !== buf) voice.player.buffer = buf
-            const rate = region.warp === 'repitch' ? region.rate : 1
-            voice.player.playbackRate = rate
-            voice.player.volume.value = gainAuto && gainAuto.length ? interpolateAutomation(gainAuto, content.contentStep, false) : region.gainDb
-            const duration = Math.max(region.out - region.in, 0.001)
-            try {
-              voice.player.start(time, region.in, duration)
-            } catch (err) {
-              console.warn(`[engine] audio track "${track.id}" failed to start:`, err)
+        const placementsDue = content.audioPlacements
+        if (voice && placementsDue && placementsDue.length) {
+          let triggered = false
+          let active: { region: BeatAudioRegion; gain: AutoPoint[] | null; startStep: number } | null = null
+          for (const pl of placementsDue) {
+            if (Math.floor(pl.startStep) === step) {
+              const buf = this.audioBuffers.get(pl.region.media)
+              if (!buf) continue // still decoding — same "not this pass" the old path had
+              if (voice.player.buffer !== buf) voice.player.buffer = buf
+              const rate = pl.region.warp === 'repitch' ? pl.region.rate : 1
+              voice.player.playbackRate = rate
+              voice.player.volume.value = pl.gain && pl.gain.length ? interpolateAutomation(pl.gain, 0, false) : pl.region.gainDb
+              const duration = Math.max(pl.region.out - pl.region.in, 0.001)
+              try {
+                voice.player.start(time + (pl.startStep - step) * stepSeconds, pl.region.in, duration)
+              } catch (err) {
+                console.warn(`[engine] audio track "${track.id}" failed to start:`, err)
+              }
+              triggered = true
+            } else if (step > pl.startStep && step < pl.startStep + audioRegionTimelineStepsUi(pl.region, stepSeconds)) {
+              // The placement whose region window covers this step — the one a mid-region gain
+              // ramp should track. Placements are sorted and non-overlapping, so at most one wins.
+              active = pl
             }
-          } else if (gainAuto && gainAuto.length) {
+          }
+          if (!triggered && active && active.gain && active.gain.length) {
             // Mid-region gain automation: ramp the already-playing player's volume, the same
-            // linearRampToValueAtTime discipline every other automated param below uses.
-            voice.player.volume.linearRampToValueAtTime(interpolateAutomation(gainAuto, content.contentStep, false), time + stepSeconds)
+            // linearRampToValueAtTime discipline every other automated param below uses — lane
+            // position is placement-relative (steps since this placement's own start).
+            voice.player.volume.linearRampToValueAtTime(interpolateAutomation(active.gain, step - active.startStep, false), time + stepSeconds)
           }
         }
         continue
