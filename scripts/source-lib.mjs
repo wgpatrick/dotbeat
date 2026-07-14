@@ -27,6 +27,9 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url))
 const { parse, serialize, setMediaSample } = await import(pathToFileURL(join(scriptsDir, '..', 'dist', 'src', 'core', 'index.js')).href)
 const { decodeWav } = await import(pathToFileURL(join(scriptsDir, '..', 'dist', 'src', 'metrics', 'index.js')).href)
 const { prepOneshot, PrepError, decodeViaWebAudio } = await import(pathToFileURL(join(scriptsDir, 'prep-oneshot-lib.mjs')).href)
+// Phase 39 Stream UB: the generative sidecar wrapper (spawns python/gen.py). Same dist-relative
+// import shape as core above, so the CLI and MCP get the identical compiled implementation.
+const { runGen } = await import(pathToFileURL(join(scriptsDir, '..', 'dist', 'src', 'analysis', 'index.js')).href)
 
 // Offline decode strategy: a local .wav is decoded by the pure-JS metrics decoder (16-bit PCM /
 // 32-bit float, zero deps — always available), so ingesting audio you already have never needs the
@@ -177,6 +180,57 @@ export async function addLocalSource({ beatFile, id, audioFile, license = 'unspe
   const source = note ? `local file ${basename(audioFile)} — ${note}` : `local file ${basename(audioFile)}`
   return ingest({ beatFile, id, inPath: audioFile, license, source, query: null, extra: note ? { note } : undefined })
 }
+
+// ==== Phase 39 Stream UB begin ====
+/** GENERATIVE path: text-to-audio one-shot via the Stable Audio Open sidecar (python/gen.py),
+ * prepped + registered through the exact same `ingest()` tail as the offline/Freesound paths — so
+ * normalization, sha256/duration, media registration, the ENFORCED provenance sidecar
+ * media/<id>.wav.json, and rollback-on-failure all come for free. Generates to a temp
+ * media/.<id>.gen.wav, ingests it, and removes the temp file in a finally. The default `stableaudio`
+ * backend needs torch + the model owner-side; `stub` runs everywhere (deterministic tone bed).
+ * Wraps gen failures as SourceError, matching the PrepError→SourceError pattern in ingest(). */
+export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, seed, backend = 'stableaudio', provider = 'stable-audio-open', model, license } = {}) {
+  if (!prompt || typeof prompt !== 'string') throw new SourceError('source gen needs a <prompt>, e.g. beat source gen song.beat pad "warm analog pad"')
+  const { mediaDir } = resolveTarget(beatFile, id)
+  mkdirSync(mediaDir, { recursive: true })
+  // A seed is required for reproducible provenance; default to a deterministic value if unset so the
+  // stub path (and the recorded seed) are stable, but let callers pin their own.
+  const effectiveSeed = seed ?? 0
+  const tempWav = join(mediaDir, `.${id}.gen.wav`)
+  try {
+    let meta
+    try {
+      ;({ meta } = await runGen({ prompt, seconds, seed: effectiveSeed, backend, outPath: tempWav }))
+    } catch (err) {
+      // BeatGenError (or anything the sidecar wrapper throws) → a clean, stack-trace-free SourceError.
+      throw new SourceError(err instanceof Error ? err.message : String(err))
+    }
+    const resolvedProvider = meta?.provider || provider
+    const resolvedModel = model ?? meta?.model ?? null
+    return await ingest({
+      beatFile,
+      id,
+      inPath: tempWav,
+      license: license ?? 'Stability-AI-Community',
+      source: `generated:${resolvedProvider}`,
+      query: prompt,
+      extra: {
+        generated: {
+          provider: resolvedProvider,
+          model: resolvedModel,
+          backend: meta?.backend ?? backend,
+          prompt,
+          seconds,
+          seed: effectiveSeed,
+          licenseUrl: 'https://stability.ai/community-license-agreement',
+        },
+      },
+    })
+  } finally {
+    try { rmSync(tempWav) } catch { /* best-effort */ }
+  }
+}
+// ==== Phase 39 Stream UB end ====
 
 /** GATED path: fetch a specific CC0 sound from Freesound by id, prep it, and register it with the
  * "CC0-1.0" license label. Throws an actionable SourceError if the key is missing or egress is

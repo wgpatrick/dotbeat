@@ -60,13 +60,56 @@ only be validated where torch is installed. After `pip install`, run through thi
 
 ## Conventions shared with `beat source gen` (Phase 39)
 
-The spawn/JSON/doctor/venv conventions here are deliberately generic. A future `python/gen.py`
-(Stable Audio Open text-to-audio, Phase 39 `beat source gen`) reuses them verbatim at zero cost:
-stdlib-only top level with lazy backend imports; one JSON document on stdout, chatter on stderr;
-exit codes `0/2/3/4` with a copy-pasteable `pip install -r ...` as the last stderr line on a
-missing dependency; the same `$BEAT_PYTHON` → `python/.venv` → `python3` interpreter resolution;
-and a `--doctor` mode probing deps with `importlib.util.find_spec` (which never executes the
-module). Copy the shape, add a `requirements-<backend>.txt`, done.
+The spawn/JSON/doctor/venv conventions here are deliberately generic. `python/gen.py` (Stable Audio
+Open text-to-audio, Phase 39 `beat source gen`) reuses them verbatim: stdlib-only top level with
+lazy backend imports; chatter on stderr; exit codes `0/2/3/4` with a copy-pasteable
+`pip install -r ...` as the last stderr line on a missing dependency; the same `$BEAT_PYTHON` →
+`python/.venv` → `python3` interpreter resolution; and a `--doctor` mode probing deps with
+`importlib.util.find_spec` (which never executes the module).
+
+**The ONE contract variation:** analysis emits its whole result as stdout JSON and writes no files,
+but generation produces **binary audio**, so `gen.py` **writes the generated WAV to the `--output`
+path it is told** and prints only a small JSON **metadata** doc on stdout
+(`{backend, provider, model, seconds, seed, sampleRate}`). The TypeScript side
+(`src/analysis/gen.ts`) plus `scripts/source-lib.mjs` own registration, the enforced provenance
+sidecar, and rollback — `gen.py` knows nothing about dotbeat's media block. See decisions.md D19.
+
+- `gen.py` — argv `--backend <stub|stableaudio> --prompt "<text>" --seconds <N> --seed <N>
+  --output <wav>` (or `--doctor`). The stdlib-only `stub` backend writes a **deterministic**
+  seed-derived 44.1 kHz stereo 16-bit WAV of the requested duration (byte-identical for a fixed
+  seed+seconds — it does not interpret the prompt, it just proves the pipeline). The `stableaudio`
+  backend lazily imports `stable_audio_tools` + `torch` and runs **Stable Audio Open 1.0** locally.
+- `requirements-stableaudio.txt` — `torch` + `stable-audio-tools`. **Version pins and the HF weights
+  repo id (`stabilityai/stable-audio-open-1.0`) are PLACEHOLDERS to confirm owner-side** (HF/PyPI
+  unreachable from the build container, mirroring `requirements-beatthis.txt`'s commit-sha caveat).
+
+### Install + validate `beat source gen` (owner machine)
+
+Same auto-discovered `python/.venv`; the model weights are gated on Hugging Face (accept the license
+and `huggingface-cli login` first) and are ~a couple GB, downloaded lazily on the first real run.
+
+```sh
+python3 -m venv python/.venv
+python/.venv/bin/pip install -r python/requirements-stableaudio.txt
+beat source gen --doctor                       # confirm stableaudio reports ok:true
+beat source gen song.beat pad "warm analog pad" --seconds 3 --seed 7   # a real one-shot
+```
+
+`beat source gen … --backend stub` runs everywhere with zero packages (the CI/dev path) and writes
+a deterministic tone bed so the registration/provenance plumbing is exercised without the model.
+
+### License + attribution (Stable Audio Open)
+
+Stable Audio Open 1.0 ships under the **Stability AI Community License**
+(<https://stability.ai/community-license-agreement>): research and non-commercial use are free, and
+**commercial** use is free for individuals/orgs under **$1M annual revenue** provided you register a
+Community License with Stability (the license terminates above $1M, where an Enterprise license is
+required). You **own** the generated outputs, and the license's distribution/attribution obligations
+attach to the **model/Materials**, not to the individual output `.wav` files — so committing
+generated one-shots into a public `.beat` project's `media/` folder is clean (research 103, D19).
+
+> **Powered by Stability AI.** dotbeat carries this attribution as the tool-integration obligation
+> for wrapping Stable Audio Open; the per-output files themselves need no attribution.
 
 ## Contract summary (for anyone editing `analyze.py`)
 

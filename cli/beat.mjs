@@ -379,7 +379,15 @@ const HELP = [
   beat source add <file.beat> <sample-id> --freesound <id> [--note N]
                                                           GATED: fetch a specific CC0 sound from Freesound by id and
                                                           register it (label "CC0-1.0"); needs the key + egress. CC0
-                                                          is the only license ever fetched (zero redistribution risk)` },
+                                                          is the only license ever fetched (zero redistribution risk)
+  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio] [--provider P] [--license L]
+                                                          GENERATE a one-shot with Stable Audio Open (local text-to-audio)
+                                                          and register it as media with a provenance sidecar. Default
+                                                          --backend stableaudio (needs torch + the model, owner-side;
+                                                          see python/README.md), default --seconds 2. --backend stub is
+                                                          a deterministic, dependency-free tone bed. "Powered by
+                                                          Stability AI"; you own the output (Stability Community License)
+  beat source gen --doctor                                report which generative backends are installed (JSON)` },
   // ==== Phase 37 Stream RD end ====
   {
     cmd: 'lane',
@@ -1697,7 +1705,9 @@ async function sourceCmd(argv) {
     const i = rest.indexOf(name)
     return i !== -1 ? rest[i + 1] : dflt
   }
-  const VALUE_FLAGS = new Set(['--max', '--dur-min', '--dur-max', '--out-dir', '--license', '--note', '--freesound'])
+  const VALUE_FLAGS = new Set(['--max', '--dur-min', '--dur-max', '--out-dir', '--license', '--note', '--freesound',
+    // ==== Phase 39 Stream UB (gen) ====
+    '--seconds', '--seed', '--backend', '--provider'])
   const positionals = rest.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(rest[i - 1]))
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
   try {
@@ -1747,6 +1757,42 @@ async function sourceCmd(argv) {
       }
       return
     }
+    // ==== Phase 39 Stream UB begin ====
+    if (sub === 'gen') {
+      // `beat source gen --doctor` probes the generative backends (stub always ok; stableaudio needs
+      // torch owner-side). Prints the genDoctor JSON so it's scriptable, like `beat analyze --doctor --json`.
+      if (rest.includes('--doctor')) {
+        const analysis = await import(new URL('../dist/src/analysis/index.js', import.meta.url).href)
+        const report = await analysis.genDoctor()
+        process.stdout.write(JSON.stringify(report, null, 2) + '\n')
+        return
+      }
+      const [file, id, prompt] = positionals
+      const result = await lib.addGeneratedSource({
+        beatFile: file,
+        id,
+        prompt,
+        seconds: flag('--seconds') !== undefined ? Number(flag('--seconds')) : 2,
+        ...(flag('--seed') !== undefined ? { seed: Number(flag('--seed')) } : {}),
+        backend: flag('--backend', 'stableaudio'),
+        provider: flag('--provider', 'stable-audio-open'),
+        ...(flag('--license') !== undefined ? { license: flag('--license') } : {}),
+      })
+      process.stdout.write(
+        `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +
+        `(${result.durationSeconds}s, license ${result.license})\n` +
+        `provenance sidecar: ${result.relPath}.json\n`,
+      )
+      if (result.reregistered) {
+        process.stdout.write(
+          result.reregistered.changed
+            ? `note: re-registered ${result.id} (replaced sha256:${result.reregistered.previousSha256.slice(0, 7)}... -> ${result.sha256.slice(0, 7)}...)\n`
+            : `note: ${result.id} already registered (unchanged)\n`,
+        )
+      }
+      return
+    }
+    // ==== Phase 39 Stream UB end ====
     throw new BeatEditError('source needs a subcommand: `beat source search <query>` or `beat source add <file.beat> <id> <local-audio-file>` (see `beat help source`)')
   } catch (err) {
     if (err && err.name === 'SourceError') throw new BeatEditError(err.message)

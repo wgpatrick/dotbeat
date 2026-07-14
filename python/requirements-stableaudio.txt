@@ -1,0 +1,39 @@
+# dotbeat `beat source gen` backend — Stable Audio Open 1.0, run LOCALLY (Phase 39 Stream UB).
+#
+# This is the ONE licensing-clean, egress-free generative path for dotbeat's shareable-project
+# thesis (research 103): you own the generated outputs, commercial use is permitted for individuals
+# and orgs under $1M annual revenue at no fee (registration with Stability required for commercial
+# use), and the license's distribution/attribution obligations attach to the MODEL/Materials, not
+# to the generated audio files you commit into a project's media/ folder. See the license posture
+# below and decisions.md D19.
+#
+# Installed and validated OWNER-SIDE only: torch + the ~couple-GB model weights are large and the
+# HF/PyPI egress is blocked in dotbeat's dev/CI container, so `python/gen.py` degrades cleanly to an
+# exit-3 "pip install -r python/requirements-stableaudio.txt" message here. The stdlib-only `stub`
+# backend keeps CI green and proves the whole pipeline.
+#
+#   python3 -m venv python/.venv
+#   python/.venv/bin/pip install -r python/requirements-stableaudio.txt
+#   beat source gen --doctor        # confirm stableaudio reports ok:true
+#
+# VERSION PINS ARE PLACEHOLDERS — CONFIRM OWNER-SIDE (GitHub/HF/PyPI unreachable from this build
+# container, mirroring the Phase 38 beat_this commit-sha caveat). Re-pin against the installed,
+# working versions before betting on them.
+torch>=2.0,<3
+stable-audio-tools==0.0.16
+
+# HF weights repo: PLACEHOLDER `stabilityai/stable-audio-open-1.0` (the presumed id, hard-coded as
+# STABLEAUDIO_MODEL_ID in python/gen.py) — MUST be confirmed owner-side against
+# https://huggingface.co/stabilityai/stable-audio-open-1.0 (HF unreachable here). The weights are
+# gated on HF: accept the model license and `huggingface-cli login` before the first run.
+#
+# LICENSE — Stability AI Community License (https://stability.ai/community-license-agreement):
+#   * Research + non-commercial use: free.
+#   * Commercial use: free for individuals/orgs under $1M annual revenue, provided you REGISTER for
+#     a Community License with Stability; the license terminates above $1M (Enterprise license
+#     required there).
+#   * You OWN the generated outputs. The distribution/attribution terms (ship a copy of the license,
+#     display "Powered by Stability AI") attach to redistributing the MODEL/Materials/derivatives,
+#     NOT to the individual output .wav files — so committing generated one-shots into a public
+#     .beat project's media/ folder is clean. dotbeat carries the "Powered by Stability AI"
+#     attribution in its docs (python/README.md) as the tool-integration obligation.
