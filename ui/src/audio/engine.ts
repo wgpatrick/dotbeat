@@ -1646,11 +1646,34 @@ interface DrumBus extends EffectHost {
 interface DrumKit {
   kick: Tone.MembraneSynth
   snare: Tone.NoiseSynth
+  snareFilter: Tone.Filter // held so a per-track kit can be disposed without leaking (Phase 35 OF)
   snareTone: Tone.MembraneSynth
   snareToneGain: Tone.Gain
   clap: Tone.NoiseSynth
+  clapFilter: Tone.Filter // same disposal-bookkeeping as snareFilter
   hat: Tone.MetalSynth
   openhat: Tone.MetalSynth
+}
+
+// ---- Phase 35 Stream OF: per-drums-track engine state (docs/phase-35-plan.md §OF) -----------
+// The engine used to bind exactly ONE drums track (`doc.tracks.find(kind === 'drums')`, one global
+// drumLanes map, one drum bus, one drumTrackId, one sf voice) — a second drums-kind track parsed,
+// serialized, edited, and inspected perfectly and was pure silence at playback. Everything a drums
+// track needs at playback now lives in ONE of these, keyed by track id in Engine.drumStates:
+// its own bus (mixer strip, insert chain, sends), its own declared-lane voice map, its own legacy
+// implicit-5-lane kit (built lazily only for a track whose `lanes` list is empty), its own shared
+// sf voice for sf-backed lanes, and its own choke/monotonic-trigger bookkeeping — so two tracks'
+// hats can never choke each other or fight over the strictly-increasing-start guard.
+interface DrumTrackState {
+  bus: DrumBus
+  declaredMode: boolean
+  lanes: Map<string, LaneVoice>
+  kit: DrumKit | null // legacy implicit-5-lane voices; null until a legacy-mode sync builds them
+  kickTuneHz: number
+  sfVoice: { synth: WorkletSynthesizer; entry: GainNode; sample: string; program: number } | null
+  sfPending: boolean
+  samplePending: Set<string>
+  lastLaneTriggerTime: Record<string, number>
 }
 
 // ---- Phase 22 Stream AB: the open per-track drum lane model (research 19/20) ---------------
@@ -1776,12 +1799,14 @@ interface AudioTrackVoice {
 
 class Engine {
   private chains = new Map<string, SynthChain>()
-  private drums: DrumKit | null = null
-  private drumTrackId: string | null = null
-  private kickTuneHz = 32.7
+  // Phase 35 Stream OF: ALL per-drums-track playback state, keyed by track id (see DrumTrackState's
+  // doc comment). Replaces the old single-track drums/drumTrackId/kickTuneHz/lastLaneTriggerTime/
+  // drumDeclaredMode/drumLanes/drumSfVoice/drumSfPending/drumSamplePending/drumBus fields — every
+  // drums-kind track in the document now gets its own live state, so a second (third, ...) drums
+  // track actually sounds instead of silently binding nothing.
+  private drumStates = new Map<string, DrumTrackState>()
   private repeatId: number | null = null
   private started = false
-  private lastLaneTriggerTime: Record<string, number> = {}
 
   // Phase 24 Stream CH: "audition a clip in isolation" (docs/phase-24-stream-ch.md). Non-null while
   // NoteView's "preview this clip" control is active — the id of the ONE track whose own live/loop-
@@ -1790,15 +1815,6 @@ class Engine {
   // track is silenced for the duration (see tick()'s content-resolution branch below) — true
   // isolation, not a mute/solo trick, so it never perturbs the mixer's persisted mute/solo state.
   private auditionTrackId: string | null = null
-
-  // Phase 22 Stream AB: declared-lane dispatch state (see the LaneVoice types above). Live only
-  // while the drums track has a non-empty `lanes` list; the legacy `drums`/`kickTuneHz` fields
-  // above stay untouched and are what's used otherwise.
-  private drumDeclaredMode = false
-  private drumLanes = new Map<string, LaneVoice>()
-  private drumSfVoice: { synth: WorkletSynthesizer; entry: GainNode; sample: string; program: number } | null = null
-  private drumSfPending = false
-  private drumSamplePending = new Set<string>()
 
   // Instrument (SoundFont) tracks. `instruments` holds READY voices; `instrumentPending` guards
   // the async build (fetch soundfont + addSoundBank + isReady) so sync() — called every tick —
@@ -1835,7 +1851,6 @@ class Engine {
 
   private reverbBus: Tone.Reverb | null = null
   private delayBus: Tone.FeedbackDelay | null = null
-  private drumBus: DrumBus | null = null
 
   private masterBus: Tone.Gain | null = null
   private masterLimiter: Tone.Limiter | null = null
@@ -1885,7 +1900,7 @@ class Engine {
   // ---- shared return buses (lazy: Tone nodes can be built before the context starts) ----
   // Phase 22 Stream AC retired the third shared bus this used to build here (chorusBus/phaserBus,
   // reachable only via the generic project-global `sendMod` field) — Chorus-Ensemble and
-  // Phaser-Flanger are now real per-track inserts (see buildSynthChain()/getDrumBus()), consistent
+  // Phaser-Flanger are now real per-track inserts (see buildSynthChain()/buildDrumBus()), consistent
   // with every other configurable effect in dotbeat (EQ3, compressor, distortion, bitcrush all
   // already live one-instance-per-track — research 17 §4.2). reverb/delay stay shared sends.
   private getBuses() {
@@ -1898,7 +1913,7 @@ class Engine {
 
   /** Wire saturator -> chorus -> phaser -> pingPong -> nextStage (Phase 22 Stream AC's four new
    * inserts, in the fixed order research 17 §5 builds them — shared by buildSynthChain() and
-   * getDrumBus() so the two chains never drift). */
+   * buildDrumBus() so the two chains never drift). */
   private wireFxTail(saturator: SaturatorNodes, chorus: Tone.Chorus, phaser: Tone.Phaser, pingPong: PingPongNodes, nextStage: Tone.ToneAudioNode) {
     saturator.out.connect(chorus)
     chorus.connect(phaser)
@@ -1906,8 +1921,10 @@ class Engine {
     pingPong.out.connect(nextStage)
   }
 
-  private getDrumBus(): DrumBus {
-    if (!this.drumBus) {
+  /** Build one drums track's own bus (Phase 35 Stream OF: one per drums-kind track, not a
+   * singleton — each lives in that track's DrumTrackState and is disposed when the track goes). */
+  private buildDrumBus(): DrumBus {
+    {
       const { reverb, delay } = this.getBuses()
       const filter = new Tone.Filter(12000, 'lowpass')
       const saturator = buildSaturator()
@@ -1942,16 +1959,82 @@ class Engine {
       vol.connect(delaySend)
       delaySend.connect(delay)
 
-      this.drumBus = {
+      return {
         filter, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET,
         saturator, chorus, phaser, pingPong, muteGain, levelTap, panner, vol, reverbSend, delaySend,
       }
     }
-    return this.drumBus
   }
 
-  private applyDrumBusParams(p: EngineSynth, effects: BeatEffect[], trackId: string) {
-    const bus = this.getDrumBus()
+  /** The live per-track drum state for `trackId`, building it (with a fresh bus) on first use. */
+  private getDrumState(trackId: string): DrumTrackState {
+    let state = this.drumStates.get(trackId)
+    if (!state) {
+      state = {
+        bus: this.buildDrumBus(),
+        declaredMode: false,
+        lanes: new Map(),
+        kit: null,
+        kickTuneHz: 32.7,
+        sfVoice: null,
+        sfPending: false,
+        samplePending: new Set(),
+        lastLaneTriggerTime: {},
+      }
+      this.drumStates.set(trackId, state)
+    }
+    return state
+  }
+
+  private disposeDrumBus(bus: DrumBus): void {
+    const nodes: Tone.ToneAudioNode[] = [
+      bus.filter, ...saturatorNodeList(bus.saturator), bus.chorus, bus.phaser, ...pingPongNodeList(bus.pingPong),
+      bus.muteGain, bus.levelTap, bus.panner, bus.vol, bus.reverbSend, bus.delaySend,
+    ]
+    for (const runtime of bus.effects.values()) {
+      nodes.push(...runtime.nodes)
+      if (runtime.raw) for (const n of runtime.raw) n.disconnect()
+    }
+    for (const n of nodes) n.dispose()
+  }
+
+  private disposeDrumKit(kit: DrumKit): void {
+    kit.kick.dispose()
+    kit.snare.dispose()
+    kit.snareFilter.dispose()
+    kit.snareTone.dispose()
+    kit.snareToneGain.dispose()
+    kit.clap.dispose()
+    kit.clapFilter.dispose()
+    kit.hat.dispose()
+    kit.openhat.dispose()
+  }
+
+  /** Full teardown of one drums track's live state — lane voices, legacy kit, sf voice, bus —
+   * called when the track vanishes from the document (Phase 35 Stream OF: with per-track buses,
+   * a removed drums track must release its whole node graph, where the old singleton just idled). */
+  private disposeDrumState(state: DrumTrackState): void {
+    for (const voice of state.lanes.values()) this.disposeLaneVoice(voice)
+    state.lanes.clear()
+    if (state.kit) {
+      this.disposeDrumKit(state.kit)
+      state.kit = null
+    }
+    if (state.sfVoice) {
+      try {
+        state.sfVoice.synth.stopAll(true)
+        state.sfVoice.synth.disconnect()
+        state.sfVoice.synth.destroy()
+      } catch {
+        // best-effort teardown, same as ensureDrumSfVoice's replacement path
+      }
+      state.sfVoice.entry.disconnect()
+      state.sfVoice = null
+    }
+    this.disposeDrumBus(state.bus)
+  }
+
+  private applyDrumBusParams(bus: DrumBus, p: EngineSynth, effects: BeatEffect[], trackId: string) {
     bus.filter.frequency.value = p.cutoff
     bus.filter.Q.value = p.resonance
     bus.filter.type = p.filterType
@@ -1986,21 +2069,24 @@ class Engine {
     applyPingPong(bus.pingPong, p.pingPongTime, p.pingPongFeedback, p.pingPongCrossFeed, p.pingPongWobbleRate, p.pingPongWobbleDepth, p.pingPongMix)
   }
 
-  private applyDrumVoiceParams(p: EngineSynth) {
-    if (!this.drums) return
-    this.kickTuneHz = p.kickTune
-    this.drums.kick.set({ pitchDecay: p.kickPunch, envelope: { decay: p.kickDecay } })
-    this.drums.snare.set({ envelope: { decay: p.snareDecay } })
-    this.drums.snareTone.set({ envelope: { decay: p.snareDecay } })
-    this.drums.snareToneGain.gain.value = p.snareTone
-    this.drums.hat.set({ envelope: { decay: p.hatDecay }, resonance: p.hatTone })
-    this.drums.openhat.set({ envelope: { decay: p.openHatDecay }, resonance: p.hatTone })
+  private applyDrumVoiceParams(state: DrumTrackState, p: EngineSynth) {
+    const kit = state.kit
+    if (!kit) return
+    state.kickTuneHz = p.kickTune
+    kit.kick.set({ pitchDecay: p.kickPunch, envelope: { decay: p.kickDecay } })
+    kit.snare.set({ envelope: { decay: p.snareDecay } })
+    kit.snareTone.set({ envelope: { decay: p.snareDecay } })
+    kit.snareToneGain.gain.value = p.snareTone
+    kit.hat.set({ envelope: { decay: p.hatDecay }, resonance: p.hatTone })
+    kit.openhat.set({ envelope: { decay: p.openHatDecay }, resonance: p.hatTone })
   }
 
-  private buildDrums(): void {
+  /** Build one legacy implicit-5-lane kit into a drums track's OWN bus (Phase 35 Stream OF: was
+   * the singleton buildDrums()/this.drums; now built lazily per legacy-mode track, so legacy mode
+   * works per-track too — same voices, same wiring, just one instance per track). */
+  private buildDrumKit(busIn: Tone.InputNode): DrumKit {
     // Every voice feeds the drum bus's filter (not master directly), so the bus's filter/EQ/comp/
     // distortion/sends apply to the whole kit — same as BeatLab.
-    const busIn = this.getDrumBus().filter
     const kick = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 7, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.1 } }).connect(busIn)
     kick.volume.value = -2
 
@@ -2023,13 +2109,13 @@ class Engine {
     const openhat = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.35, release: 0.05 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5 }).connect(busIn)
     openhat.volume.value = -20
 
-    this.drums = { kick, snare, snareTone, snareToneGain, clap, hat, openhat }
+    return { kick, snare, snareFilter, snareTone, snareToneGain, clap, clapFilter, hat, openhat }
   }
 
   // ---- Phase 22 Stream AB: declared-lane dispatch (research 19 Part VII step 5) ---------------
 
   private buildSynthLaneNode(voiceType: DrumVoiceType, busIn: Tone.InputNode): Tone.MembraneSynth | Tone.NoiseSynth | Tone.MetalSynth {
-    // Reuses the exact same MembraneSynth/NoiseSynth/MetalSynth building blocks buildDrums() hand-
+    // Reuses the exact same MembraneSynth/NoiseSynth/MetalSynth building blocks the legacy kit builder (buildDrumKit) hand-
     // wires per lane above — the point of the dispatch table is that this is now parameterized and
     // data-driven (one constructor per voice TYPE, not per lane).
     if (voiceType === 'membrane') {
@@ -2084,7 +2170,8 @@ class Engine {
       }
       voice.effectsOut.dispose()
     }
-    // sf: nothing per-lane to dispose — the shared drumSfVoice is torn down separately.
+    // sf: nothing per-lane to dispose — the track's shared sfVoice is torn down separately
+    // (disposeDrumState / ensureDrumSfVoice's replacement path).
   }
 
   /** Phase 26 Stream DK: (re)builds a sample-backed lane's playback-effect chain when its declared
@@ -2152,18 +2239,19 @@ class Engine {
   /** (Re)loads a sample-backed lane's one-shot buffer — this is the deferred v0.5 live sample-lane
    * playback (`engine.ts`'s file-header "deliberately NOT ported" list used to include it) finally
    * landing, generalized to any declared lane rather than the closed 5. Fire-and-forget from
-   * syncDeclaredDrumLanes(); best-effort like buildInstrument(). */
-  private loadLaneSample(laneName: string, sampleId: string, mediaPath: string, voice: SampleLaneVoice): void {
-    this.drumSamplePending.add(laneName)
+   * syncDeclaredDrumLanes(); best-effort like buildInstrument(). Pending-set lives on the TRACK's
+   * own state (Phase 35 Stream OF) so two drums tracks' same-named lanes can't block each other. */
+  private loadLaneSample(state: DrumTrackState, laneName: string, sampleId: string, mediaPath: string, voice: SampleLaneVoice): void {
+    state.samplePending.add(laneName)
     const old = voice.player
     const player = new Tone.Player({
       url: `${daemonBase()}/media/${mediaPath}`,
       onload: () => {
-        this.drumSamplePending.delete(laneName)
+        state.samplePending.delete(laneName)
       },
       onerror: (err: Error) => {
         console.warn(`[engine] drum lane "${laneName}" sample failed to load:`, err)
-        this.drumSamplePending.delete(laneName)
+        state.samplePending.delete(laneName)
       },
     }).connect(voice.filter)
     voice.player = player
@@ -2174,17 +2262,18 @@ class Engine {
   /** (Re)loads the ONE shared drum-channel WorkletSynthesizer every sf-backed lane on this track
    * triggers into (by GM note) — one voice per drum track, not one per lane, mirroring how a real
    * GM drum channel works (research 19 Part IV/V.2). Programs at DRUM_CHANNEL, not the instrument
-   * path's hardcoded channel 0. */
-  private async ensureDrumSfVoice(sampleId: string, program: number, mediaPath: string): Promise<void> {
-    if (this.drumSfVoice && this.drumSfVoice.sample === sampleId) {
-      if (this.drumSfVoice.program !== program) {
-        this.drumSfVoice.synth.programChange(DRUM_CHANNEL, program)
-        this.drumSfVoice.program = program
+   * path's hardcoded channel 0. Phase 35 Stream OF: the voice lives on (and connects into) the
+   * TRACK's own state/bus, so two drums tracks can carry two different soundfonts at once. */
+  private async ensureDrumSfVoice(state: DrumTrackState, sampleId: string, program: number, mediaPath: string): Promise<void> {
+    if (state.sfVoice && state.sfVoice.sample === sampleId) {
+      if (state.sfVoice.program !== program) {
+        state.sfVoice.synth.programChange(DRUM_CHANNEL, program)
+        state.sfVoice.program = program
       }
       return
     }
-    if (this.drumSfPending) return
-    this.drumSfPending = true
+    if (state.sfPending) return
+    state.sfPending = true
     try {
       await this.ensureWorkletModule()
       const res = await fetch(`${daemonBase()}/media/${mediaPath}`)
@@ -2196,10 +2285,10 @@ class Engine {
       await synth.isReady
       const entry = ctx.createGain()
       synth.connect(entry)
-      Tone.connect(entry, this.getDrumBus().filter)
+      Tone.connect(entry, state.bus.filter)
       synth.programChange(DRUM_CHANNEL, program)
-      const previous = this.drumSfVoice
-      this.drumSfVoice = { synth, entry, sample: sampleId, program }
+      const previous = state.sfVoice
+      state.sfVoice = { synth, entry, sample: sampleId, program }
       if (previous) {
         try {
           previous.synth.stopAll(true)
@@ -2213,20 +2302,20 @@ class Engine {
     } catch (err) {
       console.warn('[engine] drum sf voice failed to load:', err)
     } finally {
-      this.drumSfPending = false
+      state.sfPending = false
     }
   }
 
   /** Reconciles the live per-lane voice map with a drum track's declared `lanes` list: builds
    * synth voices from {voiceType, params}, kicks off sample loads, and ensures the shared sf
    * voice — the lane->backing dispatch table research 19 Part VII step 5 asked for. */
-  private syncDeclaredDrumLanes(doc: BeatDocument, track: BeatTrack): void {
-    const busIn = this.getDrumBus().filter
+  private syncDeclaredDrumLanes(doc: BeatDocument, track: BeatTrack, state: DrumTrackState): void {
+    const busIn = state.bus.filter
     const declared = new Set(track.lanes.map((l) => l.name))
-    for (const [name, voice] of [...this.drumLanes]) {
+    for (const [name, voice] of [...state.lanes]) {
       if (!declared.has(name)) {
         this.disposeLaneVoice(voice)
-        this.drumLanes.delete(name)
+        state.lanes.delete(name)
       }
     }
     const media = doc.media as { id: string; path: string }[]
@@ -2238,18 +2327,18 @@ class Engine {
     for (const decl of track.lanes as BeatDrumLaneDecl[]) {
       const backing = decl.backing
       if (backing.type === 'synth') {
-        let v = this.drumLanes.get(decl.name)
+        let v = state.lanes.get(decl.name)
         if (!v || v.kind !== 'synth' || v.voiceType !== backing.voice) {
           if (v) this.disposeLaneVoice(v)
           const node = this.buildSynthLaneNode(backing.voice, busIn)
           const toneLayer = backing.voice === 'noise' ? this.buildNoiseToneLayer(busIn) : undefined
           v = { kind: 'synth', voiceType: backing.voice, node, toneLayer, params: {} }
-          this.drumLanes.set(decl.name, v)
+          state.lanes.set(decl.name, v)
         }
         v.params = backing.params
         this.applySynthLaneParams(v)
       } else if (backing.type === 'sample') {
-        let v = this.drumLanes.get(decl.name)
+        let v = state.lanes.get(decl.name)
         if (!v || v.kind !== 'sample') {
           if (v) this.disposeLaneVoice(v)
           // Phase 26 Stream DK: player -> filter -> envGain -> gain (static level*velocity,
@@ -2276,7 +2365,7 @@ class Engine {
             effectsOut,
             player: null,
           }
-          this.drumLanes.set(decl.name, v)
+          state.lanes.set(decl.name, v)
         }
         v.gainDb = backing.gainDb
         v.tune = backing.tune
@@ -2287,22 +2376,22 @@ class Engine {
         v.filter.Q.value = backing.params.resonance ?? SAMPLE_LANE_PARAM_DEFAULTS.resonance
         v.filter.type = backing.filterType
         this.applySampleLaneEffects(v, decl.name, track.id, backing.effects, trackParams)
-        if (v.loadedSample !== backing.sample && !this.drumSamplePending.has(decl.name)) {
+        if (v.loadedSample !== backing.sample && !state.samplePending.has(decl.name)) {
           const m = media.find((x) => x.id === backing.sample)
           if (m) {
             v.sample = backing.sample
-            this.loadLaneSample(decl.name, backing.sample, m.path, v)
+            this.loadLaneSample(state, decl.name, backing.sample, m.path, v)
           }
         }
       } else {
         // sf-backed
-        this.drumLanes.set(decl.name, { kind: 'sf', sample: backing.sample, program: backing.program, note: backing.note })
+        state.lanes.set(decl.name, { kind: 'sf', sample: backing.sample, program: backing.program, note: backing.note })
         sfNeeded = { sample: backing.sample, program: backing.program }
       }
     }
     if (sfNeeded) {
       const m = media.find((x) => x.id === sfNeeded!.sample)
-      if (m) void this.ensureDrumSfVoice(sfNeeded.sample, sfNeeded.program, m.path)
+      if (m) void this.ensureDrumSfVoice(state, sfNeeded.sample, sfNeeded.program, m.path)
     }
   }
 
@@ -2312,8 +2401,8 @@ class Engine {
    * is untouched); best-effort, since choking a voice that isn't currently sounding is a no-op
    * Tone.js tolerates via the try/catch (a release/stop on an idle voice can throw on some Tone.js
    * node types if scheduled at/before its last scheduled time). */
-  private chokeDeclaredLane(laneName: string, time: number): void {
-    const voice = this.drumLanes.get(laneName)
+  private chokeDeclaredLane(state: DrumTrackState, laneName: string, time: number): void {
+    const voice = state.lanes.get(laneName)
     if (!voice) return
     try {
       if (voice.kind === 'synth') voice.node.triggerRelease(time)
@@ -2323,7 +2412,7 @@ class Engine {
         // stale target after the player itself has already stopped.
         voice.envGain.gain.cancelScheduledValues(time)
         voice.envGain.gain.setValueAtTime(1, time)
-      } else if (voice.kind === 'sf' && this.drumSfVoice) this.drumSfVoice.synth.noteOff(DRUM_CHANNEL, voice.note, { time })
+      } else if (voice.kind === 'sf' && state.sfVoice) state.sfVoice.synth.noteOff(DRUM_CHANNEL, voice.note, { time })
     } catch {
       // best-effort — see comment above
     }
@@ -2333,15 +2422,11 @@ class Engine {
     if (this.started) return
     this.ensureNativeContext() // pin Tone to a native context before Tone.start()/node creation
     await Tone.start()
-    this.buildDrums()
-    // Re-apply the drums track's params in case they were adjusted before this first start.
+    // Build every drums track's live state up front (kit/lanes + bus params) in case params were
+    // adjusted before this first start — the per-track generalization of the old single-track
+    // buildDrums()+applyDrum*Params warmup (Phase 35 Stream OF).
     const doc = useStore.getState().doc
-    const drumsTrack = doc?.tracks.find((t) => t.kind === 'drums')
-    if (drumsTrack) {
-      const p = coerce(drumsTrack.synth)
-      this.applyDrumVoiceParams(p)
-      this.applyDrumBusParams(p, drumsTrack.effects ?? [], drumsTrack.id)
-    }
+    if (doc) this.syncDrumTracks(doc)
     this.started = true
   }
 
@@ -2612,25 +2697,49 @@ class Engine {
       }
       this.applyParams(chain, coerce(track.synth), track.effects ?? [], track.id)
     }
-    const drumsTrack = doc.tracks.find((t) => t.kind === 'drums')
-    this.drumTrackId = drumsTrack?.id ?? null
-    // Phase 22 Stream AB: a track with a non-empty `lanes` list uses the NEW declared-lane
-    // dispatch; an empty list (every pre-v0.10 file) keeps the legacy path bit-for-bit unchanged.
-    this.drumDeclaredMode = !!drumsTrack && drumsTrack.lanes.length > 0
-    if (drumsTrack) {
-      const p = coerce(drumsTrack.synth)
-      this.applyDrumBusParams(p, drumsTrack.effects ?? [], drumsTrack.id)
-      if (this.drumDeclaredMode) {
-        this.syncDeclaredDrumLanes(doc, drumsTrack)
-      } else {
-        this.applyDrumVoiceParams(p)
-      }
-    }
+    this.syncDrumTracks(doc)
     // Per-tick read of the mixer's mute/solo state -> real audio gating. sync() already runs every
     // 16th tick, so a mute toggled mid-playback takes effect on the next step (well under a beat).
     this.applyMuteGates()
     this.syncInstruments(doc)
     this.syncAudioTracks(doc)
+  }
+
+  /** Reconcile live per-drums-track state with the document (Phase 35 Stream OF): dispose vanished
+   * drums tracks' whole node graphs, build state for new ones, and apply EVERY drums track's bus +
+   * voice params — the multi-track generalization of the old single `doc.tracks.find(kind ===
+   * 'drums')` binding that left any second drums track silent. Per track: a non-empty `lanes` list
+   * (Phase 22 Stream AB declared mode) syncs the lane dispatch table; an empty list (every
+   * pre-v0.10 file) lazily builds that track's OWN legacy implicit-5-lane kit — legacy mode works
+   * per-track too, it is not scoped to the first drums track. */
+  private syncDrumTracks(doc: BeatDocument): void {
+    const drumTracks = doc.tracks.filter((t) => t.kind === 'drums')
+    const wanted = new Set(drumTracks.map((t) => t.id))
+    for (const [id, state] of [...this.drumStates]) {
+      if (!wanted.has(id)) {
+        this.disposeDrumState(state)
+        this.drumStates.delete(id)
+      }
+    }
+    for (const track of drumTracks) {
+      const state = this.getDrumState(track.id)
+      state.declaredMode = track.lanes.length > 0
+      const p = coerce(track.synth)
+      this.applyDrumBusParams(state.bus, p, track.effects ?? [], track.id)
+      if (state.declaredMode) {
+        this.syncDeclaredDrumLanes(doc, track, state)
+      } else {
+        // A track that flipped declared -> legacy sheds its lane voices; the legacy kit is lazily
+        // built on this track's own bus. (A legacy -> declared flip leaves the kit allocated but
+        // silent — triggerDrum branches on declaredMode — matching the old engine's behavior.)
+        if (state.lanes.size > 0) {
+          for (const voice of state.lanes.values()) this.disposeLaneVoice(voice)
+          state.lanes.clear()
+        }
+        if (!state.kit) state.kit = this.buildDrumKit(state.bus.filter)
+        this.applyDrumVoiceParams(state, p)
+      }
+    }
   }
 
   /** Gate each track's output to 0 or 1 from the store's effective mute/solo state (mute wins; if
@@ -2645,8 +2754,8 @@ class Engine {
     for (const [id, chain] of this.chains) {
       chain.muteGain.gain.value = isEffectivelyMuted(state, id) ? 0 : 1
     }
-    if (this.drumBus && this.drumTrackId) {
-      this.drumBus.muteGain.gain.value = isEffectivelyMuted(state, this.drumTrackId) ? 0 : 1
+    for (const [id, drumState] of this.drumStates) {
+      drumState.bus.muteGain.gain.value = isEffectivelyMuted(state, id) ? 0 : 1
     }
     for (const [id, voice] of this.instruments) {
       voice.muteGain.gain.value = isEffectivelyMuted(state, id) ? 0 : 1
@@ -2687,7 +2796,8 @@ class Engine {
   private levelTapFor(trackId: string): Tone.Analyser | null {
     const chain = this.chains.get(trackId)
     if (chain) return chain.levelTap
-    if (this.drumBus && trackId === this.drumTrackId) return this.drumBus.levelTap
+    const drumState = this.drumStates.get(trackId)
+    if (drumState) return drumState.bus.levelTap
     const voice = this.instruments.get(trackId)
     if (voice) return voice.levelTap
     const audioVoice = this.audioTracks.get(trackId)
@@ -2948,25 +3058,31 @@ class Engine {
     }
   }
 
-  /** Triggers one drum hit. `lane` is open (Phase 22 Stream AB) — a declared name on the drums
-   * track's `lanes` list, or one of the implicit 5 DRUM_LANES for a legacy/migrated track.
+  /** Triggers one drum hit on ONE drums track's own state (Phase 35 Stream OF: `trackId` is new —
+   * the scheduler routes each drums track's hits to its own lane map/bus/kit, so a second drums
+   * track actually sounds). `lane` is open (Phase 22 Stream AB) — a declared name on that track's
+   * `lanes` list, or one of the implicit 5 DRUM_LANES for a legacy/migrated track.
    * `duration` (16th steps, research 20 Part 7) is honored ONLY in declared-lane mode: the legacy
    * switch below is left bit-for-bit as it was pre-Stream-AB (see the LaneVoice types' comment for
    * why), so it never had a duration concept and doesn't gain one now. */
-  triggerDrum(lane: string, time: number, velocity = 1, duration?: number): void {
-    // Per-lane monotonic guard: the single-instance drum voices reject a start at/before the last
-    // one (Tone.js's strictly-increasing-start rule). Nudge any non-increasing trigger 5ms forward.
+  triggerDrum(trackId: string, lane: string, time: number, velocity = 1, duration?: number): void {
+    const state = this.drumStates.get(trackId)
+    if (!state) return
+    // Per-lane monotonic guard, PER TRACK: the single-instance drum voices reject a start at/before
+    // the last one (Tone.js's strictly-increasing-start rule). Nudge any non-increasing trigger 5ms
+    // forward. Keyed on the track's own state so two tracks' same-named lanes never displace each
+    // other's trigger times.
     let t = time
-    const last = this.lastLaneTriggerTime[lane]
+    const last = state.lastLaneTriggerTime[lane]
     if (last !== undefined && t <= last) t = last + 0.005
-    this.lastLaneTriggerTime[lane] = t
+    state.lastLaneTriggerTime[lane] = t
 
-    if (this.drumDeclaredMode) {
+    if (state.declaredMode) {
       // Choke group: a closed-hat hit silences a ringing open hat (research 19 Part V.1). Keyed by
-      // canonical name, same simplification the 12-lane default kit's naming makes elsewhere in
-      // this stream (no general choke-group declaration — out of scope, see docs/phase-22-stream-ab.md).
-      if (lane === 'hat') this.chokeDeclaredLane('openhat', t)
-      const voice = this.drumLanes.get(lane)
+      // canonical name WITHIN this track's own lane map — two drums tracks' hats never choke each
+      // other (no general choke-group declaration — out of scope, see docs/phase-22-stream-ab.md).
+      if (lane === 'hat') this.chokeDeclaredLane(state, 'openhat', t)
+      const voice = state.lanes.get(lane)
       if (!voice) return
       const stepSec = Tone.Time('16n').toSeconds()
       const durSec = duration !== undefined ? duration * stepSec : undefined
@@ -3005,39 +3121,48 @@ class Engine {
         this.scheduleSampleLaneEnvelope(voice, t, effectiveDur)
       } else {
         // sf-backed
-        if (!this.drumSfVoice || this.drumSfVoice.sample !== voice.sample) return
+        if (!state.sfVoice || state.sfVoice.sample !== voice.sample) return
         const vel = Math.max(1, Math.min(127, Math.round(velocity * 127)))
-        this.drumSfVoice.synth.noteOn(DRUM_CHANNEL, voice.note, vel, { time: t })
-        if (durSec !== undefined) this.drumSfVoice.synth.noteOff(DRUM_CHANNEL, voice.note, { time: t + durSec })
+        state.sfVoice.synth.noteOn(DRUM_CHANNEL, voice.note, vel, { time: t })
+        if (durSec !== undefined) state.sfVoice.synth.noteOff(DRUM_CHANNEL, voice.note, { time: t + durSec })
       }
       return
     }
 
-    // ---- legacy 5-lane path — UNCHANGED from pre-Stream-AB, see this method's doc comment ----
-    if (!this.drums) return
+    // ---- legacy 5-lane path — same trigger switch as pre-Stream-AB, now reading THIS track's
+    // own kit/kickTune (Phase 35 Stream OF) instead of the old singleton ----
+    const kit = state.kit
+    if (!kit) return
     switch (lane) {
       case 'kick':
-        this.drums.kick.triggerAttackRelease(this.kickTuneHz, '8n', t, velocity)
+        kit.kick.triggerAttackRelease(state.kickTuneHz, '8n', t, velocity)
         break
       case 'snare':
-        this.drums.snare.triggerAttackRelease('8n', t, velocity)
-        this.drums.snareTone.triggerAttackRelease('A2', '8n', t, velocity) // silent unless snareTone > 0
+        kit.snare.triggerAttackRelease('8n', t, velocity)
+        kit.snareTone.triggerAttackRelease('A2', '8n', t, velocity) // silent unless snareTone > 0
         break
       case 'clap':
-        this.drums.clap.triggerAttackRelease('8n', t, velocity)
+        kit.clap.triggerAttackRelease('8n', t, velocity)
         break
       case 'hat':
-        this.drums.hat.triggerAttackRelease(300, '32n', t, velocity)
+        kit.hat.triggerAttackRelease(300, '32n', t, velocity)
         break
       case 'openhat':
-        this.drums.openhat.triggerAttackRelease(300, '16n', t, velocity)
+        kit.openhat.triggerAttackRelease(300, '16n', t, velocity)
         break
     }
   }
 
-  async previewDrum(lane: string, velocity = 1): Promise<void> {
+  async previewDrum(trackId: string, lane: string, velocity = 1): Promise<void> {
     await this.ensureStarted()
-    this.triggerDrum(lane, Math.max(Tone.now(), (this.lastLaneTriggerTime[lane] ?? 0) + 0.005), velocity)
+    // Make sure this track's state exists even if it was added after the engine first started
+    // (ensureStarted only warms drum states once) — same "build with current params first" idiom
+    // previewNote uses via sync().
+    const doc = useStore.getState().doc
+    if (doc && !this.drumStates.has(trackId)) this.syncDrumTracks(doc)
+    const state = this.drumStates.get(trackId)
+    if (!state) return
+    this.triggerDrum(trackId, lane, Math.max(Tone.now(), (state.lastLaneTriggerTime[lane] ?? 0) + 0.005), velocity)
   }
 
   /** Audition a single pitch through a synth/instrument track's live voice — the note-editor analog
@@ -3097,9 +3222,9 @@ class Engine {
 
   /** Audition a DRUM-KIT preset's voice-shaping params (kickTune/kickPunch/kickDecay, snareDecay,
    * hatDecay/hatTone — the same BeatSynth fields drum presets set) with a short kick/hat/snare/hat
-   * phrase. Deliberately a SEPARATE, throwaway set of voices from the live drums track's singleton
-   * DrumKit (buildDrums()/this.drums) — that one is synced every tick off the real document and
-   * shared by the whole app; previewing a not-yet-applied preset must not perturb it. Uses the same
+   * phrase. Deliberately a SEPARATE, throwaway set of voices from any live drums track's own
+   * DrumKit (buildDrumKit()/DrumTrackState.kit) — those are synced every tick off the real
+   * document; previewing a not-yet-applied preset must not perturb them. Uses the same
    * Tone.js voice types/params buildDrums() does (MembraneSynth kick, NoiseSynth snare, MetalSynth
    * hat) wired straight to the master bus, bypassing the drum bus's EQ/comp/insert chain (a preview
    * doesn't need that fidelity). */
@@ -3319,7 +3444,6 @@ class Engine {
       this.auditionTrackId = null
       useStore.getState().setAuditioning(null)
     }
-    this.lastLaneTriggerTime = {}
     for (const voice of this.instruments.values()) {
       try {
         voice.synth.stopAll(true)
@@ -3327,19 +3451,22 @@ class Engine {
         // best-effort: a not-yet-ready voice may reject stopAll
       }
     }
-    if (this.drumSfVoice) {
-      try {
-        this.drumSfVoice.synth.stopAll(true)
-      } catch {
-        // best-effort, same as the instrument voices above
-      }
-    }
-    for (const voice of this.drumLanes.values()) {
-      if (voice.kind === 'sample') {
+    for (const drumState of this.drumStates.values()) {
+      drumState.lastLaneTriggerTime = {}
+      if (drumState.sfVoice) {
         try {
-          voice.player?.stop()
+          drumState.sfVoice.synth.stopAll(true)
         } catch {
-          // best-effort: a not-yet-loaded player may reject stop
+          // best-effort, same as the instrument voices above
+        }
+      }
+      for (const voice of drumState.lanes.values()) {
+        if (voice.kind === 'sample') {
+          try {
+            voice.player?.stop()
+          } catch {
+            // best-effort: a not-yet-loaded player may reject stop
+          }
         }
       }
     }
@@ -3595,10 +3722,11 @@ class Engine {
         // params are applied reactively in sync()). Phase 18 Stream R: real tempo-sync — when
         // lfoSync is on, the rate is resolved from the CURRENT doc.bpm every tick, so a BPM edit
         // changes the drum bus LFO's period on the very next 16th-note step.
-        if ((p.lfoDest === 'cutoff' || p.lfoDest === 'amp') && p.lfoDepth > 0) {
+        const drumState = this.drumStates.get(track.id)
+        if ((p.lfoDest === 'cutoff' || p.lfoDest === 'amp') && p.lfoDepth > 0 && drumState) {
           const rateHz = p.lfoSync ? lfoSyncRateHz(doc.bpm, p.lfoSyncRate) : p.lfoRate
           const lfo = lfoValueAt(rateHz, time)
-          const bus = this.getDrumBus()
+          const bus = drumState.bus
           if (p.lfoDest === 'cutoff') {
             bus.filter.frequency.linearRampToValueAtTime(p.cutoff * Math.pow(2, p.lfoDepth * lfo), time + stepSeconds)
           } else {
@@ -3611,7 +3739,7 @@ class Engine {
         for (const h of content.hits) {
           if (Math.floor(h.start) === content.contentStep && !drumRep.suppressOriginal) {
             const frac = h.start - Math.floor(h.start)
-            this.triggerDrum(h.lane, time + frac * stepSeconds, h.velocity, h.duration)
+            this.triggerDrum(track.id, h.lane, time + frac * stepSeconds, h.velocity, h.duration)
           }
         }
         if (drumRep.repeatNow) {
@@ -3619,7 +3747,7 @@ class Engine {
             if (h.start < drumRep.sliceStart || h.start >= drumRep.sliceStart + drumRep.grid) continue
             if (seededRoll(track.id, content.contentStep, h.id) >= p.beatRepeatChance) continue
             const offset = h.start - drumRep.sliceStart
-            this.triggerDrum(h.lane, time + offset * stepSeconds, h.velocity)
+            this.triggerDrum(track.id, h.lane, time + offset * stepSeconds, h.velocity)
           }
         }
         continue
@@ -3887,7 +4015,9 @@ class Engine {
    * a sample-backed lane played its synth voice with zero signal (owner's dogfood session,
    * 2026-07-13). cli/render.mjs polls this to zero before playing. */
   pendingMediaCount(): number {
-    return this.drumSamplePending.size + this.instrumentPending.size + this.audioBufferPending.size + (this.drumSfPending ? 1 : 0)
+    let drumPending = 0
+    for (const s of this.drumStates.values()) drumPending += s.samplePending.size + (s.sfPending ? 1 : 0)
+    return drumPending + this.instrumentPending.size + this.audioBufferPending.size
   }
 
   /** Records `seconds` of the live master output (post-limiter — exactly what plays) as a WAV blob.

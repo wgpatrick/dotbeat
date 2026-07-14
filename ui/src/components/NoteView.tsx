@@ -199,7 +199,9 @@ function buildLaneAxis(track: BeatTrack): RowAxis {
       // Lane-granular selection (Phase 16 Stream J, preserved from StepSequencer): clicking a lane
       // label scopes vary to just this lane's own param group, and previews it.
       postSelection({ tracks: [trackId], lanes: [{ track: trackId, lane }] })
-      void engine.previewDrum(lane)
+      // Phase 35 Stream OF: previewDrum is per-track now — audition THIS track's lane voice, not
+      // a global single-drums-track binding.
+      void engine.previewDrum(trackId, lane)
     },
   }
 }
