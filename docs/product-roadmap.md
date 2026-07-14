@@ -24,9 +24,9 @@ data file, not this file directly, so it stays in sync with the matching artifac
 A feature with links in both columns but status "Not started" means: fully scoped, ready for a
 stream to pick up — not guesswork, a decision away from being built.
 
-## Snapshot — 306 features tracked
+## Snapshot — 307 features tracked
 
-**118** Done · **4** In progress · **184** Not started
+**118** Done · **5** In progress · **184** Not started
 
 ---
 
@@ -122,6 +122,7 @@ stream to pick up — not guesswork, a decision away from being built.
 | Per-voice mute/solo + auto-highlight the sounding lane | Ableton: every Drum Rack chain row carries its own Solo + Mute, plus Auto Select auto-highlights whichever chain is currently sounding (manual ch.24 pp.465-467). dotbeat has track-level mute/solo only — confirmed no lane-scoped mute/solo primitive exists. Extend the existing transient, session-only mute/solo pattern (ui/src/state/store.ts, already deliberately kept out of the .beat file) down to lane granularity, plus a "currently sounding" highlight in the Lanes panel keyed off the same trigger path `previewDrum`/`triggerDrum` already share. | ❌ missing | ❌ missing | ❌ missing | ⬜ Not started | [`64-ableton-vs-dotbeat-racks.md`](research/64-ableton-vs-dotbeat-racks.md) | — |
 | Extract a drum lane to its own track (`beat extract-lane`) | Ableton can extract a chain (with its devices and, for drum chains, its MIDI/hit data) to its own track (manual ch.24 pp.479-480). A pure compound edit over primitives that already exist: `addLane`/`removeLane`/`moveLane`/`setLaneBacking` plus `addTrack` — new track with one lane copying the source's backing, move every referencing `hit` line by id, remove the source lane. Has a tedious manual workaround today; ship once per-lane volume/pan lands (shares its lane-primitive surface). | ❌ missing | ❌ missing | — | ⬜ Not started | [`64-ableton-vs-dotbeat-racks.md`](research/64-ableton-vs-dotbeat-racks.md) | — |
 | Rack/chain-level mixer strip (lanes visible in the mixer) | Ableton's Rack chains appear alongside tracks in the mixer, full mixing/routing controls mirrored live with the chain list (manual ch.24 pp.478-479). Extend `MixerView.tsx` to optionally expand a drum track into its declared lanes as sub-strips (gain/pan + mute/solo, both above) — a natural follow-on once both exist, not a standalone build. | — | — | ❌ missing | ⬜ Not started | [`64-ableton-vs-dotbeat-racks.md`](research/64-ableton-vs-dotbeat-racks.md) | — |
+| Multiple drums tracks actually sound (engine wires only the first) | Found by the owner's music agent mid-song (2026-07-14): the engine binds exactly ONE drums track — `doc.tracks.find(kind === 'drums')` at ui/src/audio/engine.ts:2615, one global drumLanes map, one drum bus, one drumTrackId. A second drums track parses, serializes, edits, and inspects perfectly and is pure silence at playback — the worst silent-failure class this project tracks. The session's workaround was burning the main kit's unused tom/crash/ride lanes for vocal chops. Format has no such limit; engine-only. Fix: per-drums-track lane maps/bus/declared-mode/sf-voice, triggerDrum keyed by (track, lane), per-track choke groups and trigger guards, plus a committed two-drums-track render proof that both tracks sound. Phase 35 Stream OF. | ✅ done | ✅ done | ❌ missing | 🚧 In progress | — | [`phase-35-plan.md`](phase-35-plan.md) |
 
 ## Arrangement / song structure
 

@@ -1748,6 +1748,13 @@ export const rows = [
     research: 'research/101-usability-pilot-mcp-taste-loop.md', plan: null,
   },
 
+  {
+    area: 'Drum programming', feature: 'Multiple drums tracks actually sound (engine wires only the first)',
+    description: 'Found by the owner\'s music agent mid-song (2026-07-14): the engine binds exactly ONE drums track — `doc.tracks.find(kind === \'drums\')` at ui/src/audio/engine.ts:2615, one global drumLanes map, one drum bus, one drumTrackId. A second drums track parses, serializes, edits, and inspects perfectly and is pure silence at playback — the worst silent-failure class this project tracks. The session\'s workaround was burning the main kit\'s unused tom/crash/ride lanes for vocal chops. Format has no such limit; engine-only. Fix: per-drums-track lane maps/bus/declared-mode/sf-voice, triggerDrum keyed by (track, lane), per-track choke groups and trigger guards, plus a committed two-drums-track render proof that both tracks sound. Phase 35 Stream OF.',
+    core: 'done', cli: 'done', gui: 'missing', status: 'progress',
+    research: null, plan: 'phase-35-plan.md',
+  },
+
   // ── Known usability gaps (backlog) ────────────────────────────────────────
   // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
   // feature) or too cross-cutting (spans many components) to fold into a single fix-phase stream.

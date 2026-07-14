@@ -137,6 +137,26 @@ instead of absolute targets.
 
 Web research; no code. Flag single-source claims as such rather than over-claiming.
 
+## OF — multi-drums-track engine support *(added mid-phase, 2026-07-14)*
+
+Found by the owner's music agent mid-song: **the engine wires only the FIRST drums-kind track**
+(`ui/src/audio/engine.ts:2615` — `doc.tracks.find((t) => t.kind === 'drums')`, one global
+`drumLanes` map, one drum bus, one `drumTrackId`, one sf voice). A second drums track parses,
+serializes, edits, and inspects perfectly — and is pure silence at playback. The session had to
+burn the main kit's unused tom/crash/ride lanes to get vocal chops sounding at all. The format
+has no such limit; this is engine-only.
+
+1. Per-drums-track state: lane voice maps, bus, declared-mode flag, and (if sf-backed lanes are
+   in play) sf voice keyed by track id — `triggerDrum` becomes `(trackId, lane, ...)`; the
+   scheduler routes each drums track's hits to its own map. Choke groups and the per-lane
+   monotonic trigger guard become per-track too (two tracks' hats must not choke each other).
+2. Mixer/solo/mute, per-track sends/effects, and the GUI drum-lane panel must keep addressing
+   the right track (they mostly key by track id already — verify, don't assume).
+3. Verification is the point: a committed `ui/verify-*.mjs` (or scripts/) proof rendering a
+   two-drums-track project and measuring BOTH tracks sound (solo renders spectrally distinct,
+   both present in the mix) — the exact test that would have caught this years of sessions ago.
+   All existing single-drums behavior stays bit-for-bit (the full verify suite + 635 tests).
+
 ## Wrap-up (standing habits)
 
 - CLI/MCP pilot against OA+OC surfaces (research/103+); a GUI-facing pilot is not needed
