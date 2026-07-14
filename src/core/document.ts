@@ -645,8 +645,97 @@ export interface BeatClip {
  * mature DAW restrict to powers of two here; there's no such thing as a "/3" time signature). */
 export const TIME_SIG_DENOMINATORS: readonly number[] = [1, 2, 4, 8, 16, 32]
 
+/** v0.11 (Phase 36, decisions.md D16, docs/multi-region-audio-design.md Option A): ONE placement
+ * of a clip within a scene — `clip` is a clip id on the slot's own track, `at` is the offset from
+ * the section start in fractional 16th steps (the same unit note/hit `start` already uses), >= 0
+ * and finite. Placements are REFERENCES: the same clip is legally placeable twice on one track
+ * (the same impact sample at two hit points). Canonical order within a track's placement list is
+ * (at, clip id) ascending, and `at 0` is elided from the serialized `slot` line — which is exactly
+ * what makes every pre-v0.11 document round-trip byte-identically. */
+export interface BeatPlacement {
+  clip: string
+  at: number // fractional 16th steps from the section start; >= 0, finite
+}
+
+/** Canonical placement order: by `at`, ties by clip id (D16). Returns a new array. */
+export function sortPlacements(placements: readonly BeatPlacement[]): BeatPlacement[] {
+  return [...placements].sort((a, b) => a.at - b.at || a.clip.localeCompare(b.clip))
+}
+
+/** The single clip id consumers that predate multi-placement want from a track's slot: the
+ * placement at `at 0` if there is one, else the first placement in canonical order, else
+ * undefined. Engine scheduling (Phase 36 PC) and GUI rendering (Phase 36 PD) will replace their
+ * calls to this with real per-placement handling — until then, single-placement projects (every
+ * pre-v0.11 document) behave exactly as before, because their one placement IS the at-0 one. */
+export function firstPlacementClip(slots: Record<string, BeatPlacement[]>, trackId: string): string | undefined {
+  const placements = slots[trackId]
+  if (!placements || placements.length === 0) return undefined
+  const sorted = sortPlacements(placements)
+  return (sorted.find((p) => p.at === 0) ?? sorted[0]!).clip
+}
+
+/** An audio region's TIMELINE length in fractional 16th steps at a given document bpm — how many
+ * steps of arrangement time the region occupies before truncation. `rate` is the repitch
+ * playbackRate: at rate 2, twice as much source material elapses per timeline second, so the
+ * region is half as long on the timeline (the same in/out/rate arithmetic `splitAudioClip`'s
+ * source-split conversion uses, inverted). Overlap validation (below) and the engine's
+ * per-placement scheduling (Phase 36 PC) both key off this. */
+export function audioRegionTimelineSteps(region: Pick<BeatAudioRegion, 'in' | 'out' | 'rate'>, bpm: number): number {
+  const stepSeconds = 60 / bpm / 4 // one 16th note, seconds
+  return (region.out - region.in) / (stepSeconds * region.rate)
+}
+
+/** v0.11 placement validation shared by parse.ts (wrapped in BeatParseError) and edit.ts (wrapped
+ * in BeatEditError) — the two must never drift on WHAT is legal, only on how the error surfaces.
+ * Assumes track/clip existence has already been checked (each caller has its own established
+ * message for those). Returns the first violation as a message string, or null when valid:
+ *
+ * - every `at` must be finite and >= 0;
+ * - `at > 0` or more than one placement per track is AUDIO-ONLY for v1 (D16 scope guard):
+ *   "multi-placement is audio-only for now — synth/drum clips tile from the section start";
+ * - two placements on one track must not overlap in time — each audio region's timeline length is
+ *   computed from its in/out/rate and the document bpm (audioRegionTimelineSteps above), and
+ *   placement i must end at or before placement i+1 begins (Ableton's no-overlap arrangement
+ *   rule; truncate-at-section-end stays as today and is NOT validated here — section lengths vary
+ *   per use). */
+export function scenePlacementError(tracks: readonly BeatTrack[], bpm: number, sceneId: string, slots: Record<string, BeatPlacement[]>): string | null {
+  for (const [trackId, placements] of Object.entries(slots)) {
+    const track = tracks.find((t) => t.id === trackId)
+    for (const p of placements) {
+      if (!Number.isFinite(p.at) || p.at < 0) {
+        return `scene "${sceneId}": placement of clip "${p.clip}" on track "${trackId}" has invalid at ${p.at} — at must be a finite number >= 0`
+      }
+    }
+    if (!track) continue // existence is the caller's check
+    if (track.kind !== 'audio') {
+      if (placements.length > 1) {
+        return `scene "${sceneId}": track "${trackId}" has ${placements.length} placements — multi-placement is audio-only for now — synth/drum clips tile from the section start`
+      }
+      const only = placements[0]
+      if (only && only.at !== 0) {
+        return `scene "${sceneId}": clip "${only.clip}" on track "${trackId}" is placed at ${only.at} — multi-placement is audio-only for now — synth/drum clips tile from the section start`
+      }
+      continue
+    }
+    // audio track: no two placements may overlap on the timeline
+    const sorted = sortPlacements(placements)
+    for (let i = 0; i + 1 < sorted.length; i++) {
+      const cur = sorted[i]!
+      const next = sorted[i + 1]!
+      const clip = track.clips.find((c) => c.id === cur.clip)
+      if (!clip?.audio) continue // clip existence/audio-line presence are the caller's checks
+      const end = cur.at + audioRegionTimelineSteps(clip.audio, bpm)
+      if (next.at < end) {
+        return `scene "${sceneId}": placements overlap on track "${trackId}" — "${cur.clip}" at ${cur.at} runs ${audioRegionTimelineSteps(clip.audio, bpm)} steps (through step ${end} at ${bpm} bpm, from its region's in/out/rate) and "${next.clip}" starts at ${next.at}`
+      }
+    }
+  }
+  return null
+}
+
 /** v0.4: a scene maps tracks to clips — one complete statement of "what plays". Mirrors
- * beatlab's Scene.clipIds. Serialized as one `slot` line per mapping, in track order.
+ * beatlab's Scene.clipIds. Serialized as one `slot` line per placement, in track order, then
+ * canonical placement order (at, clip id) within a track; `at 0` elided.
  * v0.10 (Phase 32 Stream LB, docs/research/90): an optional human-facing `name` — a scene is
  * dotbeat's unit of distinct musical content (research/93's "scene vs section" comparison: "a
  * 'scene' is the reusable bundle of clips; a 'section' is one placement of a scene into the
@@ -654,11 +743,16 @@ export const TIME_SIG_DENOMINATORS: readonly number[] = [1, 2, 4, 8, 16, 32]
  * scene reused across two sections shows the same name in both places. Optional and elided when
  * absent (canonical form D9): every pre-existing scene id doubles as its own label until a `name`
  * line opts in, exactly today's behavior. Slug-like token (`SLUG_RE`), not free text — see
- * parse.ts/serialize.ts's `name` handling. */
+ * parse.ts/serialize.ts's `name` handling.
+ * v0.11 (Phase 36, D16): a track's slot holds a LIST of placements (`BeatPlacement[]`) instead of
+ * one bare clip id — repeated `slot` lines with an optional trailing `at <steps>`. A track with
+ * one placement at 0 serializes exactly as it did pre-v0.11 (byte-identity). An empty placement
+ * list has no canonical serialized form — the track key is simply absent (same elision discipline
+ * as an empty automation lane). */
 export interface BeatScene {
   id: string
   name?: string
-  slots: Record<string, string> // trackId -> clipId
+  slots: Record<string, BeatPlacement[]> // trackId -> placements (canonical order: at, then clip id)
 }
 
 /** v0.4: one song section — play `scene` for `bars` bars (clip content loops within the

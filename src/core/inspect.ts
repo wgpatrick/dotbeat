@@ -3,7 +3,7 @@
 // parsed document; this is the human-shaped view.)
 
 import type { BeatClip, BeatDocument, BeatDrumHit, BeatGroup, BeatTrack, DrumVoiceType } from './document.js'
-import { DRUM_LANES, SYNTH_FIELDS, declaredLaneNames } from './document.js'
+import { DRUM_LANES, SYNTH_FIELDS, declaredLaneNames, sortPlacements } from './document.js'
 import { serializeLaneBacking } from './serialize.js'
 import { formatNumber } from './format.js'
 
@@ -199,7 +199,11 @@ export function describeDocument(doc: BeatDocument): string {
   }
   if (doc.groups.length > 0) lines.push('')
   for (const s of doc.scenes) {
-    const slots = Object.entries(s.slots).map(([tr, c]) => `${tr}=${c}`).join(' ')
+    // v0.11: one `track=clip[@at]` token per placement, canonical (at, clip id) order within a
+    // track, `@at` elided at 0 — so a pre-v0.11 scene prints exactly as before.
+    const slots = Object.entries(s.slots)
+      .flatMap(([tr, placements]) => sortPlacements(placements).map((p) => `${tr}=${p.clip}${p.at !== 0 ? `@${formatNumber(p.at)}` : ''}`))
+      .join(' ')
     lines.push(`scene ${s.id}: ${slots || '(empty)'}`)
   }
   if (doc.scenes.length > 0) lines.push('')

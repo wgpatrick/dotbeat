@@ -6,7 +6,7 @@ import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack,
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, installAudioClip, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
 import { useDropTarget } from '../dragDrop'
-import { declaredLaneNames, type AutomationInterpolation, type BeatAutomationPoint, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind } from '../types'
+import { declaredLaneNames, firstPlacementClip, type AutomationInterpolation, type BeatAutomationPoint, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 import { showToast } from '../state/toastStore'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
@@ -337,7 +337,9 @@ function trackOccurrences(track: BeatTrack, sections: Section[], doc: BeatDocume
   const out: ClipOccurrence[] = []
   sections.forEach((s, sectionIndex) => {
     const scene = doc.scenes.find((sc) => sc.id === s.scene)
-    const clipId = scene?.slots[track.id]
+    // Phase 36 PC/PD: one block per SECTION still (the at-0/first placement's clip) — one block
+    // per PLACEMENT with offset-proportional x/width is Stream PD's work.
+    const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
     if (!clipId) return
     if (!track.clips.find((c) => c.id === clipId)) return
     out.push({ clipId, startBar: s.startBar, bars: s.bars, sectionIndex })
@@ -442,7 +444,8 @@ function flattenTrack(track: BeatTrack, sections: Section[], doc: BeatDocument):
     let clipLoop: { start: number; end: number } | null = null
     if (doc.song) {
       const scene = doc.scenes.find((s) => s.id === section.scene)
-      const clipId = scene?.slots[track.id]
+      // Phase 36 PC/PD: mini-map content is still the at-0/first placement's clip.
+      const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
       if (!clipId) continue // track not in this scene → silent this section
       const clip = track.clips.find((c) => c.id === clipId)
       if (!clip) continue

@@ -1,5 +1,5 @@
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -599,10 +599,23 @@ export function parse(text: string): BeatDocument {
         continue
       }
       if (currentScene && keyword === 'slot') {
-        if (tokens.length !== 3) throw new BeatParseError('slot expects exactly 2 values: <track> <clip>', lineNo)
+        // v0.11 (Phase 36, D16): `slot <track> <clip> [at <steps>]` — a track may carry MULTIPLE
+        // slot lines, each an independent placement; `at` is fractional 16th steps from the
+        // section start, elided when 0 (which is what keeps every pre-v0.11 file byte-identical).
+        // Liberal in, strict out: an explicit `at 0` and out-of-canonical-order placements parse
+        // fine and re-serialize canonically (sorted by at, then clip id; at-0 elided). The D16
+        // scope guard (audio-only multi-placement) and the no-overlap rule are validated
+        // post-parse, once tracks/clips/bpm are all known — see scenePlacementError below.
+        if (tokens.length !== 3 && !(tokens.length === 5 && tokens[3] === 'at')) {
+          throw new BeatParseError('slot expects <track> <clip> [at <steps>]', lineNo)
+        }
         const [, trackId, clipId] = tokens as [string, string, string]
-        if (trackId in currentScene.slots) throw new BeatParseError(`scene "${currentScene.id}" already has a slot for track "${trackId}"`, lineNo)
-        currentScene.slots[trackId] = clipId
+        let at = 0
+        if (tokens.length === 5) {
+          at = parseFloatStrict(tokens[4]!, lineNo, 'slot at')
+          if (at < 0) throw new BeatParseError(`slot at must be >= 0 steps, got ${at}`, lineNo)
+        }
+        ;(currentScene.slots[trackId] ??= []).push({ clip: clipId, at })
         continue
       }
       if (inSong && keyword === 'section') {
@@ -925,11 +938,17 @@ export function parse(text: string): BeatDocument {
   // every song section names a real scene. Fail loudly — a dangling reference is a corrupt song.
   const trackById = new Map(tracks.map((t) => [t.id, t]))
   for (const scene of scenes) {
-    for (const [trackId, clipId] of Object.entries(scene.slots)) {
+    for (const [trackId, placements] of Object.entries(scene.slots)) {
       const track = trackById.get(trackId)
       if (!track) throw new BeatParseError(`scene "${scene.id}": slot references unknown track "${trackId}"`, eof)
-      if (!track.clips.some((c) => c.id === clipId)) throw new BeatParseError(`scene "${scene.id}": slot references unknown clip "${clipId}" on track "${trackId}"`, eof)
+      for (const p of placements) {
+        if (!track.clips.some((c) => c.id === p.clip)) throw new BeatParseError(`scene "${scene.id}": slot references unknown clip "${p.clip}" on track "${trackId}"`, eof)
+      }
     }
+    // v0.11 (Phase 36, D16): the audio-only-for-v1 scope guard and the no-overlap rule — shared
+    // with edit.ts's setScene/placeClip via scenePlacementError so the two surfaces can't drift.
+    const placementError = scenePlacementError(tracks, bpm ?? 120, scene.id, scene.slots)
+    if (placementError) throw new BeatParseError(placementError, eof)
   }
   if (song) {
     if (song.length === 0) throw new BeatParseError('song block must contain at least one section', eof)

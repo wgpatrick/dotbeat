@@ -178,7 +178,7 @@ test('POST /song append converts loop mode into song mode, keeping the loop as s
     const scene = doc.scenes.find((s) => s.id === sceneId)
     assert.ok(scene, 'the conversion minted a scene')
     for (const t of doc.tracks) {
-      assert.equal(scene!.slots[t.id], sceneId, `track ${t.id} is mapped in the scene`)
+      assert.deepEqual(scene!.slots[t.id], [{ clip: sceneId, at: 0 }], `track ${t.id} is mapped in the scene`)
       assert.ok(t.clips.some((c) => c.id === sceneId), `track ${t.id} got a snapshot clip`)
     }
     // Persisted to disk and re-parses identically (in-memory === disk invariant).
@@ -321,7 +321,7 @@ test('POST /song append with an audio-kind track present does not 500 — the au
     const scene = next.scenes.find((s) => s.id === sceneId)
     assert.ok(scene)
     // the synth track snapshotted in and got mapped, same as the existing test above...
-    assert.equal(scene!.slots.lead, sceneId)
+    assert.deepEqual(scene!.slots.lead, [{ clip: sceneId, at: 0 }])
     // ...but the audio track did NOT — no slot, no phantom clip.
     assert.equal(scene!.slots.fx, undefined, 'the audio track should stay unmapped in the new scene')
     const fxTrack = next.tracks.find((t) => t.id === 'fx')!
@@ -503,13 +503,13 @@ test('POST /clip-move moves one track\'s occurrence to a different section witho
     const sec1 = doc.scenes.find((s) => s.id === doc.song![1]!.scene)!
     const sec3 = doc.scenes.find((s) => s.id === doc.song![3]!.scene)!
     assert.equal(sec0.slots.drums, undefined, 'drums unmapped at the source section')
-    assert.equal(sec0.slots.lead, 'leadClip', 'lead untouched at the source section')
-    assert.equal(sec1.slots.drums, 'drumsClip', 'drums mapped at the destination section')
-    assert.equal(sec1.slots.lead, 'leadClip', 'chorus\'s own lead mapping is untouched')
+    assert.deepEqual(sec0.slots.lead, [{ clip: 'leadClip', at: 0 }], 'lead untouched at the source section')
+    assert.deepEqual(sec1.slots.drums, [{ clip: 'drumsClip', at: 0 }], 'drums mapped at the destination section')
+    assert.deepEqual(sec1.slots.lead, [{ clip: 'leadClip', at: 0 }], 'chorus\'s own lead mapping is untouched')
     // Section 3 shared the ORIGINAL "verse" scene with section 0 — it must be completely
     // unaffected: still has drums mapped (the whole point of private-scene cloning).
-    assert.equal(sec3.slots.drums, 'drumsClip', 'a sibling section sharing the old scene keeps its own drums mapping')
-    assert.equal(sec3.slots.lead, 'leadClip')
+    assert.deepEqual(sec3.slots.drums, [{ clip: 'drumsClip', at: 0 }], 'a sibling section sharing the old scene keeps its own drums mapping')
+    assert.deepEqual(sec3.slots.lead, [{ clip: 'leadClip', at: 0 }])
     // Section 0 and section 3 must now be on DIFFERENT scenes (the clone), even though they
     // started on the same one.
     assert.notEqual(doc.song![0]!.scene, doc.song![3]!.scene)
@@ -537,10 +537,10 @@ test('POST /clip-move batches a whole marquee-selected group as one write, prese
     const sec3 = doc.scenes.find((s) => s.id === doc.song![3]!.scene)!
     assert.equal(sec0.slots.lead, undefined)
     assert.equal(sec0.slots.drums, undefined)
-    assert.equal(sec2.slots.lead, 'leadClip')
-    assert.equal(sec2.slots.drums, 'drumsClip')
-    assert.equal(sec3.slots.lead, 'leadClip', 'sibling section 3 (shared the old "verse" scene) is untouched')
-    assert.equal(sec3.slots.drums, 'drumsClip')
+    assert.deepEqual(sec2.slots.lead, [{ clip: 'leadClip', at: 0 }])
+    assert.deepEqual(sec2.slots.drums, [{ clip: 'drumsClip', at: 0 }])
+    assert.deepEqual(sec3.slots.lead, [{ clip: 'leadClip', at: 0 }], 'sibling section 3 (shared the old "verse" scene) is untouched')
+    assert.deepEqual(sec3.slots.drums, [{ clip: 'drumsClip', at: 0 }])
   } finally {
     await daemon.close()
   }

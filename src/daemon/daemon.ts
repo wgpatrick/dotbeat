@@ -83,6 +83,7 @@ import {
   setGroupTracks,
   initDocument,
   defaultDrumKitLanes,
+  firstPlacementClip,
   splitAudioClip,
   addAudioClip,
   duplicateNotes,
@@ -341,7 +342,9 @@ export function applyClipMoves(doc: BeatDocument, moves: ClipMove[]): BeatDocume
   // touched.
   const resolved = real.map((mv) => {
     const scene = doc.scenes.find((s) => s.id === sections[mv.fromIndex]!.scene)
-    const clipId = scene?.slots[mv.track]
+    // Phase 36 PC/PD: a clip-block move is still single-clip-shaped — take the at-0/first
+    // placement's clip; placement-aware move UX (one block per placement) is Stream PD's work.
+    const clipId = scene ? firstPlacementClip(scene.slots, mv.track) : undefined
     if (!clipId) throw new BeatEditError(`track "${mv.track}" has no clip playing in section ${mv.fromIndex}`)
     return { ...mv, clipId }
   })
@@ -360,7 +363,9 @@ export function applyClipMoves(doc: BeatDocument, moves: ClipMove[]): BeatDocume
   for (const idx of new Set<number>([...removals.keys(), ...additions.keys()])) {
     const sec = nextSections[idx]!
     const scene = next.scenes.find((s) => s.id === sec.scene)
-    const slots = { ...(scene?.slots ?? {}) }
+    // BeatSlotsInput: surviving tracks keep their placement lists verbatim; a moved-in clip is
+    // the pre-v0.11 bare-clip-id form (one placement at 0) — setScene accepts both.
+    const slots: Record<string, string | import('../core/index.js').BeatPlacement[]> = { ...(scene?.slots ?? {}) }
     for (const track of removals.get(idx) ?? []) delete slots[track]
     for (const [track, clipId] of additions.get(idx) ?? []) slots[track] = clipId
     // Always mint a fresh scene for a touched section, even if its old scene wasn't actually
@@ -399,6 +404,8 @@ export function removeClipFromSection(doc: BeatDocument, trackId: string, sectio
   const section = doc.song[sectionIndex]!
   const scene = doc.scenes.find((s) => s.id === section.scene)
   if (!scene || !(trackId in scene.slots)) throw new BeatEditError(`track "${trackId}" has no clip playing in section ${sectionIndex}`)
+  // Phase 36 PC/PD: "Delete" clears the track's WHOLE slot (every placement) in this section —
+  // per-placement delete targeting arrives with Stream PD's per-placement blocks.
   const slots = { ...scene.slots }
   delete slots[trackId]
   const newId = nextSceneId(doc)
@@ -423,7 +430,9 @@ export function duplicateClipToNewSection(doc: BeatDocument, trackId: string, se
   }
   const section = doc.song[sectionIndex]!
   const scene = doc.scenes.find((s) => s.id === section.scene)
-  const clipId = scene?.slots[trackId]
+  // Phase 36 PC/PD: "Duplicate" is still single-clip-shaped — forks the at-0/first placement's
+  // clip and slots the copy as one placement at 0; per-placement duplicate UX is Stream PD's work.
+  const clipId = scene ? firstPlacementClip(scene.slots, trackId) : undefined
   if (!scene || !clipId) throw new BeatEditError(`track "${trackId}" has no clip playing in section ${sectionIndex}`)
   const { doc: withClip, clip } = duplicateClip(doc, trackId, clipId)
   const newSceneId = nextSceneId(withClip)
@@ -2249,6 +2258,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           next = withClip
           if (typeof b.sceneId === 'string' && b.sceneId) {
             const scene = next.scenes.find((s) => s.id === b.sceneId)
+            // Phase 36 PC/PD: still single-clip-shaped — this REPLACES the track's whole slot
+            // with one placement at 0 (exactly the pre-v0.11 meaning); other tracks' slots merge
+            // through untouched. Placement-aware payloads are Stream PD's work.
             next = setScene(next, b.sceneId, { ...(scene?.slots ?? {}), [track.id]: clipId })
           }
           const written = writeIfChanged(next)
@@ -2310,6 +2322,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           let next = withClip
           if (typeof b.sceneId === 'string' && b.sceneId) {
             const scene = next.scenes.find((s) => s.id === b.sceneId)
+            // Phase 36 PC/PD: still single-clip-shaped — this REPLACES the track's whole slot
+            // with one placement at 0 (exactly the pre-v0.11 meaning); other tracks' slots merge
+            // through untouched. Placement-aware payloads are Stream PD's work.
             next = setScene(next, b.sceneId, { ...(scene?.slots ?? {}), [track.id]: clipId })
           }
           const written = writeIfChanged(next)

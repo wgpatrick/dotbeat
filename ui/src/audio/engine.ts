@@ -3639,8 +3639,13 @@ class Engine {
       cursor += section.bars
     }
     if (sceneId === null) return null
-    const scene = (scenes as { id: string; slots: Record<string, string> }[]).find((sc) => sc.id === sceneId)
-    const clipId = scene?.slots?.[track.id]
+    // Phase 36 PC/PD: v0.11 slots are placement LISTS ({clip, at}[]) — scheduling still takes the
+    // at-0/first placement's clip, so every single-placement project (all pre-v0.11 documents)
+    // plays exactly as before. Per-placement retrigger scheduling (region starts at
+    // sectionStart + at, a clip placed twice plays twice) is Stream PC's work.
+    const scene = (scenes as { id: string; slots: Record<string, { clip: string; at: number }[]> }[]).find((sc) => sc.id === sceneId)
+    const placements = [...(scene?.slots?.[track.id] ?? [])].sort((a, b) => a.at - b.at || a.clip.localeCompare(b.clip))
+    const clipId = placements.length > 0 ? (placements.find((p) => p.at === 0) ?? placements[0]!).clip : undefined
     if (!clipId) return null
     const clip = (
       track.clips as {

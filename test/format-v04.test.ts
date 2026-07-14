@@ -78,7 +78,8 @@ test('clips, scenes, and song parse into the expected shapes', () => {
   assert.deepEqual(drums.clips[0]!.hits, [{ id: 'kick0', lane: 'kick', start: 0, velocity: 0.9 }])
   assert.equal(drums.hits.length, 0, 'live hits separate from clip hits')
   assert.deepEqual(doc.scenes.map((s) => s.id), ['intro', 'main'])
-  assert.deepEqual(doc.scenes[1]!.slots, { lead: 'busy', drums: 'four' })
+  // v0.11: slots hold placement lists — a bare (pre-v0.11) slot line is one placement at 0
+  assert.deepEqual(doc.scenes[1]!.slots, { lead: [{ clip: 'busy', at: 0 }], drums: [{ clip: 'four', at: 0 }] })
   assert.deepEqual(doc.song, [
     { scene: 'intro', bars: 2 },
     { scene: 'main', bars: 4 },
@@ -124,12 +125,14 @@ test('reference validation fails loudly', () => {
   assert.throws(() => parse(SONG_EXAMPLE.replace(/song\n(  section .*\n)+/m, 'song\n')), /at least one section/)
 })
 
-test('duplicate clip ids per track, duplicate scenes, duplicate slots are rejected', () => {
+test('duplicate clip ids per track, duplicate scenes, and multi-placement on a non-audio track are rejected', () => {
   assert.throws(() => parse(SONG_EXAMPLE.replace('clip busy', 'clip quiet')), /duplicate clip id "quiet"/)
   assert.throws(() => parse(SONG_EXAMPLE.replace('scene main', 'scene intro')), /duplicate scene id "intro"/)
+  // v0.11: a second slot line per track is legal GRAMMAR now (a second placement), but only on
+  // audio-kind tracks — the D16 scope guard rejects it on a synth track, in the design doc's words.
   assert.throws(
     () => parse(SONG_EXAMPLE.replace('slot lead busy', 'slot lead busy\n  slot lead quiet')),
-    /already has a slot for track "lead"/,
+    /multi-placement is audio-only for now — synth\/drum clips tile from the section start/,
   )
 })
 
@@ -227,7 +230,7 @@ test('loadClip loads a saved clip\'s notes/hits into the track\'s live buffer, l
 test('removeTrack drops the removed track from scene slots (no dangling refs)', () => {
   const doc = parse(SONG_EXAMPLE)
   const { doc: without } = removeTrack(doc, 'drums')
-  assert.deepEqual(without.scenes.find((s) => s.id === 'main')!.slots, { lead: 'busy' })
+  assert.deepEqual(without.scenes.find((s) => s.id === 'main')!.slots, { lead: [{ clip: 'busy', at: 0 }] })
   // and the result re-parses (the canonical form is self-consistent)
   assert.equal(serialize(parse(serialize(without))), serialize(without))
 })

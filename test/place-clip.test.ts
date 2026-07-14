@@ -50,7 +50,7 @@ test('POST /place-clip mints a new clip from the track\'s live notes and slots i
       written: boolean
       clipId: string
       doc: {
-        scenes: { id: string; slots: Record<string, string> }[]
+        scenes: { id: string; slots: Record<string, { clip: string; at: number }[]> }[]
         tracks: { id: string; notes: { pitch: number; start: number }[]; clips: { id: string; notes: { pitch: number; start: number }[] }[] }[]
       }
     }
@@ -63,7 +63,7 @@ test('POST /place-clip mints a new clip from the track\'s live notes and slots i
       lead.notes.map((n) => [n.pitch, n.start]).sort(),
     )
     const verse = body.doc.scenes.find((s) => s.id === 'verse')!
-    assert.equal(verse.slots.lead, 'clip1')
+    assert.deepEqual(verse.slots.lead, [{ clip: 'clip1', at: 0 }])
   })
 })
 
@@ -96,14 +96,14 @@ test('POST /place-clip with an existing clipId re-saves that clip in place (BC\'
     assert.equal(again.status, 200)
     const body = (await again.json()) as {
       clipId: string
-      doc: { scenes: { id: string; slots: Record<string, string> }[]; tracks: { id: string; clips: { id: string }[] }[] }
+      doc: { scenes: { id: string; slots: Record<string, { clip: string; at: number }[]> }[]; tracks: { id: string; clips: { id: string }[] }[] }
     }
     assert.equal(body.clipId, 'clip1')
     const lead = body.doc.tracks.find((t) => t.id === 'lead')!
     assert.equal(lead.clips.length, 1) // re-saved in place, not a second clip
     const verse = body.doc.scenes.find((s) => s.id === 'verse')!
-    assert.equal(verse.slots.lead, 'clip1')
-    assert.equal(verse.slots.drums, 'clip1') // the OTHER track's slot survived the re-place
+    assert.deepEqual(verse.slots.lead, [{ clip: 'clip1', at: 0 }])
+    assert.deepEqual(verse.slots.drums, [{ clip: 'clip1', at: 0 }]) // the OTHER track's slot survived the re-place
   })
 })
 
@@ -115,7 +115,7 @@ test('POST /place-clip with no sceneId still creates the clip, just unslotted (l
       body: JSON.stringify({ track: 'lead' }),
     })
     assert.equal(res.status, 200)
-    const body = (await res.json()) as { doc: { scenes: { slots: Record<string, string> }[]; tracks: { id: string; clips: { id: string }[] }[] } }
+    const body = (await res.json()) as { doc: { scenes: { slots: Record<string, { clip: string; at: number }[]> }[]; tracks: { id: string; clips: { id: string }[] }[] } }
     const lead = body.doc.tracks.find((t) => t.id === 'lead')!
     assert.equal(lead.clips.length, 1)
     assert.ok(body.doc.scenes.every((s) => !s.slots.lead))

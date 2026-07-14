@@ -123,7 +123,7 @@ test('setScene (the slot-map setter) preserves an existing name across a re-set'
   const doc = parse(NAMED_SCENE_EXAMPLE)
   const resetSlots = setScene(doc, 'intro', { lead: 'busy' })
   assert.equal(resetSlots.scenes[0]!.name, 'partA', 'the slot re-map is unrelated to the scene name and should not wipe it')
-  assert.equal(resetSlots.scenes[0]!.slots.lead, 'busy')
+  assert.deepEqual(resetSlots.scenes[0]!.slots.lead, [{ clip: 'busy', at: 0 }])
   assert.equal(serialize(parse(serialize(resetSlots))), serialize(resetSlots))
   // and a brand-new scene minted via setScene naturally starts with no name
   const withNew = setScene(doc, 'outro', { lead: 'quiet' })

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { declaredLaneNames, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
+import { declaredLaneNames, firstPlacementClip, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
 import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, newGestureId, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
@@ -345,7 +345,8 @@ function resolveClipPlayhead(
   }
   if (sceneId === null) return null
   const scene = doc.scenes.find((s) => s.id === sceneId)
-  const clipId = scene?.slots[track.id]
+  // Phase 36 PC/PD: playhead mapping is still single-clip-shaped — the at-0/first placement.
+  const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
   if (!clipId || clipId !== openClip.id) return null // this track isn't playing the open clip right now
   const rel = currentStep - sectionStartBar * 16
   return ((rel % loopSteps) + loopSteps) % loopSteps
@@ -392,7 +393,8 @@ function liveContentIsUnsaved(track: BeatTrack): boolean {
  * because primaryClipFor's fallback found X first. */
 function clipInSelectedScene(track: BeatTrack, doc: BeatDocument, sceneId: string): BeatClip | null {
   const scene = doc.scenes.find((s) => s.id === sceneId)
-  const clipId = scene?.slots[track.id]
+  // Phase 36 PC/PD: still single-clip-shaped — the at-0/first placement of this track's slot.
+  const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
   if (!clipId) return null
   return track.clips.find((c) => c.id === clipId) ?? null
 }
@@ -941,7 +943,9 @@ export function NoteView({ track }: { track: BeatTrack }) {
     if (existing) {
       const sharingSections = doc.song!.filter((sec) => {
         const scene = doc.scenes.find((s) => s.id === sec.scene)
-        return scene?.slots[track.id] === existing.id
+        // Phase 36 PC/PD: "does this section play this clip" checks every placement, not just
+        // the first — a section that places the clip anywhere shares its content.
+        return (scene?.slots[track.id] ?? []).some((p) => p.clip === existing.id)
       }).length
       if (sharingSections > 1) {
         const otherCount = sharingSections - 1

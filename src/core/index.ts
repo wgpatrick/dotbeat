@@ -32,6 +32,8 @@ export {
   saveClip,
   loadClip,
   setScene,
+  placeClip,
+  unplaceClip,
   renameScene,
   setSong,
   songMove,
@@ -65,6 +67,7 @@ export {
   BeatEditError,
   type QuantizeOptions,
   type DuplicateNotesOptions,
+  type BeatSlotsInput,
 } from './edit.js'
 export { humanize, BeatHumanizeError, type HumanizeOptions } from './humanize.js'
 export { moebiusEase, warpStep, unwarpStep } from './groove.js'

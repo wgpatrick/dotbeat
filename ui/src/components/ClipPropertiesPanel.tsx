@@ -1,6 +1,6 @@
 import { useStore } from '../state/store'
 import { postEdit } from '../daemon/bridge'
-import { TIME_SIG_DENOMINATORS, type BeatClip, type BeatDocument, type BeatTrack } from '../types'
+import { TIME_SIG_DENOMINATORS, firstPlacementClip, type BeatClip, type BeatDocument, type BeatTrack } from '../types'
 
 // Phase 22 Stream AG — the GUI face of v0.10's clip-level loop range / time signature
 // (src/core/document.ts's BeatClipLoop/BeatTimeSignature; docs/research/18-ableton-ui-
@@ -40,15 +40,17 @@ import { TIME_SIG_DENOMINATORS, type BeatClip, type BeatDocument, type BeatTrack
  * mode and "no clip in the selected section" alike. */
 export function primaryClipFor(track: BeatTrack, doc: BeatDocument, preferredSceneId?: string | null): BeatClip | null {
   if (!doc.song) return null
+  // Phase 36 PC/PD: "the" clip of a (track, scene) pair is still the at-0/first placement's —
+  // per-placement clip-editor targeting is Stream PD's work.
   if (preferredSceneId) {
     const scene = doc.scenes.find((s) => s.id === preferredSceneId)
-    const clipId = scene?.slots[track.id]
+    const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
     const clip = clipId ? track.clips.find((c) => c.id === clipId) : undefined
     if (clip) return clip
   }
   for (const section of doc.song) {
     const scene = doc.scenes.find((s) => s.id === section.scene)
-    const clipId = scene?.slots[track.id]
+    const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
     if (!clipId) continue
     const clip = track.clips.find((c) => c.id === clipId)
     if (clip) return clip

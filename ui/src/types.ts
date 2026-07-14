@@ -200,10 +200,30 @@ export interface BeatClip {
   audio?: BeatAudioRegion // Phase 22 Stream AE; present iff the enclosing track is kind 'audio'
 }
 
+/** v0.11 (Phase 36, D16): one placement of a clip within a scene — mirrors src/core/document.ts's
+ * BeatPlacement exactly (`at` in fractional 16th steps from the section start, >= 0; `at 0` is
+ * elided in the file, so every pre-v0.11 scene is one placement at 0 per track). */
+export interface BeatPlacement {
+  clip: string
+  at: number
+}
+
+/** Hand-mirrors src/core/document.ts's firstPlacementClip (ui/ can't import src/core — see
+ * ui/src/audio/engine.ts's header note): the at-0 placement's clip if present, else the first
+ * placement's, else undefined. Phase 36 PC/PD: consumers that still want ONE clip per (track,
+ * scene) call this — real per-placement scheduling (PC) and per-placement arrangement blocks (PD)
+ * replace those call sites; single-placement projects behave exactly as pre-v0.11 either way. */
+export function firstPlacementClip(slots: Record<string, BeatPlacement[]>, trackId: string): string | undefined {
+  const placements = slots[trackId]
+  if (!placements || placements.length === 0) return undefined
+  const sorted = [...placements].sort((a, b) => a.at - b.at || a.clip.localeCompare(b.clip))
+  return (sorted.find((p) => p.at === 0) ?? sorted[0]!).clip
+}
+
 export interface BeatScene {
   id: string
   name?: string // v0.10 (Phase 32 Stream LB) — optional display name; falls back to id when absent
-  slots: Record<string, string> // trackId -> clipId
+  slots: Record<string, BeatPlacement[]> // v0.11 (Phase 36): trackId -> placements (was a bare clipId)
 }
 
 export interface BeatSongSection {
