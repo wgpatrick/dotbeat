@@ -341,7 +341,11 @@ const HELP = [
   {
     cmd: 'mcp-init',
     text: `  beat mcp-init <file> [--force]                          write a .mcp.json next to <file> so Claude Code
-                                                          (or any MCP client) auto-discovers 'beat mcp' there`,
+                                                          (or any MCP client) auto-discovers 'beat mcp' there,
+                                                          plus a music-session CLAUDE.md scaffold (you're making
+                                                          music, not developing dotbeat; render->metrics->lint;
+                                                          vary/score for taste; units) — an existing CLAUDE.md
+                                                          is never overwritten without --force`,
   },
 ]
 
@@ -1520,6 +1524,42 @@ async function selectionCmd(argv) {
 // command, the right absolute path to this repo's beat.mjs). This writes the one-file config
 // Claude Code (or any MCP client) auto-discovers on startup, so opening the project folder is
 // the entire setup step.
+
+/** The music-session CLAUDE.md scaffold `beat mcp-init` writes next to the .beat (Phase 35 OC —
+ * "the agent started updating the README"): a screenful telling the helper agent it is here to
+ * make music, not develop dotbeat. Exported via mcp-init only; kept as one template so tests can
+ * assert the shipped text. */
+function musicSessionScaffold(beatFileName) {
+  return `# Music session — ${beatFileName}
+
+You are here to MAKE MUSIC with dotbeat, not to develop dotbeat itself. Work
+through the "beat" MCP tools (or the \`beat\` CLI). Never edit the dotbeat repo,
+its README, or its source — the only files that should change here are this
+project's .beat file, its media/, and files the beat tools write themselves.
+
+The loop:
+- After EVERY render, run metrics and lint on the wav and say in one line what
+  changed musically and what the numbers did — never claim it sounds better
+  without them.
+- Taste decisions go through vary -> audition -> score. Pass audition
+  (\`--audition\` / audition:true) to get ONE audition.wav with a timecode index
+  instead of N files to juggle. Adopt a winner with beat_adopt /
+  \`beat adopt <batch-dir> <pick>\`.
+- Checkpoint at musical milestones ("drums locked", "rough mix"), not after
+  every edit — restore is always safe and append-only.
+
+Units, so edits land as intended:
+- velocity is 0..1 (0.8, not MIDI 100)
+- lane/clip gain is in dB (0 = unity, negative = quieter)
+- note/hit start and duration are 16th-note steps; fractional = off-grid feel
+- vary batch dirs (vary-*/) and beat-scores.jsonl live next to the .beat file
+
+GUI interop: if the dotbeat GUI/daemon is running (default port 8420), the
+user's live selection is readable — beat_selection reads it, and beat_vary
+with scope "selection" plus that port varies exactly what they highlighted.
+`
+}
+
 function mcpInitCmd(argv) {
   const file = argv.find((a) => !a.startsWith('--'))
   if (!file) throw new BeatEditError('mcp-init needs a <file> — the .beat project to point an MCP client at')
@@ -1531,8 +1571,19 @@ function mcpInitCmd(argv) {
   if (existsSync(configPath) && !force) throw new BeatEditError(`${configPath} already exists — pass --force to overwrite`)
   const config = { mcpServers: { beat: { command: 'node', args: [beatScript, 'mcp'] } } }
   writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n')
+  // Phase 35 OC: also scaffold a music-session CLAUDE.md next to the project. An existing
+  // CLAUDE.md is the user's own (or an earlier scaffold they may have edited) — never
+  // overwritten without --force, but its presence doesn't block the .mcp.json half above.
+  const claudePath = resolve(projectDir, 'CLAUDE.md')
+  let claudeNote
+  if (existsSync(claudePath) && !force) {
+    claudeNote = `${claudePath} already exists — left untouched (--force overwrites it with the music-session scaffold)`
+  } else {
+    writeFileSync(claudePath, musicSessionScaffold(basename(file)))
+    claudeNote = `wrote ${claudePath} (music-session ground rules for the agent)`
+  }
   process.stdout.write(
-    `wrote ${configPath}\n\n` +
+    `wrote ${configPath}\n${claudeNote}\n\n` +
       `next: open ${projectDir} in Claude Code (or any MCP client that reads .mcp.json) — the\n` +
       `"beat" server is auto-discovered. Try a tool call: beat_inspect on "${basename(file)}".\n`,
   )
