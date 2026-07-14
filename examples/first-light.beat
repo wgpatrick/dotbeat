@@ -673,6 +673,9 @@ track bass Bass #f7c948 synth
     note u100054 40 80 15 0.7
     note u100055 33 96 15 0.8
     note u100056 33 112 15 0.7
+    auto bass.cutoff
+      point rise0 0 500
+      point rise1 127 1200
   clip off-a
     note u100081 41 2 1.6 0.7
     note u100082 41 6 1.6 0.7
@@ -706,6 +709,9 @@ track bass Bass #f7c948 synth
     note u100110 33 118 1.6 0.7
     note u100111 33 122 1.6 0.7
     note u100112 33 126 1.6 0.7
+    auto bass.cutoff
+      point rise0 0 450
+      point rise1 127 900
   clip roll-a
     note u100081 41 1 0.85 0.5
     note u100082 41 2 0.85 0.72
@@ -803,6 +809,10 @@ track bass Bass #f7c948 synth
     note u100174 33 125 0.85 0.5
     note u100175 33 126 0.85 0.72
     note u100176 33 127 0.85 0.5
+    auto bass.cutoff
+      point swell0 0 500
+      point swell1 64 1000
+      point swell2 127 500
 
 track keys Keys #98c379 synth
   synth
@@ -885,6 +895,10 @@ track keys Keys #98c379 synth
     note u100064 52 120 3.5 0.55
     note u100068 60 120 3.5 0.55
     note u100072 67 120 3.5 0.55
+    auto keys.cutoff
+      point swell0 0 3000
+      point swell1 64 5200
+      point swell2 127 3000
   clip close-a
     note u100001 53 0 12 0.5
     note u100003 57 0 12 0.5
@@ -983,6 +997,9 @@ track keys Keys #98c379 synth
     note u100056 64 120 3.5 0.55
     note u100060 67 120 3.5 0.55
     note u100064 71 120 3.5 0.55
+    auto keys.cutoff
+      point rise0 0 1800
+      point rise1 127 6500
   note u100001 57 0 3.5 0.7
   note u100005 60 0 3.5 0.7
   note u100009 64 0 3.5 0.7
@@ -1088,6 +1105,10 @@ track pad Pad #c678dd synth
     note u100086 52 96 32 0.45
     note u100087 60 96 32 0.45
     note u100088 67 96 32 0.45
+    auto pad.cutoff
+      point swell0 0 1200
+      point swell1 64 3400
+      point swell2 127 1200
   clip shim-a
     note u100033 57 0 32 0.45
     note u100034 60 0 32 0.45
@@ -1306,6 +1327,10 @@ track arp Arp #e06c75 synth
     note u100206 76 125 0.9 0.65
     note u100207 72 126 0.9 0.65
     note u100208 76 127 0.9 0.65
+    auto arp.cutoff
+      point swell0 0 2500
+      point swell1 64 5500
+      point swell2 127 2500
   clip arp-d
     note u100081 69 0 0.9 0.65
     note u100082 72 1 0.9 0.65
@@ -1435,6 +1460,9 @@ track arp Arp #e06c75 synth
     note u100206 76 125 0.9 0.65
     note u100207 72 126 0.9 0.65
     note u100208 76 127 0.9 0.65
+    auto arp.resonance
+      point rise0 0 1
+      point rise1 127 7
 
 track air Air #61afef synth
   synth
@@ -1476,6 +1504,10 @@ track air Air #61afef synth
     note u100094 76 96 32 0.4
     note u100095 79 96 32 0.4
     note u100096 83 96 32 0.4
+    auto air.cutoff
+      point swell0 0 3000
+      point swell1 64 8000
+      point swell2 127 3000
   clip air-d
     note u100081 69 0 32 0.4
     note u100082 72 0 32 0.4
@@ -1537,6 +1569,12 @@ track saw Saw #d19a66 synth
     note u100094 52 96 32 0.55
     note u100095 60 96 32 0.55
     note u100096 67 96 32 0.55
+    auto saw.cutoff
+      point rise0 0 5500
+      point rise1 127 9500
+    auto saw.resonance
+      point rise0 0 0.6
+      point rise1 127 3
 
 scene intro
   slot keys close-a
