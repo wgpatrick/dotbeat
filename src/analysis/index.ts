@@ -12,3 +12,18 @@ export {
   type TrackContentStats,
 } from './structure.js'
 export { formatStructure } from './format.js'
+// ==== Phase 38 Stream SA begin ====
+// Audio-structure import: the `*.analysis.json` loader (validation + all seconds->bars math) and
+// the `beat skeleton` scaffolder. See src/analysis/import.ts.
+export {
+  validateAnalysisArtifact,
+  artifactToSections,
+  buildSkeleton,
+  formatSkeletonReport,
+  type AnalysisArtifact,
+  type AnalysisSection,
+  type SongEntry,
+  type SkeletonReport,
+  type SkeletonReportSection,
+} from './import.js'
+// ==== Phase 38 Stream SA end ====

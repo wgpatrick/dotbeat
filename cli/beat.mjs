@@ -92,6 +92,9 @@ import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildPr
 // --- Phase 37 Stream RB begin ---
 import { analyzeStructure, formatStructure, BeatAnalysisError } from '../dist/src/analysis/index.js'
 // --- Phase 37 Stream RB end ---
+// ==== Phase 38 Stream SA begin ====
+import { validateAnalysisArtifact, buildSkeleton, formatSkeletonReport } from '../dist/src/analysis/index.js'
+// ==== Phase 38 Stream SA end ====
 
 // ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
 // The old monolithic USAGE template literal, restructured as one entry per command so
@@ -111,6 +114,9 @@ const HELP_FAMILIES = [
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
   ['add-note', 'rm-note', 'add-hit', 'rm-hit'],
   ['render', 'feedback', 'metrics', 'lint'], // Phase 37 Stream RA: the render -> listen loop
+  // ==== Phase 38 Stream SA begin ====
+  ['analyze', 'skeleton', 'analyze-structure', 'source'], // Phase 38: audio import -> skeleton -> critique
+  // ==== Phase 38 Stream SA end ====
 ]
 
 /** One entry per command, in the exact order the full dump prints them. `text` is the command's
@@ -328,6 +334,19 @@ const HELP = [
                                                           via beat scene/beat_song. Requires song mode already.`,
   },
   { cmd: 'sample', text: `  beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)` },
+  // ==== Phase 38 Stream SA begin ====
+  {
+    cmd: 'skeleton',
+    text: `  beat skeleton <out.beat> <analysis.json> [--section-bars N]
+                                                          scaffold a NEW, structure-matched empty project from a
+                                                          *.analysis.json (from beat analyze): one empty scene per
+                                                          distinct detected section label, a song block matching the
+                                                          detected arrangement, tempo from the artifact. Refuses to
+                                                          overwrite an existing out.beat. Labelless artifacts fall back
+                                                          to uniform --section-bars (default 8) chunks. Fill the scenes
+                                                          afterward with beat clip / beat place.`,
+  },
+  // ==== Phase 38 Stream SA end ====
   // ==== Phase 37 Stream RD begin ====
   {
     cmd: 'source',
@@ -1520,6 +1539,31 @@ async function sampleCmd(argv) {
   process.stdout.write(`registered ${id}: sha256:${sha256.slice(0, 12)}... ${samplePath}\n`)
 }
 
+// ==== Phase 38 Stream SA begin ====
+// `beat skeleton <out.beat> <analysis.json>` — scaffold a structure-matched empty project from a
+// detected-structure artifact (docs/phase-38-plan.md §SA). All the seconds->bars math and
+// validation live in src/analysis/import.ts; this command is I/O + the refuse-overwrite guard.
+function skeletonCmd(argv) {
+  const sbIdx = argv.indexOf('--section-bars')
+  const sectionBars = sbIdx >= 0 ? Number(argv[sbIdx + 1]) : undefined
+  const positionals = argv.filter((a, i) => !a.startsWith('--') && !(sbIdx >= 0 && i === sbIdx + 1))
+  const [outFile, analysisFile] = positionals
+  if (!outFile || !analysisFile) throw new BeatAnalysisError('skeleton needs <out.beat> <analysis.json> [--section-bars N]')
+  if (existsSync(outFile)) throw new BeatAnalysisError(`${outFile} already exists — refusing to overwrite (skeleton scaffolds a NEW project; delete it or choose another path)`)
+  if (!existsSync(analysisFile)) throw new BeatAnalysisError(`no analysis file at ${analysisFile} — produce one with beat analyze <audio.wav> first`)
+  let raw
+  try {
+    raw = JSON.parse(readFileSync(analysisFile, 'utf8'))
+  } catch (e) {
+    throw new BeatAnalysisError(`${analysisFile} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  const artifact = validateAnalysisArtifact(raw)
+  const { doc, report } = buildSkeleton(artifact, sectionBars !== undefined ? { sectionBars } : {})
+  writeFileSync(outFile, serialize(doc))
+  process.stdout.write(formatSkeletonReport(report, outFile) + '\n')
+}
+// ==== Phase 38 Stream SA end ====
+
 // ==== Phase 37 Stream RD begin ====
 // `beat source` — find/ingest real sounds into the taste loop (docs/phase-37-plan.md §RD). Backed
 // by scripts/source-lib.mjs, imported at call time via a runtime dynamic import (shared verbatim
@@ -2248,6 +2292,11 @@ async function main() {
     case 'sample':
       await sampleCmd(rest)
       break
+    // ==== Phase 38 Stream SA begin ====
+    case 'skeleton':
+      skeletonCmd(rest)
+      break
+    // ==== Phase 38 Stream SA end ====
     // ==== Phase 37 Stream RD begin ====
     case 'source':
       await sourceCmd(rest)

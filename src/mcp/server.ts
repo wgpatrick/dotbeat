@@ -87,6 +87,9 @@ import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildPr
 // --- Phase 37 Stream RB begin ---
 import { analyzeStructure, formatStructure } from '../analysis/index.js'
 // --- Phase 37 Stream RB end ---
+// ==== Phase 38 Stream SA begin ====
+import { validateAnalysisArtifact, buildSkeleton, formatSkeletonReport } from '../analysis/index.js'
+// ==== Phase 38 Stream SA end ====
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
 import { varyTrack, varyFeel, varyAutomation, VARY_GROUPS } from '../vary/vary.js'
@@ -1365,6 +1368,38 @@ const TOOLS: ToolDef[] = [
     },
   },
   // ==== Phase 37 Stream RD end ====
+  // ==== Phase 38 Stream SA begin ====
+  {
+    name: 'beat_skeleton',
+    description:
+      'Scaffold a NEW, structure-matched EMPTY .beat project from a *.analysis.json artifact (produced by beat analyze / beat_analyze_audio from a reference audio file). Reads the detected tempo/downbeats/sections, and writes an empty project whose song block matches the detected arrangement: one empty scene per distinct section label (all "chorus" sections share a single chorus scene; unlabeled sections each get their own section-<n> scene), each section converted from seconds to bars (a section longer than 64 bars becomes repeated plays of its scene). A labelless artifact falls back to uniform section_bars-sized chunks (default 8). REFUSES to overwrite an existing out_file. The reference audio itself is never registered as media — only the analysis JSON of numbers/labels is used. After scaffolding, fill the empty scenes with beat_clip / beat_place. Returns the tempo and a section table (index, scene, bars, source start-seconds).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        out_file: { type: 'string', description: 'the .beat project to create (must not already exist)' },
+        analysis_file: { type: 'string', description: 'path to a *.analysis.json artifact from beat_analyze_audio' },
+        section_bars: { type: 'number', description: 'uniform chunk size (bars) for the labelless fallback; default 8, integer 1-64' },
+      },
+      required: ['out_file', 'analysis_file'],
+    },
+    handler: (args) => {
+      const outFile = str(args, 'out_file')
+      const analysisFile = str(args, 'analysis_file')
+      if (existsSync(outFile)) throw new Error(`${outFile} already exists — refusing to overwrite (skeleton scaffolds a NEW project; delete it or choose another path)`)
+      if (!existsSync(analysisFile)) throw new Error(`no analysis file at ${analysisFile} — produce one with beat_analyze_audio first`)
+      let raw: unknown
+      try {
+        raw = JSON.parse(readFileSync(analysisFile, 'utf8'))
+      } catch (e) {
+        throw new Error(`${analysisFile} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      const artifact = validateAnalysisArtifact(raw)
+      const { doc, report } = buildSkeleton(artifact, typeof args.section_bars === 'number' ? { sectionBars: args.section_bars } : {})
+      writeFileSync(outFile, serialize(doc))
+      return formatSkeletonReport(report, outFile)
+    },
+  },
+  // ==== Phase 38 Stream SA end ====
   {
     name: 'beat_lane',
     description:
