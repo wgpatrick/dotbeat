@@ -216,8 +216,24 @@ export interface BeatPlacement {
 export function firstPlacementClip(slots: Record<string, BeatPlacement[]>, trackId: string): string | undefined {
   const placements = slots[trackId]
   if (!placements || placements.length === 0) return undefined
-  const sorted = [...placements].sort((a, b) => a.at - b.at || a.clip.localeCompare(b.clip))
+  const sorted = sortPlacements(placements)
   return (sorted.find((p) => p.at === 0) ?? sorted[0]!).clip
+}
+
+/** Canonical placement order (hand-mirrors src/core/document.ts's sortPlacements): by `at`, ties
+ * by clip id. Returns a new array. */
+export function sortPlacements(placements: readonly BeatPlacement[]): BeatPlacement[] {
+  return [...placements].sort((a, b) => a.at - b.at || a.clip.localeCompare(b.clip))
+}
+
+/** An audio region's TIMELINE length in fractional 16th steps at a given document bpm — hand-
+ * mirrors src/core/document.ts's audioRegionTimelineSteps exactly (ui/ can't import src/core).
+ * Phase 36 PD: the arrangement's per-placement block widths and the "which placement contains the
+ * playhead" targeting both key off this, the same arithmetic core validation and the engine's
+ * per-placement scheduling (PC) use. */
+export function audioRegionTimelineSteps(region: Pick<BeatAudioRegion, 'in' | 'out' | 'rate'>, bpm: number): number {
+  const stepSeconds = 60 / bpm / 4 // one 16th note, seconds
+  return (region.out - region.in) / (stepSeconds * region.rate)
 }
 
 export interface BeatScene {

@@ -345,7 +345,10 @@ function resolveClipPlayhead(
   }
   if (sceneId === null) return null
   const scene = doc.scenes.find((s) => s.id === sceneId)
-  // Phase 36 PC/PD: playhead mapping is still single-clip-shaped — the at-0/first placement.
+  // The at-0/first placement is exact here, not an approximation: this playhead only renders for
+  // NoteView's note/hit editor, i.e. non-audio tracks, which v0.11 validation caps at ONE
+  // placement at 0 (the D16 audio-only scope guard). Audio tracks route to AudioClipEditor, whose
+  // placementTargetedClip does the real per-placement playhead mapping.
   const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
   if (!clipId || clipId !== openClip.id) return null // this track isn't playing the open clip right now
   const rel = currentStep - sectionStartBar * 16
@@ -393,7 +396,8 @@ function liveContentIsUnsaved(track: BeatTrack): boolean {
  * because primaryClipFor's fallback found X first. */
 function clipInSelectedScene(track: BeatTrack, doc: BeatDocument, sceneId: string): BeatClip | null {
   const scene = doc.scenes.find((s) => s.id === sceneId)
-  // Phase 36 PC/PD: still single-clip-shaped — the at-0/first placement of this track's slot.
+  // The at-0/first placement is exact for this function's callers (NoteView's Place-in-Arrangement
+  // / live-buffer sync — non-audio tracks only, single-placement-at-0 by v0.11 validation).
   const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
   if (!clipId) return null
   return track.clips.find((c) => c.id === clipId) ?? null

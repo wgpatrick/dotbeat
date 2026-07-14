@@ -361,7 +361,10 @@ async function main() {
     // C3 — Duplicate creates a genuinely independent copy in a new section right after
     // ================================================================================================
     console.log('\n[C3] Duplicate on section 1\'s clip block -> independent copy in a new section')
-    const originalClipId = daemon.getDoc().scenes.find((s) => s.id === sharedSceneId).slots.lead
+    // v0.11 (Phase 36): a slot is a PLACEMENT LIST now, not a bare clip id — this single-placement
+    // fixture's clip is its one placement's. (Phase 36 Stream PD fixed this read; the script had
+    // been crashing here since Stream PA's format change, before ever exercising Duplicate.)
+    const originalClipId = daemon.getDoc().scenes.find((s) => s.id === sharedSceneId).slots.lead[0].clip
     const originalClipNotes = JSON.stringify(daemon.getDoc().tracks.find((t) => t.id === 'lead').clips.find((c) => c.id === originalClipId).notes)
     await rightClickCenter(page, '[data-clip-block="lead::1"]')
     const clipMenu1 = page.locator('[data-ctx-menu="lead.clip.1"]')
@@ -373,7 +376,7 @@ async function main() {
     const newSection = doc3.song[2]
     const newScene = doc3.scenes.find((s) => s.id === newSection.scene)
     assert(newScene && newScene.slots.lead, '[C3] the new section\'s scene must have a "lead" slot')
-    const newClipId = newScene.slots.lead
+    const newClipId = newScene.slots.lead[0].clip // v0.11 placement list, same read as originalClipId above
     assert(newClipId !== originalClipId, `[C3] the duplicated clip must have a DIFFERENT id than the original, got the same ("${newClipId}")`)
     const newClipNotes = JSON.stringify(doc3.tracks.find((t) => t.id === 'lead').clips.find((c) => c.id === newClipId).notes)
     assert(newClipNotes === originalClipNotes, '[C3] the duplicated clip\'s notes must be an exact content copy of the original')
