@@ -40,6 +40,7 @@ import {
   addHit,
   removeHit,
   setAutomationPoint,
+  applyAutomationShape,
   addAudioClip,
   splitAudioClip,
   humanize,
@@ -253,6 +254,16 @@ const HELP = [
                                                           if it already exists, else adds it with that id;
                                                           --interpolation sets the segment-shape this point starts,
                                                           default linear — omit on a move to keep the existing shape)`,
+  },
+  {
+    cmd: 'automate-shape',
+    text: `  beat automate-shape <file> <track> <clip> <param> <ramp|sine|triangle|exp|adsr> --from V --to V [--cycles N --points N --bars N]
+                                                          fill a clip's automation lane with a predefined SHAPE (Phase 37):
+                                                          ramp = linear from->to; sine/triangle = --cycles oscillations
+                                                          between from and to; exp = eased curve; adsr = envelope. Emits
+                                                          --points points (default 16) across the clip span (--bars, else
+                                                          the clip loop / audio length / doc loop_bars). REPLACES any
+                                                          existing lane for that param on the clip.`,
   },
   {
     cmd: 'clip',
@@ -1060,6 +1071,12 @@ async function varyCmd(argv) {
     await varyFeelCmd(argv, file, track)
     return
   }
+  // === Phase 37 Stream RC begin === automation:<param> — batch movement variants of a clip lane.
+  if (group.startsWith('automation:')) {
+    await varyAutomationCmd(argv, file, track, group.slice('automation:'.length))
+    return
+  }
+  // === Phase 37 Stream RC end ===
   if (flagValue(argv, '--scope') !== undefined) {
     // Param-group variants (rung 1) mutate whole-track synth params — there's no per-note/lane
     // concept to scope by, so --scope selection only makes sense for "feel" (rung 2).
@@ -1203,6 +1220,48 @@ async function varyFeelCmd(argv, file, track) {
     if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length)
   }
 }
+
+// === Phase 37 Stream RC begin === automation as a vary target: batch movement variants of a clip
+// lane into the same writeVaryBatch -> score -> adopt harness feel already uses. Whole-doc variants
+// carrying a replayable automate-shape recipe (not set-edits), so score/adopt work for free.
+async function varyAutomationCmd(argv, file, track, param) {
+  const { varyAutomation, BeatVaryError } = await import('../dist/src/vary/vary.js')
+  if (flagValue(argv, '--scope') !== undefined) {
+    throw new BeatEditError('vary --scope selection only applies to "feel" (automation:<param> generates a whole-doc lane, not per-note/hit content)')
+  }
+  const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
+  const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
+  const { defaultBatchDir } = await import('../dist/src/vary/batch.js')
+  // Colon-free dir label (a ':' in a path is legal on Linux but ugly/portability-risky); the
+  // manifest still records the real group `automation:<param>`.
+  const outDir = flagValue(argv, '--out-dir') ?? defaultBatchDir(file, `automation-${param}`, seed)
+  const opts = {
+    count,
+    seed,
+    ...(flagValue(argv, '--points') !== undefined ? { points: Number(flagValue(argv, '--points')) } : {}),
+    ...(flagValue(argv, '--bars') !== undefined ? { bars: Number(flagValue(argv, '--bars')) } : {}),
+  }
+  const text = readFileSync(file, 'utf8')
+  const doc = parse(text)
+  let variants
+  try {
+    variants = varyAutomation(doc, track, param, opts)
+  } catch (err) {
+    if (err instanceof BeatVaryError) throw new BeatEditError(err.message)
+    throw err
+  }
+  const { writeVaryBatch, renderVaryBatch } = await import('../dist/src/vary/batch.js')
+  const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group: `automation:${param}`, count, seed, outDir, variants })
+  process.stdout.write(`${outDir}/: ${variants.length} automation variants of ${track}.${param} (seed ${seed})\n`)
+  for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
+
+  if (argv.includes('--render') || argv.includes('--audition')) {
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
+    process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
+    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length)
+  }
+}
+// === Phase 37 Stream RC end ===
 
 async function scoreCmd(argv) {
   const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--log')
@@ -1415,6 +1474,31 @@ function automateCmd(argv) {
   writeDoc(file, before, doc)
   if (!created) process.stdout.write(`(moved existing point)\n`)
 }
+
+// === Phase 37 Stream RC begin ===
+function automateShapeCmd(argv) {
+  const valued = ['--from', '--to', '--cycles', '--points', '--bars']
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const [file, track, clip, param, shape] = positional
+  if (!file || !track || !clip || !param || !shape) {
+    throw new BeatEditError('automate-shape needs <file> <track> <clip> <param> <ramp|sine|triangle|exp|adsr> [--from V --to V --cycles N --points N --bars N]')
+  }
+  const from = flagValue(argv, '--from')
+  const to = flagValue(argv, '--to')
+  if (from === undefined || to === undefined) throw new BeatEditError('automate-shape needs --from and --to (the shape\'s start and target values, in the param\'s own units)')
+  const opts = {
+    from: Number(from),
+    to: Number(to),
+    ...(flagValue(argv, '--cycles') !== undefined ? { cycles: Number(flagValue(argv, '--cycles')) } : {}),
+    ...(flagValue(argv, '--points') !== undefined ? { points: Number(flagValue(argv, '--points')) } : {}),
+    ...(flagValue(argv, '--bars') !== undefined ? { bars: Number(flagValue(argv, '--bars')) } : {}),
+  }
+  const before = readDoc(file)
+  const { doc, spanSteps, points } = applyAutomationShape(before, track, clip, param, shape, opts)
+  writeDoc(file, before, doc)
+  process.stdout.write(`${shape} ${param} on ${track}.${clip}: ${points.length} points across ${formatNumber(spanSteps)} steps (${opts.from} -> ${opts.to})\n`)
+}
+// === Phase 37 Stream RC end ===
 
 async function sampleCmd(argv) {
   const [file, id, samplePath] = argv
@@ -2125,6 +2209,11 @@ async function main() {
     case 'automate':
       automateCmd(rest)
       break
+    // === Phase 37 Stream RC begin ===
+    case 'automate-shape':
+      automateShapeCmd(rest)
+      break
+    // === Phase 37 Stream RC end ===
     case 'clip':
       clipCmd(rest)
       break

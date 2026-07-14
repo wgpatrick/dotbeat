@@ -1,5 +1,6 @@
 export * from './document.js'
 export * from './format.js'
+export { automationShapePoints, AUTOMATION_SHAPES, AutomationShapeError, type AutomationShape, type AutomationShapeOptions, type AutomationShapePoint } from './automation-shape.js'
 export { parse, BeatParseError } from './parse.js'
 export { serialize } from './serialize.js'
 export {
@@ -47,6 +48,7 @@ export {
   moveAutomationPoint,
   removeAutomationPoint,
   setAutomationPoint,
+  applyAutomationShape,
   addEffect,
   removeEffect,
   moveEffect,

@@ -6,6 +6,7 @@
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatPlacement, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
 import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
+import { automationShapePoints, type AutomationShape } from './automation-shape.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
  * in a document survive a serialize→parse round-trip deep-equal. */
@@ -1581,6 +1582,57 @@ export function setAutomationPoint(
   }
   const added = addAutomationPoint(doc, trackId, clipId, param, point)
   return { doc: added.doc, point: added.point, created: true }
+}
+
+/** Phase 37 Stream RC: fill a clip's `param` lane with a predefined SHAPE (ramp|sine|triangle|exp|
+ * adsr — src/core/automation-shape.ts's pure sampler). Clears the param's existing lane on that
+ * clip first (a shape REPLACES the lane, it doesn't add to it), then writes each sampled point
+ * through setAutomationPoint above — reusing the primitive, no new grammar. The clip span (how many
+ * 16th steps the points spread across) is resolved, in priority order: an explicit `bars` override
+ * -> the clip's own `loop` range -> an audio-region clip's length in seconds (converted via bpm) ->
+ * the document's loopBars. Param is gated by the same checkAutomatableParam track-kind branch every
+ * automation edit uses (AUTOMATABLE_SYNTH_PARAMS vs AUDIO_AUTOMATABLE_PARAMS=['gain']). Returns the
+ * doc plus the resolved span and the points written, so callers can report what they generated. */
+export function applyAutomationShape(
+  doc: BeatDocument,
+  trackId: string,
+  clipId: string,
+  param: string,
+  shape: AutomationShape,
+  opts: { from: number; to: number; cycles?: number; points?: number; bars?: number },
+): { doc: BeatDocument; spanSteps: number; points: BeatAutomationPoint[] } {
+  const track = findTrack(doc, trackId)
+  checkAutomatableParam(param, track.kind)
+  const clip = findClip(track, clipId)
+
+  // Resolve the clip span in 16th steps.
+  let spanSteps: number
+  if (opts.bars !== undefined) {
+    if (!Number.isFinite(opts.bars) || opts.bars <= 0) throw new BeatEditError(`--bars must be > 0, got ${opts.bars}`)
+    spanSteps = opts.bars * 16
+  } else if (clip.loop) {
+    spanSteps = (clip.loop.end - clip.loop.start) * 16
+  } else if (clip.audio) {
+    // audio-region seconds -> 16th steps: one 16th = (60/bpm)/4 = 15/bpm seconds.
+    const seconds = clip.audio.out - clip.audio.in
+    spanSteps = (seconds * doc.bpm) / 15
+  } else {
+    spanSteps = doc.loopBars * 16
+  }
+  if (!Number.isFinite(spanSteps) || spanSteps <= 0) throw new BeatEditError(`could not resolve a positive clip span for "${clipId}" (got ${spanSteps} steps) — pass --bars`)
+
+  const sampled = automationShapePoints(shape, { from: opts.from, to: opts.to, cycles: opts.cycles, points: opts.points, spanSteps })
+
+  // Clear the existing lane for this param on this clip (a shape REPLACES it), then write fresh
+  // points through the primitive so ids mint cleanly as p1,p2,... on the now-empty lane.
+  let next = replaceClip(doc, trackId, { ...clip, automation: clip.automation.filter((l) => l.param !== param) })
+  const written: BeatAutomationPoint[] = []
+  for (const pt of sampled) {
+    const res = setAutomationPoint(next, trackId, clipId, param, { time: pt.time, value: pt.value })
+    next = res.doc
+    written.push(res.point)
+  }
+  return { doc: next, spanSteps, points: written }
 }
 
 /** Removes an automation point; drops the whole lane if it was the last point (an empty lane
