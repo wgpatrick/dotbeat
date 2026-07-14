@@ -12,3 +12,16 @@ export {
   type TrackContentStats,
 } from './structure.js'
 export { formatStructure } from './format.js'
+// ==== Phase 38 Stream SB begin ====
+export {
+  runAnalysis,
+  sidecarDoctor,
+  resolvePython,
+  defaultAnalysisPath,
+  type AnalysisArtifact,
+  type AnalysisBackend,
+  type SidecarSection,
+  type RunAnalysisOptions,
+  type RunAnalysisResult,
+} from './sidecar.js'
+// ==== Phase 38 Stream SB end ====

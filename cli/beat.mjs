@@ -92,6 +92,9 @@ import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildPr
 // --- Phase 37 Stream RB begin ---
 import { analyzeStructure, formatStructure, BeatAnalysisError } from '../dist/src/analysis/index.js'
 // --- Phase 37 Stream RB end ---
+// ==== Phase 38 Stream SB begin ====
+import { runAnalysis, sidecarDoctor, defaultAnalysisPath } from '../dist/src/analysis/index.js'
+// ==== Phase 38 Stream SB end ====
 
 // ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
 // The old monolithic USAGE template literal, restructured as one entry per command so
@@ -140,6 +143,18 @@ const HELP = [
                                                           membership list (add/remove/reorder members)`,
   },
   { cmd: 'inspect', text: `  beat inspect <file> [--json]` },
+  // ==== Phase 38 Stream SB begin ====
+  {
+    cmd: 'analyze',
+    text: `  beat analyze <audio.wav> [--backend beatthis|stub|allin1] [--force] [-o out.json] [--json]
+                                                          detect tempo/beats/downbeats/sections in a real WAV via the
+                                                          Python sidecar; writes a cached <audio>.analysis.json (feed it to
+                                                          beat skeleton). Default backend beatthis (needs the owner-side venv;
+                                                          stub is a deterministic no-deps grid for testing). --force re-analyzes.
+                                                          NOTE: for the SYMBOLIC analysis of a .beat file, use analyze-structure.
+  beat analyze --doctor                                   report the Python interpreter + which backends are installed`,
+  },
+  // ==== Phase 38 Stream SB end ====
   // --- Phase 37 Stream RB begin ---
   {
     cmd: 'analyze-structure',
@@ -691,6 +706,97 @@ async function inspectCmd(argv) {
     process.stdout.write(describeDocument(doc) + formatInstrumentPresets(doc, presetInfo))
   }
 }
+
+// ==== Phase 38 Stream SB begin ====
+const ANALYZE_BACKENDS = ['beatthis', 'stub', 'allin1']
+
+function formatDoctorReport(report) {
+  const lines = []
+  lines.push(`interpreter: ${report.interpreter ?? '(unknown)'}`)
+  if (report.pythonFound === false) {
+    lines.push(`python3: NOT FOUND`)
+    if (report.error) lines.push(report.error)
+    return lines.join('\n') + '\n'
+  }
+  lines.push(`python: ${report.python ?? '(unknown)'}`)
+  if (report.error) {
+    lines.push(`error: ${report.error}`)
+    return lines.join('\n') + '\n'
+  }
+  lines.push('backends:')
+  const backends = report.backends ?? {}
+  for (const name of ['stub', 'beatthis', 'allin1']) {
+    const b = backends[name]
+    if (!b) continue
+    const missing = Array.isArray(b.missing) && b.missing.length > 0 ? `missing: ${b.missing.join(', ')}` : 'ok'
+    lines.push(`  ${name.padEnd(9)} ${b.ok ? 'ok' : missing}`)
+  }
+  return lines.join('\n') + '\n'
+}
+
+async function analyzeCmd(argv) {
+  const json = argv.includes('--json')
+
+  if (argv.includes('--doctor')) {
+    const report = await sidecarDoctor()
+    process.stdout.write(json ? JSON.stringify(report, null, 2) + '\n' : formatDoctorReport(report))
+    return
+  }
+
+  const force = argv.includes('--force')
+  const backendIdx = argv.indexOf('--backend')
+  const backend = backendIdx >= 0 ? argv[backendIdx + 1] : 'beatthis'
+  if (!ANALYZE_BACKENDS.includes(backend)) {
+    throw new BeatAnalysisError(`unknown --backend "${backend}" (one of: ${ANALYZE_BACKENDS.join(', ')})`)
+  }
+  let outIdx = argv.indexOf('-o')
+  if (outIdx < 0) outIdx = argv.indexOf('--out')
+  const outPath = outIdx >= 0 ? argv[outIdx + 1] : undefined
+
+  // Positional audio path = first arg that isn't a flag or a flag's value.
+  const consumed = new Set()
+  if (backendIdx >= 0) consumed.add(backendIdx + 1)
+  if (outIdx >= 0) consumed.add(outIdx + 1)
+  const audioPath = argv.find(
+    (a, i) => !a.startsWith('-') && !consumed.has(i),
+  )
+  if (!audioPath) throw new BeatAnalysisError('analyze needs an audio file (a .wav), or pass --doctor')
+  if (/\.beat$/i.test(audioPath)) {
+    throw new BeatAnalysisError(
+      `"${audioPath}" is a .beat file — for the symbolic analysis of a project, use: beat analyze-structure ${audioPath}. ` +
+        `beat analyze reads reference AUDIO (a .wav) to detect its tempo/beats/sections.`,
+    )
+  }
+
+  const { artifact, cached, outPath: writtenPath } = await runAnalysis({ audioPath, backend, force, outPath })
+
+  if (json) {
+    process.stdout.write(JSON.stringify(artifact, null, 2) + '\n')
+    return
+  }
+
+  const b = artifact.backend
+  const out = []
+  out.push(`analyzed ${artifact.source.file} (backend ${b.name}${b.version ? ` ${b.version}` : ''}${b.model ? `/${b.model}` : ''})`)
+  out.push(`  bpm ${Number(artifact.bpm).toFixed(2)} (${artifact.bpmMethod})`)
+  out.push(`  duration ${artifact.source.durationSeconds.toFixed(2)}s · ${artifact.beats.length} beats · ${artifact.downbeats.length} downbeats`)
+  if (artifact.sections.length > 0) {
+    out.push(`  sections (${artifact.sections.length}):`)
+    for (const s of artifact.sections) {
+      out.push(`    ${String(s.label ?? '(unlabeled)').padEnd(10)} ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s`)
+    }
+  } else {
+    out.push(`  sections: none (beats-only backend — beat skeleton will chunk the beat grid into parts)`)
+  }
+  if (cached) {
+    out.push(`  using cached ${writtenPath} — pass --force to re-analyze`)
+  } else {
+    out.push(`  wrote ${writtenPath}`)
+  }
+  out.push(`  next: beat skeleton <out.beat> ${writtenPath}`)
+  process.stdout.write(out.join('\n') + '\n')
+}
+// ==== Phase 38 Stream SB end ====
 
 // --- Phase 37 Stream RB begin ---
 async function analyzeStructureCmd(argv) {
@@ -2139,6 +2245,11 @@ async function main() {
     case 'inspect':
       await inspectCmd(rest)
       break
+    // ==== Phase 38 Stream SB begin ====
+    case 'analyze':
+      await analyzeCmd(rest)
+      break
+    // ==== Phase 38 Stream SB end ====
     // --- Phase 37 Stream RB begin ---
     case 'analyze-structure':
       await analyzeStructureCmd(rest)

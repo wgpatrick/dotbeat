@@ -1,0 +1,22 @@
+# SPIKE — dotbeat `beat analyze --backend allin1` dependencies (Phase 38 Stream SB).
+#
+# All-In-One (mir-aidj/all-in-one) — beats, downbeats, AND segment labels. Research 102's finding:
+# its segment BOUNDARIES are trustworthy but its LABELS are weak on electronic material, so treat
+# this as a boundaries source, not a naming source. The install is heavy and multi-step, which is
+# why this backend is a spike rather than the default (beatthis is). Everything below is documented
+# as manual steps because they do not install cleanly from a single `pip install -r` line.
+#
+# Validate OWNER-SIDE via `beat analyze --doctor` (pip is blocked in the dev/CI container).
+#
+# Manual install order (into python/.venv):
+#   1. PyTorch first (see requirements-beatthis.txt for the torch pin) — allin1 builds on it.
+#   2. NATTEN (neighborhood attention) — install the wheel matching your torch + CUDA/CPU build
+#      from https://shi-labs.com/natten/ , e.g.:
+#        pip install natten -f https://shi-labs.com/natten/wheels/cpu/torch2.0/index.html
+#   3. madmom from git (the PyPI release is stale / incompatible with recent numpy):
+#        pip install "madmom @ git+https://github.com/CPJKU/madmom@main"
+#   4. All-In-One itself:
+#        pip install "allin1 @ git+https://github.com/mir-aidj/all-in-one@main"
+#
+# Pin every git dependency to an exact commit before real use (same posture as
+# requirements-beatthis.txt) and confirm with `beat analyze --doctor`.

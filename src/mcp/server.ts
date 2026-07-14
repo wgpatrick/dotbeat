@@ -87,6 +87,9 @@ import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildPr
 // --- Phase 37 Stream RB begin ---
 import { analyzeStructure, formatStructure } from '../analysis/index.js'
 // --- Phase 37 Stream RB end ---
+// ==== Phase 38 Stream SB begin ====
+import { runAnalysis, sidecarDoctor } from '../analysis/index.js'
+// ==== Phase 38 Stream SB end ====
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
 import { varyTrack, varyFeel, varyAutomation, VARY_GROUPS } from '../vary/vary.js'
@@ -434,6 +437,45 @@ const TOOLS: ToolDef[] = [
     },
   },
   // --- Phase 37 Stream RB end ---
+  // ==== Phase 38 Stream SB begin ====
+  {
+    name: 'beat_analyze_audio',
+    description:
+      "Detect the tempo, beats, downbeats, and sections of a real reference WAV via dotbeat's Python sidecar, and write a cached <audio>.analysis.json you can feed to beat_skeleton. This is the AUDIO importer (deliberately NOT beat_analyze_structure, which reads a .beat project's symbolic arrangement — this reads an external WAV file's waveform). Backends: 'beatthis' (default; Beat This — beats+downbeats, needs the owner-side Python venv), 'stub' (a deterministic 120-BPM no-dependency grid for testing/plumbing), 'allin1' (a heavy spike backend that also labels sections). The sidecar only runs where its Python deps are installed; without them it returns an actionable install hint. Result is cached by audio-bytes sha256 + backend — a second call returns the cache unless force is set. Pass doctor:true (with no file) to report which interpreter and backends are available. WAV input only this phase.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'path to a reference audio .wav to analyze' },
+        backend: { type: 'string', description: "detection backend: 'beatthis' (default), 'stub' (deterministic, no deps), or 'allin1' (spike, adds labels)" },
+        force: { type: 'boolean', description: 're-analyze even if a matching cached .analysis.json exists' },
+        out: { type: 'string', description: 'output path for the analysis JSON (default: <audio>.analysis.json beside the input)' },
+        json: { type: 'boolean', description: 'return the raw analysis artifact JSON instead of the formatted summary' },
+        doctor: { type: 'boolean', description: 'report the resolved Python interpreter and which backends are installed (mutually exclusive with file)' },
+      },
+      required: [],
+    },
+    handler: async (args) => {
+      if (args.doctor === true) {
+        if (typeof args.file === 'string' && args.file !== '') throw new Error('doctor and file are mutually exclusive — pass one or the other')
+        const report = await sidecarDoctor()
+        return JSON.stringify(report, null, 2)
+      }
+      const file = str(args, 'file')
+      const backend = typeof args.backend === 'string' && args.backend !== '' ? args.backend : 'beatthis'
+      if (!['stub', 'beatthis', 'allin1'].includes(backend)) throw new Error(`unknown backend "${backend}" (one of: stub, beatthis, allin1)`)
+      const out = typeof args.out === 'string' && args.out !== '' ? args.out : undefined
+      const result = await runAnalysis({ audioPath: file, backend: backend as 'stub' | 'beatthis' | 'allin1', force: args.force === true, outPath: out })
+      if (args.json === true) return JSON.stringify(result.artifact, null, 2)
+      const a = result.artifact
+      const lines = [
+        `analyzed ${a.source.file} (backend ${a.backend.name}${a.backend.version ? ` ${a.backend.version}` : ''})`,
+        `bpm ${Number(a.bpm).toFixed(2)} (${a.bpmMethod}) · ${a.beats.length} beats · ${a.downbeats.length} downbeats · ${a.sections.length} sections`,
+        result.cached ? `using cached ${result.outPath} (pass force:true to re-analyze)` : `wrote ${result.outPath}`,
+      ]
+      return lines.join('\n')
+    },
+  },
+  // ==== Phase 38 Stream SB end ====
   {
     name: 'beat_set',
     description:
