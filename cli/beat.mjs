@@ -109,6 +109,7 @@ const HELP_FAMILIES = [
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
   ['add-note', 'rm-note', 'add-hit', 'rm-hit'],
+  ['render', 'feedback', 'metrics', 'lint'], // Phase 37 Stream RA: the render -> listen loop
 ]
 
 /** One entry per command, in the exact order the full dump prints them. `text` is the command's
@@ -397,8 +398,29 @@ const HELP = [
   {
     cmd: 'render',
     text: `  beat render <file> [-o out.wav] [--tail <sec>]          render to WAV through dotbeat's own engine
-                                                          (headless Chromium driving ui/; no BeatLab needed)`,
+                                                          (headless Chromium driving ui/; no BeatLab needed)
+  beat render <file> --stems [--out-dir d]                Phase 37: one solo WAV per track into an out dir
+                                                          (default stems-<file> next to the .beat) — stems for
+                                                          external mixing or per-track metrics`,
   },
+  // ---- Phase 37 Stream RA begin: feedback help entry --------------------------------------
+  {
+    cmd: 'feedback',
+    text: `  beat feedback <file> [--sections] [--ref <ref.json>] [--json]
+                                                          render the song ONCE, then report mix feedback.
+                                                          default: whole-song metrics + lint in one block.
+                                                          --sections: slice the render at song section
+                                                          boundaries and report the per-section energy arc
+                                                          (LUFS / spectral balance / width / crest per section
+                                                          + section-to-section movement, flagged only when it
+                                                          clears the render-run variance floor). --ref compares
+                                                          each section (or the whole song) against a saved
+                                                          reference profile (beat metrics --save-profile).
+                                                          Honest limits: per-section STATIC metrics only — this
+                                                          does NOT hear masking, arrangement, or transitions,
+                                                          only how sections differ as isolated static mixes`,
+  },
+  // ---- Phase 37 Stream RA end -------------------------------------------------------------
   { cmd: 'daemon', text: `  beat daemon <file> [--port 8420]` },
   { cmd: 'checkpoint', text: `  beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)` },
   {
@@ -1596,6 +1618,85 @@ async function lintCmd(argv) {
   if (docPath) process.exit(process.exitCode ?? 0)
 }
 
+// ---- Phase 37 Stream RA begin: section-aware feedback + render --stems ----------------------
+// Dynamic imports (mkdirSync/join, the section metric helpers, renderToBuffer) live inside these
+// handlers rather than on the shared top-of-file import block so sibling streams RB/RC/RD editing
+// the same file don't collide on the import lines.
+
+/** `beat feedback <file>` — render the song ONCE through the real engine and turn that capture into
+ * mix feedback. Default: whole-song analyze + lint in one block. With --sections: slice the render
+ * at the song's section boundaries and report the per-section energy arc (LUFS / spectral balance /
+ * width / crest per section + variance-padded section-to-section movement). --ref <profile.json>
+ * compares each section (or the whole song) against a saved reference profile. Honest limits:
+ * per-section STATIC metrics only — no masking, arrangement, or transition awareness. */
+async function feedbackCmd(argv) {
+  const { analyzeSections, formatSectionFeedback, formatWholeSongFeedback } = await import('../dist/src/metrics/index.js')
+  const { renderToBuffer } = await import('./render.mjs')
+
+  const json = argv.includes('--json')
+  const wantSections = argv.includes('--sections')
+  const refIdx = argv.indexOf('--ref')
+  const refPath = refIdx !== -1 ? argv[refIdx + 1] : undefined
+  if (refIdx !== -1 && (!refPath || refPath.startsWith('--'))) {
+    throw new BeatEditError('--ref needs a profile path — write one with: beat metrics <ref.wav> --save-profile <ref.json>')
+  }
+  const file = argv.find((a, i) => !a.startsWith('--') && (refIdx === -1 || i !== refIdx + 1))
+  if (!file) throw new BeatEditError('feedback needs a .beat file (it renders the file, then analyzes the render)')
+  if (refPath !== undefined && !existsSync(refPath)) {
+    throw new BeatEditError(`no profile at ${refPath} — write one with: beat metrics <ref.wav> --save-profile ${refPath}`)
+  }
+  const ref = refPath !== undefined ? parseProfile(readFileSync(refPath, 'utf8'), refPath) : undefined
+
+  const { bytes, doc } = await renderToBuffer(file)
+  const { channels, sampleRate } = decodeWav(bytes)
+
+  if (wantSections) {
+    if (!doc.song || doc.song.length === 0) {
+      throw new BeatEditError(`--sections needs a song block, but ${file} is in loop mode (no sections to slice). Run whole-song feedback instead: beat feedback ${file}`)
+    }
+    const specs = doc.song.map((s) => ({ bars: s.bars, scene: s.scene, name: doc.scenes.find((sc) => sc.id === s.scene)?.name }))
+    const secMetrics = analyzeSections(channels, sampleRate, doc.bpm, specs)
+    process.stdout.write(json ? JSON.stringify({ sections: secMetrics, ...(ref ? { ref: ref.source } : {}) }, null, 2) + '\n' : formatSectionFeedback(secMetrics, ref))
+  } else {
+    const m = analyze(channels, sampleRate)
+    const findings = lint(m, ref ? { ref } : {})
+    process.exitCode = findings.some((f) => f.level === 'warn') ? 1 : 0
+    process.stdout.write(json ? JSON.stringify({ metrics: m, findings }, null, 2) + '\n' : formatWholeSongFeedback(m, findings))
+  }
+  process.exit(process.exitCode ?? 0) // render leaves chromium/vite event-loop stragglers — see render.mjs footer
+}
+
+/** `beat render <file> --stems [--out-dir d]` — one solo-rendered WAV per track into an out dir
+ * (default stems-<basename> NEXT TO the .beat file). Reuses render.mjs's renderTrackSolosCommand
+ * (one daemon/preview/browser session, one real solo capture per track). */
+async function renderStemsCmd(argv) {
+  const { mkdirSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { renderTrackSolosCommand } = await import('./render.mjs')
+
+  const outIdx = argv.indexOf('--out-dir')
+  const outDir = outIdx !== -1 ? argv[outIdx + 1] : undefined
+  if (outIdx !== -1 && (!outDir || outDir.startsWith('--'))) throw new BeatEditError('--out-dir needs a directory path')
+  const file = argv.find((a, i) => !a.startsWith('--') && (outIdx === -1 || i !== outIdx + 1))
+  if (!file) throw new BeatEditError('render --stems needs a .beat file')
+
+  const doc = readDoc(file)
+  const trackIds = doc.tracks.map((t) => t.id)
+  if (trackIds.length === 0) throw new BeatEditError(`${file} has no tracks to render stems for`)
+  const dir = outDir ?? join(dirname(resolve(file)), `stems-${basename(file).replace(/\.beat$/, '')}`)
+  mkdirSync(dir, { recursive: true })
+
+  const wavByTrack = await renderTrackSolosCommand(file, trackIds)
+  for (const id of trackIds) {
+    const outPath = join(dir, `${id}.wav`)
+    writeFileSync(outPath, wavByTrack.get(id))
+    console.error(`wrote ${outPath} (${wavByTrack.get(id).length} bytes)`)
+  }
+  process.stdout.write(`wrote ${trackIds.length} stem${trackIds.length === 1 ? '' : 's'} to ${dir}/ (one solo render per track: ${trackIds.join(', ')})\n`)
+  process.exit(0) // render leaves chromium/vite event-loop stragglers — see render.mjs footer
+}
+// ---- Phase 37 Stream RA end -----------------------------------------------------------------
+
 /** `git show rev:path` needs the path relative to the repo root, wherever we're invoked from. */
 function gitShow(rev, file) {
   const abs = resolve(file)
@@ -2029,6 +2130,12 @@ async function main() {
       mcpInitCmd(rest)
       break
     case 'render': {
+      // Phase 37 Stream RA: `--stems` renders one solo WAV per track into an out dir instead of one
+      // full-mix WAV — its own handler (renderStemsCmd), which exits the process itself.
+      if (rest.includes('--stems')) {
+        await renderStemsCmd(rest.filter((a) => a !== '--stems'))
+        break // renderStemsCmd process.exit()s; break keeps the switch well-formed
+      }
       // One render path now (D15): dotbeat's own engine (ui/src/audio/engine.ts) driven headless.
       // The retired `--offline` flag (BeatLab-dependent, broken in this environment) is accepted
       // and ignored so old invocations don't hard-error — the real engine is dotbeat's own either way.
@@ -2036,6 +2143,10 @@ async function main() {
       await renderCommand(rest.filter((a) => a !== '--offline'))
       process.exit(0) // render leaves event-loop stragglers (chromium pipes, vite) — see render.mjs footer
     }
+    // Phase 37 Stream RA: render once, then section-aware or whole-song mix feedback in one step.
+    case 'feedback':
+      await feedbackCmd(rest)
+      break
     case 'daemon': {
       const { daemonCommand } = await import('./daemon.mjs')
       await daemonCommand(rest)

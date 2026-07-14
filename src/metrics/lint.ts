@@ -58,7 +58,7 @@ const fmt = (x: number, digits = 1) => (Number.isFinite(x) ? x.toFixed(digits) :
 /** The track whose own solo metrics score highest by `score` (ties keep the first). `score`
  * returning `null` excludes that track (e.g. a mono track has no `stereo` to score). Returns
  * `undefined` when no per-track metrics were supplied, or none score. */
-function worstTrack(tracks: TrackContribution[] | undefined, score: (m: MixMetrics) => number | null): TrackContribution | undefined {
+export function worstTrack(tracks: TrackContribution[] | undefined, score: (m: MixMetrics) => number | null): TrackContribution | undefined {
   if (!tracks) return undefined
   let best: TrackContribution | undefined
   let bestScore = -Infinity
@@ -113,7 +113,7 @@ const BAND_EDITS: Record<keyof SpectralBands, { above: string; below: string }> 
  * render-run variance. Every finding names the reference value, the measured value, and a .beat
  * edit to try — the same actionable-finding discipline as the absolute rules. All level 'info':
  * distance from a reference is taste information, not a defect. */
-function refFindings(m: MixMetrics, ref: MixProfile, trackMetrics?: TrackContribution[]): LintFinding[] {
+export function refFindings(m: MixMetrics, ref: MixProfile, trackMetrics?: TrackContribution[]): LintFinding[] {
   const out: LintFinding[] = []
   const r = ref.metrics
   const refName = ref.source
