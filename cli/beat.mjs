@@ -83,7 +83,7 @@ import {
   BeatPresetError,
   BeatPitchTimeError,
 } from '../dist/src/core/index.js'
-import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META } from '../dist/src/metrics/index.js'
+import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile, BeatProfileError } from '../dist/src/metrics/index.js'
 
 // ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
 // The old monolithic USAGE template literal, restructured as one entry per command so
@@ -291,11 +291,21 @@ const HELP = [
     text: `  beat suggest <file> <track> [--target <lane-or-id>] [--log f]
                                                           read the scores log and propose the next beat-vary round`,
   },
-  { cmd: 'metrics', text: `  beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo` },
+  {
+    cmd: 'metrics',
+    text: `  beat metrics <file.wav> [--json] [--save-profile <ref.json>]
+                                                          LUFS, true peak, crest, spectral, stereo;
+                                                          --save-profile writes the numbers as a reusable
+                                                          reference profile (with provenance) for lint --ref`,
+  },
   {
     cmd: 'lint',
-    text: `  beat lint <file.wav> [--target <LUFS>] [--json] [--doc <file.beat>]
+    text: `  beat lint <file.wav> [--target <LUFS> | --ref <ref.json>] [--json] [--doc <file.beat>]
                                                           deterministic mix findings (default target -14);
+                                                          --ref compares against a saved reference profile
+                                                          instead of absolute targets (LUFS/band/width/crest
+                                                          deltas) — full-mix statics only: a profile can't
+                                                          hear arrangement, sections, or masking;
                                                           --doc renders each track solo to name the actual
                                                           offending track in each finding's suggestion`,
   },
@@ -1242,10 +1252,23 @@ function fmtDb(x, unit = '') {
 
 function metricsCmd(argv) {
   const json = argv.includes('--json')
-  const file = argv.find((a) => !a.startsWith('--'))
+  const profileIdx = argv.indexOf('--save-profile')
+  const profilePath = profileIdx !== -1 ? argv[profileIdx + 1] : undefined
+  if (profileIdx !== -1 && (!profilePath || profilePath.startsWith('--'))) {
+    throw new BeatEditError('--save-profile needs a path to write, e.g. beat metrics ref.wav --save-profile ref.json')
+  }
+  const file = argv.find((a, i) => !a.startsWith('--') && (profileIdx === -1 || i !== profileIdx + 1))
   if (!file) throw new BeatEditError('metrics needs a wav file')
   const { channels, sampleRate } = decodeWav(readFileSync(file))
   const m = analyze(channels, sampleRate)
+  if (profilePath) {
+    // Phase 35 Stream OD: the measured metric set as a reusable reference profile (provenance:
+    // source filename, date, tool) for `beat lint --ref`. Full-mix statics only — the profile
+    // can't hear arrangement, sections, or masking.
+    writeFileSync(profilePath, serializeProfile(buildProfile(m, basename(file))))
+    // keep --json stdout pure JSON for machine consumers; the note goes to stderr there
+    ;(json ? process.stderr : process.stdout).write(`reference profile saved to ${profilePath} (source ${basename(file)}) — compare a mix with: beat lint <mix.wav> --ref ${profilePath}\n`)
+  }
   if (json) {
     // Phase 34 Stream NC: identical re-renders of the same .beat differ by up to the measured
     // amounts in RENDER_RUN_VARIANCE_META (real-time capture, phase relations shift run to run —
@@ -1277,12 +1300,30 @@ async function lintCmd(argv) {
   const target = targetIdx !== -1 ? Number(argv[targetIdx + 1]) : undefined
   const docIdx = argv.indexOf('--doc')
   const docPath = docIdx !== -1 ? argv[docIdx + 1] : undefined
+  // Phase 35 Stream OD: --ref <profile.json> switches the taste comparisons (loudness / bands /
+  // width / crest) to deltas against a saved reference profile. One comparison frame at a time:
+  // --ref and --target together is a contradiction, not a combination — error loudly.
+  const refIdx = argv.indexOf('--ref')
+  const refPath = refIdx !== -1 ? argv[refIdx + 1] : undefined
+  if (refIdx !== -1 && (!refPath || refPath.startsWith('--'))) {
+    throw new BeatEditError('--ref needs a profile path — write one with: beat metrics <ref.wav> --save-profile <ref.json>')
+  }
+  if (refPath !== undefined && target !== undefined) {
+    throw new BeatEditError('pick one comparison frame: --ref <ref.json> (compare against a reference mix) or --target <LUFS> (absolute loudness target) — not both')
+  }
   const file = argv.find(
-    (a, i) => !a.startsWith('--') && (targetIdx === -1 || i !== targetIdx + 1) && (docIdx === -1 || i !== docIdx + 1),
+    (a, i) =>
+      !a.startsWith('--') &&
+      (targetIdx === -1 || i !== targetIdx + 1) &&
+      (docIdx === -1 || i !== docIdx + 1) &&
+      (refIdx === -1 || i !== refIdx + 1),
   )
   if (!file) throw new BeatEditError('lint needs a wav file')
+  if (refPath !== undefined && !existsSync(refPath)) {
+    throw new BeatEditError(`no profile at ${refPath} — write one with: beat metrics <ref.wav> --save-profile ${refPath}`)
+  }
   const { channels, sampleRate } = decodeWav(readFileSync(file))
-  const lintOpts = target !== undefined ? { targetLufs: target } : {}
+  const lintOpts = refPath !== undefined ? { ref: parseProfile(readFileSync(refPath, 'utf8'), refPath) } : target !== undefined ? { targetLufs: target } : {}
   let findings = lint(analyze(channels, sampleRate), lintOpts)
 
   if (docPath && findings.some((f) => f.suggestion)) {
@@ -1711,6 +1752,7 @@ main().catch((err) => {
     err instanceof BeatMacroError ||
     err instanceof BeatPitchTimeError ||
     err instanceof BeatHumanizeError ||
+    err instanceof BeatProfileError ||
     err.name === 'HistoryError'
   ) {
     console.error(`error: ${err.message}`)

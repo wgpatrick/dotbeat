@@ -14,7 +14,7 @@ import { createInterface } from 'node:readline'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { dirname, join, resolve as pathResolve } from 'node:path'
+import { basename, dirname, join, resolve as pathResolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   parse,
@@ -76,7 +76,7 @@ import {
   setLaneSample,
   type BeatDocument,
 } from '../core/index.js'
-import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META } from '../metrics/index.js'
+import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile } from '../metrics/index.js'
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
 import { varyTrack, varyFeel, VARY_GROUPS } from '../vary/vary.js'
@@ -1135,32 +1135,52 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_metrics',
     description:
-      'Deterministic DSP measurements of a rendered WAV: integrated LUFS (ITU-R BS.1770), sample/true peak, crest factor, spectral band balance + centroid, stereo correlation/width. These numbers are the ground truth for any mix judgment — trust them over any impression of what the audio "probably" sounds like.',
+      'Deterministic DSP measurements of a rendered WAV: integrated LUFS (ITU-R BS.1770), sample/true peak, crest factor, spectral band balance + centroid, stereo correlation/width. These numbers are the ground truth for any mix judgment — trust them over any impression of what the audio "probably" sounds like. Pass save_profile to also write the measured numbers as a reusable reference profile (JSON with provenance: source file, date, tool) for beat_lint\'s ref argument — measure a track you love once, then critique your own mixes against it. Honest limits: a profile captures full-mix statics only; it does not hear arrangement, sections, or masking.',
     inputSchema: {
       type: 'object',
-      properties: { file: { type: 'string', description: 'path to a .wav file (render one with beat_render)' } },
+      properties: {
+        file: { type: 'string', description: 'path to a .wav file (render one with beat_render)' },
+        save_profile: { type: 'string', description: 'path to write a reference profile JSON (e.g. "ref.json"), usable as beat_lint\'s ref' },
+      },
       required: ['file'],
     },
     handler: (args) => {
-      const { channels, sampleRate } = decodeWav(readFileSync(str(args, 'file')))
+      const file = str(args, 'file')
+      const { channels, sampleRate } = decodeWav(readFileSync(file))
+      const m = analyze(channels, sampleRate)
+      // Phase 35 Stream OD: same profile shape + code path as `beat metrics --save-profile`
+      // (src/metrics/profile.ts) — a profile written on either surface reads on either.
+      const saved = typeof args.save_profile === 'string' && args.save_profile !== '' ? args.save_profile : undefined
+      if (saved) writeFileSync(saved, serializeProfile(buildProfile(m, basename(file))))
       // Same renderRunVariance metadata `beat metrics --json` emits (Phase 34 NC parity —
       // docs/render-determinism.md): deltas inside these bounds are render noise.
-      return JSON.stringify({ ...analyze(channels, sampleRate), meta: RENDER_RUN_VARIANCE_META }, null, 2)
+      return JSON.stringify({ ...m, meta: RENDER_RUN_VARIANCE_META, ...(saved ? { savedProfile: saved } : {}) }, null, 2)
     },
   },
   {
     name: 'beat_lint',
     description:
-      'Run the deterministic mix-lint rules over a rendered WAV: true-peak clipping risk, loudness vs target (default -14 LUFS), over-compression, spectral imbalance, mono/phase issues. Findings include the measured value, the threshold, and — where expressible — the .beat edit to try.',
+      'Run the deterministic mix-lint rules over a rendered WAV: true-peak clipping risk, loudness vs target (default -14 LUFS), over-compression, spectral imbalance, mono/phase issues. Findings include the measured value, the threshold, and — where expressible — the .beat edit to try. Pass ref (a profile saved by beat_metrics\' save_profile) to critique against a reference mix instead of absolute targets: findings then report loudness / band-share / width / crest deltas from the reference, padded by the measured render-run variance, while the safety rules (true-peak clipping, phase cancellation) stay absolute. ref and target_lufs are mutually exclusive — pick one comparison frame. Honest limits: the ref comparison is full-mix statics only; it does not hear arrangement, sections, or masking.',
     inputSchema: {
       type: 'object',
-      properties: { file: { type: 'string' }, target_lufs: { type: 'number', description: 'loudness target, default -14' } },
+      properties: {
+        file: { type: 'string' },
+        target_lufs: { type: 'number', description: 'loudness target, default -14 (absolute mode only; mutually exclusive with ref)' },
+        ref: { type: 'string', description: 'path to a reference profile JSON from beat_metrics\' save_profile (mutually exclusive with target_lufs)' },
+      },
       required: ['file'],
     },
     handler: (args) => {
+      const refPath = typeof args.ref === 'string' && args.ref !== '' ? args.ref : undefined
+      if (refPath !== undefined && typeof args.target_lufs === 'number') {
+        throw new Error('pick one comparison frame: ref (compare against a reference mix profile) or target_lufs (absolute loudness target) — not both')
+      }
+      if (refPath !== undefined && !existsSync(refPath)) {
+        throw new Error(`no profile at ${refPath} — write one with beat_metrics' save_profile first`)
+      }
       const { channels, sampleRate } = decodeWav(readFileSync(str(args, 'file')))
-      const findings = lint(analyze(channels, sampleRate), typeof args.target_lufs === 'number' ? { targetLufs: args.target_lufs } : {})
-      return formatLint(findings)
+      const opts = refPath !== undefined ? { ref: parseProfile(readFileSync(refPath, 'utf8'), refPath) } : typeof args.target_lufs === 'number' ? { targetLufs: args.target_lufs } : {}
+      return formatLint(lint(analyze(channels, sampleRate), opts))
     },
   },
   {

@@ -173,3 +173,64 @@ test('beat help <unknown> is the standard unknown-command error, exit 2', () => 
   const out2 = beat(['bogus', '--help'], { expectExit: 2 })
   assert.match(out2, /unknown command "bogus"/)
 })
+
+// ---- Phase 35 Stream OD: reference mix profile (save-profile / lint --ref) ------------------
+
+/** Tiny 16-bit PCM stereo wav of a sine tone — enough signal for metrics, no renders involved. */
+function writeTestWav(path: string, freq: number, amp: number, seconds = 1): void {
+  const FS = 44100
+  const n = Math.round(seconds * FS)
+  const ch = 2
+  const dataSize = n * ch * 2
+  const buf = Buffer.alloc(44 + dataSize)
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + dataSize, 4); buf.write('WAVE', 8)
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(ch, 22)
+  buf.writeUInt32LE(FS, 24); buf.writeUInt32LE(FS * ch * 2, 28); buf.writeUInt16LE(ch * 2, 32); buf.writeUInt16LE(16, 34)
+  buf.write('data', 36); buf.writeUInt32LE(dataSize, 40)
+  let o = 44
+  for (let i = 0; i < n; i++) {
+    const v = Math.round(amp * Math.sin((2 * Math.PI * freq * i) / FS) * 32767)
+    for (let c = 0; c < ch; c++) { buf.writeInt16LE(v, o); o += 2 }
+  }
+  writeFileSync(path, buf)
+}
+
+test('beat metrics --save-profile writes a provenance-carrying profile; beat lint --ref compares against it', () => {
+  const dir = dirname(tempProject())
+  const refWav = join(dir, 'ref.wav')
+  const mixWav = join(dir, 'mix.wav')
+  writeTestWav(refWav, 997, 0.4)
+  writeTestWav(mixWav, 997, 0.1) // 12 dB quieter, same spectrum
+
+  const out = beat(['metrics', refWav, '--save-profile', join(dir, 'ref.json')])
+  assert.match(out, /reference profile saved to .*ref\.json/)
+  assert.match(out, /LUFS integrated/) // the ordinary metrics readout still prints
+  const profile = JSON.parse(readFileSync(join(dir, 'ref.json'), 'utf8')) as { format: string; source: string; createdAt: string; tool: string }
+  assert.equal(profile.format, 'dotbeat-mix-profile')
+  assert.equal(profile.source, 'ref.wav')
+  assert.ok(profile.createdAt && profile.tool, 'provenance fields present')
+
+  // ref-mode findings name the reference value, the measured value, and the edit to try
+  const lintOut = beat(['lint', mixWav, '--ref', join(dir, 'ref.json')])
+  assert.match(lintOut, /\[ref-loudness\] integrated loudness -\d+\.\d LUFS is 12\.0 LU quieter than the reference \(ref\.wav: -\d+\.\d LUFS\)/)
+  assert.match(lintOut, /fix: raise all track volumes/)
+  // --json carries the same findings for machine consumers
+  const json = JSON.parse(beat(['lint', mixWav, '--ref', join(dir, 'ref.json'), '--json'])) as { rule: string }[]
+  assert.ok(json.some((f) => f.rule === 'ref-loudness'))
+})
+
+test('beat lint --ref with --target errors: one comparison frame at a time', () => {
+  const dir = dirname(tempProject())
+  const mixWav = join(dir, 'mix.wav')
+  writeTestWav(mixWav, 997, 0.3)
+  writeTestWav(join(dir, 'ref.wav'), 997, 0.4)
+  beat(['metrics', join(dir, 'ref.wav'), '--save-profile', join(dir, 'ref.json')])
+  const out = beat(['lint', mixWav, '--ref', join(dir, 'ref.json'), '--target', '-14'], { expectExit: 2 })
+  assert.match(out, /pick one comparison frame: --ref .* or --target/)
+  // and a missing/garbage profile fails with pointers, not a stack trace
+  const missing = beat(['lint', mixWav, '--ref', join(dir, 'nope.json')], { expectExit: 2 })
+  assert.match(missing, /no profile at .*nope\.json — write one with: beat metrics/)
+  writeFileSync(join(dir, 'garbage.json'), '{"some":"json"}')
+  const garbage = beat(['lint', mixWav, '--ref', join(dir, 'garbage.json')], { expectExit: 2 })
+  assert.match(garbage, /not a dotbeat mix profile/)
+})
