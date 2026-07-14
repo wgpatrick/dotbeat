@@ -1,0 +1,22 @@
+{
+  "dotbeatAnalysis": 1,
+  "source": {
+    "file": "ref.wav",
+    "sha256": "3b7a4c9e2f1d8b6a05e4c3d2b1a09f8e7d6c5b4a39281706f5e4d3c2b1a09f8e",
+    "durationSeconds": 200.5
+  },
+  "backend": { "name": "beatthis", "version": "1.0.0", "model": "final0" },
+  "generatedAt": "2026-07-14T20:11:00.000Z",
+  "bpm": 128.02,
+  "bpmMethod": "median-ibi",
+  "beats": [0.234, 0.703, 1.172, 1.641, 2.109, 2.578, 3.047, 3.516, 3.984, 4.453],
+  "downbeats": [0.234, 2.109, 3.984, 5.859],
+  "sections": [
+    { "start": 0.0, "end": 15.02, "label": "intro" },
+    { "start": 15.02, "end": 45.02, "label": "verse" },
+    { "start": 45.02, "end": 75.02, "label": "chorus" },
+    { "start": 75.02, "end": 105.02, "label": "verse" },
+    { "start": 105.02, "end": 135.02, "label": "chorus" },
+    { "start": 135.02, "end": 200.02, "label": "outro" }
+  ]
+}
