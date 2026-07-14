@@ -55,6 +55,7 @@ export {
   moveLane,
   setLaneBacking,
   setLaneParam,
+  setLaneParamPath,
   setClipLoop,
   setClipSignature,
   addAudioClip,

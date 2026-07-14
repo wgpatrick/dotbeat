@@ -4,7 +4,7 @@
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
 import { formatNumber } from './format.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -238,6 +238,18 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     return setClipAudioRegion(doc, trackId, clipId, { [field]: parseNum(value, field) }).doc
   }
 
+  // Phase 35 Stream OA: declared-lane backing params get a first-class set path —
+  //   <track>.lane.<name>.<key>  <value>   (synth-backed lanes: that voice type's
+  //   DRUM_VOICE_PARAM_DEFAULTS keys, e.g. drums.lane.kick.tune; sample-backed lanes:
+  //   SAMPLE_LANE_PARAM_KEYS plus gainDb/tune)
+  //   <track>.lane.<name>.<key>  ""        clears a params-bag override back to its default
+  // — the exact gap pilot 101 hit ("no beat set path ... can edit a declared lane's backing
+  // params at all"), and what makes lane-targeted `beat vary` manifests replayable via beat set.
+  const laneParamMatch = rest.match(/^lane\.([a-zA-Z0-9_-]+)\.([A-Za-z0-9_]+)$/)
+  if (laneParamMatch) {
+    return setLaneParamPath(doc, trackId, laneParamMatch[1]!, laneParamMatch[2]!, value)
+  }
+
   // track metadata
   if (rest === 'name') {
     if (/\s/.test(value)) throw new BeatEditError('track names are single tokens in v0.2 (no whitespace)')
@@ -331,7 +343,7 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   }
 
   throw new BeatEditError(
-    `unknown field "${rest}" on track "${trackId}" (core: ${SYNTH_PARAM_ORDER.join(', ')}; shaped: ${SYNTH_FIELDS.map((f) => f.key).join(', ')}; also name, color, shuffleAmount, shuffleGrid, pattern.<lane>[i])`,
+    `unknown field "${rest}" on track "${trackId}" (core: ${SYNTH_PARAM_ORDER.join(', ')}; shaped: ${SYNTH_FIELDS.map((f) => f.key).join(', ')}; also name, color, shuffleAmount, shuffleGrid, pattern.<lane>[i], lane.<name>.<param> on declared-lane drums tracks)`,
   )
 }
 
@@ -919,6 +931,37 @@ export function setLaneParam(doc: BeatDocument, trackId: string, name: string, k
   else params[key] = canon(value)
   const lanes = track.lanes.map((l, i) => (i === idx ? { ...l, backing: { ...l.backing, params } as BeatLaneBacking } : l))
   return { doc: replaceTrack(doc, { ...track, lanes }), lane: lanes[idx]! }
+}
+
+/** Phase 35 Stream OA: the `beat set` spelling of `setLaneParam` — parses/validates one
+ * `<track>.lane.<name>.<key> <value>` edit (see setValue's lane-param branch). String-typed on
+ * purpose: an empty value clears a params-bag override back to its default, mirroring
+ * setLaneParam's `undefined`. Two additions over raw setLaneParam: a sample-backed lane's
+ * gainDb/tune (backing FIELDS, not params-bag entries — pilot 101: no CLI/MCP path could touch
+ * them either) are settable through the same spelling, and a synth-backed lane's key is
+ * validated against its voice type's own param set (DRUM_VOICE_PARAM_DEFAULTS) so a typo'd or
+ * wrong-voice key fails loudly instead of writing a serialized-but-inaudible param. */
+export function setLaneParamPath(doc: BeatDocument, trackId: string, name: string, key: string, value: string): BeatDocument {
+  const track = requireDrumsWithOpenLanes(doc, trackId)
+  const lane = track.lanes.find((l) => l.name === name)
+  if (!lane) throw new BeatEditError(`no lane "${name}" on track "${trackId}" (have: ${track.lanes.map((l) => l.name).join(', ')})`)
+  if (lane.backing.type === 'sample' && (key === 'gainDb' || key === 'tune')) {
+    const n = canon(parseNum(value, `lane ${name} ${key}`))
+    if (key === 'tune' && (n < -24 || n > 24)) throw new BeatEditError(`lane "${name}": tune must be -24..24 semitones, got ${n}`)
+    const lanes = track.lanes.map((l) => (l === lane ? { ...l, backing: { ...lane.backing, [key]: n } as BeatLaneBacking } : l))
+    return replaceTrack(doc, { ...track, lanes })
+  }
+  if (lane.backing.type === 'sample' && !isSampleLaneParamKey(key)) {
+    throw new BeatEditError(`lane "${name}": unknown sample lane param "${key}" (expected one of ${Object.keys(SAMPLE_LANE_PARAM_DEFAULTS).join('|')}|gainDb|tune)`)
+  }
+  if (lane.backing.type === 'synth') {
+    const valid = Object.keys(DRUM_VOICE_PARAM_DEFAULTS[lane.backing.voice])
+    if (!valid.includes(key)) {
+      throw new BeatEditError(`lane "${name}" on track "${trackId}" is synth:${lane.backing.voice}-backed — its params are ${valid.join('|')}, got "${key}"`)
+    }
+  }
+  const v = value.trim() === '' ? undefined : parseNum(value, `lane ${name} ${key}`)
+  return setLaneParam(doc, trackId, name, key, v).doc
 }
 
 /** Removes a track. A document keeps at least one track (the grammar's selected_track needs a

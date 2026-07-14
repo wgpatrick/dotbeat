@@ -132,7 +132,14 @@ const HELP = [
                                                           membership list (add/remove/reorder members)`,
   },
   { cmd: 'inspect', text: `  beat inspect <file> [--json]` },
-  { cmd: 'set', text: `  beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124` },
+  {
+    cmd: 'set',
+    text: `  beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
+                                                          declared drum lanes: <track>.lane.<name>.<param> <v>
+                                                          (synth-backed: tune/punch/decay/tone; sample-backed:
+                                                          start/length/attack/hold/decay/cutoff/resonance/gainDb/
+                                                          tune; empty value reverts a param to its default)`,
+  },
   {
     cmd: 'add-note',
     text: `  beat add-note <file> <track> <pitch> <start> <duration> <velocity 0-1>
@@ -200,17 +207,26 @@ const HELP = [
   { cmd: 'drum-kit', text: `  beat drum-kit <file> <track> <name>                      apply a drum kit to a track (replaces its whole lane list)` },
   {
     cmd: 'vary',
-    text: `  beat vary <file> <track> <group> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render] [--audition]
-                                                          batch-generate small-diff variants of one param group
-                                                          (--out-dir defaults to vary-<group>-<seed> NEXT TO the
+    text: `  beat vary <file> <track> <group-or-lane> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render] [--audition]
+                                                          batch-generate small-diff variants. On a declared-lane
+                                                          drums track (every fresh/kit drums track), target a LANE
+                                                          NAME (kick, hat, tom_lo, ...) — mutates that lane's own
+                                                          backing params (synth voice tune/punch/decay/tone, or a
+                                                          sample lane's start/length/AHD/filter plus gainDb/tune),
+                                                          written as replayable beat-set lane paths; the legacy
+                                                          kick/snare/hats groups error there (they mutate track-wide
+                                                          params the engine never plays once lanes are declared).
+                                                          Elsewhere, target a param group (see --groups).
+                                                          --out-dir defaults to vary-<target>-<seed> NEXT TO the
                                                           .beat file, not the cwd; --audition implies --render and
-                                                          stitches the wavs into one audition.wav + timecode index)
+                                                          stitches the wavs into one audition.wav + timecode index.
   beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,oh | --ids a,b] [--render] [--audition]
                                                           batch humanized FEEL variants (content variation) to audition + score
   beat vary <file> <track> feel --scope selection --port <p> [...same feel flags, minus --lanes/--ids]
                                                           scope to the GUI selection held by a running daemon instead of
                                                           typing --lanes/--ids by hand (lanes -> --lanes, bars/notes -> --ids)
-  beat vary --groups                                      list the mutation groups`,
+  beat vary --groups                                      list the mutation groups (static; both modes documented)
+  beat vary <file> <track> --groups                       list THAT track's real targets (lanes + live groups)`,
   },
   {
     cmd: 'automate',
@@ -311,7 +327,10 @@ const HELP = [
     cmd: 'suggest',
     text: `  beat suggest <file> <track> [--target <lane-or-id>] [--log f]
                                                           read the scores log and propose the next beat-vary round
-                                                          (--log defaults to beat-scores.jsonl next to the .beat)`,
+                                                          (--log defaults to beat-scores.jsonl next to the .beat);
+                                                          lane-aware on declared-lane drums tracks (cold start
+                                                          recommends a real lane; never recommends a group that
+                                                          would be an audio no-op on that track)`,
   },
   {
     cmd: 'metrics',
@@ -889,15 +908,46 @@ function flagValue(argv, flag) {
 }
 
 async function varyCmd(argv) {
-  const { VARY_GROUPS, varyTrack, BeatVaryError } = await import('../dist/src/vary/vary.js')
+  const { VARY_GROUPS, LEGACY_DRUM_VOICE_GROUPS, laneVaryDefs, varyTrack, BeatVaryError } = await import('../dist/src/vary/vary.js')
+  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids', '--scope', '--port']
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   if (argv.includes('--groups') || argv.length === 0) {
+    // Track-aware when a file+track are given (Phase 35 Stream OA): a declared-lane drums
+    // track's REAL targets are its own lanes, and the legacy kick/snare/hats groups are dead
+    // there — the static list below can't know that, so it documents both modes instead.
+    const [file, track] = positional
+    if (file && track) {
+      const doc = parse(readFileSync(file, 'utf8'))
+      const t = doc.tracks.find((x) => x.id === track)
+      if (!t) throw new BeatEditError(`no track "${track}" (have: ${doc.tracks.map((x) => x.id).join(', ')})`)
+      if (t.kind === 'drums' && t.lanes.length > 0) {
+        process.stdout.write(`declared-lane drums track "${track}" — vary targets its LANES (each lane's own backing params):\n`)
+        for (const lane of t.lanes) {
+          const defs = laneVaryDefs(lane)
+          process.stdout.write(`${lane.name.padEnd(10)} ${defs ? defs.map((d) => d.key).join(', ') : '(sf-backed — program/note are identity, nothing to vary)'}\n`)
+        }
+        process.stdout.write(`track-wide groups (the drum bus — still real here):\n`)
+        for (const [name, defs] of Object.entries(VARY_GROUPS)) {
+          if (LEGACY_DRUM_VOICE_GROUPS.has(name)) continue
+          if (!['filter', 'env', 'filterenv', 'fx', 'sends', 'mix'].includes(name)) continue
+          process.stdout.write(`${name.padEnd(10)} ${defs.map((d) => d.key).join(', ')}\n`)
+        }
+        process.stdout.write(`(legacy groups ${[...LEGACY_DRUM_VOICE_GROUPS].join('/')} error on this track: they mutate track-wide params the engine never plays once lanes are declared)\n`)
+      } else {
+        const { legalGroupsForKind } = await import('../dist/src/vary/vary.js')
+        const legal = legalGroupsForKind(t.kind)
+        process.stdout.write(`${t.kind} track "${track}" — legal vary groups:\n`)
+        for (const name of legal) process.stdout.write(`${name.padEnd(10)} ${VARY_GROUPS[name].map((d) => d.key).join(', ')}\n`)
+      }
+      process.stdout.write(`feel       content variation (humanized timing/velocity) — any track\n`)
+      return
+    }
     for (const [name, defs] of Object.entries(VARY_GROUPS)) {
       process.stdout.write(`${name.padEnd(10)} ${defs.map((d) => d.key).join(', ')}\n`)
     }
+    process.stdout.write(`(kick/snare/hats apply to LEGACY drums tracks only — on a declared-lane drums track, target a lane NAME instead; run beat vary <file> <track> --groups for that track's real targets)\n`)
     return
   }
-  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids', '--scope', '--port']
-  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const [file, track, group] = positional
   if (!file || !track || !group) throw new BeatEditError('vary needs <file> <track> <group> (see beat vary --groups; "feel" batches humanized variants)')
 
@@ -909,7 +959,7 @@ async function varyCmd(argv) {
   if (flagValue(argv, '--scope') !== undefined) {
     // Param-group variants (rung 1) mutate whole-track synth params — there's no per-note/lane
     // concept to scope by, so --scope selection only makes sense for "feel" (rung 2).
-    throw new BeatEditError('vary --scope selection only applies to "feel" (param groups mutate whole-track synth params, not per-note/lane content)')
+    throw new BeatEditError('vary --scope selection only applies to "feel" (param/lane targets mutate synth or lane params, not per-note/hit content)')
   }
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
   const amount = flagValue(argv, '--amount') ? Number(flagValue(argv, '--amount')) : 0.25
@@ -1106,7 +1156,15 @@ async function suggestCmd(argv) {
   const target = flagValue(argv, '--target')
   const text = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
   const entries = parseScoresLog(text)
-  const suggestion = suggestNext(entries, track, { file, trackKind: trackObj.kind, ...(target ? { target } : {}) })
+  // trackLanes makes the suggestion lane-aware on declared-lane drums tracks (Phase 35 Stream
+  // OA): cold start recommends a real lane, and a legacy drum-voice group that would no-op on
+  // this track is never recommended.
+  const suggestion = suggestNext(entries, track, {
+    file,
+    trackKind: trackObj.kind,
+    ...(trackObj.kind === 'drums' && trackObj.lanes.length > 0 ? { trackLanes: trackObj.lanes } : {}),
+    ...(target ? { target } : {}),
+  })
   process.stdout.write(suggestion.reasoning.join('\n') + '\n')
 }
 
