@@ -1719,9 +1719,20 @@ export const rows = [
   // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
   // feature) or too cross-cutting (spans many components) to fold into a single fix-phase stream.
   // Reviewed alongside each new pilot batch — promoted into a real phase stream once scoped down,
-  // not left to rot here indefinitely. Empty as of Phase 32 (its one entry, right-click context
-  // menus, got promoted into a real stream — see "Note editing (piano roll)" below) — stays ready
-  // for whatever the next pilot batch surfaces.
+  // not left to rot here indefinitely. (Phase 32's one entry, right-click context menus, got
+  // promoted into a real stream — see "Note editing (piano roll)" below.)
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Multiple drums tracks: engine wires only the first',
+    description: 'Engine.sync() binds the drum bus/lane dispatch to `doc.tracks.find(kind === "drums")` — the FIRST drums track. Any additional drums-kind track parses, edits, and inspects fine but never makes a sound, with no warning anywhere (add-track, GUI, lint, render). Hit live in the first-light.beat session: a second drums track carrying vocal-chop sample lanes rendered as silence through three full-song renders, reading exactly like a bad mix rather than a missing track. Either real multi-drum-track engine support (per-track drum bus + lane maps — a phase-stream-sized change), or make the constraint loud: warn on adding a second drums track and have lint --doc flag hits on a never-wired one.',
+    core: 'done', cli: 'done', gui: 'missing', status: 'not-started',
+    research: 'research/101-vocal-chops-session-engine-gaps.md', plan: null,
+  },
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Legacy laneSamples entries silently ignored on declared-lane tracks',
+    description: 'Two lane-sample mechanisms coexist: the legacy v0.5 laneSamples record and the v0.10 declaration backing (`lane <name> sample <id> <gain> <tune>`); the engine honors only the declaration on declared-lane tracks. `beat lane` now writes the declaration (fixed this session), but a file can still carry legacy laneSamples entries on a declared-lane track — written by an older CLI or by hand — that parse cleanly and do nothing audible, with no conflict reported. Migrate them into declaration backing at parse/load, or flag them in lint.',
+    core: 'missing', cli: 'done', gui: 'na', status: 'not-started',
+    research: 'research/101-vocal-chops-session-engine-gaps.md', plan: null,
+  },
 
   // ── Desktop app / packaging ──────────────────────────────────────────────
   {
