@@ -79,7 +79,11 @@ function contentPhrase(t: UnplacedContentTrack): string {
 }
 
 /** The one-line human warning for a silent track — shared verbatim by `beat inspect` and
- * `beat render` so the two surfaces can never drift. */
+ * `beat render` so the two surfaces can never drift. When the track already has a clip, the only
+ * missing step is placement, so the fix hint drops the `beat clip` snapshot step (pilot 106 L1). */
 export function unplacedContentWarning(t: UnplacedContentTrack): string {
-  return `⚠ track '${t.trackId}' has ${contentPhrase(t)} but is placed in no scene — song mode won't play it (snapshot with beat clip, then beat scene / beat place)`
+  const fix = t.clipCount > 0
+    ? 'place a clip in a scene (beat scene / beat place)'
+    : 'snapshot with beat clip, then beat scene / beat place'
+  return `⚠ track '${t.trackId}' has ${contentPhrase(t)} but is placed in no scene — song mode won't play it (${fix})`
 }

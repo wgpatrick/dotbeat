@@ -51,8 +51,9 @@ test('content-but-unplaced warns; the placed track does not', () => {
 test('the inspect view shows the silent-track ⚠ line for a silent track', () => {
   const out = describeDocument(songWithOrphanedDrums())
   assert.match(out, /⚠ track 'drums' has 8 hits but is placed in no scene — song mode won't play it/)
-  // and its remediation hint, so the reader knows the way out
-  assert.match(out, /beat clip.*beat scene.*beat place/)
+  // and its remediation hint — this track already has a saved clip, so the only missing step is
+  // placement (pilot 106 L1: don't tell the user to `beat clip` when they already have one)
+  assert.match(out, /place a clip in a scene \(beat scene \/ beat place\)/)
 })
 
 test('a placed track (content in a placed clip) never warns', () => {

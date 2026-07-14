@@ -1788,7 +1788,7 @@ async function sourceCmd(argv) {
       })
       process.stdout.write(
         `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +
-        `(${result.durationSeconds}s, license ${result.license})\n` +
+        `(${result.durationSeconds}s, ${result.source}, license ${result.license})\n` +
         `provenance sidecar: ${result.relPath}.json\n`,
       )
       if (result.reregistered) {

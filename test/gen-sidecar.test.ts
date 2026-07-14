@@ -70,7 +70,9 @@ test('beat source gen --backend stub registers media + writes the provenance sid
 
   // Provenance sidecar records the prompt/provider/seed under `generated`.
   const sidecar = JSON.parse(readFileSync(sidecarPath, 'utf8'))
-  assert.equal(sidecar.license, 'Stability-AI-Community')
+  // Honest licensing (pilot 106 M2): a stub tone is NOT a Stability model output, so it's licensed
+  // 'stub-placeholder' with no Stability URL — only a real stableaudio run gets the Stability license.
+  assert.equal(sidecar.license, 'stub-placeholder')
   assert.equal(sidecar.query, 'punchy kick')
   assert.ok(sidecar.generated, 'sidecar has a generated block')
   assert.equal(sidecar.generated.prompt, 'punchy kick')
@@ -79,7 +81,7 @@ test('beat source gen --backend stub registers media + writes the provenance sid
   assert.equal(sidecar.generated.provider, 'stub')
   assert.equal(sidecar.generated.backend, 'stub')
   assert.equal(sidecar.generated.seed, 7)
-  assert.equal(sidecar.generated.licenseUrl, 'https://stability.ai/community-license-agreement')
+  assert.equal(sidecar.generated.licenseUrl, null)
 })
 
 test('beat source gen --backend stub is deterministic for a fixed seed+seconds', (t) => {
@@ -92,6 +94,20 @@ test('beat source gen --backend stub is deterministic for a fixed seed+seconds',
   const shaA = createHash('sha256').update(readFileSync(join(dir, 'media', 'genA.wav'))).digest('hex')
   const shaB = createHash('sha256').update(readFileSync(join(dir, 'media', 'genB.wav'))).digest('hex')
   assert.equal(shaA, shaB, 'fixed seed+seconds produces a stable hash regardless of prompt')
+})
+
+test('beat source gen --backend stub varies by prompt when no seed is pinned (pilot 106 M1)', (t) => {
+  if (!hasPython) return t.skip('no python3')
+  const { beatFile, dir } = freshProject()
+  // No --seed: the default seed is derived from the prompt, so two DIFFERENT prompts must produce
+  // DIFFERENT sounds (a producer building a kit from distinct prompts shouldn't get N copies) — while
+  // the SAME prompt still reproduces (determinism preserved).
+  beat(['source', 'gen', beatFile, 'kick', '808 kick', '--backend', 'stub', '--seconds', '1'])
+  beat(['source', 'gen', beatFile, 'snare', 'tight snare', '--backend', 'stub', '--seconds', '1'])
+  beat(['source', 'gen', beatFile, 'kick2', '808 kick', '--backend', 'stub', '--seconds', '1'])
+  const sha = (id: string) => createHash('sha256').update(readFileSync(join(dir, 'media', `${id}.wav`))).digest('hex')
+  assert.notEqual(sha('kick'), sha('snare'), 'different prompts → different default sounds')
+  assert.equal(sha('kick'), sha('kick2'), 'same prompt → reproducible default sound')
 })
 
 test('beat source gen --backend stableaudio without torch exits non-zero with the requirements/doctor hint', (t) => {

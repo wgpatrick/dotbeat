@@ -1,8 +1,12 @@
 # Phase 39 — trustworthy fill-and-hear + generative sound
 
-> **STATUS 2026-07-14:** Owner picked both directions after Phase 38. Two independent streams build
-> in parallel worktrees (UA fixes, UB feature); UC is the serial pilot + wrap-up. This doc is the
-> source of truth. Owner-side model validation of Phase 38's `beat analyze` proceeds separately.
+> **STATUS 2026-07-14 — COMPLETE.** Owner picked both directions after Phase 38. All streams shipped
+> and merged to `main` (810 tests green): UA (silent-render orphaned-track warning + render
+> bundled-chromium fallback + importer arg aliases + synth nudge), UB (`beat source gen` Stable Audio
+> Open, second Python sidecar), UC (pilot 106 + wrap-up). Pilot 106 found no blockers — both features
+> solid; its four actionable findings (all honesty/ergonomics polish on the stub path) were fixed
+> same-day (`docs/research/106-…` Resolution). Owner-side model validation of Phase 38's `beat
+> analyze` (and now `beat source gen`'s stableaudio backend) proceeds separately.
 
 ## Context
 

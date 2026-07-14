@@ -193,9 +193,11 @@ export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, se
   if (!prompt || typeof prompt !== 'string') throw new SourceError('source gen needs a <prompt>, e.g. beat source gen song.beat pad "warm analog pad"')
   const { mediaDir } = resolveTarget(beatFile, id)
   mkdirSync(mediaDir, { recursive: true })
-  // A seed is required for reproducible provenance; default to a deterministic value if unset so the
-  // stub path (and the recorded seed) are stable, but let callers pin their own.
-  const effectiveSeed = seed ?? 0
+  // A seed is required for reproducible provenance. When the caller doesn't pin one, DERIVE it from
+  // the prompt (pilot 106 M1: a fixed default meant two different prompts produced byte-identical
+  // output — a kit of one sound). A prompt-hash default keeps determinism (same prompt → same seed)
+  // while making distinct prompts sound distinct out of the box; an explicit --seed still overrides.
+  const effectiveSeed = seed ?? promptSeed(prompt)
   const tempWav = join(mediaDir, `.${id}.gen.wav`)
   try {
     let meta
@@ -207,28 +209,44 @@ export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, se
     }
     const resolvedProvider = meta?.provider || provider
     const resolvedModel = model ?? meta?.model ?? null
+    // Honest licensing (pilot 106 M2): the stub is a stdlib tone no Stability model ever touched, so
+    // it must NOT carry the Stability AI Community License or its URL — otherwise a tool keying off
+    // the `license` field would treat a placeholder as licensed model output. Only a real model run
+    // gets the Stability license (unless the caller asserted one explicitly).
+    const resolvedBackend = meta?.backend ?? backend
+    const isStub = resolvedBackend === 'stub'
+    const effectiveLicense = license ?? (isStub ? 'stub-placeholder' : 'Stability-AI-Community')
+    const licenseUrl = isStub ? null : 'https://stability.ai/community-license-agreement'
     return await ingest({
       beatFile,
       id,
       inPath: tempWav,
-      license: license ?? 'Stability-AI-Community',
+      license: effectiveLicense,
       source: `generated:${resolvedProvider}`,
       query: prompt,
       extra: {
         generated: {
           provider: resolvedProvider,
           model: resolvedModel,
-          backend: meta?.backend ?? backend,
+          backend: resolvedBackend,
           prompt,
           seconds,
           seed: effectiveSeed,
-          licenseUrl: 'https://stability.ai/community-license-agreement',
+          licenseUrl,
         },
       },
     })
   } finally {
     try { rmSync(tempWav) } catch { /* best-effort */ }
   }
+}
+
+/** Deterministic non-negative 31-bit seed derived from a prompt (djb2), so an unpinned
+ * `beat source gen` varies by prompt instead of collapsing to one default sound. */
+function promptSeed(prompt) {
+  let h = 5381
+  for (let i = 0; i < prompt.length; i++) h = (((h << 5) + h) ^ prompt.charCodeAt(i)) | 0
+  return Math.abs(h)
 }
 // ==== Phase 39 Stream UB end ====
 
