@@ -60,7 +60,7 @@ export type DiffEntry =
   | { kind: 'media-added'; sampleId: string; path: string }
   | { kind: 'media-removed'; sampleId: string; path: string }
   | { kind: 'media-changed'; sampleId: string; field: 'sha256' | 'path'; before: string; after: string }
-  | { kind: 'lane-sample'; trackId: string; lane: DrumLane; before: string | null; after: string | null }
+  | { kind: 'lane-sample'; trackId: string; lane: DrumLane; before: string | null; after: string | null; stale?: boolean }
   // Phase 22 Stream AB: the OPEN lane list — added/removed/backing-changed, matched by name
   | { kind: 'lane-decl'; trackId: string; lane: string; before: string | null; after: string | null }
   // v0.6 instrument tracks
@@ -363,7 +363,12 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
     for (const lane of DRUM_LANES) {
       const before = laneDesc(ta.laneSamples[lane])
       const after = laneDesc(tb.laneSamples[lane])
-      if (before !== after) out.push({ kind: 'lane-sample', trackId: id, lane, before, after })
+      // Phase 35 Stream OB: on a DECLARED-lane track the laneSamples bag is dead data (playback
+      // reads the declarations), so its edits must not be phrased as voice changes — "-> synth
+      // voice" would claim a sound change that isn't happening (the setLaneSample declared-mode
+      // fix, 2026-07-13, routes real backing edits to lane-decl entries instead).
+      const stale = ta.lanes.length > 0 || tb.lanes.length > 0
+      if (before !== after) out.push({ kind: 'lane-sample', trackId: id, lane, before, after, ...(stale ? { stale } : {}) })
     }
   }
 
@@ -507,7 +512,13 @@ export function formatDiff(entries: DiffEntry[]): string {
         lines.push(`media: ${e.sampleId} ${e.field} ${e.field === 'sha256' ? `${e.before.slice(0, 12)}... -> ${e.after.slice(0, 12)}...` : `${e.before} -> ${e.after}`}`)
         break
       case 'lane-sample':
-        lines.push(`${e.trackId}: ${e.lane} lane ${e.before ?? 'synth voice'} -> ${e.after ?? 'synth voice'}`)
+        // stale = declared-lane track, where these legacy lines are ignored by playback — say so
+        // instead of the legacy phrasing's "-> synth voice", which would claim an audible change.
+        lines.push(
+          e.stale
+            ? `${e.trackId}: stale legacy lane line ${e.lane} (ignored by playback) ${e.before ?? '(none)'} -> ${e.after ?? '(removed)'}`
+            : `${e.trackId}: ${e.lane} lane ${e.before ?? 'synth voice'} -> ${e.after ?? 'synth voice'}`,
+        )
         break
       case 'lane-decl':
         lines.push(`${e.trackId}: lane "${e.lane}" ${e.before ?? '(undeclared)'} -> ${e.after ?? '(removed)'}`)

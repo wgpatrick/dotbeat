@@ -40,6 +40,7 @@ export {
   insertScene,
   setMediaSample,
   setLaneSample,
+  clearLegacyLaneSamples,
   addAutomationPoint,
   moveAutomationPoint,
   removeAutomationPoint,

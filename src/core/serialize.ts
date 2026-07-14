@@ -70,7 +70,10 @@ function sortedHitLines(hits: BeatDrumHit[], laneOrder: readonly string[], inden
 
 // Phase 22 Stream AB: one `lane <name> <backing>` declaration line, canonical-eliding synth params
 // that equal that voice type's default (DRUM_VOICE_PARAM_DEFAULTS) — same discipline as SYNTH_FIELDS.
-function serializeLaneBacking(backing: BeatDrumLaneDecl['backing']): string {
+// Exported since Phase 35 Stream OB: `beat inspect`'s per-lane truth lines reuse this exact
+// canonical token string (raw-file-as-ground-truth doctrine — the inspect view and the file's own
+// `lane` line can never drift apart if they're the same function).
+export function serializeLaneBacking(backing: BeatDrumLaneDecl['backing']): string {
   if (backing.type === 'synth') {
     const defaults = DRUM_VOICE_PARAM_DEFAULTS[backing.voice]
     const parts = [`synth:${backing.voice}`]

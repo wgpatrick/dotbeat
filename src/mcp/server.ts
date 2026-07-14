@@ -74,6 +74,7 @@ import {
   serializeSelection,
   setMediaSample,
   setLaneSample,
+  clearLegacyLaneSamples,
   type BeatDocument,
 } from '../core/index.js'
 import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile } from '../metrics/index.js'
@@ -1107,22 +1108,30 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_lane',
     description:
-      'Back a drum lane with a registered sample — the lane plays that audio (with optional gain in dB and tune in semitones) instead of its built-in synthesized voice. sample_id must already be in the media block (register it with beat_sample first; fails loudly otherwise), or pass the literal string "none" to clear the lane back to its synthesized voice. Same semantics as `beat lane` (gain defaults 0 dB, tune defaults 0 semitones). Returns the edit list.',
+      'Back a drum lane with a registered sample — the lane plays that audio (with optional gain in dB and tune in semitones) instead of its built-in synthesized voice. sample_id must already be in the media block (register it with beat_sample first; fails loudly otherwise), or pass the literal string "none" to clear the lane back to its synthesized voice. Same semantics as `beat lane` (gain defaults 0 dB, tune defaults 0 semitones). Or pass clear_legacy: true (no lane/sample_id) to drop stale v0.5 `lane` sample lines from a declared-lane track — dead data there (playback reads the lane declarations; beat_inspect flags them); errors on a legacy 5-lane track where those lines are live. Returns the edit list.',
     inputSchema: {
       type: 'object',
       properties: {
         file: { type: 'string' },
         track: { type: 'string', description: 'a drums track id' },
-        lane: { type: 'string', description: 'one of the track\'s lanes, e.g. "kick"' },
-        sample_id: { type: 'string', description: 'a media id from beat_sample, or "none" to revert to the synthesized voice' },
+        lane: { type: 'string', description: 'one of the track\'s lanes, e.g. "kick" (required unless clear_legacy)' },
+        sample_id: { type: 'string', description: 'a media id from beat_sample, or "none" to revert to the synthesized voice (required unless clear_legacy)' },
         gain_db: { type: 'number', description: 'playback gain in dB, default 0' },
         tune: { type: 'number', description: 'pitch offset in semitones, default 0' },
+        clear_legacy: { type: 'boolean', description: 'one-shot cleanup: remove ALL stale legacy lane-sample lines from a declared-lane track (ignored by playback there). Mutually exclusive with lane/sample_id.' },
       },
-      required: ['file', 'track', 'lane', 'sample_id'],
+      required: ['file', 'track'],
     },
     handler: (args) => {
       const file = str(args, 'file')
       const before = parse(readFileSync(file, 'utf8'))
+      // Phase 35 Stream OB: the explicit stale-legacy cleanup — see clearLegacyLaneSamples.
+      if (args.clear_legacy === true) {
+        if (args.lane !== undefined || args.sample_id !== undefined) throw new Error('clear_legacy is a one-shot track-level cleanup — do not pass lane/sample_id with it')
+        const { doc } = clearLegacyLaneSamples(before, str(args, 'track'))
+        writeFileSync(file, serialize(doc))
+        return formatDiff(diffDocuments(before, doc))
+      }
       const sampleId = str(args, 'sample_id')
       const ref = sampleId === 'none' ? null : { sample: sampleId, gainDb: typeof args.gain_db === 'number' ? args.gain_db : 0, tune: typeof args.tune === 'number' ? args.tune : 0 }
       // lane is validated at runtime by setLaneSample itself (unknown-lane -> friendly error),
