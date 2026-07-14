@@ -9,6 +9,32 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D16 — multi-region audio placement: repeated `slot` lines with `at <steps>` (2026-07-14, owner)
+
+**The decision.** Lift the one-clip-per-track-per-scene ceiling via Option A of
+`docs/multi-region-audio-design.md`: a scene may carry MULTIPLE `slot` lines per track, each an
+independent placement with an optional trailing `at <steps>` (fractional 16th steps from the
+section start; `at 0` is elided so every existing file round-trips byte-identically). Owner
+approved all three open questions as recommended: (1) Option A over a separate `place` statement
+(one grammar, one canonical form — D4) and over an absolute-time arrangement lane (a second
+timing system with no current user; revisit at M4, Option A doesn't foreclose it); (2) the unit
+is 16th steps, matching note/hit starts and `audio-split` positions — one time vocabulary
+everywhere; (3) `beat audio-split` auto-places the second half at the split point in every scene
+that placed the original, which retroactively kills the orphaned-split bug class.
+
+**Scope guard.** v1 validation restricts `at > 0` / multiple placements to audio tracks —
+synth/drum clips at an offset would silently play wrong today, and fail-loudly beats
+silently-wrong (the same reasoning that rejected accept-and-ignore). Lifting that later is a
+validation+engine change with zero grammar churn. Placements sorted by `at` (ties: clip id);
+overlapping placements on one track are a validation ERROR (Ableton's no-overlap rule).
+Same clip placeable twice — placements are references. Format bump: v0.11.
+
+**Revisit when:** M4 recording/comping forces absolute-time thinking (Option C's arrangement
+lane can then coexist; placements migrate mechanically), or when a real need appears for
+synth/drum multi-placement (lift the validation, teach the engine).
+
+---
+
 ## D15 — one canonical audio engine: `ui/src/audio/engine.ts`; both CLI render paths retarget to it (2026-07-11)
 
 **The problem, precisely.** Four things currently produce audio from a `.beat` file, and they are
