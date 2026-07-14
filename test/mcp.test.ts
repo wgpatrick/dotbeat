@@ -88,6 +88,7 @@ test('beat mcp speaks the MCP handshake and serves the tool suite', async () => 
       'beat_audio_split',
       'beat_vary',
       'beat_score',
+      'beat_adopt',
       'beat_sample',
       'beat_lane',
     ]) {
@@ -348,7 +349,7 @@ test('tools/call: beat_vary -> beat_score round trip; batches are CLI-compatible
     assert.ok(!('amount' in feelManifest), 'feel manifests carry no amount key (same as the CLI)')
     assert.match(feelManifest.variants[0].recipe, /humanize seed=5 timing=0\.2 .*lanes=hat/)
     const feelScore = await mcp.request('tools/call', { name: 'beat_score', arguments: { dir: feelDir, picks: ['2'], log: logPath } })
-    assert.match(feelScore.content[0].text, /to adopt the winner \(humanize seed=6 .*\): cp /)
+    assert.match(feelScore.content[0].text, /to adopt the winner \(humanize seed=6 .*\): beat adopt .*batch-feel v2 \(or the beat_adopt tool\)/)
 
     // ...and the reverse cross-surface direction: beat_score reads a CLI-generated batch
     const cliBatch = join(dir, 'batch-cli')
@@ -469,6 +470,76 @@ test('tools/call: beat_suggest validates the track exists (CLI parity, pilot 101
     const good = await mcp.request('tools/call', { name: 'beat_suggest', arguments: { file, track: 'bass' } })
     assert.equal(good.isError ?? false, false)
     assert.doesNotMatch(good.content[0].text, /beat vary .* bass (kick|snare|hats)\b/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Phase 35 Stream OC: the MCP-native adopt (pilot 101's "a feel winner is unadoptable MCP-only"),
+// the next-to-the-.beat out_dir default (pilot 101 medium 4 — the server cwd is invisible to a
+// typical MCP client), and beat_vary's selection-scope argument validation. The happy selection
+// path (a real daemon serving a real selection) is covered in vary-scope-selection.test.ts,
+// which owns the daemon harness — here we prove the argument contract mirrors the CLI's.
+test('tools/call: beat_adopt round trip with sha guard; out_dir defaults next to the .beat; scope args validate', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-adopt-test-'))
+  const file = join(dir, 'song.beat')
+  copyFileSync(join(repoRoot, 'examples', 'real-groove.beat'), file)
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // out_dir default: no out_dir given, server cwd is the repo — the batch must land NEXT TO
+    // the .beat file, not wherever the server happens to be running
+    const vary = await mcp.request('tools/call', { name: 'beat_vary', arguments: { file, track: 'lead', group: 'filter', count: 3, seed: 21 } })
+    assert.equal(vary.isError ?? false, false, vary.content[0].text)
+    const batch = join(dir, 'vary-filter-21')
+    assert.ok(existsSync(join(batch, 'manifest.json')), 'default out_dir sits next to the .beat file')
+    assert.ok(!existsSync(join(repoRoot, 'vary-filter-21')), 'nothing scattered into the server cwd')
+
+    // adopt v2: parent bytes become the picked variant, response reports the adopted edits
+    const adopt = await mcp.request('tools/call', { name: 'beat_adopt', arguments: { dir: batch, pick: 'v2' } })
+    assert.equal(adopt.isError ?? false, false, adopt.content[0].text)
+    assert.match(adopt.content[0].text, /adopted v2 -> .*song\.beat \(lead\./)
+    assert.equal(readFileSync(file, 'utf8'), readFileSync(join(batch, 'v2.beat'), 'utf8'))
+
+    // the parent has now moved on relative to the manifest — a second adopt must refuse...
+    const refused = await mcp.request('tools/call', { name: 'beat_adopt', arguments: { dir: batch, pick: '1' } })
+    assert.equal(refused.isError, true)
+    assert.match(refused.content[0].text, /has changed since this batch was generated/)
+    assert.equal(readFileSync(file, 'utf8'), readFileSync(join(batch, 'v2.beat'), 'utf8'), 'refusal leaves the parent untouched')
+
+    // ...unless forced
+    const forced = await mcp.request('tools/call', { name: 'beat_adopt', arguments: { dir: batch, pick: '1', force: true } })
+    assert.equal(forced.isError ?? false, false, forced.content[0].text)
+    assert.match(forced.content[0].text, /\(forced: the parent had changed/)
+    assert.equal(readFileSync(file, 'utf8'), readFileSync(join(batch, 'v1.beat'), 'utf8'))
+
+    // adopt error paths use the shared batch error texts
+    const badPick = await mcp.request('tools/call', { name: 'beat_adopt', arguments: { dir: batch, pick: 'v9' } })
+    assert.equal(badPick.isError, true)
+    assert.match(badPick.content[0].text, /pick "v9" is not a variant number 1-3/)
+    const noBatch = await mcp.request('tools/call', { name: 'beat_adopt', arguments: { dir: join(dir, 'nope'), pick: '1' } })
+    assert.equal(noBatch.isError, true)
+    assert.match(noBatch.content[0].text, /no such batch directory or missing manifest\.json/)
+
+    // selection-scope argument contract, mirroring the CLI's own rules and error texts
+    const noPort = await mcp.request('tools/call', { name: 'beat_vary', arguments: { file, track: 'drums', group: 'feel', scope: 'selection', seed: 1 } })
+    assert.equal(noPort.isError, true)
+    assert.match(noPort.content[0].text, /scope "selection" needs port/)
+    const withLanes = await mcp.request('tools/call', {
+      name: 'beat_vary',
+      arguments: { file, track: 'drums', group: 'feel', scope: 'selection', port: 9999, lanes: ['hat'], seed: 1 },
+    })
+    assert.equal(withLanes.isError, true)
+    assert.match(withLanes.content[0].text, /cannot be combined with lanes\/ids/)
+    const paramScope = await mcp.request('tools/call', { name: 'beat_vary', arguments: { file, track: 'lead', group: 'filter', scope: 'selection', port: 9999, seed: 1 } })
+    assert.equal(paramScope.isError, true)
+    assert.match(paramScope.content[0].text, /only applies to "feel"/)
+    const badScope = await mcp.request('tools/call', { name: 'beat_vary', arguments: { file, track: 'drums', group: 'feel', scope: 'bars', port: 9999, seed: 1 } })
+    assert.equal(badScope.isError, true)
+    assert.match(badScope.content[0].text, /scope only supports "selection"/)
   } finally {
     mcp.close()
   }

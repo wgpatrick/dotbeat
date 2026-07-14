@@ -187,3 +187,92 @@ test('vary --scope selection only applies to "feel" — a param-group vary rejec
   })
   assert.match(out, /only applies to "feel"/)
 })
+
+// Phase 35 Stream OC: the SAME selection glue over MCP — beat_vary with scope:"selection" + port
+// reads the live selection off the daemon and resolves it exactly like the CLI's --scope
+// selection above (shared selectionToVaryScope; the argument-contract errors are covered in
+// test/mcp.test.ts). Minimal inline MCP client, same newline-delimited JSON-RPC as mcp.test.ts.
+import { spawn, type ChildProcess } from 'node:child_process'
+
+function startMcpClient(): { request: (method: string, params?: unknown) => Promise<any>; close: () => void } {
+  const proc: ChildProcess = spawn(process.execPath, [beatCli, 'mcp'], { stdio: ['pipe', 'pipe', 'inherit'] })
+  let nextId = 1
+  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
+  let buf = ''
+  proc.stdout!.on('data', (chunk: Buffer) => {
+    buf += chunk.toString('utf8')
+    let nl: number
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl)
+      buf = buf.slice(nl + 1)
+      if (!line.trim()) continue
+      const msg = JSON.parse(line) as { id?: number; result?: unknown; error?: { message: string } }
+      if (msg.id !== undefined && pending.has(msg.id)) {
+        const p = pending.get(msg.id)!
+        pending.delete(msg.id)
+        if (msg.error) p.reject(new Error(msg.error.message))
+        else p.resolve(msg.result)
+      }
+    }
+  })
+  return {
+    request: (method, params) =>
+      new Promise((resolve, reject) => {
+        const id = nextId++
+        pending.set(id, { resolve, reject })
+        proc.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
+        setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id)
+            reject(new Error(`no response to ${method} within 10s`))
+          }
+        }, 10000)
+      }),
+    close: () => proc.kill(),
+  }
+}
+
+test('beat_vary scope:"selection" over MCP resolves the daemon selection like the CLI does', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    await setSelection(daemon.port, { lanes: [{ track: 'drums', lane: 'hat' }] })
+    const outDir = join(mkdtempSync(join(tmpdir(), 'beat-mcp-scope-out-')), 'batch')
+    const mcp = startMcpClient()
+    try {
+      await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+      const res = await mcp.request('tools/call', {
+        name: 'beat_vary',
+        arguments: { file: filePath, track: 'drums', group: 'feel', scope: 'selection', port: daemon.port, seed: 1, count: 2, out_dir: outDir },
+      })
+      assert.equal(res.isError ?? false, false, res.content[0].text)
+      assert.match(res.content[0].text, /scope: selection -> lanes hat/)
+
+      // ground truth: only hat hits moved, same as the CLI test above with the same seed
+      const parent = parse(TEST_BEAT)
+      const parentDrums = parent.tracks.find((t) => t.id === 'drums')!
+      const variant = parse(readFileSync(join(outDir, 'v1.beat'), 'utf8'))
+      const variantDrums = variant.tracks.find((t) => t.id === 'drums')!
+      let hatChanged = 0
+      for (const h of parentDrums.hits) {
+        const after = variantDrums.hits.find((v) => v.id === h.id)!
+        const same = after.start === h.start && after.velocity === h.velocity
+        if (h.lane === 'hat') {
+          if (!same) hatChanged++
+        } else {
+          assert.ok(same, `non-hat hit ${h.id} should be untouched by a selection-lanes scope`)
+        }
+      }
+      assert.ok(hatChanged > 0, 'at least one hat hit should have moved')
+
+      // a selection not covering the track fails loudly with the shared resolver's message
+      await setSelection(daemon.port, { tracks: ['lead'] })
+      const wrongTrack = await mcp.request('tools/call', {
+        name: 'beat_vary',
+        arguments: { file: filePath, track: 'drums', group: 'feel', scope: 'selection', port: daemon.port, seed: 1, count: 2, out_dir: join(outDir, 'x') },
+      })
+      assert.equal(wrongTrack.isError, true)
+      assert.match(wrongTrack.content[0].text, /does not cover track "drums"/)
+    } finally {
+      mcp.close()
+    }
+  })
+})

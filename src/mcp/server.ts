@@ -72,6 +72,7 @@ import {
   formatDrumKitList,
   parseSelection,
   serializeSelection,
+  selectionToVaryScope,
   setMediaSample,
   setLaneSample,
   type BeatDocument,
@@ -80,7 +81,18 @@ import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META } from '
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
 import { varyTrack, varyFeel, VARY_GROUPS } from '../vary/vary.js'
-import { writeVaryBatch, renderVaryBatch, scoreBatch, formatScoreResult, DEFAULT_SCORES_LOG } from '../vary/batch.js'
+import {
+  writeVaryBatch,
+  renderVaryBatch,
+  scoreBatch,
+  formatScoreResult,
+  adoptVariant,
+  formatAdoptResult,
+  defaultBatchDir,
+  defaultScoresLog,
+  DEFAULT_SCORES_LOG,
+} from '../vary/batch.js'
+import { stitchAudition, formatAuditionIndex } from '../vary/audition.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -1232,7 +1244,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_vary',
     description:
-      `Batch-generate small-diff variants of one track into an out-dir — the generate half of dotbeat's vary -> audition -> score taste loop (beat_score records ranked picks; beat_suggest proposes the next round). Two rungs, same semantics and defaults as \`beat vary\`: group is either a param group (${Object.keys(VARY_GROUPS).join(', ')} — seeded mutations of that group's synth params, strength set by amount 0-1, default 0.25) or the special group "feel" (batch humanized timing/velocity variants of the track's own notes/hits — content variation, not param variation). Writes v1.beat..vN.beat plus manifest.json into out_dir (default "vary-<group>-<seed>", relative to the server's working directory) — the exact manifest \`beat score\`/beat_score read, so a batch generated here can be scored from either surface. count defaults to 9, seed to the clock (pass one for reproducibility; it's recorded in the manifest either way). feel-only options: timing/velocity/push_late/swing (humanize knobs, defaults 0.15/0.06/0/0) and lanes OR ids to scope the variation (note: the CLI's --scope selection, which reads the GUI selection off a running daemon, has no MCP equivalent yet — pass explicit lanes/ids instead). Pass render true to also render each variant to vN.wav through dotbeat's real engine — honest cost warning: that is a REAL-TIME capture per variant in headless Chromium, so a batch takes roughly count x loop-length plus a few seconds of browser startup each; a 9-variant batch of an 8-second loop is well over a minute. Returns the batch summary, one line per variant (its edits, or its feel recipe).`,
+      `Batch-generate small-diff variants of one track into an out-dir — the generate half of dotbeat's vary -> audition -> score taste loop (beat_score records ranked picks; beat_adopt takes a winner; beat_suggest proposes the next round). Two rungs, same semantics and defaults as \`beat vary\`: group is either a param group (${Object.keys(VARY_GROUPS).join(', ')} — seeded mutations of that group's synth params, strength set by amount 0-1, default 0.25) or the special group "feel" (batch humanized timing/velocity variants of the track's own notes/hits — content variation, not param variation). Writes v1.beat..vN.beat plus manifest.json into out_dir (default "vary-<group>-<seed>" NEXT TO the .beat file — NOT the server's working directory; an explicit out_dir resolves as written) — the exact manifest \`beat score\`/beat_score read, so a batch generated here can be scored from either surface. count defaults to 9, seed to the clock (pass one for reproducibility; it's recorded in the manifest either way). feel-only options: timing/velocity/push_late/swing (humanize knobs, defaults 0.15/0.06/0/0) and ONE way to scope the variation — lanes, ids, or scope "selection" with port (reads the user's live GUI selection off the daemon running on that port and resolves it to lanes/ids, exactly like the CLI's --scope selection: what the user has highlighted IS the referent of "vary this"). Pass render true to also render each variant to vN.wav through dotbeat's real engine — honest cost warning: that is a REAL-TIME capture per variant in headless Chromium, so a batch takes roughly count x loop-length plus a few seconds of browser startup each; a 9-variant batch of an 8-second loop is well over a minute. Pass audition true (implies render) to additionally stitch the rendered variants into ONE audition.wav in pick order with 0.5s gaps, returning a timecode index ("v1 @ 0:00.0, v2 @ 0:09.2, ...") and writing the same map to audition.json — one file to listen through instead of count files to juggle. Returns the batch summary, one line per variant (its edits, or its feel recipe).`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1242,29 +1254,58 @@ const TOOLS: ToolDef[] = [
         count: { type: 'number', description: 'variants per batch, 1-32, default 9' },
         amount: { type: 'number', description: 'param groups only: mutation strength (0, 1], default 0.25' },
         seed: { type: 'number', description: 'RNG seed; default from the clock (recorded in the manifest)' },
-        out_dir: { type: 'string', description: 'batch directory to create; default "vary-<group>-<seed>"' },
+        out_dir: { type: 'string', description: 'batch directory to create; default "vary-<group>-<seed>" next to the .beat file (not the server cwd)' },
         timing: { type: 'number', description: 'feel only: timing jitter in 16th steps, default 0.15' },
         velocity: { type: 'number', description: 'feel only: velocity jitter 0..1, default 0.06' },
         push_late: { type: 'number', description: 'feel only: constant behind-the-beat drag in steps, default 0' },
         swing: { type: 'number', description: 'feel only: offbeat swing 0..1, default 0' },
         lanes: { type: 'array', items: { type: 'string' }, description: 'feel only, drum tracks: scope to these lanes' },
         ids: { type: 'array', items: { type: 'string' }, description: 'feel only: scope to these note/hit ids (alternative to lanes)' },
+        scope: { type: 'string', description: 'feel only: "selection" scopes the batch to the user\'s live GUI selection, read from the daemon on `port` (mutually exclusive with lanes/ids)' },
+        port: { type: 'number', description: 'the running daemon\'s port — required with scope "selection" (same convention as beat_selection; default GUI port is 8420)' },
         render: { type: 'boolean', description: 'also render each variant to vN.wav — SLOW: real-time capture per variant in headless Chromium' },
+        audition: { type: 'boolean', description: 'implies render: also stitch the rendered variants into one audition.wav (0.5s gaps) + timecode index + audition.json' },
       },
       required: ['file', 'track', 'group'],
     },
-    handler: (args) => {
+    handler: async (args) => {
       const file = str(args, 'file')
       const track = str(args, 'track')
       const group = str(args, 'group')
       const count = typeof args.count === 'number' ? args.count : 9
       // Same seed default as the CLI: the clock, folded to a 31-bit int.
       const seed = typeof args.seed === 'number' ? args.seed : Date.now() % 2147483647
+      const render = args.render === true || args.audition === true // audition implies render
       const text = readFileSync(file, 'utf8')
       const doc = parse(text)
+      // scope "selection" — same rules and error texts as the CLI's --scope selection glue.
+      if (args.scope !== undefined && args.scope !== 'selection') throw new Error(`vary scope only supports "selection", got "${String(args.scope)}"`)
+      if (args.scope === 'selection' && group !== 'feel') {
+        throw new Error('vary scope "selection" only applies to "feel" (param groups mutate whole-track synth params, not per-note/lane content)')
+      }
+      if (args.scope === 'selection' && (args.lanes !== undefined || args.ids !== undefined)) {
+        throw new Error('vary scope "selection" cannot be combined with lanes/ids — pick one way to scope')
+      }
       const lines: string[] = []
+      let selectionScope: { lanes?: string[]; ids?: string[] } = {}
+      if (args.scope === 'selection') {
+        if (typeof args.port !== 'number') throw new Error('vary scope "selection" needs port (the running daemon — same convention as beat_selection)')
+        const res = await fetch(`http://127.0.0.1:${args.port}/selection`)
+        if (!res.ok) {
+          const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
+          throw new Error(`could not read selection from daemon on port ${args.port}: ${msg}`)
+        }
+        selectionScope = selectionToVaryScope((await res.json()) as Parameters<typeof selectionToVaryScope>[0], doc, track)
+        lines.push(
+          selectionScope.lanes
+            ? `scope: selection -> lanes ${selectionScope.lanes.join(', ')}`
+            : selectionScope.ids
+              ? `scope: selection -> ${selectionScope.ids.length} id(s): ${selectionScope.ids.join(', ')}`
+              : 'scope: selection -> whole track (selection had nothing narrowing it)',
+        )
+      }
       if (group === 'feel') {
-        const outDir = typeof args.out_dir === 'string' ? args.out_dir : `vary-feel-${seed}`
+        const outDir = typeof args.out_dir === 'string' ? args.out_dir : defaultBatchDir(file, 'feel', seed)
         const variants = varyFeel(doc, track, {
           count,
           seed,
@@ -1274,24 +1315,27 @@ const TOOLS: ToolDef[] = [
           ...(args.swing !== undefined ? { swing: num(args, 'swing') } : {}),
           ...(Array.isArray(args.lanes) ? { lanes: (args.lanes as unknown[]).map(String) } : {}),
           ...(Array.isArray(args.ids) ? { ids: (args.ids as unknown[]).map(String) } : {}),
+          ...selectionScope,
         })
         const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group: 'feel', count, seed, outDir, variants })
         lines.push(`${outDir}/: ${variants.length} feel variants of ${track} (seed ${seed})`)
         for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.recipe}`)
-        if (args.render === true) {
+        if (render) {
           renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
         }
       } else {
         const amount = typeof args.amount === 'number' ? args.amount : 0.25
-        const outDir = typeof args.out_dir === 'string' ? args.out_dir : `vary-${group}-${seed}`
+        const outDir = typeof args.out_dir === 'string' ? args.out_dir : defaultBatchDir(file, group, seed)
         const variants = varyTrack(doc, track, group, { count, amount, seed })
         const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group, count, amount, seed, outDir, variants })
         lines.push(`${outDir}/: ${variants.length} variants of ${track}.${group} (amount ${amount}, seed ${seed})`)
         for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.edits!.join(', ')}`)
-        if (args.render === true) {
+        if (render) {
           renderVaryBatch(outDir, variants.length)
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
         }
       }
       return lines.join('\n') + '\n'
@@ -1300,13 +1344,13 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_score',
     description:
-      'Record 1-3 ranked picks against a vary batch (from beat_vary or `beat vary`) into the append-only scores log — the taste-capture half of the loop, and the exhaust beat_suggest reads to propose the next round. picks is an ordered array, best first; each pick names a variant as "3" or "v3" (both accepted), and picks must be distinct — at most 3, because ranking more adds fatigue, not signal (the Edisyn pattern). Appends one jsonl entry (identical shape to `beat score`\'s, so CLI- and MCP-recorded picks share one log/history) recording the batch\'s track/group/seed, each pick\'s replayable edits (param batches) or feel recipe, and which variants were rejected. Returns the scored summary plus how to adopt the winner.',
+      'Record 1-3 ranked picks against a vary batch (from beat_vary or `beat vary`) into the append-only scores log — the taste-capture half of the loop, and the exhaust beat_suggest reads to propose the next round. picks is an ordered array, best first; each pick names a variant as "3" or "v3" (both accepted), and picks must be distinct — at most 3, because ranking more adds fatigue, not signal (the Edisyn pattern). Appends one jsonl entry (identical shape to `beat score`\'s, so CLI- and MCP-recorded picks share one log/history) recording the batch\'s track/group/seed, each pick\'s replayable edits (param batches) or feel recipe, and which variants were rejected. Returns the scored summary plus how to adopt the winner (beat_adopt takes it MCP-natively).',
     inputSchema: {
       type: 'object',
       properties: {
         dir: { type: 'string', description: 'the batch directory (contains manifest.json, written by beat_vary)' },
         picks: { type: 'array', items: { type: 'string' }, description: 'ranked picks, best first, 1-3 distinct variant numbers ("N" or "vN")' },
-        log: { type: 'string', description: `scores log path to append to, default "${DEFAULT_SCORES_LOG}"` },
+        log: { type: 'string', description: `scores log path to append to; default "${DEFAULT_SCORES_LOG}" NEXT TO the batch's parent .beat file (not the server cwd)` },
       },
       required: ['dir', 'picks'],
     },
@@ -1316,9 +1360,23 @@ const TOOLS: ToolDef[] = [
         throw new Error('picks must be an array of variant numbers ("N" or "vN"), best first')
       }
       const picks = (args.picks as unknown[]).map(String)
-      const logPath = typeof args.log === 'string' ? args.log : DEFAULT_SCORES_LOG
-      return formatScoreResult(scoreBatch(dir, picks, logPath))
+      return formatScoreResult(scoreBatch(dir, picks, typeof args.log === 'string' ? args.log : undefined))
     },
+  },
+  {
+    name: 'beat_adopt',
+    description:
+      'Adopt a winner from a vary batch: copies the picked vN.beat over the batch\'s parent .beat file — the MCP-native way to take a variant after auditioning/scoring (no shell `cp` needed; this is the ONLY adopt path for feel batches, whose humanize recipe is not replayable via beat_set). pick accepts "3" or "v3". Data safety: if the parent file has changed since the batch was generated (its current sha256 no longer matches the manifest\'s parentSha256 — the project may have moved on through other edits), this REFUSES rather than silently overwriting that newer work; either re-run beat_vary from the current file, or pass force true to overwrite anyway. Writing the file is the whole operation — a running daemon/GUI on the project hot-reloads it automatically. Consider beat_checkpoint afterwards to keep the adopted state as a restorable version.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'the batch directory (contains manifest.json, written by beat_vary)' },
+        pick: { type: 'string', description: 'the variant to adopt ("N" or "vN")' },
+        force: { type: 'boolean', description: 'overwrite the parent even though it changed since the batch was generated (sha256 mismatch) — destroys those newer edits' },
+      },
+      required: ['dir', 'pick'],
+    },
+    handler: (args) => formatAdoptResult(adoptVariant(str(args, 'dir'), str(args, 'pick'), { force: args.force === true })),
   },
   {
     name: 'beat_suggest',
@@ -1330,7 +1388,7 @@ const TOOLS: ToolDef[] = [
         file: { type: 'string', description: 'path shown in the recommended command (the project this suggestion is for)' },
         track: { type: 'string' },
         target: { type: 'string', description: 'optional lane/id/param focus filter over the scores log (matched against round group names and picks\' edit paths / feel recipes)' },
-        log: { type: 'string', description: 'path to beat-scores.jsonl, default "beat-scores.jsonl"' },
+        log: { type: 'string', description: 'path to beat-scores.jsonl; default "beat-scores.jsonl" NEXT TO the .beat file (not the server cwd) — the same place beat_score appends by default' },
       },
       required: ['file', 'track'],
     },
@@ -1345,7 +1403,7 @@ const TOOLS: ToolDef[] = [
       const doc = parse(readFileSync(file, 'utf8'))
       const trackObj = doc.tracks.find((t) => t.id === track)
       if (!trackObj) throw new Error(`no track "${track}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
-      const logPath = typeof args.log === 'string' ? args.log : 'beat-scores.jsonl'
+      const logPath = typeof args.log === 'string' ? args.log : defaultScoresLog(file)
       const text = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
       const entries = parseScoresLog(text)
       const suggestion = suggestNext(entries, track, { file, trackKind: trackObj.kind, ...(typeof args.target === 'string' ? { target: args.target } : {}) })
