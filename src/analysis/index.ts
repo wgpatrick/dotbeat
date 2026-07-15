@@ -55,3 +55,20 @@ export {
   type RunGenResult,
 } from './gen.js'
 // ==== Phase 39 Stream UB end ====
+// ==== Phase 40 Stream VA begin ====
+// Pitch detection for one-shots — pure TS, zero deps, no Python (decisions.md D20). Reuses
+// src/metrics/'s FFT and WAV decoder, so the dependency direction stays analysis -> metrics.
+// The tune/keymap arithmetic that consumes a root lives in src/core/keymap.ts.
+export {
+  detectPitch,
+  formatPartials,
+  formatPitchLine,
+  pitchConfidenceLevel,
+  PITCH_CONFIDENCE_HIGH,
+  PITCH_CONFIDENCE_MEDIUM,
+  type DetectPitchOptions,
+  type PitchConfidenceLevel,
+  type PitchDetection,
+  type SpectralPartial,
+} from './pitch.js'
+// ==== Phase 40 Stream VA end ====

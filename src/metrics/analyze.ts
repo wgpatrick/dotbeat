@@ -77,8 +77,11 @@ function truePeak(channels: Float64Array[]): number {
   return peak
 }
 
-/** Iterative radix-2 FFT, in-place, real input in re / zeros in im. */
-function fft(re: Float64Array, im: Float64Array): void {
+/** Iterative radix-2 FFT, in-place, real input in re / zeros in im. `re.length` must be a power
+ * of two. Exported (Phase 40 Stream VA) so `src/analysis/pitch.ts` can reuse the one FFT this
+ * repo has instead of carrying a second copy — the dependency direction stays analysis → metrics,
+ * and it is re-exported through `src/metrics/index.js` like everything else here. */
+export function fft(re: Float64Array, im: Float64Array): void {
   const n = re.length
   for (let i = 1, j = 0; i < n; i++) {
     let bit = n >> 1
