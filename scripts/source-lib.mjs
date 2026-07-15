@@ -19,13 +19,16 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs'
 import { dirname, join, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { createHash } from 'node:crypto'
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url))
-// Core edit primitives — same compiled module the CLI and MCP already import, resolved relative to
-// THIS file so both callers get the identical implementation regardless of their own cwd.
-const { parse, serialize, setMediaSample } = await import(pathToFileURL(join(scriptsDir, '..', 'dist', 'src', 'core', 'index.js')).href)
+// Compiled modules — the same ones the CLI and MCP already import, resolved relative to THIS file
+// so both callers get the identical implementation regardless of their own cwd.
 const { decodeWav } = await import(pathToFileURL(join(scriptsDir, '..', 'dist', 'src', 'metrics', 'index.js')).href)
+// Phase 40 Stream VB: the REGISTER half of what used to be this file's private ingest() now lives
+// in src/vary/batch.ts, because `beat adopt` is its second caller (a gen batch defers registration
+// until a candidate wins) and adopt must stay synchronous on both surfaces. Importing it back here
+// keeps ONE registration implementation — the split was meant to defer it, not to fork it.
+const { registerPreppedMedia, writeGenBatch, defaultGenBatchDir } = await import(pathToFileURL(join(scriptsDir, '..', 'dist', 'src', 'vary', 'batch.js')).href)
 const { prepOneshot, PrepError, decodeViaWebAudio } = await import(pathToFileURL(join(scriptsDir, 'prep-oneshot-lib.mjs')).href)
 // Phase 39 Stream UB: the generative sidecar wrapper (spawns python/gen.py). Same dist-relative
 // import shape as core above, so the CLI and MCP get the identical compiled implementation.
@@ -116,23 +119,41 @@ export async function downloadPreviews({ results, outDir, fetchImpl = fetch }) {
   return saved
 }
 
-/** Resolve + validate the target .beat file and prepare the media/ dir beside it. */
+/** Resolve + validate the target .beat file and prepare the media/ dir beside it. `outPath` must
+ * stay in step with registerPreppedMedia's own media/<id>.wav convention (src/vary/batch.ts) —
+ * ingest() passes this path in and relies on the two agreeing so the copy is skipped. */
 function resolveTarget(beatFile, id) {
   if (!beatFile) throw new SourceError('source add needs a <file.beat>')
   if (!id) throw new SourceError('source add needs a <sample-id>')
   if (!existsSync(beatFile)) throw new SourceError(`no .beat file at ${beatFile}`)
   const beatDir = dirname(resolve(beatFile))
   const mediaDir = join(beatDir, 'media')
-  const relPath = `media/${id}.wav`
   const outPath = join(mediaDir, `${id}.wav`)
-  return { beatDir, mediaDir, relPath, outPath }
+  return { beatDir, mediaDir, outPath }
 }
 
-/** Prep an already-decoded/downloaded local file, write the ENFORCED sidecar, and register it into
- * the .beat media block. Shared tail of both the offline and Freesound paths. */
-async function ingest({ beatFile, id, inPath, license, source, query, extra }) {
-  const { mediaDir, relPath, outPath } = resolveTarget(beatFile, id)
-  mkdirSync(mediaDir, { recursive: true })
+// ---- the ingest split (Phase 40 Stream VB) ----------------------------------------------------
+// ingest() used to be one indivisible step: prep the audio AND register it into the .beat. That
+// made `beat source gen` register every sound it generated the instant it existed — which is how
+// examples/recipe-song ended up carrying two LOSING snare candidates in its media block forever,
+// with no record that an audition ever happened. Generation's natural workflow is "same prompt, N
+// seeds, rank them, adopt the winner", and that requires the two halves to happen at DIFFERENT
+// TIMES:
+//
+//   prepCandidate()      -- at BATCH time, once per candidate. Trim/fade/normalize to a real wav
+//                           and hash it. Candidates are auditioned exactly as they will sound,
+//                           because these are the exact bytes adopt will register (prep is NOT
+//                           idempotent — re-prepping a prepped file re-trims and re-fades it — so
+//                           the winner is COPIED at adopt, never re-prepped).
+//   registerPreppedMedia -- at ADOPT time, on the winner ALONE (src/vary/batch.ts, imported above).
+//
+// The single-shot paths (source add / source gen without --count) simply do both back-to-back, in
+// ingest() below, and are unchanged in behavior. Losing candidates leave no trace outside the
+// batch dir.
+
+/** PREP half: trim/fade/peak-normalize `inPath` to `outPath` and return the provenance facts.
+ * Writes no sidecar and touches no .beat — that is registerPreppedMedia's job, whenever it runs. */
+async function prepCandidate({ inPath, outPath, license, source, query, extra }) {
   let sha256, durationSeconds
   try {
     ;({ sha256, durationSeconds } = await prepOneshot({ inPath, outPath, license, source, writeSidecar: false, decode: decodeSource }))
@@ -140,35 +161,30 @@ async function ingest({ beatFile, id, inPath, license, source, query, extra }) {
     if (err instanceof PrepError) throw new SourceError(err.message)
     throw err
   }
-  // ENFORCED provenance sidecar — media/<id>.wav.json. addLocalSource is contractually not
-  // "done" unless this lands, so a failure to write it is a hard SourceError (not a warning).
-  const sidecarPath = outPath + '.json'
+  // The ENFORCED provenance sidecar's content — media/<id>.wav.json. Built here, next to the prep
+  // that produced the facts it records, and written by registerPreppedMedia; for a batch candidate
+  // it rides in the manifest until (and only if) that candidate wins.
   const sidecar = { source, license, query: query ?? null, sha256, preparedAt: new Date().toISOString(), durationSeconds, ...(extra ?? {}) }
+  return { sha256, durationSeconds, sidecar }
+}
+
+/** Prep an already-decoded/downloaded local file, write the ENFORCED sidecar, and register it into
+ * the .beat media block. Shared tail of the offline, Freesound, and single-shot generative paths:
+ * the two halves above, run back-to-back, prepping straight into media/<id>.wav. */
+async function ingest({ beatFile, id, inPath, license, source, query, extra }) {
+  const { mediaDir, outPath } = resolveTarget(beatFile, id)
+  mkdirSync(mediaDir, { recursive: true })
+  const { sha256, durationSeconds, sidecar } = await prepCandidate({ inPath, outPath, license, source, query, extra })
   try {
-    writeFileSync(sidecarPath, JSON.stringify(sidecar, null, 2) + '\n')
+    // outPath IS media/<id>.wav, so registerPreppedMedia skips its copy and this stays exactly the
+    // sequence (sidecar-then-upsert, rollback on a failed sidecar) that ingest always ran.
+    return registerPreppedMedia(beatFile, outPath, { id, sha256, durationSeconds, license, source, sidecar })
   } catch (err) {
-    // roll back the prepped WAV so we never register media without its enforced provenance
-    try { rmSync(outPath) } catch { /* best-effort */ }
-    throw new SourceError(`could not write the required provenance sidecar ${sidecarPath}: ${err instanceof Error ? err.message : String(err)}`)
+    // BeatBatchError (or anything registration throws) -> a clean, stack-trace-free SourceError,
+    // matching the PrepError->SourceError mapping above; the messages themselves are unchanged.
+    if (err instanceof SourceError) throw err
+    throw new SourceError(err instanceof Error ? err.message : String(err))
   }
-  let before, doc
-  try {
-    before = parse(readFileSync(beatFile, 'utf8'))
-  } catch (err) {
-    throw new SourceError(`could not parse ${beatFile}: ${err instanceof Error ? err.message : String(err)}`)
-  }
-  // Re-registration note: registering an id already present in the media block silently REPLACES
-  // it (setMediaSample is an upsert). Pilot 104 flagged that silence as surprising — surface it.
-  // Detected BEFORE the upsert, reported through the return value so each surface (CLI stdout, MCP
-  // result string) can print it without this shared library ever writing to stdout (which would
-  // corrupt the MCP stdio JSON-RPC channel).
-  const existing = before.media.find((m) => m.id === id)
-  const reregistered = existing
-    ? { changed: existing.sha256 !== sha256, previousSha256: existing.sha256 }
-    : null
-  doc = setMediaSample(before, id, sha256, relPath)
-  writeFileSync(beatFile, serialize(doc))
-  return { id, sha256, relPath, sidecarPath, durationSeconds, license, source, reregistered }
 }
 
 /** OFFLINE path: ingest a local audio file you already have. License defaults to "unspecified"
@@ -197,49 +213,99 @@ export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, se
   // the prompt (pilot 106 M1: a fixed default meant two different prompts produced byte-identical
   // output — a kit of one sound). A prompt-hash default keeps determinism (same prompt → same seed)
   // while making distinct prompts sound distinct out of the box; an explicit --seed still overrides.
+  // (genSourceBatch defaults its --seed-from the same way, for the same reason.)
   const effectiveSeed = seed ?? promptSeed(prompt)
   const tempWav = join(mediaDir, `.${id}.gen.wav`)
   try {
-    let meta
-    try {
-      ;({ meta } = await runGen({ prompt, seconds, seed: effectiveSeed, backend, outPath: tempWav }))
-    } catch (err) {
-      // BeatGenError (or anything the sidecar wrapper throws) → a clean, stack-trace-free SourceError.
-      throw new SourceError(err instanceof Error ? err.message : String(err))
-    }
-    const resolvedProvider = meta?.provider || provider
-    const resolvedModel = model ?? meta?.model ?? null
-    // Honest licensing (pilot 106 M2): the stub is a stdlib tone no Stability model ever touched, so
-    // it must NOT carry the Stability AI Community License or its URL — otherwise a tool keying off
-    // the `license` field would treat a placeholder as licensed model output. Only a real model run
-    // gets the Stability license (unless the caller asserted one explicitly).
-    const resolvedBackend = meta?.backend ?? backend
-    const isStub = resolvedBackend === 'stub'
-    const effectiveLicense = license ?? (isStub ? 'stub-placeholder' : 'Stability-AI-Community')
-    const licenseUrl = isStub ? null : 'https://stability.ai/community-license-agreement'
-    return await ingest({
-      beatFile,
-      id,
-      inPath: tempWav,
-      license: effectiveLicense,
-      source: `generated:${resolvedProvider}`,
-      query: prompt,
-      extra: {
-        generated: {
-          provider: resolvedProvider,
-          model: resolvedModel,
-          backend: resolvedBackend,
-          prompt,
-          seconds,
-          seed: effectiveSeed,
-          licenseUrl,
-        },
-      },
-    })
+    const { license: effectiveLicense, source, extra } = await generateRaw({ prompt, seconds, seed: effectiveSeed, backend, provider, model, license, outPath: tempWav })
+    return await ingest({ beatFile, id, inPath: tempWav, license: effectiveLicense, source, query: prompt, extra })
   } finally {
     try { rmSync(tempWav) } catch { /* best-effort */ }
   }
 }
+
+/** Run the generator once into `outPath` and derive the provenance facts every gen path records.
+ * Shared by the single-shot addGeneratedSource above and the batch below, so a candidate's
+ * provenance is the same shape (and the same honest licensing call) either way. */
+async function generateRaw({ prompt, seconds, seed, backend, provider, model, license, outPath }) {
+  let meta
+  try {
+    ;({ meta } = await runGen({ prompt, seconds, seed, backend, outPath }))
+  } catch (err) {
+    // BeatGenError (or anything the sidecar wrapper throws) → a clean, stack-trace-free SourceError.
+    throw new SourceError(err instanceof Error ? err.message : String(err))
+  }
+  const resolvedProvider = meta?.provider || provider
+  const resolvedModel = model ?? meta?.model ?? null
+  // Honest licensing (pilot 106 M2): the stub is a stdlib tone no Stability model ever touched, so
+  // it must NOT carry the Stability AI Community License or its URL — otherwise a tool keying off
+  // the `license` field would treat a placeholder as licensed model output. Only a real model run
+  // gets the Stability license (unless the caller asserted one explicitly).
+  const resolvedBackend = meta?.backend ?? backend
+  const isStub = resolvedBackend === 'stub'
+  return {
+    license: license ?? (isStub ? 'stub-placeholder' : 'Stability-AI-Community'),
+    source: `generated:${resolvedProvider}`,
+    extra: {
+      generated: {
+        provider: resolvedProvider,
+        model: resolvedModel,
+        backend: resolvedBackend,
+        prompt,
+        seconds,
+        seed,
+        licenseUrl: isStub ? null : 'https://stability.ai/community-license-agreement',
+      },
+    },
+  }
+}
+// ==== Phase 39 Stream UB end ====
+
+// ==== Phase 40 Stream VB begin ====
+/** GENERATIVE BATCH: one prompt, N seeds, N candidates — the natural generative workflow, routed
+ * into the taste loop (`beat score` / `beat adopt`) instead of around it.
+ *
+ * The whole point is what this does NOT do: it never touches `beatFile`. Each candidate is
+ * generated to the batch dir, PREPPED there (so an audition hears exactly the bytes that would be
+ * registered), and recorded in a manifest.json of the one shape `beat score`/`beat adopt` already
+ * read (D21). Nothing enters the media block until `beat adopt <dir> <pick>` registers the winner —
+ * ALONE. Losing candidates leave no trace outside the batch dir; deleting it forgets them.
+ *
+ * Seeds are `seedFrom .. seedFrom+count-1` — contiguous and recorded per candidate, so a winner is
+ * reproducible from its provenance sidecar exactly like a single-shot generation is. */
+export async function genSourceBatch({ beatFile, id, prompt, seconds = 2, seedFrom, count = 3, backend = 'stableaudio', provider = 'stable-audio-open', model, license, outDir, onProgress } = {}) {
+  if (!prompt || typeof prompt !== 'string') throw new SourceError('source gen needs a <prompt>, e.g. beat source gen song.beat snare "tight acoustic snare" --count 3')
+  if (!Number.isInteger(count) || count < 1) throw new SourceError(`source gen --count must be a positive integer, got ${count}`)
+  if (count > 16) throw new SourceError(`source gen --count is capped at 16 (asked for ${count}) — ranking more candidates adds fatigue, not signal (the same Edisyn reasoning that caps score at 3 picks)`)
+  // Validates the .beat exists and is reachable BEFORE spending minutes generating — but note it
+  // deliberately does not mkdir media/: a batch that nobody adopts must leave the project alone.
+  resolveTarget(beatFile, id)
+  const parentText = readFileSync(beatFile, 'utf8')
+  const baseSeed = seedFrom ?? promptSeed(prompt)
+  if (!Number.isInteger(baseSeed)) throw new SourceError(`source gen --seed-from must be an integer, got ${seedFrom}`)
+  const dir = outDir ?? defaultGenBatchDir(beatFile, id, baseSeed)
+  mkdirSync(dir, { recursive: true })
+
+  const variants = []
+  for (let i = 0; i < count; i++) {
+    const seed = baseSeed + i
+    onProgress?.(i + 1, count, seed)
+    const rawWav = join(dir, `.v${i + 1}.gen.wav`)
+    const candidateWav = join(dir, `v${i + 1}.wav`)
+    try {
+      const { license: effectiveLicense, source, extra } = await generateRaw({ prompt, seconds, seed, backend, provider, model, license, outPath: rawWav })
+      const { sha256, durationSeconds, sidecar } = await prepCandidate({ inPath: rawWav, outPath: candidateWav, license: effectiveLicense, source, query: prompt, extra })
+      variants.push({ media: { id, sha256, durationSeconds, license: effectiveLicense, source, seed, sidecar } })
+    } finally {
+      try { rmSync(rawWav) } catch { /* best-effort */ }
+    }
+  }
+  const manifest = writeGenBatch({ parentPath: beatFile, parentText, id, prompt, seed: baseSeed, outDir: dir, variants })
+  return { dir, manifest, seedFrom: baseSeed, candidates: variants.map((v, i) => ({ variant: `v${i + 1}`, wav: join(dir, `v${i + 1}.wav`), ...v.media })) }
+}
+// ==== Phase 40 Stream VB end ====
+
+// ==== Phase 39 Stream UB begin ====
 
 /** Deterministic non-negative 31-bit seed derived from a prompt (djb2), so an unpinned
  * `beat source gen` varies by prompt instead of collapsing to one default sound. */
