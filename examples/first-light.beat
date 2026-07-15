@@ -38,11 +38,11 @@ track drums Drums #56b6c2 drums
   lane clap synth:noise
   lane hat synth:metal
   lane openhat synth:metal
-  lane tom_lo sample vox-ah2 1 0
-  lane tom_mid sample vox-ah2 1 3
-  lane tom_hi sample vox-oo2 1 7
-  lane crash sample vox-oo2 1 5
-  lane ride sample vox-eh2 0.95 -2
+  lane tom_lo synth:membrane
+  lane tom_mid synth:membrane
+  lane tom_hi synth:membrane
+  lane crash synth:metal
+  lane ride synth:metal
   lane cowbell synth:membrane
   clip pulse
     hit h1 kick 0 0.85
@@ -177,7 +177,6 @@ track drums Drums #56b6c2 drums
   clip pulse-mid
     hit h1 kick 0 0.85
     hit h65 hat 0 0.4
-    hit h193 tom_mid 0 0.85
     hit h66 hat 1 0.22
     hit h67 hat 2 0.5
     hit h5 openhat 2 0.45
@@ -188,7 +187,6 @@ track drums Drums #56b6c2 drums
     hit h71 hat 6 0.5
     hit h6 openhat 6 0.45
     hit h72 hat 7 0.28
-    hit h194 tom_lo 7 0.7
     hit h3 kick 8 0.85
     hit h73 hat 8 0.4
     hit h74 hat 9 0.22
@@ -197,7 +195,6 @@ track drums Drums #56b6c2 drums
     hit h76 hat 11 0.28
     hit h4 kick 12 0.85
     hit h77 hat 12 0.4
-    hit h195 tom_hi 12 0.75
     hit h78 hat 13 0.22
     hit h79 hat 14 0.5
     hit h8 openhat 14 0.45
@@ -213,11 +210,9 @@ track drums Drums #56b6c2 drums
     hit h86 hat 21 0.22
     hit h87 hat 22 0.5
     hit h14 openhat 22 0.45
-    hit h196 ride 22 0.6
     hit h88 hat 23 0.28
     hit h11 kick 24 0.85
     hit h89 hat 24 0.4
-    hit h197 tom_mid 24 0.7
     hit h90 hat 25 0.22
     hit h91 hat 26 0.5
     hit h15 openhat 26 0.45
@@ -230,7 +225,6 @@ track drums Drums #56b6c2 drums
     hit h96 hat 31 0.28
     hit h17 kick 32 0.85
     hit h97 hat 32 0.4
-    hit h198 tom_mid 32 0.85
     hit h98 hat 33 0.22
     hit h99 hat 34 0.5
     hit h21 openhat 34 0.45
@@ -241,7 +235,6 @@ track drums Drums #56b6c2 drums
     hit h103 hat 38 0.5
     hit h22 openhat 38 0.45
     hit h104 hat 39 0.28
-    hit h199 tom_lo 39 0.7
     hit h19 kick 40 0.85
     hit h105 hat 40 0.4
     hit h106 hat 41 0.22
@@ -250,7 +243,6 @@ track drums Drums #56b6c2 drums
     hit h108 hat 43 0.28
     hit h20 kick 44 0.85
     hit h109 hat 44 0.4
-    hit h200 tom_hi 44 0.75
     hit h110 hat 45 0.22
     hit h111 hat 46 0.5
     hit h24 openhat 46 0.45
@@ -266,11 +258,9 @@ track drums Drums #56b6c2 drums
     hit h118 hat 53 0.22
     hit h119 hat 54 0.5
     hit h30 openhat 54 0.45
-    hit h201 ride 54 0.6
     hit h120 hat 55 0.28
     hit h27 kick 56 0.85
     hit h121 hat 56 0.4
-    hit h202 tom_mid 56 0.7
     hit h122 hat 57 0.22
     hit h123 hat 58 0.5
     hit h31 openhat 58 0.45
@@ -283,7 +273,6 @@ track drums Drums #56b6c2 drums
     hit h128 hat 63 0.28
     hit h33 kick 64 0.85
     hit h129 hat 64 0.4
-    hit h203 tom_mid 64 0.85
     hit h130 hat 65 0.22
     hit h131 hat 66 0.5
     hit h37 openhat 66 0.45
@@ -294,7 +283,6 @@ track drums Drums #56b6c2 drums
     hit h135 hat 70 0.5
     hit h38 openhat 70 0.45
     hit h136 hat 71 0.28
-    hit h204 tom_lo 71 0.7
     hit h35 kick 72 0.85
     hit h137 hat 72 0.4
     hit h138 hat 73 0.22
@@ -303,7 +291,6 @@ track drums Drums #56b6c2 drums
     hit h140 hat 75 0.28
     hit h36 kick 76 0.85
     hit h141 hat 76 0.4
-    hit h205 tom_hi 76 0.75
     hit h142 hat 77 0.22
     hit h143 hat 78 0.5
     hit h40 openhat 78 0.45
@@ -319,11 +306,9 @@ track drums Drums #56b6c2 drums
     hit h150 hat 85 0.22
     hit h151 hat 86 0.5
     hit h46 openhat 86 0.45
-    hit h206 ride 86 0.6
     hit h152 hat 87 0.28
     hit h43 kick 88 0.85
     hit h153 hat 88 0.4
-    hit h207 tom_mid 88 0.7
     hit h154 hat 89 0.22
     hit h155 hat 90 0.5
     hit h47 openhat 90 0.45
@@ -336,7 +321,6 @@ track drums Drums #56b6c2 drums
     hit h160 hat 95 0.28
     hit h49 kick 96 0.85
     hit h161 hat 96 0.4
-    hit h208 tom_mid 96 0.85
     hit h162 hat 97 0.22
     hit h163 hat 98 0.5
     hit h53 openhat 98 0.45
@@ -347,7 +331,6 @@ track drums Drums #56b6c2 drums
     hit h167 hat 102 0.5
     hit h54 openhat 102 0.45
     hit h168 hat 103 0.28
-    hit h209 tom_lo 103 0.7
     hit h51 kick 104 0.85
     hit h169 hat 104 0.4
     hit h170 hat 105 0.22
@@ -356,7 +339,6 @@ track drums Drums #56b6c2 drums
     hit h172 hat 107 0.28
     hit h52 kick 108 0.85
     hit h173 hat 108 0.4
-    hit h210 tom_hi 108 0.75
     hit h174 hat 109 0.22
     hit h175 hat 110 0.5
     hit h56 openhat 110 0.45
@@ -372,18 +354,15 @@ track drums Drums #56b6c2 drums
     hit h182 hat 117 0.22
     hit h183 hat 118 0.5
     hit h62 openhat 118 0.45
-    hit h211 ride 118 0.6
     hit h184 hat 119 0.28
     hit h59 kick 120 0.85
     hit h185 hat 120 0.4
-    hit h212 tom_mid 120 0.7
     hit h186 hat 121 0.22
     hit h187 hat 122 0.5
     hit h63 openhat 122 0.45
     hit h188 hat 123 0.28
     hit h60 kick 124 0.85
     hit h189 hat 124 0.4
-    hit h213 crash 124 0.7
     hit h190 hat 125 0.22
     hit h191 hat 126 0.5
     hit h64 openhat 126 0.45
@@ -391,19 +370,17 @@ track drums Drums #56b6c2 drums
   clip pulse-full
     hit h1 kick 0 0.85
     hit h65 hat 0 0.4
-    hit h193 tom_mid 0 0.85
     hit h66 hat 1 0.22
     hit h67 hat 2 0.5
     hit h5 openhat 2 0.45
     hit h68 hat 3 0.28
     hit h2 kick 4 0.85
-    hit h214 clap 4 0.7
+    hit h193 clap 4 0.7
     hit h69 hat 4 0.4
     hit h70 hat 5 0.22
     hit h71 hat 6 0.5
     hit h6 openhat 6 0.45
     hit h72 hat 7 0.28
-    hit h194 tom_lo 7 0.7
     hit h3 kick 8 0.85
     hit h73 hat 8 0.4
     hit h74 hat 9 0.22
@@ -411,9 +388,8 @@ track drums Drums #56b6c2 drums
     hit h7 openhat 10 0.45
     hit h76 hat 11 0.28
     hit h4 kick 12 0.85
-    hit h215 clap 12 0.7
+    hit h194 clap 12 0.7
     hit h77 hat 12 0.4
-    hit h195 tom_hi 12 0.75
     hit h78 hat 13 0.22
     hit h79 hat 14 0.5
     hit h8 openhat 14 0.45
@@ -425,22 +401,20 @@ track drums Drums #56b6c2 drums
     hit h13 openhat 18 0.45
     hit h84 hat 19 0.28
     hit h10 kick 20 0.85
-    hit h216 clap 20 0.7
+    hit h195 clap 20 0.7
     hit h85 hat 20 0.4
     hit h86 hat 21 0.22
     hit h87 hat 22 0.5
     hit h14 openhat 22 0.45
-    hit h196 ride 22 0.6
     hit h88 hat 23 0.28
     hit h11 kick 24 0.85
     hit h89 hat 24 0.4
-    hit h197 tom_mid 24 0.7
     hit h90 hat 25 0.22
     hit h91 hat 26 0.5
     hit h15 openhat 26 0.45
     hit h92 hat 27 0.28
     hit h12 kick 28 0.85
-    hit h217 clap 28 0.7
+    hit h196 clap 28 0.7
     hit h93 hat 28 0.4
     hit h94 hat 29 0.22
     hit h95 hat 30 0.5
@@ -448,19 +422,17 @@ track drums Drums #56b6c2 drums
     hit h96 hat 31 0.28
     hit h17 kick 32 0.85
     hit h97 hat 32 0.4
-    hit h198 tom_mid 32 0.85
     hit h98 hat 33 0.22
     hit h99 hat 34 0.5
     hit h21 openhat 34 0.45
     hit h100 hat 35 0.28
     hit h18 kick 36 0.85
-    hit h218 clap 36 0.7
+    hit h197 clap 36 0.7
     hit h101 hat 36 0.4
     hit h102 hat 37 0.22
     hit h103 hat 38 0.5
     hit h22 openhat 38 0.45
     hit h104 hat 39 0.28
-    hit h199 tom_lo 39 0.7
     hit h19 kick 40 0.85
     hit h105 hat 40 0.4
     hit h106 hat 41 0.22
@@ -468,9 +440,8 @@ track drums Drums #56b6c2 drums
     hit h23 openhat 42 0.45
     hit h108 hat 43 0.28
     hit h20 kick 44 0.85
-    hit h219 clap 44 0.7
+    hit h198 clap 44 0.7
     hit h109 hat 44 0.4
-    hit h200 tom_hi 44 0.75
     hit h110 hat 45 0.22
     hit h111 hat 46 0.5
     hit h24 openhat 46 0.45
@@ -482,22 +453,20 @@ track drums Drums #56b6c2 drums
     hit h29 openhat 50 0.45
     hit h116 hat 51 0.28
     hit h26 kick 52 0.85
-    hit h220 clap 52 0.7
+    hit h199 clap 52 0.7
     hit h117 hat 52 0.4
     hit h118 hat 53 0.22
     hit h119 hat 54 0.5
     hit h30 openhat 54 0.45
-    hit h201 ride 54 0.6
     hit h120 hat 55 0.28
     hit h27 kick 56 0.85
     hit h121 hat 56 0.4
-    hit h202 tom_mid 56 0.7
     hit h122 hat 57 0.22
     hit h123 hat 58 0.5
     hit h31 openhat 58 0.45
     hit h124 hat 59 0.28
     hit h28 kick 60 0.85
-    hit h221 clap 60 0.7
+    hit h200 clap 60 0.7
     hit h125 hat 60 0.4
     hit h126 hat 61 0.22
     hit h127 hat 62 0.5
@@ -505,19 +474,17 @@ track drums Drums #56b6c2 drums
     hit h128 hat 63 0.28
     hit h33 kick 64 0.85
     hit h129 hat 64 0.4
-    hit h203 tom_mid 64 0.85
     hit h130 hat 65 0.22
     hit h131 hat 66 0.5
     hit h37 openhat 66 0.45
     hit h132 hat 67 0.28
     hit h34 kick 68 0.85
-    hit h222 clap 68 0.7
+    hit h201 clap 68 0.7
     hit h133 hat 68 0.4
     hit h134 hat 69 0.22
     hit h135 hat 70 0.5
     hit h38 openhat 70 0.45
     hit h136 hat 71 0.28
-    hit h204 tom_lo 71 0.7
     hit h35 kick 72 0.85
     hit h137 hat 72 0.4
     hit h138 hat 73 0.22
@@ -525,9 +492,8 @@ track drums Drums #56b6c2 drums
     hit h39 openhat 74 0.45
     hit h140 hat 75 0.28
     hit h36 kick 76 0.85
-    hit h223 clap 76 0.7
+    hit h202 clap 76 0.7
     hit h141 hat 76 0.4
-    hit h205 tom_hi 76 0.75
     hit h142 hat 77 0.22
     hit h143 hat 78 0.5
     hit h40 openhat 78 0.45
@@ -539,22 +505,20 @@ track drums Drums #56b6c2 drums
     hit h45 openhat 82 0.45
     hit h148 hat 83 0.28
     hit h42 kick 84 0.85
-    hit h224 clap 84 0.7
+    hit h203 clap 84 0.7
     hit h149 hat 84 0.4
     hit h150 hat 85 0.22
     hit h151 hat 86 0.5
     hit h46 openhat 86 0.45
-    hit h206 ride 86 0.6
     hit h152 hat 87 0.28
     hit h43 kick 88 0.85
     hit h153 hat 88 0.4
-    hit h207 tom_mid 88 0.7
     hit h154 hat 89 0.22
     hit h155 hat 90 0.5
     hit h47 openhat 90 0.45
     hit h156 hat 91 0.28
     hit h44 kick 92 0.85
-    hit h225 clap 92 0.7
+    hit h204 clap 92 0.7
     hit h157 hat 92 0.4
     hit h158 hat 93 0.22
     hit h159 hat 94 0.5
@@ -562,19 +526,17 @@ track drums Drums #56b6c2 drums
     hit h160 hat 95 0.28
     hit h49 kick 96 0.85
     hit h161 hat 96 0.4
-    hit h208 tom_mid 96 0.85
     hit h162 hat 97 0.22
     hit h163 hat 98 0.5
     hit h53 openhat 98 0.45
     hit h164 hat 99 0.28
     hit h50 kick 100 0.85
-    hit h226 clap 100 0.7
+    hit h205 clap 100 0.7
     hit h165 hat 100 0.4
     hit h166 hat 101 0.22
     hit h167 hat 102 0.5
     hit h54 openhat 102 0.45
     hit h168 hat 103 0.28
-    hit h209 tom_lo 103 0.7
     hit h51 kick 104 0.85
     hit h169 hat 104 0.4
     hit h170 hat 105 0.22
@@ -582,9 +544,8 @@ track drums Drums #56b6c2 drums
     hit h55 openhat 106 0.45
     hit h172 hat 107 0.28
     hit h52 kick 108 0.85
-    hit h227 clap 108 0.7
+    hit h206 clap 108 0.7
     hit h173 hat 108 0.4
-    hit h210 tom_hi 108 0.75
     hit h174 hat 109 0.22
     hit h175 hat 110 0.5
     hit h56 openhat 110 0.45
@@ -596,68 +557,55 @@ track drums Drums #56b6c2 drums
     hit h61 openhat 114 0.45
     hit h180 hat 115 0.28
     hit h58 kick 116 0.85
-    hit h228 clap 116 0.7
+    hit h207 clap 116 0.7
     hit h181 hat 116 0.4
     hit h182 hat 117 0.22
     hit h183 hat 118 0.5
     hit h62 openhat 118 0.45
-    hit h211 ride 118 0.6
     hit h184 hat 119 0.28
     hit h59 kick 120 0.85
     hit h185 hat 120 0.4
-    hit h212 tom_mid 120 0.7
     hit h186 hat 121 0.22
     hit h187 hat 122 0.5
     hit h63 openhat 122 0.45
     hit h188 hat 123 0.28
     hit h60 kick 124 0.85
-    hit h229 clap 124 0.7
+    hit h208 clap 124 0.7
     hit h189 hat 124 0.4
-    hit h213 crash 124 0.7
     hit h190 hat 125 0.22
     hit h191 hat 126 0.5
     hit h64 openhat 126 0.45
     hit h192 hat 127 0.28
   clip break
-    hit h61 tom_hi 0 0.8
     hit h1 hat 2 0.28
     hit h2 hat 6 0.28
     hit h3 hat 10 0.28
-    hit h62 tom_lo 12 0.85
     hit h4 hat 14 0.28
     hit h5 hat 18 0.28
     hit h6 hat 22 0.28
-    hit h63 crash 24 0.7
     hit h7 hat 26 0.28
     hit h8 hat 30 0.28
-    hit h64 tom_hi 32 0.8
     hit h9 hat 34 0.28
     hit h10 hat 38 0.28
     hit h11 hat 42 0.28
-    hit h65 tom_lo 44 0.85
     hit h12 hat 46 0.28
     hit h13 hat 50 0.28
     hit h14 hat 54 0.28
-    hit h66 crash 56 0.7
     hit h15 hat 58 0.28
     hit h16 hat 62 0.28
-    hit h67 tom_hi 64 0.8
     hit h17 hat 66 0.28
     hit h25 clap 68 0.4
     hit h18 hat 70 0.28
     hit h19 hat 74 0.28
     hit h26 clap 76 0.45
-    hit h68 tom_lo 76 0.85
     hit h20 hat 78 0.28
     hit h21 hat 82 0.28
     hit h27 clap 84 0.4
     hit h22 hat 86 0.28
-    hit h69 crash 88 0.7
     hit h23 hat 90 0.28
     hit h28 clap 92 0.45
     hit h24 hat 94 0.28
     hit h29 snare 96 0.28
-    hit h70 tom_hi 96 0.8
     hit h30 snare 97 0.3
     hit h31 snare 98 0.32
     hit h32 snare 99 0.34
@@ -670,7 +618,6 @@ track drums Drums #56b6c2 drums
     hit h39 snare 106 0.48
     hit h40 snare 107 0.5
     hit h41 snare 108 0.52
-    hit h71 tom_lo 108 0.85
     hit h42 snare 109 0.54
     hit h43 snare 110 0.56
     hit h44 snare 111 0.58
@@ -683,7 +630,6 @@ track drums Drums #56b6c2 drums
     hit h51 snare 118 0.72
     hit h52 snare 119 0.74
     hit h53 snare 120 0.76
-    hit h72 crash 120 0.7
     hit h54 snare 121 0.78
     hit h55 snare 122 0.8
     hit h56 snare 123 0.82
@@ -1651,6 +1597,71 @@ track saw Saw #d19a66 synth
       point rise0 0 0.6
       point rise1 127 3
 
+track vox Vox #be5046 drums
+  synth
+    osc sawtooth
+    volume 2
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+    eqLow -4
+    eqMid 3
+    sendReverb 0.4
+    sendDelay 0.35
+    duckSource drums
+    duckAmount 0.2
+  lane kick sample vox-ah2 1 0
+  lane snare sample vox-ah2 1 3
+  lane rimshot synth:noise
+  lane clap sample vox-oo2 1 7
+  lane hat sample vox-eh2 0.95 -2
+  lane openhat sample vox-oo2 1 5
+  lane tom_lo synth:membrane
+  lane tom_mid synth:membrane
+  lane tom_hi synth:membrane
+  lane crash synth:metal
+  lane ride synth:metal
+  lane cowbell synth:membrane
+  clip vox-a
+    hit h1 snare 0 0.85
+    hit h2 kick 7 0.7
+    hit h3 clap 12 0.75
+    hit h4 hat 22 0.6
+    hit h5 snare 24 0.7
+    hit h6 snare 32 0.85
+    hit h7 kick 39 0.7
+    hit h8 clap 44 0.75
+    hit h9 hat 54 0.6
+    hit h10 snare 56 0.7
+    hit h11 snare 64 0.85
+    hit h12 kick 71 0.7
+    hit h13 clap 76 0.75
+    hit h14 hat 86 0.6
+    hit h15 snare 88 0.7
+    hit h16 snare 96 0.85
+    hit h17 kick 103 0.7
+    hit h18 clap 108 0.75
+    hit h19 hat 118 0.6
+    hit h20 snare 120 0.7
+    hit h21 openhat 124 0.7
+  clip vox-d
+    hit h1 clap 0 0.8
+    hit h2 kick 12 0.85
+    hit h3 openhat 24 0.7
+    hit h4 clap 32 0.8
+    hit h5 kick 44 0.85
+    hit h6 openhat 56 0.7
+    hit h7 clap 64 0.8
+    hit h8 kick 76 0.85
+    hit h9 openhat 88 0.7
+    hit h10 clap 96 0.8
+    hit h11 kick 108 0.85
+    hit h12 openhat 120 0.7
+
 scene intro
   slot keys close-a
   slot pad intro-a
@@ -1669,6 +1680,7 @@ scene lift
   slot keys shim-d
   slot pad shim-d
   slot air air-d
+  slot vox vox-d
 
 scene peak
   slot drums pulse-full
@@ -1678,6 +1690,7 @@ scene peak
   slot arp arp-a
   slot air air-a
   slot saw saw-a
+  slot vox vox-a
 
 scene groove1
   slot drums pulse-lite
@@ -1692,6 +1705,7 @@ scene groove2
   slot pad open-a
   slot arp arp-a
   slot air air-a
+  slot vox vox-a
 
 scene drive
   slot drums pulse-full
@@ -1700,13 +1714,14 @@ scene drive
   slot pad open-a
   slot arp arp-a
   slot air air-a
+  slot vox vox-a
 
 scene outro
-  slot drums chops-only
   slot keys close-a
   slot pad shim-a
   slot arp arp-a
   slot air air-a
+  slot vox vox-d
 
 scene voxtest
 
@@ -1720,6 +1735,9 @@ scene novox
 
 scene chopcheck
   slot drums chops-only
+
+scene voxsolo
+  slot vox vox-a
 
 song
   section intro 8
