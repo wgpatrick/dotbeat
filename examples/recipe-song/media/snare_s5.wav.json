@@ -1,0 +1,17 @@
+{
+  "source": "generated:stable-audio-open",
+  "license": "Stability-AI-Community",
+  "query": "crisp found-percussion snare, paper snap and metal rattle, single short dry hit",
+  "sha256": "beda81801efacf66bb861a8b33a72a1c6255344af84805b2ad871271b114ac15",
+  "preparedAt": "2026-07-15T05:17:42.522Z",
+  "durationSeconds": 1.9969,
+  "generated": {
+    "provider": "stable-audio-open",
+    "model": "stabilityai/stable-audio-open-1.0",
+    "backend": "stableaudio",
+    "prompt": "crisp found-percussion snare, paper snap and metal rattle, single short dry hit",
+    "seconds": 2,
+    "seed": 5,
+    "licenseUrl": "https://stability.ai/community-license-agreement"
+  }
+}

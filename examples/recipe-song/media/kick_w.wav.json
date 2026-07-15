@@ -1,0 +1,17 @@
+{
+  "source": "generated:stable-audio-open",
+  "license": "Stability-AI-Community",
+  "query": "deep wooden knock drum hit, single hit, low thump, tight and dry, no reverb",
+  "sha256": "d89ffbe66d63bf0b2aaec57193262eb14277296056d7b7c1bd1209b21b64b1f6",
+  "preparedAt": "2026-07-15T05:16:06.106Z",
+  "durationSeconds": 1.9931,
+  "generated": {
+    "provider": "stable-audio-open",
+    "model": "stabilityai/stable-audio-open-1.0",
+    "backend": "stableaudio",
+    "prompt": "deep wooden knock drum hit, single hit, low thump, tight and dry, no reverb",
+    "seconds": 2,
+    "seed": 3,
+    "licenseUrl": "https://stability.ai/community-license-agreement"
+  }
+}
