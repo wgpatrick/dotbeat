@@ -55,3 +55,26 @@ export {
   type RunGenResult,
 } from './gen.js'
 // ==== Phase 39 Stream UB end ====
+// ==== Phase 40 Stream VC ====
+// `beat regen`: rebuild generated media from the provenance sidecars alone — the executable form of
+// "a fully-generated .beat project is a recipe". Imports source-lib.mjs; never modifies it (see
+// src/analysis/regen.ts and docs/phase-40-plan.md §VC).
+export {
+  planRegen,
+  runRegen,
+  estimateRegenSeconds,
+  formatDuration,
+  formatRegenPlan,
+  formatRegenSample,
+  formatRegenResults,
+  BeatRegenError,
+  type GeneratedProvenance,
+  type RegenPlan,
+  type RegenPlanEntry,
+  type RegenSkip,
+  type RegenStatus,
+  type RegenSampleResult,
+  type RegenResult,
+  type RunRegenOptions,
+} from './regen.js'
+// ==== end Phase 40 Stream VC ====

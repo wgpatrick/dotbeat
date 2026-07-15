@@ -25,6 +25,23 @@ try {
   hasPython = false
 }
 
+// Phase 40 Stream VC: the two tests below assert the missing-DEPENDENCY degrade path (stableaudio
+// fails without torch; --doctor reports it missing) — true in CI, false on a machine with the venv
+// installed, where they turned `npm test` red for a correctly-working install. Probe the backend
+// once at module top (same shape as hasPython above) and skip them where the degrade can't happen;
+// they still run wherever the dependency is genuinely absent, which is the only place they test
+// anything. Skipping also saves ~80s: with stableaudio installed, the "must fail" test SUCCEEDS in
+// generating real audio before failing its assertion. See `npm run test:sidecars` for the inverse.
+let hasStableaudio = false
+if (hasPython) {
+  try {
+    const report = JSON.parse(execFileSync(process.execPath, [beatCli, 'source', 'gen', '--doctor'], { encoding: 'utf8' }))
+    hasStableaudio = report?.backends?.stableaudio?.ok === true
+  } catch {
+    hasStableaudio = false // doctor itself failing → treat the backend as absent (the degrade path is live)
+  }
+}
+
 interface RunResult {
   status: number
   stdout: string
@@ -112,6 +129,7 @@ test('beat source gen --backend stub varies by prompt when no seed is pinned (pi
 
 test('beat source gen --backend stableaudio without torch exits non-zero with the requirements/doctor hint', (t) => {
   if (!hasPython) return t.skip('no python3')
+  if (hasStableaudio) return t.skip('stableaudio installed — degrade path not exercisable here')
   const { beatFile, dir } = freshProject()
   const out = beat(['source', 'gen', beatFile, 'genpad', 'warm pad', '--backend', 'stableaudio', '--seconds', '1', '--seed', '1'])
   assert.notEqual(out.status, 0, 'stableaudio must fail without torch installed')
@@ -125,6 +143,7 @@ test('beat source gen --backend stableaudio without torch exits non-zero with th
 
 test('beat source gen --doctor JSON parses reporting stub ok / stableaudio missing', (t) => {
   if (!hasPython) return t.skip('no python3')
+  if (hasStableaudio) return t.skip('stableaudio installed — degrade path not exercisable here')
   const out = beat(['source', 'gen', '--doctor'])
   assert.equal(out.status, 0, out.stderr)
   const report = JSON.parse(out.stdout)

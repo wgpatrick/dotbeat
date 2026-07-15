@@ -1463,6 +1463,36 @@ const TOOLS: ToolDef[] = [
     },
   },
   // ==== Phase 39 Stream UB end ====
+  // ==== Phase 40 Stream VC ====
+  {
+    name: 'beat_regen',
+    description:
+      "REBUILD a project's generated media from its provenance sidecars alone. Every `beat source gen` writes media/<id>.wav.json recording the exact prompt/seed/seconds/backend it used, so a fully-generated project is a RECIPE: clone it with an empty media/, call this, and the sounds come back. Use verify:true to regenerate into a temp dir and report per-sample sha256 match/differ WITHOUT modifying media/ (the honest check that a project is still reproducible); omit it to actually restore media/. SLOW — roughly 2 minutes per one-shot on CPU, so a 10-sample project is ~20 minutes; the count and estimate are reported before the run. IMPORTANT and not a bug: byte-identical regeneration is verified same-machine/same-torch only, so a \"differs\" result on a different machine (or after a torch upgrade) is EXPECTED — the sound was generated from the same recipe, it is not corrupted, and in restore mode it is written anyway. Media that was NOT generated (Freesound downloads, local file ingests) carries no recipe and is skipped by name. Use sample_id to do a single sound.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'the .beat project file (its media/ dir is read for provenance sidecars)' },
+        verify: { type: 'boolean', description: 'regenerate to a temp dir and report sha256 match/differ without touching media/ (default false = restore media/)' },
+        sample_id: { type: 'string', description: 'regenerate only this sample id (default: every generated sample in the project)' },
+      },
+      required: ['file'],
+    },
+    handler: async (args) => {
+      const { planRegen, runRegen, formatRegenPlan, formatRegenResults } = await import('../analysis/index.js')
+      const verify = args.verify === true
+      const id = typeof args.sample_id === 'string' ? args.sample_id : undefined
+      const file = str(args, 'file')
+      // The plan banner (count + cost estimate) leads the result, mirroring the CLI: an agent should
+      // learn what a full run costs from the same text a human does.
+      const plan = planRegen(file, { id })
+      if (plan.regenerable.length === 0) {
+        return formatRegenPlan(plan, verify) + '\nnothing to regenerate — no generated media in this project\n'
+      }
+      const res = await runRegen({ beatFile: file, id, verify })
+      return formatRegenPlan(plan, verify) + '\n' + formatRegenResults(res) + '\n'
+    },
+  },
+  // ==== end Phase 40 Stream VC ====
   // ==== Phase 38 Stream SA begin ====
   {
     name: 'beat_skeleton',

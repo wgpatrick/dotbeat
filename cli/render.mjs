@@ -18,7 +18,7 @@
 //
 // Requires `npm run build` (compiled ../dist/src). The ui/ build is produced on demand.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawn, execFileSync } from 'node:child_process'
@@ -60,6 +60,44 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const uiDir = join(repoRoot, 'ui')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Phase 40 Stream VC: newest mtime under `dir` (recursive), or 0 if it can't be read. Used only for
+// the ui/dist staleness heuristic, so an unreadable tree degrades to "not stale" and layer (b)
+// still catches a bundle too old to probe.
+function newestMtimeMs(dir) {
+  let newest = 0
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  for (const e of entries) {
+    const p = join(dir, e.name)
+    if (e.isDirectory()) newest = Math.max(newest, newestMtimeMs(p))
+    else {
+      try { newest = Math.max(newest, statSync(p).mtimeMs) } catch { /* vanished mid-scan */ }
+    }
+  }
+  return newest
+}
+
+/** Why ui/dist needs a (re)build, or null if it looks current. Compares the built bundle's newest
+ * file against ui/src + the build inputs that change what vite emits (package.json, index.html,
+ * the vite config). Returns a human reason so the build line says WHY it's building. */
+function uiDistStaleReason() {
+  const distDir = join(uiDir, 'dist')
+  if (!existsSync(join(distDir, 'index.html'))) return 'ui/dist missing'
+  const distMtime = newestMtimeMs(distDir)
+  if (distMtime === 0) return 'ui/dist unreadable'
+  let newestSrc = newestMtimeMs(join(uiDir, 'src'))
+  for (const f of ['package.json', 'index.html', 'vite.config.ts', 'vite.config.js']) {
+    const p = join(uiDir, f)
+    if (!existsSync(p)) continue
+    try { newestSrc = Math.max(newestSrc, statSync(p).mtimeMs) } catch { /* unreadable — skip */ }
+  }
+  return newestSrc > distMtime ? 'ui/dist is older than ui/src — stale bundle' : null
+}
 
 function parseArgs(argv) {
   const args = { _: [] }
@@ -113,9 +151,17 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
     console.error('building repo (dist/ missing)...')
     execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
   }
-  // Ensure ui/ is built (vite preview serves ui/dist).
-  if (!existsSync(join(uiDir, 'dist', 'index.html'))) {
-    console.error('building ui/ (ui/dist missing)...')
+  // Ensure ui/ is built AND current (vite preview serves ui/dist verbatim).
+  // Phase 40 Stream VC: this used to build only when ui/dist/index.html was MISSING, so after any
+  // `git pull`/branch switch that changed the engine, render silently served a stale bundle. That's
+  // exactly how examples/recipe-song's first render came back pure silence: the served bundle
+  // predated sample-lane playback entirely. Layer (a) of the fix — rebuild when ui/dist is older
+  // than its sources. It's a heuristic and it CAN false-negative (a branch switch can restore old
+  // content with fresh mtimes), which is acceptable only because layer (b) below — the hard error
+  // on an un-runnable readiness probe — is a real backstop rather than a second heuristic.
+  const staleReason = uiDistStaleReason()
+  if (staleReason) {
+    console.error(`building ui/ (${staleReason})...`)
     execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
   }
 
@@ -219,6 +265,22 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
     await page.waitForFunction(() => typeof window.__engine.pendingMediaCount === 'function' && window.__engine.pendingMediaCount() === 0, { timeout: 30000 })
   } catch {
     const n = await page.evaluate(() => (typeof window.__engine.pendingMediaCount === 'function' ? window.__engine.pendingMediaCount() : -1)).catch(() => -1)
+    // Phase 40 Stream VC — layer (b), the safety net. `-1` means the served bundle has no
+    // pendingMediaCount() AT ALL: the probe didn't time out, it never ran. That is not a slow media
+    // load to warn about, it's proof the bundle predates the readiness probe itself — i.e. a stale
+    // ui/dist that layer (a)'s mtime heuristic failed to catch. The recipe-song's silent render
+    // printed exactly this as "-1 media load(s) still pending", which reads like a real (if odd)
+    // measurement and let a fully silent render pass for a successful one. A probe that COULDN'T
+    // RUN must never look like a probe that ran and found something — so this is a hard error.
+    if (n === -1) {
+      throw new Error(
+        'the served ui/dist bundle has no engine.pendingMediaCount() — it predates the media-readiness probe,\n' +
+          '  so this render CANNOT be checked for sample-backed lanes/clips and would likely be silent.\n' +
+          '  ui/dist is stale (a build from an older engine; render auto-rebuilds on mtime, which a branch\n' +
+          '  switch or a restored checkout can defeat). Rebuild it and re-run:\n' +
+          '    cd ui && npm run build',
+      )
+    }
     console.error(`warning: ${n} media load(s) still pending after 30s — sample-backed lanes/clips may play their fallback voice or silence in this render`)
   }
   if (pageErrors.length) throw new Error('page error(s) before render:\n' + pageErrors.join('\n'))

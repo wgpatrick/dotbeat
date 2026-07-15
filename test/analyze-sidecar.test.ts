@@ -25,6 +25,25 @@ try {
   hasPython = false
 }
 
+// Phase 40 Stream VC: three tests below assert the missing-DEPENDENCY degrade path (beatthis fails
+// without torch; --doctor reports beatthis missing). That premise is true in CI and false on a
+// machine where the venv is actually installed — so on the owner's machine, `npm test` reported
+// failures for a CORRECTLY WORKING install. A suite that goes red when things work trains the one
+// person who runs it most to ignore red. So probe the backend the same way hasPython probes the
+// interpreter, once at module top, and skip the degrade-path tests where the degrade can't happen.
+// The coverage isn't lost: it still runs everywhere the dependency is genuinely absent (CI), which
+// is the only place it was ever testing anything. `npm run test:sidecars` covers the inverse — the
+// INSTALLED backend — which is the assertion CI structurally cannot make.
+let hasBeatthis = false
+if (hasPython) {
+  try {
+    const report = JSON.parse(execFileSync(process.execPath, [beatCli, 'analyze', '--doctor', '--json'], { encoding: 'utf8' }))
+    hasBeatthis = report?.backends?.beatthis?.ok === true
+  } catch {
+    hasBeatthis = false // doctor itself failing → treat the backend as absent (the degrade path is live)
+  }
+}
+
 interface RunResult {
   status: number
   stdout: string
@@ -152,6 +171,7 @@ test('-o writes the artifact to an explicit path', (t) => {
 
 test('--backend beatthis without torch exits non-zero with the doctor hint (the degrade path)', (t) => {
   if (!hasPython) return t.skip('no python3')
+  if (hasBeatthis) return t.skip('beatthis installed — degrade path not exercisable here')
   const wav = tempWav(4)
   const out = beat(['analyze', wav, '--backend', 'beatthis'])
   assert.notEqual(out.status, 0, 'beatthis must fail without torch installed')
@@ -173,6 +193,7 @@ test('beat analyze on a .beat file redirects to analyze-structure', (t) => {
 
 test('beat analyze --doctor --json parses and reports stub ok / beatthis missing', (t) => {
   if (!hasPython) return t.skip('no python3')
+  if (hasBeatthis) return t.skip('beatthis installed — degrade path not exercisable here')
   const out = beat(['analyze', '--doctor', '--json'])
   assert.equal(out.status, 0, out.stderr)
   const report = JSON.parse(out.stdout)
@@ -186,6 +207,8 @@ test('beat analyze --doctor --json parses and reports stub ok / beatthis missing
 
 test('beat analyze --doctor prints a readable (non-JSON) report by default', (t) => {
   if (!hasPython) return t.skip('no python3')
+  // Asserts the "missing: torch, beat_this" line specifically, so it too is premised on absence.
+  if (hasBeatthis) return t.skip('beatthis installed — degrade path not exercisable here')
   const out = beat(['analyze', '--doctor'])
   assert.equal(out.status, 0, out.stderr)
   assert.match(out.stdout, /interpreter:/)

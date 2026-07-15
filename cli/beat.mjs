@@ -389,6 +389,21 @@ const HELP = [
                                                           Stability AI"; you own the output (Stability Community License)
   beat source gen --doctor                                report which generative backends are installed (JSON)` },
   // ==== Phase 37 Stream RD end ====
+  // ==== Phase 40 Stream VC ====
+  {
+    cmd: 'regen',
+    text: `  beat regen <file.beat> [--verify] [--id <sample-id>]     rebuild generated media from the provenance sidecars alone
+                                                          (media/<id>.wav.json's prompt/seed/seconds/backend) — a fully
+                                                          generated project is a RECIPE: clone it with an empty media/,
+                                                          run this, get the song back. --verify regenerates to a temp
+                                                          dir and reports per-sample sha256 match/differ WITHOUT
+                                                          touching media/; --id does one sample. SLOW: ~2 min per
+                                                          one-shot on CPU (a 10-sample project is ~20 min); the count
+                                                          and estimate print before the run starts. Byte-identical
+                                                          reproduction is verified same-machine/same-torch only — a
+                                                          differing hash elsewhere is expected, not corruption.
+                                                          Freesound/local-ingest media isn't generated, so it's skipped` },
+  // ==== end Phase 40 Stream VC ====
   {
     cmd: 'lane',
     text: `  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample ("none" reverts the lane
@@ -1809,6 +1824,44 @@ async function sourceCmd(argv) {
 }
 // ==== Phase 37 Stream RD end ====
 
+// ==== Phase 40 Stream VC ====
+// `beat regen` — replay a project's generated media from its provenance sidecars (see
+// src/analysis/regen.ts for the honesty contract this surface is printing). The library returns
+// structured results and never writes to stdout; the formatting lives there too, so the MCP twin
+// prints the identical text. BeatRegenError → BeatEditError for the shared clean-exit path.
+async function regenCmd(argv) {
+  const args = argv.filter((a) => a !== '--verify')
+  const idFlag = args.indexOf('--id')
+  const id = idFlag !== -1 ? args[idFlag + 1] : undefined
+  const file = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--id')[0]
+  const verify = argv.includes('--verify')
+  const analysis = await import(new URL('../dist/src/analysis/index.js', import.meta.url).href)
+  try {
+    const plan = analysis.planRegen(file, { id })
+    // The cost estimate lands BEFORE the first minute is spent, never in the summary.
+    process.stdout.write(analysis.formatRegenPlan(plan, verify) + '\n')
+    if (plan.regenerable.length === 0) {
+      process.stdout.write('nothing to regenerate — no generated media in this project\n')
+      return
+    }
+    const res = await analysis.runRegen({
+      beatFile: file,
+      id,
+      verify,
+      // A 20-minute run must not be a silent one: report each sample as it lands.
+      onProgress: (r) => process.stdout.write(analysis.formatRegenSample(r) + '\n'),
+    })
+    // The summary re-prints the per-sample lines, so drop them here and keep only the tail.
+    process.stdout.write(analysis.formatRegenResults(res).split('\n').slice(res.results.length).join('\n') + '\n')
+    // A `differs` is a report, not a failure (see regen.ts) — only a real error exits non-zero.
+    if (res.results.some((r) => r.status === 'error')) process.exitCode = 1
+  } catch (err) {
+    if (err && err.name === 'BeatRegenError') throw new BeatEditError(err.message)
+    throw err
+  }
+}
+// ==== end Phase 40 Stream VC ====
+
 function laneCmd(argv) {
   // Phase 35 Stream OB: `--clear-legacy` is the one-shot explicit cleanup for stale v0.5
   // laneSamples lines on a declared-lane track (inspect flags them; playback ignores them there).
@@ -2491,6 +2544,11 @@ async function main() {
       await sourceCmd(rest)
       break
     // ==== Phase 37 Stream RD end ====
+    // ==== Phase 40 Stream VC ====
+    case 'regen':
+      await regenCmd(rest)
+      break
+    // ==== end Phase 40 Stream VC ====
     case 'lane':
       laneCmd(rest)
       break
