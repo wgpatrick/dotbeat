@@ -387,7 +387,20 @@ const HELP = [
                                                           see python/README.md), default --seconds 2. --backend stub is
                                                           a deterministic, dependency-free tone bed. "Powered by
                                                           Stability AI"; you own the output (Stability Community License)
-  beat source gen --doctor                                report which generative backends are installed (JSON)` },
+  beat source gen --doctor                                report which generative backends are installed (JSON)` +
+    // ==== Phase 40 Stream VB ====
+    `
+  beat source gen <file.beat> <sample-id> "<prompt>" --count N [--seed-from S] [--out-dir d] [--audition]
+                                                          BATCH: generate N candidates of ONE prompt across seeds
+                                                          S..S+N-1 into gen-<sample-id>-<S>/ next to the .beat and
+                                                          register NOTHING — then rank them with \`beat score\` and
+                                                          register the winner ALONE with \`beat adopt\` (the same two
+                                                          verbs a vary batch uses). Losing candidates never enter the
+                                                          media block; delete the batch dir to forget them. --audition
+                                                          stitches the candidates into one audition.wav with a timecode
+                                                          index (no render needed — they are already audio)`
+    // ==== end Phase 40 Stream VB ====
+  },
   // ==== Phase 37 Stream RD end ====
   // ==== Phase 40 Stream VC ====
   {
@@ -1730,7 +1743,11 @@ async function sourceCmd(argv) {
   }
   const VALUE_FLAGS = new Set(['--max', '--dur-min', '--dur-max', '--out-dir', '--license', '--note', '--freesound',
     // ==== Phase 39 Stream UB (gen) ====
-    '--seconds', '--seed', '--backend', '--provider'])
+    '--seconds', '--seed', '--backend', '--provider',
+    // ==== Phase 40 Stream VB ==== (gen batches)
+    '--count', '--seed-from',
+    // ==== end Phase 40 Stream VB ====
+  ])
   const positionals = rest.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(rest[i - 1]))
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
   try {
@@ -1791,6 +1808,17 @@ async function sourceCmd(argv) {
         return
       }
       const [file, id, prompt] = positionals
+      // ==== Phase 40 Stream VB ====
+      // `--count N`: generate N candidates (seeds S..S+N-1) into a batch dir and register NOTHING.
+      // Presence of --count is the switch, not its value — asking for a batch of 1 is a coherent
+      // (if unusual) request, and the alternative (N>1 means batch) would make --count 1 silently
+      // mean something else entirely. Without --count, the single-shot register-now path below is
+      // untouched.
+      if (flag('--count') !== undefined) {
+        await sourceGenBatch(lib, { file, id, prompt, rest, flag })
+        return
+      }
+      // ==== end Phase 40 Stream VB ====
       const result = await lib.addGeneratedSource({
         beatFile: file,
         id,
@@ -1822,6 +1850,48 @@ async function sourceCmd(argv) {
     throw err
   }
 }
+
+// ==== Phase 40 Stream VB begin ====
+/** `beat source gen ... --count N` — the generative taste loop's first half: N candidates from one
+ * prompt across N seeds, into a batch dir, registering NOTHING. Prints the same
+ * "audition, then: beat score ..." call to action the vary rungs print, so the generative workflow
+ * and the mutation workflow converge on one pair of verbs (score, adopt). */
+async function sourceGenBatch(lib, { file, id, prompt, rest, flag }) {
+  const count = Number(flag('--count'))
+  const seedFrom = flag('--seed-from') ?? flag('--seed')
+  const result = await lib.genSourceBatch({
+    beatFile: file,
+    id,
+    prompt,
+    count,
+    seconds: flag('--seconds') !== undefined ? Number(flag('--seconds')) : 2,
+    // --seed-from is the batch's spelling of --seed; accept --seed too rather than erroring at
+    // someone who reasonably reached for the flag the single-shot path taught them.
+    ...(seedFrom !== undefined ? { seedFrom: Number(seedFrom) } : {}),
+    backend: flag('--backend', 'stableaudio'),
+    provider: flag('--provider', 'stable-audio-open'),
+    ...(flag('--license') !== undefined ? { license: flag('--license') } : {}),
+    ...(flag('--out-dir') !== undefined ? { outDir: flag('--out-dir') } : {}),
+    onProgress: (i, n, seed) => process.stdout.write(`generating v${i}/${n} (seed ${seed})...\n`),
+  })
+  const last = result.seedFrom + result.candidates.length - 1
+  process.stdout.write(
+    `${result.dir}/: ${result.candidates.length} candidate${result.candidates.length === 1 ? '' : 's'} of "${prompt}" ` +
+    `(seeds ${result.seedFrom}${last !== result.seedFrom ? `-${last}` : ''})\n`,
+  )
+  for (const c of result.candidates) {
+    process.stdout.write(`  ${c.variant}: seed ${c.seed}, ${c.durationSeconds}s, sha256:${c.sha256.slice(0, 12)}...\n`)
+  }
+  // The property this whole path exists for — state it, don't leave it to be inferred.
+  process.stdout.write(`nothing is registered in ${file} yet: candidates live only in the batch dir until you adopt one\n`)
+  // Gen candidates are ALREADY audio: the vN.wavs a vary batch needs headless Chromium to produce
+  // exist the moment generation ends, so the SAME stitcher runs with no render step in front of it
+  // (auditionAfterRender is named for vary's flow, but it only stitches — nothing here re-renders).
+  if (rest.includes('--audition')) await auditionAfterRender(result.dir, result.candidates.length)
+  process.stdout.write(`audition, then: beat score ${result.dir} <best> [2nd 3rd]\n`)
+  process.stdout.write(`then register the winner: beat adopt ${result.dir} <best>\n`)
+}
+// ==== Phase 40 Stream VB end ====
 // ==== Phase 37 Stream RD end ====
 
 // ==== Phase 40 Stream VC ====

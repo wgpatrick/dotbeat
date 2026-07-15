@@ -1423,7 +1423,10 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_source_gen',
     description:
-      'GENERATE an audio one-shot from a text prompt with Stable Audio Open (local text-to-audio) and register it into a .beat project as media, prepped through the same trim/fade/peak-normalize pipeline as every other source and written with an ENFORCED provenance sidecar (media/<id>.wav.json recording the prompt, provider, model, seconds, seed, and the Stability AI Community License). Two backends: "stableaudio" (default) runs Stable Audio Open locally — needs torch + the model weights installed server-side (see python/README.md), and returns an actionable isError with a `beat source gen --doctor` hint if they are missing; "stub" is a deterministic, dependency-free tone bed (same seed+seconds → byte-identical audio) that proves the pipeline everywhere. You OWN the generated output; free commercial use under $1M revenue with Stability registration; "Powered by Stability AI". Once registered, use the sample id in beat_audio_clip / beat_lane / beat_add_track just like any media id.',
+      'GENERATE an audio one-shot from a text prompt with Stable Audio Open (local text-to-audio) and register it into a .beat project as media, prepped through the same trim/fade/peak-normalize pipeline as every other source and written with an ENFORCED provenance sidecar (media/<id>.wav.json recording the prompt, provider, model, seconds, seed, and the Stability AI Community License). Two backends: "stableaudio" (default) runs Stable Audio Open locally — needs torch + the model weights installed server-side (see python/README.md), and returns an actionable isError with a `beat source gen --doctor` hint if they are missing; "stub" is a deterministic, dependency-free tone bed (same seed+seconds → byte-identical audio) that proves the pipeline everywhere. You OWN the generated output; free commercial use under $1M revenue with Stability registration; "Powered by Stability AI". Once registered, use the sample id in beat_audio_clip / beat_lane / beat_add_track just like any media id.' +
+      // ==== Phase 40 Stream VB ====
+      ' BATCH MODE — pass `count` to generate N candidates of the same prompt across seeds seed_from..seed_from+N-1 and register NOTHING: they land in a batch dir (gen-<sample_id>-<seed>/ next to the .beat) with a manifest beat_score and beat_adopt read, exactly like a beat_vary batch. This is the right shape whenever you want to hear a few takes before committing to one: rank them with beat_score, then beat_adopt registers the WINNER ALONE (that adopt IS the registration — it copies the winning wav into media/ and writes its provenance sidecar). Candidates you do not adopt never touch the project, so the media block never accumulates rejects. Candidates are already audio, so `audition: true` stitches them into one audition.wav with a timecode index immediately — no render step. Without `count`, the single-shot behavior above is unchanged (generate and register in one step).',
+      // ==== end Phase 40 Stream VB ====
     inputSchema: {
       type: 'object',
       properties: {
@@ -1435,11 +1438,44 @@ const TOOLS: ToolDef[] = [
         backend: { type: 'string', description: '"stableaudio" (default, local model) or "stub" (deterministic dependency-free tone bed)' },
         provider: { type: 'string', description: 'provider label recorded in provenance (default "stable-audio-open")' },
         license: { type: 'string', description: 'license label for the generated media (default "Stability-AI-Community")' },
+        // ==== Phase 40 Stream VB ====
+        count: { type: 'number', description: 'BATCH MODE: generate this many candidates (1-16) of the same prompt, one per seed, and register NONE of them — score/adopt picks the winner. Omit for the single-shot generate-and-register behavior.' },
+        seed_from: { type: 'number', description: 'batch mode: the FIRST seed (candidate i gets seed_from + i); defaults to the prompt-derived seed, same as `seed` does for a single shot' },
+        out_dir: { type: 'string', description: 'batch mode: where the candidates + manifest.json go; default "gen-<sample_id>-<seed_from>" NEXT TO the .beat file (not the server cwd)' },
+        audition: { type: 'boolean', description: 'batch mode: also stitch the candidates into one audition.wav with a timecode index (they are already audio — no render step)' },
+        // ==== end Phase 40 Stream VB ====
       },
       required: ['file', 'sample_id', 'prompt'],
     },
     handler: async (args) => {
       const lib = await import(pathToFileURL(join(repoRoot, 'scripts', 'source-lib.mjs')).href)
+      // ==== Phase 40 Stream VB ====
+      if (typeof args.count === 'number') {
+        const result = await lib.genSourceBatch({
+          beatFile: str(args, 'file'),
+          id: str(args, 'sample_id'),
+          prompt: str(args, 'prompt'),
+          count: args.count,
+          seconds: typeof args.seconds === 'number' ? args.seconds : 2,
+          ...(typeof args.seed_from === 'number' ? { seedFrom: args.seed_from } : typeof args.seed === 'number' ? { seedFrom: args.seed } : {}),
+          backend: typeof args.backend === 'string' ? args.backend : 'stableaudio',
+          provider: typeof args.provider === 'string' ? args.provider : 'stable-audio-open',
+          ...(typeof args.license === 'string' ? { license: args.license } : {}),
+          ...(typeof args.out_dir === 'string' ? { outDir: args.out_dir } : {}),
+        })
+        const last = result.seedFrom + result.candidates.length - 1
+        const lines = [
+          `${result.dir}/: ${result.candidates.length} candidate${result.candidates.length === 1 ? '' : 's'} of "${str(args, 'prompt')}" (seeds ${result.seedFrom}${last !== result.seedFrom ? `-${last}` : ''})`,
+          ...result.candidates.map((c: { variant: string; seed: number; durationSeconds: number; sha256: string }) =>
+            `  ${c.variant}: seed ${c.seed}, ${c.durationSeconds}s, sha256:${c.sha256.slice(0, 12)}...`),
+          `nothing is registered in ${str(args, 'file')} yet: candidates live only in the batch dir until you adopt one`,
+        ]
+        if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(result.dir, result.candidates.length)).trimEnd())
+        lines.push(`audition, then: beat_score dir "${result.dir}" picks [best, ...]`)
+        lines.push(`then register the winner: beat_adopt dir "${result.dir}" pick "<best>"`)
+        return lines.join('\n') + '\n'
+      }
+      // ==== end Phase 40 Stream VB ====
       const result = await lib.addGeneratedSource({
         beatFile: str(args, 'file'),
         id: str(args, 'sample_id'),
@@ -1873,7 +1909,10 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_adopt',
     description:
-      'Adopt a winner from a vary batch: copies the picked vN.beat over the batch\'s parent .beat file — the MCP-native way to take a variant after auditioning/scoring (no shell `cp` needed; this is the ONLY adopt path for feel batches, whose humanize recipe is not replayable via beat_set). pick accepts "3" or "v3". Data safety: if the parent file has changed since the batch was generated (its current sha256 no longer matches the manifest\'s parentSha256 — the project may have moved on through other edits), this REFUSES rather than silently overwriting that newer work; either re-run beat_vary from the current file, or pass force true to overwrite anyway. Writing the file is the whole operation — a running daemon/GUI on the project hot-reloads it automatically. Consider beat_checkpoint afterwards to keep the adopted state as a restorable version.',
+      'Adopt a winner from a vary batch: copies the picked vN.beat over the batch\'s parent .beat file — the MCP-native way to take a variant after auditioning/scoring (no shell `cp` needed; this is the ONLY adopt path for feel batches, whose humanize recipe is not replayable via beat_set). pick accepts "3" or "v3". Data safety: if the parent file has changed since the batch was generated (its current sha256 no longer matches the manifest\'s parentSha256 — the project may have moved on through other edits), this REFUSES rather than silently overwriting that newer work; either re-run beat_vary from the current file, or pass force true to overwrite anyway. Writing the file is the whole operation — a running daemon/GUI on the project hot-reloads it automatically. Consider beat_checkpoint afterwards to keep the adopted state as a restorable version.' +
+      // ==== Phase 40 Stream VB ====
+      ' GEN batches (beat_source_gen with count): adopt REGISTERS the winning candidate instead of copying a document — it copies the winning wav into the project\'s media/ folder, writes its provenance sidecar, and adds the media entry, leaving every other edit in the file alone. The candidates deliberately touched nothing until this call, so adopt is the ONLY thing that puts a generated sound into the project, and the ones you did not pick leave no trace outside the batch dir. Adopting a second candidate from the same batch (changing your mind) trips the sha256 guard, because the first adopt itself changed the parent — pass force true, which just upserts the media entry.',
+      // ==== end Phase 40 Stream VB ====
     inputSchema: {
       type: 'object',
       properties: {

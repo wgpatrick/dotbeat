@@ -9,6 +9,51 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D21 — one batch manifest for generation too; `adopt` learns media, and candidates don't register until they win (2026-07-15)
+
+**The decision.** `beat source gen --count N` (Phase 40 Stream VB) generates N candidates of one
+prompt across seeds `S..S+N-1` and rides the **existing** `VaryBatchManifest` into the **existing**
+`beat score` / `beat adopt` verbs — no parallel gen-only batch shape, no second scores log, no
+`beat gen-adopt`. The three places a gen batch strains that shape are absorbed by **optional fields
+on the shape itself**, not by forking it: (a) variants are wavs, so `variants[].file` is `vN.wav`
+instead of `vN.beat` — and every reader now resolves the variant through that field rather than
+re-deriving `v${n}.beat`; (b) a gen batch has no track, so `track` becomes optional on the manifest
+and the score entry, and the round is identified by `group: "gen:<sample-id>"` (plus a top-level
+`prompt`, which makes "which prompts/seeds do I actually like" one `jq` over the same
+`beat-scores.jsonl` a cutoff sweep writes); (c) `adoptVariant` gains a `media` branch — for a gen
+batch, adopt is not a document copy but a **registration**.
+
+**The inversion that makes it worth doing.** Candidates deliberately touch NOTHING until adopt.
+`scripts/source-lib.mjs`'s private `ingest()` — prep → sha256 → media-block upsert → enforced
+provenance sidecar → rollback — is split at its seam: the **prep half** runs at batch time (once
+per candidate, into the batch dir), the **register half** (`registerPreppedMedia`, now in
+`src/vary/batch.ts`) runs at adopt time, on the winner alone. Losing candidates leave no trace
+outside the batch dir; deleting it forgets them. Two consequences worth stating: the winner is
+**copied, never re-prepped** at adopt (prep is not idempotent — it would re-trim and re-fade
+already-prepped audio), so the bytes you auditioned are byte-for-byte the bytes that get
+registered; and the register half moved into `batch.ts` rather than staying in source-lib because
+`adopt` is its second caller and must stay synchronous on both surfaces — source-lib imports it
+back, so the single-shot `source add`/`source gen` paths and the deferred `adopt` path share ONE
+registration implementation. Splitting `ingest` was meant to defer it, not to fork it.
+
+**Why.** The immediate evidence: building `examples/recipe-song/` on 2026-07-14, the snare was
+picked from seeds 5/6/7 by out-of-band FFT measurement — because `beat score`/`beat adopt` require
+a manifest generation never produced — and the two LOSING candidates are *still* registered in that
+song's media block, with no record that an audition ever happened. Both halves of that are this
+decision's targets. The deeper reason for one shape: the manifest/score-log contract was
+deliberately unified in Phase 34 NA after pilot 95's cross-surface drift ("extract the shared
+shaping into `src/` helpers both surfaces import, so the next drift can't happen"), and a second
+batch shape re-forks exactly what that fixed — it would double every reader, and the taste loop's
+whole value is that one accumulated log answers "what do I like" across every kind of round.
+
+**Known limit, accepted.** `beat suggest` **ignores** gen entries — its parser drops trackless
+entries, so a gen round never enters a track's Bradley-Terry stats. This is the intended reading,
+not an oversight: a gen round is not a mutation round for any track, and letting it in would let
+`suggest` recommend a nonsense `beat vary <file> <track> gen:snare`. The gen question ("which
+prompts/seeds win") is answerable off the same log by `prompt`/`media.seed`, and a real
+`suggest`-for-generation is a separate feature with a separate output shape. Revisit if that
+feature is ever wanted.
+
 ## D19 — the gen sidecar writes the WAV to a told path; TS owns registration + the Stability license posture (2026-07-14)
 
 **The decision (contract variation).** `beat source gen` (Phase 39, Stable Audio Open local
