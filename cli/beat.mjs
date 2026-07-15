@@ -98,6 +98,13 @@ import { validateAnalysisArtifact, buildSkeleton, formatSkeletonReport } from '.
 // ==== Phase 38 Stream SB begin ====
 import { runAnalysis, sidecarDoctor, defaultAnalysisPath } from '../dist/src/analysis/index.js'
 // ==== Phase 38 Stream SB end ====
+// ==== Phase 40 Stream VA ====
+// Pitch-aware sampling: detection (pure TS, no Python — decisions.md D20) and the tune arithmetic
+// that turns a root into a keymap. keymap.js is deep-imported rather than routed through
+// core/index.js so this stream adds no line to a file two sibling streams are also editing.
+import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
+import { buildKeymap, noteToMidi, midiToNote, rateForPitch } from '../dist/src/core/keymap.js'
+// ==== end Phase 40 Stream VA ====
 
 // ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
 // The old monolithic USAGE template literal, restructured as one entry per command so
@@ -120,6 +127,9 @@ const HELP_FAMILIES = [
   // ==== Phase 38 Stream SA begin ====
   ['analyze', 'skeleton', 'analyze-structure', 'source'], // Phase 38: audio import -> skeleton -> critique
   // ==== Phase 38 Stream SA end ====
+  // ==== Phase 40 Stream VA ====
+  ['sample', 'sample-info', 'keymap', 'lane'], // Phase 40: register a sound -> read its pitch -> play a melody with it
+  // ==== end Phase 40 Stream VA ====
 ]
 
 /** One entry per command, in the exact order the full dump prints them. `text` is the command's
@@ -426,6 +436,52 @@ const HELP = [
                                                           flags them). Errors on a legacy 5-lane track, where those
                                                           lines are live.`,
   },
+  // ==== Phase 40 Stream VA ====
+  {
+    cmd: 'sample-info',
+    text: `  beat sample-info <file> <sample-id> [--json] [--partials 8]
+                                                          what IS this sound: detected pitch (+ note name, cents off),
+                                                          confidence, duration, peak, centroid, and the top-partials
+                                                          table (frequency, level, ratio to the lowest strong partial).
+                                                          Pure TS — no Python, no venv. Read the TABLE, not just the f0:
+                                                          two partials a semitone apart (ratio ~1.06) will beat against
+                                                          themselves; a ratio like 1.80 means an inharmonic clang whose
+                                                          pitch is a judgement call. LOW confidence is a real answer, not
+                                                          a failure — bells and found percussion usually read low, and
+                                                          the table is how you decide the root yourself.`,
+  },
+  {
+    cmd: 'keymap',
+    text: `  beat keymap <file> <track> <sample-id> --scale <name> --from <note> --to <note> [--root <note>] [--key <note>] [--gain dB] [--dry-run] [--force]
+                                                          pitch-map ONE sample across a scale: mints one declared lane per
+                                                          scale degree, named by note (a5, c6, …), each tuned to land the
+                                                          sample on that pitch. The tunes come from the sample's DETECTED
+                                                          fundamental, so they are right even when the sound came back
+                                                          between notes (fractional tunes are normal and correct).
+                                                          --root <note> states the root yourself and skips detection —
+                                                          a first-class path, not a fallback: bells, plucks and found
+                                                          percussion are exactly where detection is weakest, so expect to
+                                                          use it. Refuses on a low-confidence detection (quoting the
+                                                          partials and a ready-to-paste --root) rather than building a
+                                                          wrong keymap; --force takes the detection anyway.
+                                                          --key sets the scale's root (default: --from's pitch class).
+                                                          --scale names: see beat fit-scale --list-scales.
+                                                          --dry-run prints the lanes without writing.
+                                                          A lane's tune is limited to -24..24 semitones, so a span more
+                                                          than 2 octaves from the root errors, naming what IS reachable.`,
+  },
+  {
+    cmd: 'audio-pitch',
+    text: `  beat audio-pitch <file> <track> <clip-id> (--to <note> [--root <note>] | --semitones <n>) [--force]
+                                                          repitch an audio-region clip by computing its warp rate for you
+                                                          (sets warp repitch + rate). --to <note> detects the region's
+                                                          fundamental and moves it to that note; --root <note> states the
+                                                          region's current pitch instead of detecting it; --semitones
+                                                          shifts by an interval with no detection at all (the honest
+                                                          option for a chord or a pad, which has no single pitch).
+                                                          Repitch is variable-speed: length changes with pitch.`,
+  },
+  // ==== end Phase 40 Stream VA ====
   {
     cmd: 'effect-add',
     text: `  beat effect-add <file> <track> <eq3|comp|distortion|bitcrush|eq7|autoFilter|autoPan|tremolo|utility|grainDelay|vinylDistortion|resonator> [--id id] [--index n] [--bypassed]
@@ -1953,6 +2009,250 @@ function laneCmd(argv) {
   writeDoc(file, before, setLaneSample(before, track, lane, ref))
 }
 
+// ==== Phase 40 Stream VA ====
+// Pitch-aware sampling (docs/phase-40-plan.md §VA): the three verbs that close the gap between
+// "generate a sound" and "play a melody with it". Everything here is pure TS — no venv, no Python
+// (decisions.md D20).
+
+/** Decodes a REGISTERED sample's audio. Refusing on an unregistered id (rather than taking a path)
+ * is deliberate: these verbs read the pitch of a sound the project already commits to, and the
+ * media block is that commitment. */
+function readSampleAudio(file, doc, sampleId) {
+  const entry = doc.media.find((m) => m.id === sampleId)
+  if (!entry) {
+    throw new BeatEditError(
+      `no sample "${sampleId}" in the media block (have: ${doc.media.map((m) => m.id).join(', ') || 'none'}) — register it with beat sample first`,
+    )
+  }
+  const beatDir = dirname(resolve(file))
+  const abs = resolve(beatDir, entry.path)
+  if (!existsSync(abs)) throw new BeatEditError(`sample "${sampleId}" is registered at ${entry.path}, but there is no file there (relative to ${beatDir})`)
+  return { entry, ...decodeWav(readFileSync(abs)) }
+}
+
+/** `--key a` is the natural way to say "A minor"; noteToMidi wants a full note. Only the pitch
+ * class is ever used, so the octave we invent here is arbitrary. */
+function parseKeyNote(text) {
+  return noteToMidi(/^[a-gA-G][#sb]?$/.test(text) ? `${text}4` : text)
+}
+
+/** The scale root's pitch CLASS ("a"), not its arbitrary octave ("a5") — only the class is used. */
+function pitchClassName(midi) {
+  return midiToNote(midi).replace(/-?\d+$/, '')
+}
+
+function pitchBodyNote(pitch) {
+  return `partials (measured over the body, ${pitch.analyzedFromSeconds.toFixed(3)}-${pitch.analyzedToSeconds.toFixed(3)}s of ${pitch.durationSeconds.toFixed(2)}s):`
+}
+
+function sampleInfoCmd(argv) {
+  const json = argv.includes('--json')
+  const pIdx = argv.indexOf('--partials')
+  const partialCount = pIdx !== -1 ? Number(argv[pIdx + 1]) : undefined
+  const positionals = argv.filter((a, i) => !a.startsWith('--') && !(pIdx !== -1 && i === pIdx + 1))
+  const [file, sampleId] = positionals
+  if (!file || !sampleId) throw new BeatEditError('sample-info needs <file> <sample-id> [--json] [--partials N]')
+  const doc = readDoc(file)
+  const { entry, channels, sampleRate } = readSampleAudio(file, doc, sampleId)
+  const pitch = detectPitch(channels, sampleRate, partialCount !== undefined ? { partialCount } : {})
+  const m = analyze(channels, sampleRate)
+  if (json) {
+    process.stdout.write(JSON.stringify({ id: sampleId, path: entry.path, pitch, metrics: m }, null, 2) + '\n')
+    return
+  }
+  const lines = [
+    `${sampleId}: ${m.durationSeconds.toFixed(2)}s, ${m.channels}ch @ ${m.sampleRate} Hz  ${entry.path}`,
+    formatPitchLine(pitch),
+    `peak       ${fmtDb(m.samplePeakDbfs, ' dBFS')} sample, ${fmtDb(m.truePeakDbtp, ' dBTP')} true`,
+    `centroid   ${m.spectral.centroidHz.toFixed(0)} Hz`,
+    '',
+    pitchBodyNote(pitch),
+    formatPartials(pitch.partials),
+  ]
+  // The table is the point (docs/phase-40-plan.md §VA item 2), so say what to look FOR in it —
+  // an f0 alone leaves you stuck, and these two readings are what made the recipe-song's
+  // bell_a-vs-bell_b call decidable.
+  // Only PROMINENT partials (within 6 dB of the strongest, the same bar suggestedRootHz uses) can
+  // audibly beat — a -25 dB straggler half a semitone off the root is not what sank bell_b, and
+  // saying it is would make this advice noise.
+  const beating = pitch.partials.find((q) => q.relDb >= -6 && Math.abs(1200 * Math.log2(q.ratio)) > 20 && Math.abs(1200 * Math.log2(q.ratio)) < 250)
+  if (beating) {
+    lines.push('', `note: two strong partials sit ${Math.abs(1200 * Math.log2(beating.ratio)).toFixed(0)} cents apart (x${beating.ratio.toFixed(3)}) — this close, they beat against each other: an unsteady, detuned ring rather than one clear pitch.`)
+  }
+  if (pitch.level === 'low' && pitch.suggestedRootNote) {
+    lines.push(
+      '',
+      `LOW confidence is a real answer here, not a failure: bells, plucks and found percussion usually read low.`,
+      `Read the table and decide the root yourself — then state it: beat keymap ${file} <track> ${sampleId} --scale minorPentatonic --from <note> --to <note> --root ${pitch.suggestedRootNote}`,
+    )
+  } else if (pitch.note) {
+    lines.push('', `next: beat keymap ${file} <track> ${sampleId} --scale minorPentatonic --from <note> --to <note>`)
+  }
+  process.stdout.write(lines.join('\n') + '\n')
+}
+
+/** The refusal (docs/phase-40-plan.md §VA item 3): a wrong keymap is worse than none, so a
+ * low-confidence detection stops here — but it must leave the user ONE copy-paste from success,
+ * not with a research project. So it quotes the measured confidence, the whole partial table, and
+ * the original command line with a `--root` derived from the strongest low partial appended. */
+function keymapRefusal(argv, sampleId, pitch) {
+  const lines = [
+    `pitch detection is not confident enough to root a keymap on "${sampleId}" — refusing rather than minting six lanes of wrong tuning.`,
+    '',
+    formatPitchLine(pitch),
+    '',
+    pitchBodyNote(pitch),
+    formatPartials(pitch.partials),
+    '',
+  ]
+  if (pitch.suggestedRootNote) {
+    lines.push(
+      `The lowest strong partial is ${pitch.suggestedRootHz.toFixed(1)} Hz = ${pitch.suggestedRootNote}, which is usually where a struck sound's perceived pitch sits.`,
+      `If the table agrees with you, state the root and re-run — this is a first-class path, not a workaround:`,
+      '',
+      `  beat keymap ${argv.join(' ')} --root ${pitch.suggestedRootNote}`,
+      '',
+    )
+  }
+  lines.push(`Or pass --force to build the keymap on the ${pitch.level}-confidence detection above as-is.`)
+  return lines.join('\n')
+}
+
+function keymapCmd(argv) {
+  const VALUE_FLAGS = new Set(['--scale', '--from', '--to', '--root', '--key', '--gain'])
+  const flag = (name) => {
+    const i = argv.indexOf(name)
+    return i !== -1 ? argv[i + 1] : undefined
+  }
+  const positionals = argv.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]))
+  const [file, track, sampleId] = positionals
+  const scale = flag('--scale')
+  const from = flag('--from')
+  const to = flag('--to')
+  if (!file || !track || !sampleId || !scale || !from || !to) {
+    throw new BeatEditError(
+      'keymap needs <file> <track> <sample-id> --scale <name> --from <note> --to <note> [--root <note>] [--key <note>] [--gain dB]\n' +
+      `  e.g. beat keymap song.beat bells bell_a --scale minorPentatonic --from a5 --to a6 --root a6\n` +
+      `  scale names: ${SCALE_NAMES.join(', ')}`,
+    )
+  }
+  const fromMidi = noteToMidi(from)
+  const toMidi = noteToMidi(to)
+  // The scale's root defaults to --from's pitch class, which is what "--from a5 --to a6 --scale
+  // minorPentatonic" plainly means; --key overrides it for spans that don't start on the root.
+  const scaleRootMidi = flag('--key') !== undefined ? parseKeyNote(flag('--key')) : fromMidi
+  const gainDb = flag('--gain') !== undefined ? Number(flag('--gain')) : 0
+
+  const before = readDoc(file)
+  let rootMidi
+  let rootSource
+  const rootFlag = flag('--root')
+  if (rootFlag !== undefined) {
+    rootMidi = noteToMidi(rootFlag)
+    rootSource = `--root ${rootFlag} (stated, not detected)`
+  } else {
+    const { channels, sampleRate } = readSampleAudio(file, before, sampleId)
+    const pitch = detectPitch(channels, sampleRate)
+    if (pitch.hz === null || (pitch.confidence < PITCH_CONFIDENCE_MEDIUM && !argv.includes('--force'))) {
+      throw new BeatEditError(keymapRefusal(argv, sampleId, pitch))
+    }
+    rootMidi = pitch.midi
+    rootSource = `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)})`
+  }
+
+  // --dry-run runs the REAL build and simply doesn't write it. Computing the plan alone would skip
+  // buildKeymap's track/sample checks, so a dry run against a typo'd track or an unregistered
+  // sample printed a confident lane list for an edit that could never apply — a dry run that lies
+  // about succeeding is worse than no dry run at all.
+  const dryRun = argv.includes('--dry-run')
+  const { doc, plan, added, rebacked } = buildKeymap(before, track, sampleId, { rootMidi, scaleRootMidi, scale, fromMidi, toMidi, gainDb })
+  if (!dryRun) writeDoc(file, before, doc)
+  process.stdout.write(
+    `keymap${dryRun ? ' (dry run)' : ''}: ${plan.length} lane${plan.length === 1 ? '' : 's'} on ${track} backed by ${sampleId} — ${scale} in ${pitchClassName(scaleRootMidi)}, ${midiToNote(fromMidi)}..${midiToNote(toMidi)}\n` +
+    `root ${midiToNote(rootMidi)}: ${rootSource}\n` +
+    plan.map((l) => `  lane ${l.name} sample ${sampleId} ${formatNumber(gainDb)} ${formatNumber(l.tune)}\n`).join('') +
+    (dryRun
+      ? `nothing written (--dry-run) — ${added.length} lane${added.length === 1 ? '' : 's'} would be added, ${rebacked.length} re-backed\n`
+      : (added.length > 0 ? `added ${added.length}: ${added.join(', ')}\n` : '') +
+        (rebacked.length > 0 ? `re-backed ${rebacked.length} existing lane${rebacked.length === 1 ? '' : 's'}: ${rebacked.join(', ')}\n` : '') +
+        `play it: beat add-hit ${file} ${track} ${plan[0].name} 0 0.8\n`),
+  )
+}
+
+function audioPitchCmd(argv) {
+  const VALUE_FLAGS = new Set(['--to', '--root', '--semitones'])
+  const flag = (name) => {
+    const i = argv.indexOf(name)
+    return i !== -1 ? argv[i + 1] : undefined
+  }
+  const positionals = argv.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]))
+  const [file, trackId, clipId] = positionals
+  const to = flag('--to')
+  const semitonesFlag = flag('--semitones')
+  if (!file || !trackId || !clipId || (to === undefined && semitonesFlag === undefined)) {
+    throw new BeatEditError(
+      'audio-pitch needs <file> <track> <clip-id> and either --to <note> (detect, then move to that note) or --semitones <n> (shift by an interval)\n' +
+      '  e.g. beat audio-pitch song.beat pad padbed --to g4        (detects the region\'s pitch)\n' +
+      '       beat audio-pitch song.beat pad padbed --semitones -1  (no detection — the honest option for a chord)',
+    )
+  }
+  const before = readDoc(file)
+  const track = before.tracks.find((t) => t.id === trackId)
+  if (!track) throw new BeatEditError(`no track "${trackId}" (have: ${before.tracks.map((t) => t.id).join(', ') || 'none'})`)
+  const clip = track.clips.find((c) => c.id === clipId)
+  if (!clip) throw new BeatEditError(`no clip "${clipId}" on track "${trackId}" (have: ${track.clips.map((c) => c.id).join(', ') || 'none'})`)
+  if (!clip.audio) throw new BeatEditError(`clip "${clipId}" on track "${trackId}" is not an audio-region clip — audio-pitch repitches audio regions (see beat audio-clip)`)
+
+  let semitones
+  let how
+  if (semitonesFlag !== undefined) {
+    semitones = Number(semitonesFlag)
+    if (!Number.isFinite(semitones)) throw new BeatEditError(`--semitones must be a number, got "${semitonesFlag}"`)
+    how = `--semitones ${formatNumber(semitones)} (stated — no pitch detection)`
+  } else {
+    const targetMidi = noteToMidi(to)
+    const rootFlag = flag('--root')
+    let rootMidi
+    if (rootFlag !== undefined) {
+      rootMidi = noteToMidi(rootFlag)
+      how = `--root ${rootFlag} -> ${to} (root stated, not detected)`
+    } else {
+      const { channels, sampleRate } = readSampleAudio(file, before, clip.audio.media)
+      // Detect over the SPAN THAT PLAYS, not the whole file — the region's in/out is the sound the
+      // user is repitching, and a file can hold much more than the region uses.
+      const a = Math.max(0, Math.round(clip.audio.in * sampleRate))
+      const b = Math.min(channels[0].length, Math.round(clip.audio.out * sampleRate))
+      const pitch = detectPitch(channels.map((ch) => ch.slice(a, b)), sampleRate)
+      if (pitch.hz === null || (pitch.confidence < PITCH_CONFIDENCE_MEDIUM && !argv.includes('--force'))) {
+        throw new BeatEditError(
+          `pitch detection is not confident enough to repitch "${clipId}" to ${to} — refusing rather than guessing.\n\n` +
+          formatPitchLine(pitch) + '\n\n' +
+          pitchBodyNote(pitch) + '\n' + formatPartials(pitch.partials) + '\n\n' +
+          (pitch.suggestedRootNote ? `State the region's current pitch and re-run:\n\n  beat audio-pitch ${argv.join(' ')} --root ${pitch.suggestedRootNote}\n\n` : '') +
+          `A chord or a pad has no single pitch to detect — for those, shift by an interval instead:\n\n  beat audio-pitch ${file} ${trackId} ${clipId} --semitones <n>\n\n` +
+          `Or pass --force to accept the ${pitch.level}-confidence detection above.`,
+        )
+      }
+      rootMidi = pitch.midi
+      how = `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)}) -> ${to}`
+    }
+    semitones = targetMidi - rootMidi
+  }
+  const rate = rateForPitch(0, semitones)
+  // warp first: setValue normalizes rate back to 1 while warp isn't 'repitch' (one canonical form
+  // per state, D4), so setting rate first would be undone.
+  let doc = setValue(before, `${trackId}.clip.${clipId}.audio.warp`, 'repitch')
+  doc = setValue(doc, `${trackId}.clip.${clipId}.audio.rate`, String(rate))
+  writeDoc(file, before, doc)
+  process.stdout.write(
+    `audio-pitch: ${trackId}.${clipId} warp repitch, rate ${formatNumber(rate)} (${semitones >= 0 ? '+' : ''}${formatNumber(semitones)} semitones)\n` +
+    `${how}\n` +
+    `repitch is variable-speed: the region now plays ${rate > 1 ? 'faster and shorter' : rate < 1 ? 'slower and longer' : 'unchanged'} — check its in/out span if the timing matters.\n`,
+  )
+}
+
+// ==== end Phase 40 Stream VA ====
+
 // v0.10 effect-chain commands (docs/phase-22-stream-aa.md). Add/remove/move change the chain's
 // LIST shape/order, same reason clip/scene/song get their own commands instead of overloading
 // `beat set`; bypass fits set's plain path=value grammar too (also usable as
@@ -2622,6 +2922,17 @@ async function main() {
     case 'lane':
       laneCmd(rest)
       break
+    // ==== Phase 40 Stream VA ====
+    case 'sample-info':
+      sampleInfoCmd(rest)
+      break
+    case 'keymap':
+      keymapCmd(rest)
+      break
+    case 'audio-pitch':
+      audioPitchCmd(rest)
+      break
+    // ==== end Phase 40 Stream VA ====
     case 'effect-add':
       effectAddCmd(rest)
       break

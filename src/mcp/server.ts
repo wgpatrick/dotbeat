@@ -93,6 +93,11 @@ import { validateAnalysisArtifact, buildSkeleton, formatSkeletonReport } from '.
 // ==== Phase 38 Stream SB begin ====
 import { runAnalysis, sidecarDoctor } from '../analysis/index.js'
 // ==== Phase 38 Stream SB end ====
+// ==== Phase 40 Stream VA ====
+// Pitch-aware sampling (docs/phase-40-plan.md §VA). Pure TS, no Python (decisions.md D20).
+import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM, type PitchDetection } from '../analysis/index.js'
+import { buildKeymap, noteToMidi, midiToNote, rateForPitch } from '../core/keymap.js'
+// ==== end Phase 40 Stream VA ====
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
 import { varyTrack, varyFeel, varyAutomation, VARY_GROUPS } from '../vary/vary.js'
@@ -127,6 +132,39 @@ interface ToolDef {
   inputSchema: Record<string, unknown>
   handler: (args: Record<string, unknown>) => Promise<string> | string
 }
+
+// ==== Phase 40 Stream VA ====
+/** Decodes a REGISTERED sample's audio — the MCP twin of the CLI's readSampleAudio. */
+function readSampleAudioMcp(file: string, doc: BeatDocument, sampleId: string): { path: string; channels: Float64Array[]; sampleRate: number } {
+  const entry = doc.media.find((m) => m.id === sampleId)
+  if (!entry) throw new Error(`no sample "${sampleId}" in the media block (have: ${doc.media.map((m) => m.id).join(', ') || 'none'}) — register it with beat_sample first`)
+  const beatDir = dirname(pathResolve(file))
+  const abs = pathResolve(beatDir, entry.path)
+  if (!existsSync(abs)) throw new Error(`sample "${sampleId}" is registered at ${entry.path}, but there is no file there (relative to ${beatDir})`)
+  const { channels, sampleRate } = decodeWav(readFileSync(abs))
+  return { path: entry.path, channels, sampleRate }
+}
+
+/** The low-confidence refusal, in MCP terms. Deliberately NOT the CLI's string: an agent calling a
+ * tool needs the ARGUMENT to add (`root: "a6"`), not a shell line to paste. Same contract though —
+ * quote the measured confidence and the whole partial table, and name the one-argument fix, because
+ * a wrong keymap is worse than none and a bare "low confidence" leaves the caller stuck. */
+function pitchRefusalMcp(what: string, pitch: PitchDetection, fix: string): string {
+  return [
+    `pitch detection is not confident enough to ${what} — refusing rather than building a wrong tuning.`,
+    '',
+    formatPitchLine(pitch),
+    '',
+    `partials (measured over the body, ${pitch.analyzedFromSeconds.toFixed(3)}-${pitch.analyzedToSeconds.toFixed(3)}s of ${pitch.durationSeconds.toFixed(2)}s):`,
+    formatPartials(pitch.partials),
+    '',
+    pitch.suggestedRootNote
+      ? `The lowest strong partial is ${pitch.suggestedRootHz!.toFixed(1)} Hz = ${pitch.suggestedRootNote}, which is usually where a struck sound's perceived pitch sits. Read the table, decide the root, and ${fix} (e.g. "${pitch.suggestedRootNote}") — stating the root is a first-class path, not a workaround: bells, plucks and found percussion are exactly where detection is weakest.`
+      : `Read the table and ${fix}.`,
+    `Or pass force: true to accept the ${pitch.level}-confidence detection above as-is.`,
+  ].join('\n')
+}
+// ==== end Phase 40 Stream VA ====
 
 const str = (args: Record<string, unknown>, key: string): string => {
   const v = args[key]
@@ -1574,6 +1612,183 @@ const TOOLS: ToolDef[] = [
     },
   },
   // ==== Phase 38 Stream SA end ====
+  // ==== Phase 40 Stream VA ====
+  {
+    name: 'beat_sample_info',
+    description:
+      'What IS this registered sample: its detected PITCH (fundamental in Hz, note name, cents off, fractional MIDI), a confidence read, duration/peak/centroid, and — the part to actually read — the TOP-PARTIALS TABLE (frequency, level relative to the strongest, and ratio to the lowest strong partial). Pure TS: no Python, no venv, works everywhere. dotbeat can play a sample at a tune offset but had no idea what pitch a sample IS; this is that missing middle, and it is what beat_keymap roots a pitch-map on. READ THE TABLE, NOT JUST THE f0: two strong partials a semitone apart (ratio ~1.06) will beat against each other into an unsteady, detuned ring — that reading alone is what decided the recipe-song\'s bell choice; a ratio like 1.80 means an inharmonic clang whose "pitch" is a judgement call. LOW confidence is a real, useful answer rather than a failure — bells, plucks and found percussion usually read low, because their perceived pitch can be a strike tone that is not in the spectrum at all. When it does, use the table to pick a root yourself and pass it to beat_keymap as `root`.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'the .beat project file' },
+        sample_id: { type: 'string', description: 'a media id already in the project (register with beat_sample)' },
+        partials: { type: 'number', description: 'how many partials the table carries (default 8)' },
+      },
+      required: ['file', 'sample_id'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const sampleId = str(args, 'sample_id')
+      const doc = parse(readFileSync(file, 'utf8'))
+      const { path, channels, sampleRate } = readSampleAudioMcp(file, doc, sampleId)
+      const pitch = detectPitch(channels, sampleRate, typeof args.partials === 'number' ? { partialCount: args.partials } : {})
+      const m = analyze(channels, sampleRate)
+      const out = [
+        `${sampleId}: ${m.durationSeconds.toFixed(2)}s, ${m.channels}ch @ ${m.sampleRate} Hz  ${path}`,
+        formatPitchLine(pitch),
+        `peak       ${m.samplePeakDbfs.toFixed(1)} dBFS sample, ${m.truePeakDbtp.toFixed(1)} dBTP true`,
+        `centroid   ${m.spectral.centroidHz.toFixed(0)} Hz`,
+        '',
+        `partials (measured over the body, ${pitch.analyzedFromSeconds.toFixed(3)}-${pitch.analyzedToSeconds.toFixed(3)}s of ${pitch.durationSeconds.toFixed(2)}s):`,
+        formatPartials(pitch.partials),
+      ]
+      const beating = pitch.partials.find((q) => q.relDb >= -6 && Math.abs(1200 * Math.log2(q.ratio)) > 20 && Math.abs(1200 * Math.log2(q.ratio)) < 250)
+      if (beating) {
+        out.push('', `note: two strong partials sit ${Math.abs(1200 * Math.log2(beating.ratio)).toFixed(0)} cents apart (x${beating.ratio.toFixed(3)}) — this close, they beat against each other: an unsteady, detuned ring rather than one clear pitch.`)
+      }
+      if (pitch.level === 'low' && pitch.suggestedRootNote) {
+        out.push('', `LOW confidence is a real answer here, not a failure. Read the table and decide the root yourself, then pass it to beat_keymap as root: "${pitch.suggestedRootNote}" (the lowest strong partial).`)
+      }
+      return out.join('\n')
+    },
+  },
+  {
+    name: 'beat_keymap',
+    description:
+      'Pitch-map ONE sample across a scale: mints one declared drum lane per scale degree, named by note (a5, c6, …), each backed by the same sample with the `tune` that lands it on that pitch — a melodic instrument out of a single one-shot, in one call, whose output is still just N diffable lines of text. The tunes are computed from the sample\'s DETECTED fundamental, so they are right even when the sound came back between notes (fractional tunes are normal and correct, not an error). Pass `root` to STATE the sample\'s pitch instead of detecting it — a first-class path, not a fallback: bells, plucks and found percussion are exactly where detection is weakest, so expect to use it (get a root from beat_sample_info\'s partial table). REFUSES on a low-confidence detection, quoting the partials and a suggested root, rather than minting a wrong tuning; force: true accepts the detection anyway. Existing lanes of the same name are re-backed in place, so re-running with a better root is safe and keeps any hits. A lane\'s tune is limited to -24..24 semitones, so a span more than two octaves from the root is refused, naming what IS reachable. Scales: the same vocabulary as beat_fit_scale.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'the .beat project file' },
+        track: { type: 'string', description: 'a drums track id (lanes live on drum tracks)' },
+        sample_id: { type: 'string', description: 'a media id already in the project' },
+        scale: { type: 'string', description: `scale name — one of: ${SCALE_NAMES.join(', ')}` },
+        from: { type: 'string', description: 'lowest note of the span, scientific pitch e.g. "a5" (c4 = middle C)' },
+        to: { type: 'string', description: 'highest note of the span, e.g. "a6"' },
+        root: { type: 'string', description: 'the SAMPLE\'s own pitch, e.g. "a6" — states the root instead of detecting it' },
+        key: { type: 'string', description: 'the scale\'s root note or pitch class, e.g. "a" or "a4" (default: from\'s pitch class)' },
+        gain_db: { type: 'number', description: 'lane gain in dB for every minted lane (default 0)' },
+        force: { type: 'boolean', description: 'build on a low-confidence detection anyway' },
+        dry_run: { type: 'boolean', description: 'report the lanes without writing the file' },
+      },
+      required: ['file', 'track', 'sample_id', 'scale', 'from', 'to'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const track = str(args, 'track')
+      const sampleId = str(args, 'sample_id')
+      const scale = str(args, 'scale')
+      const fromMidi = noteToMidi(str(args, 'from'))
+      const toMidi = noteToMidi(str(args, 'to'))
+      const keyArg = typeof args.key === 'string' ? args.key : undefined
+      const scaleRootMidi = keyArg === undefined ? fromMidi : noteToMidi(/^[a-gA-G][#sb]?$/.test(keyArg) ? `${keyArg}4` : keyArg)
+      const gainDb = typeof args.gain_db === 'number' ? args.gain_db : 0
+      const before = parse(readFileSync(file, 'utf8'))
+
+      let rootMidi: number
+      let rootSource: string
+      if (typeof args.root === 'string' && args.root !== '') {
+        rootMidi = noteToMidi(args.root)
+        rootSource = `root ${args.root} (stated, not detected)`
+      } else {
+        const { channels, sampleRate } = readSampleAudioMcp(file, before, sampleId)
+        const pitch = detectPitch(channels, sampleRate)
+        if (pitch.hz === null || pitch.midi === null || (pitch.confidence < PITCH_CONFIDENCE_MEDIUM && args.force !== true)) {
+          throw new Error(pitchRefusalMcp(`root a keymap on "${sampleId}"`, pitch, 'call beat_keymap again with a `root` argument'))
+        }
+        rootMidi = pitch.midi
+        rootSource = `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)})`
+      }
+
+      const opts = { rootMidi, scaleRootMidi, scale, fromMidi, toMidi, gainDb }
+      const { doc, plan, added, rebacked } = buildKeymap(before, track, sampleId, opts)
+      const header =
+        `keymap${args.dry_run === true ? ' (dry run)' : ''}: ${plan.length} lane${plan.length === 1 ? '' : 's'} on ${track} backed by ${sampleId} — ` +
+        `${scale} in ${midiToNote(scaleRootMidi).replace(/-?\d+$/, '')}, ${midiToNote(fromMidi)}..${midiToNote(toMidi)}\n` +
+        `root ${midiToNote(rootMidi)}: ${rootSource}\n` +
+        plan.map((l) => `  lane ${l.name} sample ${sampleId} ${formatNumber(gainDb)} ${formatNumber(l.tune)}`).join('\n')
+      if (args.dry_run === true) return `${header}\nnothing written (dry_run)`
+      writeFileSync(file, serialize(doc))
+      return (
+        `${header}\n` +
+        (added.length > 0 ? `added ${added.length}: ${added.join(', ')}\n` : '') +
+        (rebacked.length > 0 ? `re-backed ${rebacked.length} existing lane${rebacked.length === 1 ? '' : 's'}: ${rebacked.join(', ')}\n` : '') +
+        formatDiff(diffDocuments(before, doc))
+      )
+    },
+  },
+  {
+    name: 'beat_audio_pitch',
+    description:
+      'Repitch an audio-region clip by computing its warp rate for you (sets warp=repitch and the rate). Either `to` (detect the region\'s fundamental and move it to that note) or `semitones` (shift by an interval with no detection at all). `root` states the region\'s current pitch instead of detecting it. A CHORD or pad has no single pitch to detect and will be refused for `to` — use `semitones` there, which is the honest option. Repitch is variable-speed playback: length changes with pitch, so check the region\'s in/out span if timing matters. Detection runs over the span that actually plays (the region\'s in/out), not the whole file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string', description: 'an audio-kind track id' },
+        clip: { type: 'string', description: 'the audio-region clip id' },
+        to: { type: 'string', description: 'target note, e.g. "g4" — detects the region\'s current pitch' },
+        root: { type: 'string', description: 'the region\'s CURRENT pitch, e.g. "a4" — states it instead of detecting' },
+        semitones: { type: 'number', description: 'shift by this interval instead (no detection; the honest option for a chord)' },
+        force: { type: 'boolean', description: 'accept a low-confidence detection anyway' },
+      },
+      required: ['file', 'track', 'clip'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const trackId = str(args, 'track')
+      const clipId = str(args, 'clip')
+      const before = parse(readFileSync(file, 'utf8'))
+      const track = before.tracks.find((t) => t.id === trackId)
+      if (!track) throw new Error(`no track "${trackId}" (have: ${before.tracks.map((t) => t.id).join(', ') || 'none'})`)
+      const clip = track.clips.find((c) => c.id === clipId)
+      if (!clip) throw new Error(`no clip "${clipId}" on track "${trackId}" (have: ${track.clips.map((c) => c.id).join(', ') || 'none'})`)
+      if (!clip.audio) throw new Error(`clip "${clipId}" on track "${trackId}" is not an audio-region clip — beat_audio_pitch repitches audio regions (see beat_audio_clip)`)
+
+      let semitones: number
+      let how: string
+      if (typeof args.semitones === 'number') {
+        semitones = args.semitones
+        how = `semitones ${formatNumber(semitones)} (stated — no pitch detection)`
+      } else if (typeof args.to === 'string' && args.to !== '') {
+        const targetMidi = noteToMidi(args.to)
+        let rootMidi: number
+        if (typeof args.root === 'string' && args.root !== '') {
+          rootMidi = noteToMidi(args.root)
+          how = `root ${args.root} -> ${args.to} (root stated, not detected)`
+        } else {
+          const { channels, sampleRate } = readSampleAudioMcp(file, before, clip.audio.media)
+          const a = Math.max(0, Math.round(clip.audio.in * sampleRate))
+          const b = Math.min(channels[0]!.length, Math.round(clip.audio.out * sampleRate))
+          const pitch = detectPitch(channels.map((ch) => ch.slice(a, b)), sampleRate)
+          if (pitch.hz === null || pitch.midi === null || (pitch.confidence < PITCH_CONFIDENCE_MEDIUM && args.force !== true)) {
+            throw new Error(
+              pitchRefusalMcp(`repitch "${clipId}" to ${args.to}`, pitch, 'call beat_audio_pitch again with a `root` argument') +
+              '\nA chord or a pad has no single pitch to detect — for those, pass `semitones` (an interval) instead of `to`.',
+            )
+          }
+          rootMidi = pitch.midi
+          how = `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)}) -> ${args.to}`
+        }
+        semitones = targetMidi - rootMidi
+      } else {
+        throw new Error('beat_audio_pitch needs either `to` (a target note, detected) or `semitones` (an interval, no detection)')
+      }
+      const rate = rateForPitch(0, semitones)
+      // warp first: setValue normalizes rate back to 1 while warp isn't 'repitch' (D4), so setting
+      // rate first would be undone.
+      let doc = setValue(before, `${trackId}.clip.${clipId}.audio.warp`, 'repitch')
+      doc = setValue(doc, `${trackId}.clip.${clipId}.audio.rate`, String(rate))
+      writeFileSync(file, serialize(doc))
+      return (
+        `audio-pitch: ${trackId}.${clipId} warp repitch, rate ${formatNumber(rate)} (${semitones >= 0 ? '+' : ''}${formatNumber(semitones)} semitones)\n` +
+        `${how}\n` +
+        `repitch is variable-speed: the region now plays ${rate > 1 ? 'faster and shorter' : rate < 1 ? 'slower and longer' : 'unchanged'} — check its in/out span if the timing matters.\n` +
+        formatDiff(diffDocuments(before, doc))
+      )
+    },
+  },
+  // ==== end Phase 40 Stream VA ====
   {
     name: 'beat_lane',
     description:
