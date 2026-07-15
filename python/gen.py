@@ -63,6 +63,24 @@ def log(*parts):
     print(*parts, file=sys.stderr, flush=True)
 
 
+class _StdoutToStderr:
+    """stable_audio_tools itself uses bare `print()` (stdout) for import-time warnings (e.g.
+    transformer.py's "flash_attn not installed") and assorted model-loading chatter — outside
+    gen.py's control, but still enough to break the "stdout is exactly one JSON line" contract.
+    Redirect stdout to stderr for the third-party import/inference call, then restore it before the
+    real metadata line is printed (confirmed owner-side 2026-07-14 via `beat source gen`, which
+    parses stdout strictly)."""
+
+    def __enter__(self):
+        self._real_stdout = sys.stdout
+        sys.stdout = sys.stderr
+        return self
+
+    def __exit__(self, *exc):
+        sys.stdout = self._real_stdout
+        return False
+
+
 def write_stereo_wav(output_path, samples_l, samples_r):
     """Write two float channels (each in [-1, 1]) as a 44.1 kHz stereo 16-bit PCM WAV via stdlib
     `wave`. Interleaves L/R and clamps before quantizing to int16 — the same 16-bit format the rest
@@ -136,13 +154,12 @@ def run_stub(prompt, seconds, seed, output_path):
 # ---------------------------------------------------------------------------------------------
 # stableaudio backend — Stable Audio Open 1.0 (Stability AI), run LOCALLY (research 103). Lazily
 # imports stable-audio-tools + torch; generates from the prompt/seconds/seed and writes a 44.1 kHz
-# stereo WAV. OWNER-SIDE / UNVERIFIED: torch + the ~couple-GB HF weights are absent (and egress is
-# blocked) in this container, so this path cannot run or be tested here — it is written to be
-# obviously correct and is validated owner-side per python/README.md. The exact HF weights repo id
-# and the stable-audio-tools API surface are PLACEHOLDERS to confirm owner-side.
+# stereo WAV. Confirmed owner-side 2026-07-14 end-to-end (venv build, HF auth, a real generation
+# played back and sanity-checked: non-silent, non-clipping, correct duration) — see
+# python/requirements-stableaudio.txt for the three real install-time bugs found and fixed along
+# the way (numpy/PyWavelets ABI mismatch, an undeclared pytorch_lightning import-time dependency).
 # ---------------------------------------------------------------------------------------------
 
-# Placeholder HF weights repo id — MUST be confirmed owner-side (HF unreachable here).
 STABLEAUDIO_MODEL_ID = "stabilityai/stable-audio-open-1.0"
 
 
@@ -158,35 +175,36 @@ def run_stableaudio(prompt, seconds, seed, output_path):
 
     log("stableaudio: loading torch + stable-audio-tools (first run downloads the model weights)...")
     try:
-        import torch
-        from stable_audio_tools import get_pretrained_model
-        from stable_audio_tools.inference.generation import generate_diffusion_cond
+        with _StdoutToStderr():
+            import torch
+            from stable_audio_tools import get_pretrained_model
+            from stable_audio_tools.inference.generation import generate_diffusion_cond
     except ImportError as e:
         raise DependencyError(
             f"Stable Audio Open backend unavailable ({e}).",
             BACKEND_REQUIREMENTS["stableaudio"],
         )
 
-    # OWNER-SIDE / UNVERIFIED below this line: the stable-audio-tools call shapes are the documented
-    # 1.0 API as of research 103 but were not runnable here — confirm against the installed version.
+    # Confirmed owner-side 2026-07-14 against the installed stable-audio-tools==0.0.20 (torch<3,>=2.0).
     try:
         device = "cuda" if _cuda_available() else "cpu"
         log(f"stableaudio: running on {device}")
         torch.manual_seed(seed)
 
-        model, model_config = get_pretrained_model(STABLEAUDIO_MODEL_ID)
-        sample_rate = model_config["sample_rate"]
-        sample_size = int(seconds * sample_rate)
-        model = model.to(device)
+        with _StdoutToStderr():
+            model, model_config = get_pretrained_model(STABLEAUDIO_MODEL_ID)
+            sample_rate = model_config["sample_rate"]
+            sample_size = int(seconds * sample_rate)
+            model = model.to(device)
 
-        conditioning = [{"prompt": prompt, "seconds_start": 0, "seconds_total": seconds}]
-        output = generate_diffusion_cond(
-            model,
-            conditioning=conditioning,
-            sample_size=sample_size,
-            device=device,
-            seed=seed,
-        )
+            conditioning = [{"prompt": prompt, "seconds_start": 0, "seconds_total": seconds}]
+            output = generate_diffusion_cond(
+                model,
+                conditioning=conditioning,
+                sample_size=sample_size,
+                device=device,
+                seed=seed,
+            )
 
         # output: a torch tensor shaped [batch, channels, samples] in [-1, 1]. Take batch 0, force
         # stereo, resample to 44.1 kHz if the model's native rate differs, and hand two float lists

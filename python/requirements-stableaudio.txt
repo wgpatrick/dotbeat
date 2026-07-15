@@ -16,16 +16,32 @@
 #   python/.venv/bin/pip install -r python/requirements-stableaudio.txt
 #   beat source gen --doctor        # confirm stableaudio reports ok:true
 #
-# VERSION PINS ARE PLACEHOLDERS — CONFIRM OWNER-SIDE (GitHub/HF/PyPI unreachable from this build
-# container, mirroring the Phase 38 beat_this commit-sha caveat). Re-pin against the installed,
-# working versions before betting on them.
+# Pins confirmed owner-side 2026-07-14 (PyPI reachable from the owner machine). stable-audio-tools
+# 0.0.16..0.0.19 pin an old exact `pandas==2.0.2` that has no wheel for Python >=3.12 and fails to
+# build from source (missing pkg_resources under modern setuptools) — 0.0.20 is the first release
+# that both fixes this AND declares its real constraint: requires-python ">=3.10,<3.11". There is no
+# version of stable-audio-tools installable on this machine's system Python (3.13); python/.venv
+# MUST be built with a 3.10 interpreter (`brew install python@3.10`) for this backend to import.
 torch>=2.0,<3
-stable-audio-tools==0.0.16
+stable-audio-tools==0.0.20
 
-# HF weights repo: PLACEHOLDER `stabilityai/stable-audio-open-1.0` (the presumed id, hard-coded as
-# STABLEAUDIO_MODEL_ID in python/gen.py) — MUST be confirmed owner-side against
-# https://huggingface.co/stabilityai/stable-audio-open-1.0 (HF unreachable here). The weights are
-# gated on HF: accept the model license and `huggingface-cli login` before the first run.
+# stable-audio-tools==0.0.20 itself pins PyWavelets==1.4.1, which predates numpy 2.0 and is
+# ABI-incompatible with it ("numpy.dtype size changed" ImportError at runtime, confirmed
+# owner-side 2026-07-14 — install order matters, this line must come AFTER stable-audio-tools so
+# pip's resolver doesn't silently keep the broken pin). PyWavelets does not otherwise pin numpy, so
+# raising it above 1.6 the moment this repo's numpy is 2.x is always safe.
+PyWavelets>=1.6
+
+# stable_audio_tools/models/lora/callbacks.py unconditionally `import pytorch_lightning` — reached
+# at IMPORT time by get_pretrained_model()'s ordinary inference path (dit.py -> lora/__init__.py ->
+# callbacks.py), not just LoRA training, even though pytorch_lightning is missing from
+# stable-audio-tools' own declared dependencies (confirmed owner-side 2026-07-14: get_pretrained_model
+# raises "No module named 'pytorch_lightning'" without this).
+pytorch-lightning
+
+# HF weights repo `stabilityai/stable-audio-open-1.0` confirmed owner-side 2026-07-14 via
+# https://huggingface.co/api/models/stabilityai/stable-audio-open-1.0 (gated: "auto"). Accept the
+# model license on that page and `huggingface-cli login` before the first real run.
 #
 # LICENSE — Stability AI Community License (https://stability.ai/community-license-agreement):
 #   * Research + non-commercial use: free.

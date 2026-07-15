@@ -20,11 +20,18 @@ an actionable error, never a stack trace.
 ## Install (owner machine)
 
 pip is intentionally blocked in the dev/CI container, so the real backends are installed and
-validated **on your own machine**. dotbeat auto-discovers a venv at `python/.venv`:
+validated **on your own machine**. dotbeat auto-discovers a venv at `python/.venv`.
+
+**Build the venv on Python 3.10, not your newest system Python.** `stable-audio-tools` (the
+`beat source gen` backend) declares `requires-python >=3.10,<3.11` — on 3.12+ every published
+version either refuses to install or fails building a wheel. Beat This has no such ceiling, so one
+3.10 venv cleanly serves both sidecars (validated 2026-07-14):
 
 ```sh
-python3 -m venv python/.venv
+brew install python@3.10           # macOS; any 3.10 interpreter works
+/opt/homebrew/bin/python3.10 -m venv python/.venv
 python/.venv/bin/pip install -r python/requirements-beatthis.txt
+python/.venv/bin/pip install -r python/requirements-stableaudio.txt
 ```
 
 That's it — zero config after. `beat analyze` resolves its interpreter in this order:
@@ -36,10 +43,10 @@ That's it — zero config after. `beat analyze` resolves its interpreter in this
 The resolved interpreter path is printed by `beat analyze --doctor` and in every degrade message,
 so you always know which Python ran.
 
-> **`requirements-beatthis.txt` pins `beat_this` to a git commit sha that is a placeholder** (the
-> build container can't reach GitHub to verify it). Confirm/replace it against
-> <https://github.com/CPJKU/beat_this> before your first real run, then re-run
-> `beat analyze --doctor`.
+> All pins in both requirements files were confirmed owner-side on 2026-07-14 against live
+> PyPI/GitHub/HF, and each non-obvious line (the `soundfile` fallback Beat This silently needs, the
+> `PyWavelets`/numpy-2 ABI fix, the undeclared `pytorch_lightning` import) carries a comment
+> explaining exactly what breaks without it — read those before "simplifying" the files.
 
 ## Owner-side validation checklist
 
@@ -79,21 +86,34 @@ sidecar, and rollback — `gen.py` knows nothing about dotbeat's media block. Se
   seed-derived 44.1 kHz stereo 16-bit WAV of the requested duration (byte-identical for a fixed
   seed+seconds — it does not interpret the prompt, it just proves the pipeline). The `stableaudio`
   backend lazily imports `stable_audio_tools` + `torch` and runs **Stable Audio Open 1.0** locally.
-- `requirements-stableaudio.txt` — `torch` + `stable-audio-tools`. **Version pins and the HF weights
-  repo id (`stabilityai/stable-audio-open-1.0`) are PLACEHOLDERS to confirm owner-side** (HF/PyPI
-  unreachable from the build container, mirroring `requirements-beatthis.txt`'s commit-sha caveat).
+- `requirements-stableaudio.txt` — `torch` + `stable-audio-tools` plus two pins that fix real
+  breakage (`PyWavelets>=1.6` for the numpy-2 ABI, `pytorch-lightning` for an undeclared import in
+  stable-audio-tools' inference path). All pins and the HF weights repo id
+  (`stabilityai/stable-audio-open-1.0`, gated) confirmed owner-side 2026-07-14.
 
 ### Install + validate `beat source gen` (owner machine)
 
-Same auto-discovered `python/.venv`; the model weights are gated on Hugging Face (accept the license
-and `huggingface-cli login` first) and are ~a couple GB, downloaded lazily on the first real run.
+Same auto-discovered `python/.venv` (built on **Python 3.10** — see Install above). The model
+weights are **gated on Hugging Face** and downloaded lazily on the first real run (~2 GB):
+
+1. While logged into your HF account, open
+   <https://huggingface.co/stabilityai/stable-audio-open-1.0> and accept the license
+   ("Agree and access repository").
+2. `python/.venv/bin/hf auth login` and paste a token from
+   <https://huggingface.co/settings/tokens> (read scope is enough).
 
 ```sh
-python3 -m venv python/.venv
 python/.venv/bin/pip install -r python/requirements-stableaudio.txt
 beat source gen --doctor                       # confirm stableaudio reports ok:true
 beat source gen song.beat pad "warm analog pad" --seconds 3 --seed 7   # a real one-shot
 ```
+
+Runtime expectations (measured 2026-07-14, M-series CPU, no CUDA): ~2 min per 3-second one-shot at
+the model's 250 diffusion steps — plan generation batches accordingly. Generation is deterministic
+for a fixed prompt/seed/seconds **on the same machine/torch build**: regenerating through
+`beat source gen` reproduces the registered file byte-for-byte (sha256-verified), which is what
+makes a fully-generated project a *recipe* — `examples/recipe-song/` is the worked proof.
+Cross-machine bit-reproducibility is not guaranteed (different BLAS/threading).
 
 `beat source gen … --backend stub` runs everywhere with zero packages (the CI/dev path) and writes
 a deterministic tone bed so the registration/provenance plumbing is exercised without the model.
