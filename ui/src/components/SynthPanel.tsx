@@ -23,6 +23,16 @@ import { onAnimationFrame } from '../audio/animationFrame'
 // this file is the one generic renderer. Every control POSTs `<track>.<key>` via /edit — a
 // one-line git diff per edit. ParamStatus/grading is intentionally absent.
 
+/** The inline "this control isn't doing anything right now, and here's why" hint, or null when the
+ * control is live. Shared by every spec.kind (knobs AND enums) so the LFO Hz-knob / sync-Rate-dropdown
+ * pair dim consistently — see synthParams.ts's ParamSpec.dimAtZero/dimUnless/dimIfBool. */
+function inactiveHintFor(p: BeatTrack['synth'], spec: ParamSpec): string | null {
+  if (spec.dimAtZero && Number(p[spec.key] ?? 0) === 0) return 'inactive at 0% — turn up to hear it'
+  if (spec.dimUnless && Number(p[spec.dimUnless.key] ?? 0) <= 0) return `inactive until ${spec.dimUnless.label} > 0`
+  if (spec.dimIfBool && (p[spec.dimIfBool.key] === true) === spec.dimIfBool.equals) return spec.dimIfBool.hint
+  return null
+}
+
 /** One control, dispatched by spec.kind. */
 function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec; trackIds: string[] }) {
   const p = track.synth
@@ -30,8 +40,12 @@ function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec;
 
   if (spec.kind === 'enum') {
     const value = String(p[spec.key] ?? spec.values?.[0] ?? '')
+    // An enum can be gated inactive too (LFO's tempo-sync Rate dropdown while Sync is off) — dim it
+    // and show the same style of inline hint the knobs use, but keep it interactive (matching the
+    // dimmed-knob precedent: you can still change a value that isn't currently driving the sound).
+    const enumHint = inactiveHintFor(p, spec)
     return (
-      <label className="param-enum" title={spec.hint}>
+      <label className={`param-enum ${enumHint ? 'param-inactive' : ''}`} title={enumHint ? `${spec.hint ? spec.hint + ' — ' : ''}${enumHint}` : spec.hint}>
         <span className="knob-label">{spec.label}</span>
         <select value={value} onChange={(ev) => postEdit(path, ev.target.value)}>
           {spec.values!.map((o) => (
@@ -40,6 +54,7 @@ function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec;
             </option>
           ))}
         </select>
+        {enumHint ? <span className="param-inactive-hint">{enumHint}</span> : null}
       </label>
     )
   }
@@ -80,12 +95,10 @@ function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec;
   // knob
   const value = Number(p[spec.key] ?? spec.min ?? 0)
   // Phase 31 Stream KD items 1/2 (pilots 90/91): a knob whose param currently has no audible effect
-  // gets a visual cue instead of silence — see synthParams.ts's ParamSpec.dimAtZero/dimUnless for
-  // the two gating shapes this covers (a self-zeroed effect Mix knob; the filter-envelope shape
-  // knobs gated by a separate Fenv amount knob).
-  let inactiveHint: string | null = null
-  if (spec.dimAtZero && value === 0) inactiveHint = 'inactive at 0% — turn up to hear it'
-  else if (spec.dimUnless && Number(p[spec.dimUnless.key] ?? 0) <= 0) inactiveHint = `inactive until ${spec.dimUnless.label} > 0`
+  // gets a visual cue instead of silence — see synthParams.ts's ParamSpec.dimAtZero/dimUnless/dimIfBool
+  // for the gating shapes this covers (a self-zeroed effect Mix knob; the filter-envelope shape knobs
+  // gated by a separate Fenv amount knob; the LFO Hz-rate knob gated by its Sync toggle).
+  const inactiveHint = inactiveHintFor(p, spec)
 
   const knob = (
     <Knob

@@ -1,7 +1,9 @@
 export * from './document.js'
 export * from './format.js'
+export { automationShapePoints, AUTOMATION_SHAPES, AutomationShapeError, type AutomationShape, type AutomationShapeOptions, type AutomationShapePoint } from './automation-shape.js'
 export { parse, BeatParseError } from './parse.js'
 export { serialize } from './serialize.js'
+export { unplacedContentTracks, unplacedContentWarning, type UnplacedContentTrack } from './coverage.js'
 export {
   sandboxPayloadToBeatDocument,
   beatDocumentToPartialTracks,
@@ -32,6 +34,8 @@ export {
   saveClip,
   loadClip,
   setScene,
+  placeClip,
+  unplaceClip,
   renameScene,
   setSong,
   songMove,
@@ -45,6 +49,7 @@ export {
   moveAutomationPoint,
   removeAutomationPoint,
   setAutomationPoint,
+  applyAutomationShape,
   addEffect,
   removeEffect,
   moveEffect,
@@ -65,6 +70,7 @@ export {
   BeatEditError,
   type QuantizeOptions,
   type DuplicateNotesOptions,
+  type BeatSlotsInput,
 } from './edit.js'
 export { humanize, BeatHumanizeError, type HumanizeOptions } from './humanize.js'
 export { moebiusEase, warpStep, unwarpStep } from './groove.js'

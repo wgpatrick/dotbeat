@@ -204,7 +204,7 @@ test('POST /library/install-audio-clip mints a new clip, registers the media, si
       clipId: string
       doc: {
         media: { id: string; path: string; sha256: string }[]
-        scenes: { id: string; slots: Record<string, string> }[]
+        scenes: { id: string; slots: Record<string, { clip: string; at: number }[]> }[]
         tracks: { id: string; clips: { id: string; audio?: { media: string; in: number; out: number; warp: string; rate: number } }[] }[]
       }
     }
@@ -226,7 +226,7 @@ test('POST /library/install-audio-clip mints a new clip, registers the media, si
     assert.ok(existsSync(join(dir, 'media', 'kit-init-kick.wav')))
     // slotted into the requested scene so it's immediately visible/playable
     const verse = body.doc.scenes.find((s) => s.id === 'verse')!
-    assert.equal(verse.slots.fx, 'clip1')
+    assert.deepEqual(verse.slots.fx, [{ clip: 'clip1', at: 0 }])
   })
 })
 
@@ -250,7 +250,7 @@ test('POST /library/install-audio-clip with an existing clipId replaces that cli
     const body = (await second.json()) as {
       clipId: string
       doc: {
-        scenes: { id: string; slots: Record<string, string> }[]
+        scenes: { id: string; slots: Record<string, { clip: string; at: number }[]> }[]
         tracks: { id: string; clips: { id: string; audio?: { media: string } }[] }[]
       }
     }
@@ -259,7 +259,7 @@ test('POST /library/install-audio-clip with an existing clipId replaces that cli
     assert.equal(fxTrack.clips.length, 1) // replaced, not a second clip
     assert.equal(fxTrack.clips[0]!.audio!.media, 'kit-init-snare')
     const verse = body.doc.scenes.find((s) => s.id === 'verse')!
-    assert.equal(verse.slots.fx, 'clip1') // untouched, still pointing at the same (now-updated) clip
+    assert.deepEqual(verse.slots.fx, [{ clip: 'clip1', at: 0 }]) // untouched, still pointing at the same (now-updated) clip
   })
 })
 

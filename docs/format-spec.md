@@ -870,6 +870,74 @@ scene s1
   double-click the chip's name to rename in place, one double-click whether or not the section was
   already selected (the Phase 31 Stream KE convention).
 
+### v0.11 additions — multi-region audio placement (Phase 36 Stream PA; decisions.md D16; docs/multi-region-audio-design.md Option A)
+
+Lifts the one-clip-per-track-per-scene ceiling (pilots 85/99: can't lay a riser at bar 3 of a
+4-bar section, can't place two one-shots at different spots, `audio-split`'s second half was
+arrangement-orphaned). A scene's slot for a track is now a LIST of **placements**: a track may
+carry **multiple `slot` lines**, each an independent placement with an optional trailing
+`at <steps>` — 16th steps from the section start, fractional allowed, the same unit note/hit
+`start` already uses.
+
+```
+scene s1
+  name intro
+  slot bass clip1
+  slot fx riser1
+  slot fx impact1 at 48
+  slot fx riser1 at 56.5
+```
+
+- **Grammar**: `slot <track> <clip> [at <steps>]`. `at` must be a finite number `>= 0`; omitted
+  means 0. `slot` stays the ONLY placement mechanism — no parallel grammar (Option B's separate
+  `place` statement was rejected: two spellings of "this clip sounds in this scene" violates
+  one-canonical-form).
+- **Canonical form**: within a track, placements sort by `at` (ties: clip id), and `at 0` is
+  **elided** — so every existing document round-trips **byte-identically** (proven against every
+  `examples/` project plus the round-trip suite, `test/format-v11-placements.test.ts`), and a
+  single-placement-at-zero scene looks exactly like today. One new placement = exactly one added
+  line (D4). An explicit `at 0` or out-of-order slot lines parse fine and re-serialize
+  canonically (liberal in, strict out). An empty placement list has no serialized form — the
+  track's slot lines are simply absent.
+- **Same clip placeable twice** (riser1 above) — placements are references; musically common
+  (the same impact sample at two hit points), and it falls out of the model for free.
+- **Validation (fail-loudly)**: a placement's clip must exist on that track (unchanged); `at > 0`
+  or more than one placement per track is rejected on synth/drums/instrument tracks — "multi-
+  placement is audio-only for now — synth/drum clips tile from the section start" (D16 scope
+  guard: a synth clip placed at step 48 that actually played at 0 is exactly the silent wrongness
+  the project refuses; lifting this later is a validation+engine change, zero grammar churn); two
+  placements on one audio track must not **overlap** in time — each region's timeline length is
+  computed from its `in`/`out`/`rate` and the document bpm (`audioRegionTimelineSteps` in
+  `src/core/document.ts`; back-to-back is legal, Ableton's no-overlap arrangement rule), and
+  truncate-at-section-end stays as today. Shared between parser and edit primitives
+  (`scenePlacementError`) so the two surfaces can't drift.
+- **Edit primitives** (`src/core/edit.ts`): `setScene` accepts placement lists AND the pre-v0.11
+  `Record<trackId, clipId>` shape unchanged (`BeatSlotsInput` — a bare clip id means one placement
+  at 0, which keeps every existing caller working); new `placeClip(doc, sceneId, trackId, clipId,
+  at)` / `unplaceClip(doc, sceneId, trackId, clipId, at?)` — unplace is unambiguous when a clip is
+  placed once and REQUIRES `at` when it's placed more than once (fail-loudly on ambiguity);
+  `splitAudioClip` now **auto-places the second half** at `placement.at + split steps` in every
+  scene that placed the parent (one auto-placement per parent placement — multi-placement parents
+  included; scenes that never placed the parent are untouched), returning the placements it made
+  so the CLI/MCP surface can print them (D16 q3 — this retroactively closes the orphaned-split
+  bug class; no new overlap is possible since the halves tile the parent's exact span).
+- **Diff**: `scene-slot` entries are placement-granular — one entry per placement
+  (`scene s1: fx +impact1@48`, `scene s1: fx -riser1@56.5`, `@` elided at 0), an `at` change
+  reports as ONE `scene-slot-moved` entry (`scene s1: fx riser1 moved @56.5 -> @48`), never a
+  remove+add pair, and a single-clip swap at `at 0` reads exactly as it did pre-v0.11
+  (`scene s1: lead clip1 -> clip2`).
+- **Format version bumped to `0.11`** — a real grammar addition, the same bar the v0.10 bump
+  (audio regions) met. Per the established bump convention, `beat init` / `initDocument` / the
+  BeatLab-bridge converter stamp NEW documents `0.11`; existing files keep their own
+  `format_version` line and parse (and round-trip) exactly as before. **Migration: none needed** —
+  every v0.11 addition is elided-by-default, so a pre-v0.11 file is already in canonical v0.11
+  form.
+- **Engine/GUI sequencing**: this section is the CORE (Stream PA) statement. Engine scheduling of
+  `at > 0` placements (region starts at `sectionStart + at`, a clip placed twice plays twice) is
+  Stream PC; per-placement arrangement blocks and clip-editor targeting are Stream PD; until those
+  land, consumers take a slot's at-0/first placement (`firstPlacementClip`) — single-placement
+  projects, i.e. every pre-v0.11 document, play and render exactly as before.
+
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
 Clips/scenes (shipped v0.4), arrangement (shipped v0.4), multi-device chains beyond the

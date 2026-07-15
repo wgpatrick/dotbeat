@@ -1,6 +1,6 @@
 # Multi-region audio placement — schema design proposal (Phase 34 Stream ND)
 
-**Status: PROPOSAL — awaiting owner decision. No implementation in this phase.**
+**Status: APPROVED 2026-07-14 (owner) — all three §5 questions decided as recommended; see decisions.md D16. Implementation: Phase 36.**
 
 Source: pilot 99 (`docs/research/99-usability-pilot-cli-audio.md`) confirmed that placing two
 audio regions at different positions on one track within one section is impossible *by data

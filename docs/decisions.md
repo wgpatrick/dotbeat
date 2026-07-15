@@ -9,6 +9,156 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D21 — one batch manifest for generation too; `adopt` learns media, and candidates don't register until they win (2026-07-15)
+
+**The decision.** `beat source gen --count N` (Phase 40 Stream VB) generates N candidates of one
+prompt across seeds `S..S+N-1` and rides the **existing** `VaryBatchManifest` into the **existing**
+`beat score` / `beat adopt` verbs — no parallel gen-only batch shape, no second scores log, no
+`beat gen-adopt`. The three places a gen batch strains that shape are absorbed by **optional fields
+on the shape itself**, not by forking it: (a) variants are wavs, so `variants[].file` is `vN.wav`
+instead of `vN.beat` — and every reader now resolves the variant through that field rather than
+re-deriving `v${n}.beat`; (b) a gen batch has no track, so `track` becomes optional on the manifest
+and the score entry, and the round is identified by `group: "gen:<sample-id>"` (plus a top-level
+`prompt`, which makes "which prompts/seeds do I actually like" one `jq` over the same
+`beat-scores.jsonl` a cutoff sweep writes); (c) `adoptVariant` gains a `media` branch — for a gen
+batch, adopt is not a document copy but a **registration**.
+
+**The inversion that makes it worth doing.** Candidates deliberately touch NOTHING until adopt.
+`scripts/source-lib.mjs`'s private `ingest()` — prep → sha256 → media-block upsert → enforced
+provenance sidecar → rollback — is split at its seam: the **prep half** runs at batch time (once
+per candidate, into the batch dir), the **register half** (`registerPreppedMedia`, now in
+`src/vary/batch.ts`) runs at adopt time, on the winner alone. Losing candidates leave no trace
+outside the batch dir; deleting it forgets them. Two consequences worth stating: the winner is
+**copied, never re-prepped** at adopt (prep is not idempotent — it would re-trim and re-fade
+already-prepped audio), so the bytes you auditioned are byte-for-byte the bytes that get
+registered; and the register half moved into `batch.ts` rather than staying in source-lib because
+`adopt` is its second caller and must stay synchronous on both surfaces — source-lib imports it
+back, so the single-shot `source add`/`source gen` paths and the deferred `adopt` path share ONE
+registration implementation. Splitting `ingest` was meant to defer it, not to fork it.
+
+**Why.** The immediate evidence: building `examples/recipe-song/` on 2026-07-14, the snare was
+picked from seeds 5/6/7 by out-of-band FFT measurement — because `beat score`/`beat adopt` require
+a manifest generation never produced — and the two LOSING candidates are *still* registered in that
+song's media block, with no record that an audition ever happened. Both halves of that are this
+decision's targets. The deeper reason for one shape: the manifest/score-log contract was
+deliberately unified in Phase 34 NA after pilot 95's cross-surface drift ("extract the shared
+shaping into `src/` helpers both surfaces import, so the next drift can't happen"), and a second
+batch shape re-forks exactly what that fixed — it would double every reader, and the taste loop's
+whole value is that one accumulated log answers "what do I like" across every kind of round.
+
+**Known limit, accepted.** `beat suggest` **ignores** gen entries — its parser drops trackless
+entries, so a gen round never enters a track's Bradley-Terry stats. This is the intended reading,
+not an oversight: a gen round is not a mutation round for any track, and letting it in would let
+`suggest` recommend a nonsense `beat vary <file> <track> gen:snare`. The gen question ("which
+prompts/seeds win") is answerable off the same log by `prompt`/`media.seed`, and a real
+`suggest`-for-generation is a separate feature with a separate output shape. Revisit if that
+feature is ever wanted.
+
+## D19 — the gen sidecar writes the WAV to a told path; TS owns registration + the Stability license posture (2026-07-14)
+
+**The decision (contract variation).** `beat source gen` (Phase 39, Stable Audio Open local
+text-to-audio) is the SECOND Python sidecar and reuses the D17 template verbatim — with one
+deliberate variation. Analysis emits its whole result as stdout JSON and writes no files; generation
+produces **binary audio**, so `python/gen.py` **writes the generated WAV to the `--output` path it
+is told** and prints only a small JSON **metadata** doc (`{backend, provider, model, seconds, seed,
+sampleRate}`) on stdout (chatter → stderr). Everything else is identical: stdlib-only top level with
+lazy backend imports (`stable_audio_tools`, `torch`), the `0/2/3/4` exit codes with a copy-pasteable
+`pip install -r python/requirements-stableaudio.txt` as the last stderr line on a missing dep, the
+`$BEAT_PYTHON` → `python/.venv` → `python3` resolution, and a `--doctor` probe via
+`importlib.util.find_spec`. The TypeScript/`scripts/source-lib.mjs` side owns ALL of registration:
+`addGeneratedSource` generates to a temp `media/.<id>.gen.wav`, then routes through the existing
+private `ingest()` tail, so prep (normalize/sha256/duration), media registration, the ENFORCED
+provenance sidecar `media/<id>.wav.json` (recording prompt/provider/model/seconds/seed under
+`generated`), and rollback-on-failure all come for free — the temp file is removed in a `finally`. A
+stdlib-only `stub` backend writes a deterministic seed-derived tone bed so CI/the dev container
+exercise the whole pipeline with zero packages.
+
+**Why.** Gen can't fit analyze's stdout-only rule (a WAV isn't a JSON line), but keeping the Python
+side dumb — "write bytes here, print metadata" — preserves D17's core property: everything
+dotbeat-specific (provenance, media block, rollback) stays in testable TypeScript, and the Python
+surface is tiny and swappable. Reusing `ingest()` rather than a parallel registration path means the
+generative provenance record is the same shape as RD's Freesound one.
+
+**The license posture (Stability AI Community License, research 103).** Stable Audio Open 1.0 is the
+one licensing-clean, egress-free generative path for dotbeat's shareable-project thesis. You **own**
+the generated outputs; commercial use is free for individuals/orgs under **$1M annual revenue**
+provided you register a Community License with Stability (it terminates above $1M → Enterprise). The
+license's distribution/attribution obligations (ship a copy of the license, display **"Powered by
+Stability AI"**) attach to redistributing the **model/Materials/derivatives**, NOT to the individual
+generated output `.wav` files — so committing generated one-shots into a public `.beat` project's
+`media/` folder is clean. dotbeat carries the "Powered by Stability AI" attribution in its docs
+(`python/README.md`) as the tool-integration obligation; per-output files need no attribution. The
+HF weights repo id (`stabilityai/stable-audio-open-1.0`) and the `stable-audio-tools` version pin
+are placeholders to confirm owner-side (HF/PyPI unreachable from the build container).
+
+## D18 — a reference track analyzed for structure never enters the project as media (2026-07-14)
+
+**The decision.** `beat analyze <song.wav>` (Phase 38) reads a reference track and emits a
+`*.analysis.json` of numbers and labels (tempo, beat/downbeat times, section boundaries) — and the
+source audio is **never registered into the `.beat` project** as a media clip. `beat skeleton`
+scaffolds an empty structure-matched project from that JSON; the JSON path is the only trail back
+to the reference. There is deliberately no `--register-source` shortcut.
+
+**Why.** Research 102's copyright posture: an analysis artifact that is purely derived facts
+(BPM, section labels) is safe to commit, diff, and share; the analyzed audio itself is someone
+else's copyrighted recording and has no business living inside a user's MIT-licensed project. Keeping
+the two apart at the tool boundary makes the safe thing the default and the unsafe thing something a
+user has to do on purpose (they still can, explicitly, via `beat source add` with their own file and
+an asserted license). This mirrors D-series "make the canonical/safe form the path of least
+resistance" reasoning.
+
+## D17 — the Python-sidecar JSON contract: TS owns all I/O and unit conversion, Python emits raw analysis in seconds (2026-07-14)
+
+**The decision.** dotbeat's first non-Node dependency (Phase 38 audio analysis) is structured as a
+**child-process sidecar with a frozen JSON contract**, not an embedded runtime or an FFI binding.
+`python/analyze.py` imports stdlib only at module top (backend deps — torch, beat_this, allin1 —
+import lazily inside their run functions), takes `--backend`/`--input` (or `--doctor`), and writes
+the analysis **core** (`{backend, bpm|null, beats, downbeats, sections}`, all times in **seconds**)
+to **stdout only** — no file writes, no dotbeat knowledge. The TypeScript wrapper
+(`src/analysis/sidecar.ts`) owns everything else: it computes the audio sha256, resolves the Python
+interpreter (`$BEAT_PYTHON` → `python/.venv/bin/python3` → PATH), enforces the exit-code contract
+(0 ok · 2 bad input · 3 missing dep · 4 failure) with copy-pasteable degrade messages, wraps the
+core in the versioned envelope, and atomically caches it next to the audio. All **seconds→bars**
+math and the canonical `AnalysisArtifact` validation live on the TS side (`src/analysis/import.ts`),
+which is the sole validation authority. A stdlib-only `stub` backend produces a deterministic grid
+so CI and dev containers exercise the identical plumbing with zero Python packages installed.
+
+**Why.** (1) The MIR ecosystem is Python/PyTorch (research 102) — a sidecar is the only realistic
+shape, and a frozen JSON boundary keeps that dependency at arm's length: everything dotbeat-specific
+stays testable in TypeScript. (2) Putting sha256/caching/unit-conversion/validation on the TS side
+means the Python surface is tiny, dumb, and swappable — a future backend (allin1, or `gen.py` for
+Stable Audio Open in Phase 39) copies the same argv/exit/doctor conventions at near-zero cost. (3)
+The `stub` backend + skip-gated integration tests keep the suite green everywhere, including the CI
+and dev environments where PyPI/HuggingFace egress is blocked and torch can never install — real
+models run only on the owner's machine, validated via `beat analyze --doctor`. The conventions are
+documented in `python/README.md` as the shared template for later sidecars.
+
+## D16 — multi-region audio placement: repeated `slot` lines with `at <steps>` (2026-07-14, owner)
+
+**The decision.** Lift the one-clip-per-track-per-scene ceiling via Option A of
+`docs/multi-region-audio-design.md`: a scene may carry MULTIPLE `slot` lines per track, each an
+independent placement with an optional trailing `at <steps>` (fractional 16th steps from the
+section start; `at 0` is elided so every existing file round-trips byte-identically). Owner
+approved all three open questions as recommended: (1) Option A over a separate `place` statement
+(one grammar, one canonical form — D4) and over an absolute-time arrangement lane (a second
+timing system with no current user; revisit at M4, Option A doesn't foreclose it); (2) the unit
+is 16th steps, matching note/hit starts and `audio-split` positions — one time vocabulary
+everywhere; (3) `beat audio-split` auto-places the second half at the split point in every scene
+that placed the original, which retroactively kills the orphaned-split bug class.
+
+**Scope guard.** v1 validation restricts `at > 0` / multiple placements to audio tracks —
+synth/drum clips at an offset would silently play wrong today, and fail-loudly beats
+silently-wrong (the same reasoning that rejected accept-and-ignore). Lifting that later is a
+validation+engine change with zero grammar churn. Placements sorted by `at` (ties: clip id);
+overlapping placements on one track are a validation ERROR (Ableton's no-overlap rule).
+Same clip placeable twice — placements are references. Format bump: v0.11.
+
+**Revisit when:** M4 recording/comping forces absolute-time thinking (Option C's arrangement
+lane can then coexist; placements migrate mechanically), or when a real need appears for
+synth/drum multi-placement (lift the validation, teach the engine).
+
+---
+
 ## D15 — one canonical audio engine: `ui/src/audio/engine.ts`; both CLI render paths retarget to it (2026-07-11)
 
 **The problem, precisely.** Four things currently produce audio from a `.beat` file, and they are

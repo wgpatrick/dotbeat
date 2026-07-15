@@ -20,6 +20,8 @@ import {
   parse,
   saveClip,
   setScene,
+  placeClip,
+  unplaceClip,
   renameScene,
   setSong,
   songMove,
@@ -38,6 +40,7 @@ import {
   addHit,
   removeHit,
   setAutomationPoint,
+  applyAutomationShape,
   addAudioClip,
   splitAudioClip,
   humanize,
@@ -79,12 +82,29 @@ import {
   serializeSelection,
   selectionToVaryScope,
   BeatSelectionError,
+  formatNumber,
   BeatEditError,
   BeatParseError,
   BeatPresetError,
   BeatPitchTimeError,
 } from '../dist/src/core/index.js'
 import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile, BeatProfileError } from '../dist/src/metrics/index.js'
+// --- Phase 37 Stream RB begin ---
+import { analyzeStructure, formatStructure, BeatAnalysisError } from '../dist/src/analysis/index.js'
+// --- Phase 37 Stream RB end ---
+// ==== Phase 38 Stream SA begin ====
+import { validateAnalysisArtifact, buildSkeleton, formatSkeletonReport } from '../dist/src/analysis/index.js'
+// ==== Phase 38 Stream SA end ====
+// ==== Phase 38 Stream SB begin ====
+import { runAnalysis, sidecarDoctor, defaultAnalysisPath } from '../dist/src/analysis/index.js'
+// ==== Phase 38 Stream SB end ====
+// ==== Phase 40 Stream VA ====
+// Pitch-aware sampling: detection (pure TS, no Python — decisions.md D20) and the tune arithmetic
+// that turns a root into a keymap. keymap.js is deep-imported rather than routed through
+// core/index.js so this stream adds no line to a file two sibling streams are also editing.
+import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
+import { buildKeymap, noteToMidi, midiToNote, rateForPitch } from '../dist/src/core/keymap.js'
+// ==== end Phase 40 Stream VA ====
 
 // ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
 // The old monolithic USAGE template literal, restructured as one entry per command so
@@ -101,8 +121,15 @@ const HELP_FAMILIES = [
   ['vary', 'score', 'adopt', 'suggest'],
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
-  ['clip', 'scene', 'scene-set', 'song', 'song-move', 'song-insert'],
+  ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
   ['add-note', 'rm-note', 'add-hit', 'rm-hit'],
+  ['render', 'feedback', 'metrics', 'lint'], // Phase 37 Stream RA: the render -> listen loop
+  // ==== Phase 38 Stream SA begin ====
+  ['analyze', 'skeleton', 'analyze-structure', 'source'], // Phase 38: audio import -> skeleton -> critique
+  // ==== Phase 38 Stream SA end ====
+  // ==== Phase 40 Stream VA ====
+  ['sample', 'sample-info', 'keymap', 'lane'], // Phase 40: register a sound -> read its pitch -> play a melody with it
+  // ==== end Phase 40 Stream VA ====
 ]
 
 /** One entry per command, in the exact order the full dump prints them. `text` is the command's
@@ -132,6 +159,28 @@ const HELP = [
                                                           membership list (add/remove/reorder members)`,
   },
   { cmd: 'inspect', text: `  beat inspect <file> [--json]` },
+  // ==== Phase 38 Stream SB begin ====
+  {
+    cmd: 'analyze',
+    text: `  beat analyze <audio.wav> [--backend beatthis|stub|allin1] [--force] [-o out.json] [--json]
+                                                          detect tempo/beats/downbeats/sections in a real WAV via the
+                                                          Python sidecar; writes a cached <audio>.analysis.json (feed it to
+                                                          beat skeleton). Default backend beatthis (needs the owner-side venv;
+                                                          stub is a deterministic no-deps grid for testing). --force re-analyzes.
+                                                          NOTE: for the SYMBOLIC analysis of a .beat file, use analyze-structure.
+  beat analyze --doctor                                   report the Python interpreter + which backends are installed`,
+  },
+  // ==== Phase 38 Stream SB end ====
+  // --- Phase 37 Stream RB begin ---
+  {
+    cmd: 'analyze-structure',
+    text: `  beat analyze-structure <file> [--json] [--root N] [--scale name]
+                                                          symbolic song analysis (no rendering): per-section onset
+                                                          density, syncopation, pitch-class vs scale, repetition/novelty.
+                                                          --root 0-11 (0=C) + --scale (major/minor/dorian/…) enable the
+                                                          in-scale readout; omit both for scale-agnostic histograms`,
+  },
+  // --- Phase 37 Stream RB end ---
   {
     cmd: 'set',
     text: `  beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
@@ -225,6 +274,12 @@ const HELP = [
   beat vary <file> <track> feel --scope selection --port <p> [...same feel flags, minus --lanes/--ids]
                                                           scope to the GUI selection held by a running daemon instead of
                                                           typing --lanes/--ids by hand (lanes -> --lanes, bars/notes -> --ids)
+  beat vary <file> <track> automation:<param> [--clip id] [--count 9] [--seed N] [--render] [--audition]
+                                                          batch MOVEMENT variants of a clip's automation on <param>
+                                                          (varies shape/depth/rate/phase, e.g. automation:cutoff) —
+                                                          --clip picks WHICH clip's lane (default the track's first clip);
+                                                          each variant carries a replayable beat automate-shape recipe;
+                                                          scores/adopts through the same loop (see beat automate-shape)
   beat vary --groups                                      list the mutation groups (static; both modes documented)
   beat vary <file> <track> --groups                       list THAT track's real targets (lanes + live groups)`,
   },
@@ -236,6 +291,16 @@ const HELP = [
                                                           if it already exists, else adds it with that id;
                                                           --interpolation sets the segment-shape this point starts,
                                                           default linear — omit on a move to keep the existing shape)`,
+  },
+  {
+    cmd: 'automate-shape',
+    text: `  beat automate-shape <file> <track> <clip> <param> <ramp|sine|triangle|exp|adsr> --from V --to V [--cycles N --points N --bars N]
+                                                          fill a clip's automation lane with a predefined SHAPE (Phase 37):
+                                                          ramp = linear from->to; sine/triangle = --cycles oscillations
+                                                          between from and to; exp = eased curve; adsr = envelope. Emits
+                                                          --points points (default 16) across the clip span (--bars, else
+                                                          the clip loop / audio length / doc loop_bars). REPLACES any
+                                                          existing lane for that param on the clip.`,
   },
   {
     cmd: 'clip',
@@ -250,13 +315,38 @@ const HELP = [
                                                           existing content first if you want a fresh, independent
                                                           clip instead of an accumulated one)`,
   },
-  { cmd: 'scene', text: `  beat scene <file> <scene-id> [<track>=<clip> ...]       create/replace a scene's slot map` },
+  {
+    cmd: 'scene',
+    text: `  beat scene <file> <scene-id> [<track>=<clip>[@<steps>] ...]
+                                                          create/replace a scene's slot map — the command that MINTS a
+                                                          scene (beat place only edits existing ones). Repeat a track for
+                                                          multiple placements (v0.11), e.g. fx=riser1 fx=impact1@48;
+                                                          @<steps> is fractional 16th steps from the section start
+                                                          (omitted = 0). Multi-placement / @>0 is AUDIO tracks only for
+                                                          now — synth/drum clips tile from the section start`,
+  },
   {
     cmd: 'scene-set',
     text: `  beat scene-set <file> <scene-id> --name N|--clear-name  rename a scene (or clear its name, back to showing
                                                           just the id) — the scene IS the reusable bundle of
                                                           content, so its name follows it into every section
                                                           that reuses it`,
+  },
+  {
+    cmd: 'place',
+    text: `  beat place <file> <scene> <track> <clip> <at-steps>     add ONE placement of an already-saved clip to a scene's
+                                                          track slot at <at-steps> (fractional 16th steps from the
+                                                          section start). The scene must already EXIST — beat scene
+                                                          mints scenes, place edits one placement. Audio tracks only
+                                                          for at > 0 / multiple placements (v1); overlapping
+                                                          placements on one track are an error`,
+  },
+  {
+    cmd: 'unplace',
+    text: `  beat unplace <file> <scene> <track> <clip>[@<at>]       remove ONE placement. @<at> is only required when the
+                                                          same clip is placed more than once on that track (the
+                                                          error lists the candidate at values); removing the last
+                                                          placement drops the track from the scene entirely`,
   },
   { cmd: 'song', text: `  beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)` },
   { cmd: 'song-move', text: `  beat song-move <file> <from-index> <to-index>           reorder a section — a two-line diff, not a rewrite` },
@@ -270,6 +360,73 @@ const HELP = [
                                                           via beat scene/beat_song. Requires song mode already.`,
   },
   { cmd: 'sample', text: `  beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)` },
+  // ==== Phase 38 Stream SA begin ====
+  {
+    cmd: 'skeleton',
+    text: `  beat skeleton <out.beat> <analysis.json> [--section-bars N]
+                                                          scaffold a NEW, structure-matched empty project from a
+                                                          *.analysis.json (from beat analyze): one empty scene per
+                                                          distinct detected section label, a song block matching the
+                                                          detected arrangement, tempo from the artifact. Refuses to
+                                                          overwrite an existing out.beat. Labelless artifacts fall back
+                                                          to uniform --section-bars (default 8) chunks. Fill the scenes
+                                                          afterward with beat clip / beat place.`,
+  },
+  // ==== Phase 38 Stream SA end ====
+  // ==== Phase 37 Stream RD begin ====
+  {
+    cmd: 'source',
+    text: `  beat source search <query> [--max N] [--dur-min V] [--dur-max V] [--out-dir d]
+                                                          find CC0 (public-domain) sounds on Freesound, top-rated first
+                                                          (--out-dir also downloads each preview for auditioning);
+                                                          NEEDS FREESOUND_API_KEY + network egress to freesound.org
+  beat source add <file.beat> <sample-id> <local-audio-file> [--license L] [--note N]
+                                                          OFFLINE: prep a file you already have (trim/fade/normalize)
+                                                          and register it as media, writing an enforced provenance
+                                                          sidecar media/<id>.wav.json. --license defaults to
+                                                          "unspecified" (you assert the license; only the --freesound
+                                                          path labels media "CC0-1.0")
+  beat source add <file.beat> <sample-id> --freesound <id> [--note N]
+                                                          GATED: fetch a specific CC0 sound from Freesound by id and
+                                                          register it (label "CC0-1.0"); needs the key + egress. CC0
+                                                          is the only license ever fetched (zero redistribution risk)
+  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio] [--provider P] [--license L]
+                                                          GENERATE a one-shot with Stable Audio Open (local text-to-audio)
+                                                          and register it as media with a provenance sidecar. Default
+                                                          --backend stableaudio (needs torch + the model, owner-side;
+                                                          see python/README.md), default --seconds 2. --backend stub is
+                                                          a deterministic, dependency-free tone bed. "Powered by
+                                                          Stability AI"; you own the output (Stability Community License)
+  beat source gen --doctor                                report which generative backends are installed (JSON)` +
+    // ==== Phase 40 Stream VB ====
+    `
+  beat source gen <file.beat> <sample-id> "<prompt>" --count N [--seed-from S] [--out-dir d] [--audition]
+                                                          BATCH: generate N candidates of ONE prompt across seeds
+                                                          S..S+N-1 into gen-<sample-id>-<S>/ next to the .beat and
+                                                          register NOTHING — then rank them with \`beat score\` and
+                                                          register the winner ALONE with \`beat adopt\` (the same two
+                                                          verbs a vary batch uses). Losing candidates never enter the
+                                                          media block; delete the batch dir to forget them. --audition
+                                                          stitches the candidates into one audition.wav with a timecode
+                                                          index (no render needed — they are already audio)`
+    // ==== end Phase 40 Stream VB ====
+  },
+  // ==== Phase 37 Stream RD end ====
+  // ==== Phase 40 Stream VC ====
+  {
+    cmd: 'regen',
+    text: `  beat regen <file.beat> [--verify] [--id <sample-id>]     rebuild generated media from the provenance sidecars alone
+                                                          (media/<id>.wav.json's prompt/seed/seconds/backend) — a fully
+                                                          generated project is a RECIPE: clone it with an empty media/,
+                                                          run this, get the song back. --verify regenerates to a temp
+                                                          dir and reports per-sample sha256 match/differ WITHOUT
+                                                          touching media/; --id does one sample. SLOW: ~2 min per
+                                                          one-shot on CPU (a 10-sample project is ~20 min); the count
+                                                          and estimate print before the run starts. Byte-identical
+                                                          reproduction is verified same-machine/same-torch only — a
+                                                          differing hash elsewhere is expected, not corruption.
+                                                          Freesound/local-ingest media isn't generated, so it's skipped` },
+  // ==== end Phase 40 Stream VC ====
   {
     cmd: 'lane',
     text: `  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample ("none" reverts the lane
@@ -279,6 +436,52 @@ const HELP = [
                                                           flags them). Errors on a legacy 5-lane track, where those
                                                           lines are live.`,
   },
+  // ==== Phase 40 Stream VA ====
+  {
+    cmd: 'sample-info',
+    text: `  beat sample-info <file> <sample-id> [--json] [--partials 8]
+                                                          what IS this sound: detected pitch (+ note name, cents off),
+                                                          confidence, duration, peak, centroid, and the top-partials
+                                                          table (frequency, level, ratio to the lowest strong partial).
+                                                          Pure TS — no Python, no venv. Read the TABLE, not just the f0:
+                                                          two partials a semitone apart (ratio ~1.06) will beat against
+                                                          themselves; a ratio like 1.80 means an inharmonic clang whose
+                                                          pitch is a judgement call. LOW confidence is a real answer, not
+                                                          a failure — bells and found percussion usually read low, and
+                                                          the table is how you decide the root yourself.`,
+  },
+  {
+    cmd: 'keymap',
+    text: `  beat keymap <file> <track> <sample-id> --scale <name> --from <note> --to <note> [--root <note>] [--key <note>] [--gain dB] [--dry-run] [--force]
+                                                          pitch-map ONE sample across a scale: mints one declared lane per
+                                                          scale degree, named by note (a5, c6, …), each tuned to land the
+                                                          sample on that pitch. The tunes come from the sample's DETECTED
+                                                          fundamental, so they are right even when the sound came back
+                                                          between notes (fractional tunes are normal and correct).
+                                                          --root <note> states the root yourself and skips detection —
+                                                          a first-class path, not a fallback: bells, plucks and found
+                                                          percussion are exactly where detection is weakest, so expect to
+                                                          use it. Refuses on a low-confidence detection (quoting the
+                                                          partials and a ready-to-paste --root) rather than building a
+                                                          wrong keymap; --force takes the detection anyway.
+                                                          --key sets the scale's root (default: --from's pitch class).
+                                                          --scale names: see beat fit-scale --list-scales.
+                                                          --dry-run prints the lanes without writing.
+                                                          A lane's tune is limited to -24..24 semitones, so a span more
+                                                          than 2 octaves from the root errors, naming what IS reachable.`,
+  },
+  {
+    cmd: 'audio-pitch',
+    text: `  beat audio-pitch <file> <track> <clip-id> (--to <note> [--root <note>] | --semitones <n>) [--force]
+                                                          repitch an audio-region clip by computing its warp rate for you
+                                                          (sets warp repitch + rate). --to <note> detects the region's
+                                                          fundamental and moves it to that note; --root <note> states the
+                                                          region's current pitch instead of detecting it; --semitones
+                                                          shifts by an interval with no detection at all (the honest
+                                                          option for a chord or a pad, which has no single pitch).
+                                                          Repitch is variable-speed: length changes with pitch.`,
+  },
+  // ==== end Phase 40 Stream VA ====
   {
     cmd: 'effect-add',
     text: `  beat effect-add <file> <track> <eq3|comp|distortion|bitcrush|eq7|autoFilter|autoPan|tremolo|utility|grainDelay|vinylDistortion|resonator> [--id id] [--index n] [--bypassed]
@@ -307,7 +510,10 @@ const HELP = [
                                                           split-at-point: cuts one audio-region clip into
                                                           two at a timeline position (fractional 16th
                                                           steps from the clip's start), same media,
-                                                          adjusted in/out — no DSP`,
+                                                          adjusted in/out — no DSP. v0.11: the second half
+                                                          is auto-placed right after the first in every
+                                                          scene that placed the original (reported in the
+                                                          output), so a split never orphans arrangement`,
   },
   {
     cmd: 'score',
@@ -353,8 +559,35 @@ const HELP = [
   {
     cmd: 'render',
     text: `  beat render <file> [-o out.wav] [--tail <sec>]          render to WAV through dotbeat's own engine
-                                                          (headless Chromium driving ui/; no BeatLab needed)`,
+                                                          (headless Chromium driving ui/; no BeatLab needed)
+  beat render <file> --stems [--out-dir d]                Phase 37: one solo WAV per track into an out dir
+                                                          (default stems-<file> next to the .beat) — stems for
+                                                          external mixing or per-track metrics
+  env CHROME_PATH=<binary>                                use a specific Chromium/Chrome instead of a system
+                                                          Chrome install — required in locked-down/proxied
+                                                          environments where \`playwright install chrome\` is
+                                                          blocked (a \`playwright install chromium\` binary works).
+  note: song mode renders only scene-placed content — a groove on a track that isn't placed in any
+        scene renders SILENT. Snapshot with beat clip and place it with beat scene / beat place first.`,
   },
+  // ---- Phase 37 Stream RA begin: feedback help entry --------------------------------------
+  {
+    cmd: 'feedback',
+    text: `  beat feedback <file> [--sections] [--ref <ref.json>] [--json]
+                                                          render the song ONCE, then report mix feedback.
+                                                          default: whole-song metrics + lint in one block.
+                                                          --sections: slice the render at song section
+                                                          boundaries and report the per-section energy arc
+                                                          (LUFS / spectral balance / width / crest per section
+                                                          + section-to-section movement, flagged only when it
+                                                          clears the render-run variance floor). --ref compares
+                                                          each section (or the whole song) against a saved
+                                                          reference profile (beat metrics --save-profile).
+                                                          Honest limits: per-section STATIC metrics only — this
+                                                          does NOT hear masking, arrangement, or transitions,
+                                                          only how sections differ as isolated static mixes`,
+  },
+  // ---- Phase 37 Stream RA end -------------------------------------------------------------
   { cmd: 'daemon', text: `  beat daemon <file> [--port 8420]` },
   { cmd: 'checkpoint', text: `  beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)` },
   {
@@ -369,9 +602,9 @@ const HELP = [
   { cmd: 'selection', text: `  beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon` },
   {
     cmd: 'mcp',
-    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (~55,
-                                                          covering track/note/hit/effect/song/preset/macro/drum-kit/
-                                                          vary/score/adopt/sample/lane/checkpoint/render/metrics editing) —
+    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (~58,
+                                                          covering track/note/hit/effect/scene/place/song/preset/macro/
+                                                          drum-kit/vary/score/adopt/sample/lane/checkpoint/render/metrics editing) —
                                                           only daemon (a long-running process, structurally not a
                                                           tool call) stays CLI-only; send tools/list on a running
                                                           'beat mcp' for the exact, current set`,
@@ -438,6 +671,14 @@ function addTrackCmd(argv) {
   // (research 19 Part VII) — --legacy-lanes opts back into the old implicit-5, empty-lanes[] shape
   // for a caller/script that specifically wants pre-v0.10 behavior.
   const legacyLanes = rest.includes('--legacy-lanes')
+  // Phase 39 Stream UA (pilot 105 leftover): an instrument track with no --soundfont fails in core
+  // (edit.ts addTrack). Intercept here to add the synth-track nudge to the message — the same
+  // "instrument tracks need a soundfont" guard, plus a way forward for a quick part with no sample.
+  if (kind === 'instrument' && rest.indexOf('--soundfont') === -1) {
+    throw new BeatEditError(
+      'instrument tracks need a soundfont: pass --soundfont <sample-id> [--program N] (register the .sf2 with beat sample first) — or use a synth track for a quick part with no sample',
+    )
+  }
   const before = readDoc(file)
   const { doc } = addTrack(before, {
     id,
@@ -591,6 +832,121 @@ async function inspectCmd(argv) {
     process.stdout.write(describeDocument(doc) + formatInstrumentPresets(doc, presetInfo))
   }
 }
+
+// ==== Phase 38 Stream SB begin ====
+const ANALYZE_BACKENDS = ['beatthis', 'stub', 'allin1']
+
+function formatDoctorReport(report) {
+  const lines = []
+  lines.push(`interpreter: ${report.interpreter ?? '(unknown)'}`)
+  if (report.pythonFound === false) {
+    lines.push(`python3: NOT FOUND`)
+    if (report.error) lines.push(report.error)
+    return lines.join('\n') + '\n'
+  }
+  lines.push(`python: ${report.python ?? '(unknown)'}`)
+  if (report.error) {
+    lines.push(`error: ${report.error}`)
+    return lines.join('\n') + '\n'
+  }
+  lines.push('backends:')
+  const backends = report.backends ?? {}
+  for (const name of ['stub', 'beatthis', 'allin1']) {
+    const b = backends[name]
+    if (!b) continue
+    const missing = Array.isArray(b.missing) && b.missing.length > 0 ? `missing: ${b.missing.join(', ')}` : 'ok'
+    lines.push(`  ${name.padEnd(9)} ${b.ok ? 'ok' : missing}`)
+  }
+  return lines.join('\n') + '\n'
+}
+
+async function analyzeCmd(argv) {
+  const json = argv.includes('--json')
+
+  if (argv.includes('--doctor')) {
+    const report = await sidecarDoctor()
+    process.stdout.write(json ? JSON.stringify(report, null, 2) + '\n' : formatDoctorReport(report))
+    return
+  }
+
+  const force = argv.includes('--force')
+  const backendIdx = argv.indexOf('--backend')
+  const backend = backendIdx >= 0 ? argv[backendIdx + 1] : 'beatthis'
+  if (!ANALYZE_BACKENDS.includes(backend)) {
+    throw new BeatAnalysisError(`unknown --backend "${backend}" (one of: ${ANALYZE_BACKENDS.join(', ')})`)
+  }
+  let outIdx = argv.indexOf('-o')
+  if (outIdx < 0) outIdx = argv.indexOf('--out')
+  const outPath = outIdx >= 0 ? argv[outIdx + 1] : undefined
+
+  // Positional audio path = first arg that isn't a flag or a flag's value.
+  const consumed = new Set()
+  if (backendIdx >= 0) consumed.add(backendIdx + 1)
+  if (outIdx >= 0) consumed.add(outIdx + 1)
+  const audioPath = argv.find(
+    (a, i) => !a.startsWith('-') && !consumed.has(i),
+  )
+  if (!audioPath) throw new BeatAnalysisError('analyze needs an audio file (a .wav), or pass --doctor')
+  if (/\.beat$/i.test(audioPath)) {
+    throw new BeatAnalysisError(
+      `"${audioPath}" is a .beat file — for the symbolic analysis of a project, use: beat analyze-structure ${audioPath}. ` +
+        `beat analyze reads reference AUDIO (a .wav) to detect its tempo/beats/sections.`,
+    )
+  }
+
+  const { artifact, cached, outPath: writtenPath } = await runAnalysis({ audioPath, backend, force, outPath })
+
+  if (json) {
+    process.stdout.write(JSON.stringify(artifact, null, 2) + '\n')
+    return
+  }
+
+  const b = artifact.backend
+  const out = []
+  out.push(`analyzed ${artifact.source.file} (backend ${b.name}${b.version ? ` ${b.version}` : ''}${b.model ? `/${b.model}` : ''})`)
+  if (b.name === 'stub') {
+    out.push(`  ⚠ stub backend — a synthetic fixed 120-BPM intro/loop/outro grid, NOT detected from your audio.`)
+    out.push(`    install a real backend for true tempo/section detection: beat analyze --doctor`)
+  }
+  out.push(`  bpm ${Number(artifact.bpm).toFixed(2)} (${artifact.bpmMethod})`)
+  out.push(`  duration ${artifact.source.durationSeconds.toFixed(2)}s · ${artifact.beats.length} beats · ${artifact.downbeats.length} downbeats`)
+  if (artifact.sections.length > 0) {
+    out.push(`  sections (${artifact.sections.length}):`)
+    for (const s of artifact.sections) {
+      out.push(`    ${String(s.label ?? '(unlabeled)').padEnd(10)} ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s`)
+    }
+  } else {
+    out.push(`  sections: none (beats-only backend — beat skeleton will chunk the beat grid into parts)`)
+  }
+  if (cached) {
+    out.push(`  using cached ${writtenPath} — pass --force to re-analyze`)
+  } else {
+    out.push(`  wrote ${writtenPath}`)
+  }
+  out.push(`  next: beat skeleton <out.beat> ${writtenPath}`)
+  process.stdout.write(out.join('\n') + '\n')
+}
+// ==== Phase 38 Stream SB end ====
+
+// --- Phase 37 Stream RB begin ---
+async function analyzeStructureCmd(argv) {
+  const json = argv.includes('--json')
+  const rootIdx = argv.indexOf('--root')
+  const scaleIdx = argv.indexOf('--scale')
+  const root = rootIdx >= 0 ? Number(argv[rootIdx + 1]) : undefined
+  const scale = scaleIdx >= 0 ? argv[scaleIdx + 1] : undefined
+  // Positional file is the first arg that isn't a flag or a flag's value.
+  const file = argv.find((a, i) => a !== '--json' && a !== '--root' && a !== '--scale' && !(rootIdx >= 0 && i === rootIdx + 1) && !(scaleIdx >= 0 && i === scaleIdx + 1))
+  if (!file) throw new BeatEditError('analyze-structure needs a file')
+  const doc = readDoc(file)
+  const analysis = analyzeStructure(doc, { root, scale })
+  if (json) {
+    process.stdout.write(JSON.stringify(analysis, null, 2) + '\n')
+  } else {
+    process.stdout.write(formatStructure(analysis) + '\n')
+  }
+}
+// --- Phase 37 Stream RB end ---
 
 function setCmd(argv) {
   const [file, ...pairs] = argv
@@ -909,7 +1265,7 @@ function flagValue(argv, flag) {
 
 async function varyCmd(argv) {
   const { VARY_GROUPS, LEGACY_DRUM_VOICE_GROUPS, laneVaryDefs, varyTrack, BeatVaryError } = await import('../dist/src/vary/vary.js')
-  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids', '--scope', '--port']
+  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids', '--scope', '--port', '--clip', '--points', '--bars']
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   if (argv.includes('--groups') || argv.length === 0) {
     // Track-aware when a file+track are given (Phase 35 Stream OA): a declared-lane drums
@@ -945,6 +1301,8 @@ async function varyCmd(argv) {
     for (const [name, defs] of Object.entries(VARY_GROUPS)) {
       process.stdout.write(`${name.padEnd(10)} ${defs.map((d) => d.key).join(', ')}\n`)
     }
+    process.stdout.write(`feel       humanized timing/velocity content variation (see beat vary <file> <track> feel)\n`)
+    process.stdout.write(`automation:<param>  movement/shape variants of a clip's automation lane, e.g. automation:cutoff (--clip id targets a specific clip; default the track's first; see beat automate-shape)\n`)
     process.stdout.write(`(kick/snare/hats apply to LEGACY drums tracks only — on a declared-lane drums track, target a lane NAME instead; run beat vary <file> <track> --groups for that track's real targets)\n`)
     return
   }
@@ -956,6 +1314,12 @@ async function varyCmd(argv) {
     await varyFeelCmd(argv, file, track)
     return
   }
+  // === Phase 37 Stream RC begin === automation:<param> — batch movement variants of a clip lane.
+  if (group.startsWith('automation:')) {
+    await varyAutomationCmd(argv, file, track, group.slice('automation:'.length))
+    return
+  }
+  // === Phase 37 Stream RC end ===
   if (flagValue(argv, '--scope') !== undefined) {
     // Param-group variants (rung 1) mutate whole-track synth params — there's no per-note/lane
     // concept to scope by, so --scope selection only makes sense for "feel" (rung 2).
@@ -1100,6 +1464,53 @@ async function varyFeelCmd(argv, file, track) {
   }
 }
 
+// === Phase 37 Stream RC begin === automation as a vary target: batch movement variants of a clip
+// lane into the same writeVaryBatch -> score -> adopt harness feel already uses. Whole-doc variants
+// carrying a replayable automate-shape recipe (not set-edits), so score/adopt work for free.
+async function varyAutomationCmd(argv, file, track, param) {
+  const { varyAutomation, BeatVaryError } = await import('../dist/src/vary/vary.js')
+  if (flagValue(argv, '--scope') !== undefined) {
+    throw new BeatEditError('vary --scope selection only applies to "feel" (automation:<param> generates a whole-doc lane, not per-note/hit content)')
+  }
+  const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
+  const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
+  const { defaultBatchDir } = await import('../dist/src/vary/batch.js')
+  // Colon-free dir label (a ':' in a path is legal on Linux but ugly/portability-risky); the
+  // manifest still records the real group `automation:<param>`.
+  const outDir = flagValue(argv, '--out-dir') ?? defaultBatchDir(file, `automation-${param}`, seed)
+  const opts = {
+    count,
+    seed,
+    ...(flagValue(argv, '--points') !== undefined ? { points: Number(flagValue(argv, '--points')) } : {}),
+    ...(flagValue(argv, '--bars') !== undefined ? { bars: Number(flagValue(argv, '--bars')) } : {}),
+    // --clip picks WHICH clip's automation lane to vary; omit for the track's first clip (the prior
+    // implicit behavior). Pilot 104: with automation on more than one clip the target was silent
+    // and unreachable; this makes it explicit without changing the default. varyAutomation errors
+    // cleanly (BeatVaryError) if the named clip isn't on the track.
+    ...(flagValue(argv, '--clip') !== undefined ? { clip: flagValue(argv, '--clip') } : {}),
+  }
+  const text = readFileSync(file, 'utf8')
+  const doc = parse(text)
+  let variants
+  try {
+    variants = varyAutomation(doc, track, param, opts)
+  } catch (err) {
+    if (err instanceof BeatVaryError) throw new BeatEditError(err.message)
+    throw err
+  }
+  const { writeVaryBatch, renderVaryBatch } = await import('../dist/src/vary/batch.js')
+  const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group: `automation:${param}`, count, seed, outDir, variants })
+  process.stdout.write(`${outDir}/: ${variants.length} automation variants of ${track}.${param} (seed ${seed})\n`)
+  for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
+
+  if (argv.includes('--render') || argv.includes('--audition')) {
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
+    process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
+    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length)
+  }
+}
+// === Phase 37 Stream RC end ===
+
 async function scoreCmd(argv) {
   const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--log')
   const [dir, ...picks] = positional
@@ -1181,15 +1592,60 @@ function clipCmd(argv) {
 
 function sceneCmd(argv) {
   const [file, sceneId, ...pairs] = argv
-  if (!file || !sceneId) throw new BeatEditError('scene needs <file> <scene-id> [<track>=<clip> ...]')
+  if (!file || !sceneId) throw new BeatEditError('scene needs <file> <scene-id> [<track>=<clip>[@<steps>] ...]')
+  // v0.11 (Phase 36 PB): each pair is one PLACEMENT — the same track may repeat, and a trailing
+  // @<steps> (fractional 16th steps from the section start, default 0) says where it sounds.
+  // Everything funnels into core's setScene placement lists; all validation (audio-only-for-v1,
+  // overlap, clip-exists) lives there, shared with the parser and MCP.
   const slots = {}
   for (const pair of pairs) {
     const eq = pair.indexOf('=')
-    if (eq === -1) throw new BeatEditError(`slot "${pair}" must be <track>=<clip>`)
-    slots[pair.slice(0, eq)] = pair.slice(eq + 1)
+    if (eq === -1) throw new BeatEditError(`slot "${pair}" must be <track>=<clip>[@<steps>]`)
+    const track = pair.slice(0, eq)
+    const rhs = pair.slice(eq + 1)
+    const sep = rhs.lastIndexOf('@') // clip ids are alphanumeric/_/- tokens, so '@' is unambiguous
+    let placement
+    if (sep === -1) {
+      placement = { clip: rhs, at: 0 }
+    } else {
+      const at = Number(rhs.slice(sep + 1))
+      if (rhs.slice(sep + 1) === '' || Number.isNaN(at)) throw new BeatEditError(`slot "${pair}": @ must be followed by a step offset (fractional 16th steps), e.g. fx=impact1@48`)
+      placement = { clip: rhs.slice(0, sep), at }
+    }
+    ;(slots[track] ??= []).push(placement)
   }
   const before = readDoc(file)
   writeDoc(file, before, setScene(before, sceneId, slots))
+}
+
+// v0.11 (Phase 36 PB): the friendlier single-placement verbs over core's placeClip/unplaceClip.
+// `place` requires the scene to already exist (beat scene mints scenes); `unplace` needs @<at>
+// only when the same clip is placed more than once on that track — core fail-louds on ambiguity
+// and we surface its error verbatim.
+function placeCmd(argv) {
+  const [file, sceneId, track, clip, at] = argv
+  if (!file || !sceneId || !track || !clip || at === undefined) {
+    throw new BeatEditError('place needs <file> <scene> <track> <clip> <at-steps> (the scene must already exist — beat scene mints scenes)')
+  }
+  const before = readDoc(file)
+  const { doc } = placeClip(before, sceneId, track, clip, Number(at))
+  writeDoc(file, before, doc)
+}
+
+function unplaceCmd(argv) {
+  const [file, sceneId, track, clipArg] = argv
+  if (!file || !sceneId || !track || !clipArg) throw new BeatEditError('unplace needs <file> <scene> <track> <clip>[@<at>]')
+  const sep = clipArg.lastIndexOf('@')
+  let clip = clipArg
+  let at
+  if (sep !== -1) {
+    at = Number(clipArg.slice(sep + 1))
+    if (clipArg.slice(sep + 1) === '' || Number.isNaN(at)) throw new BeatEditError(`unplace "${clipArg}": @ must be followed by the placement's step offset, e.g. riser1@56.5`)
+    clip = clipArg.slice(0, sep)
+  }
+  const before = readDoc(file)
+  const { doc } = unplaceClip(before, sceneId, track, clip, at)
+  writeDoc(file, before, doc)
 }
 
 // Phase 32 Stream LB: renames (or clears) a scene's display name — the CLI/agent face on
@@ -1267,6 +1723,31 @@ function automateCmd(argv) {
   if (!created) process.stdout.write(`(moved existing point)\n`)
 }
 
+// === Phase 37 Stream RC begin ===
+function automateShapeCmd(argv) {
+  const valued = ['--from', '--to', '--cycles', '--points', '--bars']
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const [file, track, clip, param, shape] = positional
+  if (!file || !track || !clip || !param || !shape) {
+    throw new BeatEditError('automate-shape needs <file> <track> <clip> <param> <ramp|sine|triangle|exp|adsr> [--from V --to V --cycles N --points N --bars N]')
+  }
+  const from = flagValue(argv, '--from')
+  const to = flagValue(argv, '--to')
+  if (from === undefined || to === undefined) throw new BeatEditError('automate-shape needs --from and --to (the shape\'s start and target values, in the param\'s own units)')
+  const opts = {
+    from: Number(from),
+    to: Number(to),
+    ...(flagValue(argv, '--cycles') !== undefined ? { cycles: Number(flagValue(argv, '--cycles')) } : {}),
+    ...(flagValue(argv, '--points') !== undefined ? { points: Number(flagValue(argv, '--points')) } : {}),
+    ...(flagValue(argv, '--bars') !== undefined ? { bars: Number(flagValue(argv, '--bars')) } : {}),
+  }
+  const before = readDoc(file)
+  const { doc, spanSteps, points } = applyAutomationShape(before, track, clip, param, shape, opts)
+  writeDoc(file, before, doc)
+  process.stdout.write(`${shape} ${param} on ${track}.${clip}: ${points.length} points across ${formatNumber(spanSteps)} steps (${opts.from} -> ${opts.to})\n`)
+}
+// === Phase 37 Stream RC end ===
+
 async function sampleCmd(argv) {
   const [file, id, samplePath] = argv
   if (!file || !id || !samplePath) throw new BeatEditError('sample needs <file> <sample-id> <wav-path> (path relative to the .beat file)')
@@ -1279,6 +1760,233 @@ async function sampleCmd(argv) {
   writeDoc(file, before, setMediaSample(before, id, sha256, samplePath.replace(/\\/g, '/')))
   process.stdout.write(`registered ${id}: sha256:${sha256.slice(0, 12)}... ${samplePath}\n`)
 }
+
+// ==== Phase 38 Stream SA begin ====
+// `beat skeleton <out.beat> <analysis.json>` — scaffold a structure-matched empty project from a
+// detected-structure artifact (docs/phase-38-plan.md §SA). All the seconds->bars math and
+// validation live in src/analysis/import.ts; this command is I/O + the refuse-overwrite guard.
+function skeletonCmd(argv) {
+  const sbIdx = argv.indexOf('--section-bars')
+  const sectionBars = sbIdx >= 0 ? Number(argv[sbIdx + 1]) : undefined
+  const positionals = argv.filter((a, i) => !a.startsWith('--') && !(sbIdx >= 0 && i === sbIdx + 1))
+  const [outFile, analysisFile] = positionals
+  if (!outFile || !analysisFile) throw new BeatAnalysisError('skeleton needs <out.beat> <analysis.json> [--section-bars N]')
+  if (existsSync(outFile)) throw new BeatAnalysisError(`${outFile} already exists — refusing to overwrite (skeleton scaffolds a NEW project; delete it or choose another path)`)
+  if (!existsSync(analysisFile)) throw new BeatAnalysisError(`no analysis file at ${analysisFile} — produce one with beat analyze <audio.wav> first`)
+  let raw
+  try {
+    raw = JSON.parse(readFileSync(analysisFile, 'utf8'))
+  } catch (e) {
+    throw new BeatAnalysisError(`${analysisFile} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  const artifact = validateAnalysisArtifact(raw)
+  const { doc, report } = buildSkeleton(artifact, sectionBars !== undefined ? { sectionBars } : {})
+  writeFileSync(outFile, serialize(doc))
+  process.stdout.write(formatSkeletonReport(report, outFile) + '\n')
+}
+// ==== Phase 38 Stream SA end ====
+
+// ==== Phase 37 Stream RD begin ====
+// `beat source` — find/ingest real sounds into the taste loop (docs/phase-37-plan.md §RD). Backed
+// by scripts/source-lib.mjs, imported at call time via a runtime dynamic import (shared verbatim
+// with the MCP surface). SourceError is mapped to BeatEditError HERE so the shared main().catch
+// prints a clean `error: ...` (exit 2) with no stack — never leaking through as an uncaught throw.
+async function sourceCmd(argv) {
+  const [sub, ...rest] = argv
+  const flag = (name, dflt) => {
+    const i = rest.indexOf(name)
+    return i !== -1 ? rest[i + 1] : dflt
+  }
+  const VALUE_FLAGS = new Set(['--max', '--dur-min', '--dur-max', '--out-dir', '--license', '--note', '--freesound',
+    // ==== Phase 39 Stream UB (gen) ====
+    '--seconds', '--seed', '--backend', '--provider',
+    // ==== Phase 40 Stream VB ==== (gen batches)
+    '--count', '--seed-from',
+    // ==== end Phase 40 Stream VB ====
+  ])
+  const positionals = rest.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(rest[i - 1]))
+  const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
+  try {
+    if (sub === 'search') {
+      const [query] = positionals
+      const outDir = flag('--out-dir')
+      const opts = {
+        query,
+        max: flag('--max') !== undefined ? Number(flag('--max')) : 10,
+        durMin: flag('--dur-min') !== undefined ? Number(flag('--dur-min')) : 0.05,
+        durMax: flag('--dur-max') !== undefined ? Number(flag('--dur-max')) : 5,
+      }
+      const { total, results } = await lib.freesoundSearchCC0(opts)
+      process.stdout.write(`${total} CC0 result${total === 1 ? '' : 's'} for "${query}" — top ${results.length} by rating:\n`)
+      for (const r of results) {
+        process.stdout.write(`  #${r.id}  ${r.name} by ${r.by}  (${Number(r.duration).toFixed(2)}s, rating ${r.rating ?? 'n/a'})  ${r.url}\n`)
+      }
+      if (outDir) {
+        const saved = await lib.downloadPreviews({ results, outDir })
+        process.stdout.write(`downloaded ${saved.length} preview${saved.length === 1 ? '' : 's'} into ${outDir}/ for auditioning\n`)
+      }
+      process.stdout.write(`register one with: beat source add <file.beat> <id> --freesound <#>\n`)
+      return
+    }
+    if (sub === 'add') {
+      const [file, id, audioFile] = positionals
+      const freesoundId = flag('--freesound')
+      const note = flag('--note')
+      let result
+      if (freesoundId !== undefined) {
+        result = await lib.addFreesoundSource({ beatFile: file, id, freesoundId, note })
+      } else {
+        result = await lib.addLocalSource({ beatFile: file, id, audioFile, license: flag('--license', 'unspecified'), note })
+      }
+      process.stdout.write(
+        `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +
+        `(${result.durationSeconds}s, license ${result.license})\n` +
+        `provenance sidecar: ${result.relPath}.json\n`,
+      )
+      // Pilot 104 minor: re-registering an existing id silently replaced it. Say so explicitly.
+      if (result.reregistered) {
+        process.stdout.write(
+          result.reregistered.changed
+            ? `note: re-registered ${result.id} (replaced sha256:${result.reregistered.previousSha256.slice(0, 7)}... -> ${result.sha256.slice(0, 7)}...)\n`
+            : `note: ${result.id} already registered (unchanged)\n`,
+        )
+      }
+      return
+    }
+    // ==== Phase 39 Stream UB begin ====
+    if (sub === 'gen') {
+      // `beat source gen --doctor` probes the generative backends (stub always ok; stableaudio needs
+      // torch owner-side). Prints the genDoctor JSON so it's scriptable, like `beat analyze --doctor --json`.
+      if (rest.includes('--doctor')) {
+        const analysis = await import(new URL('../dist/src/analysis/index.js', import.meta.url).href)
+        const report = await analysis.genDoctor()
+        process.stdout.write(JSON.stringify(report, null, 2) + '\n')
+        return
+      }
+      const [file, id, prompt] = positionals
+      // ==== Phase 40 Stream VB ====
+      // `--count N`: generate N candidates (seeds S..S+N-1) into a batch dir and register NOTHING.
+      // Presence of --count is the switch, not its value — asking for a batch of 1 is a coherent
+      // (if unusual) request, and the alternative (N>1 means batch) would make --count 1 silently
+      // mean something else entirely. Without --count, the single-shot register-now path below is
+      // untouched.
+      if (flag('--count') !== undefined) {
+        await sourceGenBatch(lib, { file, id, prompt, rest, flag })
+        return
+      }
+      // ==== end Phase 40 Stream VB ====
+      const result = await lib.addGeneratedSource({
+        beatFile: file,
+        id,
+        prompt,
+        seconds: flag('--seconds') !== undefined ? Number(flag('--seconds')) : 2,
+        ...(flag('--seed') !== undefined ? { seed: Number(flag('--seed')) } : {}),
+        backend: flag('--backend', 'stableaudio'),
+        provider: flag('--provider', 'stable-audio-open'),
+        ...(flag('--license') !== undefined ? { license: flag('--license') } : {}),
+      })
+      process.stdout.write(
+        `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +
+        `(${result.durationSeconds}s, ${result.source}, license ${result.license})\n` +
+        `provenance sidecar: ${result.relPath}.json\n`,
+      )
+      if (result.reregistered) {
+        process.stdout.write(
+          result.reregistered.changed
+            ? `note: re-registered ${result.id} (replaced sha256:${result.reregistered.previousSha256.slice(0, 7)}... -> ${result.sha256.slice(0, 7)}...)\n`
+            : `note: ${result.id} already registered (unchanged)\n`,
+        )
+      }
+      return
+    }
+    // ==== Phase 39 Stream UB end ====
+    throw new BeatEditError('source needs a subcommand: `beat source search <query>` or `beat source add <file.beat> <id> <local-audio-file>` (see `beat help source`)')
+  } catch (err) {
+    if (err && err.name === 'SourceError') throw new BeatEditError(err.message)
+    throw err
+  }
+}
+
+// ==== Phase 40 Stream VB begin ====
+/** `beat source gen ... --count N` — the generative taste loop's first half: N candidates from one
+ * prompt across N seeds, into a batch dir, registering NOTHING. Prints the same
+ * "audition, then: beat score ..." call to action the vary rungs print, so the generative workflow
+ * and the mutation workflow converge on one pair of verbs (score, adopt). */
+async function sourceGenBatch(lib, { file, id, prompt, rest, flag }) {
+  const count = Number(flag('--count'))
+  const seedFrom = flag('--seed-from') ?? flag('--seed')
+  const result = await lib.genSourceBatch({
+    beatFile: file,
+    id,
+    prompt,
+    count,
+    seconds: flag('--seconds') !== undefined ? Number(flag('--seconds')) : 2,
+    // --seed-from is the batch's spelling of --seed; accept --seed too rather than erroring at
+    // someone who reasonably reached for the flag the single-shot path taught them.
+    ...(seedFrom !== undefined ? { seedFrom: Number(seedFrom) } : {}),
+    backend: flag('--backend', 'stableaudio'),
+    provider: flag('--provider', 'stable-audio-open'),
+    ...(flag('--license') !== undefined ? { license: flag('--license') } : {}),
+    ...(flag('--out-dir') !== undefined ? { outDir: flag('--out-dir') } : {}),
+    onProgress: (i, n, seed) => process.stdout.write(`generating v${i}/${n} (seed ${seed})...\n`),
+  })
+  const last = result.seedFrom + result.candidates.length - 1
+  process.stdout.write(
+    `${result.dir}/: ${result.candidates.length} candidate${result.candidates.length === 1 ? '' : 's'} of "${prompt}" ` +
+    `(seeds ${result.seedFrom}${last !== result.seedFrom ? `-${last}` : ''})\n`,
+  )
+  for (const c of result.candidates) {
+    process.stdout.write(`  ${c.variant}: seed ${c.seed}, ${c.durationSeconds}s, sha256:${c.sha256.slice(0, 12)}...\n`)
+  }
+  // The property this whole path exists for — state it, don't leave it to be inferred.
+  process.stdout.write(`nothing is registered in ${file} yet: candidates live only in the batch dir until you adopt one\n`)
+  // Gen candidates are ALREADY audio: the vN.wavs a vary batch needs headless Chromium to produce
+  // exist the moment generation ends, so the SAME stitcher runs with no render step in front of it
+  // (auditionAfterRender is named for vary's flow, but it only stitches — nothing here re-renders).
+  if (rest.includes('--audition')) await auditionAfterRender(result.dir, result.candidates.length)
+  process.stdout.write(`audition, then: beat score ${result.dir} <best> [2nd 3rd]\n`)
+  process.stdout.write(`then register the winner: beat adopt ${result.dir} <best>\n`)
+}
+// ==== Phase 40 Stream VB end ====
+// ==== Phase 37 Stream RD end ====
+
+// ==== Phase 40 Stream VC ====
+// `beat regen` — replay a project's generated media from its provenance sidecars (see
+// src/analysis/regen.ts for the honesty contract this surface is printing). The library returns
+// structured results and never writes to stdout; the formatting lives there too, so the MCP twin
+// prints the identical text. BeatRegenError → BeatEditError for the shared clean-exit path.
+async function regenCmd(argv) {
+  const args = argv.filter((a) => a !== '--verify')
+  const idFlag = args.indexOf('--id')
+  const id = idFlag !== -1 ? args[idFlag + 1] : undefined
+  const file = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--id')[0]
+  const verify = argv.includes('--verify')
+  const analysis = await import(new URL('../dist/src/analysis/index.js', import.meta.url).href)
+  try {
+    const plan = analysis.planRegen(file, { id })
+    // The cost estimate lands BEFORE the first minute is spent, never in the summary.
+    process.stdout.write(analysis.formatRegenPlan(plan, verify) + '\n')
+    if (plan.regenerable.length === 0) {
+      process.stdout.write('nothing to regenerate — no generated media in this project\n')
+      return
+    }
+    const res = await analysis.runRegen({
+      beatFile: file,
+      id,
+      verify,
+      // A 20-minute run must not be a silent one: report each sample as it lands.
+      onProgress: (r) => process.stdout.write(analysis.formatRegenSample(r) + '\n'),
+    })
+    // The summary re-prints the per-sample lines, so drop them here and keep only the tail.
+    process.stdout.write(analysis.formatRegenResults(res).split('\n').slice(res.results.length).join('\n') + '\n')
+    // A `differs` is a report, not a failure (see regen.ts) — only a real error exits non-zero.
+    if (res.results.some((r) => r.status === 'error')) process.exitCode = 1
+  } catch (err) {
+    if (err && err.name === 'BeatRegenError') throw new BeatEditError(err.message)
+    throw err
+  }
+}
+// ==== end Phase 40 Stream VC ====
 
 function laneCmd(argv) {
   // Phase 35 Stream OB: `--clear-legacy` is the one-shot explicit cleanup for stale v0.5
@@ -1300,6 +2008,250 @@ function laneCmd(argv) {
   const ref = sampleId === 'none' ? null : { sample: sampleId, gainDb: gain !== undefined ? Number(gain) : 0, tune: tune !== undefined ? Number(tune) : 0 }
   writeDoc(file, before, setLaneSample(before, track, lane, ref))
 }
+
+// ==== Phase 40 Stream VA ====
+// Pitch-aware sampling (docs/phase-40-plan.md §VA): the three verbs that close the gap between
+// "generate a sound" and "play a melody with it". Everything here is pure TS — no venv, no Python
+// (decisions.md D20).
+
+/** Decodes a REGISTERED sample's audio. Refusing on an unregistered id (rather than taking a path)
+ * is deliberate: these verbs read the pitch of a sound the project already commits to, and the
+ * media block is that commitment. */
+function readSampleAudio(file, doc, sampleId) {
+  const entry = doc.media.find((m) => m.id === sampleId)
+  if (!entry) {
+    throw new BeatEditError(
+      `no sample "${sampleId}" in the media block (have: ${doc.media.map((m) => m.id).join(', ') || 'none'}) — register it with beat sample first`,
+    )
+  }
+  const beatDir = dirname(resolve(file))
+  const abs = resolve(beatDir, entry.path)
+  if (!existsSync(abs)) throw new BeatEditError(`sample "${sampleId}" is registered at ${entry.path}, but there is no file there (relative to ${beatDir})`)
+  return { entry, ...decodeWav(readFileSync(abs)) }
+}
+
+/** `--key a` is the natural way to say "A minor"; noteToMidi wants a full note. Only the pitch
+ * class is ever used, so the octave we invent here is arbitrary. */
+function parseKeyNote(text) {
+  return noteToMidi(/^[a-gA-G][#sb]?$/.test(text) ? `${text}4` : text)
+}
+
+/** The scale root's pitch CLASS ("a"), not its arbitrary octave ("a5") — only the class is used. */
+function pitchClassName(midi) {
+  return midiToNote(midi).replace(/-?\d+$/, '')
+}
+
+function pitchBodyNote(pitch) {
+  return `partials (measured over the body, ${pitch.analyzedFromSeconds.toFixed(3)}-${pitch.analyzedToSeconds.toFixed(3)}s of ${pitch.durationSeconds.toFixed(2)}s):`
+}
+
+function sampleInfoCmd(argv) {
+  const json = argv.includes('--json')
+  const pIdx = argv.indexOf('--partials')
+  const partialCount = pIdx !== -1 ? Number(argv[pIdx + 1]) : undefined
+  const positionals = argv.filter((a, i) => !a.startsWith('--') && !(pIdx !== -1 && i === pIdx + 1))
+  const [file, sampleId] = positionals
+  if (!file || !sampleId) throw new BeatEditError('sample-info needs <file> <sample-id> [--json] [--partials N]')
+  const doc = readDoc(file)
+  const { entry, channels, sampleRate } = readSampleAudio(file, doc, sampleId)
+  const pitch = detectPitch(channels, sampleRate, partialCount !== undefined ? { partialCount } : {})
+  const m = analyze(channels, sampleRate)
+  if (json) {
+    process.stdout.write(JSON.stringify({ id: sampleId, path: entry.path, pitch, metrics: m }, null, 2) + '\n')
+    return
+  }
+  const lines = [
+    `${sampleId}: ${m.durationSeconds.toFixed(2)}s, ${m.channels}ch @ ${m.sampleRate} Hz  ${entry.path}`,
+    formatPitchLine(pitch),
+    `peak       ${fmtDb(m.samplePeakDbfs, ' dBFS')} sample, ${fmtDb(m.truePeakDbtp, ' dBTP')} true`,
+    `centroid   ${m.spectral.centroidHz.toFixed(0)} Hz`,
+    '',
+    pitchBodyNote(pitch),
+    formatPartials(pitch.partials),
+  ]
+  // The table is the point (docs/phase-40-plan.md §VA item 2), so say what to look FOR in it —
+  // an f0 alone leaves you stuck, and these two readings are what made the recipe-song's
+  // bell_a-vs-bell_b call decidable.
+  // Only PROMINENT partials (within 6 dB of the strongest, the same bar suggestedRootHz uses) can
+  // audibly beat — a -25 dB straggler half a semitone off the root is not what sank bell_b, and
+  // saying it is would make this advice noise.
+  const beating = pitch.partials.find((q) => q.relDb >= -6 && Math.abs(1200 * Math.log2(q.ratio)) > 20 && Math.abs(1200 * Math.log2(q.ratio)) < 250)
+  if (beating) {
+    lines.push('', `note: two strong partials sit ${Math.abs(1200 * Math.log2(beating.ratio)).toFixed(0)} cents apart (x${beating.ratio.toFixed(3)}) — this close, they beat against each other: an unsteady, detuned ring rather than one clear pitch.`)
+  }
+  if (pitch.level === 'low' && pitch.suggestedRootNote) {
+    lines.push(
+      '',
+      `LOW confidence is a real answer here, not a failure: bells, plucks and found percussion usually read low.`,
+      `Read the table and decide the root yourself — then state it: beat keymap ${file} <track> ${sampleId} --scale minorPentatonic --from <note> --to <note> --root ${pitch.suggestedRootNote}`,
+    )
+  } else if (pitch.note) {
+    lines.push('', `next: beat keymap ${file} <track> ${sampleId} --scale minorPentatonic --from <note> --to <note>`)
+  }
+  process.stdout.write(lines.join('\n') + '\n')
+}
+
+/** The refusal (docs/phase-40-plan.md §VA item 3): a wrong keymap is worse than none, so a
+ * low-confidence detection stops here — but it must leave the user ONE copy-paste from success,
+ * not with a research project. So it quotes the measured confidence, the whole partial table, and
+ * the original command line with a `--root` derived from the strongest low partial appended. */
+function keymapRefusal(argv, sampleId, pitch) {
+  const lines = [
+    `pitch detection is not confident enough to root a keymap on "${sampleId}" — refusing rather than minting six lanes of wrong tuning.`,
+    '',
+    formatPitchLine(pitch),
+    '',
+    pitchBodyNote(pitch),
+    formatPartials(pitch.partials),
+    '',
+  ]
+  if (pitch.suggestedRootNote) {
+    lines.push(
+      `The lowest strong partial is ${pitch.suggestedRootHz.toFixed(1)} Hz = ${pitch.suggestedRootNote}, which is usually where a struck sound's perceived pitch sits.`,
+      `If the table agrees with you, state the root and re-run — this is a first-class path, not a workaround:`,
+      '',
+      `  beat keymap ${argv.join(' ')} --root ${pitch.suggestedRootNote}`,
+      '',
+    )
+  }
+  lines.push(`Or pass --force to build the keymap on the ${pitch.level}-confidence detection above as-is.`)
+  return lines.join('\n')
+}
+
+function keymapCmd(argv) {
+  const VALUE_FLAGS = new Set(['--scale', '--from', '--to', '--root', '--key', '--gain'])
+  const flag = (name) => {
+    const i = argv.indexOf(name)
+    return i !== -1 ? argv[i + 1] : undefined
+  }
+  const positionals = argv.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]))
+  const [file, track, sampleId] = positionals
+  const scale = flag('--scale')
+  const from = flag('--from')
+  const to = flag('--to')
+  if (!file || !track || !sampleId || !scale || !from || !to) {
+    throw new BeatEditError(
+      'keymap needs <file> <track> <sample-id> --scale <name> --from <note> --to <note> [--root <note>] [--key <note>] [--gain dB]\n' +
+      `  e.g. beat keymap song.beat bells bell_a --scale minorPentatonic --from a5 --to a6 --root a6\n` +
+      `  scale names: ${SCALE_NAMES.join(', ')}`,
+    )
+  }
+  const fromMidi = noteToMidi(from)
+  const toMidi = noteToMidi(to)
+  // The scale's root defaults to --from's pitch class, which is what "--from a5 --to a6 --scale
+  // minorPentatonic" plainly means; --key overrides it for spans that don't start on the root.
+  const scaleRootMidi = flag('--key') !== undefined ? parseKeyNote(flag('--key')) : fromMidi
+  const gainDb = flag('--gain') !== undefined ? Number(flag('--gain')) : 0
+
+  const before = readDoc(file)
+  let rootMidi
+  let rootSource
+  const rootFlag = flag('--root')
+  if (rootFlag !== undefined) {
+    rootMidi = noteToMidi(rootFlag)
+    rootSource = `--root ${rootFlag} (stated, not detected)`
+  } else {
+    const { channels, sampleRate } = readSampleAudio(file, before, sampleId)
+    const pitch = detectPitch(channels, sampleRate)
+    if (pitch.hz === null || (pitch.confidence < PITCH_CONFIDENCE_MEDIUM && !argv.includes('--force'))) {
+      throw new BeatEditError(keymapRefusal(argv, sampleId, pitch))
+    }
+    rootMidi = pitch.midi
+    rootSource = `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)})`
+  }
+
+  // --dry-run runs the REAL build and simply doesn't write it. Computing the plan alone would skip
+  // buildKeymap's track/sample checks, so a dry run against a typo'd track or an unregistered
+  // sample printed a confident lane list for an edit that could never apply — a dry run that lies
+  // about succeeding is worse than no dry run at all.
+  const dryRun = argv.includes('--dry-run')
+  const { doc, plan, added, rebacked } = buildKeymap(before, track, sampleId, { rootMidi, scaleRootMidi, scale, fromMidi, toMidi, gainDb })
+  if (!dryRun) writeDoc(file, before, doc)
+  process.stdout.write(
+    `keymap${dryRun ? ' (dry run)' : ''}: ${plan.length} lane${plan.length === 1 ? '' : 's'} on ${track} backed by ${sampleId} — ${scale} in ${pitchClassName(scaleRootMidi)}, ${midiToNote(fromMidi)}..${midiToNote(toMidi)}\n` +
+    `root ${midiToNote(rootMidi)}: ${rootSource}\n` +
+    plan.map((l) => `  lane ${l.name} sample ${sampleId} ${formatNumber(gainDb)} ${formatNumber(l.tune)}\n`).join('') +
+    (dryRun
+      ? `nothing written (--dry-run) — ${added.length} lane${added.length === 1 ? '' : 's'} would be added, ${rebacked.length} re-backed\n`
+      : (added.length > 0 ? `added ${added.length}: ${added.join(', ')}\n` : '') +
+        (rebacked.length > 0 ? `re-backed ${rebacked.length} existing lane${rebacked.length === 1 ? '' : 's'}: ${rebacked.join(', ')}\n` : '') +
+        `play it: beat add-hit ${file} ${track} ${plan[0].name} 0 0.8\n`),
+  )
+}
+
+function audioPitchCmd(argv) {
+  const VALUE_FLAGS = new Set(['--to', '--root', '--semitones'])
+  const flag = (name) => {
+    const i = argv.indexOf(name)
+    return i !== -1 ? argv[i + 1] : undefined
+  }
+  const positionals = argv.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]))
+  const [file, trackId, clipId] = positionals
+  const to = flag('--to')
+  const semitonesFlag = flag('--semitones')
+  if (!file || !trackId || !clipId || (to === undefined && semitonesFlag === undefined)) {
+    throw new BeatEditError(
+      'audio-pitch needs <file> <track> <clip-id> and either --to <note> (detect, then move to that note) or --semitones <n> (shift by an interval)\n' +
+      '  e.g. beat audio-pitch song.beat pad padbed --to g4        (detects the region\'s pitch)\n' +
+      '       beat audio-pitch song.beat pad padbed --semitones -1  (no detection — the honest option for a chord)',
+    )
+  }
+  const before = readDoc(file)
+  const track = before.tracks.find((t) => t.id === trackId)
+  if (!track) throw new BeatEditError(`no track "${trackId}" (have: ${before.tracks.map((t) => t.id).join(', ') || 'none'})`)
+  const clip = track.clips.find((c) => c.id === clipId)
+  if (!clip) throw new BeatEditError(`no clip "${clipId}" on track "${trackId}" (have: ${track.clips.map((c) => c.id).join(', ') || 'none'})`)
+  if (!clip.audio) throw new BeatEditError(`clip "${clipId}" on track "${trackId}" is not an audio-region clip — audio-pitch repitches audio regions (see beat audio-clip)`)
+
+  let semitones
+  let how
+  if (semitonesFlag !== undefined) {
+    semitones = Number(semitonesFlag)
+    if (!Number.isFinite(semitones)) throw new BeatEditError(`--semitones must be a number, got "${semitonesFlag}"`)
+    how = `--semitones ${formatNumber(semitones)} (stated — no pitch detection)`
+  } else {
+    const targetMidi = noteToMidi(to)
+    const rootFlag = flag('--root')
+    let rootMidi
+    if (rootFlag !== undefined) {
+      rootMidi = noteToMidi(rootFlag)
+      how = `--root ${rootFlag} -> ${to} (root stated, not detected)`
+    } else {
+      const { channels, sampleRate } = readSampleAudio(file, before, clip.audio.media)
+      // Detect over the SPAN THAT PLAYS, not the whole file — the region's in/out is the sound the
+      // user is repitching, and a file can hold much more than the region uses.
+      const a = Math.max(0, Math.round(clip.audio.in * sampleRate))
+      const b = Math.min(channels[0].length, Math.round(clip.audio.out * sampleRate))
+      const pitch = detectPitch(channels.map((ch) => ch.slice(a, b)), sampleRate)
+      if (pitch.hz === null || (pitch.confidence < PITCH_CONFIDENCE_MEDIUM && !argv.includes('--force'))) {
+        throw new BeatEditError(
+          `pitch detection is not confident enough to repitch "${clipId}" to ${to} — refusing rather than guessing.\n\n` +
+          formatPitchLine(pitch) + '\n\n' +
+          pitchBodyNote(pitch) + '\n' + formatPartials(pitch.partials) + '\n\n' +
+          (pitch.suggestedRootNote ? `State the region's current pitch and re-run:\n\n  beat audio-pitch ${argv.join(' ')} --root ${pitch.suggestedRootNote}\n\n` : '') +
+          `A chord or a pad has no single pitch to detect — for those, shift by an interval instead:\n\n  beat audio-pitch ${file} ${trackId} ${clipId} --semitones <n>\n\n` +
+          `Or pass --force to accept the ${pitch.level}-confidence detection above.`,
+        )
+      }
+      rootMidi = pitch.midi
+      how = `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)}) -> ${to}`
+    }
+    semitones = targetMidi - rootMidi
+  }
+  const rate = rateForPitch(0, semitones)
+  // warp first: setValue normalizes rate back to 1 while warp isn't 'repitch' (one canonical form
+  // per state, D4), so setting rate first would be undone.
+  let doc = setValue(before, `${trackId}.clip.${clipId}.audio.warp`, 'repitch')
+  doc = setValue(doc, `${trackId}.clip.${clipId}.audio.rate`, String(rate))
+  writeDoc(file, before, doc)
+  process.stdout.write(
+    `audio-pitch: ${trackId}.${clipId} warp repitch, rate ${formatNumber(rate)} (${semitones >= 0 ? '+' : ''}${formatNumber(semitones)} semitones)\n` +
+    `${how}\n` +
+    `repitch is variable-speed: the region now plays ${rate > 1 ? 'faster and shorter' : rate < 1 ? 'slower and longer' : 'unchanged'} — check its in/out span if the timing matters.\n`,
+  )
+}
+
+// ==== end Phase 40 Stream VA ====
 
 // v0.10 effect-chain commands (docs/phase-22-stream-aa.md). Add/remove/move change the chain's
 // LIST shape/order, same reason clip/scene/song get their own commands instead of overloading
@@ -1379,9 +2331,12 @@ function audioSplitCmd(argv) {
   const [file, track, clip, at] = positional
   if (!file || !track || !clip || at === undefined) throw new BeatEditError('audio-split needs <file> <track> <clip> <at-step> [--id new-clip-id]')
   const before = readDoc(file)
-  const { doc, first, second } = splitAudioClip(before, track, clip, Number(at), newId !== undefined ? { newClipId: newId } : {})
+  const { doc, first, second, placements } = splitAudioClip(before, track, clip, Number(at), newId !== undefined ? { newClipId: newId } : {})
   writeDoc(file, before, doc)
   process.stdout.write(`split "${clip}" into "${first.id}" and "${second.id}"\n`)
+  // v0.11 (Phase 36): the split auto-places the second half right after the first in every scene
+  // that placed the original (D16 q3) — say where, so the arrangement effect is never a surprise.
+  for (const p of placements) process.stdout.write(`auto-placed "${p.clip}" at ${formatNumber(p.at)} in scene "${p.sceneId}"\n`)
 }
 
 function fmtDb(x, unit = '') {
@@ -1483,6 +2438,85 @@ async function lintCmd(argv) {
   // (no --doc) exits naturally exactly as it always has.
   if (docPath) process.exit(process.exitCode ?? 0)
 }
+
+// ---- Phase 37 Stream RA begin: section-aware feedback + render --stems ----------------------
+// Dynamic imports (mkdirSync/join, the section metric helpers, renderToBuffer) live inside these
+// handlers rather than on the shared top-of-file import block so sibling streams RB/RC/RD editing
+// the same file don't collide on the import lines.
+
+/** `beat feedback <file>` — render the song ONCE through the real engine and turn that capture into
+ * mix feedback. Default: whole-song analyze + lint in one block. With --sections: slice the render
+ * at the song's section boundaries and report the per-section energy arc (LUFS / spectral balance /
+ * width / crest per section + variance-padded section-to-section movement). --ref <profile.json>
+ * compares each section (or the whole song) against a saved reference profile. Honest limits:
+ * per-section STATIC metrics only — no masking, arrangement, or transition awareness. */
+async function feedbackCmd(argv) {
+  const { analyzeSections, formatSectionFeedback, formatWholeSongFeedback } = await import('../dist/src/metrics/index.js')
+  const { renderToBuffer } = await import('./render.mjs')
+
+  const json = argv.includes('--json')
+  const wantSections = argv.includes('--sections')
+  const refIdx = argv.indexOf('--ref')
+  const refPath = refIdx !== -1 ? argv[refIdx + 1] : undefined
+  if (refIdx !== -1 && (!refPath || refPath.startsWith('--'))) {
+    throw new BeatEditError('--ref needs a profile path — write one with: beat metrics <ref.wav> --save-profile <ref.json>')
+  }
+  const file = argv.find((a, i) => !a.startsWith('--') && (refIdx === -1 || i !== refIdx + 1))
+  if (!file) throw new BeatEditError('feedback needs a .beat file (it renders the file, then analyzes the render)')
+  if (refPath !== undefined && !existsSync(refPath)) {
+    throw new BeatEditError(`no profile at ${refPath} — write one with: beat metrics <ref.wav> --save-profile ${refPath}`)
+  }
+  const ref = refPath !== undefined ? parseProfile(readFileSync(refPath, 'utf8'), refPath) : undefined
+
+  const { bytes, doc } = await renderToBuffer(file)
+  const { channels, sampleRate } = decodeWav(bytes)
+
+  if (wantSections) {
+    if (!doc.song || doc.song.length === 0) {
+      throw new BeatEditError(`--sections needs a song block, but ${file} is in loop mode (no sections to slice). Run whole-song feedback instead: beat feedback ${file}`)
+    }
+    const specs = doc.song.map((s) => ({ bars: s.bars, scene: s.scene, name: doc.scenes.find((sc) => sc.id === s.scene)?.name }))
+    const secMetrics = analyzeSections(channels, sampleRate, doc.bpm, specs)
+    process.stdout.write(json ? JSON.stringify({ sections: secMetrics, ...(ref ? { ref: ref.source } : {}) }, null, 2) + '\n' : formatSectionFeedback(secMetrics, ref))
+  } else {
+    const m = analyze(channels, sampleRate)
+    const findings = lint(m, ref ? { ref } : {})
+    process.exitCode = findings.some((f) => f.level === 'warn') ? 1 : 0
+    process.stdout.write(json ? JSON.stringify({ metrics: m, findings }, null, 2) + '\n' : formatWholeSongFeedback(m, findings))
+  }
+  process.exit(process.exitCode ?? 0) // render leaves chromium/vite event-loop stragglers — see render.mjs footer
+}
+
+/** `beat render <file> --stems [--out-dir d]` — one solo-rendered WAV per track into an out dir
+ * (default stems-<basename> NEXT TO the .beat file). Reuses render.mjs's renderTrackSolosCommand
+ * (one daemon/preview/browser session, one real solo capture per track). */
+async function renderStemsCmd(argv) {
+  const { mkdirSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { renderTrackSolosCommand } = await import('./render.mjs')
+
+  const outIdx = argv.indexOf('--out-dir')
+  const outDir = outIdx !== -1 ? argv[outIdx + 1] : undefined
+  if (outIdx !== -1 && (!outDir || outDir.startsWith('--'))) throw new BeatEditError('--out-dir needs a directory path')
+  const file = argv.find((a, i) => !a.startsWith('--') && (outIdx === -1 || i !== outIdx + 1))
+  if (!file) throw new BeatEditError('render --stems needs a .beat file')
+
+  const doc = readDoc(file)
+  const trackIds = doc.tracks.map((t) => t.id)
+  if (trackIds.length === 0) throw new BeatEditError(`${file} has no tracks to render stems for`)
+  const dir = outDir ?? join(dirname(resolve(file)), `stems-${basename(file).replace(/\.beat$/, '')}`)
+  mkdirSync(dir, { recursive: true })
+
+  const wavByTrack = await renderTrackSolosCommand(file, trackIds)
+  for (const id of trackIds) {
+    const outPath = join(dir, `${id}.wav`)
+    writeFileSync(outPath, wavByTrack.get(id))
+    console.error(`wrote ${outPath} (${wavByTrack.get(id).length} bytes)`)
+  }
+  process.stdout.write(`wrote ${trackIds.length} stem${trackIds.length === 1 ? '' : 's'} to ${dir}/ (one solo render per track: ${trackIds.join(', ')})\n`)
+  process.exit(0) // render leaves chromium/vite event-loop stragglers — see render.mjs footer
+}
+// ---- Phase 37 Stream RA end -----------------------------------------------------------------
 
 /** `git show rev:path` needs the path relative to the repo root, wherever we're invoked from. */
 function gitShow(rev, file) {
@@ -1756,6 +2790,16 @@ async function main() {
     case 'inspect':
       await inspectCmd(rest)
       break
+    // ==== Phase 38 Stream SB begin ====
+    case 'analyze':
+      await analyzeCmd(rest)
+      break
+    // ==== Phase 38 Stream SB end ====
+    // --- Phase 37 Stream RB begin ---
+    case 'analyze-structure':
+      await analyzeStructureCmd(rest)
+      break
+    // --- Phase 37 Stream RB end ---
     case 'set':
       setCmd(rest)
       break
@@ -1828,6 +2872,11 @@ async function main() {
     case 'automate':
       automateCmd(rest)
       break
+    // === Phase 37 Stream RC begin ===
+    case 'automate-shape':
+      automateShapeCmd(rest)
+      break
+    // === Phase 37 Stream RC end ===
     case 'clip':
       clipCmd(rest)
       break
@@ -1836,6 +2885,12 @@ async function main() {
       break
     case 'scene-set':
       sceneSetCmd(rest)
+      break
+    case 'place':
+      placeCmd(rest)
+      break
+    case 'unplace':
+      unplaceCmd(rest)
       break
     case 'song':
       songCmd(rest)
@@ -1849,9 +2904,35 @@ async function main() {
     case 'sample':
       await sampleCmd(rest)
       break
+    // ==== Phase 38 Stream SA begin ====
+    case 'skeleton':
+      skeletonCmd(rest)
+      break
+    // ==== Phase 38 Stream SA end ====
+    // ==== Phase 37 Stream RD begin ====
+    case 'source':
+      await sourceCmd(rest)
+      break
+    // ==== Phase 37 Stream RD end ====
+    // ==== Phase 40 Stream VC ====
+    case 'regen':
+      await regenCmd(rest)
+      break
+    // ==== end Phase 40 Stream VC ====
     case 'lane':
       laneCmd(rest)
       break
+    // ==== Phase 40 Stream VA ====
+    case 'sample-info':
+      sampleInfoCmd(rest)
+      break
+    case 'keymap':
+      keymapCmd(rest)
+      break
+    case 'audio-pitch':
+      audioPitchCmd(rest)
+      break
+    // ==== end Phase 40 Stream VA ====
     case 'effect-add':
       effectAddCmd(rest)
       break
@@ -1906,6 +2987,12 @@ async function main() {
       mcpInitCmd(rest)
       break
     case 'render': {
+      // Phase 37 Stream RA: `--stems` renders one solo WAV per track into an out dir instead of one
+      // full-mix WAV — its own handler (renderStemsCmd), which exits the process itself.
+      if (rest.includes('--stems')) {
+        await renderStemsCmd(rest.filter((a) => a !== '--stems'))
+        break // renderStemsCmd process.exit()s; break keeps the switch well-formed
+      }
       // One render path now (D15): dotbeat's own engine (ui/src/audio/engine.ts) driven headless.
       // The retired `--offline` flag (BeatLab-dependent, broken in this environment) is accepted
       // and ignored so old invocations don't hard-error — the real engine is dotbeat's own either way.
@@ -1913,6 +3000,10 @@ async function main() {
       await renderCommand(rest.filter((a) => a !== '--offline'))
       process.exit(0) // render leaves event-loop stragglers (chromium pipes, vite) — see render.mjs footer
     }
+    // Phase 37 Stream RA: render once, then section-aware or whole-song mix feedback in one step.
+    case 'feedback':
+      await feedbackCmd(rest)
+      break
     case 'daemon': {
       const { daemonCommand } = await import('./daemon.mjs')
       await daemonCommand(rest)
@@ -1941,8 +3032,10 @@ main().catch((err) => {
     err instanceof BeatPitchTimeError ||
     err instanceof BeatHumanizeError ||
     err instanceof BeatProfileError ||
+    err instanceof BeatAnalysisError ||
     err.name === 'HistoryError' ||
-    err.name === 'WavDecodeError'
+    err.name === 'WavDecodeError' ||
+    err.name === 'AutomationShapeError'
   ) {
     console.error(`error: ${err.message}`)
     process.exitCode = 2

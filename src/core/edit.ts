@@ -3,9 +3,10 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey } from './document.js'
+import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatPlacement, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
+import { automationShapePoints, type AutomationShape } from './automation-shape.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
  * in a document survive a serialize→parse round-trip deep-equal. */
@@ -1166,7 +1167,11 @@ export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: 
   const loopBars = opts.loopBars ?? 2
   if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
   if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
-  const base: BeatDocument = { formatVersion: '0.10', bpm, loopBars, selectedTrack: '', media: [], tracks: [], groups: [], scenes: [], song: null }
+  // v0.11 (Phase 36): fresh documents stamp the current format version — the established bump
+  // convention (see format-spec.md's v0.10 note): initDocument / the BeatLab-bridge converter
+  // stamp NEW documents with the new version; existing files keep their own version string and
+  // parse (and round-trip) unchanged, since every v0.11 addition is elided-by-default.
+  const base: BeatDocument = { formatVersion: '0.11', bpm, loopBars, selectedTrack: '', media: [], tracks: [], groups: [], scenes: [], song: null }
   const { doc } = addTrack(base, { id: opts.trackId ?? 'lead', kind: 'synth' })
   return { ...doc, selectedTrack: doc.tracks[0]!.id }
 }
@@ -1216,22 +1221,98 @@ export function loadClip(doc: BeatDocument, trackId: string, clipId: string): Be
   })
 }
 
-/** Sets (or creates) a scene's slot map. Every slot must reference an existing clip on an
- * existing track — same fail-loudly stance as the parser. Preserves the scene's existing `name`
+/** v0.11 (Phase 36): the slot-map input shape every setScene caller may pass — either the
+ * pre-v0.11 single-clip-per-track form (a bare clip id string, meaning one placement at 0: the
+ * daemon's scene builders and the GUI's place-clip route all speak this) or an explicit placement
+ * list. Mixed maps are fine (one track a string, another a placement array). */
+export type BeatSlotsInput = Record<string, string | BeatPlacement[]>
+
+/** Normalizes a BeatSlotsInput entry to a canonical placement list: a bare clip id becomes one
+ * placement at 0; explicit placements get canonical number precision and (at, clip id) order.
+ * Empty placement arrays are dropped by the caller (an empty list has no canonical form). */
+function normalizeSlotEntry(entry: string | BeatPlacement[]): BeatPlacement[] {
+  if (typeof entry === 'string') return [{ clip: entry, at: 0 }]
+  return sortPlacements(entry.map((p) => ({ clip: p.clip, at: canon(p.at) })))
+}
+
+/** Sets (or creates) a scene's slot map. Every placement must reference an existing clip on an
+ * existing track — same fail-loudly stance as the parser — and the v0.11 placement rules apply
+ * (scenePlacementError: at finite/>=0, D16's audio-only-for-v1 scope guard, no overlap on one
+ * track). Accepts the pre-v0.11 `Record<trackId, clipId>` shape unchanged (BeatSlotsInput above)
+ * so single-clip callers keep working as-is. Preserves the scene's existing `name`
  * (v0.10, Phase 32 Stream LB) when re-setting an already-named scene, the same "re-snapshot
  * doesn't wipe unrelated metadata" discipline `saveClip` already follows for automation/loop —
  * this is a slot-map edit, not a rename. */
-export function setScene(doc: BeatDocument, sceneId: string, slots: Record<string, string>): BeatDocument {
+export function setScene(doc: BeatDocument, sceneId: string, slots: BeatSlotsInput): BeatDocument {
   if (!/^[a-zA-Z0-9_-]+$/.test(sceneId)) throw new BeatEditError(`scene ids are single alphanumeric/_/- tokens, got "${sceneId}"`)
-  for (const [trackId, clipId] of Object.entries(slots)) {
+  const normalized: Record<string, BeatPlacement[]> = {}
+  for (const [trackId, entry] of Object.entries(slots)) {
     const track = findTrack(doc, trackId)
-    if (!track.clips.some((c) => c.id === clipId)) throw new BeatEditError(`track "${trackId}" has no clip "${clipId}" (have: ${track.clips.map((c) => c.id).join(', ') || 'none'})`)
+    const placements = normalizeSlotEntry(entry)
+    if (placements.length === 0) continue // no placements = the track key is simply absent (canonical form)
+    for (const p of placements) {
+      if (!track.clips.some((c) => c.id === p.clip)) throw new BeatEditError(`track "${trackId}" has no clip "${p.clip}" (have: ${track.clips.map((c) => c.id).join(', ') || 'none'})`)
+    }
+    normalized[trackId] = placements
   }
+  const placementError = scenePlacementError(doc.tracks, doc.bpm, sceneId, normalized)
+  if (placementError) throw new BeatEditError(placementError)
   const existing = doc.scenes.findIndex((s) => s.id === sceneId)
   const existingName = existing === -1 ? undefined : doc.scenes[existing]!.name
-  const scene = { id: sceneId, ...(existingName !== undefined ? { name: existingName } : {}), slots: { ...slots } }
+  const scene = { id: sceneId, ...(existingName !== undefined ? { name: existingName } : {}), slots: normalized }
   const scenes = existing === -1 ? [...doc.scenes, scene] : doc.scenes.map((s, i) => (i === existing ? scene : s))
   return { ...doc, scenes }
+}
+
+/** v0.11 (Phase 36, D16): adds ONE placement of `clipId` at `at` (fractional 16th steps from the
+ * section start) to `sceneId`'s slot for `trackId` — the friendlier single-placement verb `beat
+ * place`/`beat_place` (Phase 36 PB) call, and the core primitive the GUI's drag-to-place will
+ * eventually target. The scene must already exist (`setScene`/`beat scene` mints scenes — this
+ * verb edits one placement, it doesn't define a scene). All v0.11 placement rules apply
+ * (audio-only-for-v1, no overlap, at finite/>=0) — fail-loudly via scenePlacementError. */
+export function placeClip(doc: BeatDocument, sceneId: string, trackId: string, clipId: string, at: number): { doc: BeatDocument; placement: BeatPlacement } {
+  const scene = doc.scenes.find((s) => s.id === sceneId)
+  if (!scene) throw new BeatEditError(`no scene "${sceneId}" (have: ${doc.scenes.map((s) => s.id).join(', ') || 'none'}) — create it first (beat scene / setScene)`)
+  const track = findTrack(doc, trackId)
+  if (!track.clips.some((c) => c.id === clipId)) throw new BeatEditError(`track "${trackId}" has no clip "${clipId}" (have: ${track.clips.map((c) => c.id).join(', ') || 'none'})`)
+  if (!Number.isFinite(at) || at < 0) throw new BeatEditError(`placement at must be a finite number >= 0 steps, got ${at}`)
+  const placement: BeatPlacement = { clip: clipId, at: canon(at) }
+  const slots: Record<string, BeatPlacement[]> = { ...scene.slots, [trackId]: sortPlacements([...(scene.slots[trackId] ?? []), placement]) }
+  const placementError = scenePlacementError(doc.tracks, doc.bpm, sceneId, slots)
+  if (placementError) throw new BeatEditError(placementError)
+  return { doc: { ...doc, scenes: doc.scenes.map((s) => (s.id === sceneId ? { ...s, slots } : s)) }, placement }
+}
+
+/** v0.11 (Phase 36, D16): removes ONE placement of `clipId` from `sceneId`'s slot for `trackId`.
+ * Unambiguous when the clip is placed exactly once; when it's placed more than once, `at` is
+ * REQUIRED to say which placement dies (fail-loudly on ambiguity — Phase 36 PB's `beat unplace
+ * ... <clip>[@<at>]` contract). Removing a track's last placement drops the track key entirely
+ * (an empty placement list has no canonical serialized form). */
+export function unplaceClip(doc: BeatDocument, sceneId: string, trackId: string, clipId: string, at?: number): { doc: BeatDocument; removed: BeatPlacement } {
+  const scene = doc.scenes.find((s) => s.id === sceneId)
+  if (!scene) throw new BeatEditError(`no scene "${sceneId}" (have: ${doc.scenes.map((s) => s.id).join(', ') || 'none'})`)
+  findTrack(doc, trackId)
+  const placements = scene.slots[trackId] ?? []
+  const matching = placements.filter((p) => p.clip === clipId && (at === undefined || p.at === canon(at)))
+  if (matching.length === 0) {
+    const have = placements.map((p) => `${p.clip}@${formatNumber(p.at)}`).join(', ') || 'none'
+    throw new BeatEditError(
+      at === undefined
+        ? `clip "${clipId}" is not placed on track "${trackId}" in scene "${sceneId}" (placed there: ${have})`
+        : `clip "${clipId}" is not placed at ${formatNumber(canon(at))} on track "${trackId}" in scene "${sceneId}" (placed there: ${have})`,
+    )
+  }
+  if (matching.length > 1) {
+    throw new BeatEditError(
+      `clip "${clipId}" is placed ${matching.length} times on track "${trackId}" in scene "${sceneId}" (at ${matching.map((p) => formatNumber(p.at)).join(', ')}) — pass the placement's at to say which one`,
+    )
+  }
+  const removed = matching[0]!
+  const remaining = placements.filter((p) => p !== removed)
+  const slots: Record<string, BeatPlacement[]> = { ...scene.slots }
+  if (remaining.length === 0) delete slots[trackId]
+  else slots[trackId] = remaining
+  return { doc: { ...doc, scenes: doc.scenes.map((s) => (s.id === sceneId ? { ...s, slots } : s)) }, removed }
 }
 
 /** Sets (or clears, with name = null) a scene's display name (Phase 32 Stream LB — the GUI's
@@ -1503,6 +1584,57 @@ export function setAutomationPoint(
   return { doc: added.doc, point: added.point, created: true }
 }
 
+/** Phase 37 Stream RC: fill a clip's `param` lane with a predefined SHAPE (ramp|sine|triangle|exp|
+ * adsr — src/core/automation-shape.ts's pure sampler). Clears the param's existing lane on that
+ * clip first (a shape REPLACES the lane, it doesn't add to it), then writes each sampled point
+ * through setAutomationPoint above — reusing the primitive, no new grammar. The clip span (how many
+ * 16th steps the points spread across) is resolved, in priority order: an explicit `bars` override
+ * -> the clip's own `loop` range -> an audio-region clip's length in seconds (converted via bpm) ->
+ * the document's loopBars. Param is gated by the same checkAutomatableParam track-kind branch every
+ * automation edit uses (AUTOMATABLE_SYNTH_PARAMS vs AUDIO_AUTOMATABLE_PARAMS=['gain']). Returns the
+ * doc plus the resolved span and the points written, so callers can report what they generated. */
+export function applyAutomationShape(
+  doc: BeatDocument,
+  trackId: string,
+  clipId: string,
+  param: string,
+  shape: AutomationShape,
+  opts: { from: number; to: number; cycles?: number; points?: number; bars?: number },
+): { doc: BeatDocument; spanSteps: number; points: BeatAutomationPoint[] } {
+  const track = findTrack(doc, trackId)
+  checkAutomatableParam(param, track.kind)
+  const clip = findClip(track, clipId)
+
+  // Resolve the clip span in 16th steps.
+  let spanSteps: number
+  if (opts.bars !== undefined) {
+    if (!Number.isFinite(opts.bars) || opts.bars <= 0) throw new BeatEditError(`--bars must be > 0, got ${opts.bars}`)
+    spanSteps = opts.bars * 16
+  } else if (clip.loop) {
+    spanSteps = (clip.loop.end - clip.loop.start) * 16
+  } else if (clip.audio) {
+    // audio-region seconds -> 16th steps: one 16th = (60/bpm)/4 = 15/bpm seconds.
+    const seconds = clip.audio.out - clip.audio.in
+    spanSteps = (seconds * doc.bpm) / 15
+  } else {
+    spanSteps = doc.loopBars * 16
+  }
+  if (!Number.isFinite(spanSteps) || spanSteps <= 0) throw new BeatEditError(`could not resolve a positive clip span for "${clipId}" (got ${spanSteps} steps) — pass --bars`)
+
+  const sampled = automationShapePoints(shape, { from: opts.from, to: opts.to, cycles: opts.cycles, points: opts.points, spanSteps })
+
+  // Clear the existing lane for this param on this clip (a shape REPLACES it), then write fresh
+  // points through the primitive so ids mint cleanly as p1,p2,... on the now-empty lane.
+  let next = replaceClip(doc, trackId, { ...clip, automation: clip.automation.filter((l) => l.param !== param) })
+  const written: BeatAutomationPoint[] = []
+  for (const pt of sampled) {
+    const res = setAutomationPoint(next, trackId, clipId, param, { time: pt.time, value: pt.value })
+    next = res.doc
+    written.push(res.point)
+  }
+  return { doc: next, spanSteps, points: written }
+}
+
 /** Removes an automation point; drops the whole lane if it was the last point (an empty lane
  * has no canonical serialized form — see BeatAutomationLane in document.ts). */
 export function removeAutomationPoint(doc: BeatDocument, trackId: string, clipId: string, param: string, pointId: string): { doc: BeatDocument; point: BeatAutomationPoint } {
@@ -1620,8 +1752,18 @@ export function setClipAudioRegion(
  * Gain-automation points partition by time — before the split stay on the first clip unchanged;
  * at/after it move to the second clip, retimed relative to ITS own new start — the same "survive
  * the split, attached to whichever segment they fall in" discipline research 16 §2 documents for
- * warp markers (not yet built, but automation already behaves this way today). */
-export function splitAudioClip(doc: BeatDocument, trackId: string, clipId: string, atSteps: number, opts: { newClipId?: string } = {}): { doc: BeatDocument; first: BeatClip; second: BeatClip } {
+ * warp markers (not yet built, but automation already behaves this way today).
+ *
+ * v0.11 (Phase 36, D16 q3): AUTO-PLACES the second half at `placement.at + atSteps` in every
+ * scene that placed the parent clip on this track — including each placement of a
+ * multi-placement parent — so the split is genuinely lossless at the ARRANGEMENT level too, not
+ * just the clip level (the "orphaned split output" gap pilots 85/99 both hit). Scenes that did
+ * not place the parent are untouched. No new overlap is possible: the first half's timeline
+ * length shrinks to exactly `atSteps`, so [at, at+atSteps) + [at+atSteps, at+originalLength)
+ * tile the parent's original span exactly. The `placements` list in the return value reports
+ * every auto-placement made (scene id + at), so the CLI/MCP surface (Phase 36 PB) can print
+ * them. */
+export function splitAudioClip(doc: BeatDocument, trackId: string, clipId: string, atSteps: number, opts: { newClipId?: string } = {}): { doc: BeatDocument; first: BeatClip; second: BeatClip; placements: { sceneId: string; clip: string; at: number }[] } {
   const track = findTrack(doc, trackId)
   if (track.kind !== 'audio') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — split-at-point only applies to audio-region clips`)
   const idx = track.clips.findIndex((c) => c.id === clipId)
@@ -1661,7 +1803,22 @@ export function splitAudioClip(doc: BeatDocument, trackId: string, clipId: strin
   const second: BeatClip = { id: newId, notes: [], hits: [], automation: partitionAutomation(false), loop: null, signature: null, audio: { ...clip.audio, in: sourceSplit } }
 
   const clips = [...track.clips.slice(0, idx), first, second, ...track.clips.slice(idx + 1)]
-  return { doc: replaceTrack(doc, { ...track, clips }), first, second }
+  let next = replaceTrack(doc, { ...track, clips })
+
+  // v0.11 (Phase 36, D16 q3): auto-place the second half after the first, in every scene that
+  // placed the parent — one new placement per parent placement, at parent.at + atSteps.
+  const placements: { sceneId: string; clip: string; at: number }[] = []
+  next = {
+    ...next,
+    scenes: next.scenes.map((scene) => {
+      const parentPlacements = (scene.slots[trackId] ?? []).filter((p) => p.clip === clipId)
+      if (parentPlacements.length === 0) return scene // this scene never placed the parent — untouched
+      const added = parentPlacements.map((p) => ({ clip: newId!, at: canon(p.at + atSteps) }))
+      for (const p of added) placements.push({ sceneId: scene.id, clip: p.clip, at: p.at })
+      return { ...scene, slots: { ...scene.slots, [trackId]: sortPlacements([...scene.slots[trackId]!, ...added]) } }
+    }),
+  }
+  return { doc: next, first, second, placements }
 }
 
 /** Phase 32 Stream LA ("Duplicate" on an arrangement clip block, docs/research/81/87/92/93):

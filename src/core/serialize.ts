@@ -1,5 +1,5 @@
 import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
-import { AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_KEYS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain } from './document.js'
+import { AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_KEYS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
 
 // v0.10: the effect chain serializes iff it differs from the canonical default (isDefaultEffectChain)
@@ -274,12 +274,19 @@ function serializeGroup(g: BeatGroup): string[] {
 // re-mapped slot is a one-line diff. v0.10 (Phase 32 Stream LB): an optional `name` line comes
 // right after the header, before the slots — canonical elision (D9): omitted entirely when
 // absent, so every pre-existing scene (no name) round-trips byte-identically.
+// v0.11 (Phase 36, D16): one `slot` line PER PLACEMENT — within a track, placements in canonical
+// (at, clip id) order, with `at 0` elided — so a single-placement-at-zero scene (every pre-v0.11
+// scene) serializes exactly as before, and one new placement is exactly one added line. An empty
+// placement list emits nothing (no canonical form for "a slot with no placements").
 function serializeScene(scene: BeatScene, trackOrder: string[]): string[] {
   const lines = [`scene ${scene.id}`]
   if (scene.name !== undefined) lines.push(`  name ${scene.name}`)
   for (const trackId of trackOrder) {
-    const clipId = scene.slots[trackId]
-    if (clipId !== undefined) lines.push(`  slot ${trackId} ${clipId}`)
+    const placements = scene.slots[trackId]
+    if (placements === undefined) continue
+    for (const p of sortPlacements(placements)) {
+      lines.push(`  slot ${trackId} ${p.clip}${p.at !== 0 ? ` at ${formatNumber(p.at)}` : ''}`)
+    }
   }
   return lines
 }

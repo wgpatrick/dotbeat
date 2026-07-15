@@ -1253,9 +1253,9 @@ export const rows = [
   },
   {
     area: 'Render / export', feature: 'Per-track stem rendering (`beat render --stems`)',
-    description: '`ROADMAP.md` §5 already floats `beat render project.beat -o mix.wav --stems` as a near-term capability, but it doesn\'t exist — `cli/render.mjs`\'s actual arg parser accepts only `-o/--tail/--daemon-port/--preview-port`, no stems flag. Ableton\'s own export matrix treats Main / All Individual Tracks / Selected Tracks Only as first-class render modes (manual ch.5 pp.122-127). Add a per-track solo-render loop (mute every other track, render, repeat) over the existing render path — small, and directly feeds the D2 metrics/lint loop with per-stem signal, not just mix-bus.',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
-    research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: null,
+    description: 'DONE (Phase 37 Stream RA): `beat render <file> --stems [--out-dir d]` writes one solo WAV per track, reusing the existing `renderTrackSolosCommand` store-solo session (one browser boot for all stems). Feeds the D2 metrics/lint loop with per-stem signal, not just mix-bus.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: 'phase-37-plan.md',
   },
 
   // ── Metrics / critique loop ──────────────────────────────────────────────
@@ -1774,6 +1774,78 @@ export const rows = [
     research: null, plan: 'phase-35-plan.md',
   },
 
+  // ── Feedback, generation & sound sources (Phase 37) ──────────────────────
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Section-aware feedback (`beat feedback --sections`)',
+    description: 'Phase 37 Stream RA: renders the song ONCE, slices the captured WAV at section boundaries (cumulative-bars math), analyze()s each slice → a per-section energy-arc report (LUFS / band shares / width / crest per section + section-to-section deltas, flagged only when they clear the Phase-34 render-variance floor), with optional per-section-vs-reference-profile (--ref). The structural critique nobody else can do cheaply — for a dotbeat song the section boundaries are IN the file, so no audio inference is needed. Reuses analyze/worstTrack/variance. CLI + beat_feedback MCP. Honest limits: per-section statics only, no masking/transition analysis. Proven live: a dark intro (-46 LUFS, 113 Hz centroid) vs a bright drop (-20 LUFS, 1640 Hz) reported as "+26 LU louder, +15pt brighter".',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: null, plan: 'phase-37-plan.md',
+  },
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Symbolic song analysis (`beat analyze-structure`)',
+    description: 'Phase 37 Stream RB: pure deterministic functions over notes/hits/scenes/placements (src/analysis/, no rendering) — onset density & syncopation per section, pitch-class histogram vs the declared scale (reusing core SCALES), and repetition/novelty across sections (per-section clip-content signatures → Jaccard + exact-repeat linkage + novel-section detection). Reads a song\'s arrangement without audio (e.g. "§3 is the drop; §4-6 repeat the intro"). Feeds beat feedback\'s arrangement-level critique AND establishes the internal StructureAnalysis vocabulary Phase 38\'s audio-structure import (research/102) will emit into. CLI + beat_analyze_structure MCP.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/102-track-analysis-tooling.md', plan: 'phase-37-plan.md',
+  },
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Automation-shape generator + automation as a vary target',
+    description: 'Phase 37 Stream RC: `beat automate-shape <file> <track> <clip> <param> <ramp|sine|triangle|exp|adsr> [--from --to --cycles --points --bars]` fills an automation lane by sampling the shape into points and replaying the existing setAutomationPoint primitive (no new grammar — the "Predefined automation shapes" roadmap row, made a generator). And `beat vary <track> automation:<param>` generates whole-doc movement variants (vary shape/depth/rate/phase), each carrying a replayable automate-shape recipe, into the existing writeVaryBatch → score → adopt → audition harness — closing the "vary can\'t touch automation" gap so movement is now a first-class taste-loop candidate. CLI + beat_automate_shape MCP + beat_vary automation routing. Proven live: a sine cutoff sweep moved the spectral centroid across a 148 Hz range vs 4 Hz flat baseline (37x).',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: null, plan: 'phase-37-plan.md',
+  },
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Freesound CC0 into the taste loop (`beat source`)',
+    description: 'Phase 37 Stream RD: wires the already-built CC0 search→prep→register pipeline into first-class verbs. `beat source search <query>` (CC0-hard-filtered Freesound discovery, top-rated first) and `beat source add <file.beat> <sample-id> <local-audio-file>` (offline: prep-oneshot trim/normalize/16-bit → register into media → enforced provenance sidecar media/<id>.wav.json) + a gated `--freesound <id>` download path. CLI + beat_source_search/add MCP. License default "unspecified" for local files (honest — can\'t verify), "CC0-1.0" only on the Freesound path. Network verified BLOCKED through the proxy (no key + CONNECT 403), so search/--freesound are env-gated with clean actionable errors; the offline add path is fully working and tested. Zero licensing risk.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/103-generative-audio-apis.md', plan: 'phase-37-plan.md',
+  },
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Generative-audio direction (research 103) — deferred build',
+    description: 'Research 103: generative-audio API landscape for the vocal-chop/SFX pain. Verdict (with an owner-supplied primary-source correction on the ElevenLabs Music terms): ElevenLabs splits by product — SFX distribution-banned (avoid), Music undetermined-and-wrong-shape (full songs, not chops), Voice/TTS the actually-relevant product for vocal chops (needs its own terms fetched). MusicGen/AudioCraft weights are non-commercial. The clean path is Stable Audio Open run LOCALLY (own outputs, purpose-built for short 44.1kHz one-shots, zero egress/cost) — but it inherits the Phase-38 Python-sidecar plumbing, so build AFTER beat analyze. Near-term generative substitute: the CC0 Freesound path above. No build this phase.',
+    core: 'na', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/103-generative-audio-apis.md', plan: null,
+  },
+
+  // \u2500\u2500 Audio-structure import (Phase 38) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  {
+    area: 'Audio-structure import (Phase 38)', feature: 'Audio-structure analysis (`beat analyze`, first Python sidecar)',
+    description: 'Phase 38 Stream SB: `beat analyze <song.wav> [--backend beatthis|stub|allin1] [--force] [-o out.json] [--json]` and `beat analyze --doctor`. dotbeat\'s FIRST non-Node dependency, structured as a child-process sidecar with a frozen JSON contract (D17): python/analyze.py emits raw analysis in seconds on stdout (stdlib-only top level; torch/beat_this import lazily); src/analysis/sidecar.ts owns sha256/interpreter-resolution/exit-code-contract/envelope/atomic-cache next to the audio. Real models (Beat This, MIT code+weights) run owner-side \u2014 this container/CI have no torch and blocked PyPI/HF egress, so a deterministic stdlib `stub` backend exercises identical plumbing green (python3-gated integration tests actually run here). Backends beyond stub degrade with copy-pasteable `pip install` fixes surfaced through --doctor. CLI + beat_analyze_audio MCP.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/102-track-analysis-tooling.md', plan: 'phase-38-plan.md',
+  },
+  {
+    area: 'Audio-structure import (Phase 38)', feature: 'Structure-matched scaffolding (`beat skeleton`)',
+    description: 'Phase 38 Stream SA: `beat skeleton <out.beat> <analysis.json> [--section-bars N]` turns an analyze artifact into an empty structure-matched .beat \u2014 integer tempo (detected value shown), one scene per distinct section label (repeats reference the same scene; per-entry bars on the song timeline), all seconds\u2192bars math loader-owned (barSeconds from the downbeat grid or 4\u00b760/bpm; round-to-0 sections dropped, >64-bar sections split into 32-bar repeats to satisfy setSong, empty-sections artifacts fall back to uniform --section-bars chunks). src/analysis/import.ts is the sole AnalysisArtifact validation authority. The reference audio is NEVER registered as media (D18). Round-trips: buildSkeleton output re-parses and analyzeStructure sees the same sections \u2014 closing the loop RB\'s vocabulary promised. CLI + beat_skeleton MCP.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/102-track-analysis-tooling.md', plan: 'phase-38-plan.md',
+  },
+  // \u2500\u2500 Generative sound & render trust (Phase 39) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  {
+    area: 'Generative sound & render trust (Phase 39)', feature: 'Text-to-audio sample generation (`beat source gen`, Stable Audio Open)',
+    description: 'Phase 39 Stream UB: dotbeat\'s SECOND Python sidecar. `beat source gen <file.beat> <id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio]` (+ beat_source_gen MCP) generates a one-shot locally via Stable Audio Open and registers it into media through the existing source-lib ingest path \u2014 same prep/sha256/enforced-provenance-sidecar/rollback as beat source add, with a `generated` block recording prompt/provider/model/seconds/seed/license. Contract variation from D17 (decisions.md D19): gen writes the WAV to a told --output path + JSON metadata on stdout (audio isn\'t a stdout JSON line); TS/source-lib owns registration. A deterministic stdlib `stub` backend keeps CI/dev green with zero packages; real Stable Audio Open runs owner-side (torch + ~couple-GB HF weights, egress-blocked here). Stability AI Community License posture: outputs are the user\'s, free commercial use <$1M revenue with Stability registration, "Powered by Stability AI" attribution in dotbeat docs. Placeholders to confirm owner-side: HF repo stabilityai/stable-audio-open-1.0, stable-audio-tools==0.0.16.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/103-generative-audio-apis.md', plan: 'phase-39-plan.md',
+  },
+  {
+    area: 'Generative sound & render trust (Phase 39)', feature: 'Silent-render warning (unplaced-content detector)',
+    description: 'Phase 39 Stream UA (pilot 105 HIGH): song mode plays only scene-placed content, so a groove added to a track that is placed in no scene rendered a valid, SILENT WAV with no warning anywhere. New src/core/coverage.ts unplacedContentTracks(doc) detects \u2014 in song mode only \u2014 tracks with sounding content (live notes/hits, or a clip carrying notes/hits/audio) referenced by no scene the song plays (resolution mirrors structure.ts firstPlacementClip). Warned from beat inspect and before every render (warn-only; still renders). Also this stream: render now auto-falls-back to a bundled Playwright chromium (executablePath() then a PLAYWRIGHT_BROWSERS_PATH scan) instead of only documenting CHROME_PATH; beat_skeleton accepts out/analysis aliases; add-track instrument nudges toward synth.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/105-usability-pilot-audio-import.md', plan: 'phase-39-plan.md',
+  },
+
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Pilot 104 low-severity leftovers (Phase 37 surface) \u2014 resolved in Phase 38 SD',
+    description: 'The low/minor remainder of pilot 104, all three cleared by Phase 38 Stream SD: (1) `vary automation:<param>` gained an explicit `--clip <id>` selector (CLI + beat_vary MCP), documented in help/--groups (default still targets the first clip); (2) the harmless `404 Not Found` render page-error is now filtered from console forwarding while genuine JS exceptions and engine media-load warnings still surface; (3) `source add`/`ingest` now prints an explicit re-register note (replaced sha256 abc\u2026\u2192def\u2026, or "already registered (unchanged)") instead of silently replacing. Kept as a done-row for the citation trail.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/104-usability-pilot-phase37-surface.md', plan: 'phase-38-plan.md',
+  },
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Pilot 105 leftovers (audio-import surface) — resolved in Phase 39 UA',
+    description: 'All four pilot-105 leftovers cleared by Phase 39 Stream UA (on top of the four Phase-38-SE same-day fixes): (1) the load-bearing silent-render fix — inspect/render now DETECT a populated track placed in zero scenes of the active song and warn (src/core/coverage.ts); (2) render auto-falls-back to a bundled Playwright chromium instead of only documenting CHROME_PATH; (3) beat_skeleton now accepts out/analysis aliases and beat_analyze_audio documents file-required-unless-doctor; (4) add-track instrument nudges toward synth. Kept as a done-row for the citation trail.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/105-usability-pilot-audio-import.md', plan: 'phase-39-plan.md',
+  },
+
   // ── Known usability gaps (backlog) ────────────────────────────────────────
   // Findings from usability pilots that are real and worth tracking, but too large (a genuine new
   // feature) or too cross-cutting (spans many components) to fold into a single fix-phase stream.
@@ -1792,6 +1864,20 @@ export const rows = [
     description: 'The polish-level remainder of pilot 103 (its two bugs — the synth-track no-op vary group and the metrics WavDecodeError stack trace — were fixed same-day, along with the adopt-refusal flag wording, the score hint now leading with `beat adopt`, and the `--lanes hat,openhat` help example): (1) `beat mcp-init --force` is all-or-nothing — it overwrites a customized music-session CLAUDE.md just to refresh .mcp.json; needs per-file granularity; (2) lint findings are uniformly INFO with a placeholder `song.beat` in fix lines instead of the real filename; (3) mix-profile JSON serializes dual-mono width as the string "-Infinity" among numeric fields (documented but surprising); (4) multi-word `--name` rejection cites stale "v0.2" text; (5) `beat suggest` output leaks its source filename (fourth pilot to note it).',
     core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
     research: 'research/103-usability-pilot-lane-taste-loop.md', plan: null,
+  },
+
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Render silently uses a stale ui/dist after git pull',
+    description: 'cli/render.mjs serves ui/ via `vite preview` and auto-builds ui/dist only when the directory is MISSING entirely — after a git pull that changes the engine, an existing stale ui/dist is served as-is, and the render harness cannot even detect it (the first real all-sample-lanes render after Phase 39 came back pure silence because the served engine build predated sample-lane playback; the pendingMediaCount readiness probe printed the nonsense count -1 because the OLD bundle lacks the function — the very trap Phase 39 UA was built to close, reopened by staleness). Fix direction: compare ui/dist mtime against ui/src (or embed a build hash the harness checks) and rebuild/refuse instead of serving stale; found 2026-07-14 building examples/recipe-song, the first project exercising sample-backed lanes end-to-end through render.',
+    core: 'na', cli: 'missing', gui: 'na', status: 'not-started',
+    research: null, plan: null,
+  },
+
+  {
+    area: 'Known usability gaps (backlog)', feature: 'beat score cannot rank `beat source gen` seed candidates',
+    description: 'The natural generative-audio audition loop — same prompt, N seeds, rank the candidates, adopt the winner — cannot route through beat score/adopt, which require a beat-vary batch manifest that generation never produces. Building examples/recipe-song (2026-07-14), the snare had to be picked from its three seed candidates by out-of-band FFT metrics instead of the taste loop, and the two losing samples stay registered in the media block with no record of the audition outcome. Fix direction: let `beat source gen` emit N seed variants as a scoreable batch (manifest + optional stitched audition.wav, mirroring vary --audition), so generated sounds join the same score/suggest/adopt history as synth-param variants.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: null, plan: null,
   },
 
   // ── Desktop app / packaging ──────────────────────────────────────────────
@@ -1829,8 +1915,8 @@ export const rows = [
   },
   {
     area: 'Audio-region clip editing', feature: 'Multi-region placement (multiple audio clips per track per section)',
-    description: 'The one-clip-per-track-per-scene data-model ceiling, confirmed as a core constraint by pilot 99 (CLI repro) after research/85 hit it from the GUI: a scene slot maps track → ONE clip, an audio clip carries ONE region, and the engine only starts a region at the section boundary — so a riser at bar 3, two one-shots in one section, or hearing both halves of an `audio-split` in place are all structurally impossible today. Full design proposal with three options, blast radius, and a recommendation (repeated `slot` lines with an optional `at <steps>` — one grammar, byte-identical round-trip for every existing file, one added line per placement in diffs, audio-only validation for v1, and `audio-split` auto-placing its second half, which retroactively fixes the orphaned-split GUI bug class) in docs/multi-region-audio-design.md — awaiting the owner\'s call on its §5 questions before any implementation phase.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    description: 'The one-clip-per-track-per-scene data-model ceiling, confirmed as a core constraint by pilot 99 (CLI repro) after research/85 hit it from the GUI: a scene slot maps track → ONE clip, an audio clip carries ONE region, and the engine only starts a region at the section boundary — so a riser at bar 3, two one-shots in one section, or hearing both halves of an `audio-split` in place are all structurally impossible today. Full design proposal with three options, blast radius, and a recommendation (repeated `slot` lines with an optional `at <steps>` — one grammar, byte-identical round-trip for every existing file, one added line per placement in diffs, audio-only validation for v1, and `audio-split` auto-placing its second half, which retroactively fixes the orphaned-split GUI bug class) in docs/multi-region-audio-design.md — APPROVED by the owner 2026-07-14 (decisions.md D16: Option A, at in 16th steps, audio-split auto-places). Implementation underway as Phase 36 (streams PA core -> PB CLI/MCP + PC engine + PD daemon/GUI).',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'progress',
     research: 'research/99-usability-pilot-cli-audio.md', plan: 'multi-region-audio-design.md',
   },
   {

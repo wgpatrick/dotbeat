@@ -191,7 +191,10 @@ async function main() {
     const preMoveScenesByTrackSection = {}
     for (const [t, s] of selected.map((x) => [x.track, x.section])) {
       const scene = daemon.getDoc().scenes.find((sc) => sc.id === daemon.getDoc().song[s].scene)
-      preMoveScenesByTrackSection[selKey(t, s)] = scene?.slots[t]
+      // v0.11 (Phase 36): a slot is a PLACEMENT LIST, compared by content below (a move rebuilds
+      // the arrays, so reference equality can never hold post-v0.11). Fixed by Phase 36 Stream PD;
+      // the strict `===` had been failing here since Stream PA's format change.
+      preMoveScenesByTrackSection[selKey(t, s)] = JSON.stringify(scene?.slots[t])
     }
 
     // Drag drums's section-2 block ("drop") rightward — should snap onto section 3 (the next
@@ -222,7 +225,7 @@ async function main() {
     for (const { track, section } of selected) {
       const targetIndex = section + 1
       const targetScene = doc2.scenes.find((sc) => sc.id === doc2.song[targetIndex].scene)
-      assert(targetScene?.slots[track] === preMoveScenesByTrackSection[selKey(track, section)], `[C] ${track}'s occurrence should have moved from section ${section} to ${targetIndex}, preserving its clip id`)
+      assert(JSON.stringify(targetScene?.slots[track]) === preMoveScenesByTrackSection[selKey(track, section)], `[C] ${track}'s occurrence should have moved from section ${section} to ${targetIndex}, preserving its clip id`)
     }
     // drums/bass had occurrences at BOTH section 1 and section 2 — both shift by +1, so section 1
     // (the lowest source index, not also somebody else's target within this batch) must end up
@@ -237,7 +240,8 @@ async function main() {
     // sections sharing a scene with a moved section).
     for (let i = 0; i < 6; i++) {
       const scene = doc2.scenes.find((sc) => sc.id === doc2.song[i].scene)
-      assert(scene?.slots.pad === 'groove', `[C] "pad" must still play "groove" in section ${i} (untouched by the drums/bass/lead move)`)
+      // v0.11 (Phase 36): the slot is one placement of "groove" at 0 — same fix as the reads above.
+      assert(scene?.slots.pad?.length === 1 && scene.slots.pad[0].clip === 'groove' && scene.slots.pad[0].at === 0, `[C] "pad" must still play "groove" in section ${i} (untouched by the drums/bass/lead move)`)
     }
     console.log('[C] PASS: "pad" (not selected) is unaffected in all 6 sections — sibling sections sharing the old scenes were not disturbed')
 

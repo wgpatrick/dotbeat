@@ -1,5 +1,5 @@
-import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumPattern, BeatNote, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
-import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultEffectChain, defaultSynthFields } from './document.js'
+import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumPattern, BeatNote, BeatPlacement, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultEffectChain, defaultSynthFields, firstPlacementClip } from './document.js'
 
 /** v0.9: the assumed shape of beatlab's per-clip automation engine state — a param name mapped
  * to its list of (time, value) points, UNORDERED and WITHOUT stable ids (beatlab's live clip
@@ -93,7 +93,7 @@ export interface ExternalSandboxPayload {
   arrangement?: { enabled?: boolean; mode?: string | null; timeline?: { sceneId: string; bars: number }[] }
 }
 
-const BEAT_FORMAT_VERSION = '0.10'
+const BEAT_FORMAT_VERSION = '0.11'
 
 /** SynthParams fields the format deliberately does NOT model (each needs grammar design of its
  * own — large arrays, ordered lists, or redundant pairs; see docs/phase-5-plan.md). These are
@@ -282,14 +282,16 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
   const trackById = new Map(tracks.map((t) => [t.id, t]))
   const scenes = (payload.scenes ?? []).map((s) => {
     if (s.name !== undefined && s.name !== s.id) report.droppedFields.push(`scenes[${s.id}].name`)
-    const slots: Record<string, string> = {}
+    // v0.11: BeatLab's clipIds map has no placement concept — each entry becomes one placement
+    // at 0 (exactly the pre-v0.11 meaning of a slot).
+    const slots: Record<string, BeatPlacement[]> = {}
     for (const [trackId, clipId] of Object.entries(s.clipIds)) {
       const track = trackById.get(trackId)
       if (!track || !track.clips.some((c) => c.id === clipId)) {
         report.droppedFields.push(`scene ${s.id}: dangling slot ${trackId}`)
         continue
       }
-      slots[trackId] = clipId
+      slots[trackId] = [{ clip: clipId, at: 0 }]
     }
     return { id: s.id, slots }
   })
@@ -376,7 +378,7 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
   loopBars: number
   selectedTrackId: string
   tracks: PartialTrack[]
-  scenes: { id: string; name: string; clipIds: Record<string, string> }[]
+  scenes: { id: string; name: string; clipIds: Record<string, string>; placements: Record<string, BeatPlacement[]> }[]
   song: { sceneId: string; bars: number }[] | null
   media: { id: string; sha256: string; path: string }[]
   instruments: PartialInstrument[]
@@ -414,7 +416,23 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
           }
         : {}),
     })),
-    scenes: doc.scenes.map((s) => ({ id: s.id, name: s.id, clipIds: { ...s.slots } })),
+    // v0.11: `clipIds` keeps the pre-placement reduction (each track's slot -> its at-0/first
+    // placement's clip id) so legacy BeatLab-bridge consumers are untouched; `placements` (Phase 36
+    // PD) additively carries the FULL per-track placement lists so any /doc reader that wants the
+    // real v0.11 shape sees it — same additive-field discipline `instruments` above established
+    // ("consumers that don't know the field ignore it"). Real per-placement scheduling/rendering
+    // happens in dotbeat's own engine and GUI (via GET /document's raw BeatDocument), never through
+    // the reduced clipIds map.
+    scenes: doc.scenes.map((s) => ({
+      id: s.id,
+      name: s.id,
+      clipIds: Object.fromEntries(
+        Object.keys(s.slots)
+          .map((trackId) => [trackId, firstPlacementClip(s.slots, trackId)])
+          .filter((pair): pair is [string, string] => pair[1] !== undefined),
+      ),
+      placements: Object.fromEntries(Object.entries(s.slots).map(([trackId, ps]) => [trackId, ps.map((p) => ({ ...p }))])),
+    })),
     song: doc.song ? doc.song.map((x) => ({ sceneId: x.scene, bars: x.bars })) : null,
     media: doc.media.map((m) => ({ ...m })),
     instruments: doc.tracks

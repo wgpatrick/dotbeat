@@ -10,8 +10,8 @@
 // machine-applicable changeset, and — later — the natural undo / --dry-run representation. Each
 // entry carries `before`/`after`, so inverting a diff is structurally trivial when we need it.
 
-import type { BeatAudioRegion, BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatNote, BeatTrack, DrumLane } from './document.js'
-import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER } from './document.js'
+import type { BeatAudioRegion, BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatNote, BeatPlacement, BeatTrack, DrumLane } from './document.js'
+import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
 
 // Phase 22 Stream AB: a one-line human description of a lane's backing, for lane-decl diffs.
@@ -51,7 +51,14 @@ export type DiffEntry =
   | { kind: 'clip-signature'; trackId: string; clipId: string; before: { numerator: number; denominator: number } | null; after: { numerator: number; denominator: number } | null }
   | { kind: 'scene-added'; sceneId: string }
   | { kind: 'scene-removed'; sceneId: string }
-  | { kind: 'scene-slot'; sceneId: string; trackId: string; before: string | null; after: string | null }
+  // v0.11 (Phase 36): scene-slot entries are PLACEMENT-granular. `scene-slot` reports one
+  // placement at a fixed `at`: a clip substitution (before -> after), an added placement
+  // (before null), or a removed one (after null). `scene-slot-moved` reports an `at` change of
+  // one clip's placement as a MOVE, never a remove+add pair (the alsdiff lesson, same as
+  // track-moved/effect-moved). A pre-v0.11-style single-clip swap (one placement each side,
+  // both at 0) reads exactly as it always did.
+  | { kind: 'scene-slot'; sceneId: string; trackId: string; at: number; before: string | null; after: string | null }
+  | { kind: 'scene-slot-moved'; sceneId: string; trackId: string; clip: string; before: number; after: number }
   // v0.10 (Phase 32 Stream LB): a scene's optional display name changed, absent -> present, or
   // present -> absent (before/after null = "no name"), same shape as scene-slot's null-for-empty.
   | { kind: 'scene-meta'; sceneId: string; field: 'name'; before: string | null; after: string | null }
@@ -163,6 +170,50 @@ function diffEffects(trackId: string, aEffects: BeatEffect[], bEffects: BeatEffe
     const after = bById.get(id)!.enabled
     if (before !== after) out.push({ kind: 'effect-enabled', trackId, effectId: id, before, after })
   }
+}
+
+// v0.11 (Phase 36): placement-granular scene-slot diffing for one (scene, track) pair.
+// Placements have no stable id — identity is (clip, at) — so matching is a multiset cancel of
+// identical placements, then, per clip present on both leftover sides, sorted pairing by `at`
+// (an `at` change reports as ONE scene-slot-moved entry, not remove+add), then equal-`at`
+// pairing across clips (a clip substitution at a fixed position reports as one before -> after
+// scene-slot entry — exactly the pre-v0.11 single-clip-swap shape), and only what's left reports
+// as added/removed placements.
+function diffScenePlacements(sceneId: string, trackId: string, aPlacements: readonly BeatPlacement[], bPlacements: readonly BeatPlacement[], out: DiffEntry[]) {
+  const key = (p: BeatPlacement) => `${p.clip}@${p.at}`
+  const removed = [...sortPlacements(aPlacements)]
+  const added = [...sortPlacements(bPlacements)]
+  // 1) cancel identical (clip, at) placements
+  for (let i = removed.length - 1; i >= 0; i--) {
+    const j = added.findIndex((p) => key(p) === key(removed[i]!))
+    if (j !== -1) {
+      removed.splice(i, 1)
+      added.splice(j, 1)
+    }
+  }
+  // 2) same clip on both leftover sides -> at changes, paired in sorted order, reported as moves
+  for (const clip of new Set(removed.map((p) => p.clip))) {
+    const rs = removed.filter((p) => p.clip === clip)
+    const as = added.filter((p) => p.clip === clip)
+    const n = Math.min(rs.length, as.length)
+    for (let i = 0; i < n; i++) {
+      out.push({ kind: 'scene-slot-moved', sceneId, trackId, clip, before: rs[i]!.at, after: as[i]!.at })
+      removed.splice(removed.indexOf(rs[i]!), 1)
+      added.splice(added.indexOf(as[i]!), 1)
+    }
+  }
+  // 3) different clip at the SAME at -> one substitution entry (the pre-v0.11 swap shape)
+  for (let i = removed.length - 1; i >= 0; i--) {
+    const j = added.findIndex((p) => p.at === removed[i]!.at)
+    if (j !== -1) {
+      out.push({ kind: 'scene-slot', sceneId, trackId, at: removed[i]!.at, before: removed[i]!.clip, after: added[j]!.clip })
+      removed.splice(i, 1)
+      added.splice(j, 1)
+    }
+  }
+  // 4) whatever remains is a genuine placement add/remove
+  for (const p of removed) out.push({ kind: 'scene-slot', sceneId, trackId, at: p.at, before: p.clip, after: null })
+  for (const p of added) out.push({ kind: 'scene-slot', sceneId, trackId, at: p.at, before: null, after: p.clip })
 }
 
 export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
@@ -334,9 +385,7 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
     if (nameBefore !== nameAfter) out.push({ kind: 'scene-meta', sceneId: sid, field: 'name', before: nameBefore, after: nameAfter })
     const trackIds = new Set([...Object.keys(sa.slots), ...Object.keys(sb.slots)])
     for (const tid of trackIds) {
-      const before = sa.slots[tid] ?? null
-      const after = sb.slots[tid] ?? null
-      if (before !== after) out.push({ kind: 'scene-slot', sceneId: sid, trackId: tid, before, after })
+      diffScenePlacements(sid, tid, sa.slots[tid] ?? [], sb.slots[tid] ?? [], out)
     }
   }
 
@@ -496,8 +545,17 @@ export function formatDiff(entries: DiffEntry[]): string {
       case 'scene-removed':
         lines.push(`scene removed "${e.sceneId}"`)
         break
-      case 'scene-slot':
-        lines.push(`scene ${e.sceneId}: ${e.trackId} ${e.before ?? '(empty)'} -> ${e.after ?? '(empty)'}`)
+      case 'scene-slot': {
+        // v0.11: an at-0 substitution keeps the exact pre-v0.11 wording; a placement add/remove
+        // uses the plan's own +clip@at / -clip@at syntax (at elided when 0, like the file itself).
+        const atSuffix = e.at !== 0 ? `@${formatNumber(e.at)}` : ''
+        if (e.before !== null && e.after !== null) lines.push(`scene ${e.sceneId}: ${e.trackId} ${e.before}${atSuffix} -> ${e.after}${atSuffix}`)
+        else if (e.after !== null) lines.push(`scene ${e.sceneId}: ${e.trackId} +${e.after}${atSuffix}`)
+        else lines.push(`scene ${e.sceneId}: ${e.trackId} -${e.before}${atSuffix}`)
+        break
+      }
+      case 'scene-slot-moved':
+        lines.push(`scene ${e.sceneId}: ${e.trackId} ${e.clip} moved @${formatNumber(e.before)} -> @${formatNumber(e.after)}`)
         break
       case 'scene-meta':
         lines.push(`scene ${e.sceneId}: name ${e.before ?? '(none)'} -> ${e.after ?? '(none)'}`)

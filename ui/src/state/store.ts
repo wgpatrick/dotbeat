@@ -127,6 +127,16 @@ interface DawState {
    * Session-only, like `selectedTrackId` — not written to the .beat file, and (see `setDoc` below)
    * reset to null whenever it stops resolving against the live doc (song shrinks/clears). */
   selectedSectionIndex: number | null
+  /** Phase 36 Stream PD (v0.11 multi-region placements, D16): which PLACEMENT of an audio track's
+   * multi-placement slot the user last clicked in the arrangement — the third coordinate of "which
+   * clip is open" alongside `selectedTrackId`/`selectedSectionIndex` above. Only audio tracks can
+   * carry more than one placement per (track, section) (the D16 audio-only scope guard), so this is
+   * only ever set by a click on an audio clip block; `null` means "no explicit placement choice,"
+   * which every consumer (AudioClipEditor's clip resolution) treats as "fall back to the playhead's
+   * placement, else the at-0/first one." Session-only, like the two fields above; cleared whenever
+   * the section selection changes without a placement click, and (see `setDoc`) whenever it stops
+   * resolving against the live doc. */
+  selectedPlacement: { track: string; clip: string; at: number } | null
   /** Phase 29 Stream GB (docs/research/81, /86): bumped once per track each time a PRESET is
    * actually applied to it — the in-panel PresetPicker (SynthPanel.tsx) and a Content-Browser
    * drag-drop onto a track header both funnel through daemon/library.ts's applyPresetToTrack,
@@ -146,6 +156,7 @@ interface DawState {
   setParseError: (m: string | null) => void
   setSelectedTrack: (id: string) => void
   setSelectedSection: (index: number | null) => void
+  setSelectedPlacement: (p: { track: string; clip: string; at: number } | null) => void
   setPlaying: (p: boolean) => void
   setBottomPane: (p: BottomPane) => void
   toggleBottomPane: () => void
@@ -189,24 +200,36 @@ export const useStore = create<DawState>((set) => ({
   canUndo: false,
   canRedo: false,
   selectedSectionIndex: null,
+  selectedPlacement: null,
   presetEpoch: {},
 
   setDoc: (doc) =>
-    set((s) => ({
-      doc,
-      parseError: null,
+    set((s) => {
       // Keep a local selection if it still resolves; otherwise clear to fall back to the doc's.
-      selectedTrackId: s.selectedTrackId && doc.tracks.some((t) => t.id === s.selectedTrackId) ? s.selectedTrackId : null,
+      const selectedTrackId = s.selectedTrackId && doc.tracks.some((t) => t.id === s.selectedTrackId) ? s.selectedTrackId : null
       // Same "keep it if it still resolves" discipline as selectedTrackId above — a section index
       // stops being meaningful the instant the song shrinks below it (a delete, or leaving song mode
       // entirely), so a stale index doesn't silently keep pointing at some OTHER section post-edit.
-      selectedSectionIndex:
-        s.selectedSectionIndex !== null && doc.song && s.selectedSectionIndex < doc.song.length ? s.selectedSectionIndex : null,
-    })),
+      const selectedSectionIndex =
+        s.selectedSectionIndex !== null && doc.song && s.selectedSectionIndex < doc.song.length ? s.selectedSectionIndex : null
+      // Phase 36 PD: a placement selection only survives if the selected section's scene still
+      // literally places that (clip, at) on that track — anything else (placement moved/removed,
+      // section retargeted, song gone) falls back to null's documented playhead/first behavior.
+      const sp = s.selectedPlacement
+      const sectionScene =
+        selectedSectionIndex !== null && doc.song ? doc.scenes.find((sc) => sc.id === doc.song![selectedSectionIndex]!.scene) : undefined
+      const selectedPlacement =
+        sp && sectionScene && (sectionScene.slots[sp.track] ?? []).some((p) => p.clip === sp.clip && p.at === sp.at) ? sp : null
+      return { doc, parseError: null, selectedTrackId, selectedSectionIndex, selectedPlacement }
+    }),
   setConnected: (connected) => set({ connected }),
   setParseError: (parseError) => set({ parseError }),
   setSelectedTrack: (selectedTrackId) => set({ selectedTrackId }),
-  setSelectedSection: (selectedSectionIndex) => set({ selectedSectionIndex }),
+  // Retargeting the section drops any explicit placement choice — a placement is meaningful only
+  // within the section it was clicked in; the caller that DOES know a placement (ArrangementView's
+  // audio clip-block click) sets it right after via setSelectedPlacement.
+  setSelectedSection: (selectedSectionIndex) => set({ selectedSectionIndex, selectedPlacement: null }),
+  setSelectedPlacement: (selectedPlacement) => set({ selectedPlacement }),
   setPlaying: (playing) => set({ playing }),
   setBottomPane: (bottomPane) => set({ bottomPane, bottomPaneOpen: true }),
   toggleBottomPane: () => set((s) => ({ bottomPane: s.bottomPane === 'clip' ? 'device' : 'clip', bottomPaneOpen: true })),

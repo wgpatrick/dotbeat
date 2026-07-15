@@ -6,12 +6,12 @@
 // once instead of being re-shaped per surface (phase-34-plan.md NA item 5: "extract the shared
 // shaping into src/ helpers both surfaces import, so the next drift can't happen").
 
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, symlinkSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, symlinkSync, copyFileSync, rmSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { serialize, type BeatDocument } from '../core/index.js'
+import { parse, serialize, setMediaSample, type BeatDocument } from '../core/index.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..') // dist/src/vary -> repo root
 
@@ -39,6 +39,15 @@ export function defaultScoresLog(beatFilePath: string): string {
   return resolve(dirname(resolve(beatFilePath)), DEFAULT_SCORES_LOG)
 }
 
+// ==== Phase 40 Stream VB ====
+/** Default GEN batch out-dir: "gen-<sample-id>-<seed>" next to the parent .beat — the same
+ * next-to-the-.beat convention as defaultBatchDir above, with a prefix that says at a glance which
+ * kind of batch a directory holds. Used by `beat source gen --count N` / beat_source_gen. */
+export function defaultGenBatchDir(parentPath: string, id: string, seed: number): string {
+  return resolve(dirname(resolve(parentPath)), `gen-${id}-${seed}`)
+}
+// ==== end Phase 40 Stream VB ====
+
 /** Batch/score shaping failures — the CLI rewraps these as BeatEditError (clean `error: ...`
  * output, exit 2); the MCP server surfaces the message as an isError tool result. */
 export class BeatBatchError extends Error {
@@ -48,16 +57,49 @@ export class BeatBatchError extends Error {
   }
 }
 
+// ==== Phase 40 Stream VB ====
+/** D21: the per-variant `media` field that lets a GEN batch (N seeds of one prompt) ride this one
+ * manifest shape instead of forking a parallel gen-only batch contract. A gen candidate is an
+ * already-prepped one-shot WAV sitting in the batch dir that has NOT been registered into the
+ * parent .beat — everything `registerPreppedMedia` needs to do that registration at ADOPT time,
+ * for the winner alone, travels in here. `sidecar` is the complete provenance doc (prompt, seed,
+ * backend, model, license posture…) written verbatim to media/<id>.wav.json on adopt, so adopt is
+ * a dumb, deterministic replay of a decision the batch already recorded. */
+export interface VariantMedia {
+  /** the media/sample id this candidate registers as if it wins */
+  id: string
+  /** sha256 of the PREPPED candidate wav — the exact bytes adopt copies into media/, so what you
+   * auditioned is byte-for-byte what gets registered (prep never re-runs at adopt) */
+  sha256: string
+  durationSeconds: number
+  license: string
+  source: string
+  /** the generator seed for this candidate (batch seed + index) */
+  seed?: number
+  /** the ENFORCED provenance sidecar doc, written verbatim to media/<id>.wav.json at adopt */
+  sidecar: Record<string, unknown>
+}
+// ==== end Phase 40 Stream VB ====
+
 export interface VaryBatchManifest {
   parent: string
   parentSha256: string
-  track: string
+  // ==== Phase 40 Stream VB ====
+  // D21 strain (b): optional, because a GEN batch has no track — its candidates are media that
+  // isn't in the project yet, so there is nothing for it to belong to. Vary batches always set it.
+  track?: string
+  // ==== end Phase 40 Stream VB ====
   group: string
   count: number
   amount?: number // param batches only — feel batches have no strength knob, so no key at all
   seed: number
   createdAt: string
-  variants: { file: string; edits?: string[]; recipe?: string }[]
+  // ==== Phase 40 Stream VB ==== (gen batches only: the one prompt all N seeds render)
+  prompt?: string
+  // ==== end Phase 40 Stream VB ====
+  // D21 strain (a): `file` is "vN.beat" for vary batches and "vN.wav" for gen batches — every
+  // reader below resolves the variant through THIS field rather than re-deriving "vN.beat".
+  variants: { file: string; edits?: string[]; recipe?: string; media?: VariantMedia }[]
 }
 
 export interface WriteVaryBatchOptions {
@@ -109,6 +151,119 @@ export function writeVaryBatch(opts: WriteVaryBatchOptions): VaryBatchManifest {
   return manifest
 }
 
+// ==== Phase 40 Stream VB ====
+
+export interface WriteGenBatchOptions {
+  /** The parent .beat path exactly as the caller referenced it — stored verbatim, same as vary. */
+  parentPath: string
+  /** The parent's raw text, hashed into parentSha256: the .beat adopt will register into. */
+  parentText: string
+  /** The media id the candidates compete to become — the manifest's group is "gen:<id>". */
+  id: string
+  /** The one prompt all N candidates render (the batch varies only the seed). */
+  prompt: string
+  /** The FIRST seed of the run (candidate i has seed + i) — the batch's identity, like vary's. */
+  seed: number
+  outDir: string
+  /** One per candidate in v1..vN order; each candidate's PREPPED wav must already be written to
+   * outDir/v<i+1>.wav by the caller (source-lib's prep half). */
+  variants: { media: VariantMedia }[]
+}
+
+/** Writes manifest.json for a GEN batch — the candidates' v1.wav..vN.wav are already on disk (the
+ * generator wrote them; unlike vary there is no document to serialize). Produces the SAME
+ * VaryBatchManifest shape writeVaryBatch does, so scoreBatch/adoptVariant/readBatchManifest and
+ * both surfaces read one contract (D21) — the differences are entirely carried by the optional
+ * fields the type already declares: `file` is vN.wav, `track` is absent, `media` is present. */
+export function writeGenBatch(opts: WriteGenBatchOptions): VaryBatchManifest {
+  mkdirSync(opts.outDir, { recursive: true })
+  // The caller writes the candidate wavs and this names them — an invariant split across two files,
+  // so verify it here rather than letting a manifest that lies about its own contents reach adopt.
+  opts.variants.forEach((_, i) => {
+    const wav = resolve(opts.outDir, `v${i + 1}.wav`)
+    if (!existsSync(wav)) throw new BeatBatchError(`gen batch is missing its prepped candidate ${wav} — the manifest would name a file that does not exist`)
+  })
+  const manifest: VaryBatchManifest = {
+    parent: opts.parentPath,
+    parentSha256: createHash('sha256').update(opts.parentText).digest('hex'),
+    // no `track` — see the D21 strain (b) note on the interface
+    group: `gen:${opts.id}`,
+    count: opts.variants.length,
+    seed: opts.seed,
+    createdAt: new Date().toISOString(),
+    prompt: opts.prompt,
+    variants: opts.variants.map((v, i) => ({ file: `v${i + 1}.wav`, media: v.media })),
+  }
+  writeFileSync(resolve(opts.outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
+  return manifest
+}
+
+export interface RegisterMediaResult {
+  id: string
+  sha256: string
+  /** the media path as written into the .beat, e.g. "media/snare.wav" */
+  relPath: string
+  sidecarPath: string
+  durationSeconds: number
+  license: string
+  source: string
+  /** non-null when the id was ALREADY in the media block (setMediaSample is an upsert) — pilot
+   * 104's "silent replace" note, surfaced through the return value so each surface prints it. */
+  reregistered: { changed: boolean; previousSha256: string } | null
+}
+
+/** The REGISTER half of source-lib's old `ingest()` (Phase 40 VB): take an ALREADY-PREPPED wav and
+ * make it real in a .beat project — copy it to media/<id>.wav, write the ENFORCED provenance
+ * sidecar, and upsert the media block.
+ *
+ * It lives here rather than in scripts/source-lib.mjs because `adoptVariant` (below) is the second
+ * caller and must stay synchronous for both surfaces; source-lib imports it back so `beat source
+ * add`/`gen`'s single-shot path and `beat adopt`'s deferred path share ONE registration
+ * implementation — splitting ingest was never meant to fork it.
+ *
+ * `wavPath` may already BE media/<id>.wav (source-lib preps straight there on the single-shot
+ * path), in which case the copy is skipped. Rollback: a failed sidecar write removes the wav, so
+ * media is never registered without its provenance — the invariant the original ingest enforced. */
+export function registerPreppedMedia(beatFilePath: string, wavPath: string, media: VariantMedia): RegisterMediaResult {
+  const beatDir = dirname(resolve(beatFilePath))
+  const mediaDir = join(beatDir, 'media')
+  const relPath = `media/${media.id}.wav`
+  const outPath = join(mediaDir, `${media.id}.wav`)
+  mkdirSync(mediaDir, { recursive: true })
+  const copied = resolve(wavPath) !== resolve(outPath)
+  if (copied) {
+    if (!existsSync(wavPath)) throw new BeatBatchError(`the prepped candidate ${wavPath} is missing — cannot register ${media.id}`)
+    copyFileSync(wavPath, outPath)
+  }
+  const sidecarPath = outPath + '.json'
+  try {
+    writeFileSync(sidecarPath, JSON.stringify(media.sidecar, null, 2) + '\n')
+  } catch (err) {
+    try { rmSync(outPath) } catch { /* best-effort */ }
+    throw new BeatBatchError(`could not write the required provenance sidecar ${sidecarPath}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  let before
+  try {
+    before = parse(readFileSync(beatFilePath, 'utf8'))
+  } catch (err) {
+    throw new BeatBatchError(`could not parse ${beatFilePath}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  const existing = before.media.find((m) => m.id === media.id)
+  const reregistered = existing ? { changed: existing.sha256 !== media.sha256, previousSha256: existing.sha256 } : null
+  writeFileSync(beatFilePath, serialize(setMediaSample(before, media.id, media.sha256, relPath)))
+  return {
+    id: media.id,
+    sha256: media.sha256,
+    relPath,
+    sidecarPath,
+    durationSeconds: media.durationSeconds,
+    license: media.license,
+    source: media.source,
+    reregistered,
+  }
+}
+// ==== end Phase 40 Stream VB ====
+
 export interface RenderBatchOptions {
   /** Set to the parent .beat path for FEEL batches: variant files reference media relative to
    * themselves, and the parent's media/ dir sits next to the parent, so it gets linked into the
@@ -146,12 +301,18 @@ export function renderVaryBatch(outDir: string, count: number, opts: RenderBatch
 export interface ScoreEntry {
   t: string
   batch: string
-  track: string
+  // ==== Phase 40 Stream VB ==== (D21 strain (b): absent on gen entries — a gen batch has no track)
+  track?: string
+  // ==== end Phase 40 Stream VB ====
   group: string
   amount?: number
   seed: number
   parentSha256: string
-  picks: { rank: number; variant: string; recipe?: string; edits?: string[] }[]
+  // ==== Phase 40 Stream VB ==== (gen entries: the prompt these seeds rendered — one `jq` away
+  // from answering "which prompts/seeds do I actually like", the point of keeping ONE scores log)
+  prompt?: string
+  // ==== end Phase 40 Stream VB ====
+  picks: { rank: number; variant: string; recipe?: string; edits?: string[]; media?: { id: string; seed?: number; sha256: string } }[]
   rejected: string[]
 }
 
@@ -161,7 +322,17 @@ export interface ScoreBatchResult {
   manifest: VaryBatchManifest
   ranks: number[]
   entry: ScoreEntry
-  isFeel: boolean
+  /** True when this batch's variants carry a `recipe` (a whole-doc result — feel humanize batches
+   * AND Phase 37 automation-shape batches) rather than replayable `edits` (param/lane batches). The
+   * adopt-vs-`beat set`-replay branch keys off this, not off any specific group name, so a new
+   * whole-doc vary target scores and adopts for free by simply producing recipe'd variants. */
+  usesRecipe: boolean
+  // ==== Phase 40 Stream VB ====
+  /** True when this batch's variants carry `media` — a GEN batch of one-shot candidates, whose
+   * winner is ADOPTED BY REGISTRATION rather than by copying a document over the parent. Keyed off
+   * the variant shape for the same reason usesRecipe is, not off the "gen:" group prefix. */
+  usesMedia: boolean
+  // ==== end Phase 40 Stream VB ====
 }
 
 /** Read + parse a batch dir's manifest.json — shared by scoreBatch and adoptVariant so the
@@ -217,26 +388,41 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   const resolvedLog = logPath ?? defaultScoresLog(resolveBatchParent(dir, manifest))
   const ranks = picks.map((p) => normalizePick(p, manifest.variants.length))
   if (new Set(ranks).size !== ranks.length) throw new BeatBatchError('picks must be distinct')
-  // param batches carry replayable `edits`; feel batches carry a `recipe` (the whole variant
-  // file IS the result, since humanize isn't a set-replayable edit).
-  const isFeel = manifest.group === 'feel'
+  // param batches carry replayable `edits`; whole-doc batches (feel humanize, Phase 37 automation-
+  // shape) carry a `recipe` (the variant file IS the result, not a set-replayable edit). Key off the
+  // variant shape itself, not any group name, so any future whole-doc target works without touching
+  // this: a batch is recipe-shaped iff its (homogeneous) variants carry recipe rather than edits.
+  const usesRecipe = manifest.variants.length > 0 && manifest.variants[0]!.recipe !== undefined
+  // ==== Phase 40 Stream VB ====
+  // Third variant shape, same rule: a batch is media-shaped iff its variants carry `media` (gen
+  // candidates). Note the file name comes from the variant's own `file` field everywhere below
+  // rather than a re-derived `v${n}.beat` — D21 strain (a). For vary batches that field IS
+  // "vN.beat", so every existing entry keeps its exact bytes.
+  const usesMedia = manifest.variants.length > 0 && manifest.variants[0]!.media !== undefined
+  const fileOf = (n: number) => manifest.variants[n - 1]!.file
+  // ==== end Phase 40 Stream VB ====
   const entry: ScoreEntry = {
     t: new Date().toISOString(),
     batch: dir,
-    track: manifest.track,
+    ...(manifest.track !== undefined ? { track: manifest.track } : {}),
     group: manifest.group,
     amount: manifest.amount,
     seed: manifest.seed,
     parentSha256: manifest.parentSha256,
+    ...(manifest.prompt !== undefined ? { prompt: manifest.prompt } : {}),
     picks: ranks.map((n, i) => ({
       rank: i + 1,
-      variant: `v${n}.beat`,
-      ...(isFeel ? { recipe: manifest.variants[n - 1]!.recipe } : { edits: manifest.variants[n - 1]!.edits }),
+      variant: fileOf(n),
+      ...(usesMedia
+        ? { media: { id: manifest.variants[n - 1]!.media!.id, seed: manifest.variants[n - 1]!.media!.seed, sha256: manifest.variants[n - 1]!.media!.sha256 } }
+        : usesRecipe
+          ? { recipe: manifest.variants[n - 1]!.recipe }
+          : { edits: manifest.variants[n - 1]!.edits }),
     })),
-    rejected: manifest.variants.map((_, i) => i + 1).filter((n) => !ranks.includes(n)).map((n) => `v${n}.beat`),
+    rejected: manifest.variants.map((_, i) => i + 1).filter((n) => !ranks.includes(n)).map(fileOf),
   }
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
-  return { dir, logPath: resolvedLog, manifest, ranks, entry, isFeel }
+  return { dir, logPath: resolvedLog, manifest, ranks, entry, usesRecipe, usesMedia }
 }
 
 /** The human-facing summary both surfaces emit after a score: the scored line plus the
@@ -245,7 +431,16 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
  * MCP-only agent); param batches keep the `beat set` replay, which survives the parent moving on. */
 export function formatScoreResult(r: ScoreBatchResult): string {
   let out = `scored ${r.dir}: ${r.ranks.map((n) => `v${n}`).join(' > ')} -> ${r.logPath}\n`
-  if (r.isFeel) out += `to adopt the winner (${r.entry.picks[0]!.recipe}): beat adopt ${r.dir} v${r.ranks[0]} (or the beat_adopt tool)\n`
+  // ==== Phase 40 Stream VB ====
+  // A gen winner has no edits to replay and no document to copy — adopt is the ONLY way to take it
+  // (it is what registers the sample), so say exactly that rather than offering a `beat set` line.
+  if (r.usesMedia) {
+    const m = r.entry.picks[0]!.media!
+    out += `to adopt the winner (${m.id}, seed ${m.seed ?? '?'}) — this is what registers it into ${r.manifest.parent}: beat adopt ${r.dir} v${r.ranks[0]} (or the beat_adopt tool)\n`
+    return out
+  }
+  // ==== end Phase 40 Stream VB ====
+  if (r.usesRecipe) out += `to adopt the winner (${r.entry.picks[0]!.recipe}): beat adopt ${r.dir} v${r.ranks[0]} (or the beat_adopt tool)\n`
   else out += `to adopt the winner: beat adopt ${r.dir} v${r.ranks[0]} (or replay just its edits: beat set ${r.manifest.parent} ${r.entry.picks[0]!.edits!.join(' ')})\n`
   return out
 }
@@ -266,6 +461,14 @@ export interface AdoptResult {
   forced: boolean
   recipe?: string
   edits?: string[]
+  // ==== Phase 40 Stream VB ====
+  /** Set for a GEN batch: what the deferred registration actually did to the parent. Its presence
+   * is what tells formatAdoptResult it adopted a SAMPLE, not a document. */
+  media?: RegisterMediaResult
+  /** GEN batches: how many candidates the batch held, so the summary can say how many losers were
+   * left unregistered — the whole property this stream exists to establish. */
+  candidateCount?: number
+  // ==== end Phase 40 Stream VB ====
 }
 
 /** Copy the picked variant's bytes over the batch's parent .beat file. Data safety: the parent
@@ -275,8 +478,10 @@ export interface AdoptResult {
 export function adoptVariant(dir: string, pick: string, opts: { force?: boolean } = {}): AdoptResult {
   const manifest = readBatchManifest(dir)
   const n = normalizePick(pick, manifest.variants.length)
-  const variantPath = resolve(dir, `v${n}.beat`)
-  if (!existsSync(variantPath)) throw new BeatBatchError(`v${n}.beat is listed in the manifest but missing from ${dir}`)
+  const v = manifest.variants[n - 1]!
+  // Phase 40 VB (D21 strain (a)): the variant's own `file` — "vN.beat" for vary, "vN.wav" for gen.
+  const variantPath = resolve(dir, v.file)
+  if (!existsSync(variantPath)) throw new BeatBatchError(`${v.file} is listed in the manifest but missing from ${dir}`)
   const parentPath = resolveBatchParent(dir, manifest)
   if (!existsSync(parentPath)) {
     throw new BeatBatchError(`cannot find the batch's parent file "${manifest.parent}" (looked at ${parentPath}) — run adopt from the directory vary ran in, or copy the variant by hand`)
@@ -284,13 +489,41 @@ export function adoptVariant(dir: string, pick: string, opts: { force?: boolean 
   const parentSha = createHash('sha256').update(readFileSync(parentPath, 'utf8')).digest('hex')
   const mismatch = parentSha !== manifest.parentSha256
   if (mismatch && opts.force !== true) {
+    // ==== Phase 40 Stream VB ====
+    // The guard still applies to a gen adopt — the .beat it registers into must not have moved —
+    // but the CONSEQUENCE differs, so the message must too: a gen adopt upserts one media line
+    // rather than overwriting the whole document, and the commonest way to trip it is adopting a
+    // second candidate from the same batch (the first adopt is itself a change to the parent).
+    if (v.media !== undefined) {
+      throw new BeatBatchError(
+        `${parentPath} has changed since this batch was generated (sha256 ${parentSha.slice(0, 12)}... vs the manifest's ${manifest.parentSha256.slice(0, 12)}...) — ` +
+          `it has moved on through other edits (adopting an earlier candidate from this batch is itself such a change). ` +
+          `Registering ${v.media.id} into that changed file is probably what you want if you are simply changing your mind about which candidate wins — ` +
+          `force it ("beat adopt ... --force" / beat_adopt force:true), which upserts the media entry and leaves every other edit alone`,
+      )
+    }
+    // ==== end Phase 40 Stream VB ====
     throw new BeatBatchError(
       `${parentPath} has changed since this batch was generated (sha256 ${parentSha.slice(0, 12)}... vs the manifest's ${manifest.parentSha256.slice(0, 12)}...) — ` +
         `adopting would overwrite that newer work. Re-vary from the current file, or force the overwrite ("beat adopt ... --force" / beat_adopt force:true)`,
     )
   }
+  // ==== Phase 40 Stream VB ====
+  // GEN batch: adopt IS the registration (the candidates deliberately touched nothing until now).
+  // The prepped bytes are copied verbatim — prep never re-runs, so the winner registers as exactly
+  // the audio that was auditioned — and the losers are simply never mentioned again.
+  if (v.media !== undefined) {
+    return {
+      dir,
+      pick: n,
+      parentPath,
+      forced: mismatch,
+      media: registerPreppedMedia(parentPath, variantPath, v.media),
+      candidateCount: manifest.variants.length,
+    }
+  }
+  // ==== end Phase 40 Stream VB ====
   writeFileSync(parentPath, readFileSync(variantPath, 'utf8'))
-  const v = manifest.variants[n - 1]!
   return {
     dir,
     pick: n,
@@ -302,6 +535,31 @@ export function adoptVariant(dir: string, pick: string, opts: { force?: boolean 
 
 /** The human-facing summary both surfaces emit after an adopt. */
 export function formatAdoptResult(r: AdoptResult): string {
+  // ==== Phase 40 Stream VB ====
+  if (r.media !== undefined) {
+    const m = r.media
+    const losers = (r.candidateCount ?? 1) - 1
+    let out =
+      `adopted v${r.pick} -> registered ${m.id} in ${r.parentPath}: sha256:${m.sha256.slice(0, 12)}... ${m.relPath} ` +
+      `(${m.durationSeconds}s, ${m.source}, license ${m.license})\n` +
+      `provenance sidecar: ${m.relPath}.json\n`
+    // Same re-register note the source-add/gen surfaces print (pilot 104): an upsert is silent
+    // otherwise, and here it is genuinely likely (re-adopting after changing your mind).
+    if (m.reregistered) {
+      out += m.reregistered.changed
+        ? `note: re-registered ${m.id} (replaced sha256:${m.reregistered.previousSha256.slice(0, 7)}... -> ${m.sha256.slice(0, 7)}...)\n`
+        : `note: ${m.id} already registered (unchanged)\n`
+    }
+    if (r.forced) out += `(forced: the parent had changed since this batch was generated — only ${m.id}'s media entry was touched)\n`
+    if (losers > 0) {
+      out += losers === 1
+        ? `the 1 losing candidate stayed in ${r.dir} and was never registered — delete the dir to forget it\n`
+        : `the ${losers} losing candidates stayed in ${r.dir} and were never registered — delete the dir to forget them\n`
+    }
+    out += `a running daemon/GUI on this file picks the change up automatically; checkpoint to keep it as a version\n`
+    return out
+  }
+  // ==== end Phase 40 Stream VB ====
   const what = r.recipe ?? (r.edits && r.edits.length > 0 ? r.edits.join(', ') : undefined)
   let out = `adopted v${r.pick} -> ${r.parentPath}${what !== undefined ? ` (${what})` : ''}\n`
   if (r.forced) out += `(forced: the parent had changed since this batch was generated — its newer edits are now overwritten)\n`

@@ -32,7 +32,7 @@ import { readFileSync, writeFileSync, watch, existsSync, mkdirSync, copyFileSync
 import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { AutomationInterpolation, BeatDocument, BeatSelection, BeatSongSection, DrumLane } from '../core/index.js'
+import type { AutomationInterpolation, BeatDocument, BeatPlacement, BeatSelection, BeatSongSection, DrumLane } from '../core/index.js'
 import {
   parse,
   serialize,
@@ -83,6 +83,8 @@ import {
   setGroupTracks,
   initDocument,
   defaultDrumKitLanes,
+  sortPlacements,
+  audioRegionTimelineSteps,
   splitAudioClip,
   addAudioClip,
   duplicateNotes,
@@ -318,6 +320,44 @@ export interface ClipMove {
   track: string
   fromIndex: number
   toIndex: number
+  /** v0.11 (Phase 36 PD): which placement to move when the track's slot holds several — the
+   * placement's own `at` (fractional 16th steps) in the SOURCE section's scene. Omitted = the
+   * at-0/first placement in canonical order, which for every pre-v0.11 document (one placement at
+   * 0 per track) is its only placement — so single-clip callers are unchanged. */
+  at?: number
+}
+
+/** Phase 36 PD: pick ONE placement out of a track's slot — by exact `at` when given (per-placement
+ * targeting from the arrangement's per-placement blocks), else the at-0/first placement in
+ * canonical order (the pre-v0.11 meaning of "the" clip of a (track, scene) pair). */
+function pickPlacement(placements: readonly BeatPlacement[] | undefined, at: number | undefined): BeatPlacement | undefined {
+  if (!placements || placements.length === 0) return undefined
+  const sorted = sortPlacements(placements)
+  if (at === undefined) return sorted.find((p) => p.at === 0) ?? sorted[0]
+  return sorted.find((p) => p.at === at)
+}
+
+/** Phase 36 PD: the arrangement-drop rule for landing `incoming` in a track's placement list —
+ * Ableton's arrangement semantics (docs/research/30): a dropped clip REPLACES whatever it would
+ * overlap in time and leaves non-overlapping neighbors alone. For every pre-v0.11 document (one
+ * placement at 0 per track) this reduces exactly to the old replace-the-whole-slot behavior (the
+ * incoming at-0 placement always overlaps the existing at-0 one); for a multi-placement audio slot
+ * it keeps the placements the incoming one doesn't collide with (a clip moved to at 0 doesn't wipe
+ * an unrelated riser at 48). Overlap extents use the same audioRegionTimelineSteps arithmetic
+ * v0.11 validation itself uses; a placement whose clip has no measurable region (a non-audio clip
+ * — always at 0 by the D16 scope guard) collides iff the two placements share the same `at`. */
+function placeReplacingOverlaps(track: BeatTrack | undefined, bpm: number, existing: readonly BeatPlacement[], incoming: BeatPlacement): BeatPlacement[] {
+  const lengthOf = (p: BeatPlacement): number | null => {
+    const clip = track?.clips.find((c) => c.id === p.clip)
+    return clip?.audio ? audioRegionTimelineSteps(clip.audio, bpm) : null
+  }
+  const inLen = lengthOf(incoming)
+  const kept = existing.filter((p) => {
+    const pLen = lengthOf(p)
+    if (inLen === null || pLen === null) return p.at !== incoming.at
+    return p.at + pLen <= incoming.at || incoming.at + inLen <= p.at
+  })
+  return sortPlacements([...kept, { ...incoming }])
 }
 
 export function applyClipMoves(doc: BeatDocument, moves: ClipMove[]): BeatDocument {
@@ -335,24 +375,35 @@ export function applyClipMoves(doc: BeatDocument, moves: ClipMove[]): BeatDocume
     }
   }
 
-  // Resolve every move's clip id up front, against the UNCHANGED starting document — a track can
+  // Resolve every move's placement up front, against the UNCHANGED starting document — a track can
   // be both a "from" and a "to" for different moves in the same batch (e.g. two tracks swapping
   // sections), so nothing here may read a slot that an earlier move in this same loop already
-  // touched.
+  // touched. v0.11 (Phase 36 PD): a move is PLACEMENT-granular — `mv.at` names which placement of
+  // a multi-placement audio slot moves (the arrangement's per-placement blocks pass it); omitted,
+  // the at-0/first placement moves, which is the only placement every pre-v0.11 document has.
   const resolved = real.map((mv) => {
     const scene = doc.scenes.find((s) => s.id === sections[mv.fromIndex]!.scene)
-    const clipId = scene?.slots[mv.track]
-    if (!clipId) throw new BeatEditError(`track "${mv.track}" has no clip playing in section ${mv.fromIndex}`)
-    return { ...mv, clipId }
+    const placement = pickPlacement(scene?.slots[mv.track], mv.at)
+    if (!placement) {
+      const have = (scene?.slots[mv.track] ?? []).map((p) => `${p.clip}@${p.at}`).join(', ')
+      throw new BeatEditError(
+        mv.at === undefined
+          ? `track "${mv.track}" has no clip playing in section ${mv.fromIndex}`
+          : `track "${mv.track}" has no placement at ${mv.at} in section ${mv.fromIndex} (placed there: ${have || 'none'})`,
+      )
+    }
+    return { ...mv, placement }
   })
 
-  const removals = new Map<number, Set<string>>() // section index -> track ids to unmap
-  const additions = new Map<number, Map<string, string>>() // section index -> track id -> clip id to map
+  const removals = new Map<number, Map<string, BeatPlacement[]>>() // section index -> track id -> placements to remove
+  const additions = new Map<number, Map<string, BeatPlacement[]>>() // section index -> track id -> placements to land
   for (const mv of resolved) {
-    if (!removals.has(mv.fromIndex)) removals.set(mv.fromIndex, new Set())
-    removals.get(mv.fromIndex)!.add(mv.track)
+    if (!removals.has(mv.fromIndex)) removals.set(mv.fromIndex, new Map())
+    const rm = removals.get(mv.fromIndex)!
+    rm.set(mv.track, [...(rm.get(mv.track) ?? []), mv.placement])
     if (!additions.has(mv.toIndex)) additions.set(mv.toIndex, new Map())
-    additions.get(mv.toIndex)!.set(mv.track, mv.clipId)
+    const ad = additions.get(mv.toIndex)!
+    ad.set(mv.track, [...(ad.get(mv.track) ?? []), mv.placement])
   }
 
   const nextSections = sections.map((s) => ({ ...s }))
@@ -360,9 +411,22 @@ export function applyClipMoves(doc: BeatDocument, moves: ClipMove[]): BeatDocume
   for (const idx of new Set<number>([...removals.keys(), ...additions.keys()])) {
     const sec = nextSections[idx]!
     const scene = next.scenes.find((s) => s.id === sec.scene)
-    const slots = { ...(scene?.slots ?? {}) }
-    for (const track of removals.get(idx) ?? []) delete slots[track]
-    for (const [track, clipId] of additions.get(idx) ?? []) slots[track] = clipId
+    // Surviving tracks keep their placement lists verbatim; a removal drops JUST the moved
+    // placement (matched by clip+at value — duplicates are impossible, overlap validation forbids
+    // two placements sharing one `at`); a landing placement keeps its own `at` and replaces only
+    // what it overlaps (placeReplacingOverlaps above — the old whole-slot replace, generalized).
+    const slots: Record<string, BeatPlacement[]> = Object.fromEntries(Object.entries(scene?.slots ?? {}).map(([t, ps]) => [t, ps.map((p) => ({ ...p }))]))
+    for (const [track, toRemove] of removals.get(idx) ?? []) {
+      const remaining = (slots[track] ?? []).filter((p) => !toRemove.some((r) => r.clip === p.clip && r.at === p.at))
+      if (remaining.length === 0) delete slots[track]
+      else slots[track] = remaining
+    }
+    for (const [track, toLand] of additions.get(idx) ?? []) {
+      const trackObj = next.tracks.find((t) => t.id === track)
+      let list = slots[track] ?? []
+      for (const p of toLand) list = placeReplacingOverlaps(trackObj, next.bpm, list, p)
+      slots[track] = list
+    }
     // Always mint a fresh scene for a touched section, even if its old scene wasn't actually
     // shared — simplest way to guarantee this move never bleeds into a sibling section, and
     // nextSceneId(next) is always strictly past every scene minted so far this batch too.
@@ -390,8 +454,14 @@ export function applyClipMoves(doc: BeatDocument, moves: ClipMove[]): BeatDocume
  * fork-on-touch call applyClipMoves makes) so any OTHER section still sharing the old scene id is
  * completely unaffected; if that was the last section referencing the old scene, pruneOrphanedScenes
  * drops it, same cleanup songDelete already does. Refuses when the track has no clip in this section
- * (nothing to delete) rather than silently no-op-ing. */
-export function removeClipFromSection(doc: BeatDocument, trackId: string, sectionIndex: number): BeatDocument {
+ * (nothing to delete) rather than silently no-op-ing.
+ *
+ * v0.11 (Phase 36 PD): `at` given targets ONE placement of a multi-placement audio slot (the
+ * arrangement's per-placement blocks pass the right-clicked block's own `at`) — just that
+ * placement dies, the track's other placements in this section survive. `at` omitted keeps the
+ * pre-v0.11 meaning: the track's whole slot clears (which for every pre-v0.11 document is its one
+ * placement — identical outcome either way there). */
+export function removeClipFromSection(doc: BeatDocument, trackId: string, sectionIndex: number, at?: number): BeatDocument {
   if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no sections to remove a clip from')
   if (!Number.isInteger(sectionIndex) || sectionIndex < 0 || sectionIndex >= doc.song.length) {
     throw new BeatEditError(`section index ${sectionIndex} out of range (0-${doc.song.length - 1})`)
@@ -399,8 +469,20 @@ export function removeClipFromSection(doc: BeatDocument, trackId: string, sectio
   const section = doc.song[sectionIndex]!
   const scene = doc.scenes.find((s) => s.id === section.scene)
   if (!scene || !(trackId in scene.slots)) throw new BeatEditError(`track "${trackId}" has no clip playing in section ${sectionIndex}`)
-  const slots = { ...scene.slots }
-  delete slots[trackId]
+  const slots: Record<string, BeatPlacement[]> = { ...scene.slots }
+  if (at !== undefined) {
+    const placements = scene.slots[trackId]!
+    const victim = placements.find((p) => p.at === at)
+    if (!victim) {
+      const have = placements.map((p) => `${p.clip}@${p.at}`).join(', ')
+      throw new BeatEditError(`track "${trackId}" has no placement at ${at} in section ${sectionIndex} (placed there: ${have || 'none'})`)
+    }
+    const remaining = placements.filter((p) => p !== victim)
+    if (remaining.length === 0) delete slots[trackId]
+    else slots[trackId] = remaining
+  } else {
+    delete slots[trackId]
+  }
   const newId = nextSceneId(doc)
   const withScene = setScene(doc, newId, slots)
   const nextSections = doc.song.map((s, i) => (i === sectionIndex ? { scene: newId, bars: s.bars } : s))
@@ -415,22 +497,38 @@ export function removeClipFromSection(doc: BeatDocument, trackId: string, sectio
  * same as any two sections that legitimately reuse one scene today), then inserts a new song section
  * playing it immediately after this one — so the result is a second, visually adjacent clip block
  * that starts out sounding identical to the original but is genuinely independently editable for
- * this one track, without touching the section being duplicated FROM at all. */
-export function duplicateClipToNewSection(doc: BeatDocument, trackId: string, sectionIndex: number): { doc: BeatDocument; index: number; sceneId: string; clipId: string } {
+ * this one track, without touching the section being duplicated FROM at all.
+ *
+ * v0.11 (Phase 36 PD): duplicate is PLACEMENT-granular — `at` given forks the placement at that
+ * offset (the right-clicked block's own placement); omitted, the at-0/first placement forks (every
+ * pre-v0.11 document's only one). The new scene keeps the track's WHOLE placement list — only the
+ * chosen placement's clip is swapped for the fork (same `at`); the track's other placements stay
+ * shared references, exactly like every other track's slot does. */
+export function duplicateClipToNewSection(doc: BeatDocument, trackId: string, sectionIndex: number, at?: number): { doc: BeatDocument; index: number; sceneId: string; clipId: string; at: number } {
   if (!doc.song || doc.song.length === 0) throw new BeatEditError('not in song mode — no section to duplicate a clip from')
   if (!Number.isInteger(sectionIndex) || sectionIndex < 0 || sectionIndex >= doc.song.length) {
     throw new BeatEditError(`section index ${sectionIndex} out of range (0-${doc.song.length - 1})`)
   }
   const section = doc.song[sectionIndex]!
   const scene = doc.scenes.find((s) => s.id === section.scene)
-  const clipId = scene?.slots[trackId]
-  if (!scene || !clipId) throw new BeatEditError(`track "${trackId}" has no clip playing in section ${sectionIndex}`)
-  const { doc: withClip, clip } = duplicateClip(doc, trackId, clipId)
+  const chosen = pickPlacement(scene?.slots[trackId], at)
+  if (!scene || !chosen) {
+    const have = (scene?.slots[trackId] ?? []).map((p) => `${p.clip}@${p.at}`).join(', ')
+    throw new BeatEditError(
+      at === undefined
+        ? `track "${trackId}" has no clip playing in section ${sectionIndex}`
+        : `track "${trackId}" has no placement at ${at} in section ${sectionIndex} (placed there: ${have || 'none'})`,
+    )
+  }
+  const { doc: withClip, clip } = duplicateClip(doc, trackId, chosen.clip)
   const newSceneId = nextSceneId(withClip)
-  const slots = { ...scene.slots, [trackId]: clip.id }
+  const slots = {
+    ...scene.slots,
+    [trackId]: scene.slots[trackId]!.map((p) => (p.clip === chosen.clip && p.at === chosen.at ? { clip: clip.id, at: p.at } : { ...p })),
+  }
   const withScene = setScene(withClip, newSceneId, slots)
   const { doc: next, index } = songInsert(withScene, sectionIndex + 1, newSceneId, section.bars)
-  return { doc: next, index, sceneId: newSceneId, clipId: clip.id }
+  return { doc: next, index, sceneId: newSceneId, clipId: clip.id, at: chosen.at }
 }
 
 // ─── overlapping-region resolution policy (Phase 22 Stream AG) ──────────────────────────────────
@@ -1163,11 +1261,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             return
           }
           const moves: ClipMove[] = b.moves.map((raw, i) => {
-            const m = raw as { track?: unknown; fromIndex?: unknown; toIndex?: unknown }
+            const m = raw as { track?: unknown; fromIndex?: unknown; toIndex?: unknown; at?: unknown }
             if (typeof m.track !== 'string' || typeof m.fromIndex !== 'number' || typeof m.toIndex !== 'number') {
-              throw new BeatEditError(`moves[${i}] must be {track: string, fromIndex: number, toIndex: number}`)
+              throw new BeatEditError(`moves[${i}] must be {track: string, fromIndex: number, toIndex: number, at?: number}`)
             }
-            return { track: m.track, fromIndex: m.fromIndex, toIndex: m.toIndex }
+            if (m.at !== undefined && typeof m.at !== 'number') throw new BeatEditError(`moves[${i}].at must be a number when given`)
+            return { track: m.track, fromIndex: m.fromIndex, toIndex: m.toIndex, ...(typeof m.at === 'number' ? { at: m.at } : {}) }
           })
           const next = applyClipMoves(doc, moves)
           const written = writeIfChanged(next)
@@ -1184,16 +1283,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     // Phase 32 Stream LA: the arrangement clip-block context menu's "Delete" — removeClipFromSection's
     // doc comment above has the full "why this needs its own fork-on-touch route rather than a plain
     // {path,value} /edit on the scene's slots (shared-scene bleed, same hazard /clip-move guards).
-    //   { track: string, sectionIndex: number } -> { written, doc }
+    //   { track: string, sectionIndex: number, at?: number } -> { written, doc }
+    //   (v0.11, Phase 36 PD: `at` targets one placement of a multi-placement audio slot; omitted =
+    //   the whole slot, the pre-v0.11 meaning.)
     if (req.method === 'POST' && url.pathname === '/clip-remove') {
       readBody(req)
         .then((body) => {
-          const b = JSON.parse(body) as { track?: unknown; sectionIndex?: unknown }
-          if (typeof b.track !== 'string' || typeof b.sectionIndex !== 'number') {
-            json(res, 400, { error: 'body must be {track: string, sectionIndex: number}' })
+          const b = JSON.parse(body) as { track?: unknown; sectionIndex?: unknown; at?: unknown }
+          if (typeof b.track !== 'string' || typeof b.sectionIndex !== 'number' || (b.at !== undefined && typeof b.at !== 'number')) {
+            json(res, 400, { error: 'body must be {track: string, sectionIndex: number, at?: number}' })
             return
           }
-          const next = removeClipFromSection(doc, b.track, b.sectionIndex)
+          const next = removeClipFromSection(doc, b.track, b.sectionIndex, typeof b.at === 'number' ? b.at : undefined)
           const written = writeIfChanged(next)
           revalidateSelection()
           json(res, 200, { written, doc })
@@ -1208,19 +1309,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     // Phase 32 Stream LA: the arrangement clip-block context menu's "Duplicate" —
     // duplicateClipToNewSection's doc comment above has the full "why". Returns the new section's
     // index/scene/clip ids so the GUI can select the fresh clip block without re-deriving them.
-    //   { track: string, sectionIndex: number } -> { written, index, sceneId, clipId, doc }
+    //   { track: string, sectionIndex: number, at?: number } -> { written, index, sceneId, clipId, at, doc }
+    //   (v0.11, Phase 36 PD: `at` targets one placement of a multi-placement audio slot; omitted =
+    //   the at-0/first placement, every pre-v0.11 document's only one.)
     if (req.method === 'POST' && url.pathname === '/clip-duplicate') {
       readBody(req)
         .then((body) => {
-          const b = JSON.parse(body) as { track?: unknown; sectionIndex?: unknown }
-          if (typeof b.track !== 'string' || typeof b.sectionIndex !== 'number') {
-            json(res, 400, { error: 'body must be {track: string, sectionIndex: number}' })
+          const b = JSON.parse(body) as { track?: unknown; sectionIndex?: unknown; at?: unknown }
+          if (typeof b.track !== 'string' || typeof b.sectionIndex !== 'number' || (b.at !== undefined && typeof b.at !== 'number')) {
+            json(res, 400, { error: 'body must be {track: string, sectionIndex: number, at?: number}' })
             return
           }
-          const { doc: next, index, sceneId, clipId } = duplicateClipToNewSection(doc, b.track, b.sectionIndex)
+          const { doc: next, index, sceneId, clipId, at } = duplicateClipToNewSection(doc, b.track, b.sectionIndex, typeof b.at === 'number' ? b.at : undefined)
           const written = writeIfChanged(next)
           revalidateSelection()
-          json(res, 200, { written, index, sceneId, clipId, doc })
+          json(res, 200, { written, index, sceneId, clipId, at, doc })
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
@@ -2249,7 +2352,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           next = withClip
           if (typeof b.sceneId === 'string' && b.sceneId) {
             const scene = next.scenes.find((s) => s.id === b.sceneId)
-            next = setScene(next, b.sceneId, { ...(scene?.slots ?? {}), [track.id]: clipId })
+            // v0.11 (Phase 36 PD): the dropped-in clip lands as one placement at 0, REPLACING only
+            // what it overlaps in time (placeReplacingOverlaps — for a single-placement slot that's
+            // the old whole-slot replace; a multi-placement audio slot keeps its non-overlapping
+            // placements, e.g. a riser at 48). Other tracks' slots merge through untouched.
+            const trackAfter = next.tracks.find((t) => t.id === track.id)
+            next = setScene(next, b.sceneId, {
+              ...(scene?.slots ?? {}),
+              [track.id]: placeReplacingOverlaps(trackAfter, next.bpm, scene?.slots[track.id] ?? [], { clip: clipId, at: 0 }),
+            })
           }
           const written = writeIfChanged(next)
           revalidateSelection()
@@ -2310,6 +2421,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           let next = withClip
           if (typeof b.sceneId === 'string' && b.sceneId) {
             const scene = next.scenes.find((s) => s.id === b.sceneId)
+            // Replaces the track's whole slot with one placement at 0 — exact and final here, not a
+            // stopgap: this route rejects audio tracks above, and non-audio slots are single-
+            // placement-at-0 by v0.11's own validation (the D16 scope guard), so "the whole slot"
+            // and "the one placement" are the same thing. Other tracks' slots merge through
+            // untouched.
             next = setScene(next, b.sceneId, { ...(scene?.slots ?? {}), [track.id]: clipId })
           }
           const written = writeIfChanged(next)

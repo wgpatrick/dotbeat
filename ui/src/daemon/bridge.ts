@@ -605,6 +605,10 @@ export interface ClipMove {
   track: string
   fromIndex: number
   toIndex: number
+  /** v0.11 (Phase 36 PD): which placement of a multi-placement audio slot moves — the placement's
+   * own `at` in the source section. Omitted = the at-0/first placement (every pre-v0.11 slot's
+   * only one). Mirrors daemon.ts's ClipMove exactly. */
+  at?: number
 }
 
 export async function postClipMove(moves: ClipMove[]): Promise<void> {
@@ -629,14 +633,16 @@ export async function postClipMove(moves: ClipMove[]): Promise<void> {
 // needs its own route" (same per-section scene-forking hazard postClipMove's own comment covers).
 
 /** Removes `track`'s clip from the scene playing at song section `sectionIndex` — the clip-block
- * context menu's "Delete." Throws with the daemon's error message on a 4xx (e.g. the track has no
- * clip in that section already). */
-export async function postClipRemove(track: string, sectionIndex: number): Promise<void> {
+ * context menu's "Delete." v0.11 (Phase 36 PD): `at` given targets ONE placement of a multi-
+ * placement audio slot (the right-clicked block's own); omitted clears the whole slot (identical
+ * for every single-placement slot). Throws with the daemon's error message on a 4xx (e.g. the
+ * track has no clip in that section already). */
+export async function postClipRemove(track: string, sectionIndex: number, at?: number): Promise<void> {
   const base = daemonBase()
   const res = await fetch(`${base}/clip-remove`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ track, sectionIndex }),
+    body: JSON.stringify({ track, sectionIndex, ...(at !== undefined ? { at } : {}) }),
   })
   if (!res.ok) {
     const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)
@@ -648,13 +654,15 @@ export async function postClipRemove(track: string, sectionIndex: number): Promi
 
 /** Forks `track`'s clip at song section `sectionIndex` into an independent copy, bundled into a
  * brand-new scene, inserted as a new section immediately after — the clip-block context menu's
- * "Duplicate." Returns the new section's index so the caller can select it. */
-export async function postClipDuplicate(track: string, sectionIndex: number): Promise<{ index: number; sceneId: string; clipId: string }> {
+ * "Duplicate." v0.11 (Phase 36 PD): `at` given forks THAT placement's clip (the track's other
+ * placements ride along as shared references); omitted forks the at-0/first placement. Returns
+ * the new section's index so the caller can select it. */
+export async function postClipDuplicate(track: string, sectionIndex: number, at?: number): Promise<{ index: number; sceneId: string; clipId: string }> {
   const base = daemonBase()
   const res = await fetch(`${base}/clip-duplicate`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ track, sectionIndex }),
+    body: JSON.stringify({ track, sectionIndex, ...(at !== undefined ? { at } : {}) }),
   })
   if (!res.ok) {
     const msg = await res.json().then((b) => (b as { error?: string }).error).catch(() => res.statusText)

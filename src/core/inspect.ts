@@ -3,9 +3,10 @@
 // parsed document; this is the human-shaped view.)
 
 import type { BeatClip, BeatDocument, BeatDrumHit, BeatGroup, BeatTrack, DrumVoiceType } from './document.js'
-import { DRUM_LANES, SYNTH_FIELDS, declaredLaneNames } from './document.js'
+import { DRUM_LANES, SYNTH_FIELDS, declaredLaneNames, sortPlacements } from './document.js'
 import { serializeLaneBacking } from './serialize.js'
 import { formatNumber } from './format.js'
+import { unplacedContentTracks, unplacedContentWarning } from './coverage.js'
 
 // v0.9: ", auto: cutoff(3), volume(2)" — lane names + point counts, in lane order; empty when
 // the clip has no automation (the common case, and every v0.8-and-earlier file).
@@ -199,13 +200,26 @@ export function describeDocument(doc: BeatDocument): string {
   }
   if (doc.groups.length > 0) lines.push('')
   for (const s of doc.scenes) {
-    const slots = Object.entries(s.slots).map(([tr, c]) => `${tr}=${c}`).join(' ')
+    // v0.11: one `track=clip[@at]` token per placement, canonical (at, clip id) order within a
+    // track, `@at` elided at 0 — so a pre-v0.11 scene prints exactly as before.
+    const slots = Object.entries(s.slots)
+      .flatMap(([tr, placements]) => sortPlacements(placements).map((p) => `${tr}=${p.clip}${p.at !== 0 ? `@${formatNumber(p.at)}` : ''}`))
+      .join(' ')
     lines.push(`scene ${s.id}: ${slots || '(empty)'}`)
   }
   if (doc.scenes.length > 0) lines.push('')
   if (doc.song) {
     const total = doc.song.reduce((sum, x) => sum + x.bars, 0)
     lines.push(`song: ${doc.song.map((x) => `${x.scene}(${x.bars})`).join(' ')} — ${total} bars total`)
+  }
+  // Phase 39 Stream UA (pilot 105 HIGH): the silent-render trap — in song mode, a track with real
+  // content that's placed in no scene the song plays renders silent with no other warning anywhere.
+  // One ⚠ line per such track, after the scenes/song block. Loop mode never trips this (see
+  // coverage.ts) so the block is empty and prints nothing.
+  const silent = unplacedContentTracks(doc)
+  if (silent.length > 0) {
+    lines.push('')
+    for (const t of silent) lines.push(unplacedContentWarning(t))
   }
   return lines.join('\n').replace(/\n+$/, '\n')
 }

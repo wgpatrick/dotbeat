@@ -1,6 +1,6 @@
 import { useStore } from '../state/store'
 import { postEdit } from '../daemon/bridge'
-import { TIME_SIG_DENOMINATORS, type BeatClip, type BeatDocument, type BeatTrack } from '../types'
+import { TIME_SIG_DENOMINATORS, firstPlacementClip, type BeatClip, type BeatDocument, type BeatTrack } from '../types'
 
 // Phase 22 Stream AG — the GUI face of v0.10's clip-level loop range / time signature
 // (src/core/document.ts's BeatClipLoop/BeatTimeSignature; docs/research/18-ableton-ui-
@@ -40,15 +40,20 @@ import { TIME_SIG_DENOMINATORS, type BeatClip, type BeatDocument, type BeatTrack
  * mode and "no clip in the selected section" alike. */
 export function primaryClipFor(track: BeatTrack, doc: BeatDocument, preferredSceneId?: string | null): BeatClip | null {
   if (!doc.song) return null
+  // v0.11 (Phase 36 PD): "the" clip of a (track, scene) pair here is the at-0/first placement's —
+  // exact for every non-audio track (single placement at 0 by the D16 scope guard) and the
+  // documented FALLBACK for audio: per-placement targeting (the clicked/playhead placement of a
+  // multi-placement slot) is layered on top by AudioClipEditor's placementTargetedClip, which
+  // falls through to this when no explicit placement is in play.
   if (preferredSceneId) {
     const scene = doc.scenes.find((s) => s.id === preferredSceneId)
-    const clipId = scene?.slots[track.id]
+    const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
     const clip = clipId ? track.clips.find((c) => c.id === clipId) : undefined
     if (clip) return clip
   }
   for (const section of doc.song) {
     const scene = doc.scenes.find((s) => s.id === section.scene)
-    const clipId = scene?.slots[track.id]
+    const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
     if (!clipId) continue
     const clip = track.clips.find((c) => c.id === clipId)
     if (clip) return clip
@@ -66,11 +71,16 @@ export function selectedSceneId(doc: BeatDocument | null, selectedSectionIndex: 
   return doc.song[selectedSectionIndex]?.scene ?? null
 }
 
-export function ClipPropertiesPanel({ track }: { track: BeatTrack }) {
+/** `clipOverride` (v0.11, Phase 36 PD): a caller that has already resolved WHICH clip is open —
+ * AudioClipEditor's placement targeting (clicked/playhead placement of a multi-placement audio
+ * slot) — passes it so this strip names the same clip; omitted (NoteView's non-audio panels, where
+ * one placement per (track, scene) is guaranteed by validation) resolves via primaryClipFor
+ * exactly as before. */
+export function ClipPropertiesPanel({ track, clipOverride }: { track: BeatTrack; clipOverride?: BeatClip | null }) {
   const doc = useStore((s) => s.doc)
   const selectedSectionIndex = useStore((s) => s.selectedSectionIndex)
   if (!doc) return null
-  const clip = primaryClipFor(track, doc, selectedSceneId(doc, selectedSectionIndex))
+  const clip = clipOverride ?? primaryClipFor(track, doc, selectedSceneId(doc, selectedSectionIndex))
   if (!clip) {
     return (
       <div className="clip-props" data-clip-props="none">

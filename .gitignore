@@ -15,3 +15,9 @@ target/
 
 # Reference material for research (e.g. Ableton's own manual) — large binaries, never committed.
 /prior_art/
+
+# Owner-side Python venv for the ML sidecars (python/README.md) — machine-local, never committed.
+python/.venv/
+
+# CLI render outputs inside example projects — regenerable from the .beat + media.
+examples/*/render-*.wav

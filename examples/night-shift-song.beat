@@ -1,7 +1,10 @@
 format_version 0.4
 bpm 124
 loop_bars 4
-selected_track lead
+selected_track pad
+
+media
+  sample upright-piano-kw-small sha256:cf2a98eb38a32c4954b4b6e2caae4112d62dd8e892eceefdd7942b0e7d01ac2f media/upright-piano-kw-small.sf2
 
 track lead lead #e06c75 synth
   synth
@@ -67,8 +70,14 @@ track drums drums #56b6c2 drums
     hatDecay 0.07
     openHatDecay 0.4
     hatTone 3500
+  lane kick synth:membrane tune=30 punch=0.01 decay=0.35
+  lane snare synth:noise tone=0.55 decay=0.2
+  lane clap synth:noise
+  lane hat synth:metal decay=0.07 tone=3500
+  lane openhat synth:metal decay=0.4 tone=3500
   clip groove
-    hit kick0 kick 0 0.9
+    loop 0 2
+    hit kick0 kick 0 0.49
     hit hat2 hat 2 0.55
     hit kick4 kick 4 0.85
     hit clap4 clap 4 0.7
@@ -79,7 +88,7 @@ track drums drums #56b6c2 drums
     hit clap12 clap 12 0.7
     hit hat14 hat 14 0.5
     hit openhat14 openhat 14 0.4
-    hit kick16 kick 16 0.9
+    hit kick16 kick 16.534 0.9 2
     hit hat18 hat 18 0.55
     hit kick20 kick 20 0.85
     hit clap20 clap 20 0.7
@@ -112,7 +121,7 @@ track drums drums #56b6c2 drums
     hit clap60 clap 60 0.7
     hit hat62 hat 62 0.5
     hit openhat62 openhat 62 0.4
-  hit kick0 kick 0 0.9
+  hit kick0 kick 0 0.49
   hit hat2 hat 2 0.55
   hit kick4 kick 4 0.85
   hit clap4 clap 4 0.7
@@ -123,13 +132,18 @@ track drums drums #56b6c2 drums
   hit clap12 clap 12 0.7
   hit hat14 hat 14 0.5
   hit openhat14 openhat 14 0.4
-  hit kick16 kick 16 0.9
+  hit h2 kick 15 0.8
+  hit h1 kick 16 0.8
   hit hat18 hat 18 0.55
   hit kick20 kick 20 0.85
   hit clap20 clap 20 0.7
-  hit hat22 hat 22 0.55
+  hit h5 hat 22 0.22
+  hit hat22 hat 22 0.22
+  hit h3 hat 23 0.11
+  hit h4 hat 23 0.11
   hit kick24 kick 24 0.9
   hit hat26 hat 26 0.55
+  hit h6 hat 27 0.8
   hit kick28 kick 28 0.85
   hit clap28 clap 28 0.7
   hit hat30 hat 30 0.5
@@ -159,10 +173,10 @@ track drums drums #56b6c2 drums
 
 track bass bass #f7c948 synth
   synth
-    osc sawtooth
+    osc square
     volume 3
-    cutoff 550
-    resonance 1
+    cutoff 500
+    resonance 3
     attack 0.005
     decay 0.22
     sustain 0.35
@@ -172,14 +186,21 @@ track bass bass #f7c948 synth
     osc2Level 0.25
     osc2Detune 1203
     subLevel 0.6
-    filterEnvAmount 0.35
+    fmLevel 0.2
+    fmHarmonicity 2
+    fmModIndex 8
+    filterEnvAmount 0.1
     filterEnvDecay 0.18
     filterEnvSustain 0.15
+    lfoDepth 0.7
+    lfoDest cutoff
     glide 0.02
-    eqLow 1.5
+    eqLow 2
     compMix 0.5
-    distortionAmount 0.15
-    distortionMix 0.2
+    distortionAmount 0.35
+    distortionMix 0.4
+    bitcrushBits 7
+    bitcrushMix 0.15
     duckSource drums
     duckAmount 0.45
   clip groove
@@ -226,27 +247,57 @@ track bass bass #f7c948 synth
 
 track pad pad #c678dd synth
   synth
-    osc sawtooth
+    osc sine
     volume -2
-    cutoff 2600
-    resonance 0.8
-    attack 0.4
-    decay 0.4
-    sustain 0.7
-    release 1.2
+    cutoff 7000
+    resonance 1
+    attack 0.001
+    decay 0.35
+    sustain 0.1
+    release 0.15
     pan -0.35
-    osc2Level 0.5
-    osc2Detune 9
-    unisonVoices 5
-    unisonWidth 0.8
-    lfoRate 0.25
-    lfoDepth 0.2
+    wtTable pwm
+    wtPos 0.1297
+    osc2Type sine
+    osc2Level 0.3
+    subLevel 0.1844
+    noiseLevel 0.0884
+    fmLevel 0.45
+    fmHarmonicity 2
+    fmModIndex 6
+    unisonVoices 3
+    unisonWidth 0.6
+    filterEnvAmount 0.4
+    filterEnvAttack 0.1614
+    filterEnvDecay 0.12
+    filterEnvSustain 0.5491
+    filterEnvRelease 2
+    lfoRate 0.6
+    lfoDepth 0.15
     lfoDest cutoff
-    eqMid -1
-    sendReverb 0.55
-    sendDelay 0.15
+    lfo2Depth 0.5609
+    glide 0.374
+    velToFilterAmount 0.26
+    eqLow 0.5
+    eqMid -2.6553
+    compMix 0.4
+    distortionAmount 0.1
+    distortionMix 0.15
+    bitcrushBits 7
+    bitcrushMix 0.15
+    grainDelayTime 0.0238
+    grainDelayFeedback 0.437
+    grainDelayPitch 0.0335
+    grainDelayMix 0.3414
+    sendReverb 0.25
+    sendDelay 0.4
     duckSource drums
     duckAmount 0.3
+  effect distortion distortion
+  effect comp comp
+  effect bitcrush bitcrush
+  effect grainDelay grainDelay
+  effect eq3 eq3
   clip groove
     note u100021 57 0 14 0.55
     note u100022 60 0 14 0.5
@@ -260,18 +311,86 @@ track pad pad #c678dd synth
     note u100030 55 48 14 0.55
     note u100031 59 48 14 0.5
     note u100032 62 48 14 0.55
-  note u100021 57 0 14 0.55
-  note u100022 60 0 14 0.5
-  note u100023 64 0 14 0.5
+  note u100022 57 0 14 0.5
+  note u100021 60 0 14 0.55
+  note u100023 63 0 14 0.5
   note u100024 53 16 14 0.55
   note u100025 57 16 14 0.5
   note u100026 60 16 14 0.5
   note u100027 55 32 14 0.55
   note u100028 60 32 14 0.5
   note u100029 64 32 14 0.5
+  note u100079 67 32 14 0.8
   note u100030 55 48 14 0.55
   note u100031 59 48 14 0.5
   note u100032 62 48 14 0.55
+
+track synth synth #98c379 synth
+  synth
+    osc triangle
+    volume -10
+    cutoff 875.5897
+    resonance 0.8
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+    wtTable pwm
+    wtPos 0.6857
+    osc2Level 0.55
+  clip clip1
+    loop 0 1
+    signature 4 4
+    note u100040 84 0 2 0.8
+    note u100041 85 3 2 0.8
+    note u100042 86 6 2 0.8
+    note u100045 88 8 2 0.8
+    note u100044 93 10 2 0.8
+    note u100043 87 13 2 0.8
+  note u100040 84 0 2 0.8
+  note u100041 85 3 2 0.8
+  note u100042 86 6 2 0.8
+  note u100045 88 8 2 0.8 chance=75
+  note u100044 93 10 4 0.8
+  note u100043 87 13 2 0.8
+
+track audio audio #61afef audio
+
+track instrument instrument #e06c75 instrument
+  soundfont upright-piano-kw-small 0
+
+track instrument5 instrument5 #98c379 instrument
+  soundfont upright-piano-kw-small 0
+
+track instrument6 instrument6 #61afef instrument
+  soundfont upright-piano-kw-small 0
+
+track instrument7 instrument7 #e06c75 instrument
+  soundfont upright-piano-kw-small 0
+  note u100047 36 0 5 0.8
+  note u100048 52 0 5 0.8
+  note u100049 55 0 5 0.8
+  note u100050 59 0 5 0.8
+  note u100055 40 5 5 0.8
+  note u100052 47 5 5 0.8
+  note u100054 55 5 5 0.8
+  note u100056 60 5 5 0.8
+  note u100058 64 5 5 0.8
+  note u100059 48 10 6 0.8
+  note u100060 52 10 6 0.8
+  note u100061 55 10 6 0.8
+  note u100062 52 16 1 0.8
+  note u100063 48 17 1 0.8
+  note u100064 47 18 1 0.8
+  note u100065 40 19 1 0.8
+  note u100066 52 20 1 0.8
+  note u100067 48 21 1 0.8
+  note u100068 47 22 1 0.8
+  note u100075 40 23 2 0.8
+  note u100076 40 25 7 0.8
+  note u100077 47 25 7 0.8
+  note u100078 55 25 7 0.8
 
 scene intro
   slot pad groove
@@ -287,9 +406,37 @@ scene drop
   slot bass groove
   slot pad groove
 
+scene s1
+  slot bass groove
+  slot pad groove
+
+scene s2
+  slot drums groove
+  slot pad groove
+
+scene s3
+  slot pad groove
+  slot synth clip1
+
+scene s4
+  slot drums groove
+  slot bass groove
+  slot pad groove
+
+scene s5
+  slot drums groove
+  slot pad groove
+  slot synth clip1
+
+scene s6
+  slot drums groove
+  slot bass groove
+  slot pad groove
+  slot synth clip1
+
 song
-  section intro 4
-  section build 4
+  section s5 4
+  section s6 4
   section drop 13
   section intro 4
   section intro 4

@@ -1,0 +1,240 @@
+format_version 0.11
+bpm 96
+loop_bars 4
+selected_track bells
+
+media
+  sample bell_a sha256:218372820ab420127acf849a4b9552260d2dd4439d5c088027abd03af14275d9 media/bell_a.wav
+  sample bell_b sha256:2c5fdf168fb15fe948bcbdeb30c9b72436e472a1fb174d53080b3a2659d2f9dd media/bell_b.wav
+  sample kick_w sha256:d89ffbe66d63bf0b2aaec57193262eb14277296056d7b7c1bd1209b21b64b1f6 media/kick_w.wav
+  sample snare_s5 sha256:beda81801efacf66bb861a8b33a72a1c6255344af84805b2ad871271b114ac15 media/snare_s5.wav
+  sample snare_s6 sha256:66d7c94c2a29551d2ebc0afde25bde4ff389f1a2be447ca28b263ba4b88e5739 media/snare_s6.wav
+  sample snare_s7 sha256:230f408ded1fb5a76b036a6fd22dda71195889fddb47cf46736a53aaf25c547f media/snare_s7.wav
+  sample hat_g sha256:93153d1ce2d8acaf5c8b05a78ee153a6906ada388656bf63f64bf104ae0a1db7 media/hat_g.wav
+  sample openhat_c sha256:07f444e217ba1fe411f52ed453ed846183761f1fc0b1157e09c4abc083908fd9 media/openhat_c.wav
+  sample bass_p sha256:49b1669501006c5b069128c71ac417122af82185b985b549831298b1cbd6ff61 media/bass_p.wav
+  sample pad_am sha256:456efbbc6ff915217c13b37fb989d16b8504f90823e250c679258022ec7b5d1f media/pad_am.wav
+
+track bells bells #e5c07b drums
+  synth
+    osc sawtooth
+    volume -4
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+  lane a5 sample bell_a 0 -12
+  lane c6 sample bell_a 0 -9
+  lane d6 sample bell_a 0 -7
+  lane e6 sample bell_a 0 -5
+  lane g6 sample bell_a 0 -2
+  lane a6 sample bell_a 0 0
+  clip mel
+    hit h1 a5 0 0.6495
+    hit h2 c6 5.9558 0.4676
+    hit h3 d6 9.924 0.6903
+    hit h4 e6 15.9494 0.7279
+    hit h5 d6 21.9757 0.4915
+    hit h6 c6 26.0579 0.546
+    hit h7 a5 30.0589 0.5047
+    hit h8 g6 37.9133 0.6935
+    hit h9 e6 44.0613 0.7066
+    hit h10 d6 47.9647 0.5422
+    hit h11 c6 54.0288 0.5646
+    hit h12 a5 56.1092 0.7738
+  hit h1 a5 0 0.6495
+  hit h2 c6 5.9558 0.4676
+  hit h3 d6 9.924 0.6903
+  hit h4 e6 15.9494 0.7279
+  hit h5 d6 21.9757 0.4915
+  hit h6 c6 26.0579 0.546
+  hit h7 a5 30.0589 0.5047
+  hit h8 g6 37.9133 0.6935
+  hit h9 e6 44.0613 0.7066
+  hit h10 d6 47.9647 0.5422
+  hit h11 c6 54.0288 0.5646
+  hit h12 a5 56.1092 0.7738
+
+track kit kit #56b6c2 drums
+  synth
+    osc sawtooth
+    volume -4
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+  lane kick sample kick_w 0 0
+  lane snare sample snare_s5 -2 0
+  lane hat sample hat_g -6 0
+  lane openhat sample openhat_c -6 0
+  clip groove
+    hit h37 kick 0 0.9
+    hit h1 hat 0 0.6256
+    hit h2 hat 1.8979 0.4616
+    hit h3 hat 3.9788 0.5253
+    hit h47 snare 4 0.75
+    hit h4 hat 6.0337 0.3476
+    hit h5 hat 7.9213 0.5855
+    hit h6 hat 9.988 0.3672
+    hit h38 kick 10 0.8
+    hit h48 snare 12 0.8
+    hit h7 hat 12.0013 0.5188
+    hit h8 hat 14.075 0.2918
+    hit h33 hat 15.5364 0.273
+    hit h9 hat 15.9145 0.4656
+    hit h39 kick 16 0.9
+    hit h10 hat 17.9101 0.4438
+    hit h49 snare 20 0.75
+    hit h11 hat 20.0298 0.5783
+    hit h12 hat 21.9452 0.3625
+    hit h40 kick 23 0.45
+    hit h13 hat 24.0179 0.6
+    hit h14 hat 25.9512 0.3477
+    hit h41 kick 26 0.8
+    hit h15 hat 27.9718 0.5314
+    hit h50 snare 28 0.8
+    hit h16 hat 30.0127 0.3637
+    hit h35 openhat 30.0303 0.3596
+    hit h17 hat 31.9906 0.5295
+    hit h42 kick 32 0.9
+    hit h18 hat 33.9846 0.3522
+    hit h51 snare 36 0.75
+    hit h19 hat 36.1104 0.6186
+    hit h20 hat 37.9784 0.4395
+    hit h21 hat 40.1382 0.5832
+    hit h43 kick 42 0.8
+    hit h22 hat 42.0252 0.3242
+    hit h23 hat 43.96 0.5503
+    hit h52 snare 44 0.8
+    hit h24 hat 45.9928 0.3827
+    hit h34 hat 47.4948 0.2451
+    hit h44 kick 48 0.9
+    hit h25 hat 48.0202 0.5434
+    hit h26 hat 50.0839 0.3704
+    hit h27 hat 51.9635 0.5272
+    hit h53 snare 52 0.75
+    hit h28 hat 53.9461 0.4495
+    hit h45 kick 55 0.45
+    hit h29 hat 55.9453 0.5623
+    hit h30 hat 57.983 0.3666
+    hit h46 kick 58 0.8
+    hit h54 snare 60 0.8
+    hit h31 hat 60.077 0.5833
+    hit h32 hat 61.9853 0.3042
+    hit h36 openhat 62.0786 0.4998
+    hit h55 snare 62.5 0.3
+  hit h37 kick 0 0.9
+  hit h1 hat 0 0.6256
+  hit h2 hat 1.8979 0.4616
+  hit h3 hat 3.9788 0.5253
+  hit h47 snare 4 0.75
+  hit h4 hat 6.0337 0.3476
+  hit h5 hat 7.9213 0.5855
+  hit h6 hat 9.988 0.3672
+  hit h38 kick 10 0.8
+  hit h48 snare 12 0.8
+  hit h7 hat 12.0013 0.5188
+  hit h8 hat 14.075 0.2918
+  hit h33 hat 15.5364 0.273
+  hit h9 hat 15.9145 0.4656
+  hit h39 kick 16 0.9
+  hit h10 hat 17.9101 0.4438
+  hit h49 snare 20 0.75
+  hit h11 hat 20.0298 0.5783
+  hit h12 hat 21.9452 0.3625
+  hit h40 kick 23 0.45
+  hit h13 hat 24.0179 0.6
+  hit h14 hat 25.9512 0.3477
+  hit h41 kick 26 0.8
+  hit h15 hat 27.9718 0.5314
+  hit h50 snare 28 0.8
+  hit h16 hat 30.0127 0.3637
+  hit h35 openhat 30.0303 0.3596
+  hit h17 hat 31.9906 0.5295
+  hit h42 kick 32 0.9
+  hit h18 hat 33.9846 0.3522
+  hit h51 snare 36 0.75
+  hit h19 hat 36.1104 0.6186
+  hit h20 hat 37.9784 0.4395
+  hit h21 hat 40.1382 0.5832
+  hit h43 kick 42 0.8
+  hit h22 hat 42.0252 0.3242
+  hit h23 hat 43.96 0.5503
+  hit h52 snare 44 0.8
+  hit h24 hat 45.9928 0.3827
+  hit h34 hat 47.4948 0.2451
+  hit h44 kick 48 0.9
+  hit h25 hat 48.0202 0.5434
+  hit h26 hat 50.0839 0.3704
+  hit h27 hat 51.9635 0.5272
+  hit h53 snare 52 0.75
+  hit h28 hat 53.9461 0.4495
+  hit h45 kick 55 0.45
+  hit h29 hat 55.9453 0.5623
+  hit h30 hat 57.983 0.3666
+  hit h46 kick 58 0.8
+  hit h54 snare 60 0.8
+  hit h31 hat 60.077 0.5833
+  hit h32 hat 61.9853 0.3042
+  hit h36 openhat 62.0786 0.4998
+  hit h55 snare 62.5 0.3
+
+track bass bass #98c379 drums
+  synth
+    osc sawtooth
+    volume -4
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+  lane a1 sample bass_p 0 -6.5
+  lane g1 sample bass_p 0 -8.5
+  lane c2 sample bass_p 0 -3.5
+  clip bline
+    hit h1 a1 0 0.8
+    hit h2 a1 10 0.6
+    hit h3 a1 16 0.8
+    hit h4 g1 26 0.7
+    hit h5 a1 32 0.8
+    hit h6 a1 42 0.6
+    hit h7 c2 48 0.75
+    hit h8 g1 58 0.7
+  hit h1 a1 0 0.8
+  hit h2 a1 10 0.6
+  hit h3 a1 16 0.8
+  hit h4 g1 26 0.7
+  hit h5 a1 32 0.8
+  hit h6 a1 42 0.6
+  hit h7 c2 48 0.75
+  hit h8 g1 58 0.7
+
+track pad pad #c678dd audio
+  clip padbed
+    audio pad_am 0 11.98 -6 repitch 0.9439
+
+scene intro
+  slot bells mel
+  slot pad padbed
+
+scene full
+  slot bells mel
+  slot kit groove
+  slot bass bline
+  slot pad padbed
+
+scene outro
+  slot pad padbed
+
+song
+  section intro 4
+  section full 8
+  section outro 4

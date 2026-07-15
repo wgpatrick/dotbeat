@@ -18,16 +18,86 @@
 //
 // Requires `npm run build` (compiled ../dist/src). The ui/ build is produced on demand.
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawn, execFileSync } from 'node:child_process'
 import { chromium } from 'playwright-core'
 
+// Phase 39 Stream UA (pilot 105): the first EXISTING bundled-Playwright-chromium binary, or
+// undefined if none is found. `chromium.executablePath()` is playwright-core's programmatic path to
+// the chromium revision IT expects — the primary, correct source. But when browsers are
+// pre-provisioned (as in locked-down/proxied CI images) their revision can predate this
+// playwright-core, so executablePath() names a build that was never installed; we then scan
+// PLAYWRIGHT_BROWSERS_PATH for whatever chromium build IS present (the stable `chromium` symlink
+// first, then any chromium-<rev> dir). All candidates are existsSync-gated, so a wholly missing
+// bundle simply yields undefined and the caller degrades to its actionable CHROME_PATH hint.
+function bundledChromiumPath() {
+  const candidates = []
+  try {
+    const p = chromium.executablePath()
+    if (p) candidates.push(p)
+  } catch {
+    /* no bundled chromium registered with playwright-core */
+  }
+  const base = process.env.PLAYWRIGHT_BROWSERS_PATH
+  if (base) {
+    candidates.push(join(base, 'chromium')) // stable symlink some provisioned images provide
+    try {
+      for (const d of readdirSync(base)) {
+        if (/^chromium-\d+$/.test(d)) {
+          candidates.push(join(base, d, 'chrome-linux', 'chrome'), join(base, d, 'chrome-linux64', 'chrome'))
+        }
+      }
+    } catch {
+      /* PLAYWRIGHT_BROWSERS_PATH unreadable — skip the scan */
+    }
+  }
+  return candidates.find((p) => existsSync(p))
+}
+
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const uiDir = join(repoRoot, 'ui')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Phase 40 Stream VC: newest mtime under `dir` (recursive), or 0 if it can't be read. Used only for
+// the ui/dist staleness heuristic, so an unreadable tree degrades to "not stale" and layer (b)
+// still catches a bundle too old to probe.
+function newestMtimeMs(dir) {
+  let newest = 0
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  for (const e of entries) {
+    const p = join(dir, e.name)
+    if (e.isDirectory()) newest = Math.max(newest, newestMtimeMs(p))
+    else {
+      try { newest = Math.max(newest, statSync(p).mtimeMs) } catch { /* vanished mid-scan */ }
+    }
+  }
+  return newest
+}
+
+/** Why ui/dist needs a (re)build, or null if it looks current. Compares the built bundle's newest
+ * file against ui/src + the build inputs that change what vite emits (package.json, index.html,
+ * the vite config). Returns a human reason so the build line says WHY it's building. */
+function uiDistStaleReason() {
+  const distDir = join(uiDir, 'dist')
+  if (!existsSync(join(distDir, 'index.html'))) return 'ui/dist missing'
+  const distMtime = newestMtimeMs(distDir)
+  if (distMtime === 0) return 'ui/dist unreadable'
+  let newestSrc = newestMtimeMs(join(uiDir, 'src'))
+  for (const f of ['package.json', 'index.html', 'vite.config.ts', 'vite.config.js']) {
+    const p = join(uiDir, f)
+    if (!existsSync(p)) continue
+    try { newestSrc = Math.max(newestSrc, statSync(p).mtimeMs) } catch { /* unreadable — skip */ }
+  }
+  return newestSrc > distMtime ? 'ui/dist is older than ui/src — stale bundle' : null
+}
 
 function parseArgs(argv) {
   const args = { _: [] }
@@ -81,13 +151,21 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
     console.error('building repo (dist/ missing)...')
     execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
   }
-  // Ensure ui/ is built (vite preview serves ui/dist).
-  if (!existsSync(join(uiDir, 'dist', 'index.html'))) {
-    console.error('building ui/ (ui/dist missing)...')
+  // Ensure ui/ is built AND current (vite preview serves ui/dist verbatim).
+  // Phase 40 Stream VC: this used to build only when ui/dist/index.html was MISSING, so after any
+  // `git pull`/branch switch that changed the engine, render silently served a stale bundle. That's
+  // exactly how examples/recipe-song's first render came back pure silence: the served bundle
+  // predated sample-lane playback entirely. Layer (a) of the fix — rebuild when ui/dist is older
+  // than its sources. It's a heuristic and it CAN false-negative (a branch switch can restore old
+  // content with fresh mtimes), which is acceptable only because layer (b) below — the hard error
+  // on an un-runnable readiness probe — is a real backstop rather than a second heuristic.
+  const staleReason = uiDistStaleReason()
+  if (staleReason) {
+    console.error(`building ui/ (${staleReason})...`)
     execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
   }
 
-  const { parse } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
+  const { parse, unplacedContentTracks, unplacedContentWarning } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
   const { startDaemon } = await import(pathToFileURL(join(repoRoot, 'dist/src/daemon/daemon.js')).href)
 
   const doc = parse(readFileSync(beatPath, 'utf8'))
@@ -97,13 +175,18 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   const seconds = (renderBars * 16 * 60) / doc.bpm / 4 + tail
   console.error(`parsed ${beatPath}: ${doc.tracks.length} track(s), bpm ${doc.bpm}, ${renderBars} bar(s) -> ${seconds.toFixed(2)}s of audio`)
 
+  // Phase 39 Stream UA (pilot 105 HIGH): in song mode a track with real content that's placed in no
+  // scene the song plays renders SILENT with no other warning. Surface it before rendering so a
+  // silent part is never a surprise — warn only; still render (the render is otherwise correct).
+  for (const t of unplacedContentTracks(doc)) console.error(unplacedContentWarning(t))
+
   const daemon = await startDaemon({ filePath: beatPath, port: daemonPort })
   console.error(`daemon on :${daemon.port}`)
 
   const served = await serveUi(previewPort)
   console.error(`ui served at ${served.url}`)
 
-  const browser = await chromium.launch({
+  const launchOpts = {
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
     headless: true,
     // The throttling flags matter for real-time capture: a headless page counts as backgrounded,
@@ -114,7 +197,40 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
       '--disable-backgrounding-occluded-windows',
       '--disable-renderer-backgrounding',
     ],
-  })
+  }
+  let browser
+  try {
+    browser = await chromium.launch(launchOpts)
+  } catch (err) {
+    // An explicit CHROME_PATH that fails to launch is a real, user-supplied error — surface it
+    // as-is rather than silently ignoring their choice.
+    if (process.env.CHROME_PATH) throw err
+    // The default `channel: 'chrome'` needs a system Chrome install, which many locked-down /
+    // proxied environments (incl. this one) can't get — `npx playwright install chrome` 403s.
+    // Phase 39 Stream UA (pilot 105): before surfacing the CHROME_PATH hint, try Playwright's OWN
+    // bundled chromium (the binary `npx playwright install chromium` downloads — which, unlike
+    // `chrome`, this environment CAN fetch). Launch order end-to-end: explicit CHROME_PATH →
+    // system `chrome` channel → bundled chromium → actionable error. The whole probe+relaunch is
+    // guarded so a MISSING or unlaunchable bundle degrades to the hint below, never a raw throw.
+    let bundled = bundledChromiumPath()
+    if (bundled) {
+      try {
+        console.error(`system Chrome unavailable; falling back to Playwright's bundled chromium (${bundled})`)
+        browser = await chromium.launch({ ...launchOpts, executablePath: bundled })
+      } catch {
+        bundled = undefined // bundled binary present but unlaunchable — surface the hint too
+      }
+    }
+    if (!browser) {
+      // Point at the fix instead of leaking Playwright's raw "distribution not found" error.
+      throw new Error(
+        `could not launch Chrome: ${err && err.message ? err.message.split('\n')[0] : err}\n` +
+          `  set CHROME_PATH to an existing Chromium/Chrome binary and re-run, e.g.:\n` +
+          `    CHROME_PATH=/opt/pw-browsers/chromium node cli/render.mjs ...\n` +
+          `  (a Playwright chromium from \`npx playwright install chromium\` works too).`,
+      )
+    }
+  }
   const page = await browser.newPage()
   const pageErrors = []
   page.on('pageerror', (e) => pageErrors.push(String(e)))
@@ -124,7 +240,16 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   // anywhere (owner's dogfood session, 2026-07-13).
   page.on('console', (msg) => {
     const type = msg.type()
-    if (type === 'warning' || type === 'error') console.error(`[page ${type}] ${msg.text()}`)
+    if (type !== 'warning' && type !== 'error') return
+    const text = msg.text()
+    // Pilot 104 low: a benign resource-load 404 (a missing favicon/asset the headless render never
+    // needs) logs to the console as an `error` and clutters render output, reading like a failure.
+    // Drop ONLY that specific "Failed to load resource: ... 404" line. Genuine JS exceptions arrive
+    // via 'pageerror' (thrown, not routed here); the engine's own media-load failures arrive as
+    // console.warn ("... sample failed to load", type 'warning') and are not this pattern, so both
+    // still surface untouched.
+    if (type === 'error' && /Failed to load resource:.*\b404\b/.test(text)) return
+    console.error(`[page ${type}] ${text}`)
   })
 
   console.error('loading dotbeat ui (headless)...')
@@ -140,6 +265,22 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
     await page.waitForFunction(() => typeof window.__engine.pendingMediaCount === 'function' && window.__engine.pendingMediaCount() === 0, { timeout: 30000 })
   } catch {
     const n = await page.evaluate(() => (typeof window.__engine.pendingMediaCount === 'function' ? window.__engine.pendingMediaCount() : -1)).catch(() => -1)
+    // Phase 40 Stream VC — layer (b), the safety net. `-1` means the served bundle has no
+    // pendingMediaCount() AT ALL: the probe didn't time out, it never ran. That is not a slow media
+    // load to warn about, it's proof the bundle predates the readiness probe itself — i.e. a stale
+    // ui/dist that layer (a)'s mtime heuristic failed to catch. The recipe-song's silent render
+    // printed exactly this as "-1 media load(s) still pending", which reads like a real (if odd)
+    // measurement and let a fully silent render pass for a successful one. A probe that COULDN'T
+    // RUN must never look like a probe that ran and found something — so this is a hard error.
+    if (n === -1) {
+      throw new Error(
+        'the served ui/dist bundle has no engine.pendingMediaCount() — it predates the media-readiness probe,\n' +
+          '  so this render CANNOT be checked for sample-backed lanes/clips and would likely be silent.\n' +
+          '  ui/dist is stale (a build from an older engine; render auto-rebuilds on mtime, which a branch\n' +
+          '  switch or a restored checkout can defeat). Rebuild it and re-run:\n' +
+          '    cd ui && npm run build',
+      )
+    }
     console.error(`warning: ${n} media load(s) still pending after 30s — sample-backed lanes/clips may play their fallback voice or silence in this render`)
   }
   if (pageErrors.length) throw new Error('page error(s) before render:\n' + pageErrors.join('\n'))
@@ -228,6 +369,23 @@ export async function renderCommand(argv) {
     const wavBytes = await captureWav(session.page, session.seconds, session.pageErrors)
     writeFileSync(outPath, wavBytes)
     console.error(`wrote ${outPath} (${wavBytes.length} bytes)`)
+  } finally {
+    await session.close()
+  }
+}
+
+/** Phase 37 Stream RA: one full-mix real-time capture returned IN MEMORY as WAV bytes (Buffer),
+ * instead of written to disk — for callers that decode/slice/analyze the render rather than keeping
+ * the file (e.g. `beat feedback`: render once, slice at section boundaries, analyze each slice).
+ * Reuses the exact bootRenderSession + captureWav path `renderCommand` uses, so the bytes are the
+ * same real-engine post-limiter master capture, just never touching the filesystem. Returns
+ * `{ bytes, doc, seconds }` — `doc` (parsed) and `seconds` (render length) save the caller a
+ * re-parse for the section bar math. */
+export async function renderToBuffer(beatPath, opts = {}) {
+  const session = await bootRenderSession(beatPath, opts)
+  try {
+    const bytes = await captureWav(session.page, session.seconds, session.pageErrors)
+    return { bytes, doc: session.doc, seconds: session.seconds }
   } finally {
     await session.close()
   }

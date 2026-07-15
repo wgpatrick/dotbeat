@@ -1,0 +1,18 @@
+# dotbeat `beat analyze --backend beatthis` dependencies (Phase 38 Stream SB).
+#
+# Beat This (CPJKU) — beats + downbeats, no tempo/sections. See python/README.md for the venv
+# install story. pip is BLOCKED in the dev/CI container, so this file is validated OWNER-SIDE via
+# `beat analyze --doctor` after you install it into python/.venv.
+
+torch>=2.0,<3
+
+# beat_this is not on PyPI — install from the project's git repo pinned to an exact commit.
+# Pin confirmed owner-side 2026-07-14 via `gh api repos/CPJKU/beat_this/commits/main`
+# (https://github.com/CPJKU/beat_this/commit/b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c).
+beat_this @ git+https://github.com/CPJKU/beat_this@b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c
+
+# beat_this's own load_audio() tries torchaudio.load() first and silently falls back to soundfile
+# on ANY exception; on this torch/torchaudio pairing torchaudio.load() fails for plain WAV files
+# with no useful error, so without soundfile installed every real analyze call dies with "Could not
+# load audio" (confirmed owner-side 2026-07-14 — analyze worked immediately once this was added).
+soundfile

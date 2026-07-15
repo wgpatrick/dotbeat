@@ -6,7 +6,7 @@ import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack,
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, installAudioClip, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
 import { useDropTarget } from '../dragDrop'
-import { declaredLaneNames, type AutomationInterpolation, type BeatAutomationPoint, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind } from '../types'
+import { audioRegionTimelineSteps, declaredLaneNames, firstPlacementClip, sortPlacements, type AutomationInterpolation, type BeatAutomationPoint, type BeatDocument, type BeatGroup, type BeatTrack, type TrackKind } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 import { showToast } from '../state/toastStore'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
@@ -318,37 +318,69 @@ function laneLabel(track: BeatTrack, param: string): string {
   return `${track.name} / ${spec.label}`
 }
 
-/** Where a track's automatable clip actually plays, in song-time. One entry per section that maps
- * this track to a clip that exists; [] in loop mode (no clip-scoped playback). The picker targets
- * the FIRST occurrence's clip (v1: one editable clip per track — multi-clip automation deferred). */
+/** Where a track's automatable clip actually plays, in song-time. [] in loop mode (no clip-scoped
+ * playback). The picker targets the FIRST occurrence's clip (v1: one editable clip per track —
+ * multi-clip automation deferred).
+ *
+ * v0.11 (Phase 36 PD): occurrences are PLACEMENT-granular. A non-audio track still gets exactly
+ * one occurrence per section that maps it to an existing clip, spanning the whole section (a
+ * synth/drum clip tiles from the section start — the D16 scope guard makes that the only legal
+ * shape). An AUDIO track gets one occurrence PER PLACEMENT: `at` is the placement's own offset,
+ * `startStep`/`lengthSteps` are the block's real timeline extent (placement start to the region's
+ * timeline length, truncated at the section end — the same extent the engine actually sounds). */
 interface ClipOccurrence {
   clipId: string
   startBar: number
   bars: number
-  /** Phase 24 Stream CC: this occurrence's index into the `sections`/`doc.song` array. Occurrences
-   * are 1:1 with sections (a track's clip is never at an arbitrary bar, only ever "this track's
-   * slot in this section's scene" — see daemon.ts's applyClipMoves doc comment), so the section
-   * index IS the move primitive's addressing unit — clicking/dragging a clip block needs it to
-   * build a {track, fromIndex, toIndex} move. */
+  /** Phase 24 Stream CC: this occurrence's index into the `sections`/`doc.song` array — the move/
+   * remove/duplicate primitives' section-addressing unit. */
   sectionIndex: number
+  /** v0.11: this occurrence's placement offset within its section, in fractional 16th steps (0 for
+   * every non-audio occurrence and every pre-v0.11 document). Part of the occurrence's identity —
+   * occKey folds it in, and the daemon's placement-granular ops take it as `at`. */
+  at: number
+  /** Absolute song-timeline start of the BLOCK, in steps: sectionStart*16 + at. */
+  startStep: number
+  /** The block's rendered length in steps: the audio region's timeline length truncated at the
+   * section end; a full section (bars*16) for non-audio occurrences. */
+  lengthSteps: number
 }
 function trackOccurrences(track: BeatTrack, sections: Section[], doc: BeatDocument): ClipOccurrence[] {
   if (!doc.song) return []
   const out: ClipOccurrence[] = []
   sections.forEach((s, sectionIndex) => {
     const scene = doc.scenes.find((sc) => sc.id === s.scene)
-    const clipId = scene?.slots[track.id]
+    if (!scene) return
+    const sectionStartStep = s.startBar * 16
+    const sectionSteps = s.bars * 16
+    if (track.kind === 'audio') {
+      // One occurrence per placement (v0.11), x/width proportional to `at` and the region's own
+      // timeline length — blocks sit where the audio actually sounds, not "the whole section."
+      for (const p of sortPlacements(scene.slots[track.id] ?? [])) {
+        const clip = track.clips.find((c) => c.id === p.clip)
+        if (!clip?.audio) continue
+        if (p.at >= sectionSteps) continue // placed past this section's end — nothing audible to draw
+        const lengthSteps = Math.min(audioRegionTimelineSteps(clip.audio, doc.bpm), sectionSteps - p.at)
+        out.push({ clipId: p.clip, startBar: s.startBar, bars: s.bars, sectionIndex, at: p.at, startStep: sectionStartStep + p.at, lengthSteps })
+      }
+      return
+    }
+    const clipId = firstPlacementClip(scene.slots, track.id) // non-audio: single placement at 0 by validation
     if (!clipId) return
     if (!track.clips.find((c) => c.id === clipId)) return
-    out.push({ clipId, startBar: s.startBar, bars: s.bars, sectionIndex })
+    out.push({ clipId, startBar: s.startBar, bars: s.bars, sectionIndex, at: 0, startStep: sectionStartStep, lengthSteps: sectionSteps })
   })
   return out
 }
 
-/** Phase 24 Stream CC: a stable string key for a (track, section-occurrence) pair — the unit both
- * the marquee selection Set and the clip-move batch address. */
-function occKey(trackId: string, sectionIndex: number): string {
-  return `${trackId}::${sectionIndex}`
+/** Phase 24 Stream CC: a stable string key for one occurrence — the unit both the marquee
+ * selection Set and the clip-move batch address. v0.11 (Phase 36 PD): a placement at `at > 0`
+ * appends its offset (`track::section::at`); the at-0 key keeps the original two-part form so
+ * every pre-existing selector/verify script (`[data-clip-block="lead::0"]`) still matches — and
+ * the two forms can't collide, since one track can't place two clips at the same `at` (overlap
+ * validation). */
+function occKey(trackId: string, sectionIndex: number, at: number): string {
+  return at === 0 ? `${trackId}::${sectionIndex}` : `${trackId}::${sectionIndex}::${at}`
 }
 
 /** Phase 29 Stream GA: a deterministic small color for a scene id, used ONLY as the "these sections
@@ -442,7 +474,11 @@ function flattenTrack(track: BeatTrack, sections: Section[], doc: BeatDocument):
     let clipLoop: { start: number; end: number } | null = null
     if (doc.song) {
       const scene = doc.scenes.find((s) => s.id === section.scene)
-      const clipId = scene?.slots[track.id]
+      // The at-0/first placement's clip is exact here: this flattener only produces note/hit
+      // ticks, and note/hit-bearing (non-audio) tracks are single-placement-at-0 by v0.11's own
+      // validation (D16 scope guard). Audio tracks carry no notes/hits — their per-placement
+      // rendering is the canvas fill + block overlay in TrackRow, driven by trackOccurrences.
+      const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
       if (!clipId) continue // track not in this scene → silent this section
       const clip = track.clips.find((c) => c.id === clipId)
       if (!clip) continue
@@ -551,8 +587,10 @@ function TrackRow({
    * always a whole-bar round), until the drag commits or cancels. */
   dragPreview: { deltaBars: number; keys: Set<string> } | null
   /** Phase 24 Stream CC: pointerdown on one clip block — stops the event from also starting the
-   * lane's own empty-space marquee/bar-select drag (see beginClipDrag in the parent). */
-  onOccPointerDown: (sectionIndex: number, e: React.PointerEvent) => void
+   * lane's own empty-space marquee/bar-select drag (see beginClipDrag in the parent). v0.11
+   * (Phase 36 PD): passes the whole occurrence, so the parent knows WHICH placement (occ.at) and
+   * which clip the gesture targets. */
+  onOccPointerDown: (occ: ClipOccurrence, e: React.PointerEvent) => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { track } = flat
@@ -564,7 +602,7 @@ function TrackRow({
   // duplicateClipToNewSection for what each item actually does. `busy` disables both items for the
   // duration of their own round-trip (each is a real write, not a debounced /edit) so a second
   // right-click mid-flight can't fire a duplicate request against a stale sectionIndex.
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; sectionIndex: number; clipId: string } | null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; sectionIndex: number; clipId: string; at: number } | null>(null)
   const [ctxBusy, setCtxBusy] = useState(false)
   const setSelectedTrack = useStore((s) => s.setSelectedTrack)
   const setSelectedSection = useStore((s) => s.setSelectedSection)
@@ -738,11 +776,15 @@ function TrackRow({
       // canvas text is just the media filename + warp mode (extra detail the DOM label doesn't
       // carry), anchored to the BOTTOM of the block so it doesn't collide with the DOM label at
       // the top.
+      //
+      // v0.11 (Phase 36 PD): one fill PER PLACEMENT, at the placement's own startStep/lengthSteps
+      // (trackOccurrences), not one full-section fill per section — the fill sits exactly where
+      // the audio actually sounds.
       for (const occ of occurrences ?? []) {
         const clip = track.clips.find((c) => c.id === occ.clipId)
         if (!clip?.audio) continue
-        const x = occ.startBar * pxPerBar
-        const w = Math.max(4, occ.bars * pxPerBar)
+        const x = (occ.startStep / 16) * pxPerBar
+        const w = Math.max(4, (occ.lengthSteps / 16) * pxPerBar)
         ctx.fillStyle = track.color
         ctx.globalAlpha = 0.85
         ctx.fillRect(x + 1, 4, w - 2, ROW_H - 8)
@@ -843,7 +885,7 @@ function TrackRow({
     occurrences && occurrences.length > 0
       ? occurrences
       : sections.length === 1 && sections[0]!.scene === LOOP_SCENE_SENTINEL
-        ? [{ clipId: LOOP_SCENE_SENTINEL, startBar: sections[0]!.startBar, bars: sections[0]!.bars, sectionIndex: 0 }]
+        ? [{ clipId: LOOP_SCENE_SENTINEL, startBar: sections[0]!.startBar, bars: sections[0]!.bars, sectionIndex: 0, at: 0, startStep: sections[0]!.startBar * 16, lengthSteps: sections[0]!.bars * 16 }]
         : []
 
   return (
@@ -956,11 +998,14 @@ function TrackRow({
             library-drop clip-targeting logic), so it doesn't change what loop-mode content exists,
             only that its row now gets a visible boundary/label/selection target like song mode's do. */}
         {displayOccurrences.map((occ) => {
-          const key = occKey(track.id, occ.sectionIndex)
+          const key = occKey(track.id, occ.sectionIndex, occ.at)
           const isSelected = selectedOcc.has(key)
           const isDragging = !!dragPreview?.keys.has(key)
-          const left = (occ.startBar + (isDragging ? dragPreview!.deltaBars : 0)) * pxPerBar
-          const width = Math.max(4, occ.bars * pxPerBar)
+          // v0.11 (Phase 36 PD): position/size from the occurrence's own startStep/lengthSteps —
+          // a placement at `at 32` renders x-offset into its section, width = the region's real
+          // timeline extent (trackOccurrences), not a full-section block.
+          const left = (occ.startStep / 16 + (isDragging ? dragPreview!.deltaBars : 0)) * pxPerBar
+          const width = Math.max(4, (occ.lengthSteps / 16) * pxPerBar)
           return (
             <div
               key={key}
@@ -968,8 +1013,9 @@ function TrackRow({
               data-clip-block={key}
               data-clip-id={occ.clipId}
               data-section-index={occ.sectionIndex}
+              data-placement-at={occ.at}
               style={{ left, width, borderColor: track.color }}
-              title={`${occ.clipId} · ${occ.bars} bar${occ.bars === 1 ? '' : 's'}`}
+              title={`${occ.clipId}${occ.at > 0 ? ` @ step ${occ.at}` : ''} · ${occ.bars} bar${occ.bars === 1 ? '' : 's'} section`}
               onPointerDown={
                 occ.clipId === LOOP_SCENE_SENTINEL
                   ? // The synthetic loop-mode block (Phase 27 Stream EA bug 1) has no real clip to
@@ -984,7 +1030,7 @@ function TrackRow({
                     // on this row" behaves identically whether or not the synthetic block happens to
                     // be there.
                     onRowPointerDown
-                  : (e) => onOccPointerDown(occ.sectionIndex, e)
+                  : (e) => onOccPointerDown(occ, e)
               }
               onContextMenu={
                 occ.clipId === LOOP_SCENE_SENTINEL
@@ -996,7 +1042,7 @@ function TrackRow({
                   : (e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      setCtxMenu({ x: e.clientX, y: e.clientY, sectionIndex: occ.sectionIndex, clipId: occ.clipId })
+                      setCtxMenu({ x: e.clientX, y: e.clientY, sectionIndex: occ.sectionIndex, clipId: occ.clipId, at: occ.at })
                     }
               }
             >
@@ -1007,7 +1053,12 @@ function TrackRow({
       </div>
       {ctxMenu &&
         (() => {
-          const { sectionIndex, clipId } = ctxMenu
+          const { sectionIndex, clipId, at } = ctxMenu
+          // v0.11 (Phase 36 PD): an audio block is ONE placement of a possibly multi-placement
+          // slot, so Delete/Duplicate pass the block's own `at` — the daemon targets just that
+          // placement (a riser at 48 survives deleting the at-0 clip). Non-audio slots are
+          // single-placement by validation, so the pre-v0.11 whole-slot calls stay exact there.
+          const placementAt = track.kind === 'audio' ? at : undefined
           const items: ContextMenuItem[] = [
             {
               key: 'delete',
@@ -1016,7 +1067,7 @@ function TrackRow({
               disabled: ctxBusy,
               onSelect: () => {
                 setCtxBusy(true)
-                postClipRemove(track.id, sectionIndex)
+                postClipRemove(track.id, sectionIndex, placementAt)
                   .catch((err) => showToast(`Could not delete clip: ${(err as Error).message}`))
                   .finally(() => setCtxBusy(false))
               },
@@ -1028,7 +1079,7 @@ function TrackRow({
               title: `copy "${clipId}" into a new, independent scene in a fresh section right after this one`,
               onSelect: () => {
                 setCtxBusy(true)
-                postClipDuplicate(track.id, sectionIndex)
+                postClipDuplicate(track.id, sectionIndex, placementAt)
                   .then(({ index }) => {
                     // Point every "which clip is open" bit of state at the freshly-inserted section,
                     // same three side effects a plain click on a clip block already sets (beginClipDrag's
@@ -1195,9 +1246,13 @@ function AutomationLane({
     ctx.strokeStyle = track.color
     ctx.lineWidth = 1.5
     for (const occ of occurrences) {
-      for (let off = 0; off < occ.bars * 16; off += loopSteps) {
-        const tileStartStep = occ.startBar * 16 + off
-        const tileEndStep = Math.min(occ.startBar * 16 + occ.bars * 16, tileStartStep + loopSteps)
+      // v0.11 (Phase 36 PD): tile from the occurrence's own block extent (startStep/lengthSteps) —
+      // for an audio placement the curve rides the placement's real start (placement-relative gain
+      // automation, matching the engine's own lookup), not the section boundary; for non-audio
+      // occurrences startStep/lengthSteps ARE the section bounds, so nothing changes there.
+      for (let off = 0; off < occ.lengthSteps; off += loopSteps) {
+        const tileStartStep = occ.startStep + off
+        const tileEndStep = Math.min(occ.startStep + occ.lengthSteps, tileStartStep + loopSteps)
         const xAt = (localStep: number) => ((tileStartStep + localStep) / 16) * pxPerBar
         if (eff.length === 0) continue
         ctx.beginPath()
@@ -1275,10 +1330,10 @@ function AutomationLane({
   const clipTimeFromX = useCallback(
     (localX: number): { time: number; occ: ClipOccurrence } | null => {
       const absStep = (localX / pxPerBar) * 16
-      let occ = occurrences.find((o) => absStep >= o.startBar * 16 && absStep < (o.startBar + o.bars) * 16)
+      let occ = occurrences.find((o) => absStep >= o.startStep && absStep < o.startStep + o.lengthSteps)
       if (!occ) occ = occurrences[0]
       if (!occ) return null
-      let t = ((absStep - occ.startBar * 16) % loopSteps + loopSteps) % loopSteps
+      let t = ((absStep - occ.startStep) % loopSteps + loopSteps) % loopSteps
       t = Math.max(0, Math.min(loopSteps, Number(t.toFixed(2))))
       return { time: t, occ }
     },
@@ -1651,6 +1706,9 @@ export function ArrangementView() {
   // branch) or a section chip's name (the sections toolbar further down).
   const selectedSectionIndex = useStore((s) => s.selectedSectionIndex)
   const setSelectedSection = useStore((s) => s.setSelectedSection)
+  // Phase 36 PD (v0.11): the third "which clip is open" coordinate — set by a click on an audio
+  // clip block (beginClipDrag's click branch), read by AudioClipEditor's placement targeting.
+  const setSelectedPlacement = useStore((s) => s.setSelectedPlacement)
   // Phase 22 Stream AG: the overlap-resolution preference every resize (chip +/- and the drag
   // handle) reads and sends to the daemon's POST /song resize op.
   const overlapPolicy = useStore((s) => s.overlapPolicy)
@@ -1759,9 +1817,10 @@ export function ArrangementView() {
   // marquee-selected right now," which is pure, local, transient GUI interaction state, never
   // meant to survive a reload or be read by anything outside this component.
   //
-  // `selectedOcc` keys are `occKey(trackId, sectionIndex)` — occurrences are 1:1 with sections
-  // (see ClipOccurrence's own doc comment), so that pair is the addressable unit. A plain marquee
-  // REPLACES the selection (no shift-to-add — out of scope, matches this stream's own scope cut).
+  // `selectedOcc` keys are `occKey(trackId, sectionIndex, at)` — one key per occurrence (v0.11:
+  // per PLACEMENT on audio tracks; still 1:1 with sections everywhere else — see ClipOccurrence's
+  // own doc comment), so that triple is the addressable unit. A plain marquee REPLACES the
+  // selection (no shift-to-add — out of scope, matches this stream's own scope cut).
   const [selectedOcc, setSelectedOcc] = useState<Set<string>>(new Set())
   // Which track rows the current empty-space lane drag has passed over, keyed the same way `drag`
   // (above) already is — reuses that SAME gesture (a lane pointerdown) rather than inventing a
@@ -1989,12 +2048,16 @@ export function ArrangementView() {
   const splitAudioAtPlayhead = useCallback(
     async (track: BeatTrack) => {
       const occ = occurrencesByTrack.get(track.id) ?? []
-      const hit = occ.find((o) => currentStep >= o.startBar * 16 && currentStep < (o.startBar + o.bars) * 16)
+      // v0.11 (Phase 36 PD): occurrences are placement-granular, so "which clip is under the
+      // playhead" is the placement whose OWN block extent contains it — a playhead over the riser
+      // at step 32 splits the riser, not the at-0 clip — and the split offset is relative to the
+      // placement's start, not the section's.
+      const hit = occ.find((o) => currentStep >= o.startStep && currentStep < o.startStep + o.lengthSteps)
       if (!hit) {
         showToast('Move the playhead over this track\'s clip first (split-at-playhead needs a position inside the clip).')
         return
       }
-      const atSteps = currentStep - hit.startBar * 16
+      const atSteps = currentStep - hit.startStep
       if (atSteps <= 0) {
         showToast('The playhead is at the very start of the clip — nothing to split there.')
         return
@@ -2060,7 +2123,9 @@ export function ArrangementView() {
   // drag behavior" for a block outside any selection, per docs/phase-24-plan.md's CC scope). One
   // batched POST /clip-move commits the whole group as one write.
   const beginClipDrag = useCallback(
-    (trackId: string, sectionIndex: number, e: React.PointerEvent) => {
+    (track: BeatTrack, occ: ClipOccurrence, e: React.PointerEvent) => {
+      const trackId = track.id
+      const { sectionIndex } = occ
       // Phase 32 Stream LA: right-click is handled entirely by the block's own onContextMenu (its
       // new context menu, TrackRow below) — same `e.button === 2` bail AutomationLane's onPointerDown
       // already uses. Fixes a real pre-existing bug docs/research/87 found along the way: with no
@@ -2072,7 +2137,7 @@ export function ArrangementView() {
       if (e.button === 2) return
       e.stopPropagation()
       e.preventDefault()
-      const key = occKey(trackId, sectionIndex)
+      const key = occKey(trackId, sectionIndex, occ.at)
       const keys = selectedOcc.has(key) ? new Set(selectedOcc) : new Set([key])
       const startClientX = e.clientX
       const pxb = pxPerBar || 1
@@ -2107,6 +2172,11 @@ export function ArrangementView() {
           // synthetic loop-mode block if that path is ever routed through here instead of
           // onRowPointerDown).
           if (sectionIndex >= 0) setSelectedSection(sectionIndex)
+          // v0.11 (Phase 36 PD): on an AUDIO track the clicked block is ONE placement of a possibly
+          // multi-placement slot — record exactly which one, so the bottom-pane clip editor
+          // (AudioClipEditor) targets the clicked placement's clip, not blindly the at-0/first one.
+          // Must come after setSelectedSection, which deliberately clears any placement choice.
+          if (track.kind === 'audio' && sectionIndex >= 0) setSelectedPlacement({ track: trackId, clip: occ.clipId, at: occ.at })
           return
         }
         if (deltaBars === 0) return
@@ -2115,17 +2185,23 @@ export function ArrangementView() {
         const targetIndex = nearestSectionIndex(sections, origin.startBar + deltaBars)
         const deltaSections = targetIndex - sectionIndex
         if (deltaSections === 0) return
-        const moves: { track: string; fromIndex: number; toIndex: number }[] = []
+        const moves: { track: string; fromIndex: number; toIndex: number; at?: number }[] = []
         for (const k of keys) {
-          const sep = k.lastIndexOf('::')
-          const tid = k.slice(0, sep)
-          const fromIndex = Number(k.slice(sep + 2))
+          // occKey is `track::section` (at 0) or `track::section::at` (a placement at > 0) —
+          // track ids are slugs (no ':'), so a plain '::' split is unambiguous.
+          const parts = k.split('::')
+          const tid = parts[0]!
+          const fromIndex = Number(parts[1])
+          const at = parts.length > 2 ? Number(parts[2]) : undefined
           const toIndex = fromIndex + deltaSections
           if (toIndex < 0 || toIndex >= sections.length) {
             showToast('Cannot move the selection that far — it would fall outside the arrangement.')
             return
           }
-          moves.push({ track: tid, fromIndex, toIndex })
+          // v0.11 (Phase 36 PD): the daemon's move is placement-granular — `at` names WHICH
+          // placement moves (omitted = the at-0/first, every pre-v0.11 slot's only one), and the
+          // moved placement keeps its own `at` in the destination section.
+          moves.push({ track: tid, fromIndex, toIndex, ...(at !== undefined ? { at } : {}) })
         }
         // Phase 30 Stream JD, item 4 (docs/research/87): daemon.ts's applyClipMoves ALWAYS mints a
         // fresh, private scene for every section a move touches (its own comment: "simplest way to
@@ -2162,7 +2238,7 @@ export function ArrangementView() {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [selectedOcc, pxPerBar, sections, setSelectedTrack, setBottomPaneOpen],
+    [selectedOcc, pxPerBar, sections, setSelectedTrack, setBottomPaneOpen, setSelectedSection, setSelectedPlacement],
   )
 
   // Start a length-resize drag from a section's right-edge handle. stopPropagation keeps the ruler's
@@ -2340,7 +2416,10 @@ export function ArrangementView() {
             const next = new Set<string>()
             for (const tid of rowsSpannedRef.current) {
               for (const occ of occurrencesByTrack.get(tid) ?? []) {
-                if (occ.startBar < end && occ.startBar + occ.bars > start) next.add(occKey(tid, occ.sectionIndex))
+                // v0.11 (Phase 36 PD): intersect against the occurrence's REAL block extent
+                // (startStep/lengthSteps) — a placement at step 32 isn't selected by a marquee
+                // over the section's first bar it doesn't touch.
+                if (occ.startStep / 16 < end && (occ.startStep + occ.lengthSteps) / 16 > start) next.add(occKey(tid, occ.sectionIndex, occ.at))
               }
             }
             setSelectedOcc(next)
@@ -3157,7 +3236,7 @@ export function ArrangementView() {
                 occurrences={occ}
                 selectedOcc={selectedOcc}
                 dragPreview={clipDrag}
-                onOccPointerDown={(sectionIndex, e) => beginClipDrag(flat.track.id, sectionIndex, e)}
+                onOccPointerDown={(occ, e) => beginClipDrag(flat.track, occ, e)}
                 headerExtra={
                   <>
                     <button

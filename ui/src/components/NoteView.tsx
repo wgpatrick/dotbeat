@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { declaredLaneNames, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
+import { declaredLaneNames, firstPlacementClip, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
 import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, newGestureId, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
@@ -345,7 +345,11 @@ function resolveClipPlayhead(
   }
   if (sceneId === null) return null
   const scene = doc.scenes.find((s) => s.id === sceneId)
-  const clipId = scene?.slots[track.id]
+  // The at-0/first placement is exact here, not an approximation: this playhead only renders for
+  // NoteView's note/hit editor, i.e. non-audio tracks, which v0.11 validation caps at ONE
+  // placement at 0 (the D16 audio-only scope guard). Audio tracks route to AudioClipEditor, whose
+  // placementTargetedClip does the real per-placement playhead mapping.
+  const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
   if (!clipId || clipId !== openClip.id) return null // this track isn't playing the open clip right now
   const rel = currentStep - sectionStartBar * 16
   return ((rel % loopSteps) + loopSteps) % loopSteps
@@ -392,7 +396,9 @@ function liveContentIsUnsaved(track: BeatTrack): boolean {
  * because primaryClipFor's fallback found X first. */
 function clipInSelectedScene(track: BeatTrack, doc: BeatDocument, sceneId: string): BeatClip | null {
   const scene = doc.scenes.find((s) => s.id === sceneId)
-  const clipId = scene?.slots[track.id]
+  // The at-0/first placement is exact for this function's callers (NoteView's Place-in-Arrangement
+  // / live-buffer sync — non-audio tracks only, single-placement-at-0 by v0.11 validation).
+  const clipId = scene ? firstPlacementClip(scene.slots, track.id) : undefined
   if (!clipId) return null
   return track.clips.find((c) => c.id === clipId) ?? null
 }
@@ -941,7 +947,9 @@ export function NoteView({ track }: { track: BeatTrack }) {
     if (existing) {
       const sharingSections = doc.song!.filter((sec) => {
         const scene = doc.scenes.find((s) => s.id === sec.scene)
-        return scene?.slots[track.id] === existing.id
+        // Phase 36 PC/PD: "does this section play this clip" checks every placement, not just
+        // the first — a section that places the clip anywhere shares its content.
+        return (scene?.slots[track.id] ?? []).some((p) => p.clip === existing.id)
       }).length
       if (sharingSections > 1) {
         const otherCount = sharingSections - 1

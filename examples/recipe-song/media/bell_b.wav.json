@@ -1,0 +1,17 @@
+{
+  "source": "generated:stable-audio-open",
+  "license": "Stability-AI-Community",
+  "query": "glass marimba single note, pure tone, clean pitched strike, warm resonance",
+  "sha256": "2c5fdf168fb15fe948bcbdeb30c9b72436e472a1fb174d53080b3a2659d2f9dd",
+  "preparedAt": "2026-07-15T05:13:25.206Z",
+  "durationSeconds": 2.9698,
+  "generated": {
+    "provider": "stable-audio-open",
+    "model": "stabilityai/stable-audio-open-1.0",
+    "backend": "stableaudio",
+    "prompt": "glass marimba single note, pure tone, clean pitched strike, warm resonance",
+    "seconds": 3,
+    "seed": 42,
+    "licenseUrl": "https://stability.ai/community-license-agreement"
+  }
+}
