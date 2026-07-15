@@ -14,7 +14,7 @@ media
 track drums Drums #56b6c2 drums
   synth
     osc sawtooth
-    volume -10
+    volume -11.5
     cutoff 12000
     resonance 0.1
     attack 0.01
@@ -654,7 +654,7 @@ track drums Drums #56b6c2 drums
 track bass Bass #f7c948 synth
   synth
     osc sawtooth
-    volume -10
+    volume -11.5
     cutoff 700
     resonance 0.8
     attack 0.01
@@ -838,7 +838,7 @@ track bass Bass #f7c948 synth
 track keys Keys #98c379 synth
   synth
     osc sine
-    volume -10
+    volume -11.5
     cutoff 4500
     resonance 0.8
     attack 0.002
@@ -1089,7 +1089,7 @@ track keys Keys #98c379 synth
 track pad Pad #c678dd synth
   synth
     osc sawtooth
-    volume -10
+    volume -11.5
     cutoff 2600
     resonance 0.8
     attack 0.4
@@ -1207,7 +1207,7 @@ track pad Pad #c678dd synth
 track arp Arp #e06c75 synth
   synth
     osc sawtooth
-    volume -6.5
+    volume -8
     cutoff 4200
     resonance 1
     attack 0.001
@@ -1488,7 +1488,7 @@ track arp Arp #e06c75 synth
 track air Air #61afef synth
   synth
     osc sine
-    volume -12
+    volume -13.5
     cutoff 9000
     resonance 0.8
     attack 0.3
@@ -1556,7 +1556,7 @@ track air Air #61afef synth
 track saw Saw #d19a66 synth
   synth
     osc sawtooth
-    volume -7
+    volume -8.5
     cutoff 6500
     resonance 0.6
     attack 0.02
@@ -1600,7 +1600,7 @@ track saw Saw #d19a66 synth
 track vox Vox #be5046 drums
   synth
     osc sawtooth
-    volume 2
+    volume -10.5
     cutoff 12000
     resonance 0.1
     attack 0.01
