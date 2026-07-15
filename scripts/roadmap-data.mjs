@@ -1866,6 +1866,20 @@ export const rows = [
     research: 'research/103-usability-pilot-lane-taste-loop.md', plan: null,
   },
 
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Render silently uses a stale ui/dist after git pull',
+    description: 'cli/render.mjs serves ui/ via `vite preview` and auto-builds ui/dist only when the directory is MISSING entirely — after a git pull that changes the engine, an existing stale ui/dist is served as-is, and the render harness cannot even detect it (the first real all-sample-lanes render after Phase 39 came back pure silence because the served engine build predated sample-lane playback; the pendingMediaCount readiness probe printed the nonsense count -1 because the OLD bundle lacks the function — the very trap Phase 39 UA was built to close, reopened by staleness). Fix direction: compare ui/dist mtime against ui/src (or embed a build hash the harness checks) and rebuild/refuse instead of serving stale; found 2026-07-14 building examples/recipe-song, the first project exercising sample-backed lanes end-to-end through render.',
+    core: 'na', cli: 'missing', gui: 'na', status: 'not-started',
+    research: null, plan: null,
+  },
+
+  {
+    area: 'Known usability gaps (backlog)', feature: 'beat score cannot rank `beat source gen` seed candidates',
+    description: 'The natural generative-audio audition loop — same prompt, N seeds, rank the candidates, adopt the winner — cannot route through beat score/adopt, which require a beat-vary batch manifest that generation never produces. Building examples/recipe-song (2026-07-14), the snare had to be picked from its three seed candidates by out-of-band FFT metrics instead of the taste loop, and the two losing samples stay registered in the media block with no record of the audition outcome. Fix direction: let `beat source gen` emit N seed variants as a scoreable batch (manifest + optional stitched audition.wav, mirroring vary --audition), so generated sounds join the same score/suggest/adopt history as synth-param variants.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: null, plan: null,
+  },
+
   // ── Desktop app / packaging ──────────────────────────────────────────────
   {
     area: 'Desktop app / packaging', feature: 'Tauri shell, compiled sidecar, bundled starter',
