@@ -42,10 +42,13 @@ the vary target/seed/amount (already in the batch's provenance), and — once L1
 embedding reference. Backfill is possible for batches whose renders still exist; otherwise this
 starts the clock, so it lands first.
 
-**Embeddings.** A frozen pretrained audio encoder (selection per research/107 Part 4 —
-license-clean, locally runnable; CLAP/MERT family) run over every variant render, cached next to
-the batch. Dimensionality reduction (PCA to ~30-50 dims) is fit on *unlabeled* variants — dotbeat
-can render unlimited unlabeled audio, so the projection costs zero preference labels.
+**Embeddings.** Frozen **LAION-CLAP `larger_clap_music`** (Apache-2.0 weights, 512-d per clip,
+plain HF transformers; the best license-clean human-timbre-alignment evidence per research/107
+§4.1) run over every variant render, cached next to the batch, plus **Audiobox-Aesthetics' four
+scores** (CC-BY-4.0) as explicit production-quality features. Dimensionality reduction (PCA to
+~30-50 dims) is fit on *unlabeled* variants — dotbeat can render unlimited unlabeled audio, so
+the projection costs zero preference labels. (MERT/MuQ score higher on music benchmarks but ship
+CC-BY-NC weights — acceptable only if that component stays personal-use-only.)
 
 **Blind audition.** `vary --audition` already stitches variants into one WAV with a timecode
 index. Two additions: (a) presentation-order shuffling with the mapping stored, so picks are
@@ -121,11 +124,25 @@ each morning:
   6. picks append to the score log → critic retrains → next night's loop uses the new critic
 ```
 
-- **Quality-diversity, not hill-climbing** (method details per research/107 Part 3): a pure
-  fitness loop converges to one local optimum — nine near-identical "best hats." A MAP-Elites-style
-  archive keeps the best of *each region* (bright/dark, sparse/busy...), which is what makes long
-  runs surface interesting-and-compelling rather than converged-and-boring. Descriptor axes come
-  from the embedding space.
+- **Quality-diversity, not hill-climbing** (evidence in research/107 Part 3): a pure fitness loop
+  converges to one local optimum — nine near-identical "best hats" — and the Picbreeder result
+  shows the interesting artifact often *cannot* be reached by optimizing for it directly. Concrete
+  choices from the literature: **CVT-MAP-Elites** archive (k centroids ≈ the number of frontier
+  items reviewed each morning), **CMA-ME-style emitters** with the **iso+line operator**
+  (σ_iso≈0.01, σ_line≈0.2 on [0,1]-normalized genomes) for continuous synth-param/automation
+  genomes, plain per-slot mutation for discrete groove genomes (which the literature has NOT
+  covered — grooves are unexplored QD territory). **Descriptors start handcrafted and
+  human-legible** (centroid/brightness, onset density, swing, width) so morning review reads as
+  "the bright sparse corner vs the dark busy corner"; learned-embedding descriptors come later
+  with the known mechanics (archive re-projection on descriptor retrain; collapse checks). QDAIF
+  (ICLR 2024) is the direct precedent that a learned-critic-scored QD loop produces elite sets
+  humans rate as both more diverse AND better than fitness-only search.
+- **The surrogate pattern (DSA-ME) is the highest-leverage structural choice:** the taste model IS
+  the surrogate. The overnight loop evaluates thousands of candidates against the critic (instant)
+  and spends real renders only on archive-frontier candidates — the same candidates whose morning
+  labels retrain the critic. SAIL-line results suggest roughly an order of magnitude fewer true
+  evaluations; the archive's diversity is itself what keeps the surrogate accurate across the
+  space.
 - **Goodhart containment** is layered, not optional: pessimistic scoring (step 3), forced
   exploration (ε-immigrants, step 1), critic retraining on the frontier (step 6 — the frontier is
   exactly where the critic is least trustworthy and a human label most informative), and the
@@ -153,21 +170,87 @@ from a loved record (method details per research/107 Part 2). Outcomes, both val
 4. Shortens the road — iterations-to-adopt trending down on comparable tasks, from existing logs.
 5. Transfers — blind listeners prefer loop-shaped results (the only test of the whole system).
 
-## Build order (each step independently shippable)
+## Execution plan (step by step, with owner tasks called out)
 
-| step | what | depends on | proves |
-|---|---|---|---|
-| 1 | L1 log enrichment + eval harness | nothing | baseline scorers vs 11% floor |
-| 2 | L1 embeddings + blind-audition shuffle | 1 | embedding features beat/lose to DSP |
-| 3 | L3 v0 BT ranker + `suggest --taste` (advisory pre-rank only) | 1-2 | taste model beats chance |
-| 4 | L2 stems/chops pipeline + prior | 2 | cross-domain prior transfers (or not) |
-| 5 | L4 overnight QD loop, morning frontier audits | 3 | loop finds keepers faster than random |
-| 6 | Sound-matching mode (ceiling measurement / auto-preset) | 5's loop | engine ceiling, per class |
+Each phase is independently shippable and gated on evidence, not faith. "Owner" tasks are things
+only the owner can do; everything else is agent/dev work.
 
-Steps 1-3 are small and use only existing infrastructure (score log, metrics, vary, audition).
-Step 5 is where compute spend starts to matter (renders are ~real-time; a 1,000-candidate
-overnight run at ~8s/render ≈ 2.2 GPU-free hours — feasible tonight, worth the offline-render
-investment later).
+### T0 — Groundwork (agent; ~1 session; no owner tasks)
+- Enrich the score-log schema: every entry stores each variant's DSP metric vector + vary
+  provenance (target/seed/amount); backfill from batch dirs whose renders still exist.
+- Eval harness command: held-out-batch top-1 / top-3 / rank correlation for any scorer, with
+  random + DSP-BT reference scorers built in. This number gates everything after.
+- Blind-audition upgrade: shuffle presentation order (mapping stored), and allow pointing the
+  audition/pick flow at arbitrary clip sets (needed for T3's blind chop rating).
+
+### T1 — First signal (owner: just make music; agent: measure)
+- **Owner:** use dotbeat normally; rank vary batches as usual. Target ~20 scored batches over
+  normal use — no extra workflow, the loop rides existing habits.
+- Agent: at 10 and 20 batches, train the v0 Bradley-Terry ranker, report held-out top-1 vs the
+  ~11% chance floor.
+- **Gate:** meaningfully above chance at 20 batches → T4. Near chance → T2 first (features, not
+  labels, are the bottleneck).
+
+### T2 — Embeddings (agent; no owner tasks)
+- Integrate the chosen frozen encoder (per research/107 Part 4), cache embeddings per render,
+  PCA fit on unlabeled variants (free — render as many as needed).
+- Ablate via the harness: DSP-only vs embedding-only vs both, split by variant type.
+
+### T3 — Real-music dataset and taste prior (owner-led data, agent-led pipeline)
+- **Owner:** curate three playlists — loved / neutral / disliked — as local audio files
+  (~50 songs each to start; more later). These files and everything derived from them stay out
+  of the repo and out of anything shared (private-model use only).
+- Agent: stem-separate (Demucs) → chop at detected bars (Beat This) → embed + metrics; also emit
+  per-stem reference profiles from loved songs (immediate `lint --ref` payoff, zero ML).
+- **Owner:** blind-rate chop batches through the audition flow — 10-20 items per session (the
+  fatigue ceiling from the IEC literature), a handful of sessions.
+- Agent: train the prior (loved-centroid distance first); test transfer by scoring historical
+  dotbeat batches — does the prior alone beat chance on past picks?
+- **Gate:** prior transfers → it becomes a T4 feature. It doesn't → keep it for reference
+  profiles only, and say so in this doc.
+
+### T4 — `suggest --taste` (agent; owner uses it passively)
+- Advisory pre-rank of new batches + next-batch proposal by acquisition value, with a
+  connectivity anchor (one past winner per batch). Never auto-adopts.
+- Measure: iterations-to-adopt on comparable tasks, before vs after.
+
+### T5 — Overnight QD loop (agent builds; owner spends 10 min/morning)
+- CVT archive (k ≈ 12-20), CMA-ME-style emitters with iso+line mutation, DSA-ME surrogate
+  pattern (critic screens thousands; render only the frontier), pessimistic scoring
+  (mean − β·std), ε pure-random immigrants per generation.
+- **Owner:** blind-audit the morning frontier (≤ 10-20 items); picks retrain the critic.
+- Compute note: renders are ~real-time (a 1,000-render night ≈ hours); if throughput binds,
+  resurrect a faster-than-realtime offline render on dotbeat's own engine (decisions.md D15's
+  closing note anticipated exactly this need).
+
+### T6 — Sound matching / expressiveness ceiling (agent; owner picks targets)
+- **Owner:** choose 5-10 target stem chops from loved records ("I want sounds like THIS").
+- Agent: **CMA-ES** per target (the method the closest published analogue, INSTRUMENTAL, proved
+  out on a 28-param subtractive synth — research/107 §2): population ~24 rendered in parallel,
+  budget 2-5K renders/target (90% of gain lands early), on 1-2s loudness-normalized chops.
+  Pitch frozen from f0 detection (spectral losses are provably bad at pitch); discrete params
+  (osc/filter types) enumerated as separate short runs; staged search (source params, then
+  inserts); spectral-analysis initialization. Optimize log-mel MSS + MFCC + envelope distance;
+  **report** the ceiling in MFCC + CLAP cosine (the human-validated metrics). Guard the
+  INSTRUMENTAL failure mode: clamp parameters to sane ranges — past ~30 dims the optimizer
+  exploits extremes instead of matching.
+- Foreknowledge for the ceiling study: INSTRUMENTAL's single biggest quality lever was adding
+  **unison voices + a noise floor** to the engine (−49% loss) — if "thickness" dominates
+  dotbeat's match error, that's the first engine feature to consider. Also honest: no published
+  work has matched against *stem chops from commercial mixes* (published targets are single
+  notes/one-shots) — dotbeat's targets are harder than anything benchmarked.
+
+### T7 (optional, later) — Paid listener validation
+- Only if/when the critic clears the personal bar and rung-5 transfer is worth testing: Prolific
+  pairwise-preference screens (~$12/hr + 33% fee ≈ **$0.10-0.15 per clip rating**; ~$100-150 per
+  1,000 ratings), headphone-screened, anchored by a small expert panel. The literature validates
+  crowd MUSHRA against experts for *speech quality* (r≈0.95 on Prolific); crowd *music preference*
+  validity is undemonstrated — start with a small validation batch. Note research/107's standing
+  caution: cross-person data helping a *personal* taste model is an open question; this phase
+  evaluates transfer, it does not feed training by default.
+
+T0-T1 use only existing infrastructure and start the data clock immediately — everything later
+gets stronger the earlier T1 begins.
 
 ## Open risks (honest register)
 
