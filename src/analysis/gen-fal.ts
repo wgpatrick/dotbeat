@@ -4,10 +4,13 @@
 // hosted path is seconds, a few cents each). Pure TS, no Python: one POST to fal's synchronous
 // run endpoint, one download of the audio it returns.
 //
-// Provider = the fal model path. The default, fal-ai/stable-audio, is the SAME Stable Audio Open
-// model the local backend runs — same "you own the output" Stability Community License posture —
-// so switching backends never silently switches licensing. fal-ai/stable-audio-25/text-to-audio
-// (Stability's 2.5, longer/stronger, ~$0.20/generation) is an explicit opt-in via --provider.
+// Provider = the fal model path. The default is Stable Audio 3 MEDIUM (the owner's "use a bigger
+// model" ask, 2026-07-17): 1.4B params, up to ~6-minute stereo, trained on fully licensed data,
+// outputs owned under the Stability Community License — the same licensing posture as the local
+// Stable Audio Open backend, from a strictly stronger model. Alternatives via --provider:
+// fal-ai/stable-audio (Stable Audio Open — the exact model the local backend runs) and
+// fal-ai/stable-audio-25/text-to-audio (Stability 2.5; platform terms, not Community License —
+// source-lib labels it honestly).
 //
 // Transport is injectable and defaults to curl: unlike Node's fetch, curl honors
 // HTTPS_PROXY/CA-bundle env everywhere this runs (proxied agent containers AND the owner's
@@ -17,7 +20,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { BeatGenError, type GenMeta } from './gen.js'
 
-export const FAL_DEFAULT_PROVIDER = 'fal-ai/stable-audio'
+export const FAL_DEFAULT_PROVIDER = 'fal-ai/stable-audio-3/medium/text-to-audio'
 
 const FAL_KEY_HINT =
   'the fal backend needs an API key: export FAL_KEY=... (create one at https://fal.ai/dashboard/keys). ' +
@@ -92,12 +95,24 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
     throw new BeatGenError(`--provider must be a fal model path like "${FAL_DEFAULT_PROVIDER}" or "fal-ai/stable-audio-25/text-to-audio", got "${provider}"`)
   }
 
-  const post = await transport({
-    method: 'POST',
-    url: `https://fal.run/${provider}`,
-    headers: { Authorization: `Key ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: opts.prompt, seconds_total: opts.seconds, seed: opts.seed }),
-  })
+  // Duration field names vary across the stable-audio family's fal endpoints (seconds_total on
+  // Open-era endpoints; some newer ones use duration) and the schema pages aren't fetchable from
+  // every environment — so on a 422 schema rejection, retry ONCE with the alias before giving up,
+  // and surface the API's own validation text verbatim if both shapes fail.
+  const postBody = (durationField: 'seconds_total' | 'duration') =>
+    JSON.stringify({ prompt: opts.prompt, [durationField]: opts.seconds, seed: opts.seed })
+  const postOnce = (body: string) =>
+    transport({
+      method: 'POST',
+      url: `https://fal.run/${provider}`,
+      headers: { Authorization: `Key ${apiKey}`, 'Content-Type': 'application/json' },
+      body,
+    })
+  let post = await postOnce(postBody('seconds_total'))
+  if (post.status === 422) {
+    const retry = await postOnce(postBody('duration'))
+    if (retry.status !== 422) post = retry
+  }
   if (post.status === 401 || post.status === 403) {
     throw new BeatGenError(`fal rejected the API key (HTTP ${post.status}) — check FAL_KEY. ${post.bodyText.slice(0, 200)}`)
   }

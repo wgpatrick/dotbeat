@@ -104,6 +104,35 @@ test('runGenFal validates provider shape and honors an explicit fal model path',
   assert.equal(calls[0]!.url, 'https://fal.run/fal-ai/stable-audio-25/text-to-audio')
 })
 
+test('runGenFal retries a 422 schema rejection once with the duration alias', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fal-422-'))
+  const out = join(dir, 'v1.wav')
+  const calls: { body?: string; url: string }[] = []
+  const transport: FalTransport = async (req) => {
+    calls.push({ body: req.body, url: req.url })
+    if (req.method === 'POST') {
+      const body = JSON.parse(req.body!) as Record<string, unknown>
+      if (body.seconds_total !== undefined) return { status: 422, bodyText: '{"detail":[{"msg":"extra fields not permitted: seconds_total"}]}' }
+      return { status: 200, bodyText: JSON.stringify({ audio_file: { url: 'https://cdn.fal.example/out.wav' } }) }
+    }
+    if (req.outPath !== undefined) writeFileSync(req.outPath, tinyWav())
+    return { status: 200, bodyText: '' }
+  }
+  const meta = await runGenFal({ prompt: 'x', seconds: 4, seed: 3, outPath: out, transport, apiKey: 'k' })
+  assert.equal(meta.seconds, 4)
+  assert.equal(calls.length, 3, 'POST, retry POST, download')
+  assert.deepEqual(JSON.parse(calls[1]!.body!), { prompt: 'x', duration: 4, seed: 3 }, 'retry swapped the duration field')
+})
+
+test('runGenFal surfaces the API validation text when both duration shapes are rejected', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fal-422x2-'))
+  const { transport } = mockTransport({ postStatus: 422, postBody: '{"detail":"prompt too long"}' })
+  await assert.rejects(
+    runGenFal({ prompt: 'x', seconds: 1, seed: 1, outPath: join(dir, 'v1.wav'), transport, apiKey: 'k' }),
+    /HTTP 422.*prompt too long/s,
+  )
+})
+
 test('extractAudioUrl accepts the known response shapes and rejects junk', () => {
   assert.equal(extractAudioUrl({ audio_file: { url: 'https://a/x.wav' } }), 'https://a/x.wav')
   assert.equal(extractAudioUrl({ audio: { url: 'https://a/y.wav' } }), 'https://a/y.wav')

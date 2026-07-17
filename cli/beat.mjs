@@ -396,11 +396,13 @@ const HELP = [
                                                           --backend stableaudio (needs torch + the model, owner-side;
                                                           see python/README.md), default --seconds 2. --backend stub is
                                                           a deterministic, dependency-free tone bed. --backend fal
-                                                          runs the SAME Stable Audio Open model hosted on fal.ai
-                                                          (seconds per one-shot instead of minutes; needs FAL_KEY;
-                                                          --provider fal-ai/stable-audio-25/text-to-audio opts into
-                                                          Stable Audio 2.5 under Stability platform terms). "Powered
-                                                          by Stability AI"; you own the output (Community License)
+                                                          generates on fal.ai's GPUs (seconds per one-shot instead
+                                                          of minutes; needs FAL_KEY) — default model Stable Audio 3
+                                                          MEDIUM (1.4B params, licensed training data, outputs yours
+                                                          under the Community License); --provider picks others:
+                                                          fal-ai/stable-audio (Open, the local backend's model) or
+                                                          fal-ai/stable-audio-25/text-to-audio (2.5, Stability
+                                                          platform terms). "Powered by Stability AI"
   beat source gen --doctor                                report which generative backends are installed (JSON)` +
     // ==== Phase 40 Stream VB ====
     `
