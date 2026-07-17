@@ -271,14 +271,15 @@ export interface RenderBatchOptions {
    * batch dir before rendering (best-effort — a failed link surfaces as render's own
    * missing-sample report). */
   linkMediaFrom?: string
-  /** Called before each variant render (1-based) — the CLI prints "rendering vN/N...". */
-  onProgress?: (i: number, n: number) => void
 }
 
-/** Renders v1.beat..vN.beat in outDir to vN.wav each, through cli/render.mjs — dotbeat's own
- * engine driven in headless Chromium (D15). Real-time capture per variant: a batch of N takes
- * ~N x loop-length plus browser startup. */
+/** Renders the batch's .beat variants to vN.wav each through cli/render.mjs's --batch mode —
+ * dotbeat's own engine in headless Chromium (D15), booted ONCE for the whole batch (the
+ * per-variant daemon + vite + browser boot used to cost ~10-15s of pure overhead each; variants
+ * now swap through one session via the daemon's own hot-reload). Real-time capture per variant
+ * still applies; the child prints per-variant progress on stderr (inherited). */
 export function renderVaryBatch(outDir: string, count: number, opts: RenderBatchOptions = {}): void {
+  if (count < 1) return
   if (opts.linkMediaFrom !== undefined) {
     const parentMedia = resolve(dirname(resolve(opts.linkMediaFrom)), 'media')
     const batchMedia = resolve(outDir, 'media')
@@ -291,12 +292,9 @@ export function renderVaryBatch(outDir: string, count: number, opts: RenderBatch
     }
   }
   const renderCli = join(repoRoot, 'cli', 'render.mjs')
-  for (let i = 0; i < count; i++) {
-    opts.onProgress?.(i + 1, count)
-    execFileSync(process.execPath, [renderCli, resolve(outDir, `v${i + 1}.beat`), '-o', resolve(outDir, `v${i + 1}.wav`)], {
-      stdio: ['ignore', 'ignore', 'inherit'],
-    })
-  }
+  execFileSync(process.execPath, [renderCli, '--batch', resolve(outDir)], {
+    stdio: ['ignore', 'ignore', 'inherit'],
+  })
 }
 
 export interface ScoreEntry {

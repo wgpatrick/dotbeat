@@ -1398,7 +1398,7 @@ async function varyCmd(argv) {
     // real-time capture per variant, so a batch of N takes ~N * loop-length plus browser startup —
     // slower than the retired faster-than-realtime offline path. Correct output, honest cost; a
     // dedicated fast batch renderer for dotbeat's own engine is future work (see D15 / phase-17 doc).
-    renderVaryBatch(outDir, variants.length, { onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
+    renderVaryBatch(outDir, variants.length)
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
     if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
@@ -1511,7 +1511,7 @@ async function varyFeelCmd(argv, file, track) {
     // matching note in varyCmd above; a fast batch renderer for the canonical engine is future work).
     // linkMediaFrom: variant .beat files reference media relative to themselves; the parent's
     // media/ dir sits next to the parent, so batch.ts links it into the batch dir before rendering.
-    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
     if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
@@ -1557,7 +1557,7 @@ async function varyAutomationCmd(argv, file, track, param) {
   for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
 
   if (argv.includes('--render') || argv.includes('--audition')) {
-    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
     if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }

@@ -18,7 +18,7 @@
 //
 // Requires `npm run build` (compiled ../dist/src). The ui/ build is produced on demand.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, copyFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawn, execFileSync } from 'node:child_process'
@@ -107,6 +107,7 @@ function parseArgs(argv) {
     else if (a === '--tail') args.tail = argv[++i]
     else if (a === '--daemon-port') args.daemonPort = argv[++i]
     else if (a === '--preview-port') args.previewPort = argv[++i]
+    else if (a === '--batch') args.batch = argv[++i]
     // legacy no-ops: the engine is dotbeat's own now, so these are accepted-and-ignored rather
     // than errored, so old scripts/invocations don't break on an unknown flag.
     else if (a === '--beatlab-dir') i++ // swallow its value
@@ -419,10 +420,76 @@ export async function renderTrackSolosCommand(beatPath, trackIds, opts = {}) {
   return results
 }
 
+/**
+ * Batch mode (`--batch <dir>`, taste-loop groundwork / D15's "fast batch render" note): render
+ * every .beat variant in a vary-batch dir through ONE boot of the whole harness. The per-variant
+ * cost used to include a fresh daemon + vite preview + headless Chromium (~10-15s of pure
+ * overhead each); here the session boots once against a scratch copy of variant 1, and each
+ * subsequent variant is swapped in by overwriting the daemon's watched file — the daemon's
+ * directory watcher broadcasts the new doc over SSE and the page's store hot-reloads, exactly
+ * the mechanism `beat adopt` already relies on for a running GUI.
+ */
+export async function renderBatchCommand(argv) {
+  const args = parseArgs(argv)
+  const dir = args.batch
+  let manifest
+  try {
+    manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'))
+  } catch (err) {
+    console.error(`--batch needs a vary-batch directory with a manifest.json (${err.message})`)
+    process.exit(1)
+  }
+  const beatVariants = manifest.variants.filter((v) => v.file.endsWith('.beat'))
+  if (beatVariants.length === 0) {
+    console.error('nothing to render: this batch has no .beat variants (gen batches are already audio)')
+    process.exit(1)
+  }
+  // The daemon watches ONE file for the whole session; variants take turns being that file.
+  // Dotfile name so the scratch copy can never be mistaken for a tenth variant.
+  const currentPath = join(dir, '.render-current.beat')
+  copyFileSync(join(dir, beatVariants[0].file), currentPath)
+  const session = await bootRenderSession(currentPath, {
+    daemonPort: args.daemonPort !== undefined ? Number(args.daemonPort) : 0,
+    previewPort: args.previewPort !== undefined ? Number(args.previewPort) : 5899,
+  })
+  const { parse } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
+  try {
+    for (let i = 0; i < beatVariants.length; i++) {
+      const v = beatVariants[i]
+      console.error(`rendering ${v.file.replace(/\.beat$/, '')} (${i + 1}/${beatVariants.length})...`)
+      if (i > 0) {
+        // Swap the next variant in and wait until the page's store actually reflects it —
+        // consecutive vary variants always differ (that is what a variant is), so a doc-JSON
+        // fingerprint change is a reliable reload signal.
+        const prevFingerprint = await session.page.evaluate(() => JSON.stringify(window.__store.getState().doc))
+        copyFileSync(join(dir, v.file), currentPath)
+        await session.page.waitForFunction(
+          (prev) => JSON.stringify(window.__store.getState().doc) !== prev,
+          prevFingerprint,
+          { timeout: 15000 },
+        )
+        await sleep(200) // let the engine's sync() tick absorb the new doc before capture
+      }
+      const doc = parse(readFileSync(join(dir, v.file), 'utf8'))
+      const renderBars = doc.song && doc.song.length > 0 ? doc.song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
+      const seconds = (renderBars * 16 * 60) / doc.bpm / 4
+      const wavBytes = await captureWav(session.page, seconds, session.pageErrors)
+      session.pageErrors.length = 0 // captured errors are per-variant, not cumulative
+      const outPath = join(dir, v.file.replace(/\.beat$/, '.wav'))
+      writeFileSync(outPath, wavBytes)
+      console.error(`wrote ${outPath} (${wavBytes.length} bytes)`)
+    }
+  } finally {
+    await session.close()
+    try { rmSync(currentPath) } catch { /* best-effort scratch cleanup */ }
+  }
+}
+
 // Runs directly (node cli/render.mjs ...) or via the `beat` dispatcher (cli/beat.mjs), which
 // imports renderCommand instead.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  renderCommand(process.argv.slice(2))
+  const argv = process.argv.slice(2)
+  ;(argv.includes('--batch') ? renderBatchCommand(argv) : renderCommand(argv))
     .then(() => process.exit(0)) // browser.close()/preview.kill() alone don't reliably drain the
     // event loop (chromium pipes, vite's esbuild service) — same fix scripts/smoke.mjs needed.
     .catch((err) => {
