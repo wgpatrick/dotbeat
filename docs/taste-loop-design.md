@@ -175,6 +175,43 @@ from a loved record (method details per research/107 Part 2). Outcomes, both val
 Each phase is independently shippable and gated on evidence, not faith. "Owner" tasks are things
 only the owner can do; everything else is agent/dev work.
 
+### Status & revised sequencing (2026-07-17)
+
+**Where the board actually stands.** T0 and T2 are DONE — and T2 landed beyond this doc's spec:
+CLAP default + MERT opt-in, per-variant-type ablation splits, and the Audiobox-Aesthetics axes
+as named explicit features with signed per-axis taste directions in the report. The renderer arc
+(D22/D23) resolved T5's compute note *ahead of need*: offline compute is exact, linear in song
+length, and the DEFAULT for vary batches — so batch material is cheap everywhere, including the
+future overnight loop. Hosted generation (fal.ai, Stable Audio 3 Medium default) is wired and
+waiting on a FAL_KEY smoke test. Three CLI pilots (109/110/111) hardened every taste-loop
+surface the same day it shipped.
+
+**The consequence: the critical path now runs entirely through the owner's ears.** Every
+agent-buildable, ungated item in this plan is built. T4 is gated on T1's ~20 scored batches by
+design; T5 on T4; T6 on T3's private dataset. Nothing more should be built ahead of that
+evidence — the next unit of progress is scored batches, not code.
+
+**Revised near-term sequence:**
+1. **T1, made nearly free (owner ~1 evening total):** the offline default makes a scoring
+   session cheap — each batch is one `vary ... --render --audition` (a couple of minutes,
+   mostly unattended), one listen to the blind `audition.wav`, one `beat score` line. Work from
+   `examples/first-light.beat` — real song, real taste context (the doc's own non-stationarity
+   mitigation) — and spread batches across tracks and groups so the comparison graph isn't
+   single-axis: pad/arp/keys/bass × filter/env/osc/mix/motion, plus a couple of drum-lane and
+   feel batches. Ten to twenty of those and T1's gate is answerable.
+2. **Checkpoints at 10 and 20 batches (agent):** run `beat taste-eval` and report — now with
+   per-type splits and, once `requirements-clap.txt`/`requirements-aesthetics.txt` are installed
+   owner-side, the embedding ablation and named aesthetic directions this doc originally
+   deferred to later phases. Install the deps before scoring starts so caches fill as renders
+   happen instead of via backfill.
+3. **T4 gate decision at 20** exactly as specified below — no scaffolding before the number.
+4. **Parallel owner errands (minutes each, all unblock something):** FAL_KEY live generation
+   test; the two pip installs above; T3 playlist curation whenever listening time allows (T3's
+   pipeline is agent work that starts the day the files exist).
+5. **Agent work while waiting:** the pilot-111 backlog bugs — the soundfont live-render
+   scheduling failure (it breaks rendering `night-shift-song`, real music of the owner's) and
+   the empty page-error report that hid it — are the highest-value ungated engineering left.
+
 ### T0 — Groundwork (agent; ~1 session; no owner tasks)
 - Enrich the score-log schema: every entry stores each variant's DSP metric vector + vary
   provenance (target/seed/amount); backfill from batch dirs whose renders still exist.
