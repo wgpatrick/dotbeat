@@ -95,10 +95,15 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
     throw new BeatGenError(`--provider must be a fal model path like "${FAL_DEFAULT_PROVIDER}" or "fal-ai/stable-audio-25/text-to-audio", got "${provider}"`)
   }
 
-  // Duration field names vary across the stable-audio family's fal endpoints (seconds_total on
-  // Open-era endpoints; some newer ones use duration) and the schema pages aren't fetchable from
-  // every environment — so on a 422 schema rejection, retry ONCE with the alias before giving up,
-  // and surface the API's own validation text verbatim if both shapes fail.
+  // Duration field names vary across the stable-audio family's fal endpoints: Open-era and 2.5
+  // (fal-ai/stable-audio, fal-ai/stable-audio-25/...) take `seconds_total`; stable-audio-3/medium
+  // takes `duration`. Critically, 3/medium SILENTLY IGNORES an unknown `seconds_total` (returns 200,
+  // not 422) and falls back to its 30s default — so the old "seconds_total first, retry on 422"
+  // logic never corrected it and every 3/medium one-shot came out ~30s (a 1s "kick" was 28s).
+  // So choose the primary field by provider, and keep the 422 retry with the alias as a safety net
+  // for any endpoint whose shape we guessed wrong.
+  const primaryField: 'seconds_total' | 'duration' = /stable-audio-3/.test(provider) ? 'duration' : 'seconds_total'
+  const aliasField: 'seconds_total' | 'duration' = primaryField === 'duration' ? 'seconds_total' : 'duration'
   //
   // output_format: "wav" — REQUEST WAV EXPLICITLY. The stable-audio-3/medium endpoint defaults to
   // mp3 (output_format accepts mp3/wav/flac/ogg/opus/m4a/aac), and dotbeat's prep pipeline only has
@@ -115,9 +120,9 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
       headers: { Authorization: `Key ${apiKey}`, 'Content-Type': 'application/json' },
       body,
     })
-  let post = await postOnce(postBody('seconds_total'))
+  let post = await postOnce(postBody(primaryField))
   if (post.status === 422) {
-    const retry = await postOnce(postBody('duration'))
+    const retry = await postOnce(postBody(aliasField))
     if (retry.status !== 422) post = retry
   }
   if (post.status === 401 || post.status === 403) {

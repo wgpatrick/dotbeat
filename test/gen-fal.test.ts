@@ -42,7 +42,10 @@ test('runGenFal happy path: POST body, download, WAV check, GenMeta contract', a
   const meta = await runGenFal({ prompt: 'a dusty snare', seconds: 2, seed: 7, outPath: out, transport, apiKey: 'k' })
   assert.equal(calls[0]!.method, 'POST')
   assert.equal(calls[0]!.url, `https://fal.run/${FAL_DEFAULT_PROVIDER}`)
-  assert.deepEqual(JSON.parse(calls[0]!.body!), { prompt: 'a dusty snare', seconds_total: 2, seed: 7, output_format: 'wav' })
+  // stable-audio-3/medium (the default provider) takes `duration`, not `seconds_total` — sending
+  // the wrong field is silently ignored by that endpoint and yields its 30s default (the one-shot
+  // duration bug). The primary field is chosen by provider; see runGenFal.
+  assert.deepEqual(JSON.parse(calls[0]!.body!), { prompt: 'a dusty snare', duration: 2, seed: 7, output_format: 'wav' })
   assert.equal(calls[1]!.method, 'GET')
   assert.deepEqual(meta, { backend: 'fal', provider: FAL_DEFAULT_PROVIDER, model: FAL_DEFAULT_PROVIDER, seconds: 2, seed: 7, sampleRate: 48000 })
 })
@@ -110,7 +113,9 @@ test('runGenFal validates provider shape and honors an explicit fal model path',
   assert.equal(calls[0]!.url, 'https://fal.run/fal-ai/stable-audio-25/text-to-audio')
 })
 
-test('runGenFal retries a 422 schema rejection once with the duration alias', async () => {
+test('runGenFal retries a 422 schema rejection once with the alias duration field', async () => {
+  // The default provider (stable-audio-3/medium) sends `duration` as its primary field. If that
+  // endpoint 422s on it, runGenFal must retry ONCE with the alias (`seconds_total`) before failing.
   const dir = mkdtempSync(join(tmpdir(), 'fal-422-'))
   const out = join(dir, 'v1.wav')
   const calls: { body?: string; url: string }[] = []
@@ -118,7 +123,7 @@ test('runGenFal retries a 422 schema rejection once with the duration alias', as
     calls.push({ body: req.body, url: req.url })
     if (req.method === 'POST') {
       const body = JSON.parse(req.body!) as Record<string, unknown>
-      if (body.seconds_total !== undefined) return { status: 422, bodyText: '{"detail":[{"msg":"extra fields not permitted: seconds_total"}]}' }
+      if (body.duration !== undefined) return { status: 422, bodyText: '{"detail":[{"msg":"extra fields not permitted: duration"}]}' }
       return { status: 200, bodyText: JSON.stringify({ audio_file: { url: 'https://cdn.fal.example/out.wav' } }) }
     }
     if (req.outPath !== undefined) writeFileSync(req.outPath, tinyWav())
@@ -127,7 +132,8 @@ test('runGenFal retries a 422 schema rejection once with the duration alias', as
   const meta = await runGenFal({ prompt: 'x', seconds: 4, seed: 3, outPath: out, transport, apiKey: 'k' })
   assert.equal(meta.seconds, 4)
   assert.equal(calls.length, 3, 'POST, retry POST, download')
-  assert.deepEqual(JSON.parse(calls[1]!.body!), { prompt: 'x', duration: 4, seed: 3, output_format: 'wav' }, 'retry swapped the duration field, keeping output_format')
+  assert.deepEqual(JSON.parse(calls[0]!.body!), { prompt: 'x', duration: 4, seed: 3, output_format: 'wav' }, 'primary field is duration for stable-audio-3')
+  assert.deepEqual(JSON.parse(calls[1]!.body!), { prompt: 'x', seconds_total: 4, seed: 3, output_format: 'wav' }, 'retry swapped to the seconds_total alias')
 })
 
 test('runGenFal surfaces the API validation text when both duration shapes are rejected', async () => {
