@@ -201,22 +201,55 @@ best/2nd/3rd, writes through scoreBatch into ONE beat-scores.jsonl). Organic sco
 music-making still counts — same log — this just removes the production obligation from the
 data clock.
 
-**Target data distribution** (what ~40-60 rated batches should cover, so the model — and the
-per-type eval splits — can answer where taste signal lives; ≥5 batches per split escapes the
-smoke label):
-- **~40% synth-param vary** across groups (filter/env/osc/mix/motion) × track roles
-  (chords/bass/arp) × seed styles — the core "which sound do I prefer" signal.
-- **~10% feel** (timing/velocity humanize) — groove taste, a different axis entirely.
-- **~15% drum-voice vary** (kick/snare/hats) — transient/percussion taste.
-- **~30% generated samples** (fal, category-stratified prompts: drum one-shots, bass/pluck/stab,
-  pads/textures, vocal chops, risers/impacts × style treatments) — the owner's highest-interest
-  material, and the round type T5's generation steering will lean on.
-- **~5% first-light-context batches** (vary on the real song) — the non-stationarity/context
-  check: does taste measured on synthetic seeds transfer to the song that matters?
-- Known confound, tracked not hidden: loudness differences inside a batch can dominate naive
-  preference; lufs is an explicit feature so a "louder wins" component becomes a VISIBLE learned
-  weight rather than silent bias. If it dominates everything, loudness-normalize batch renders
-  and re-measure (a one-line change at stitch/render time, deferred until the data says so).
+**Target data distribution** (thought through 2026-07-17 against what each downstream consumer
+actually needs; ≥5 batches per split escapes the smoke label, ~10+ per split is where the
+research base says signal starts). The organizing fact: a batch teaches only WITHIN-batch
+contrasts, so the distribution is really "what varies inside a batch × what context it varies
+against" — and each downstream consumer needs a different kind of contrast covered:
+
+*What each consumer needs:*
+- **T4 (`suggest --taste` pre-ranking)** deploys on vary batches over real songs → the vary share
+  must dominate, spread across groups × track roles × seed styles so no single axis is the whole
+  model.
+- **T5 (QD critic under optimization pressure)** will be queried at the EDGES of param space
+  (that's what optimizers do) → include coarse-amount batches, or the critic's first frontier
+  encounter is pure extrapolation — the Goodhart failure research/107 warns about.
+- **Gen steering** needs BOTH gen questions covered, and they are different: which *realization*
+  of one prompt (one prompt × N seeds — what a batch does today), and which *aesthetic* (one
+  subject × N style treatments, one candidate each — a style-contrast batch). The owner's stated
+  interest ("those generated sounds are some of the most interesting") is mostly the second.
+- **Eval honesty** needs consistency probes: a few batches re-presented later with a different
+  shuffle measure the owner's own test-retest agreement — the CEILING any model can reach. A
+  model at 68% is at ceiling if self-agreement is 70%, and failing if it's 95%.
+
+*The mix, for the first ~60 rated batches:*
+- **~35% synth-param vary** (filter/env/osc/mix/motion × chords/bass/arp × seed styles), with
+  vary AMOUNT itself mixed roughly 25% subtle / 50% default / 25% coarse — subtle teaches fine
+  discrimination (noisier labels, near-ties expected: skip is the right answer there and skips
+  cost nothing), coarse maps the edges T5 will visit.
+- **~10% feel** (timing/velocity) — groove taste is its own axis.
+- **~10% drum-voice vary** (kick/snare/hats) — transient taste; note the full-mix render can
+  mask small drum differences (accepted: in-mix is the deployed context, and taste-in-context
+  is the point).
+- **~15% gen realization batches** (one prompt × N seeds) and **~15% gen style-contrast batches**
+  (one subject × N styles, one candidate each, assembled as a clip-set) — together the ~30% gen
+  share the owner asked for, now split across both questions.
+- **~10% real-song-context batches** (vary on first-light/night-shift) — the transfer probe:
+  does taste measured on synthetic seeds hold on the music that matters? (Batch parent paths
+  distinguish these in the log if a split is ever needed.)
+- **~5% repeat probes** (a scored batch re-collected under a fresh dir with a different shuffle)
+  — the self-consistency ceiling. Analysis keys on matching parent+group+seed.
+
+*Confounds, tracked not hidden:*
+- **Loudness**: differences inside a batch can dominate naive preference; lufs is an explicit
+  feature so a "louder wins" component becomes a VISIBLE learned weight rather than silent bias.
+  If it dominates everything, loudness-normalize batch renders and re-measure (deferred until
+  the data says so).
+- **Ties**: there is deliberately no "no preference" button — a batch with no clear winner
+  should be SKIPPED (unlogged), which is honest missing data rather than forced noise.
+- **Fatigue/drift**: entries carry timestamps; keep sessions in the 10-20-batch range the IEC
+  literature flags as the ceiling, and the repeat probes will show if late-session ratings
+  degrade.
 
 **Revised near-term sequence:**
 1. **T1, made nearly free (owner ~1 evening total):** the offline default makes a scoring

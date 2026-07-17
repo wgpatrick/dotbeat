@@ -171,6 +171,28 @@ export interface GenPromptSpec {
   seconds: number
 }
 
+/** Style-contrast batches (data-distribution rev, 2026-07-17): ONE subject × several style
+ * treatments, one candidate each — the batch's within-contrast is the AESTHETIC, not the
+ * realization, which is the gen question the owner actually cares most about. */
+export interface StyleContrastSpec {
+  id: string
+  subject: string
+  seconds: number
+  prompts: string[]
+}
+
+export function generateStyleContrasts(seed: number, count: number, stylesPer = 4): StyleContrastSpec[] {
+  const rng = mulberry32(seed * 7 + 3)
+  const subjects = [...GEN_SUBJECTS].sort(() => rng() - 0.5)
+  const out: StyleContrastSpec[] = []
+  for (let i = 0; i < count; i++) {
+    const s = subjects[i % subjects.length]!
+    const styles = [...GEN_STYLES].sort(() => rng() - 0.5).slice(0, stylesPer)
+    out.push({ id: `${s.id}sc${i + 1}`, subject: s.subject, seconds: s.seconds, prompts: styles.map((st) => `${s.subject}, ${st}`) })
+  }
+  return out
+}
+
 /** `count` seeded prompts, stratified across subjects before styles repeat. */
 export function generateGenPrompts(seed: number, count: number): GenPromptSpec[] {
   const rng = mulberry32(seed)

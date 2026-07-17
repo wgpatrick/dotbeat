@@ -1415,9 +1415,14 @@ async function tasteCollectCmd(argv) {
     for (let b = 0; b < perSeed && targets.length > 0; b++) {
       const [track, group] = targets.splice(Math.floor(rng() * targets.length), 1)[0]
       const varySeed = Math.floor(rng() * 100000)
-      process.stderr.write(`\n=== ${f}: vary ${track} ${group} (seed ${varySeed}) ===\n`)
+      // Amount mixing (data-distribution rev): ~25% subtle / 50% default / 25% coarse — subtle
+      // teaches fine discrimination (skips expected there and fine), coarse maps the edges of
+      // param space T5's optimizer will actually visit.
+      const roll = rng()
+      const amount = roll < 0.25 ? 0.15 : roll < 0.75 ? 0.25 : 0.4
+      process.stderr.write(`\n=== ${f}: vary ${track} ${group} (seed ${varySeed}, amount ${amount}) ===\n`)
       try {
-        execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'vary', file, track, group, '--count', String(count), '--seed', String(varySeed), '--render'], { stdio: ['ignore', 'ignore', 'inherit'] })
+        execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'vary', file, track, group, '--count', String(count), '--seed', String(varySeed), '--amount', String(amount), '--render'], { stdio: ['ignore', 'ignore', 'inherit'] })
         made += 1
       } catch (err) {
         failed += 1
@@ -1431,9 +1436,11 @@ async function tasteCollectCmd(argv) {
   // is what `beat rate` finds). Default backend fal (needs FAL_KEY + egress); stub keeps the
   // whole pipeline testable offline.
   let genMade = 0
+  const styleCount = Math.floor(genCount / 2) // half the gen share goes to style-contrast batches
+  const realizationCount = genCount - styleCount
   if (genCount > 0) {
     const hostFile = join(dir, seedFiles[0])
-    for (const spec of generateGenPrompts(metaSeed, genCount)) {
+    for (const spec of generateGenPrompts(metaSeed, realizationCount)) {
       const seedFrom = Math.floor(rng() * 100000)
       process.stderr.write(`\n=== gen ${spec.id}: "${spec.prompt}" (${spec.seconds}s x${count}, ${genBackend}) ===\n`)
       try {
@@ -1454,7 +1461,38 @@ async function tasteCollectCmd(argv) {
       }
     }
   }
-  process.stdout.write(`\n${made} vary batch(es) + ${genMade} gen batch(es) across ${seedFiles.length} seed song(s)${failed > 0 ? ` (${failed} failed)` : ''}\n`)
+  // Style-contrast batches (data-distribution rev): one SUBJECT × several style treatments, one
+  // candidate each — the within-batch contrast is the aesthetic, not the realization. Each
+  // treatment generates as a 1-candidate gen batch, the wavs are gathered into one dir, and
+  // `beat audition` turns that dir into an ordinary scoreable clip-set batch.
+  let styleMade = 0
+  if (styleCount > 0) {
+    const { generateStyleContrasts } = await import('../dist/src/taste/seeds.js')
+    const { mkdirSync, copyFileSync } = await import('node:fs')
+    const hostFile = join(dir, seedFiles[0])
+    for (const spec of generateStyleContrasts(metaSeed, styleCount)) {
+      const styleDir = join(dir, `style-${spec.id}-${metaSeed}`)
+      process.stderr.write(`\n=== style contrast ${spec.id}: "${spec.subject}" x ${spec.prompts.length} treatments (${genBackend}) ===\n`)
+      try {
+        mkdirSync(styleDir, { recursive: true })
+        spec.prompts.forEach((prompt, i) => {
+          const s = Math.floor(rng() * 100000)
+          const candId = `${spec.id}c${i + 1}`
+          execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'source', 'gen', hostFile, candId, prompt, '--count', '1', '--seed-from', String(s), '--seconds', String(spec.seconds), '--backend', genBackend], { stdio: ['ignore', 'ignore', 'inherit'] })
+          const candDir = join(dir, `gen-${candId}-${s}`)
+          copyFileSync(join(candDir, 'v1.wav'), join(styleDir, `s${i + 1}.wav`))
+          rmSync(candDir, { recursive: true }) // the 1-candidate batch was scaffolding, not a rating unit
+        })
+        execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'audition', styleDir, '--group', `style:${spec.id}`, '--seed', String(metaSeed)], { stdio: ['ignore', 'ignore', 'inherit'] })
+        styleMade += 1
+      } catch {
+        failed += 1
+        try { rmSync(styleDir, { recursive: true }) } catch { /* best-effort */ }
+        process.stderr.write(`warning: style contrast "${spec.id}" failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; retry with --gen-backend stub)' : ''}\n`)
+      }
+    }
+  }
+  process.stdout.write(`\n${made} vary batch(es) + ${genMade} gen batch(es) + ${styleMade} style-contrast batch(es) across ${seedFiles.length} seed song(s)${failed > 0 ? ` (${failed} failed)` : ''}\n`)
   process.stdout.write(`next: beat rate ${dir} — rate them in the browser; then beat taste-eval --log ${join(dir, 'beat-scores.jsonl')}\n`)
 }
 
