@@ -1317,9 +1317,9 @@ export const rows = [
     research: 'research/109-usability-pilot-render-offline.md', plan: null,
   },
   {
-    area: 'Render / export', feature: 'Offline render scaling: schedule-window + dispose-behind-frontier',
-    description: 'The real fix for D22\'s superlinear offline compute: drive OfflineAudioContext.suspend() so scheduling stays a window ahead of the render frontier and spent one-shot sources are disposed once their audio has actually rendered — turning per-quantum cost from O(all notes so far) into O(sounding notes). Would make --offline the honest default for full-song renders and the T5 overnight QD loop\'s render budget.',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    area: 'Render / export', feature: 'Offline render scaling: schedule-window + dispose-behind-frontier (D23)',
+    description: 'DONE: the offline context is now a raw NATIVE OfflineAudioContext (same raw-native pinning the live engine does for spessasynth — standardized-audio-context snapshots the graph at startRendering, which both silenced post-window-1 scheduling and made scheduling itself crawl), rendered in ~2s windows via native suspend()/resume(): Tone\'s clock runs one window ahead of the render frontier, and spent one-shot sources are disposed once the frontier has actually rendered past their stop time — per-quantum cost O(sounding notes) instead of O(every note so far). Measured: real-groove 27s -> 9.0s; first-light 10s/30s was 0.32x->0.12x (quadratic), now 0.31x flat (linear). Parity gates unchanged (smoke/real-groove/voxtest). Runtime-checked internals hooks with a loud one-pass fallback; decimator forced passthrough on all offline contexts (native ones expose createScriptProcessor but never pause for its events).',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: null,
   },
 

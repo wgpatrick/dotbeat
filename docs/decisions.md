@@ -9,6 +9,58 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D23 — offline renders build on a raw NATIVE OfflineAudioContext, rendered in windows with dispose-behind-the-frontier (2026-07-17)
+
+**The decision.** The offline renderer's context is now a raw native `OfflineAudioContext` handed
+to Tone's wrapper via its context overload — the exact same raw-native pinning the live engine
+already does for spessasynth (`ensureNativeContext`) — and the render is driven in ~2s windows
+using the native `suspend(time)`/`resume()` API: Tone's JS clock runs exactly one window ahead of
+the native render frontier, and at each suspension every spent one-shot source whose stop time
+(plus margin) the frontier has passed — i.e. whose audio is *actually rendered* — is disposed.
+This closes D22's known limit: per-quantum cost becomes O(currently-sounding nodes) instead of
+O(every note so far).
+
+**Why the native context is load-bearing, not an optimization.** The first windowed attempt kept
+Tone's default standardized-audio-context-backed offline context and failed twice over, both
+measured: (a) s-a-c reconstructs the entire native graph as a SNAPSHOT inside `startRendering()`,
+so anything scheduled after rendering begins never reaches the audio — every post-window-1 note
+rendered silent (7 parity failures on real-groove); (b) even the scheduling itself crawled
+(21.5s of clock-advance for 7.6s of audio). On the raw native context, scheduling while
+suspended is exactly what the suspend API exists for, and the same clock advance took 1.2s.
+Dropping s-a-c from the offline path was worth ~3x by itself before disposal even mattered.
+
+**Measured (same 4-core container as D22's numbers):**
+- real-groove (7.6s, 4 tracks): 27s one-pass → **9.0s** windowed (0.8x realtime).
+- first-light 10s/30s: was 31s/248s (0.32x→0.12x, quadratic) → **30.8s/95.5s (0.31x flat — linear)**.
+- first-light FULL SONG (96s, 8 tracks): **334.5s (0.3x, linear held end-to-end)** — the quadratic
+  path never finished it at all (killed past 20 minutes).
+- Parity gates unchanged: smoke/real-groove/voxtest match live within `src/metrics/variance.ts`
+  bounds with the same two known live-chain exceptions (mono-width opus noise, sub-band tilt).
+
+**Third known live-chain exception: peak-domain on a limiter-pinned dense mix.** The full-song
+gate passes every energy metric (LUFS Δ0.19, RMS Δ0.12, all five bands, width, correlation) but
+reads live peaks ~1 dB hotter than offline (−1.5 vs −2.5 dBTP, crest likewise) at the same
+musical moments, while two LIVE renders agree to Δ0.18 — a systematic capture-chain difference,
+not render noise, and not disposal (disposal only touches sources past their stop time, and a
+truncated tail would dent LUFS/air, which match). Direct measurement: round-tripping the exact
+offline WAV through the live path's own MediaRecorder opus codec raised its peak by +0.45 dB —
+lossy-codec peak overshoot on near-full-scale material, the textbook reason mastering targets
+−1..−2 dBTP before lossy encode; realtime-encode adaptation and the unseeded noise voices supply
+the remainder. As with the other two exceptions, the OFFLINE number is the trustworthy one: the
+engine's true post-limiter output does not actually graze −1.5 dBTP — the opus decode does.
+
+**Guardrails.** The driver hooks two Tone internals (`OfflineContext._currentTime`/`emit('tick')`
+— the literal body of `_renderClock`, run in bounded chunks — and `OneShotSource.prototype
+._onended`, the one place every spent oscillator/buffer-source announces itself), each checked at
+runtime by `windowedInternals()`; if a Tone upgrade moves them, the render falls back to the
+one-pass path with a loud caveat naming the quadratic cost. A raw native offline context DOES
+expose `createScriptProcessor`, so the Redux decimator's guard now keys on `isOffline` too —
+ScriptProcessorNode's main-thread audioprocess events are not paused for by an offline render,
+and the documented, caveat-flagged passthrough beats nondeterministic partial audio. `resume()`
+sits in a `finally` so a throwing tick callback can never leave the native render suspended
+forever. Disposal margin is 1s past `_stopTime` (which already includes the fade-out), covering
+the exponential-tail allowance.
+
 ## D22 — offline render is opt-in (`--offline`), exact but not unconditionally fast; live capture stays the default (2026-07-17)
 
 **The decision.** D15's closing note ("if a faster-than-realtime batch render path is needed
