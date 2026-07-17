@@ -146,9 +146,10 @@ test('beat <cmd> --help prints only that command\'s block', () => {
   assert.doesNotMatch(out, /beat init|beat humanize|paths for set/)
   assert.ok(out.split('\n').length < 8, `expected a short block, got ${out.split('\n').length} lines`)
   // --help is intercepted only as the first arg, so it can't shadow a command's own later args —
-  // and the full no-args dump still ends with set's paths footer as it always has
+  // and the full no-args dump still ends with set's paths footer as it always has. Pilot 108: the
+  // dump header now ADVERTISES per-command help (nobody found it behind a bare "usage:").
   const dump = beat([])
-  assert.match(dump, /^usage:\n {2}beat init /)
+  assert.match(dump, /^usage \(one command's block: beat help <command>.*\):\n {2}beat init /)
   assert.match(dump, /paths for set: bpm \| loop_bars/)
 })
 
@@ -156,7 +157,8 @@ test('beat help <cmd> works and appends the command\'s "related:" family', () =>
   const out = beat(['help', 'vary'])
   assert.match(out, /^usage:\n {2}beat vary <file> <track> <group-or-lane>/)
   assert.match(out, /beat vary --groups/)
-  assert.match(out, /\nrelated: beat score, beat adopt, beat suggest\n$/)
+  // Pilot 108: the family is the whole taste loop now — audition and taste-eval joined it
+  assert.match(out, /\nrelated: beat audition, beat score, beat adopt, beat suggest, beat taste-eval\n$/)
   // set's per-command view carries its paths footer
   const setHelp = beat(['set', '--help'])
   assert.match(setHelp, /paths for set: bpm \| loop_bars/)
@@ -168,7 +170,7 @@ test('beat help <cmd> works and appends the command\'s "related:" family', () =>
 test('beat help <unknown> is the standard unknown-command error, exit 2', () => {
   const out = beat(['help', 'nope'], { expectExit: 2 })
   assert.match(out, /unknown command "nope"/)
-  assert.match(out, /usage:/) // the full dump follows, same as any unknown command
+  assert.match(out, /usage \(one command's block/) // the full dump follows, same as any unknown command
   // ...and an unknown command with --help behaves the same way
   const out2 = beat(['bogus', '--help'], { expectExit: 2 })
   assert.match(out2, /unknown command "bogus"/)

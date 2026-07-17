@@ -89,21 +89,72 @@ export interface AuditionResult {
   gapSeconds: number
   totalSeconds: number
   entries: AuditionEntry[]
+  /** Pilot 108: true when presentation order differs from generation order — the printed index
+   * then withholds the variant-at-timecode mapping (it IS the answer key; blindness shouldn't
+   * depend on the listener averting their eyes from the very line that names the wav). */
+  shuffled: boolean
 }
 
-/** Stitch outDir's v1.wav..v<count>.wav into outDir/audition.wav (gapSeconds of silence between
- * variants, none before v1 or after vN) and write the timecode index to outDir/audition.json.
- * Returns the index so callers can print it. */
-export function stitchAudition(outDir: string, count: number, opts: { gapSeconds?: number } = {}): AuditionResult {
+/** Deterministic seeded RNG for reproducible presentation shuffles. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** Fisher-Yates over 1..count, seeded — the presentation order for a blind audition. Exported so
+ * tests (and any future GUI audition view) reproduce the exact order a given seed stitches. */
+export function shuffledOrder(count: number, seed: number): number[] {
+  const order = Array.from({ length: count }, (_, i) => i + 1)
+  const rng = mulberry32(seed)
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[order[i], order[j]] = [order[j]!, order[i]!]
+  }
+  return order
+}
+
+export interface StitchOptions {
+  gapSeconds?: number
+  /** Presentation order as 1-based variant numbers (e.g. [3,1,2]). Overrides shuffleSeed. */
+  order?: number[]
+  /** T0 taste-loop (docs/taste-loop-design.md L1): shuffle presentation order with this seed so
+   * listening position decouples from generation order — v1..vN are seed-monotone, and unshuffled
+   * auditions bake position bias into every pick. The mapping stays fully recoverable: entries /
+   * audition.json list which variant sits at which timecode, and scoring still uses variant ids. */
+  shuffleSeed?: number
+  /** Variant file names when they aren't v1.wav..vN.wav (arbitrary clip-set auditions). Length
+   * must equal `count`; index i holds variant i+1's wav file name relative to outDir. */
+  files?: string[]
+}
+
+/** Stitch outDir's variant renders into outDir/audition.wav (gapSeconds of silence between
+ * variants, none before the first or after the last) and write the timecode index to
+ * outDir/audition.json. Presentation order is v1..vN unless `order`/`shuffleSeed` says otherwise;
+ * entries are listed in PRESENTATION order, each naming its variant, so the index is the
+ * blind-listening answer key. Returns the index so callers can print it. */
+export function stitchAudition(outDir: string, count: number, opts: StitchOptions = {}): AuditionResult {
   if (count < 1) throw new BeatBatchError('audition needs at least one rendered variant')
+  if (opts.files !== undefined && opts.files.length !== count) {
+    throw new BeatBatchError(`audition got ${opts.files.length} file names for ${count} variants`)
+  }
   const gapSeconds = opts.gapSeconds ?? AUDITION_GAP_SECONDS
-  const wavs = Array.from({ length: count }, (_, i) => readWavChunks(resolve(outDir, `v${i + 1}.wav`)))
+  const order = opts.order ?? (opts.shuffleSeed !== undefined ? shuffledOrder(count, opts.shuffleSeed) : Array.from({ length: count }, (_, i) => i + 1))
+  if (order.length !== count || new Set(order).size !== count || order.some((n) => !Number.isInteger(n) || n < 1 || n > count)) {
+    throw new BeatBatchError(`audition order must be a permutation of 1..${count}`)
+  }
+  const wavName = (variantNumber: number) => opts.files?.[variantNumber - 1] ?? `v${variantNumber}.wav`
+  const wavs = order.map((n) => readWavChunks(resolve(outDir, wavName(n))))
   const first = wavs[0]!
   for (let i = 1; i < wavs.length; i++) {
     const w = wavs[i]!
     if (w.formatTag !== first.formatTag || w.channels !== first.channels || w.sampleRate !== first.sampleRate || w.bitsPerSample !== first.bitsPerSample) {
       throw new BeatBatchError(
-        `v${i + 1}.wav differs from v1.wav (${w.sampleRate} Hz / ${w.channels} ch / ${w.bitsPerSample}-bit vs ${first.sampleRate} Hz / ${first.channels} ch / ${first.bitsPerSample}-bit) — audition only stitches same-format renders from one batch`,
+        `${wavName(order[i]!)} differs from ${wavName(order[0]!)} (${w.sampleRate} Hz / ${w.channels} ch / ${w.bitsPerSample}-bit vs ${first.sampleRate} Hz / ${first.channels} ch / ${first.bitsPerSample}-bit) — audition only stitches same-format renders from one batch`,
       )
     }
   }
@@ -117,8 +168,8 @@ export function stitchAudition(outDir: string, count: number, opts: { gapSeconds
     const frames = wavs[i]!.data.length / first.blockAlign
     const startSeconds = startFrames / first.sampleRate
     entries.push({
-      variant: `v${i + 1}`,
-      wav: `v${i + 1}.wav`,
+      variant: `v${order[i]!}`,
+      wav: wavName(order[i]!),
       startSeconds,
       timecode: formatTimecode(startSeconds),
       durationSeconds: frames / first.sampleRate,
@@ -155,12 +206,18 @@ export function stitchAudition(outDir: string, count: number, opts: { gapSeconds
   const wavPath = resolve(outDir, 'audition.wav')
   const jsonPath = resolve(outDir, 'audition.json')
   const totalSeconds = dataLength / first.blockAlign / first.sampleRate
+  const shuffled = order.some((n, i) => n !== i + 1)
   writeFileSync(wavPath, out)
-  writeFileSync(jsonPath, JSON.stringify({ gapSeconds, sampleRate: first.sampleRate, totalSeconds, entries }, null, 2) + '\n')
-  return { wavPath, jsonPath, sampleRate: first.sampleRate, gapSeconds, totalSeconds, entries }
+  writeFileSync(jsonPath, JSON.stringify({ gapSeconds, sampleRate: first.sampleRate, totalSeconds, shuffled, entries }, null, 2) + '\n')
+  return { wavPath, jsonPath, sampleRate: first.sampleRate, gapSeconds, totalSeconds, entries, shuffled }
 }
 
-/** The one-line timecode index both surfaces print: "audition.wav (0:28.1): v1 @ 0:00.0, v2 @ 0:09.2, ...". */
+/** The one-line index both surfaces print. Unshuffled: the timecode map as always. Shuffled
+ * (blind): the map is withheld — printing "v3 @ 0:00.0" next to the wav path would hand the
+ * listener the answer key before they listen (pilot 108); it lives in audition.json instead. */
 export function formatAuditionIndex(r: AuditionResult): string {
+  if (r.shuffled) {
+    return `${r.wavPath} (${formatTimecode(r.totalSeconds)}): ${r.entries.length} variants, order shuffled — listen and rank BEFORE looking at the answer key in ${r.jsonPath}\n`
+  }
   return `${r.wavPath} (${formatTimecode(r.totalSeconds)}): ${r.entries.map((e) => `${e.variant} @ ${e.timecode}`).join(', ')} — index in ${r.jsonPath}\n`
 }

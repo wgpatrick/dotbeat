@@ -42,7 +42,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 /** Measured 2026-07-14 on the owner's CPU: a ~1.5s Stable Audio Open one-shot takes ~2 minutes.
  * The stub backend is stdlib-only and effectively instant. Used only to print an up-front estimate
  * — deliberately coarse, and labelled as an estimate wherever it's shown. */
-const SECONDS_PER_ONESHOT: Record<string, number> = { stableaudio: 120, stub: 1 }
+const SECONDS_PER_ONESHOT: Record<string, number> = { stableaudio: 120, stub: 1, fal: 15 }
 const DEFAULT_SECONDS_PER_ONESHOT = 120
 
 /** A typed error for the regen path, so the CLI/MCP surfaces print a clean, stack-trace-free line
