@@ -245,8 +245,19 @@ export const SCORERS: Record<string, Scorer> = {
   'both-bt': btScorerFor('both'),
 }
 
-export interface ScorerReport {
-  scorer: string
+/** T2 leftover (roadmap): which kind of round produced a batch. Ablation splits key on this —
+ * a taste model can be predictive on synth-param vary rounds and at chance on gen rounds (or
+ * vice versa), and one pooled number hides that. Classification uses the manifest conventions:
+ * `gen:<id>` groups are generation rounds (D21); track-bearing entries are vary rounds; a
+ * trackless non-gen batch is a stitched clip-set (`beat audition <dir>`, any group name). */
+export type VariantType = 'vary' | 'gen' | 'clip-set'
+export function variantTypeOf(b: { group: string; track?: string }): VariantType {
+  if (b.group.startsWith('gen:')) return 'gen'
+  if (b.track !== undefined) return 'vary'
+  return 'clip-set'
+}
+
+export interface ScorerSplit {
   batches: number
   /** fraction of held-out batches whose rank-1 pick the scorer ranked first */
   top1: number
@@ -258,6 +269,17 @@ export interface ScorerReport {
   /** analytic chance floors given each batch's own variant count */
   chanceTop1: number
   chanceTop3: number
+}
+
+/** Splits with fewer batches than this are labeled smoke in text AND carry `smoke: true` in JSON
+ * (pilot 110: script consumers shouldn't have to re-derive the threshold from the prose). */
+export const SPLIT_SMOKE_MIN_BATCHES = 5
+
+export interface ScorerReport extends ScorerSplit {
+  scorer: string
+  /** per-variant-type split of the SAME folds (same trained models — each fold's outcome is
+   * attributed to its held-out batch's type). Present only when the log spans >1 type. */
+  byType?: (ScorerSplit & { type: VariantType; smoke: boolean })[]
 }
 
 export interface EvalReport {
@@ -275,25 +297,46 @@ export interface EvalReport {
   embedding?: { backend: string; attached: number; missing: number; pcaDims: number; note?: string }
 }
 
-/** One scorer's leave-one-batch-out pass over its eligible batches. */
+/** One held-out fold's raw outcome, attributed to its batch's variant type for the splits. */
+interface FoldOutcome {
+  type: VariantType
+  top1Hit: boolean
+  top3Hit: boolean
+  pairsRight: number
+  pairCount: number
+  chanceTop1: number
+  chanceTop3: number
+}
+
+function aggregateFolds(folds: FoldOutcome[]): ScorerSplit {
+  const n = Math.max(1, folds.length)
+  const pairCount = folds.reduce((s, f) => s + f.pairCount, 0)
+  const pairsRight = folds.reduce((s, f) => s + f.pairsRight, 0)
+  return {
+    batches: folds.length,
+    top1: folds.filter((f) => f.top1Hit).length / n,
+    top3: folds.filter((f) => f.top3Hit).length / n,
+    pairwise: pairCount === 0 ? 0 : pairsRight / pairCount,
+    pairCount,
+    chanceTop1: folds.reduce((s, f) => s + f.chanceTop1, 0) / n,
+    chanceTop3: folds.reduce((s, f) => s + f.chanceTop3, 0) / n,
+  }
+}
+
+/** One scorer's leave-one-batch-out pass over its eligible batches. Every fold's outcome is also
+ * attributed to the held-out batch's variant type; the per-type splits aggregate the SAME folds
+ * (same trained models), so overall numbers are exactly the weighted union of the splits. */
 function runScorer(name: string, scorer: Scorer, batches: TasteBatch[], rng: () => number): ScorerReport {
-  let top1 = 0
-  let top3 = 0
-  let pairsRight = 0
-  let pairCount = 0
-  let chanceTop1 = 0
-  let chanceTop3 = 0
+  const folds: FoldOutcome[] = []
   for (let i = 0; i < batches.length; i++) {
     const heldOut = batches[i]!
     const training = batches.filter((_, j) => j !== i)
     const scores = scorer(heldOut, training, rng)
     const rankedFiles = Object.keys(scores).sort((a, b) => scores[b]! - scores[a]!)
     const target = heldOut.picks[0]!
-    if (rankedFiles[0] === target) top1 += 1
-    if (rankedFiles.slice(0, 3).includes(target)) top3 += 1
     const n = Math.max(1, rankedFiles.length)
-    chanceTop1 += 1 / n
-    chanceTop3 += Math.min(3, n) / n
+    let pairsRight = 0
+    let pairCount = 0
     // pairwise: every implied comparison whose two sides both have scores
     for (let wi = 0; wi < heldOut.picks.length; wi++) {
       const w = heldOut.picks[wi]!
@@ -304,18 +347,27 @@ function runScorer(name: string, scorer: Scorer, batches: TasteBatch[], rng: () 
         if (scores[w]! > scores[l]!) pairsRight += 1
       }
     }
+    folds.push({
+      type: variantTypeOf(heldOut),
+      top1Hit: rankedFiles[0] === target,
+      top3Hit: rankedFiles.slice(0, 3).includes(target),
+      pairsRight,
+      pairCount,
+      chanceTop1: 1 / n,
+      chanceTop3: Math.min(3, n) / n,
+    })
   }
-  const n = Math.max(1, batches.length)
-  return {
-    scorer: name,
-    batches: batches.length,
-    top1: top1 / n,
-    top3: top3 / n,
-    pairwise: pairCount === 0 ? 0 : pairsRight / pairCount,
-    pairCount,
-    chanceTop1: chanceTop1 / n,
-    chanceTop3: chanceTop3 / n,
+  const types = [...new Set(folds.map((f) => f.type))]
+  const report: ScorerReport = { scorer: name, ...aggregateFolds(folds) }
+  if (types.length > 1) {
+    report.byType = types
+      .sort()
+      .map((type) => {
+        const split = aggregateFolds(folds.filter((f) => f.type === type))
+        return { type, ...split, smoke: split.batches < SPLIT_SMOKE_MIN_BATCHES }
+      })
   }
+  return report
 }
 
 export interface EvaluateOptions {
@@ -387,6 +439,9 @@ export function formatEvalReport(r: EvalReport): string {
   out += `held-out prediction (leave-one-batch-out, ${r.usable} folds):\n`
   for (const s of r.scorers) {
     out += `  ${s.scorer.padEnd(8)} top-1 ${pct(s.top1)} (chance ${pct(s.chanceTop1)})  top-3 ${pct(s.top3)} (chance ${pct(s.chanceTop3)})  pairwise ${pct(s.pairwise)} of ${s.pairCount} (chance 50%)\n`
+    for (const t of s.byType ?? []) {
+      out += `    ${t.type.padEnd(9)} (${t.batches} batch${t.batches === 1 ? '' : 'es'}) top-1 ${pct(t.top1)} (chance ${pct(t.chanceTop1)})  top-3 ${pct(t.top3)} (chance ${pct(t.chanceTop3)})  pairwise ${pct(t.pairwise)} of ${t.pairCount}${t.smoke ? '  [small split — smoke, not evidence]' : ''}\n`
+    }
   }
   if (r.trainedPairCount > 0) {
     out += `taste directions (BT weights over all ${r.trainedPairCount} pairs; sign = preferred direction of the z-scored feature):\n`

@@ -546,7 +546,7 @@ const HELP = [
   },
   {
     cmd: 'taste-eval',
-    text: `  beat taste-eval <file.beat> [--log f] [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M]
+    text: `  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M]
                                                           the taste-model eval harness (docs/taste-loop-design.md):
                                                           leave-one-batch-out held-out pick prediction over the
                                                           scores log — top-1/top-3/pairwise accuracy vs chance for
@@ -560,6 +560,11 @@ const HELP = [
                                                           Scored batches carry per-variant DSP features in the log
                                                           since T0; --backfill derives them for older entries whose
                                                           batch renders still exist (rewrites the log, .bak kept).
+                                                          When the log mixes round kinds, each scorer also reports
+                                                          per-type splits — vary (track variations), gen (generated
+                                                          samples, group "gen:<id>"), clip-set (beat audition dirs)
+                                                          — same folds, attributed by the held-out batch's kind;
+                                                          splits under 5 batches are labeled smoke (JSON: smoke).
   beat taste-eval --doctor                                report the embedding sidecar's readiness (interpreter +
                                                           per-backend deps), JSON`,
   },
@@ -1608,16 +1613,25 @@ async function tasteEvalCmd(argv) {
     return
   }
   const valued = ['--log', '--seed', '--embed-backend', '--embed-model']
+  // Pilot 110 (MEDIUM): unknown flags used to be silently ignored (`--by-type` did nothing with
+  // exit 0) — same failure class as pilot 109's `--offlin` render finding. Loud error instead.
+  const known = new Set([...valued, '--json', '--backfill', '--doctor'])
+  for (const a of argv) {
+    if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --log, --seed, --json, --backfill, --embed-backend, --embed-model, --doctor)`)
+  }
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const [file] = positional
-  if (!file) throw new BeatEditError('taste-eval needs <file.beat> (the log defaults to beat-scores.jsonl next to it) or an explicit --log <path>')
+  const explicitLog = flagValue(argv, '--log')
+  // Pilot 110 (MEDIUM): this used to demand <file.beat> even WITH --log, while its own error text
+  // promised "--log <path>" alone works. The text was right; the check was wrong.
+  if (!file && explicitLog === undefined) throw new BeatEditError('taste-eval needs <file.beat> (the log defaults to beat-scores.jsonl next to it) or an explicit --log <path>')
   const { defaultScoresLog } = await import('../dist/src/vary/batch.js')
   const { evaluate, formatEvalReport } = await import('../dist/src/taste/eval.js')
   const embedBackend = flagValue(argv, '--embed-backend') ?? 'clap'
   if (!['stub', 'clap', 'mert', 'off'].includes(embedBackend)) {
     throw new BeatEditError(`--embed-backend must be one of stub|clap|mert|off, got "${embedBackend}"`)
   }
-  const logPath = flagValue(argv, '--log') ?? defaultScoresLog(file)
+  const logPath = explicitLog ?? defaultScoresLog(file)
   if (!existsSync(logPath)) throw new BeatEditError(`no scores log at ${logPath} — score some batches first (beat vary ... --render, beat score)`)
   if (argv.includes('--backfill')) {
     // Rewrite entries that lack features but whose batch renders still exist — making the log

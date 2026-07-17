@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { FEATURE_KEYS, metricsToFeatures, computeBatchFeatures, type FeatureVector } from '../src/taste/features.js'
 import { standardizeBatch, pairsFromRanking, trainBT, scoreVector, describeWeights } from '../src/taste/ranker.js'
-import { loadTasteBatches, evaluate, mulberry32 } from '../src/taste/eval.js'
+import { loadTasteBatches, evaluate, mulberry32, variantTypeOf, formatEvalReport } from '../src/taste/eval.js'
 import { stitchAudition, shuffledOrder } from '../src/vary/audition.js'
 import { scoreBatch, writeClipSetBatch, adoptVariant, formatScoreResult, BeatBatchError, type VaryBatchManifest } from '../src/vary/batch.js'
 import { analyze, decodeWav } from '../src/metrics/index.js'
@@ -138,6 +138,61 @@ test('evaluate: dsp-bt beats random on a consistent synthetic taste, with honest
   assert.ok(Math.abs(bt.chanceTop1 - 0.2) < 1e-9, '5 variants -> 20% chance floor')
   const centroidW = report.weights.find((w) => w.feature === 'centroidLog2')
   assert.ok(centroidW !== undefined && centroidW.weight < 0, 'reported taste direction: darker preferred')
+})
+
+test('taste-eval per-variant-type splits: mixed logs split by type, single-type logs do not', async () => {
+  // Same planted "prefers darker" taste, expressed through three round kinds: vary entries
+  // (track-bearing), gen entries (group `gen:<id>`, no track), and a clip-set entry (trackless,
+  // arbitrary group). The splits must partition the SAME folds: per-type batch counts sum to the
+  // overall count, and every type present in the log appears exactly once per scorer.
+  const genEntry = (i: number) => {
+    const e = JSON.parse(darkTasteEntry(100 + i)) as Record<string, unknown>
+    delete e.track
+    e.group = 'gen:snare'
+    e.batch = `/nonexistent/gen-batch-${i}`
+    return JSON.stringify(e)
+  }
+  const clipSetEntry = (i: number) => {
+    const e = JSON.parse(darkTasteEntry(200 + i)) as Record<string, unknown>
+    delete e.track
+    e.group = 'clips'
+    e.batch = `/nonexistent/clips-batch-${i}`
+    return JSON.stringify(e)
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'taste-split-'))
+  const logPath = join(dir, 'beat-scores.jsonl')
+  const lines = [
+    ...Array.from({ length: 4 }, (_, i) => darkTasteEntry(i)),
+    ...Array.from({ length: 3 }, (_, i) => genEntry(i)),
+    clipSetEntry(0),
+  ]
+  writeFileSync(logPath, lines.join('\n') + '\n')
+  const report = await evaluate(logPath, { seed: 41, embedBackend: 'off' })
+  assert.equal(report.usable, 8)
+  const bt = report.scorers.find((s) => s.scorer === 'dsp-bt')!
+  assert.ok(bt.byType !== undefined, 'mixed log must carry per-type splits')
+  assert.deepEqual(bt.byType.map((t) => t.type).sort(), ['clip-set', 'gen', 'vary'])
+  assert.equal(bt.byType.reduce((s, t) => s + t.batches, 0), bt.batches, 'splits partition the folds')
+  assert.equal(bt.byType.find((t) => t.type === 'vary')!.batches, 4)
+  assert.equal(bt.byType.find((t) => t.type === 'gen')!.batches, 3)
+  assert.equal(bt.byType.find((t) => t.type === 'clip-set')!.batches, 1)
+  // pilot 110: the smoke threshold is machine-readable, not prose-only
+  assert.equal(bt.byType.find((t) => t.type === 'vary')!.smoke, true, '4 batches < 5 -> smoke')
+  assert.equal(bt.byType.find((t) => t.type === 'gen')!.smoke, true)
+  const text = formatEvalReport(report)
+  assert.match(text, /vary\s+\(4 batches\)/)
+  assert.match(text, /gen\s+\(3 batches\) .*\[small split — smoke, not evidence\]/)
+
+  // classifier unit cases
+  assert.equal(variantTypeOf({ group: 'gen:kick' }), 'gen')
+  assert.equal(variantTypeOf({ group: 'cutoff', track: 'lead' }), 'vary')
+  assert.equal(variantTypeOf({ group: 'anything-else' }), 'clip-set')
+
+  // single-type log: no byType noise
+  const soloPath = join(dir, 'solo.jsonl')
+  writeFileSync(soloPath, Array.from({ length: 3 }, (_, i) => darkTasteEntry(i)).join('\n') + '\n')
+  const solo = await evaluate(soloPath, { seed: 41, embedBackend: 'off' })
+  assert.equal(solo.scorers.find((s) => s.scorer === 'dsp-bt')!.byType, undefined)
 })
 
 test('loadTasteBatches skips batches with no derivable features and says why', () => {
