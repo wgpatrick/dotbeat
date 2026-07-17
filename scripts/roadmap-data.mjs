@@ -788,6 +788,12 @@ export const rows = [
     research: 'research/50-ableton-vs-dotbeat-live-concepts.md', plan: 'phase-26-plan.md',
   },
   {
+    area: 'Instrument / SoundFont tracks', feature: 'Fix live render of soundfont songs failing with "Start time must be strictly greater than" (pilot 111)',
+    description: 'Pilot 111 (research/111): a plain LIVE `beat render` of examples/night-shift-song.beat fails after the full ~77s wait with a spessasynth/engine scheduling error ("Start time must be strictly greater...") — and the CLI reports it as "page error(s) during render:" with an EMPTY list, so the user sees a failure with no reason. Two parts: the engine scheduling bug itself (instrument-track path), and the error-reporting path that can produce an empty page-error list.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/111-usability-pilot-batch-offline-default.md', plan: null,
+  },
+  {
     area: 'Instrument / SoundFont tracks', feature: 'One-shot sampler instrument track kind',
     description: 'A lean sampler instrument (volume, sample, release, pitch-tracking — 3-4 literal fields) as a track kind distinct from the implicit "every track is a synth" assumption. Explicitly the right-sized alternative to Ableton\'s full multisampling Sampler stack (key/velocity zones, dedicated Zone Editor view, manual ch.30 §30.10, pp.734-738) — if multisampling depth is ever wanted, extend this leaner one-shot sampler with key-range zones incrementally rather than building a Zone Editor from scratch (research/68).',
     core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
@@ -1820,6 +1826,12 @@ export const rows = [
     research: null, plan: 'phase-35-plan.md',
   },
 
+  {
+    area: 'Vary / audition loop', feature: 'vary on instrument tracks: error lists groups it then refuses (pilot 111)',
+    description: 'Pilot 111 (research/111): on an instrument (soundfont) track, `beat vary` refuses every non-feel group — but the refusal error lists those same groups as legal targets in the same message. Either support the applicable groups on instrument tracks or make the error name only what actually works there (feel).',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/111-usability-pilot-batch-offline-default.md', plan: null,
+  },
   {
     area: 'Vary / audition loop', feature: 'One-WAV audition (contact sheet) + first-class adopt',
     description: 'Owner\'s #1 ergonomic ask from the first dogfood session: `beat vary --audition` / beat_vary audition:true (implies render) stitches every rendered variant into ONE audition.wav — 0.5s gaps, printed timecode index (v1 @ 0:00.0, ...), same map in audition.json — instead of N files to juggle. And adopting a winner is a real verb now: `beat adopt <batch-dir> <pick>` / beat_adopt copies the picked variant over the parent through the manifest, refusing if the parent\'s sha256 no longer matches the batch\'s parentSha256 (the parent moved on) unless forced — pilot 101\'s "a feel winner is unadoptable MCP-only" gap closed with data-safety included.',
