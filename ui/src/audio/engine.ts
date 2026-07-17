@@ -672,7 +672,12 @@ interface DownsamplerNode {
 const DOWNSAMPLER_BUFFER_SIZE = 1024
 function buildDownsampler(): DownsamplerNode {
   const ctx = Tone.getContext().rawContext as AudioContext
-  if (typeof ctx.createScriptProcessor !== 'function') {
+  // Passthrough in EVERY offline context, not just ones lacking createScriptProcessor: the
+  // offline renderer now builds on a raw NATIVE OfflineAudioContext (ui/src/audio/offline.ts),
+  // which DOES expose createScriptProcessor — but ScriptProcessorNode's audioprocess events are
+  // main-thread callbacks an offline render does not pause for, so the node would emit silence
+  // or nondeterministic partial audio rather than the documented, caveat-flagged passthrough.
+  if (Tone.getContext().isOffline || typeof ctx.createScriptProcessor !== 'function') {
     // Offline rendering (ui/src/audio/offline.ts): standardized-audio-context's OfflineAudioContext
     // deliberately omits the deprecated ScriptProcessorNode, so the decimator degrades to a plain
     // passthrough gain there. hold=1 (bitcrushRate off) IS passthrough, so this is bit-exact for
