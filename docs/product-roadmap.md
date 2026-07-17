@@ -24,9 +24,9 @@ data file, not this file directly, so it stays in sync with the matching artifac
 A feature with links in both columns but status "Not started" means: fully scoped, ready for a
 stream to pick up — not guesswork, a decision away from being built.
 
-## Snapshot — 331 features tracked
+## Snapshot — 334 features tracked
 
-**138** Done · **5** In progress · **188** Not started
+**140** Done · **5** In progress · **189** Not started
 
 ---
 
@@ -322,6 +322,9 @@ stream to pick up — not guesswork, a decision away from being built.
 |---|---|---|---|---|---|---|---|
 | GUI Export button | Reuses the live engine’s own capture path; verified against the CLI reference render. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-20-render-export.md`](phase-20-render-export.md) |
 | Per-track stem rendering (`beat render --stems`) | DONE (Phase 37 Stream RA): `beat render <file> --stems [--out-dir d]` writes one solo WAV per track, reusing the existing `renderTrackSolosCommand` store-solo session (one browser boot for all stems). Feeds the D2 metrics/lint loop with per-stem signal, not just mix-bus. | ✅ done | ✅ done | — | ✅ Done | [`52-ableton-vs-dotbeat-files-and-sets.md`](research/52-ableton-vs-dotbeat-files-and-sets.md) | [`phase-37-plan.md`](phase-37-plan.md) |
+| Fast render, slice 1: one harness boot per vary batch (`render --batch`) | DONE: `beat render --batch <dir>` boots daemon+vite+Chromium ONCE and renders every variant by swapping the watched file and waiting for the store to hot-reload — measured 33s vs ~70s for a 12-variant batch (boot was most of every per-variant render). `beat vary --render` and `beat source gen` ride it automatically. | ✅ done | ✅ done | — | ✅ Done | — | — |
+| Fast render, slice 2: offline compute (`beat render --offline`, D22) | DONE (opt-in): the SAME Engine class constructed inside a Tone OfflineContext — exact deterministic PCM (no MediaRecorder/opus loss), parity-gated against live capture on smoke + real-groove within src/metrics/variance.ts bounds (the two exceptions — mono-project "width", sub-band tilt — are the live capture chain's own lossiness). Refuses soundfont projects loudly; bitcrushRate degrades to passthrough with a named caveat. NOT unconditionally fast: Tone schedules the whole song then renders once, so spent one-shot voices accumulate and compute grows superlinearly with length×density (smoke 3.4x realtime; 8-track 96s first-light 0.12-0.32x — CLI prints the ratio + a heads-up under 1x). See D22 for the three t=0/context invariants this surfaced. | ✅ done | ✅ done | — | ✅ Done | — | — |
+| Offline render scaling: schedule-window + dispose-behind-frontier | The real fix for D22's superlinear offline compute: drive OfflineAudioContext.suspend() so scheduling stays a window ahead of the render frontier and spent one-shot sources are disposed once their audio has actually rendered — turning per-quantum cost from O(all notes so far) into O(sounding notes). Would make --offline the honest default for full-song renders and the T5 overnight QD loop's render budget. | ❌ missing | ❌ missing | — | ⬜ Not started | — | — |
 
 ## Metrics / critique loop
 

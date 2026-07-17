@@ -9,6 +9,51 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D22 — offline render is opt-in (`--offline`), exact but not unconditionally fast; live capture stays the default (2026-07-17)
+
+**The decision.** D15's closing note ("if a faster-than-realtime batch render path is needed
+later... that's a fresh build bundling `ui/`'s own engine headlessly") is now built —
+`ui/src/audio/offline.ts` + `beat render --offline` — as the SAME `Engine` class constructed
+inside a Tone `OfflineContext` (one canonical engine survives; this is a second *context*, not a
+second engine). It ships **opt-in**, and live capture remains the default and the reference,
+because the honest measurement says "offline" and "fast" are not synonyms:
+
+- **Exactness:** offline output is deterministic PCM straight off the graph (identical metrics
+  across runs), where live capture rides MediaRecorder→opus→decode. The two parity failures on
+  the gate were both cases where *live* is the lossy one: stereo "width" on a mono project
+  measures the opus chain's decorrelation noise floor, and a small sub-band share tilt traces to
+  low-frequency shedding in the capture chain. Everything else matched inside
+  `src/metrics/variance.ts` bounds on both gate projects (2-note smoke, 4-track real-groove).
+- **Speed is graph-bound and SUPERLINEAR in song length:** Tone's offline architecture schedules
+  the whole song, then renders once; spent one-shot voices can never be disposed mid-schedule
+  (their audio hasn't rendered yet), so every note's oscillator+gain survives to the end and the
+  render pass processes all of them every quantum. Measured: 1-track smoke 3.4x realtime; the
+  8-track 96s `first-light` 0.32x at 10s, 0.12x at 30s — slower than live capture, on a container
+  where the live path itself underruns (~0.4x, the Phase-34 wall-clock-truncation evidence). The
+  CLI prints the measured ratio and a heads-up whenever it lands under 1x.
+
+**Three t=0/context rules the build surfaced, now load-bearing engine invariants:**
+1. **Tick-time code must resolve its transport through the engine's own bound context**
+   (`Engine.boundContext`, captured at `ensureStarted`) — never `Tone.getTransport()`/
+   `Tone.Time()`. Tone restores the global context *before* offline rendering runs, so a global
+   lookup inside a render-time tick answers with the LIVE transport (position 0) — that bug
+   retriggered step 0's note on every 16th, forever.
+2. **Never schedule the first event at absolute context time 0** — a t=0 attack collides with the
+   param's initial-value event and renders a visibly wrong envelope (measured: 10ms attack halved,
+   +4 dB resonant overshoot). Offline renders start the transport `OFFLINE_RENDER_PREROLL_SECONDS`
+   in and trim exactly that much off.
+3. **Drive the render loop synchronously** (`OfflineContext.render(false)`), and suspend the live
+   realtime context for the duration: Tone.Offline's async loop yields to `setTimeout` once per
+   audio-second, and a hidden headless page's intensive wake-up throttling parks each yield —
+   a 96s render stalled indefinitely at ~0% CPU under the wrapper.
+
+**Deliberate v1 scope:** soundfont (instrument/sf-lane) projects are refused loudly (spessasynth
+needs a native realtime context); `bitcrushRate` degrades to passthrough with a named caveat;
+media is warmed from the live engine's decode caches (`warmMediaLoads` + seeded buffers), never
+fetched by the offline instance. The real fix for the superlinear scaling — a schedule-window +
+dispose-behind-the-frontier loop over `OfflineAudioContext.suspend()` — is a roadmap item, not a
+patch to smuggle in.
+
 ## D21 — one batch manifest for generation too; `adopt` learns media, and candidates don't register until they win (2026-07-15)
 
 **The decision.** `beat source gen --count N` (Phase 40 Stream VB) generates N candidates of one

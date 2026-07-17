@@ -1304,6 +1304,24 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: 'phase-37-plan.md',
   },
+  {
+    area: 'Render / export', feature: 'Fast render, slice 1: one harness boot per vary batch (`render --batch`)',
+    description: 'DONE: `beat render --batch <dir>` boots daemon+vite+Chromium ONCE and renders every variant by swapping the watched file and waiting for the store to hot-reload — measured 33s vs ~70s for a 12-variant batch (boot was most of every per-variant render). `beat vary --render` and `beat source gen` ride it automatically.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: null, plan: null,
+  },
+  {
+    area: 'Render / export', feature: 'Fast render, slice 2: offline compute (`beat render --offline`, D22)',
+    description: 'DONE (opt-in): the SAME Engine class constructed inside a Tone OfflineContext — exact deterministic PCM (no MediaRecorder/opus loss), parity-gated against live capture on smoke + real-groove within src/metrics/variance.ts bounds (the two exceptions — mono-project "width", sub-band tilt — are the live capture chain\'s own lossiness). Refuses soundfont projects loudly; bitcrushRate degrades to passthrough with a named caveat. NOT unconditionally fast: Tone schedules the whole song then renders once, so spent one-shot voices accumulate and compute grows superlinearly with length×density (smoke 3.4x realtime; 8-track 96s first-light 0.12-0.32x — CLI prints the ratio + a heads-up under 1x). See D22 for the three t=0/context invariants this surfaced.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: null, plan: null,
+  },
+  {
+    area: 'Render / export', feature: 'Offline render scaling: schedule-window + dispose-behind-frontier',
+    description: 'The real fix for D22\'s superlinear offline compute: drive OfflineAudioContext.suspend() so scheduling stays a window ahead of the render frontier and spent one-shot sources are disposed once their audio has actually rendered — turning per-quantum cost from O(all notes so far) into O(sounding notes). Would make --offline the honest default for full-song renders and the T5 overnight QD loop\'s render budget.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: null, plan: null,
+  },
 
   // ── Metrics / critique loop ──────────────────────────────────────────────
   {

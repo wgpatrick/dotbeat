@@ -596,6 +596,14 @@ const HELP = [
     cmd: 'render',
     text: `  beat render <file> [-o out.wav] [--tail <sec>]          render to WAV through dotbeat's own engine
                                                           (headless Chromium driving ui/; no BeatLab needed)
+  beat render <file> --offline [-o out.wav]               compute the mix through an offline context instead
+                                                          of capturing the realtime clock — same engine,
+                                                          deterministic exact PCM (no lossy recorder step).
+                                                          CPU-bound: fast for short/small projects, can be
+                                                          SLOWER than live capture for long dense songs (the
+                                                          measured ratio is printed). Refuses soundfont
+                                                          (instrument/sf-lane) projects; bitcrushRate renders
+                                                          as passthrough (caveat printed). See decisions D22.
   beat render <file> --stems [--out-dir d]                Phase 37: one solo WAV per track into an out dir
                                                           (default stems-<file> next to the .beat) — stems for
                                                           external mixing or per-track metrics
@@ -3140,11 +3148,12 @@ async function main() {
         await renderStemsCmd(rest.filter((a) => a !== '--stems'))
         break // renderStemsCmd process.exit()s; break keeps the switch well-formed
       }
-      // One render path now (D15): dotbeat's own engine (ui/src/audio/engine.ts) driven headless.
-      // The retired `--offline` flag (BeatLab-dependent, broken in this environment) is accepted
-      // and ignored so old invocations don't hard-error — the real engine is dotbeat's own either way.
+      // One engine (D15): dotbeat's own (ui/src/audio/engine.ts) driven headless. `--offline` is
+      // MEANINGFUL again (renderer slice 2) — same engine, computed through Tone.Offline as fast
+      // as the CPU allows instead of captured off the realtime clock. (The OLD --offline was a
+      // retired BeatLab path; this one shares every line of engine code with live playback.)
       const { renderCommand } = await import('./render.mjs')
-      await renderCommand(rest.filter((a) => a !== '--offline'))
+      await renderCommand(rest)
       process.exit(0) // render leaves event-loop stragglers (chromium pipes, vite) — see render.mjs footer
     }
     // Phase 37 Stream RA: render once, then section-aware or whole-song mix feedback in one step.

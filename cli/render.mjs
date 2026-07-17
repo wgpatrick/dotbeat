@@ -108,6 +108,7 @@ function parseArgs(argv) {
     else if (a === '--daemon-port') args.daemonPort = argv[++i]
     else if (a === '--preview-port') args.previewPort = argv[++i]
     else if (a === '--batch') args.batch = argv[++i]
+    else if (a === '--offline') args.offline = true
     // legacy no-ops: the engine is dotbeat's own now, so these are accepted-and-ignored rather
     // than errored, so old scripts/invocations don't break on an unknown flag.
     else if (a === '--beatlab-dir') i++ // swallow its value
@@ -322,6 +323,34 @@ async function captureWav(page, seconds, pageErrors) {
   return trimLeadingSilence(Buffer.from(base64, 'base64'), seconds)
 }
 
+/** Offline capture (renderer slice 2): compute the mix through Tone.Offline via the page's
+ * __renderOffline hook (ui/src/audio/offline.ts) — same engine class, offline context, as fast
+ * as the CPU allows. The buffer is exact-length by construction (no recorder spin-up, no trim,
+ * no underrun class of bug). Refusals (soundfont tracks, undecoded media) throw with the page's
+ * own reason so callers can fall back to live capture deliberately. */
+async function captureOfflineWav(page, seconds, pageErrors) {
+  console.error("rendering (offline compute through dotbeat's own engine)...")
+  const result = await page.evaluate(async (secs) => {
+    const { blob, caveats, renderMs } = await window.__renderOffline(secs)
+    const buf = await blob.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+    return { base64: btoa(binary), caveats, renderMs }
+  }, seconds)
+  if (pageErrors.length) throw new Error('page error(s) during offline render:\n' + pageErrors.join('\n'))
+  for (const caveat of result.caveats) console.error(`offline caveat: ${caveat}`)
+  const ratio = (seconds * 1000) / Math.max(1, result.renderMs)
+  console.error(`offline compute: ${(result.renderMs / 1000).toFixed(2)}s for ${seconds.toFixed(2)}s of audio (${ratio.toFixed(1)}x realtime)`)
+  // Honesty note, not an error: offline compute is CPU-bound and Tone's schedule-then-render
+  // architecture keeps every one-shot voice node alive for the whole render (see
+  // ui/src/audio/offline.ts header), so long/dense songs on a slow machine can compute SLOWER
+  // than the live capture would have taken. The output is still exact — this is purely a
+  // wall-clock heads-up so nobody assumes --offline is unconditionally the fast path.
+  if (ratio < 1) console.error(`note: offline computed slower than realtime on this machine — plain live capture may be faster for this project`)
+  return Buffer.from(result.base64, 'base64')
+}
+
 /** Cut the recorder-spin-up silence off the front of a canonical 44-byte-header 16-bit PCM WAV
  * (what engine.recordWav()/audioBufferToWav produce) so the file starts on the loop's first
  * sound, then cap it at `seconds` so the deliberate over-capture doesn't lengthen the file.
@@ -367,7 +396,9 @@ export async function renderCommand(argv) {
 
   const session = await bootRenderSession(beatPath, { tail, daemonPort, previewPort })
   try {
-    const wavBytes = await captureWav(session.page, session.seconds, session.pageErrors)
+    const wavBytes = args.offline
+      ? await captureOfflineWav(session.page, session.seconds, session.pageErrors)
+      : await captureWav(session.page, session.seconds, session.pageErrors)
     writeFileSync(outPath, wavBytes)
     console.error(`wrote ${outPath} (${wavBytes.length} bytes)`)
   } finally {
@@ -473,7 +504,9 @@ export async function renderBatchCommand(argv) {
       const doc = parse(readFileSync(join(dir, v.file), 'utf8'))
       const renderBars = doc.song && doc.song.length > 0 ? doc.song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
       const seconds = (renderBars * 16 * 60) / doc.bpm / 4
-      const wavBytes = await captureWav(session.page, seconds, session.pageErrors)
+      const wavBytes = args.offline
+        ? await captureOfflineWav(session.page, seconds, session.pageErrors)
+        : await captureWav(session.page, seconds, session.pageErrors)
       session.pageErrors.length = 0 // captured errors are per-variant, not cumulative
       const outPath = join(dir, v.file.replace(/\.beat$/, '.wav'))
       writeFileSync(outPath, wavBytes)

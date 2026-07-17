@@ -666,12 +666,20 @@ interface EffectRuntime {
 // (Chromium, via Playwright) — an accepted tradeoff for "small," per the research doc's framing.
 // See docs/phase-23-stream-be.md for the fuller design writeup.
 interface DownsamplerNode {
-  node: ScriptProcessorNode
+  node: AudioNode
   setHold: (n: number) => void
 }
 const DOWNSAMPLER_BUFFER_SIZE = 1024
 function buildDownsampler(): DownsamplerNode {
   const ctx = Tone.getContext().rawContext as AudioContext
+  if (typeof ctx.createScriptProcessor !== 'function') {
+    // Offline rendering (ui/src/audio/offline.ts): standardized-audio-context's OfflineAudioContext
+    // deliberately omits the deprecated ScriptProcessorNode, so the decimator degrades to a plain
+    // passthrough gain there. hold=1 (bitcrushRate off) IS passthrough, so this is bit-exact for
+    // every project not using bitcrushRate; renderOfflineWav flags the caveat when a doc does.
+    const passthrough = ctx.createGain()
+    return { node: passthrough, setHold: () => {} }
+  }
   const node = ctx.createScriptProcessor(DOWNSAMPLER_BUFFER_SIZE, 2, 2)
   let hold = 1 // samples to hold; 1 = passthrough (no reduction) — bitcrushRate's default/off state
   let counter = 0
@@ -1819,7 +1827,32 @@ interface AudioTrackVoice {
   levelTap: Tone.Analyser
 }
 
-class Engine {
+/** Options for non-default Engine instances (the singleton `engine` below uses none). */
+/** Transport start offset for an offline render (ui/src/audio/offline.ts). A note scheduled at
+ * exactly context time 0 renders with a visibly wrong envelope attack — measured on a 10ms linear
+ * attack: it collapsed to roughly half its length, and the resonant-filter overshoot came out
+ * ~4 dB hotter than the live engine's (t=0 is where a param's ramp anchor collides with its
+ * initial-value event, an ambiguity every later time is free of). The live path never schedules
+ * at absolute 0 — the context is already running before play() — so an offline render starts the
+ * transport this far in instead, and renderOfflineWav trims exactly this much off the front. */
+export const OFFLINE_RENDER_PREROLL_SECONDS = 0.1
+
+export interface EngineOptions {
+  /** Offline-render mode (ui/src/audio/offline.ts): the instance builds every node against
+   * Tone's CURRENT context — inside Tone.Offline() that is the offline context — and must never
+   * pin a native realtime AudioContext or schedule Draw-based GUI handoffs. */
+  offline?: boolean
+  /** Pre-decoded media buffers handed over from the live engine so an offline instance plays
+   * sample lanes / audio clips without fetching (decoded AudioBuffers are plain sample data,
+   * safely usable across contexts). */
+  seedBuffers?: ReadonlyMap<string, Tone.ToneAudioBuffer>
+}
+
+export class Engine {
+  constructor(private readonly opts: EngineOptions = {}) {
+    if (opts.seedBuffers) for (const [id, buf] of opts.seedBuffers) this.audioBuffers.set(id, buf)
+  }
+
   private chains = new Map<string, SynthChain>()
   // Phase 35 Stream OF: ALL per-drums-track playback state, keyed by track id (see DrumTrackState's
   // doc comment). Replaces the old single-track drums/drumTrackId/kickTuneHz/lastLaneTriggerTime/
@@ -1829,6 +1862,26 @@ class Engine {
   private drumStates = new Map<string, DrumTrackState>()
   private repeatId: number | null = null
   private started = false
+
+  // The Tone context this engine's nodes and transport belong to, captured in ensureStarted()
+  // (after ensureNativeContext() has pinned the live engine's native context; inside the
+  // Tone.Offline() callback for an offline instance). Every TICK-TIME lookup (tick(),
+  // triggerDrum()) must resolve the transport through this instead of the global
+  // Tone.getTransport()/Tone.Time(): Tone.Offline restores the global context BEFORE the offline
+  // rendering actually runs, so a global lookup inside a tick fired during rendering answers with
+  // the LIVE transport — position frozen at 0, live bpm — which made every offline tick compute
+  // step 0 and retrigger the first note on every 16th, forever (the -30 dB "sustain wall" bug).
+  private boundContext: ReturnType<typeof Tone.getContext> | null = null
+  /** The transport this engine schedules on (see boundContext) — falls back to the global
+   * transport before the first ensureStarted(), where the two are the same thing. */
+  private get transportRef(): ReturnType<typeof Tone.getTransport> {
+    return this.boundContext ? this.boundContext.transport : Tone.getTransport()
+  }
+  /** One 16th-note in seconds on THIS engine's transport — the tick-time-safe replacement for
+   * `Tone.Time('16n').toSeconds()`, which reads the GLOBAL context's transport bpm. */
+  private stepSecondsNow(): number {
+    return 60 / this.transportRef.bpm.value / 4
+  }
 
   // Phase 24 Stream CH: "audition a clip in isolation" (docs/phase-24-stream-ch.md). Non-null while
   // NoteView's "preview this clip" control is active — the id of the ONE track whose own live/loop-
@@ -1864,6 +1917,14 @@ class Engine {
    * Idempotent; must run before the first Tone node is created (called at the top of getMaster and
    * ensureStarted, the only entry points that build nodes). */
   private ensureNativeContext(): AudioContext {
+    if (this.opts.offline) {
+      // Offline instances build against Tone's CURRENT context (Tone.Offline's own) — pinning a
+      // native realtime AudioContext here would yank the whole render back onto the wall clock.
+      // The decode call sites use the returned context's decodeAudioData, which the offline
+      // context also implements; the worklet/sf paths that genuinely need a NATIVE context are
+      // refused up-front by renderOfflineWav's precheck (ui/src/audio/offline.ts).
+      return Tone.getContext().rawContext as AudioContext
+    }
     if (!this.nativeCtx) {
       this.nativeCtx = new AudioContext()
       Tone.setContext(this.nativeCtx)
@@ -2264,8 +2325,19 @@ class Engine {
    * syncDeclaredDrumLanes(); best-effort like buildInstrument(). Pending-set lives on the TRACK's
    * own state (Phase 35 Stream OF) so two drums tracks' same-named lanes can't block each other. */
   private loadLaneSample(state: DrumTrackState, laneName: string, sampleId: string, mediaPath: string, voice: SampleLaneVoice): void {
-    state.samplePending.add(laneName)
     const old = voice.player
+    // Already-decoded buffer (an offline instance seeded from the live engine's caches — see
+    // EngineOptions.seedBuffers/exportAudioBuffers): build the player synchronously from sample
+    // data instead of URL-fetching, which an offline render can't wait on (play() doesn't await
+    // lane loads; the render would race the fetch and capture the silent fallback).
+    const seeded = this.audioBuffers.get(sampleId)
+    if (seeded && seeded.loaded) {
+      voice.player = new Tone.Player(seeded).connect(voice.filter)
+      voice.loadedSample = sampleId
+      if (old) old.dispose()
+      return
+    }
+    state.samplePending.add(laneName)
     const player = new Tone.Player({
       url: `${daemonBase()}/media/${mediaPath}`,
       onload: () => {
@@ -2440,10 +2512,27 @@ class Engine {
     }
   }
 
+  /** Kick every media decode the current document needs (drum-lane one-shots + audio-clip
+   * buffers) WITHOUT starting playback. play()/auditionClip() warm these as a side effect of
+   * sync(); an offline render (ui/src/audio/offline.ts) never plays the LIVE engine, so it calls
+   * this explicitly, then waits for pendingMediaCount() to reach 0 before seeding the offline
+   * instance from exportAudioBuffers(). */
+  async warmMediaLoads(): Promise<void> {
+    await this.ensureStarted() // syncDrumTracks inside kicks lane-sample loads
+    const doc = useStore.getState().doc
+    if (doc) this.syncAudioTracks(doc)
+  }
+
   async ensureStarted(): Promise<void> {
     if (this.started) return
-    this.ensureNativeContext() // pin Tone to a native context before Tone.start()/node creation
-    await Tone.start()
+    if (!this.opts.offline) {
+      this.ensureNativeContext() // pin Tone to a native context before Tone.start()/node creation
+      await Tone.start() // an offline context needs no user-gesture resume — Offline() drives it
+    }
+    // Capture OUR context now (native for live, the offline context inside Tone.Offline's
+    // callback for an offline instance) — tick-time code resolves the transport through this,
+    // never through the global lookup. See boundContext's doc comment.
+    this.boundContext = Tone.getContext()
     // Build every drums track's live state up front (kit/lanes + bus params) in case params were
     // adjusted before this first start — the per-track generalization of the old single-track
     // buildDrums()+applyDrum*Params warmup (Phase 35 Stream OF).
@@ -3106,7 +3195,7 @@ class Engine {
       if (lane === 'hat') this.chokeDeclaredLane(state, 'openhat', t)
       const voice = state.lanes.get(lane)
       if (!voice) return
-      const stepSec = Tone.Time('16n').toSeconds()
+      const stepSec = this.stepSecondsNow() // NOT Tone.Time('16n') — see boundContext's doc comment
       const durSec = duration !== undefined ? duration * stepSec : undefined
       if (voice.kind === 'synth') {
         const defaults = DRUM_VOICE_PARAM_DEFAULTS[voice.voiceType]
@@ -3373,7 +3462,8 @@ class Engine {
     t.position = `${startBar ?? region?.start ?? 0}m`
     if (this.repeatId !== null) t.clear(this.repeatId)
     this.repeatId = t.scheduleRepeat((time) => this.tick(time), '16n', 0)
-    t.start()
+    // Offline: never start at absolute context time 0 — see OFFLINE_RENDER_PREROLL_SECONDS.
+    t.start(this.opts.offline ? OFFLINE_RENDER_PREROLL_SECONDS : undefined)
     useStore.getState().setPlaying(true)
   }
 
@@ -3727,7 +3817,7 @@ class Engine {
     if (!doc) return
     // Re-sync each tick so live knob/step edits are heard on the next step (BeatLab does the same).
     this.sync(doc)
-    const transport = Tone.getTransport()
+    const transport = this.transportRef // NOT Tone.getTransport() — see boundContext's doc comment
     const song = doc.song && doc.song.length > 0 ? (doc.song as { scene: string; bars: number }[]) : null
     const songBars = song ? song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
     // Phase 24 Stream CE: wrap over the active loop region's bar range instead of the full song when
@@ -3749,7 +3839,7 @@ class Engine {
     // region is active) — chanceFires re-rolls per (pass, track, note), so the same note is
     // re-evaluated fresh every time the loop comes back around rather than a single fixed draw.
     const pass = Math.floor((rawStep - wrapStartStep) / wrapSteps)
-    const stepSeconds = Tone.Time('16n').toSeconds()
+    const stepSeconds = this.stepSecondsNow() // NOT Tone.Time('16n') — see boundContext's doc comment
 
     for (const track of doc.tracks) {
       // Phase 24 Stream CH: while auditioning, ONLY the auditioned track plays — its own top-level
@@ -4081,9 +4171,13 @@ class Engine {
     }
 
     // Grid-quantized reactive-state handoff, aligned to the audio clock (BeatLab engine.ts:1423).
-    Tone.getDraw().schedule(() => {
-      useStore.setState({ currentStep: step, masterLevel: this.masterMeter?.getValue() as number | undefined })
-    }, time)
+    // Skipped offline: Draw is an rAF-driven GUI timeline — an offline render has no frames to
+    // align to, and the store's playhead shouldn't jump around while a render computes.
+    if (!this.opts.offline) {
+      Tone.getDraw().schedule(() => {
+        useStore.setState({ currentStep: step, masterLevel: this.masterMeter?.getValue() as number | undefined })
+      }, time)
+    }
   }
 
   /** Media loads still in flight: drum one-shot lane samples, the shared drum soundfont voice,
@@ -4135,6 +4229,24 @@ class Engine {
     const arrayBuf = await captured.arrayBuffer()
     const decoded = await Tone.getContext().rawContext.decodeAudioData(arrayBuf)
     return audioBufferToWav(decoded)
+  }
+
+  /** Hand the decode cache to an offline instance (ui/src/audio/offline.ts) — decoded buffers
+   * are plain sample data, so sharing them across contexts is safe and skips every re-fetch.
+   * Includes BOTH caches media decodes into: `audioBuffers` (audio-clip regions, keyed by media
+   * id) and every drum lane's own loaded one-shot (loadLaneSample decodes into the lane voice's
+   * Tone.Player, never into audioBuffers — an offline render that only got the clip cache
+   * refused sample-lane projects as "media not decoded" even when they were fully loaded). */
+  exportAudioBuffers(): ReadonlyMap<string, Tone.ToneAudioBuffer> {
+    const merged = new Map(this.audioBuffers)
+    for (const state of this.drumStates.values()) {
+      for (const voice of state.lanes.values()) {
+        if (voice.kind === 'sample' && voice.loadedSample !== null && voice.player?.buffer.loaded && !merged.has(voice.loadedSample)) {
+          merged.set(voice.loadedSample, voice.player.buffer)
+        }
+      }
+    }
+    return merged
   }
 }
 
