@@ -114,6 +114,15 @@ load()
 </script>`
 
 export async function rateCommand(argv) {
+  // Pilot 112 (MEDIUM): a typo'd flag (--prot 4520) used to be silently ignored — the server
+  // bound the default port while the user waited on a dead one. Same loud-error stance as
+  // render/vary/taste-eval after pilots 109-111.
+  for (const a of argv) {
+    if (a.startsWith('--') && a !== '--port' && a !== '--log') {
+      console.error(`error: unknown flag "${a}" (known: --port, --log)`)
+      process.exit(2)
+    }
+  }
   const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--port' && argv[i - 1] !== '--log')
   const root = resolve(positional[0] ?? '.')
   const portIdx = argv.indexOf('--port')
@@ -163,8 +172,20 @@ export async function rateCommand(argv) {
           res.writeHead(400).end('batch outside root')
           return
         }
-        // picks arrive as wav filenames in preference order; scoreBatch wants variant refs
-        const result = scoreBatch(batchDir, picks.map((w) => w.replace(/\.wav$/, '')), logPath)
+        if (!Array.isArray(picks) || picks.length === 0) {
+          res.writeHead(400).end('picks must be a non-empty array')
+          return
+        }
+        // picks arrive as wav filenames in preference order; scoreBatch wants variant refs.
+        // A bad pick is the CLIENT's error (pilot 112: it used to 500) — scoreBatch's own
+        // message is already the useful part.
+        let result
+        try {
+          result = scoreBatch(batchDir, picks.map((w) => String(w).replace(/\.wav$/, '')), logPath)
+        } catch (scoreErr) {
+          res.writeHead(400).end(String(scoreErr?.message ?? scoreErr))
+          return
+        }
         console.error(`scored ${batchDir}: ${picks.join(' > ')}`)
         res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, log: result.logPath ?? logPath }))
       } else {
@@ -175,6 +196,20 @@ export async function rateCommand(argv) {
     }
   })
   const initial = buildQueue()
+  if (initial.length === 0) {
+    // Pilot 112: this used to start a server whose page cheerfully said "all 0 batches rated".
+    console.error(`nothing to rate: no unscored rendered batches under ${root}`)
+    console.error(`generate some first: beat taste-seeds <dir> && beat taste-collect <dir> — or point at a dir of rendered vary batches`)
+    process.exit(1)
+  }
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`error: port ${port} is already in use — pass --port <other> (is another beat rate still running?)`)
+      process.exit(2)
+    }
+    console.error(`error: ${err.message}`)
+    process.exit(1)
+  })
   server.listen(port, '127.0.0.1', () => {
     console.error(`rating ${initial.length} unscored batch(es) under ${root}`)
     console.error(`scores -> ${logPath}`)

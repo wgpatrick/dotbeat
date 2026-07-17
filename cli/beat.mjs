@@ -13,7 +13,7 @@
 // diff exit codes follow diff(1) convention: 0 = no musical changes, 1 = changes, 2 = error.
 // Requires `npm run build` (reads compiled ../dist/src/core).
 
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -587,8 +587,9 @@ const HELP = [
     text: `  beat taste-collect <dir> [--per-seed 2] [--count 5] [--gen N] [--gen-backend fal|stub|stableaudio] [--seed 41]
                                                           build the rating queue from a taste-seeds dir: --per-seed
                                                           vary batches per seed song (random track x group incl.
-                                                          feel + drum voices, offline-rendered), plus --gen
-                                                          generated-sample batches from a stratified prompt bank
+                                                          feel + drum voices, offline-rendered), --count variants
+                                                          per batch, plus --gen generated-sample batches from a
+                                                          stratified prompt bank
                                                           (drum one-shots, bass/plucks, pads/textures, vox chops,
                                                           risers — default backend fal, needs FAL_KEY). Failures
                                                           skip with a warning; everything lands as ordinary
@@ -1397,7 +1398,6 @@ async function tasteCollectCmd(argv) {
   const genBackend = flagValue(argv, '--gen-backend') ?? 'fal'
   const { mulberry32 } = await import('../dist/src/taste/eval.js')
   const { generateGenPrompts } = await import('../dist/src/taste/seeds.js')
-  const { readdirSync } = await import('node:fs')
   const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
   if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
   // 'feel' rides in the synth pool so timing/velocity taste gets sampled too (its own round type
@@ -1439,9 +1439,18 @@ async function tasteCollectCmd(argv) {
       try {
         execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'source', 'gen', hostFile, spec.id, spec.prompt, '--count', String(count), '--seed-from', String(seedFrom), '--seconds', String(spec.seconds), '--backend', genBackend], { stdio: ['ignore', 'ignore', 'inherit'] })
         genMade += 1
-      } catch (err) {
+      } catch {
         failed += 1
-        process.stderr.write(`warning: gen "${spec.id}" failed — skipping (${err instanceof Error ? err.message.split('\n')[0] : err})${genBackend === 'fal' ? ' — FAL_KEY set and fal.run reachable?' : ''}\n`)
+        // Pilot 112 (MEDIUM): the raw child error suggested `--backend stub` — a flag THIS
+        // command rejects (ours is --gen-backend) — and leaked the inner command line. Own the
+        // message; the child's real error already printed on the inherited stderr just above.
+        process.stderr.write(`warning: gen "${spec.id}" failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; retry with --gen-backend stub for placeholder audio, or --gen-backend stableaudio for local generation)' : ''}\n`)
+        // a failed gen can leave its empty batch dir behind — remove it so `beat rate` never
+        // queues a wav-less husk
+        try {
+          const husk = join(dir, `gen-${spec.id}-${seedFrom}`)
+          if (existsSync(husk) && !readdirSync(husk).some((x) => x.endsWith('.wav'))) rmSync(husk, { recursive: true })
+        } catch { /* best-effort cleanup */ }
       }
     }
   }
