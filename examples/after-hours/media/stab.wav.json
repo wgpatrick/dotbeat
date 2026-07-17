@@ -1,0 +1,17 @@
+{
+  "source": "generated:fal-ai/stable-audio-25/text-to-audio",
+  "license": "Stability-Platform-Terms",
+  "query": "deep house chord stab, lush jazzy Rhodes electric piano minor 9th chord, warm analog, short plucky attack, filtered, no reverb",
+  "sha256": "825e60be2ffabbb35477ae02240bed57d5491758e9255fecffda1f6e4c70cdcb",
+  "preparedAt": "2026-07-17T06:44:48.504Z",
+  "durationSeconds": 2,
+  "generated": {
+    "provider": "fal-ai/stable-audio-25/text-to-audio",
+    "model": "fal-ai/stable-audio-25/text-to-audio",
+    "backend": "fal",
+    "prompt": "deep house chord stab, lush jazzy Rhodes electric piano minor 9th chord, warm analog, short plucky attack, filtered, no reverb",
+    "seconds": 2,
+    "seed": 21,
+    "licenseUrl": "https://stability.ai/terms-of-use"
+  }
+}

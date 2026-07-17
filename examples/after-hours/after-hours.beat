@@ -5,6 +5,7 @@ selected_track bass
 
 media
   sample rhodes sha256:29d8c9e90646d570cdaf33d06e0b0963809771ea63a3e2bda84aa16457eacf73 gen-rhodes-11/v1.wav
+  sample stab sha256:825e60be2ffabbb35477ae02240bed57d5491758e9255fecffda1f6e4c70cdcb media/stab.wav
 
 track keys keys #c678dd drums
   synth
@@ -270,3 +271,37 @@ track bass bass #98c379 synth
   note u100030 27 118 1.4 0.8
   note u100031 27 122 1.4 0.8
   note u100032 39 126 1.4 0.62
+
+track chords chords #e5c07b drums
+  synth
+    osc sawtooth
+    volume -9
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+    duckSource drums
+    duckAmount 0.4
+  lane fm sample stab -3 0
+  lane db sample stab -3 -4
+  lane ab sample stab -3 3
+  lane eb sample stab -3 -2
+  hit h1 fm 6 0.62
+  hit h2 fm 14 0.5
+  hit h3 fm 22 0.62
+  hit h4 fm 30 0.5
+  hit h5 db 38 0.62
+  hit h6 db 46 0.5
+  hit h7 db 54 0.62
+  hit h8 db 62 0.5
+  hit h9 ab 70 0.62
+  hit h10 ab 78 0.5
+  hit h11 ab 86 0.62
+  hit h12 ab 94 0.5
+  hit h13 eb 102 0.62
+  hit h14 eb 110 0.5
+  hit h15 eb 118 0.62
+  hit h16 eb 126 0.5
