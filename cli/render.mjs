@@ -268,6 +268,14 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
     // console.warn ("... sample failed to load", type 'warning') and are not this pattern, so both
     // still surface untouched.
     if (type === 'error' && /Failed to load resource:.*\b404\b/.test(text)) return
+    // Pilot 108 leftover (research/108, "not fixed, tracked"): two KNOWN-BENIGN engine internals
+    // fire on effectively every render and mean nothing to a musician — Chromium's
+    // ScriptProcessorNode deprecation notice (the Redux decimator is deliberately a
+    // ScriptProcessorNode, see engine.ts buildDownsampler) and Tone's scheduling-accuracy hint
+    // (an advisory about Draw-time scheduling, not an audio problem). Filter EXACTLY these; a
+    // genuine warning (e.g. "sample failed to load") still surfaces untouched.
+    if (/The ScriptProcessorNode is deprecated/.test(text)) return
+    if (/Events scheduled inside of scheduled callbacks should use the passed in scheduling time/.test(text)) return
     console.error(`[page ${type}] ${text}`)
   })
 
