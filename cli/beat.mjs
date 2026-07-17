@@ -546,7 +546,7 @@ const HELP = [
   },
   {
     cmd: 'taste-eval',
-    text: `  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M]
+    text: `  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M] [--aes-backend aes|stub|off]
                                                           the taste-model eval harness (docs/taste-loop-design.md):
                                                           leave-one-batch-out held-out pick prediction over the
                                                           scores log — top-1/top-3/pairwise accuracy vs chance for
@@ -557,6 +557,11 @@ const HELP = [
                                                           to each wav: clap = LAION-CLAP (default, Apache-2.0),
                                                           mert = MERT-330M (stronger on music benchmarks; CC-BY-NC
                                                           weights, personal use only), stub = deterministic no-deps.
+                                                          --aes-backend adds Audiobox-Aesthetics (CC-BY-4.0): four
+                                                          NAMED axes per clip — CE content enjoyment, CU content
+                                                          usefulness, PC production complexity, PQ production
+                                                          quality — as explicit features (aes-bt / dsp+aes-bt in
+                                                          the ablation) plus signed per-axis taste directions.
                                                           Scored batches carry per-variant DSP features in the log
                                                           since T0; --backfill derives them for older entries whose
                                                           batch renders still exist (rewrites the log, .bak kept).
@@ -612,6 +617,13 @@ const HELP = [
                                                           Refuses soundfont (instrument/sf-lane) projects;
                                                           an ACTIVE bitcrushRate (>1 with bitcrushMix >0)
                                                           renders as passthrough (caveat printed).
+  beat render --batch <dir> [--live | --offline]          render every .beat variant in a vary-batch dir through
+                                                          ONE harness boot (what vary --render calls). Defaults
+                                                          to OFFLINE compute — short clips are where it is both
+                                                          exact and fast — falling back to live capture with a
+                                                          printed reason when the project uses soundfonts.
+                                                          --live forces realtime capture; --offline errors
+                                                          instead of falling back.
   beat render <file> --stems [--out-dir d]                Phase 37: one solo WAV per track into an out dir
                                                           (default stems-<file> next to the .beat) — stems for
                                                           external mixing or per-track metrics
@@ -1323,6 +1335,15 @@ function flagValue(argv, flag) {
 async function varyCmd(argv) {
   const { VARY_GROUPS, LEGACY_DRUM_VOICE_GROUPS, laneVaryDefs, varyTrack, BeatVaryError } = await import('../dist/src/vary/vary.js')
   const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids', '--scope', '--port', '--clip', '--points', '--bars']
+  // Pilot 111 (MEDIUM): vary accepted ANY unknown flag silently — the pilot-109 fix landed on
+  // render only. Same loud error, covering the feel/automation sub-commands too (they share this
+  // argv). --live/--offline are the render-mode passthrough (see varyRenderMode below).
+  const knownBool = ['--groups', '--render', '--audition', '--no-shuffle', '--live', '--offline']
+  const knownVary = new Set([...valued, ...knownBool])
+  for (const a of argv) {
+    if (a.startsWith('--') && !knownVary.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...knownVary].join(', ')})`)
+  }
+  if (argv.includes('--live') && argv.includes('--offline')) throw new BeatEditError('--live and --offline are mutually exclusive')
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   if (argv.includes('--groups') || argv.length === 0) {
     // Track-aware when a file+track are given (Phase 35 Stream OA): a declared-lane drums
@@ -1410,14 +1431,21 @@ async function varyCmd(argv) {
   }
 
   if (argv.includes('--render') || argv.includes('--audition')) {
-    // D15: the one render path is dotbeat's own engine driven headless (cli/render.mjs). It's a
-    // real-time capture per variant, so a batch of N takes ~N * loop-length plus browser startup —
-    // slower than the retired faster-than-realtime offline path. Correct output, honest cost; a
-    // dedicated fast batch renderer for dotbeat's own engine is future work (see D15 / phase-17 doc).
-    renderVaryBatch(outDir, variants.length)
+    // D15/D23: the one render path is dotbeat's own engine driven headless via render.mjs --batch
+    // (one harness boot per batch; offline compute by default, live fallback for soundfont
+    // projects — the child prints which). Pilot 111: linkMediaFrom was missing HERE while the
+    // feel/automation paths passed it — a group vary of any sample-using project rendered with
+    // every media fetch 404ing (silent lanes / thousands of noisy errors).
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...varyRenderMode(argv) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
     if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
+}
+
+/** The vary --render capture-mode passthrough (pilot 111: --live used to be silently swallowed —
+ * the render child never saw it, despite the batch banner advertising it). */
+function varyRenderMode(argv) {
+  return argv.includes('--live') ? { mode: 'live' } : argv.includes('--offline') ? { mode: 'offline' } : {}
 }
 
 /** `--audition` (Phase 35 OC): stitch the just-rendered vN.wavs into one contact-sheet
@@ -1527,7 +1555,7 @@ async function varyFeelCmd(argv, file, track) {
     // matching note in varyCmd above; a fast batch renderer for the canonical engine is future work).
     // linkMediaFrom: variant .beat files reference media relative to themselves; the parent's
     // media/ dir sits next to the parent, so batch.ts links it into the batch dir before rendering.
-    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...varyRenderMode(argv) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
     if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
@@ -1573,7 +1601,7 @@ async function varyAutomationCmd(argv, file, track, param) {
   for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
 
   if (argv.includes('--render') || argv.includes('--audition')) {
-    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...varyRenderMode(argv) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
     if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
@@ -1612,12 +1640,12 @@ async function tasteEvalCmd(argv) {
     process.stdout.write(JSON.stringify(await embedDoctor(), null, 2) + '\n')
     return
   }
-  const valued = ['--log', '--seed', '--embed-backend', '--embed-model']
+  const valued = ['--log', '--seed', '--embed-backend', '--embed-model', '--aes-backend']
   // Pilot 110 (MEDIUM): unknown flags used to be silently ignored (`--by-type` did nothing with
   // exit 0) — same failure class as pilot 109's `--offlin` render finding. Loud error instead.
   const known = new Set([...valued, '--json', '--backfill', '--doctor'])
   for (const a of argv) {
-    if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --log, --seed, --json, --backfill, --embed-backend, --embed-model, --doctor)`)
+    if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --log, --seed, --json, --backfill, --embed-backend, --embed-model, --aes-backend, --doctor)`)
   }
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const [file] = positional
@@ -1631,6 +1659,13 @@ async function tasteEvalCmd(argv) {
   if (!['stub', 'clap', 'mert', 'off'].includes(embedBackend)) {
     throw new BeatEditError(`--embed-backend must be one of stub|clap|mert|off, got "${embedBackend}"`)
   }
+  // Audiobox-Aesthetics axes (research/107 §4.1): 'stub' maps to the sidecar's aes-stub backend
+  // (deterministic plumbing-truth axes, no torch) so the whole aes path tests everywhere.
+  const aesRaw = flagValue(argv, '--aes-backend') ?? 'aes'
+  if (!['aes', 'stub', 'off'].includes(aesRaw)) {
+    throw new BeatEditError(`--aes-backend must be one of aes|stub|off, got "${aesRaw}"`)
+  }
+  const aesBackend = aesRaw === 'stub' ? 'aes-stub' : aesRaw
   const logPath = explicitLog ?? defaultScoresLog(file)
   if (!existsSync(logPath)) throw new BeatEditError(`no scores log at ${logPath} — score some batches first (beat vary ... --render, beat score)`)
   if (argv.includes('--backfill')) {
@@ -1657,7 +1692,7 @@ async function tasteEvalCmd(argv) {
     process.stdout.write(`backfilled features into ${filled} entr${filled === 1 ? 'y' : 'ies'} of ${logPath} (original kept at ${logPath}.bak)\n`)
   }
   const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
-  const report = await evaluate(logPath, { seed, embedBackend, embedModel: flagValue(argv, '--embed-model') })
+  const report = await evaluate(logPath, { seed, embedBackend, embedModel: flagValue(argv, '--embed-model'), aesBackend })
   if (argv.includes('--json')) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n')
     return
@@ -3173,6 +3208,14 @@ async function main() {
         if (rest.includes('--offline')) console.error('note: --offline is not supported with --stems yet — stems render via live capture')
         await renderStemsCmd(rest.filter((a) => a !== '--stems' && a !== '--offline'))
         break // renderStemsCmd process.exit()s; break keeps the switch well-formed
+      }
+      // Pilot 111 (HIGH): `beat render --batch <dir>` was advertised in help but UNREACHABLE —
+      // this case always routed to renderCommand, which treats --batch's value as noise and dies
+      // on the missing positional. Only vary's direct render.mjs exec ever reached batch mode.
+      if (rest.includes('--batch')) {
+        const { renderBatchCommand } = await import('./render.mjs')
+        await renderBatchCommand(rest)
+        process.exit(0) // same event-loop-straggler story as the single-render exit below
       }
       // One engine (D15): dotbeat's own (ui/src/audio/engine.ts) driven headless. `--offline` is
       // MEANINGFUL again (renderer slice 2) — same engine, computed through Tone.Offline as fast

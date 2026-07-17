@@ -19,6 +19,10 @@ const SPAWN_TIMEOUT_MS = 600_000
 const SPAWN_MAX_BUFFER = 64 * 1024 * 1024
 
 export type EmbedBackend = 'stub' | 'clap' | 'mert'
+/** Audiobox-Aesthetics axes ride the same sidecar/cache plumbing but are NOT embeddings — four
+ * named, crowd-trained axes (CE/CU/PC/PQ) used as explicit features, never PCA-projected. */
+export type AesBackend = 'aes' | 'aes-stub'
+export const AES_AXES = ['CE', 'CU', 'PC', 'PQ'] as const
 
 export class BeatEmbedError extends Error {
   constructor(message: string) {
@@ -36,8 +40,11 @@ export interface EmbeddingResult {
   cached: boolean
 }
 
-function cachePath(audioPath: string): string {
-  return `${audioPath}.embedding.json`
+/** aes results live in their OWN sidecar file: taste-eval runs an embedding backend AND an aes
+ * backend over the same wavs in one pass, and a shared cache file would thrash (each backend's
+ * mismatch check would recompute and overwrite the other's entry every run). */
+function cachePath(audioPath: string, backend: string): string {
+  return backend.startsWith('aes') ? `${audioPath}.aesthetics.json` : `${audioPath}.embedding.json`
 }
 
 function sha256File(path: string): string {
@@ -61,11 +68,11 @@ function spawnEmbed(args: string[]): Promise<{ code: number | null; stdout: stri
  * sidecar's own fix line on missing deps (exit 3) — callers that can degrade (taste-eval) catch
  * and report rather than abort.
  */
-export async function embedAudioFile(audioPath: string, opts: { backend?: EmbedBackend; model?: string } = {}): Promise<EmbeddingResult> {
+export async function embedAudioFile(audioPath: string, opts: { backend?: EmbedBackend | AesBackend; model?: string } = {}): Promise<EmbeddingResult> {
   if (!existsSync(audioPath)) throw new BeatEmbedError(`no audio file at ${audioPath}`)
   const backend = opts.backend ?? 'clap'
   const sha = sha256File(audioPath)
-  const cp = cachePath(audioPath)
+  const cp = cachePath(audioPath, backend)
   if (existsSync(cp)) {
     try {
       const cached = JSON.parse(readFileSync(cp, 'utf8')) as { sha256?: string; backend?: string; model?: string; dims?: number; embedding?: number[] }

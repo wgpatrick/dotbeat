@@ -271,6 +271,10 @@ export interface RenderBatchOptions {
    * batch dir before rendering (best-effort — a failed link surfaces as render's own
    * missing-sample report). */
   linkMediaFrom?: string
+  /** Force the batch capture path (pilot 111: `vary --render --live` used to swallow the flag
+   * silently — the render child never saw it). Omitted = render --batch's own default (offline
+   * when the project is eligible, live otherwise). */
+  mode?: 'live' | 'offline'
 }
 
 /** Renders the batch's .beat variants to vN.wav each through cli/render.mjs's --batch mode —
@@ -292,7 +296,9 @@ export function renderVaryBatch(outDir: string, count: number, opts: RenderBatch
     }
   }
   const renderCli = join(repoRoot, 'cli', 'render.mjs')
-  execFileSync(process.execPath, [renderCli, '--batch', resolve(outDir)], {
+  const args = [renderCli, '--batch', resolve(outDir)]
+  if (opts.mode !== undefined) args.push(`--${opts.mode}`)
+  execFileSync(process.execPath, args, {
     stdio: ['ignore', 'ignore', 'inherit'],
   })
 }

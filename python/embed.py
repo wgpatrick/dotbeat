@@ -37,6 +37,7 @@ import wave
 BACKEND_REQUIREMENTS = {
     "clap": "python/requirements-clap.txt",
     "mert": "python/requirements-mert.txt",
+    "aes": "python/requirements-aesthetics.txt",
 }
 STUB_VERSION = "0.1.0"
 STUB_DIMS = 16
@@ -45,6 +46,11 @@ DEFAULT_CLAP_MODEL = "laion/larger_clap_music"
 # but its WEIGHTS are CC-BY-NC-4.0 — fine for a personal taste model (the model only listens; it
 # never touches the license of the audio it analyzes), not shippable in a commercial product.
 DEFAULT_MERT_MODEL = "m-a-p/MERT-v1-330M"
+# Audiobox-Aesthetics (research/107 §4.1, the T2 "explicit features" pick): the only model in the
+# survey trained DIRECTLY on human aesthetic ratings (~97k crowd-annotated clips) — four named,
+# interpretable axes rather than an embedding. Weights CC-BY-4.0 (license-clean).
+DEFAULT_AES_MODEL = "facebook/audiobox-aesthetics"
+AES_AXES = ["CE", "CU", "PC", "PQ"]  # content enjoyment/usefulness, production complexity/quality
 
 
 class UsageError(Exception):
@@ -176,13 +182,80 @@ def run_mert(input_path, model_id):
     }
 
 
+def run_aes(input_path, model_id):
+    """Audiobox-Aesthetics: four crowd-trained axes per clip — lazy imports, exit 3 with the fix.
+    The four numbers come back as a 4-dim "embedding" ordered as AES_AXES so the caller's cache/
+    transport plumbing is shared with the real embedding backends; the `axes` field names them."""
+    for mod in ("torch", "audiobox_aesthetics"):
+        if importlib.util.find_spec(mod) is None:
+            raise DependencyError(
+                f"missing Python package '{mod}' for the aes backend",
+                BACKEND_REQUIREMENTS["aes"],
+            )
+    from audiobox_aesthetics.infer import initialize_predictor  # noqa: PLC0415
+
+    try:
+        predictor = initialize_predictor()
+        scores = predictor.forward([{"path": input_path}])[0]
+    except Exception as e:
+        raise EmbeddingError(f"audiobox-aesthetics inference failed: {e}")
+    missing = [a for a in AES_AXES if a not in scores]
+    if missing:
+        raise EmbeddingError(f"audiobox-aesthetics returned no {missing} axis (got keys: {sorted(scores)})")
+    return {
+        "backend": "aes",
+        "model": model_id,
+        "dims": len(AES_AXES),
+        "sampleRate": 16000,  # the predictor resamples internally; informational only
+        "axes": AES_AXES,
+        "embedding": [float(scores[a]) for a in AES_AXES],
+    }
+
+
+def run_aes_stub(input_path):
+    """Deterministic 4-dim stand-in for the aes axes, derived from simple audio stats — the same
+    plumbing-truth-not-perceptual-truth stance as run_stub, shaped like run_aes so the taste-eval
+    aes path (cache, z-scoring, BT scorer, report) runs and tests everywhere without torch."""
+    mono, rate = read_wav_mono(input_path)
+    n = len(mono)
+    rms = math.sqrt(sum(x * x for x in mono) / n)
+    peak = max(abs(x) for x in mono) or 1e-9
+    crossings = sum(1 for i in range(1, n) if (mono[i - 1] < 0) != (mono[i] < 0))
+    zcr = crossings / n
+    half = n // 2 or 1
+    rms_a = math.sqrt(sum(x * x for x in mono[:half]) / half)
+    rms_b = math.sqrt(sum(x * x for x in mono[half:]) / max(1, n - half))
+    return {
+        "backend": "aes-stub",
+        "model": f"aes-stub-{STUB_VERSION}",
+        "dims": len(AES_AXES),
+        "sampleRate": rate,
+        "axes": AES_AXES,
+        "embedding": [
+            round(rms, 8),  # "CE": tracks overall level
+            round(zcr, 8),  # "CU": tracks brightness-ish
+            round(abs(rms_a - rms_b) / (rms or 1e-9), 8),  # "PC": tracks level movement
+            round(rms / peak, 8),  # "PQ": tracks density (inverse crest)
+        ],
+    }
+
+
 def doctor():
     """Probe backend availability WITHOUT importing heavy deps (find_spec only)."""
     clap_missing = [m for m in ("torch", "transformers", "librosa") if importlib.util.find_spec(m) is None]
     mert_missing = [m for m in ("torch", "transformers", "librosa", "nnAudio") if importlib.util.find_spec(m) is None]
+    aes_missing = [m for m in ("torch", "audiobox_aesthetics") if importlib.util.find_spec(m) is None]
     return {
         "backends": {
             "stub": {"available": True, "version": STUB_VERSION, "dims": STUB_DIMS},
+            "aes-stub": {"available": True, "version": STUB_VERSION, "axes": AES_AXES},
+            "aes": {
+                "available": not aes_missing,
+                "model": DEFAULT_AES_MODEL,
+                "axes": AES_AXES,
+                "license_note": "CC-BY-4.0 weights (research/107 Part 4)",
+                **({"missing": aes_missing, "fix": f"pip install -r {BACKEND_REQUIREMENTS['aes']}"} if aes_missing else {}),
+            },
             "clap": {
                 "available": not clap_missing,
                 "model": DEFAULT_CLAP_MODEL,
@@ -200,7 +273,7 @@ def doctor():
 
 def main(argv):
     p = argparse.ArgumentParser(prog="embed.py", description="dotbeat audio-embedding sidecar")
-    p.add_argument("--backend", choices=["stub", "clap", "mert"])
+    p.add_argument("--backend", choices=["stub", "clap", "mert", "aes", "aes-stub"])
     p.add_argument("--input")
     p.add_argument("--model", default=None)
     p.add_argument("--doctor", action="store_true")
@@ -210,10 +283,14 @@ def main(argv):
         print(json.dumps(doctor()))
         return 0
     if not args.backend or not args.input:
-        raise UsageError("missing --backend (one of: stub, clap, mert) or --input, or pass --doctor")
+        raise UsageError("missing --backend (one of: stub, clap, mert, aes, aes-stub) or --input, or pass --doctor")
 
     if args.backend == "stub":
         result = run_stub(args.input)
+    elif args.backend == "aes":
+        result = run_aes(args.input, args.model or DEFAULT_AES_MODEL)
+    elif args.backend == "aes-stub":
+        result = run_aes_stub(args.input)
     elif args.backend == "mert":
         result = run_mert(args.input, args.model or DEFAULT_MERT_MODEL)
     else:

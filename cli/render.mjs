@@ -109,6 +109,7 @@ function parseArgs(argv) {
     else if (a === '--preview-port') args.previewPort = argv[++i]
     else if (a === '--batch') args.batch = argv[++i]
     else if (a === '--offline') args.offline = true
+    else if (a === '--live') args.live = true
     // legacy no-ops: the engine is dotbeat's own now, so these are accepted-and-ignored rather
     // than errored, so old scripts/invocations don't break on an unknown flag.
     else if (a === '--beatlab-dir') i++ // swallow its value
@@ -117,7 +118,7 @@ function parseArgs(argv) {
       // Pilot 109 (MEDIUM): a typo'd flag used to be silently swallowed into the positional list
       // — `--offlin` ran a full LIVE render with exit 0, silently downgrading the one flag whose
       // entire point is exactness. Unknown flags are an immediate, loud error.
-      console.error(`error: unknown flag "${a}" (known: -o/--out, --tail, --daemon-port, --preview-port, --batch, --offline)`)
+      console.error(`error: unknown flag "${a}" (known: -o/--out, --tail, --daemon-port, --preview-port, --batch, --offline, --live)`)
       process.exit(2)
     } else args._.push(a)
   }
@@ -444,6 +445,10 @@ export async function renderCommand(argv) {
     console.error(`error: no file at ${beatPath}`)
     process.exit(2)
   }
+  if (args.offline && args.live) {
+    console.error('error: --offline and --live are mutually exclusive')
+    process.exit(2)
+  }
   if (args.offline) {
     const refusal = await offlinePreflightRefusal(beatPath)
     if (refusal) {
@@ -552,6 +557,32 @@ export async function renderBatchCommand(argv) {
     console.error('nothing to render: this batch has no .beat variants (gen batches are already audio)')
     process.exit(1)
   }
+  if (args.offline && args.live) {
+    console.error('error: --offline and --live are mutually exclusive')
+    process.exit(2)
+  }
+  // Batch renders default to OFFLINE (D22/D23): a vary batch is short clips — exactly where the
+  // offline path is both faster than the realtime clock and exact (no recorder spin-up, no opus
+  // step) — and D23 made its compute linear. The mode is decided ONCE for the whole batch and
+  // printed loudly (pilot 109: silent mode changes are the worst failure shape): a project the
+  // offline path refuses (soundfont tracks / sf lanes — detectable at parse time, and shared by
+  // every variant of the same parent) falls back to live capture automatically; --live forces
+  // live; --offline forces offline and errors on refusal instead of falling back.
+  let offlineMode = false
+  if (!args.live) {
+    const refusal = await offlinePreflightRefusal(join(dir, beatVariants[0].file))
+    if (refusal === null) {
+      offlineMode = true
+      console.error('batch rendering offline (exact compute through the engine; pass --live to force realtime capture)')
+    } else if (args.offline) {
+      console.error(`error: offline render refused: ${refusal}`)
+      process.exit(2)
+    } else {
+      console.error(`batch rendering via live capture (offline refused: ${refusal})`)
+    }
+  } else {
+    console.error('batch rendering via live capture (--live)')
+  }
   // The daemon watches ONE file for the whole session; variants take turns being that file.
   // Dotfile name so the scratch copy can never be mistaken for a tenth variant.
   const currentPath = join(dir, '.render-current.beat')
@@ -581,7 +612,7 @@ export async function renderBatchCommand(argv) {
       const doc = parse(readFileSync(join(dir, v.file), 'utf8'))
       const renderBars = doc.song && doc.song.length > 0 ? doc.song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
       const seconds = (renderBars * 16 * 60) / doc.bpm / 4
-      const wavBytes = args.offline
+      const wavBytes = offlineMode
         ? await captureOfflineWav(session.page, seconds, session.pageErrors)
         : await captureWav(session.page, seconds, session.pageErrors)
       session.pageErrors.length = 0 // captured errors are per-variant, not cumulative
