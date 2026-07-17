@@ -125,11 +125,11 @@ test('pairsFromRanking decomposes ranked picks over rejected variants', () => {
 
 // ---- eval harness ---------------------------------------------------------------------------------
 
-test('evaluate: dsp-bt beats random on a consistent synthetic taste, with honest chance floors', () => {
+test('evaluate: dsp-bt beats random on a consistent synthetic taste, with honest chance floors', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'taste-eval-'))
   const logPath = join(dir, 'beat-scores.jsonl')
   writeFileSync(logPath, Array.from({ length: 12 }, (_, i) => darkTasteEntry(i)).join('\n') + '\n')
-  const report = evaluate(logPath, { seed: 41 })
+  const report = await evaluate(logPath, { seed: 41, embedBackend: 'off' })
   assert.equal(report.usable, 12)
   const bt = report.scorers.find((s) => s.scorer === 'dsp-bt')!
   const rnd = report.scorers.find((s) => s.scorer === 'random')!
@@ -198,6 +198,86 @@ test('stitchAudition shuffles deterministically by seed and the index is the ans
   assert.deepEqual(unshuffled.entries.map((e) => e.variant), ['v1', 'v2', 'v3', 'v4'], 'no seed -> generation order')
   // the answer key: each entry's wav really is that variant's file
   for (const e of r1.entries) assert.equal(e.wav, `${e.variant}.wav`)
+})
+
+// ---- T2: embeddings, PCA, and the ablation --------------------------------------------------------
+
+test('fitPCA finds the max-variance direction and projectPCA reduces dimensionality', async () => {
+  const { fitPCA, projectPCA } = await import('../src/taste/embeddings.js')
+  // points spread along the (1,1) diagonal in 2d, tiny noise off-axis
+  const rows = Array.from({ length: 20 }, (_, i) => [i, i + (i % 2 === 0 ? 0.01 : -0.01)])
+  const pca = fitPCA(rows, 1)
+  assert.equal(pca.components.length, 1)
+  const [a, b] = pca.components[0]!
+  assert.ok(Math.abs(Math.abs(a!) - Math.abs(b!)) < 0.05, `first component ~diagonal, got [${a}, ${b}]`)
+  const projected = projectPCA(pca, [10, 10])
+  assert.equal(projected.length, 1)
+})
+
+test('embedAudioFile (stub sidecar): real spawn, cache write, cache hit, invalidation on new bytes', async (t) => {
+  const { embedAudioFile } = await import('../src/taste/embeddings.js')
+  const dir = mkdtempSync(join(tmpdir(), 'taste-embed-'))
+  const wavPath = join(dir, 'clip.wav')
+  writeFileSync(wavPath, toneWav(500, 0.5))
+  let first
+  try {
+    first = await embedAudioFile(wavPath, { backend: 'stub' })
+  } catch (err) {
+    t.skip(`no python3 for the stub sidecar here: ${err instanceof Error ? err.message : err}`)
+    return
+  }
+  assert.equal(first.cached, false)
+  assert.equal(first.dims, 16)
+  assert.equal(first.embedding.length, 16)
+  const second = await embedAudioFile(wavPath, { backend: 'stub' })
+  assert.equal(second.cached, true)
+  assert.deepEqual(second.embedding, first.embedding)
+  writeFileSync(wavPath, toneWav(2000, 0.5)) // new bytes -> sha mismatch -> recompute
+  const third = await embedAudioFile(wavPath, { backend: 'stub' })
+  assert.equal(third.cached, false)
+  assert.notDeepEqual(third.embedding, first.embedding)
+})
+
+test('taste-eval ablation: embed-bt sees a taste the DSP features are blind to', async (t) => {
+  // Batches of tone renders where the pick is ALWAYS the lowest-frequency variant, but the
+  // stored DSP features are IDENTICAL constants — dsp-bt is structurally blind, while the stub
+  // embedding's zero-crossing stats encode frequency, so embed-bt (and both-bt) can learn it.
+  const { evaluate: evalFn } = await import('../src/taste/eval.js')
+  const dir = mkdtempSync(join(tmpdir(), 'taste-ablate-'))
+  const logPath = join(dir, 'beat-scores.jsonl')
+  const lines: string[] = []
+  for (let b = 0; b < 8; b++) {
+    const batchDir = join(dir, `vary-tone-${b}`)
+    mkdirSync(batchDir)
+    const freqs = [300, 900, 1800].map((f) => f + b * 40)
+    const files = ['v1.beat', 'v2.beat', 'v3.beat']
+    const rotate = b % 3 // move the low-freq variant around so position never predicts
+    const rotated = [...freqs.slice(rotate), ...freqs.slice(0, rotate)]
+    rotated.forEach((f, i) => writeFileSync(join(batchDir, `v${i + 1}.wav`), toneWav(f, 0.5)))
+    const lowest = rotated.indexOf(Math.min(...rotated))
+    const constantFeatures = Object.fromEntries(files.map((f) => [f, fakeFeatures(10, -20)]))
+    lines.push(JSON.stringify({
+      t: 'x', batch: batchDir, track: 'lead', group: 'tone', seed: b, parentSha256: 'x',
+      picks: [{ rank: 1, variant: files[lowest]! }],
+      rejected: files.filter((_, i) => i !== lowest),
+      features: constantFeatures,
+    }))
+  }
+  writeFileSync(logPath, lines.join('\n') + '\n')
+  let report
+  try {
+    report = await evalFn(logPath, { seed: 41, embedBackend: 'stub' })
+  } catch (err) {
+    t.skip(`no python3 for the stub sidecar here: ${err instanceof Error ? err.message : err}`)
+    return
+  }
+  assert.equal(report.embedding?.attached, 8)
+  assert.ok(report.embedding!.pcaDims >= 2, 'PCA produced components')
+  const embedBt = report.scorers.find((s) => s.scorer === 'embed-bt')
+  const dspBt = report.scorers.find((s) => s.scorer === 'dsp-bt')
+  assert.ok(embedBt !== undefined, 'embed-bt ran')
+  assert.ok(embedBt!.pairwise > 0.8, `embed-bt should order the pairs, got ${embedBt!.pairwise}`)
+  assert.ok(dspBt!.pairwise <= 0.6, `dsp-bt is blind on constant features, got ${dspBt!.pairwise}`)
 })
 
 // ---- pilot 108 fixes ------------------------------------------------------------------------------

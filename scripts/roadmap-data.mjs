@@ -1261,9 +1261,9 @@ export const rows = [
     research: 'research/108-usability-pilot-taste-loop.md', plan: 'taste-loop-design.md',
   },
   {
-    area: 'Taste loop', feature: 'T2: audio-embedding features (LAION-CLAP + Audiobox axes)',
-    description: 'Frozen LAION-CLAP larger_clap_music (Apache-2.0, 512-d) embeddings per variant render, PCA-reduced on unlabeled variants, plus Audiobox-Aesthetics\' four production-quality scores as explicit features; ablate DSP-only vs embedding-only vs both per variant type through the T0 harness. Python sidecar shape (same pattern as beat analyze).',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    area: 'Taste loop', feature: 'T2: audio-embedding features + ablation (CLAP default, MERT opt-in)',
+    description: 'python/embed.py — third sidecar on the analyze/gen template: LAION-CLAP larger_clap_music (default; Apache-2.0, 512-d), MERT-v1-330M as the bigger opt-in (stronger on MARBLE; CC-BY-NC weights = personal use only — the model only listens, so it never touches the license of the audio it analyzes), and a pure-stdlib deterministic stub so the whole pipeline runs and tests dependency-free. TS side (src/taste/embeddings.ts): per-wav cache keyed by audio sha256+backend+model, dependency-free power-iteration PCA fit on unlabeled variants. taste-eval grows the T2 ablation: embed-bt and both-bt scorers next to random/dsp-bt (embed scorers run over the batches whose renders still exist; the report says how many), --embed-backend clap|mert|stub|off, --embed-model, and --doctor for sidecar readiness. Proven by a planted-taste test where DSP features are held constant and only the embedding can see the preference — embed-bt orders >80% of held-out pairs while dsp-bt sits at chance. Remaining from the original row: Audiobox-Aesthetics axes as explicit features, and per-variant-type ablation splits.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
   },
   {

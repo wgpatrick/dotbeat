@@ -20,26 +20,31 @@ export interface TrainPair {
   loser: number[]
 }
 
-/** z-score each feature across the batch's variants; a feature with zero variance inside the
- * batch (nothing to distinguish) maps to 0 for every variant. Returns vectors in FEATURE_KEYS
- * order, aligned with the input array. */
-export function standardizeBatch(vectors: FeatureVector[]): number[][] {
-  const n = vectors.length
-  const dims = FEATURE_KEYS.length
+/** z-score each COLUMN across a set of row vectors; a column with zero variance (nothing to
+ * distinguish) maps to 0 for every row. Generic — DSP features and PCA'd embeddings both pass
+ * through here, so "standardized within the batch" means the same thing for every feature set. */
+export function zScoreColumns(rows: number[][]): number[][] {
+  const n = rows.length
+  if (n === 0) return []
+  const dims = rows[0]!.length
   const out: number[][] = Array.from({ length: n }, () => new Array<number>(dims).fill(0))
   for (let d = 0; d < dims; d++) {
-    const key = FEATURE_KEYS[d]!
     let mean = 0
-    for (const v of vectors) mean += v[key]
+    for (const r of rows) mean += r[d]!
     mean /= n
     let variance = 0
-    for (const v of vectors) variance += (v[key] - mean) ** 2
+    for (const r of rows) variance += (r[d]! - mean) ** 2
     const std = Math.sqrt(variance / n)
     if (std > 1e-9) {
-      for (let i = 0; i < n; i++) out[i]![d] = (vectors[i]![key] - mean) / std
+      for (let i = 0; i < n; i++) out[i]![d] = (rows[i]![d]! - mean) / std
     }
   }
   return out
+}
+
+/** z-score each DSP feature across the batch's variants, in FEATURE_KEYS order. */
+export function standardizeBatch(vectors: FeatureVector[]): number[][] {
+  return zScoreColumns(vectors.map((v) => FEATURE_KEYS.map((k) => v[k])))
 }
 
 /** Decompose one scored batch into pairwise comparisons: picks (already rank-ordered, best
@@ -76,7 +81,9 @@ const sigmoid = (z: number) => 1 / (1 + Math.exp(-z))
  * 13 dims x a few hundred pairs trains in well under a millisecond — retrain-per-invocation is
  * the intended usage, no persistence layer needed yet. */
 export function trainBT(pairs: TrainPair[], opts: { l2?: number; iterations?: number; learningRate?: number } = {}): BTModel {
-  const dims = FEATURE_KEYS.length
+  // dims come from the data — the same trainer serves the 13-dim DSP model, PCA'd embeddings,
+  // and their concatenation (taste-eval's T2 ablation).
+  const dims = pairs.length > 0 ? pairs[0]!.winner.length : FEATURE_KEYS.length
   const l2 = opts.l2 ?? 0.05
   const iterations = opts.iterations ?? 500
   const learningRate = opts.learningRate ?? 0.5

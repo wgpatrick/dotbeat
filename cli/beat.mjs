@@ -544,15 +544,22 @@ const HELP = [
   },
   {
     cmd: 'taste-eval',
-    text: `  beat taste-eval <file.beat> [--log f] [--json] [--seed N] [--backfill]
+    text: `  beat taste-eval <file.beat> [--log f] [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M]
                                                           the taste-model eval harness (docs/taste-loop-design.md):
                                                           leave-one-batch-out held-out pick prediction over the
-                                                          scores log — reports top-1/top-3/pairwise accuracy vs
-                                                          chance for the built-in scorers (random, dsp-bt) plus the
-                                                          learned taste directions. Scored batches carry per-variant
-                                                          DSP features in the log since T0; --backfill derives them
-                                                          for older entries whose batch renders still exist
-                                                          (rewrites the log, .bak kept)`,
+                                                          scores log — top-1/top-3/pairwise accuracy vs chance for
+                                                          the built-in scorers (random, dsp-bt, and — when batch
+                                                          renders still exist to embed — embed-bt and both-bt, the
+                                                          T2 ablation) plus the learned taste directions. Embeddings
+                                                          come from a Python sidecar (python/embed.py), cached next
+                                                          to each wav: clap = LAION-CLAP (default, Apache-2.0),
+                                                          mert = MERT-330M (stronger on music benchmarks; CC-BY-NC
+                                                          weights, personal use only), stub = deterministic no-deps.
+                                                          Scored batches carry per-variant DSP features in the log
+                                                          since T0; --backfill derives them for older entries whose
+                                                          batch renders still exist (rewrites the log, .bak kept).
+  beat taste-eval --doctor                                report the embedding sidecar's readiness (interpreter +
+                                                          per-backend deps), JSON`,
   },
   {
     cmd: 'audition',
@@ -1581,12 +1588,22 @@ async function scoreCmd(argv) {
 // features). Entries older than the T0 log enrichment get their features derived lazily from
 // batch-dir renders when those still exist; --backfill makes that durable by rewriting the log.
 async function tasteEvalCmd(argv) {
-  const valued = ['--log', '--seed']
+  // --doctor: report the embedding sidecar's readiness (interpreter, per-backend deps) and stop.
+  if (argv.includes('--doctor')) {
+    const { embedDoctor } = await import('../dist/src/taste/embeddings.js')
+    process.stdout.write(JSON.stringify(await embedDoctor(), null, 2) + '\n')
+    return
+  }
+  const valued = ['--log', '--seed', '--embed-backend', '--embed-model']
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const [file] = positional
   if (!file) throw new BeatEditError('taste-eval needs <file.beat> (the log defaults to beat-scores.jsonl next to it) or an explicit --log <path>')
   const { defaultScoresLog } = await import('../dist/src/vary/batch.js')
   const { evaluate, formatEvalReport } = await import('../dist/src/taste/eval.js')
+  const embedBackend = flagValue(argv, '--embed-backend') ?? 'clap'
+  if (!['stub', 'clap', 'mert', 'off'].includes(embedBackend)) {
+    throw new BeatEditError(`--embed-backend must be one of stub|clap|mert|off, got "${embedBackend}"`)
+  }
   const logPath = flagValue(argv, '--log') ?? defaultScoresLog(file)
   if (!existsSync(logPath)) throw new BeatEditError(`no scores log at ${logPath} — score some batches first (beat vary ... --render, beat score)`)
   if (argv.includes('--backfill')) {
@@ -1613,7 +1630,7 @@ async function tasteEvalCmd(argv) {
     process.stdout.write(`backfilled features into ${filled} entr${filled === 1 ? 'y' : 'ies'} of ${logPath} (original kept at ${logPath}.bak)\n`)
   }
   const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
-  const report = evaluate(logPath, { seed })
+  const report = await evaluate(logPath, { seed, embedBackend, embedModel: flagValue(argv, '--embed-model') })
   if (argv.includes('--json')) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n')
     return
