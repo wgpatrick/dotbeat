@@ -390,13 +390,17 @@ const HELP = [
                                                           GATED: fetch a specific CC0 sound from Freesound by id and
                                                           register it (label "CC0-1.0"); needs the key + egress. CC0
                                                           is the only license ever fetched (zero redistribution risk)
-  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio] [--provider P] [--license L]
+  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio|fal] [--provider P] [--license L]
                                                           GENERATE a one-shot with Stable Audio Open (local text-to-audio)
                                                           and register it as media with a provenance sidecar. Default
                                                           --backend stableaudio (needs torch + the model, owner-side;
                                                           see python/README.md), default --seconds 2. --backend stub is
-                                                          a deterministic, dependency-free tone bed. "Powered by
-                                                          Stability AI"; you own the output (Stability Community License)
+                                                          a deterministic, dependency-free tone bed. --backend fal
+                                                          runs the SAME Stable Audio Open model hosted on fal.ai
+                                                          (seconds per one-shot instead of minutes; needs FAL_KEY;
+                                                          --provider fal-ai/stable-audio-25/text-to-audio opts into
+                                                          Stable Audio 2.5 under Stability platform terms). "Powered
+                                                          by Stability AI"; you own the output (Community License)
   beat source gen --doctor                                report which generative backends are installed (JSON)` +
     // ==== Phase 40 Stream VB ====
     `
