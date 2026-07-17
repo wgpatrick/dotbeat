@@ -230,7 +230,7 @@ export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, se
 async function generateRaw({ prompt, seconds, seed, backend, provider, model, license, outPath }) {
   let meta
   try {
-    ;({ meta } = await runGen({ prompt, seconds, seed, backend, outPath }))
+    ;({ meta } = await runGen({ prompt, seconds, seed, backend, provider, outPath }))
   } catch (err) {
     // BeatGenError (or anything the sidecar wrapper throws) → a clean, stack-trace-free SourceError.
     throw new SourceError(err instanceof Error ? err.message : String(err))
@@ -243,8 +243,13 @@ async function generateRaw({ prompt, seconds, seed, backend, provider, model, li
   // gets the Stability license (unless the caller asserted one explicitly).
   const resolvedBackend = meta?.backend ?? backend
   const isStub = resolvedBackend === 'stub'
+  // Same honest-licensing rule, one more case: Stable Audio 2.5 over the fal API is governed by
+  // Stability's platform/API terms, not the open-weights Community License — label it as such so
+  // the sidecar never claims a license the audio doesn't have. fal's default provider is Stable
+  // Audio OPEN (the same model the local backend runs), which keeps the Community License.
+  const isPlatformModel = typeof resolvedProvider === 'string' && resolvedProvider.includes('stable-audio-25')
   return {
-    license: license ?? (isStub ? 'stub-placeholder' : 'Stability-AI-Community'),
+    license: license ?? (isStub ? 'stub-placeholder' : isPlatformModel ? 'Stability-Platform-Terms' : 'Stability-AI-Community'),
     source: `generated:${resolvedProvider}`,
     extra: {
       generated: {
@@ -254,7 +259,7 @@ async function generateRaw({ prompt, seconds, seed, backend, provider, model, li
         prompt,
         seconds,
         seed,
-        licenseUrl: isStub ? null : 'https://stability.ai/community-license-agreement',
+        licenseUrl: isStub ? null : isPlatformModel ? 'https://stability.ai/terms-of-use' : 'https://stability.ai/community-license-agreement',
       },
     },
   }

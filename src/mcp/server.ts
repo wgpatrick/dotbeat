@@ -1461,7 +1461,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_source_gen',
     description:
-      'GENERATE an audio one-shot from a text prompt with Stable Audio Open (local text-to-audio) and register it into a .beat project as media, prepped through the same trim/fade/peak-normalize pipeline as every other source and written with an ENFORCED provenance sidecar (media/<id>.wav.json recording the prompt, provider, model, seconds, seed, and the Stability AI Community License). Two backends: "stableaudio" (default) runs Stable Audio Open locally — needs torch + the model weights installed server-side (see python/README.md), and returns an actionable isError with a `beat source gen --doctor` hint if they are missing; "stub" is a deterministic, dependency-free tone bed (same seed+seconds → byte-identical audio) that proves the pipeline everywhere. You OWN the generated output; free commercial use under $1M revenue with Stability registration; "Powered by Stability AI". Once registered, use the sample id in beat_audio_clip / beat_lane / beat_add_track just like any media id.' +
+      'GENERATE an audio one-shot from a text prompt with Stable Audio Open (local text-to-audio) and register it into a .beat project as media, prepped through the same trim/fade/peak-normalize pipeline as every other source and written with an ENFORCED provenance sidecar (media/<id>.wav.json recording the prompt, provider, model, seconds, seed, and the Stability AI Community License). Three backends: "stableaudio" (default) runs Stable Audio Open locally — needs torch + the model weights installed server-side (see python/README.md), and returns an actionable isError with a `beat source gen --doctor` hint if they are missing; "fal" generates on fal.ai GPUs (seconds per one-shot instead of minutes; needs FAL_KEY in the server environment; default model Stable Audio 3 Medium — licensed training data, outputs owned under the Community License; provider fal-ai/stable-audio selects Open, fal-ai/stable-audio-25/text-to-audio selects 2.5 under Stability platform terms); "stub" is a deterministic, dependency-free tone bed (same seed+seconds → byte-identical audio) that proves the pipeline everywhere. You OWN the generated output; free commercial use under $1M revenue with Stability registration; "Powered by Stability AI". Once registered, use the sample id in beat_audio_clip / beat_lane / beat_add_track just like any media id.' +
       // ==== Phase 40 Stream VB ====
       ' BATCH MODE — pass `count` to generate N candidates of the same prompt across seeds seed_from..seed_from+N-1 and register NOTHING: they land in a batch dir (gen-<sample_id>-<seed>/ next to the .beat) with a manifest beat_score and beat_adopt read, exactly like a beat_vary batch. This is the right shape whenever you want to hear a few takes before committing to one: rank them with beat_score, then beat_adopt registers the WINNER ALONE (that adopt IS the registration — it copies the winning wav into media/ and writes its provenance sidecar). Candidates you do not adopt never touch the project, so the media block never accumulates rejects. Candidates are already audio, so `audition: true` stitches them into one audition.wav with a timecode index immediately — no render step. Without `count`, the single-shot behavior above is unchanged (generate and register in one step).',
       // ==== end Phase 40 Stream VB ====
@@ -1473,8 +1473,8 @@ const TOOLS: ToolDef[] = [
         prompt: { type: 'string', description: 'the text prompt to generate from, e.g. "warm analog pad" or "punchy 808 kick"' },
         seconds: { type: 'number', description: 'clip length in seconds (default 2; Stable Audio Open caps ~47)' },
         seed: { type: 'number', description: 'integer seed for reproducible generation (default 0); recorded in the provenance sidecar' },
-        backend: { type: 'string', description: '"stableaudio" (default, local model) or "stub" (deterministic dependency-free tone bed)' },
-        provider: { type: 'string', description: 'provider label recorded in provenance (default "stable-audio-open")' },
+        backend: { type: 'string', description: '"stableaudio" (default, local model), "fal" (hosted API on fal.ai GPUs, seconds instead of minutes; needs FAL_KEY server-side; default model Stable Audio 3 Medium), or "stub" (deterministic dependency-free tone bed)' },
+        provider: { type: 'string', description: 'provider label recorded in provenance (default "stable-audio-open"); for backend "fal" a fal model path selects the hosted model (default "fal-ai/stable-audio-3/medium/text-to-audio" — Stable Audio 3 Medium, Community License; also "fal-ai/stable-audio" for Open or "fal-ai/stable-audio-25/text-to-audio" for 2.5 under Stability platform terms)' },
         license: { type: 'string', description: 'license label for the generated media (default "Stability-AI-Community")' },
         // ==== Phase 40 Stream VB ====
         count: { type: 'number', description: 'BATCH MODE: generate this many candidates (1-16) of the same prompt, one per seed, and register NONE of them — score/adopt picks the winner. Omit for the single-shot generate-and-register behavior.' },
@@ -1508,7 +1508,7 @@ const TOOLS: ToolDef[] = [
             `  ${c.variant}: seed ${c.seed}, ${c.durationSeconds}s, sha256:${c.sha256.slice(0, 12)}...`),
           `nothing is registered in ${str(args, 'file')} yet: candidates live only in the batch dir until you adopt one`,
         ]
-        if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(result.dir, result.candidates.length)).trimEnd())
+        if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(result.dir, result.candidates.length, { shuffleSeed: result.seedFrom })).trimEnd())
         lines.push(`audition, then: beat_score dir "${result.dir}" picks [best, ...]`)
         lines.push(`then register the winner: beat_adopt dir "${result.dir}" pick "<best>"`)
         return lines.join('\n') + '\n'
@@ -2057,7 +2057,7 @@ const TOOLS: ToolDef[] = [
         if (render) {
           renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
-          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
         }
         return lines.join('\n') + '\n'
       }
@@ -2081,7 +2081,7 @@ const TOOLS: ToolDef[] = [
         if (render) {
           renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
-          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
         }
       } else {
         const amount = typeof args.amount === 'number' ? args.amount : 0.25
@@ -2093,7 +2093,7 @@ const TOOLS: ToolDef[] = [
         if (render) {
           renderVaryBatch(outDir, variants.length)
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
-          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
         }
       }
       return lines.join('\n') + '\n'

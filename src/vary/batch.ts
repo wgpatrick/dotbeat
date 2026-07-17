@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse, serialize, setMediaSample, type BeatDocument } from '../core/index.js'
+import { computeBatchFeatures } from '../taste/features.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..') // dist/src/vary -> repo root
 
@@ -314,6 +315,13 @@ export interface ScoreEntry {
   // ==== end Phase 40 Stream VB ====
   picks: { rank: number; variant: string; recipe?: string; edits?: string[]; media?: { id: string; seed?: number; sha256: string } }[]
   rejected: string[]
+  /** T0 taste-loop enrichment (docs/taste-loop-design.md L1): the DSP feature vector of EVERY
+   * variant with a render present at score time, keyed by the variant's `file`, picks and
+   * rejects alike — the training data a taste model needs is "what did the losers measure",
+   * which the picks-only shape above deliberately never carried. Absent entirely when the batch
+   * was never rendered (scoring un-rendered batches stays legal and cheap). Batch dirs get
+   * deleted after adopt; this makes the log self-contained for training. */
+  features?: Record<string, Record<string, number>>
 }
 
 export interface ScoreBatchResult {
@@ -333,6 +341,12 @@ export interface ScoreBatchResult {
    * the variant shape for the same reason usesRecipe is, not off the "gen:" group prefix. */
   usesMedia: boolean
   // ==== end Phase 40 Stream VB ====
+  /** Pilot 108: set when this batch dir already had one or more entries in the resolved log —
+   * the LATEST previous ranking, as display labels ("v1 > v3"), so the summary can flag the
+   * re-score instead of silently appending a contradiction. The log stays append-only (a
+   * re-score is a legitimate change of mind); the taste harness uses the latest entry per batch
+   * (src/taste/eval.ts) and this note is how the user learns that rule exists. */
+  previousPicks?: string
 }
 
 /** Read + parse a batch dir's manifest.json — shared by scoreBatch and adoptVariant so the
@@ -375,17 +389,46 @@ export function resolveBatchParent(dir: string, manifest: VaryBatchManifest): st
   return fromCwd // let callers report the nonexistence against the most conventional candidate
 }
 
+// ---- clip-set batches (T0 taste-loop, docs/taste-loop-design.md L1) ---------------------------
+// An audition/score batch built from ARBITRARY wavs (stem chops, downloaded one-shots) rather
+// than variants of a parent .beat — the T3 blind-chop-rating flow needs exactly the vary batch's
+// audition + score machinery pointed at sounds that have no parent document. Represented in the
+// SAME manifest shape with parent/parentSha256 empty: scoreBatch defaults the log next to the
+// batch dir (there is no parent to sit next to), and adoptVariant refuses outright (nothing to
+// adopt into).
+
+/** Write a clip-set batch manifest over wavs already sitting in outDir. `files` are outDir-
+ * relative wav names in v1..vN order. */
+export function writeClipSetBatch(outDir: string, files: string[], opts: { group?: string; seed?: number } = {}): VaryBatchManifest {
+  if (files.length === 0) throw new BeatBatchError('a clip-set batch needs at least one wav')
+  for (const f of files) {
+    if (!existsSync(resolve(outDir, f))) throw new BeatBatchError(`clip-set batch is missing ${resolve(outDir, f)}`)
+  }
+  const manifest: VaryBatchManifest = {
+    parent: '',
+    parentSha256: '',
+    group: opts.group ?? 'clips',
+    count: files.length,
+    seed: opts.seed ?? 41,
+    createdAt: new Date().toISOString(),
+    variants: files.map((file) => ({ file })),
+  }
+  writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
+  return manifest
+}
+
 /** Records 1-3 ranked picks against a batch dir into the append-only scores log — the exact
  * normalization, validation, entry shape, and append `beat score` has always done, shared so
  * `beat_score` can't drift. Picks accept "N" or "vN" (Phase 33 Stream ME, research/96). Absent
  * an explicit logPath the log defaults NEXT TO the batch's parent .beat file (Phase 35 OC —
  * not the process cwd), so CLI- and MCP-recorded picks land in the same file regardless of
- * where either process happens to be running. */
+ * where either process happens to be running. Clip-set batches (empty parent) default the log
+ * next to the batch dir instead. */
 export function scoreBatch(dir: string, picks: string[], logPath?: string): ScoreBatchResult {
   if (picks.length === 0) throw new BeatBatchError('score needs 1-3 ranked picks (variant numbers, best first)')
   if (picks.length > 3) throw new BeatBatchError('at most 3 ranked picks (Edisyn (3,16) pattern — ranking more adds fatigue, not signal)')
   const manifest = readBatchManifest(dir)
-  const resolvedLog = logPath ?? defaultScoresLog(resolveBatchParent(dir, manifest))
+  const resolvedLog = logPath ?? (manifest.parent === '' ? resolve(dirname(resolve(dir)), DEFAULT_SCORES_LOG) : defaultScoresLog(resolveBatchParent(dir, manifest)))
   const ranks = picks.map((p) => normalizePick(p, manifest.variants.length))
   if (new Set(ranks).size !== ranks.length) throw new BeatBatchError('picks must be distinct')
   // param batches carry replayable `edits`; whole-doc batches (feel humanize, Phase 37 automation-
@@ -421,8 +464,31 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
     })),
     rejected: manifest.variants.map((_, i) => i + 1).filter((n) => !ranks.includes(n)).map(fileOf),
   }
+  // T0 taste-loop enrichment: measure every rendered variant into the entry (see the ScoreEntry
+  // field comment). computeBatchFeatures skips missing/undecodable renders, so an un-rendered
+  // batch adds nothing and costs one existsSync per variant.
+  const features = computeBatchFeatures(dir, manifest.variants.map((v) => v.file))
+  if (Object.keys(features).length > 0) entry.features = features
+  // Pilot 108: detect a re-score of an already-scored batch BEFORE appending, so the summary can
+  // say so — a fat-fingered duplicate otherwise silently contradicts the taste log's history.
+  let previousPicks: string | undefined
+  if (existsSync(resolvedLog)) {
+    const fileToLabel = new Map(manifest.variants.map((v, i) => [v.file, `v${i + 1}`]))
+    for (const line of readFileSync(resolvedLog, 'utf8').split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      try {
+        const prev = JSON.parse(trimmed) as Partial<ScoreEntry>
+        if (prev.batch === dir && Array.isArray(prev.picks)) {
+          previousPicks = prev.picks.map((p) => fileToLabel.get(p.variant) ?? p.variant).join(' > ')
+        }
+      } catch {
+        /* non-entry line — ignore */
+      }
+    }
+  }
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
-  return { dir, logPath: resolvedLog, manifest, ranks, entry, usesRecipe, usesMedia }
+  return { dir, logPath: resolvedLog, manifest, ranks, entry, usesRecipe, usesMedia, ...(previousPicks !== undefined ? { previousPicks } : {}) }
 }
 
 /** The human-facing summary both surfaces emit after a score: the scored line plus the
@@ -431,6 +497,16 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
  * MCP-only agent); param batches keep the `beat set` replay, which survives the parent moving on. */
 export function formatScoreResult(r: ScoreBatchResult): string {
   let out = `scored ${r.dir}: ${r.ranks.map((n) => `v${n}`).join(' > ')} -> ${r.logPath}\n`
+  // Pilot 108: a re-score is legal (changed your mind) but never silent — and say which entry wins.
+  if (r.previousPicks !== undefined) {
+    out += `note: this batch was already scored (${r.previousPicks}) — the log keeps both, and beat taste-eval uses only the LATEST entry per batch\n`
+  }
+  // Clip-set batches (T0 taste-loop): the picks ARE the product — they feed the taste log; there
+  // is no parent to adopt into and no edits to replay, so say that instead of hinting either.
+  if (r.manifest.parent === '') {
+    out += `picks recorded for the taste log; a clip-set batch has nothing to adopt — register a keeper with beat sample / beat source add\n`
+    return out
+  }
   // ==== Phase 40 Stream VB ====
   // A gen winner has no edits to replay and no document to copy — adopt is the ONLY way to take it
   // (it is what registers the sample), so say exactly that rather than offering a `beat set` line.
@@ -477,6 +553,9 @@ export interface AdoptResult {
  * force — adopting a variant grown from a stale parent would silently destroy the newer work. */
 export function adoptVariant(dir: string, pick: string, opts: { force?: boolean } = {}): AdoptResult {
   const manifest = readBatchManifest(dir)
+  if (manifest.parent === '') {
+    throw new BeatBatchError('this is a clip-set batch (arbitrary wavs, no parent .beat) — its picks feed the scores log, but there is nothing to adopt into. Register a wav with beat sample / beat source add instead')
+  }
   const n = normalizePick(pick, manifest.variants.length)
   const v = manifest.variants[n - 1]!
   // Phase 40 VB (D21 strain (a)): the variant's own `file` — "vN.beat" for vary, "vN.wav" for gen.

@@ -1,0 +1,8 @@
+# taste-loop T2 embedding backend, the BIGGER opt-in (docs/taste-loop-design.md; research/107
+# Part 4): MERT-v1-330M — stronger than CLAP on music-understanding benchmarks (MARBLE), 1024-d
+# mean-pooled frame features. WEIGHTS ARE CC-BY-NC-4.0: personal use only, not shippable in a
+# commercial product (the code is Apache-2.0; the restriction rides the checkpoint).
+torch>=2.1
+transformers>=4.38
+librosa>=0.10
+nnAudio>=0.3

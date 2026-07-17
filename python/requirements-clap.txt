@@ -1,0 +1,6 @@
+# taste-loop T2 embedding backend (docs/taste-loop-design.md; research/107 Part 4):
+# LAION-CLAP `laion/larger_clap_music` via transformers — Apache-2.0 weights, 512-d per clip.
+# First run downloads ~2GB of weights into the Hugging Face cache.
+torch>=2.1
+transformers>=4.38
+librosa>=0.10

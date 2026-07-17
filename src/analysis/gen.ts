@@ -41,7 +41,7 @@ export class BeatGenError extends Error {
   }
 }
 
-export type GenBackend = 'stub' | 'stableaudio'
+export type GenBackend = 'stub' | 'stableaudio' | 'fal'
 
 /** The metadata gen.py prints on stdout (the WAV itself is written to outPath). */
 export interface GenMeta {
@@ -59,6 +59,9 @@ export interface RunGenOptions {
   seed: number
   backend: GenBackend
   outPath: string
+  /** fal backend only: the fal model path (defaults to FAL_DEFAULT_PROVIDER). The Python
+   * backends ignore it — their provider is baked into gen.py's own metadata. */
+  provider?: string
 }
 
 export interface RunGenResult {
@@ -111,6 +114,18 @@ export async function runGen(opts: RunGenOptions): Promise<RunGenResult> {
   }
   if (!(seconds > 0)) throw new BeatGenError(`beat source gen: --seconds must be positive, got ${seconds}`)
   if (!Number.isInteger(seed)) throw new BeatGenError(`beat source gen: --seed must be an integer, got ${seed}`)
+
+  // The hosted backend is pure TS — no Python, no venv, one API round-trip (gen-fal.ts). Same
+  // GenMeta contract, so source-lib's prep/provenance pipeline never knows the difference.
+  if (backend === 'fal') {
+    const { runGenFal } = await import('./gen-fal.js')
+    // Only a real fal model path ("owner/model[/sub]") is a provider here — callers pass legacy
+    // provider labels like "stable-audio-open" through this field for the Python backends, and
+    // those must fall back to fal's default model rather than 404 as a bogus endpoint.
+    const provider = opts.provider !== undefined && opts.provider.includes('/') ? opts.provider : undefined
+    const meta = await runGenFal({ prompt, seconds, seed, provider, outPath })
+    return { meta, outPath }
+  }
 
   const python = resolvePython()
   const res = await spawnPython(python, [
@@ -167,11 +182,14 @@ export async function genDoctor(): Promise<Record<string, unknown>> {
   try {
     res = await spawnPython(python, [GEN_PY, '--doctor'])
   } catch (e) {
-    return { pythonFound: false, interpreter: python, error: e instanceof Error ? e.message : String(e) }
+    const { falDoctor } = await import('./gen-fal.js')
+    return { pythonFound: false, ...falDoctor(), interpreter: python, error: e instanceof Error ? e.message : String(e) }
   }
   if (res.enoent) {
+    const { falDoctor } = await import('./gen-fal.js')
     return {
       pythonFound: false,
+      ...falDoctor(),
       interpreter: python,
       error: `no Python interpreter found (tried "${python}"). ${VENV_SETUP_HINT}`,
     }
@@ -185,5 +203,6 @@ export async function genDoctor(): Promise<Record<string, unknown>> {
   } catch {
     return { pythonFound: true, interpreter: python, error: 'gen sidecar --doctor produced non-JSON output', raw: res.stdout }
   }
-  return { ...report, interpreter: python, pythonFound: true }
+  const { falDoctor } = await import('./gen-fal.js')
+  return { ...report, ...falDoctor(), interpreter: python, pythonFound: true }
 }
