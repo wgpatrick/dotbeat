@@ -1306,7 +1306,7 @@ export const rows = [
   },
   {
     area: 'Render / export', feature: 'Fast render, slice 1: one harness boot per vary batch (`render --batch`)',
-    description: 'DONE: `beat render --batch <dir>` boots daemon+vite+Chromium ONCE and renders every variant by swapping the watched file and waiting for the store to hot-reload — measured 33s vs ~70s for a 12-variant batch (boot was most of every per-variant render). `beat vary --render` and `beat source gen` ride it automatically.',
+    description: 'DONE: `beat render --batch <dir>` boots daemon+vite+Chromium ONCE and renders every variant by swapping the watched file and waiting for the store to hot-reload — measured 33s vs ~70s for a 12-variant batch (boot was most of every per-variant render). `beat vary --render` and `beat source gen` ride it automatically. Since D23, batch renders default to OFFLINE compute (short clips are exactly where it is both exact and fast — verified ~1.0x realtime per real-groove variant even on the weak dev container), decided once per batch and printed loudly: soundfont projects fall back to live capture with the refusal reason printed, --live forces realtime capture, --offline errors instead of falling back.',
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: null,
   },

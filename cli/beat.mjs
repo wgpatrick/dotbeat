@@ -612,6 +612,13 @@ const HELP = [
                                                           Refuses soundfont (instrument/sf-lane) projects;
                                                           an ACTIVE bitcrushRate (>1 with bitcrushMix >0)
                                                           renders as passthrough (caveat printed).
+  beat render --batch <dir> [--live | --offline]          render every .beat variant in a vary-batch dir through
+                                                          ONE harness boot (what vary --render calls). Defaults
+                                                          to OFFLINE compute — short clips are where it is both
+                                                          exact and fast — falling back to live capture with a
+                                                          printed reason when the project uses soundfonts.
+                                                          --live forces realtime capture; --offline errors
+                                                          instead of falling back.
   beat render <file> --stems [--out-dir d]                Phase 37: one solo WAV per track into an out dir
                                                           (default stems-<file> next to the .beat) — stems for
                                                           external mixing or per-track metrics
