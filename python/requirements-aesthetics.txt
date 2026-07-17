@@ -1,0 +1,5 @@
+# Audiobox-Aesthetics backend (taste-loop T2 leftover; docs/research/107 §4.1):
+# four crowd-trained aesthetic axes per clip — CE (content enjoyment), CU (content
+# usefulness), PC (production complexity), PQ (production quality).
+# Weights: facebook/audiobox-aesthetics, CC-BY-4.0 (license-clean; research/107 Part 4 table).
+audiobox_aesthetics>=0.0.2

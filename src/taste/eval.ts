@@ -15,7 +15,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { computeBatchFeatures, type FeatureVector } from './features.js'
 import { pairsFromRanking, standardizeBatch, zScoreColumns, trainBT, scoreVector, describeWeights, type TrainPair, type BTModel } from './ranker.js'
-import { embedAudioFile, BeatEmbedError, fitPCA, projectPCA, type EmbedBackend } from './embeddings.js'
+import { embedAudioFile, BeatEmbedError, fitPCA, projectPCA, AES_AXES, type EmbedBackend, type AesBackend } from './embeddings.js'
 
 export interface TasteBatch {
   /** batch dir as recorded in the log entry */
@@ -34,6 +34,10 @@ export interface TasteBatch {
   embeddings?: Record<string, number[]>
   /** transient: PCA-projected embeddings, filled by evaluate() once the PCA is fitted */
   embedProjected?: Map<string, number[]>
+  /** T2 leftover (research/107 §4.1): Audiobox-Aesthetics axes [CE, CU, PC, PQ] keyed by variant
+   * file — explicit named features, deliberately NEVER PCA-projected (interpretability is the
+   * point). Only for batches whose renders still exist, like embeddings. */
+  aes?: Record<string, number[]>
 }
 
 export interface LoadResult {
@@ -212,9 +216,55 @@ export function projectAllEmbeddings(batches: TasteBatch[], kMax = 16): number {
   return pca.components.length
 }
 
+/** Attach Audiobox-Aesthetics axes to every batch whose renders still exist — the aes twin of
+ * attachEmbeddings (same sidecar, same cache-next-to-the-wav convention, its own cache file).
+ * A dependency failure aborts with the sidecar's fix line; per-file problems skip that variant. */
+export async function attachAesthetics(batches: TasteBatch[], opts: { backend?: AesBackend } = {}): Promise<AttachEmbeddingsResult> {
+  let attached = 0
+  let missing = 0
+  for (const b of batches) {
+    if (!existsSync(b.dir)) {
+      missing += 1
+      continue
+    }
+    const axes: Record<string, number[]> = {}
+    for (const file of Object.keys(b.features)) {
+      const wav = file.endsWith('.wav') ? file : file.replace(/\.beat$/, '.wav')
+      const wavPath = resolve(b.dir, wav)
+      if (!existsSync(wavPath)) continue
+      try {
+        axes[file] = (await embedAudioFile(wavPath, { backend: opts.backend ?? 'aes' })).embedding
+      } catch (err) {
+        if (err instanceof BeatEmbedError) return { attached, missing, error: err.message }
+        throw err
+      }
+    }
+    if (Object.keys(axes).length >= 2 && axes[b.picks[0]!] !== undefined) {
+      b.aes = axes
+      attached += 1
+    } else {
+      missing += 1
+    }
+  }
+  return { attached, missing }
+}
+
 /** Per-batch model-input vectors for one feature set, z-scored within the batch. */
-function vectorsFor(batch: TasteBatch, kind: 'dsp' | 'embed' | 'both'): Map<string, number[]> {
+function vectorsFor(batch: TasteBatch, kind: 'dsp' | 'embed' | 'both' | 'aes' | 'dsp+aes'): Map<string, number[]> {
   if (kind === 'dsp') return standardizedByFile(batch)
+  if (kind === 'aes' || kind === 'dsp+aes') {
+    const files = Object.keys(batch.aes ?? {})
+    const aesZ = zScoreColumns(files.map((f) => batch.aes![f]!))
+    const aesByFile = new Map(files.map((f, i) => [f, aesZ[i]!]))
+    if (kind === 'aes') return aesByFile
+    const dspByFile = standardizedByFile(batch)
+    const out = new Map<string, number[]>()
+    for (const [f, aesVec] of aesByFile) {
+      const dspVec = dspByFile.get(f)
+      if (dspVec !== undefined) out.set(f, [...dspVec, ...aesVec])
+    }
+    return out
+  }
   const files = [...(batch.embedProjected?.keys() ?? [])]
   const embedZ = zScoreColumns(files.map((f) => batch.embedProjected!.get(f)!))
   const embedByFile = new Map(files.map((f, i) => [f, embedZ[i]!]))
@@ -229,7 +279,7 @@ function vectorsFor(batch: TasteBatch, kind: 'dsp' | 'embed' | 'both'): Map<stri
   return out
 }
 
-function btScorerFor(kind: 'dsp' | 'embed' | 'both'): Scorer {
+function btScorerFor(kind: 'dsp' | 'embed' | 'both' | 'aes' | 'dsp+aes'): Scorer {
   return (heldOut, training) => {
     const pairs: TrainPair[] = []
     for (const b of training) pairs.push(...pairsFromRanking(b.picks, b.rejected, vectorsFor(b, kind)))
@@ -243,6 +293,8 @@ export const SCORERS: Record<string, Scorer> = {
   'dsp-bt': btScorerFor('dsp'),
   'embed-bt': btScorerFor('embed'),
   'both-bt': btScorerFor('both'),
+  'aes-bt': btScorerFor('aes'),
+  'dsp+aes-bt': btScorerFor('dsp+aes'),
 }
 
 /** T2 leftover (roadmap): which kind of round produced a batch. Ablation splits key on this —
@@ -295,6 +347,10 @@ export interface EvalReport {
   trainedPairCount: number
   /** T2: embedding attachment outcome — absent when embeddings were turned off */
   embedding?: { backend: string; attached: number; missing: number; pcaDims: number; note?: string }
+  /** Audiobox-Aesthetics attachment outcome — absent when turned off. `axes` names the four
+   * explicit feature dims [CE, CU, PC, PQ]; `weights` is the aes-only BT model trained on every
+   * aes-bearing batch, one signed number per NAMED axis (the interpretability payoff). */
+  aesthetics?: { backend: string; attached: number; missing: number; note?: string; weights?: { axis: string; weight: number }[] }
 }
 
 /** One held-out fold's raw outcome, attributed to its batch's variant type for the splits. */
@@ -375,6 +431,9 @@ export interface EvaluateOptions {
   /** 'off' skips embeddings entirely; default 'clap' degrades to a note when the sidecar can't run */
   embedBackend?: EmbedBackend | 'off'
   embedModel?: string
+  /** 'off' skips the Audiobox-Aesthetics axes; default 'aes' degrades to a note when the sidecar
+   * can't run (same stance as embeddings — the harness always runs, backends are additive). */
+  aesBackend?: AesBackend | 'off'
 }
 
 /** Leave-one-batch-out evaluation of every scorer over the log. The embed/both scorers run only
@@ -393,12 +452,32 @@ export async function evaluate(logPath: string, opts: EvaluateOptions = {}): Pro
     embedding = { backend: embedBackend, attached: attach.attached, missing: attach.missing, pcaDims, ...(attach.error !== undefined ? { note: attach.error } : {}) }
   }
 
+  let aesthetics: EvalReport['aesthetics']
+  const aesBackend = opts.aesBackend ?? 'aes'
+  if (aesBackend !== 'off' && batches.length > 0) {
+    const attach = await attachAesthetics(batches, { backend: aesBackend })
+    aesthetics = { backend: aesBackend, attached: attach.attached, missing: attach.missing, ...(attach.error !== undefined ? { note: attach.error } : {}) }
+  }
+
   const embedBatches = batches.filter((b) => b.embedProjected !== undefined)
+  const aesBatches = batches.filter((b) => b.aes !== undefined)
   reports.push(runScorer('random', SCORERS.random!, batches, rng))
   reports.push(runScorer('dsp-bt', SCORERS['dsp-bt']!, batches, rng))
   if (embedBatches.length >= 2) {
     reports.push(runScorer('embed-bt', SCORERS['embed-bt']!, embedBatches, rng))
     reports.push(runScorer('both-bt', SCORERS['both-bt']!, embedBatches, rng))
+  }
+  if (aesBatches.length >= 2) {
+    reports.push(runScorer('aes-bt', SCORERS['aes-bt']!, aesBatches, rng))
+    reports.push(runScorer('dsp+aes-bt', SCORERS['dsp+aes-bt']!, aesBatches, rng))
+    // The interpretability payoff: an aes-only BT model over ALL aes-bearing batches gives one
+    // signed weight per NAMED axis — "+PQ / -PC" reads as "prefers cleaner production over busier".
+    if (aesthetics !== undefined) {
+      const pairs: TrainPair[] = []
+      for (const b of aesBatches) pairs.push(...pairsFromRanking(b.picks, b.rejected, vectorsFor(b, 'aes')))
+      const aesModel = trainBT(pairs)
+      aesthetics.weights = AES_AXES.map((axis, i) => ({ axis, weight: aesModel.weights[i] ?? 0 })).sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight))
+    }
   }
 
   const fullModel = trainOnBatches(batches)
@@ -412,6 +491,7 @@ export async function evaluate(logPath: string, opts: EvaluateOptions = {}): Pro
     weights: describeWeights(fullModel),
     trainedPairCount: fullModel.pairCount,
     ...(embedding !== undefined ? { embedding } : {}),
+    ...(aesthetics !== undefined ? { aesthetics } : {}),
   }
 }
 
@@ -431,6 +511,14 @@ export function formatEvalReport(r: EvalReport): string {
       out += r.embedding.missing > 0 ? `; ${r.embedding.missing} without renders to embed\n` : '\n'
     }
   }
+  if (r.aesthetics !== undefined) {
+    if (r.aesthetics.note !== undefined) {
+      out += `aesthetics (${r.aesthetics.backend}): unavailable — ${r.aesthetics.note}\n`
+    } else {
+      out += `aesthetics (${r.aesthetics.backend}): ${r.aesthetics.attached} batch${r.aesthetics.attached === 1 ? '' : 'es'} scored on the ${AES_AXES.join('/')} axes`
+      out += r.aesthetics.missing > 0 ? `; ${r.aesthetics.missing} without renders to score\n` : '\n'
+    }
+  }
   for (const s of r.skipped) out += `  skipped ${s.dir} (${s.group}): ${s.reason}\n`
   if (r.usable === 0) {
     out += 'nothing to evaluate yet — score some rendered batches first (beat vary ... --render, then beat score)\n'
@@ -446,6 +534,10 @@ export function formatEvalReport(r: EvalReport): string {
   if (r.trainedPairCount > 0) {
     out += `taste directions (BT weights over all ${r.trainedPairCount} pairs; sign = preferred direction of the z-scored feature):\n`
     for (const w of r.weights) out += `  ${w.weight >= 0 ? '+' : ''}${w.weight.toFixed(2)}  ${w.feature}\n`
+  }
+  if (r.aesthetics?.weights !== undefined) {
+    out += `aesthetic taste directions (aes-only BT weights; CE=content enjoyment, CU=content usefulness, PC=production complexity, PQ=production quality):\n`
+    for (const w of r.aesthetics.weights) out += `  ${w.weight >= 0 ? '+' : ''}${w.weight.toFixed(2)}  ${w.axis}\n`
   }
   if (r.usable < 10) out += `note: ${r.usable} batches is far below the ~10-30 the research base expects for usable signal — treat these numbers as smoke, not evidence (docs/research/107-taste-model-program.md)\n`
   return out

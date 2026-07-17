@@ -546,7 +546,7 @@ const HELP = [
   },
   {
     cmd: 'taste-eval',
-    text: `  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M]
+    text: `  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M] [--aes-backend aes|stub|off]
                                                           the taste-model eval harness (docs/taste-loop-design.md):
                                                           leave-one-batch-out held-out pick prediction over the
                                                           scores log — top-1/top-3/pairwise accuracy vs chance for
@@ -557,6 +557,11 @@ const HELP = [
                                                           to each wav: clap = LAION-CLAP (default, Apache-2.0),
                                                           mert = MERT-330M (stronger on music benchmarks; CC-BY-NC
                                                           weights, personal use only), stub = deterministic no-deps.
+                                                          --aes-backend adds Audiobox-Aesthetics (CC-BY-4.0): four
+                                                          NAMED axes per clip — CE content enjoyment, CU content
+                                                          usefulness, PC production complexity, PQ production
+                                                          quality — as explicit features (aes-bt / dsp+aes-bt in
+                                                          the ablation) plus signed per-axis taste directions.
                                                           Scored batches carry per-variant DSP features in the log
                                                           since T0; --backfill derives them for older entries whose
                                                           batch renders still exist (rewrites the log, .bak kept).
@@ -1619,12 +1624,12 @@ async function tasteEvalCmd(argv) {
     process.stdout.write(JSON.stringify(await embedDoctor(), null, 2) + '\n')
     return
   }
-  const valued = ['--log', '--seed', '--embed-backend', '--embed-model']
+  const valued = ['--log', '--seed', '--embed-backend', '--embed-model', '--aes-backend']
   // Pilot 110 (MEDIUM): unknown flags used to be silently ignored (`--by-type` did nothing with
   // exit 0) — same failure class as pilot 109's `--offlin` render finding. Loud error instead.
   const known = new Set([...valued, '--json', '--backfill', '--doctor'])
   for (const a of argv) {
-    if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --log, --seed, --json, --backfill, --embed-backend, --embed-model, --doctor)`)
+    if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --log, --seed, --json, --backfill, --embed-backend, --embed-model, --aes-backend, --doctor)`)
   }
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const [file] = positional
@@ -1638,6 +1643,13 @@ async function tasteEvalCmd(argv) {
   if (!['stub', 'clap', 'mert', 'off'].includes(embedBackend)) {
     throw new BeatEditError(`--embed-backend must be one of stub|clap|mert|off, got "${embedBackend}"`)
   }
+  // Audiobox-Aesthetics axes (research/107 §4.1): 'stub' maps to the sidecar's aes-stub backend
+  // (deterministic plumbing-truth axes, no torch) so the whole aes path tests everywhere.
+  const aesRaw = flagValue(argv, '--aes-backend') ?? 'aes'
+  if (!['aes', 'stub', 'off'].includes(aesRaw)) {
+    throw new BeatEditError(`--aes-backend must be one of aes|stub|off, got "${aesRaw}"`)
+  }
+  const aesBackend = aesRaw === 'stub' ? 'aes-stub' : aesRaw
   const logPath = explicitLog ?? defaultScoresLog(file)
   if (!existsSync(logPath)) throw new BeatEditError(`no scores log at ${logPath} — score some batches first (beat vary ... --render, beat score)`)
   if (argv.includes('--backfill')) {
@@ -1664,7 +1676,7 @@ async function tasteEvalCmd(argv) {
     process.stdout.write(`backfilled features into ${filled} entr${filled === 1 ? 'y' : 'ies'} of ${logPath} (original kept at ${logPath}.bak)\n`)
   }
   const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
-  const report = await evaluate(logPath, { seed, embedBackend, embedModel: flagValue(argv, '--embed-model') })
+  const report = await evaluate(logPath, { seed, embedBackend, embedModel: flagValue(argv, '--embed-model'), aesBackend })
   if (argv.includes('--json')) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n')
     return

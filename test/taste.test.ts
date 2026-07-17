@@ -335,6 +335,55 @@ test('taste-eval ablation: embed-bt sees a taste the DSP features are blind to',
   assert.ok(dspBt!.pairwise <= 0.6, `dsp-bt is blind on constant features, got ${dspBt!.pairwise}`)
 })
 
+test('taste-eval aesthetics: aes-bt learns a loudness taste on stub axes the DSP features are blind to', async (t) => {
+  // Same shape as the embed ablation above, but the planted taste is LOUDNESS (the aes-stub CE
+  // axis tracks RMS) and the stored DSP features are constants: aes-bt should learn it, dsp-bt
+  // can't, and the report carries named per-axis weights with CE dominant.
+  const { evaluate: evalFn } = await import('../src/taste/eval.js')
+  const dir = mkdtempSync(join(tmpdir(), 'taste-aes-'))
+  const logPath = join(dir, 'beat-scores.jsonl')
+  const lines: string[] = []
+  for (let b = 0; b < 8; b++) {
+    const batchDir = join(dir, `vary-loud-${b}`)
+    mkdirSync(batchDir)
+    const gains = [0.15, 0.4, 0.8]
+    const files = ['v1.beat', 'v2.beat', 'v3.beat']
+    const rotate = b % 3
+    const rotated = [...gains.slice(rotate), ...gains.slice(0, rotate)]
+    rotated.forEach((g, i) => writeFileSync(join(batchDir, `v${i + 1}.wav`), toneWav(440 + b * 10, g)))
+    const loudest = rotated.indexOf(Math.max(...rotated))
+    const constantFeatures = Object.fromEntries(files.map((f) => [f, fakeFeatures(10, -20)]))
+    lines.push(JSON.stringify({
+      t: 'x', batch: batchDir, track: 'lead', group: 'mix', seed: b, parentSha256: 'x',
+      picks: [{ rank: 1, variant: files[loudest]! }],
+      rejected: files.filter((_, i) => i !== loudest),
+      features: constantFeatures,
+    }))
+  }
+  writeFileSync(logPath, lines.join('\n') + '\n')
+  let report
+  try {
+    report = await evalFn(logPath, { seed: 41, embedBackend: 'off', aesBackend: 'aes-stub' })
+  } catch (err) {
+    t.skip(`no python3 for the stub sidecar here: ${err instanceof Error ? err.message : err}`)
+    return
+  }
+  assert.equal(report.aesthetics?.attached, 8)
+  const aesBt = report.scorers.find((s) => s.scorer === 'aes-bt')
+  const dspBt = report.scorers.find((s) => s.scorer === 'dsp-bt')
+  assert.ok(aesBt !== undefined, 'aes-bt ran')
+  assert.ok(aesBt!.pairwise > 0.8, `aes-bt should order the pairs, got ${aesBt!.pairwise}`)
+  assert.ok(dspBt!.pairwise <= 0.6, `dsp-bt is blind on constant features, got ${dspBt!.pairwise}`)
+  const weights = report.aesthetics!.weights!
+  assert.equal(weights.length, 4)
+  assert.deepEqual([...weights.map((w) => w.axis)].sort(), ['CE', 'CU', 'PC', 'PQ'])
+  const ce = weights.find((w) => w.axis === 'CE')!
+  assert.ok(ce.weight > 0, `CE (tracks RMS in the stub) should carry positive weight, got ${ce.weight}`)
+  // second run hits the aes cache files written next to the wavs
+  const sidecars = (await import('node:fs')).readdirSync(join(dir, 'vary-loud-0')).filter((f) => f.endsWith('.aesthetics.json'))
+  assert.equal(sidecars.length, 3, 'aes axes cached next to each wav in their own cache file')
+})
+
 // ---- pilot 108 fixes ------------------------------------------------------------------------------
 
 test('re-scoring an already-scored batch is flagged, and the harness keeps only the latest entry', () => {
