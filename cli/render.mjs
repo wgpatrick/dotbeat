@@ -113,7 +113,13 @@ function parseArgs(argv) {
     // than errored, so old scripts/invocations don't break on an unknown flag.
     else if (a === '--beatlab-dir') i++ // swallow its value
     else if (a === '--port') i++ // old BeatLab dev-server port; irrelevant now
-    else args._.push(a)
+    else if (a.startsWith('--')) {
+      // Pilot 109 (MEDIUM): a typo'd flag used to be silently swallowed into the positional list
+      // — `--offlin` ran a full LIVE render with exit 0, silently downgrading the one flag whose
+      // entire point is exactness. Unknown flags are an immediate, loud error.
+      console.error(`error: unknown flag "${a}" (known: -o/--out, --tail, --daemon-port, --preview-port, --batch, --offline)`)
+      process.exit(2)
+    } else args._.push(a)
   }
   return args
 }
@@ -121,7 +127,18 @@ function parseArgs(argv) {
 // Serve a production build of ui/ and resolve the URL vite actually bound (parsed from its output
 // so a busy port auto-increments cleanly instead of failing). Returns { proc, url }.
 async function serveUi(preferredPort) {
-  const proc = spawn('npm', ['run', 'preview', '--', '--port', String(preferredPort)], { cwd: uiDir, stdio: ['ignore', 'pipe', 'pipe'] })
+  // detached => its own process group. Killing only the spawned pid kills the npm wrapper while
+  // the actual vite server it spawned lives on — pilot 109 found ~24 orphaned `vite preview`
+  // servers accumulated on one box (~90MB RSS each), one leaked per render. close() kills the
+  // whole group (negative pid) so the server actually dies with the session.
+  const proc = spawn('npm', ['run', 'preview', '--', '--port', String(preferredPort)], { cwd: uiDir, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
+  proc.killTree = () => {
+    try {
+      process.kill(-proc.pid, 'SIGTERM')
+    } catch {
+      try { proc.kill('SIGTERM') } catch { /* already gone */ }
+    }
+  }
   const url = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('vite preview did not announce a URL within 30s')), 30000)
     let buf = ''
@@ -289,7 +306,7 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
 
   const close = async () => {
     await browser.close()
-    served.proc.kill('SIGTERM')
+    served.proc.killTree() // group kill — see serveUi (pilot 109's vite-leak finding)
     await daemon.close()
   }
   return { page, pageErrors, doc, seconds, close }
@@ -382,27 +399,79 @@ function trimLeadingSilence(wav, seconds) {
   return out
 }
 
+/** Parse-time `--offline` refusal (pilot 109 HIGH): instrument tracks and sf-backed lanes are
+ * detectable from the parsed doc alone, so refuse in the first second instead of after ~30s of
+ * daemon + headless-Chromium spin-up delivering the same message as a raw page.evaluate stack.
+ * Best-effort — a missing dist/ build means no parser yet; the in-page refusal still backstops. */
+async function offlinePreflightRefusal(beatPath) {
+  try {
+    const { parse } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
+    const doc = parse(readFileSync(beatPath, 'utf8'))
+    const instrumentTracks = doc.tracks.filter((t) => t.kind === 'instrument').map((t) => t.id)
+    if (instrumentTracks.length > 0) {
+      return `instrument (soundfont) tracks need a native realtime context (worklet) — offline render does not support them yet: ${instrumentTracks.join(', ')}`
+    }
+    const sfLanes = []
+    for (const t of doc.tracks) {
+      for (const lane of t.lanes ?? []) {
+        if (lane.backing?.type === 'sf') sfLanes.push(`${t.id}.${lane.name}`)
+      }
+    }
+    if (sfLanes.length > 0) return `sf-backed drum lanes need a native realtime context (worklet) — offline render does not support them yet: ${sfLanes.join(', ')}`
+    return null
+  } catch {
+    return null // no build / unparseable here — bootRenderSession and the in-page check own those errors
+  }
+}
+
 export async function renderCommand(argv) {
   const args = parseArgs(argv)
   const beatPath = args._[0]
   if (!beatPath) {
-    console.error('usage: node cli/render.mjs <project.beat> [-o out.wav] [--tail <sec>] [--daemon-port N] [--preview-port N]')
+    console.error('usage: node cli/render.mjs <project.beat> [-o out.wav] [--tail <sec>] [--daemon-port N] [--preview-port N] [--offline]')
     process.exit(1)
+  }
+  if (!existsSync(beatPath)) {
+    // Pilot 109 (LOW): this used to surface as a raw ENOENT stack trace from the parser.
+    console.error(`error: no file at ${beatPath}`)
+    process.exit(2)
+  }
+  if (args.offline) {
+    const refusal = await offlinePreflightRefusal(beatPath)
+    if (refusal) {
+      console.error(`error: offline render refused: ${refusal}`)
+      process.exit(2)
+    }
   }
   const outPath = args.out ?? beatPath.replace(/\.beat$/, '') + '.wav'
   const tail = Number(args.tail ?? 0)
   const daemonPort = args.daemonPort !== undefined ? Number(args.daemonPort) : 0 // 0 => OS picks a free port
   const previewPort = args.previewPort !== undefined ? Number(args.previewPort) : 5899
 
+  // Errors are printed friendly and the process EXITS here. Before pilot 109, a mid-render error
+  // (e.g. an in-page --offline refusal) propagated to beat.mjs's catch — which prints and sets
+  // exitCode but never calls process.exit — while the leaked chromium/daemon/vite handles kept
+  // the event loop alive: the CLI printed a stack trace and then hung FOREVER (killed manually
+  // after 7+ minutes). Teardown is raced against a timeout so a wedged browser can't re-hang it.
   const session = await bootRenderSession(beatPath, { tail, daemonPort, previewPort })
+  let failure = null
   try {
     const wavBytes = args.offline
       ? await captureOfflineWav(session.page, session.seconds, session.pageErrors)
       : await captureWav(session.page, session.seconds, session.pageErrors)
     writeFileSync(outPath, wavBytes)
     console.error(`wrote ${outPath} (${wavBytes.length} bytes)`)
+  } catch (err) {
+    failure = err
   } finally {
-    await session.close()
+    await Promise.race([session.close(), sleep(5000)])
+  }
+  if (failure) {
+    // First meaningful line only — the playwright page.evaluate wrapper adds minified-bundle
+    // frames that read as noise next to the (already good) refusal message itself.
+    const line = String(failure.message ?? failure).split('\n').find((l) => l.trim()) ?? 'render failed'
+    console.error(`error: ${line.replace(/^page\.evaluate:\s*Error:\s*/, '')}`)
+    process.exit(1)
   }
 }
 

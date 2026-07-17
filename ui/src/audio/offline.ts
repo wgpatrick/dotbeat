@@ -17,6 +17,13 @@
 // which the offline context doesn't implement — it renders as passthrough (its own off state).
 // The caveats list names every track that actually uses it, so the caller can choose live capture.
 //
+// DETERMINISM, precisely (pilot 109 measured it): metrics are repeatable run-to-run, and pure
+// oscillator content is repeatable to ~1 LSB of int16 — but NOT byte-exact, and noise-based
+// voices (Tone.Noise picks a random buffer offset per start — the default kit's snare/clap/hats)
+// produce genuinely different waveforms each run, offline and live alike. "Offline" buys the
+// exact post-limiter graph output with no MediaRecorder/opus loss; it does not seed the engine's
+// noise sources.
+//
 // PERFORMANCE ENVELOPE (measured 2026-07-17, 4-core container): compute time is CPU-bound and
 // grows SUPERLINEARLY with song length × note density. Tone's offline architecture schedules the
 // entire song before a single startRendering() pass, so no one-shot source can ever be disposed

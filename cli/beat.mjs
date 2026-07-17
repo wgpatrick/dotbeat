@@ -597,13 +597,16 @@ const HELP = [
     text: `  beat render <file> [-o out.wav] [--tail <sec>]          render to WAV through dotbeat's own engine
                                                           (headless Chromium driving ui/; no BeatLab needed)
   beat render <file> --offline [-o out.wav]               compute the mix through an offline context instead
-                                                          of capturing the realtime clock — same engine,
-                                                          deterministic exact PCM (no lossy recorder step).
-                                                          CPU-bound: fast for short/small projects, can be
-                                                          SLOWER than live capture for long dense songs (the
-                                                          measured ratio is printed). Refuses soundfont
-                                                          (instrument/sf-lane) projects; bitcrushRate renders
-                                                          as passthrough (caveat printed). See decisions D22.
+                                                          of capturing the realtime clock — same engine, no
+                                                          lossy recorder step. Repeatable to ~1 LSB for
+                                                          oscillator content; noise-based voices (e.g. the
+                                                          default kit's snare/hats) vary per run, exactly as
+                                                          they do live. CPU-bound: fast for short/small
+                                                          projects, can be SLOWER than live capture for long
+                                                          dense songs (the measured ratio is printed).
+                                                          Refuses soundfont (instrument/sf-lane) projects;
+                                                          an ACTIVE bitcrushRate (>1 with bitcrushMix >0)
+                                                          renders as passthrough (caveat printed).
   beat render <file> --stems [--out-dir d]                Phase 37: one solo WAV per track into an out dir
                                                           (default stems-<file> next to the .beat) — stems for
                                                           external mixing or per-track metrics
@@ -2647,7 +2650,13 @@ async function renderStemsCmd(argv) {
   const outIdx = argv.indexOf('--out-dir')
   const outDir = outIdx !== -1 ? argv[outIdx + 1] : undefined
   if (outIdx !== -1 && (!outDir || outDir.startsWith('--'))) throw new BeatEditError('--out-dir needs a directory path')
-  const file = argv.find((a, i) => !a.startsWith('--') && (outIdx === -1 || i !== outIdx + 1))
+  // Pilot 109 (LOW): --preview-port was silently ignored in stems mode (plain renders honor it),
+  // breaking port-disciplined parallel automation. Parse it and pass it through.
+  const portIdx = argv.indexOf('--preview-port')
+  const previewPort = portIdx !== -1 ? Number(argv[portIdx + 1]) : undefined
+  if (portIdx !== -1 && !Number.isFinite(previewPort)) throw new BeatEditError('--preview-port needs a port number')
+  const consumed = new Set([outIdx + (outIdx !== -1 ? 1 : NaN), portIdx + (portIdx !== -1 ? 1 : NaN)])
+  const file = argv.find((a, i) => !a.startsWith('--') && !consumed.has(i))
   if (!file) throw new BeatEditError('render --stems needs a .beat file')
 
   const doc = readDoc(file)
@@ -2656,7 +2665,7 @@ async function renderStemsCmd(argv) {
   const dir = outDir ?? join(dirname(resolve(file)), `stems-${basename(file).replace(/\.beat$/, '')}`)
   mkdirSync(dir, { recursive: true })
 
-  const wavByTrack = await renderTrackSolosCommand(file, trackIds)
+  const wavByTrack = await renderTrackSolosCommand(file, trackIds, previewPort !== undefined ? { previewPort } : {})
   for (const id of trackIds) {
     const outPath = join(dir, `${id}.wav`)
     writeFileSync(outPath, wavByTrack.get(id))
@@ -3145,7 +3154,10 @@ async function main() {
       // Phase 37 Stream RA: `--stems` renders one solo WAV per track into an out dir instead of one
       // full-mix WAV — its own handler (renderStemsCmd), which exits the process itself.
       if (rest.includes('--stems')) {
-        await renderStemsCmd(rest.filter((a) => a !== '--stems'))
+        // Pilot 109 (MEDIUM): --offline used to be silently dropped here — every stem rendered
+        // via live capture with zero indication the flag was ignored. Say so out loud.
+        if (rest.includes('--offline')) console.error('note: --offline is not supported with --stems yet — stems render via live capture')
+        await renderStemsCmd(rest.filter((a) => a !== '--stems' && a !== '--offline'))
         break // renderStemsCmd process.exit()s; break keeps the switch well-formed
       }
       // One engine (D15): dotbeat's own (ui/src/audio/engine.ts) driven headless. `--offline` is

@@ -18,12 +18,15 @@ inside a Tone `OfflineContext` (one canonical engine survives; this is a second 
 second engine). It ships **opt-in**, and live capture remains the default and the reference,
 because the honest measurement says "offline" and "fast" are not synonyms:
 
-- **Exactness:** offline output is deterministic PCM straight off the graph (identical metrics
-  across runs), where live capture rides MediaRecorder→opus→decode. The two parity failures on
-  the gate were both cases where *live* is the lossy one: stereo "width" on a mono project
-  measures the opus chain's decorrelation noise floor, and a small sub-band share tilt traces to
-  low-frequency shedding in the capture chain. Everything else matched inside
-  `src/metrics/variance.ts` bounds on both gate projects (2-note smoke, 4-track real-groove).
+- **Exactness:** offline output is the post-limiter graph output with no MediaRecorder→opus→
+  decode step — metrics repeat run-to-run and oscillator content repeats to ~1 LSB, though NOT
+  byte-exact, and noise-based voices (the default kit's snare/clap/hats — Tone.Noise picks a
+  random buffer offset per start) differ per run offline and live alike (pilot 109 quantified
+  both). The two parity failures on the gate were both cases where *live* is the lossy one:
+  stereo "width" on a mono project measures the opus chain's decorrelation noise floor, and a
+  small sub-band share tilt traces to low-frequency shedding in the capture chain. Everything
+  else matched inside `src/metrics/variance.ts` bounds on both gate projects (2-note smoke,
+  4-track real-groove).
 - **Speed is graph-bound and SUPERLINEAR in song length:** Tone's offline architecture schedules
   the whole song, then renders once; spent one-shot voices can never be disposed mid-schedule
   (their audio hasn't rendered yet), so every note's oscillator+gain survives to the end and the
