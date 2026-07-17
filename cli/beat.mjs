@@ -596,6 +596,17 @@ const HELP = [
     cmd: 'render',
     text: `  beat render <file> [-o out.wav] [--tail <sec>]          render to WAV through dotbeat's own engine
                                                           (headless Chromium driving ui/; no BeatLab needed)
+  beat render <file> --offline [-o out.wav]               compute the mix through an offline context instead
+                                                          of capturing the realtime clock — same engine, no
+                                                          lossy recorder step. Repeatable to ~1 LSB for
+                                                          oscillator content; noise-based voices (e.g. the
+                                                          default kit's snare/hats) vary per run, exactly as
+                                                          they do live. CPU-bound: fast for short/small
+                                                          projects, can be SLOWER than live capture for long
+                                                          dense songs (the measured ratio is printed).
+                                                          Refuses soundfont (instrument/sf-lane) projects;
+                                                          an ACTIVE bitcrushRate (>1 with bitcrushMix >0)
+                                                          renders as passthrough (caveat printed).
   beat render <file> --stems [--out-dir d]                Phase 37: one solo WAV per track into an out dir
                                                           (default stems-<file> next to the .beat) — stems for
                                                           external mixing or per-track metrics
@@ -1398,7 +1409,7 @@ async function varyCmd(argv) {
     // real-time capture per variant, so a batch of N takes ~N * loop-length plus browser startup —
     // slower than the retired faster-than-realtime offline path. Correct output, honest cost; a
     // dedicated fast batch renderer for dotbeat's own engine is future work (see D15 / phase-17 doc).
-    renderVaryBatch(outDir, variants.length, { onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
+    renderVaryBatch(outDir, variants.length)
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
     if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
@@ -1511,7 +1522,7 @@ async function varyFeelCmd(argv, file, track) {
     // matching note in varyCmd above; a fast batch renderer for the canonical engine is future work).
     // linkMediaFrom: variant .beat files reference media relative to themselves; the parent's
     // media/ dir sits next to the parent, so batch.ts links it into the batch dir before rendering.
-    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
     if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
@@ -1557,7 +1568,7 @@ async function varyAutomationCmd(argv, file, track, param) {
   for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
 
   if (argv.includes('--render') || argv.includes('--audition')) {
-    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
+    renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
     if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
@@ -2639,7 +2650,13 @@ async function renderStemsCmd(argv) {
   const outIdx = argv.indexOf('--out-dir')
   const outDir = outIdx !== -1 ? argv[outIdx + 1] : undefined
   if (outIdx !== -1 && (!outDir || outDir.startsWith('--'))) throw new BeatEditError('--out-dir needs a directory path')
-  const file = argv.find((a, i) => !a.startsWith('--') && (outIdx === -1 || i !== outIdx + 1))
+  // Pilot 109 (LOW): --preview-port was silently ignored in stems mode (plain renders honor it),
+  // breaking port-disciplined parallel automation. Parse it and pass it through.
+  const portIdx = argv.indexOf('--preview-port')
+  const previewPort = portIdx !== -1 ? Number(argv[portIdx + 1]) : undefined
+  if (portIdx !== -1 && !Number.isFinite(previewPort)) throw new BeatEditError('--preview-port needs a port number')
+  const consumed = new Set([outIdx + (outIdx !== -1 ? 1 : NaN), portIdx + (portIdx !== -1 ? 1 : NaN)])
+  const file = argv.find((a, i) => !a.startsWith('--') && !consumed.has(i))
   if (!file) throw new BeatEditError('render --stems needs a .beat file')
 
   const doc = readDoc(file)
@@ -2648,7 +2665,7 @@ async function renderStemsCmd(argv) {
   const dir = outDir ?? join(dirname(resolve(file)), `stems-${basename(file).replace(/\.beat$/, '')}`)
   mkdirSync(dir, { recursive: true })
 
-  const wavByTrack = await renderTrackSolosCommand(file, trackIds)
+  const wavByTrack = await renderTrackSolosCommand(file, trackIds, previewPort !== undefined ? { previewPort } : {})
   for (const id of trackIds) {
     const outPath = join(dir, `${id}.wav`)
     writeFileSync(outPath, wavByTrack.get(id))
@@ -3137,14 +3154,18 @@ async function main() {
       // Phase 37 Stream RA: `--stems` renders one solo WAV per track into an out dir instead of one
       // full-mix WAV — its own handler (renderStemsCmd), which exits the process itself.
       if (rest.includes('--stems')) {
-        await renderStemsCmd(rest.filter((a) => a !== '--stems'))
+        // Pilot 109 (MEDIUM): --offline used to be silently dropped here — every stem rendered
+        // via live capture with zero indication the flag was ignored. Say so out loud.
+        if (rest.includes('--offline')) console.error('note: --offline is not supported with --stems yet — stems render via live capture')
+        await renderStemsCmd(rest.filter((a) => a !== '--stems' && a !== '--offline'))
         break // renderStemsCmd process.exit()s; break keeps the switch well-formed
       }
-      // One render path now (D15): dotbeat's own engine (ui/src/audio/engine.ts) driven headless.
-      // The retired `--offline` flag (BeatLab-dependent, broken in this environment) is accepted
-      // and ignored so old invocations don't hard-error — the real engine is dotbeat's own either way.
+      // One engine (D15): dotbeat's own (ui/src/audio/engine.ts) driven headless. `--offline` is
+      // MEANINGFUL again (renderer slice 2) — same engine, computed through Tone.Offline as fast
+      // as the CPU allows instead of captured off the realtime clock. (The OLD --offline was a
+      // retired BeatLab path; this one shares every line of engine code with live playback.)
       const { renderCommand } = await import('./render.mjs')
-      await renderCommand(rest.filter((a) => a !== '--offline'))
+      await renderCommand(rest)
       process.exit(0) // render leaves event-loop stragglers (chromium pipes, vite) — see render.mjs footer
     }
     // Phase 37 Stream RA: render once, then section-aware or whole-song mix feedback in one step.

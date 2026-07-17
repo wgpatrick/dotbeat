@@ -39,8 +39,15 @@ const { runGen } = await import(pathToFileURL(join(scriptsDir, '..', 'dist', 'sr
 // native node-web-audio-api decoder. Any other container (mp3/flac/aiff — e.g. a Freesound preview)
 // falls back to node-web-audio-api, which the gated network path implies anyway.
 async function decodeSource(inPath) {
-  if (/\.wav$/i.test(inPath)) {
-    const { sampleRate, channels } = decodeWav(readFileSync(inPath))
+  // Dispatch on the actual container (RIFF/WAVE magic), NOT the filename extension: the generative
+  // backends write their download to a `.v<n>.gen.wav` temp file even when the bytes are MP3 (fal's
+  // stable-audio endpoints return MP3), so trusting `.wav` routes MP3 into the pure-JS WAV decoder
+  // and fails with "not a RIFF/WAVE file". Real WAV still uses the zero-dep decoder (so ingesting a
+  // local .wav needs no native dep); anything else — MP3/FLAC/AIFF — falls back to node-web-audio-api.
+  const bytes = readFileSync(inPath)
+  const isWav = bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WAVE'
+  if (isWav) {
+    const { sampleRate, channels } = decodeWav(bytes)
     return { sampleRate, channels }
   }
   return decodeViaWebAudio(inPath)

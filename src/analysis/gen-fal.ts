@@ -99,8 +99,15 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
   // Open-era endpoints; some newer ones use duration) and the schema pages aren't fetchable from
   // every environment — so on a 422 schema rejection, retry ONCE with the alias before giving up,
   // and surface the API's own validation text verbatim if both shapes fail.
+  //
+  // output_format: "wav" — REQUEST WAV EXPLICITLY. The stable-audio-3/medium endpoint defaults to
+  // mp3 (output_format accepts mp3/wav/flac/ogg/opus/m4a/aac), and dotbeat's prep pipeline only has
+  // a zero-dep decoder for WAV (MP3 needs the native node-web-audio-api, absent in some checkouts).
+  // WAV is lossless and universally decodable here, and prep normalizes to 16-bit WAV anyway, so we
+  // always ask the source for WAV rather than round-tripping through a compressed container.
+  // Endpoints that don't accept output_format ignore an unknown field (or 422, caught below).
   const postBody = (durationField: 'seconds_total' | 'duration') =>
-    JSON.stringify({ prompt: opts.prompt, [durationField]: opts.seconds, seed: opts.seed })
+    JSON.stringify({ prompt: opts.prompt, [durationField]: opts.seconds, seed: opts.seed, output_format: 'wav' })
   const postOnce = (body: string) =>
     transport({
       method: 'POST',
@@ -134,14 +141,16 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
   if (download.status !== 200 || !existsSync(opts.outPath)) {
     throw new BeatGenError(`downloading the generated audio failed (HTTP ${download.status}) from ${audioUrl}`)
   }
-  // The prep pipeline decodes WAV only — verify the magic now so a provider that returned mp3/ogg
-  // fails with the real reason instead of a decode error three steps later.
+  // The download can be any container the prep pipeline can decode. dotbeat's prep decoder
+  // (scripts/prep-oneshot-lib.mjs decodeViaWebAudio, via node-web-audio-api) handles WAV, AIFF,
+  // FLAC and MP3 and resamples — and fal's stable-audio endpoints return MP3 — so we do NOT
+  // require WAV here: prep re-decodes the download and normalizes it to a 16-bit 44.1kHz WAV a
+  // step later, sniffing the real container from the bytes regardless of this file's name. Only
+  // read a sample rate straight from a WAV header when the bytes actually are WAV; for anything
+  // else, report the 44.1kHz rate prep normalizes every registered one-shot to.
   const head = readFileSync(opts.outPath).subarray(0, 12)
   const isWav = head.length >= 12 && head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE'
-  if (!isWav) {
-    throw new BeatGenError(`fal ${provider} returned non-WAV audio (${audioUrl.split('.').pop()}) — dotbeat's prep pipeline needs WAV; pick a provider/format that emits WAV`)
-  }
-  const sampleRate = readFileSync(opts.outPath).readUInt32LE(24)
+  const sampleRate = isWav ? readFileSync(opts.outPath).readUInt32LE(24) : 44100
 
   return {
     backend: 'fal',

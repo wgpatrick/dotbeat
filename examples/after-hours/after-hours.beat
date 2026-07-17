@@ -1,0 +1,292 @@
+format_version 0.11
+bpm 123
+loop_bars 8
+selected_track bass
+
+media
+  sample stab sha256:825e60be2ffabbb35477ae02240bed57d5491758e9255fecffda1f6e4c70cdcb media/stab.wav
+  sample pluck sha256:34af0ac686f842b3e386efd787b99c05db09f03020ff6c8580c1287e2ca98dc5 media/pluck.wav
+
+track keys keys #c678dd drums
+  synth
+    osc sawtooth
+    volume -7
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+  lane f3 sample pluck 0 -2 length=0.7 attack=0.004 decay=0.5
+  lane g3 sample pluck 0 0 length=0.7 attack=0.004 decay=0.5
+  lane gs3 sample pluck 0 1 length=0.7 attack=0.004 decay=0.5
+  lane as3 sample pluck 0 3 length=0.7 attack=0.004 decay=0.5
+  lane c4 sample pluck 0 5 length=0.7 attack=0.004 decay=0.5
+  lane cs4 sample pluck 0 6 length=0.7 attack=0.004 decay=0.5
+  lane ds4 sample pluck 0 8 length=0.7 attack=0.004 decay=0.5
+  lane f4 sample pluck 0 10 length=0.7 attack=0.004 decay=0.5
+  hit h1 f4 2 0.65
+  hit h2 c4 6 0.5
+  hit h3 gs3 12 0.6
+  hit h4 g3 22 0.45
+  hit h5 gs3 26 0.55
+  hit h6 f4 34 0.65
+  hit h7 cs4 38 0.5
+  hit h8 as3 44 0.6
+  hit h9 gs3 58 0.5
+  hit h10 ds4 66 0.65
+  hit h11 c4 70 0.5
+  hit h12 gs3 76 0.6
+  hit h13 as3 90 0.5
+  hit h14 ds4 98 0.65
+  hit h15 as3 102 0.5
+  hit h16 g3 108 0.6
+  hit h17 f4 122 0.55
+  hit h18 ds4 126 0.5
+
+track drums drums #56b6c2 drums
+  synth
+    osc sawtooth
+    volume -9
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+  lane kick synth:membrane tune=44 punch=0.02 decay=0.42
+  lane snare synth:noise
+  lane rimshot synth:noise
+  lane clap synth:noise tone=0.42 decay=0.16
+  lane hat synth:metal decay=0.028 tone=8200
+  lane openhat synth:metal decay=0.3 tone=7000
+  lane tom_lo synth:membrane
+  lane tom_mid synth:membrane
+  lane tom_hi synth:membrane
+  lane crash synth:metal
+  lane ride synth:metal
+  lane cowbell synth:membrane
+  hit h1 kick 0 0.92
+  hit h11 hat 0.1104 0.2566
+  hit h12 hat 1.9622 0.2639
+  hit h7 openhat 1.9945 0.4859
+  hit h13 hat 3.9709 0.1992
+  hit h2 kick 4 0.92
+  hit h5 clap 4 0.62
+  hit h14 hat 5.9388 0.3372
+  hit h8 openhat 6.0481 0.4964
+  hit h15 hat 7.9803 0.2641
+  hit h3 kick 8 0.92
+  hit h9 openhat 10.0343 0.4827
+  hit h16 hat 10.0779 0.2208
+  hit h4 kick 12 0.92
+  hit h6 clap 12 0.62
+  hit h17 hat 12.0238 0.2019
+  hit h10 openhat 13.9494 0.4981
+  hit h18 hat 14.0519 0.2724
+  hit h29 hat 15.9873 0.2139
+  hit h19 kick 16 0.92
+  hit h25 openhat 17.9509 0.511
+  hit h30 hat 18.0532 0.2506
+  hit h20 kick 20 0.92
+  hit h23 clap 20 0.62
+  hit h31 hat 20.0307 0.2854
+  hit h26 openhat 22.0288 0.4475
+  hit h32 hat 22.0322 0.1583
+  hit h21 kick 24 0.92
+  hit h33 hat 24.0398 0.2477
+  hit h27 openhat 25.9694 0.4771
+  hit h34 hat 26.0253 0.2329
+  hit h22 kick 28 0.92
+  hit h24 clap 28 0.62
+  hit h35 hat 28.0192 0.2193
+  hit h36 hat 29.9705 0.2663
+  hit h28 openhat 30.1209 0.4485
+  hit h37 kick 32 0.92
+  hit h47 hat 32.0383 0.2195
+  hit h43 openhat 34.0126 0.4634
+  hit h48 hat 34.0326 0.3397
+  hit h38 kick 36 0.92
+  hit h41 clap 36 0.62
+  hit h49 hat 36.0794 0.2068
+  hit h50 hat 37.9392 0.2943
+  hit h44 openhat 37.9981 0.4856
+  hit h51 hat 39.9966 0.2449
+  hit h39 kick 40 0.92
+  hit h45 openhat 41.9314 0.38
+  hit h52 hat 41.9407 0.2805
+  hit h53 hat 43.9997 0.1965
+  hit h40 kick 44 0.92
+  hit h42 clap 44 0.62
+  hit h46 openhat 46.0603 0.4487
+  hit h54 hat 46.0752 0.3526
+  hit h65 hat 47.9382 0.2535
+  hit h55 kick 48 0.92
+  hit h66 hat 49.964 0.2517
+  hit h61 openhat 49.9738 0.4114
+  hit h67 hat 51.9886 0.2694
+  hit h56 kick 52 0.92
+  hit h59 clap 52 0.62
+  hit h62 openhat 53.9741 0.503
+  hit h68 hat 53.9988 0.2744
+  hit h69 hat 55.9572 0.2894
+  hit h57 kick 56 0.92
+  hit h63 openhat 57.9427 0.4985
+  hit h70 hat 58.0532 0.2097
+  hit h58 kick 60 0.92
+  hit h60 clap 60 0.62
+  hit h71 hat 60.0421 0.2306
+  hit h72 hat 61.9834 0.2421
+  hit h64 openhat 62.0192 0.4069
+  hit h73 kick 64 0.92
+  hit h83 hat 64.0246 0.2405
+  hit h84 hat 65.9644 0.2985
+  hit h79 openhat 65.9963 0.4185
+  hit h74 kick 68 0.92
+  hit h77 clap 68 0.62
+  hit h85 hat 68.0033 0.2898
+  hit h80 openhat 69.9876 0.4136
+  hit h86 hat 70.0683 0.1828
+  hit h87 hat 71.9768 0.253
+  hit h75 kick 72 0.92
+  hit h81 openhat 73.9539 0.4816
+  hit h88 hat 73.9759 0.243
+  hit h76 kick 76 0.92
+  hit h78 clap 76 0.62
+  hit h89 hat 76.0071 0.2354
+  hit h90 hat 77.9645 0.2735
+  hit h82 openhat 78.0377 0.3602
+  hit h101 hat 79.993 0.2431
+  hit h91 kick 80 0.92
+  hit h97 openhat 82.0012 0.5323
+  hit h102 hat 82.0171 0.2892
+  hit h103 hat 83.9977 0.2561
+  hit h92 kick 84 0.92
+  hit h95 clap 84 0.62
+  hit h104 hat 85.9948 0.1471
+  hit h98 openhat 86.0071 0.3586
+  hit h105 hat 87.9901 0.1793
+  hit h93 kick 88 0.92
+  hit h106 hat 89.9158 0.1981
+  hit h99 openhat 90.0105 0.4124
+  hit h94 kick 92 0.92
+  hit h96 clap 92 0.62
+  hit h107 hat 92.0236 0.2411
+  hit h108 hat 93.9962 0.2418
+  hit h100 openhat 94.0498 0.5455
+  hit h119 hat 95.9983 0.3118
+  hit h109 kick 96 0.92
+  hit h120 hat 97.9588 0.2785
+  hit h115 openhat 98.0148 0.4638
+  hit h110 kick 100 0.92
+  hit h113 clap 100 0.62
+  hit h121 hat 100.0198 0.3813
+  hit h116 openhat 101.9253 0.3459
+  hit h122 hat 101.9839 0.2454
+  hit h111 kick 104 0.92
+  hit h123 hat 104.0182 0.1556
+  hit h117 openhat 105.9839 0.4595
+  hit h124 hat 106.0529 0.2571
+  hit h112 kick 108 0.92
+  hit h114 clap 108 0.62
+  hit h125 hat 108.0166 0.2506
+  hit h118 openhat 109.9496 0.4187
+  hit h126 hat 109.986 0.244
+  hit h137 hat 111.9326 0.237
+  hit h127 kick 112 0.92
+  hit h133 openhat 113.9574 0.4674
+  hit h138 hat 113.9874 0.2536
+  hit h139 hat 115.923 0.2301
+  hit h128 kick 116 0.92
+  hit h131 clap 116 0.62
+  hit h134 openhat 117.9671 0.4227
+  hit h140 hat 118.0341 0.3221
+  hit h129 kick 120 0.92
+  hit h141 hat 120.0082 0.2252
+  hit h142 hat 121.9309 0.3128
+  hit h135 openhat 121.999 0.4484
+  hit h130 kick 124 0.92
+  hit h132 clap 124 0.62
+  hit h143 hat 124.0222 0.2223
+  hit h136 openhat 125.9863 0.492
+  hit h144 hat 126.0063 0.1025
+
+track bass bass #98c379 synth
+  synth
+    osc sine
+    volume -6
+    cutoff 420
+    resonance 1.4
+    attack 0.005
+    decay 0.16
+    sustain 0.25
+    release 0.12
+    pan 0
+    subLevel 0.55
+    duckSource drums
+    duckAmount 0.55
+  note u100001 29 2 1.4 0.8
+  note u100002 29 6 1.4 0.8
+  note u100003 29 10 1.4 0.8
+  note u100004 29 14 1.4 0.8
+  note u100005 29 18 1.4 0.8
+  note u100006 29 22 1.4 0.8
+  note u100007 29 26 1.4 0.8
+  note u100008 41 30 1.4 0.62
+  note u100009 25 34 1.4 0.8
+  note u100010 25 38 1.4 0.8
+  note u100011 25 42 1.4 0.8
+  note u100012 25 46 1.4 0.8
+  note u100013 25 50 1.4 0.8
+  note u100014 25 54 1.4 0.8
+  note u100015 25 58 1.4 0.8
+  note u100016 37 62 1.4 0.62
+  note u100017 32 66 1.4 0.8
+  note u100018 32 70 1.4 0.8
+  note u100019 32 74 1.4 0.8
+  note u100020 32 78 1.4 0.8
+  note u100021 32 82 1.4 0.8
+  note u100022 32 86 1.4 0.8
+  note u100023 32 90 1.4 0.8
+  note u100024 44 94 1.4 0.62
+  note u100025 27 98 1.4 0.8
+  note u100026 27 102 1.4 0.8
+  note u100027 27 106 1.4 0.8
+  note u100028 27 110 1.4 0.8
+  note u100029 27 114 1.4 0.8
+  note u100030 27 118 1.4 0.8
+  note u100031 27 122 1.4 0.8
+  note u100032 39 126 1.4 0.62
+
+track chords chords #e5c07b drums
+  synth
+    osc sawtooth
+    volume -9
+    cutoff 12000
+    resonance 0.1
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+    duckSource drums
+    duckAmount 0.4
+  lane fm7 sample stab -3 5
+  hit h1 fm7 6 0.62
+  hit h2 fm7 14 0.5
+  hit h3 fm7 22 0.62
+  hit h4 fm7 30 0.5
+  hit h5 fm7 38 0.62
+  hit h6 fm7 46 0.5
+  hit h7 fm7 54 0.62
+  hit h8 fm7 62 0.5
+  hit h9 fm7 70 0.62
+  hit h10 fm7 78 0.5
+  hit h11 fm7 86 0.62
+  hit h12 fm7 94 0.5
+  hit h13 fm7 102 0.62
+  hit h14 fm7 110 0.5
+  hit h15 fm7 118 0.62
+  hit h16 fm7 126 0.5

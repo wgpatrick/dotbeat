@@ -3,7 +3,7 @@
 // non-JSON, missing audio URL, and the non-WAV guard the prep pipeline depends on.
 
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -42,7 +42,7 @@ test('runGenFal happy path: POST body, download, WAV check, GenMeta contract', a
   const meta = await runGenFal({ prompt: 'a dusty snare', seconds: 2, seed: 7, outPath: out, transport, apiKey: 'k' })
   assert.equal(calls[0]!.method, 'POST')
   assert.equal(calls[0]!.url, `https://fal.run/${FAL_DEFAULT_PROVIDER}`)
-  assert.deepEqual(JSON.parse(calls[0]!.body!), { prompt: 'a dusty snare', seconds_total: 2, seed: 7 })
+  assert.deepEqual(JSON.parse(calls[0]!.body!), { prompt: 'a dusty snare', seconds_total: 2, seed: 7, output_format: 'wav' })
   assert.equal(calls[1]!.method, 'GET')
   assert.deepEqual(meta, { backend: 'fal', provider: FAL_DEFAULT_PROVIDER, model: FAL_DEFAULT_PROVIDER, seconds: 2, seed: 7, sampleRate: 48000 })
 })
@@ -85,11 +85,17 @@ test('runGenFal surfaces HTTP errors, bad JSON, and missing audio URLs with the 
   )
 })
 
-test('runGenFal rejects non-WAV downloads with the real reason', async () => {
+test('runGenFal accepts a non-WAV (mp3) download — prep decodes it downstream — and reports 44.1kHz', async () => {
+  // fal's stable-audio endpoints return MP3; the prep pipeline (node-web-audio-api) decodes it, so
+  // runGenFal must pass the bytes through rather than reject them. It reports the 44.1kHz rate prep
+  // normalizes every registered one-shot to, since a non-WAV header carries no readable rate here.
   const dir = mkdtempSync(join(tmpdir(), 'fal-mp3-'))
   const out = join(dir, 'v1.wav')
-  const { transport } = mockTransport({ wav: Buffer.from('ID3\x04not a wav at all, definitely an mp3 file') })
-  await assert.rejects(runGenFal({ prompt: 'x', seconds: 1, seed: 1, outPath: out, transport, apiKey: 'k' }), /non-WAV/)
+  const mp3ish = Buffer.from('ID3\x04not a wav at all, definitely an mp3 file')
+  const { transport } = mockTransport({ wav: mp3ish })
+  const meta = await runGenFal({ prompt: 'x', seconds: 1, seed: 1, outPath: out, transport, apiKey: 'k' })
+  assert.equal(meta.sampleRate, 44100)
+  assert.deepEqual(readFileSync(out), mp3ish) // the raw download is preserved for prep to decode
 })
 
 test('runGenFal validates provider shape and honors an explicit fal model path', async () => {
@@ -121,7 +127,7 @@ test('runGenFal retries a 422 schema rejection once with the duration alias', as
   const meta = await runGenFal({ prompt: 'x', seconds: 4, seed: 3, outPath: out, transport, apiKey: 'k' })
   assert.equal(meta.seconds, 4)
   assert.equal(calls.length, 3, 'POST, retry POST, download')
-  assert.deepEqual(JSON.parse(calls[1]!.body!), { prompt: 'x', duration: 4, seed: 3 }, 'retry swapped the duration field')
+  assert.deepEqual(JSON.parse(calls[1]!.body!), { prompt: 'x', duration: 4, seed: 3, output_format: 'wav' }, 'retry swapped the duration field, keeping output_format')
 })
 
 test('runGenFal surfaces the API validation text when both duration shapes are rejected', async () => {

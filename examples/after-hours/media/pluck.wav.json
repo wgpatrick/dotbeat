@@ -1,0 +1,17 @@
+{
+  "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+  "license": "Stability-AI-Community",
+  "query": "single note synth pluck, ONE sustained pitch only, no chord, plucky short attack, warm analog deep house lead, clean fundamental, no reverb",
+  "sha256": "34af0ac686f842b3e386efd787b99c05db09f03020ff6c8580c1287e2ca98dc5",
+  "preparedAt": "2026-07-17T07:02:40.549Z",
+  "durationSeconds": 29.7129,
+  "generated": {
+    "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+    "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+    "backend": "fal",
+    "prompt": "single note synth pluck, ONE sustained pitch only, no chord, plucky short attack, warm analog deep house lead, clean fundamental, no reverb",
+    "seconds": 2,
+    "seed": 42,
+    "licenseUrl": "https://stability.ai/community-license-agreement"
+  }
+}

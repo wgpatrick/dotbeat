@@ -18,7 +18,7 @@
 //
 // Requires `npm run build` (compiled ../dist/src). The ui/ build is produced on demand.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, copyFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawn, execFileSync } from 'node:child_process'
@@ -107,11 +107,19 @@ function parseArgs(argv) {
     else if (a === '--tail') args.tail = argv[++i]
     else if (a === '--daemon-port') args.daemonPort = argv[++i]
     else if (a === '--preview-port') args.previewPort = argv[++i]
+    else if (a === '--batch') args.batch = argv[++i]
+    else if (a === '--offline') args.offline = true
     // legacy no-ops: the engine is dotbeat's own now, so these are accepted-and-ignored rather
     // than errored, so old scripts/invocations don't break on an unknown flag.
     else if (a === '--beatlab-dir') i++ // swallow its value
     else if (a === '--port') i++ // old BeatLab dev-server port; irrelevant now
-    else args._.push(a)
+    else if (a.startsWith('--')) {
+      // Pilot 109 (MEDIUM): a typo'd flag used to be silently swallowed into the positional list
+      // — `--offlin` ran a full LIVE render with exit 0, silently downgrading the one flag whose
+      // entire point is exactness. Unknown flags are an immediate, loud error.
+      console.error(`error: unknown flag "${a}" (known: -o/--out, --tail, --daemon-port, --preview-port, --batch, --offline)`)
+      process.exit(2)
+    } else args._.push(a)
   }
   return args
 }
@@ -119,7 +127,18 @@ function parseArgs(argv) {
 // Serve a production build of ui/ and resolve the URL vite actually bound (parsed from its output
 // so a busy port auto-increments cleanly instead of failing). Returns { proc, url }.
 async function serveUi(preferredPort) {
-  const proc = spawn('npm', ['run', 'preview', '--', '--port', String(preferredPort)], { cwd: uiDir, stdio: ['ignore', 'pipe', 'pipe'] })
+  // detached => its own process group. Killing only the spawned pid kills the npm wrapper while
+  // the actual vite server it spawned lives on — pilot 109 found ~24 orphaned `vite preview`
+  // servers accumulated on one box (~90MB RSS each), one leaked per render. close() kills the
+  // whole group (negative pid) so the server actually dies with the session.
+  const proc = spawn('npm', ['run', 'preview', '--', '--port', String(preferredPort)], { cwd: uiDir, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
+  proc.killTree = () => {
+    try {
+      process.kill(-proc.pid, 'SIGTERM')
+    } catch {
+      try { proc.kill('SIGTERM') } catch { /* already gone */ }
+    }
+  }
   const url = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('vite preview did not announce a URL within 30s')), 30000)
     let buf = ''
@@ -287,7 +306,7 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
 
   const close = async () => {
     await browser.close()
-    served.proc.kill('SIGTERM')
+    served.proc.killTree() // group kill — see serveUi (pilot 109's vite-leak finding)
     await daemon.close()
   }
   return { page, pageErrors, doc, seconds, close }
@@ -321,6 +340,34 @@ async function captureWav(page, seconds, pageErrors) {
   return trimLeadingSilence(Buffer.from(base64, 'base64'), seconds)
 }
 
+/** Offline capture (renderer slice 2): compute the mix through Tone.Offline via the page's
+ * __renderOffline hook (ui/src/audio/offline.ts) — same engine class, offline context, as fast
+ * as the CPU allows. The buffer is exact-length by construction (no recorder spin-up, no trim,
+ * no underrun class of bug). Refusals (soundfont tracks, undecoded media) throw with the page's
+ * own reason so callers can fall back to live capture deliberately. */
+async function captureOfflineWav(page, seconds, pageErrors) {
+  console.error("rendering (offline compute through dotbeat's own engine)...")
+  const result = await page.evaluate(async (secs) => {
+    const { blob, caveats, renderMs } = await window.__renderOffline(secs)
+    const buf = await blob.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+    return { base64: btoa(binary), caveats, renderMs }
+  }, seconds)
+  if (pageErrors.length) throw new Error('page error(s) during offline render:\n' + pageErrors.join('\n'))
+  for (const caveat of result.caveats) console.error(`offline caveat: ${caveat}`)
+  const ratio = (seconds * 1000) / Math.max(1, result.renderMs)
+  console.error(`offline compute: ${(result.renderMs / 1000).toFixed(2)}s for ${seconds.toFixed(2)}s of audio (${ratio.toFixed(1)}x realtime)`)
+  // Honesty note, not an error: offline compute is CPU-bound and Tone's schedule-then-render
+  // architecture keeps every one-shot voice node alive for the whole render (see
+  // ui/src/audio/offline.ts header), so long/dense songs on a slow machine can compute SLOWER
+  // than the live capture would have taken. The output is still exact — this is purely a
+  // wall-clock heads-up so nobody assumes --offline is unconditionally the fast path.
+  if (ratio < 1) console.error(`note: offline computed slower than realtime on this machine — plain live capture may be faster for this project`)
+  return Buffer.from(result.base64, 'base64')
+}
+
 /** Cut the recorder-spin-up silence off the front of a canonical 44-byte-header 16-bit PCM WAV
  * (what engine.recordWav()/audioBufferToWav produce) so the file starts on the loop's first
  * sound, then cap it at `seconds` so the deliberate over-capture doesn't lengthen the file.
@@ -352,25 +399,79 @@ function trimLeadingSilence(wav, seconds) {
   return out
 }
 
+/** Parse-time `--offline` refusal (pilot 109 HIGH): instrument tracks and sf-backed lanes are
+ * detectable from the parsed doc alone, so refuse in the first second instead of after ~30s of
+ * daemon + headless-Chromium spin-up delivering the same message as a raw page.evaluate stack.
+ * Best-effort — a missing dist/ build means no parser yet; the in-page refusal still backstops. */
+async function offlinePreflightRefusal(beatPath) {
+  try {
+    const { parse } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
+    const doc = parse(readFileSync(beatPath, 'utf8'))
+    const instrumentTracks = doc.tracks.filter((t) => t.kind === 'instrument').map((t) => t.id)
+    if (instrumentTracks.length > 0) {
+      return `instrument (soundfont) tracks need a native realtime context (worklet) — offline render does not support them yet: ${instrumentTracks.join(', ')}`
+    }
+    const sfLanes = []
+    for (const t of doc.tracks) {
+      for (const lane of t.lanes ?? []) {
+        if (lane.backing?.type === 'sf') sfLanes.push(`${t.id}.${lane.name}`)
+      }
+    }
+    if (sfLanes.length > 0) return `sf-backed drum lanes need a native realtime context (worklet) — offline render does not support them yet: ${sfLanes.join(', ')}`
+    return null
+  } catch {
+    return null // no build / unparseable here — bootRenderSession and the in-page check own those errors
+  }
+}
+
 export async function renderCommand(argv) {
   const args = parseArgs(argv)
   const beatPath = args._[0]
   if (!beatPath) {
-    console.error('usage: node cli/render.mjs <project.beat> [-o out.wav] [--tail <sec>] [--daemon-port N] [--preview-port N]')
+    console.error('usage: node cli/render.mjs <project.beat> [-o out.wav] [--tail <sec>] [--daemon-port N] [--preview-port N] [--offline]')
     process.exit(1)
+  }
+  if (!existsSync(beatPath)) {
+    // Pilot 109 (LOW): this used to surface as a raw ENOENT stack trace from the parser.
+    console.error(`error: no file at ${beatPath}`)
+    process.exit(2)
+  }
+  if (args.offline) {
+    const refusal = await offlinePreflightRefusal(beatPath)
+    if (refusal) {
+      console.error(`error: offline render refused: ${refusal}`)
+      process.exit(2)
+    }
   }
   const outPath = args.out ?? beatPath.replace(/\.beat$/, '') + '.wav'
   const tail = Number(args.tail ?? 0)
   const daemonPort = args.daemonPort !== undefined ? Number(args.daemonPort) : 0 // 0 => OS picks a free port
   const previewPort = args.previewPort !== undefined ? Number(args.previewPort) : 5899
 
+  // Errors are printed friendly and the process EXITS here. Before pilot 109, a mid-render error
+  // (e.g. an in-page --offline refusal) propagated to beat.mjs's catch — which prints and sets
+  // exitCode but never calls process.exit — while the leaked chromium/daemon/vite handles kept
+  // the event loop alive: the CLI printed a stack trace and then hung FOREVER (killed manually
+  // after 7+ minutes). Teardown is raced against a timeout so a wedged browser can't re-hang it.
   const session = await bootRenderSession(beatPath, { tail, daemonPort, previewPort })
+  let failure = null
   try {
-    const wavBytes = await captureWav(session.page, session.seconds, session.pageErrors)
+    const wavBytes = args.offline
+      ? await captureOfflineWav(session.page, session.seconds, session.pageErrors)
+      : await captureWav(session.page, session.seconds, session.pageErrors)
     writeFileSync(outPath, wavBytes)
     console.error(`wrote ${outPath} (${wavBytes.length} bytes)`)
+  } catch (err) {
+    failure = err
   } finally {
-    await session.close()
+    await Promise.race([session.close(), sleep(5000)])
+  }
+  if (failure) {
+    // First meaningful line only — the playwright page.evaluate wrapper adds minified-bundle
+    // frames that read as noise next to the (already good) refusal message itself.
+    const line = String(failure.message ?? failure).split('\n').find((l) => l.trim()) ?? 'render failed'
+    console.error(`error: ${line.replace(/^page\.evaluate:\s*Error:\s*/, '')}`)
+    process.exit(1)
   }
 }
 
@@ -419,10 +520,78 @@ export async function renderTrackSolosCommand(beatPath, trackIds, opts = {}) {
   return results
 }
 
+/**
+ * Batch mode (`--batch <dir>`, taste-loop groundwork / D15's "fast batch render" note): render
+ * every .beat variant in a vary-batch dir through ONE boot of the whole harness. The per-variant
+ * cost used to include a fresh daemon + vite preview + headless Chromium (~10-15s of pure
+ * overhead each); here the session boots once against a scratch copy of variant 1, and each
+ * subsequent variant is swapped in by overwriting the daemon's watched file — the daemon's
+ * directory watcher broadcasts the new doc over SSE and the page's store hot-reloads, exactly
+ * the mechanism `beat adopt` already relies on for a running GUI.
+ */
+export async function renderBatchCommand(argv) {
+  const args = parseArgs(argv)
+  const dir = args.batch
+  let manifest
+  try {
+    manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'))
+  } catch (err) {
+    console.error(`--batch needs a vary-batch directory with a manifest.json (${err.message})`)
+    process.exit(1)
+  }
+  const beatVariants = manifest.variants.filter((v) => v.file.endsWith('.beat'))
+  if (beatVariants.length === 0) {
+    console.error('nothing to render: this batch has no .beat variants (gen batches are already audio)')
+    process.exit(1)
+  }
+  // The daemon watches ONE file for the whole session; variants take turns being that file.
+  // Dotfile name so the scratch copy can never be mistaken for a tenth variant.
+  const currentPath = join(dir, '.render-current.beat')
+  copyFileSync(join(dir, beatVariants[0].file), currentPath)
+  const session = await bootRenderSession(currentPath, {
+    daemonPort: args.daemonPort !== undefined ? Number(args.daemonPort) : 0,
+    previewPort: args.previewPort !== undefined ? Number(args.previewPort) : 5899,
+  })
+  const { parse } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
+  try {
+    for (let i = 0; i < beatVariants.length; i++) {
+      const v = beatVariants[i]
+      console.error(`rendering ${v.file.replace(/\.beat$/, '')} (${i + 1}/${beatVariants.length})...`)
+      if (i > 0) {
+        // Swap the next variant in and wait until the page's store actually reflects it —
+        // consecutive vary variants always differ (that is what a variant is), so a doc-JSON
+        // fingerprint change is a reliable reload signal.
+        const prevFingerprint = await session.page.evaluate(() => JSON.stringify(window.__store.getState().doc))
+        copyFileSync(join(dir, v.file), currentPath)
+        await session.page.waitForFunction(
+          (prev) => JSON.stringify(window.__store.getState().doc) !== prev,
+          prevFingerprint,
+          { timeout: 15000 },
+        )
+        await sleep(200) // let the engine's sync() tick absorb the new doc before capture
+      }
+      const doc = parse(readFileSync(join(dir, v.file), 'utf8'))
+      const renderBars = doc.song && doc.song.length > 0 ? doc.song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
+      const seconds = (renderBars * 16 * 60) / doc.bpm / 4
+      const wavBytes = args.offline
+        ? await captureOfflineWav(session.page, seconds, session.pageErrors)
+        : await captureWav(session.page, seconds, session.pageErrors)
+      session.pageErrors.length = 0 // captured errors are per-variant, not cumulative
+      const outPath = join(dir, v.file.replace(/\.beat$/, '.wav'))
+      writeFileSync(outPath, wavBytes)
+      console.error(`wrote ${outPath} (${wavBytes.length} bytes)`)
+    }
+  } finally {
+    await session.close()
+    try { rmSync(currentPath) } catch { /* best-effort scratch cleanup */ }
+  }
+}
+
 // Runs directly (node cli/render.mjs ...) or via the `beat` dispatcher (cli/beat.mjs), which
 // imports renderCommand instead.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  renderCommand(process.argv.slice(2))
+  const argv = process.argv.slice(2)
+  ;(argv.includes('--batch') ? renderBatchCommand(argv) : renderCommand(argv))
     .then(() => process.exit(0)) // browser.close()/preview.kill() alone don't reliably drain the
     // event loop (chromium pipes, vite's esbuild service) — same fix scripts/smoke.mjs needed.
     .catch((err) => {
