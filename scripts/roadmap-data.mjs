@@ -1244,6 +1244,47 @@ export const rows = [
     research: null, plan: 'phase-23-stream-bb.md',
   },
 
+  // ── Taste loop (docs/taste-loop-design.md) ────────────────────────────────
+  // The personal-taste-model program: learn which variants the owner picks, then let that model
+  // steer generation. Evidence base in docs/research/107-taste-model-program.md; phases T0-T7 in
+  // the design doc. Every claim reduces to `beat taste-eval`'s held-out numbers.
+  {
+    area: 'Taste loop', feature: 'T0: instrumented score log + eval harness + blind audition',
+    description: 'Score-log enrichment: `beat score` now measures EVERY rendered variant (picks and rejects) into the entry as a stable 13-dim DSP feature vector (src/taste/features.ts), making the log self-contained training data after batch dirs are deleted; `beat taste-eval --backfill` derives features for older entries whose renders survive. Eval harness (`beat taste-eval`, src/taste/eval.ts): leave-one-batch-out held-out pick prediction — top-1/top-3/pairwise vs analytic chance floors — with built-in reference scorers (random; dsp-bt = the v0 regularized logistic Bradley-Terry ranker over within-batch z-scored features, src/taste/ranker.ts, which also reports its learned taste directions). Blind audition: vary/gen `--audition` now shuffles presentation order (seeded from the batch seed, reproducible; `--no-shuffle` opts out) so listening position decouples from generation order, and a new `beat audition <dir>` stitches a scoreable clip-set batch from ANY directory of wavs (the T3 blind chop-rating flow) — score works on it, adopt correctly refuses. 11 tests (test/taste.test.ts) incl. a planted-taste recovery check; verified end-to-end on a live vary batch.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
+  },
+  {
+    area: 'Taste loop', feature: 'T2: audio-embedding features (LAION-CLAP + Audiobox axes)',
+    description: 'Frozen LAION-CLAP larger_clap_music (Apache-2.0, 512-d) embeddings per variant render, PCA-reduced on unlabeled variants, plus Audiobox-Aesthetics\' four production-quality scores as explicit features; ablate DSP-only vs embedding-only vs both per variant type through the T0 harness. Python sidecar shape (same pattern as beat analyze).',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
+  },
+  {
+    area: 'Taste loop', feature: 'T3: real-music taste prior (stems -> chops -> blind ratings)',
+    description: 'Owner-curated loved/neutral/disliked playlists -> Demucs stems -> bar-boundary chops -> embeddings + blind chop ratings through the T0 clip-set audition flow -> a per-stem-class taste prior (loved-centroid distance first), tested for transfer against historical dotbeat picks. Immediate no-ML payoff: per-stem reference profiles from loved songs for lint --ref. Private data — never enters the repo.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
+  },
+  {
+    area: 'Taste loop', feature: 'T4: suggest --taste (advisory pre-rank + active batch proposal)',
+    description: 'The v0 ranker pre-ranks new batches and proposes next-batch composition by acquisition value under the current posterior, with a comparison-graph connectivity anchor (one past winner per batch). Never auto-adopts. Gate: T0 harness shows dsp-bt meaningfully above chance at ~20 scored batches.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
+  },
+  {
+    area: 'Taste loop', feature: 'T5: overnight critic-guided quality-diversity search',
+    description: 'CVT-MAP-Elites archive (k ~ morning-review size), CMA-ME-style emitters with the iso+line operator over synth-param/automation genomes, DSA-ME surrogate pattern (the taste model screens thousands; renders spent only on the archive frontier), pessimistic scoring (mean - beta*std), epsilon random immigrants; owner blind-audits <=10-20 frontier items each morning, picks retrain the critic. May need the faster-than-realtime offline render path (D15\'s closing note).',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
+  },
+  {
+    area: 'Taste loop', feature: 'T6: sound matching / expressiveness ceiling (CMA-ES)',
+    description: 'Per-target CMA-ES (population ~24 parallel renders, 2-5K budget) against loudness-normalized reference stem chops: log-mel MSS + MFCC + envelope loss, pitch frozen from f0 detection, discrete params enumerated, staged source-then-inserts search; ceiling reported in MFCC + CLAP cosine per sound class. Doubles as auto-preset-from-reference; unreachable classes become an evidence-backed engine feature list (INSTRUMENTAL: unison + noise floor was the single biggest lever).',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
+  },
+
   // ── Render / export ──────────────────────────────────────────────────────
   {
     area: 'Render / export', feature: 'GUI Export button',

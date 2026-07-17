@@ -1508,7 +1508,7 @@ const TOOLS: ToolDef[] = [
             `  ${c.variant}: seed ${c.seed}, ${c.durationSeconds}s, sha256:${c.sha256.slice(0, 12)}...`),
           `nothing is registered in ${str(args, 'file')} yet: candidates live only in the batch dir until you adopt one`,
         ]
-        if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(result.dir, result.candidates.length)).trimEnd())
+        if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(result.dir, result.candidates.length, { shuffleSeed: result.seedFrom })).trimEnd())
         lines.push(`audition, then: beat_score dir "${result.dir}" picks [best, ...]`)
         lines.push(`then register the winner: beat_adopt dir "${result.dir}" pick "<best>"`)
         return lines.join('\n') + '\n'
@@ -2057,7 +2057,7 @@ const TOOLS: ToolDef[] = [
         if (render) {
           renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
-          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
         }
         return lines.join('\n') + '\n'
       }
@@ -2081,7 +2081,7 @@ const TOOLS: ToolDef[] = [
         if (render) {
           renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
-          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
         }
       } else {
         const amount = typeof args.amount === 'number' ? args.amount : 0.25
@@ -2093,7 +2093,7 @@ const TOOLS: ToolDef[] = [
         if (render) {
           renderVaryBatch(outDir, variants.length)
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
-          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length)).trimEnd())
+          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
         }
       }
       return lines.join('\n') + '\n'

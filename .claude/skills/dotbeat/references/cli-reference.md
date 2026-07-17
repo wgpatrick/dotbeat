@@ -52,6 +52,14 @@ beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lan
 beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
 beat suggest <file> <track> [--target <lane-or-id>] [--log f]
                                                         read the scores log and propose the next beat-vary round
+beat taste-eval <file.beat> [--log f] [--json] [--backfill]
+                                                        taste-model eval harness (docs/taste-loop-design.md):
+                                                        held-out pick prediction over the scores log vs chance;
+                                                        scored batches log per-variant DSP features since T0
+beat audition <dir> [--group G] [--seed N] [--no-shuffle]
+                                                        blind audition.wav from ANY wav dir (clip-set batch,
+                                                        scoreable via beat score) or re-stitch an existing
+                                                        batch; presentation order seeded-shuffled by default
 beat metrics <file.wav> [--json]                        LUFS, true peak, crest, spectral, stereo
 beat lint <file.wav> [--target <LUFS>] [--json]         deterministic mix findings (default target -14)
 beat render <file> [-o out.wav] --beatlab-dir <path>    (or BEATLAB_DIR env)

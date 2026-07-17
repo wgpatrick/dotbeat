@@ -13,7 +13,7 @@
 // diff exit codes follow diff(1) convention: 0 = no musical changes, 1 = changes, 2 = error.
 // Requires `npm run build` (reads compiled ../dist/src/core).
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
@@ -537,6 +537,29 @@ const HELP = [
                                                           lane-aware on declared-lane drums tracks (cold start
                                                           recommends a real lane; never recommends a group that
                                                           would be an audio no-op on that track)`,
+  },
+  {
+    cmd: 'taste-eval',
+    text: `  beat taste-eval <file.beat> [--log f] [--json] [--seed N] [--backfill]
+                                                          the taste-model eval harness (docs/taste-loop-design.md):
+                                                          leave-one-batch-out held-out pick prediction over the
+                                                          scores log — reports top-1/top-3/pairwise accuracy vs
+                                                          chance for the built-in scorers (random, dsp-bt) plus the
+                                                          learned taste directions. Scored batches carry per-variant
+                                                          DSP features in the log since T0; --backfill derives them
+                                                          for older entries whose batch renders still exist
+                                                          (rewrites the log, .bak kept)`,
+  },
+  {
+    cmd: 'audition',
+    text: `  beat audition <dir> [--group G] [--seed N] [--no-shuffle]
+                                                          stitch a blind audition.wav from ANY directory of wavs
+                                                          (stem chops, one-shots) or re-stitch an existing batch.
+                                                          A plain wav dir gets a clip-set manifest (sorted names ->
+                                                          v1..vN) so beat score works on it; presentation order is
+                                                          seeded-shuffled by default (position bias — the printed
+                                                          index is the answer key). vary/gen --audition shuffles the
+                                                          same way; --no-shuffle restores generation order there too`,
   },
   {
     cmd: 'metrics',
@@ -1359,17 +1382,29 @@ async function varyCmd(argv) {
     // dedicated fast batch renderer for dotbeat's own engine is future work (see D15 / phase-17 doc).
     renderVaryBatch(outDir, variants.length, { onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
-    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length)
+    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
 }
 
 /** `--audition` (Phase 35 OC): stitch the just-rendered vN.wavs into one contact-sheet
- * audition.wav with a printed timecode index (+ audition.json) — shared by both vary rungs. */
-async function auditionAfterRender(outDir, count) {
+ * audition.wav with a printed timecode index (+ audition.json) — shared by both vary rungs.
+ * T0 taste-loop: presentation order is SHUFFLED by default (seeded from the batch dir's own
+ * manifest seed, so re-stitching the same batch reproduces the same order) — v1..vN are
+ * seed-monotone, and unshuffled listening bakes position bias into every pick. The printed index
+ * is the answer key; `--no-shuffle` restores generation order. */
+async function auditionAfterRender(outDir, count, opts = {}) {
   const { stitchAudition, formatAuditionIndex } = await import('../dist/src/vary/audition.js')
-  const { BeatBatchError } = await import('../dist/src/vary/batch.js')
+  const { BeatBatchError, readBatchManifest } = await import('../dist/src/vary/batch.js')
   try {
-    process.stdout.write(formatAuditionIndex(stitchAudition(outDir, count)))
+    let shuffleSeed
+    if (opts.noShuffle !== true) {
+      try {
+        shuffleSeed = readBatchManifest(outDir).seed
+      } catch {
+        shuffleSeed = 41 // no manifest (arbitrary clip set) — any fixed seed keeps it reproducible
+      }
+    }
+    process.stdout.write(formatAuditionIndex(stitchAudition(outDir, count, { shuffleSeed })))
   } catch (err) {
     if (err instanceof BeatBatchError) throw new BeatEditError(err.message)
     throw err
@@ -1460,7 +1495,7 @@ async function varyFeelCmd(argv, file, track) {
     // media/ dir sits next to the parent, so batch.ts links it into the batch dir before rendering.
     renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
-    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length)
+    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
 }
 
@@ -1506,7 +1541,7 @@ async function varyAutomationCmd(argv, file, track, param) {
   if (argv.includes('--render') || argv.includes('--audition')) {
     renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, onProgress: (i, n) => process.stdout.write(`rendering v${i}/${n}...\n`) })
     process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
-    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length)
+    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
   }
 }
 // === Phase 37 Stream RC end ===
@@ -1529,6 +1564,84 @@ async function scoreCmd(argv) {
     throw err
   }
   process.stdout.write(formatScoreResult(result))
+}
+
+// T0 taste-loop (docs/taste-loop-design.md L1): the eval harness every taste-model claim reduces
+// to — leave-one-batch-out held-out pick prediction over the scores log, with the built-in
+// reference scorers (random = the honesty floor, dsp-bt = the v0 Bradley-Terry ranker over DSP
+// features). Entries older than the T0 log enrichment get their features derived lazily from
+// batch-dir renders when those still exist; --backfill makes that durable by rewriting the log.
+async function tasteEvalCmd(argv) {
+  const valued = ['--log', '--seed']
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const [file] = positional
+  if (!file) throw new BeatEditError('taste-eval needs <file.beat> (the log defaults to beat-scores.jsonl next to it) or an explicit --log <path>')
+  const { defaultScoresLog } = await import('../dist/src/vary/batch.js')
+  const { evaluate, formatEvalReport } = await import('../dist/src/taste/eval.js')
+  const logPath = flagValue(argv, '--log') ?? defaultScoresLog(file)
+  if (!existsSync(logPath)) throw new BeatEditError(`no scores log at ${logPath} — score some batches first (beat vary ... --render, beat score)`)
+  if (argv.includes('--backfill')) {
+    // Rewrite entries that lack features but whose batch renders still exist — making the log
+    // self-contained before batch dirs get cleaned up. A .bak of the original is kept.
+    const lines = readFileSync(logPath, 'utf8').split('\n')
+    const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+    let filled = 0
+    const rewritten = lines.map((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return line
+      let entry
+      try { entry = JSON.parse(trimmed) } catch { return line }
+      if (entry.features !== undefined || typeof entry.batch !== 'string' || !Array.isArray(entry.picks)) return line
+      if (!existsSync(entry.batch)) return line
+      const files = [...entry.picks.map((p) => p.variant), ...(entry.rejected ?? [])]
+      const features = computeBatchFeatures(entry.batch, files)
+      if (Object.keys(features).length === 0) return line
+      filled += 1
+      return JSON.stringify({ ...entry, features })
+    })
+    writeFileSync(logPath + '.bak', lines.join('\n'))
+    writeFileSync(logPath, rewritten.join('\n'))
+    process.stdout.write(`backfilled features into ${filled} entr${filled === 1 ? 'y' : 'ies'} of ${logPath} (original kept at ${logPath}.bak)\n`)
+  }
+  const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
+  const report = evaluate(logPath, { seed })
+  if (argv.includes('--json')) {
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n')
+    return
+  }
+  process.stdout.write(formatEvalReport(report))
+}
+
+// T0 taste-loop: audition an ARBITRARY directory of wavs — the blind chop-rating flow
+// (docs/taste-loop-design.md T3) and a re-stitch for existing batches. A dir without a
+// manifest.json gets a clip-set manifest written over its wavs (sorted by name -> v1..vN), so
+// `beat score` works on it exactly like a vary batch; adopt correctly refuses (no parent).
+async function auditionCmd(argv) {
+  const valued = ['--group', '--seed']
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const [dir] = positional
+  if (!dir) throw new BeatEditError('audition needs <dir> (a vary/gen batch dir, or any directory of .wav files)')
+  const { readBatchManifest, writeClipSetBatch, BeatBatchError } = await import('../dist/src/vary/batch.js')
+  const { stitchAudition, formatAuditionIndex } = await import('../dist/src/vary/audition.js')
+  try {
+    let manifest
+    try {
+      manifest = readBatchManifest(dir)
+    } catch {
+      const files = readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.wav') && f !== 'audition.wav').sort()
+      const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
+      manifest = writeClipSetBatch(dir, files, { group: flagValue(argv, '--group'), seed })
+      process.stdout.write(`clip-set batch: ${files.length} wavs as v1..v${files.length} (manifest.json written)\n`)
+      for (let i = 0; i < files.length; i++) process.stdout.write(`  v${i + 1}: ${files[i]}\n`)
+    }
+    const shuffleSeed = argv.includes('--no-shuffle') ? undefined : manifest.seed
+    const files = manifest.variants.map((v) => (v.file.endsWith('.wav') ? v.file : v.file.replace(/\.beat$/, '.wav')))
+    process.stdout.write(formatAuditionIndex(stitchAudition(dir, manifest.variants.length, { shuffleSeed, files })))
+    process.stdout.write(`rate it blind, then: beat score ${dir} <best> [2nd 3rd]\n`)
+  } catch (err) {
+    if (err instanceof BeatBatchError) throw new BeatEditError(err.message)
+    throw err
+  }
 }
 
 // Phase 35 Stream OC (pilot 101 medium 3): adopt a scored winner as a real verb — copies the
@@ -1943,7 +2056,7 @@ async function sourceGenBatch(lib, { file, id, prompt, rest, flag }) {
   // Gen candidates are ALREADY audio: the vN.wavs a vary batch needs headless Chromium to produce
   // exist the moment generation ends, so the SAME stitcher runs with no render step in front of it
   // (auditionAfterRender is named for vary's flow, but it only stitches — nothing here re-renders).
-  if (rest.includes('--audition')) await auditionAfterRender(result.dir, result.candidates.length)
+  if (rest.includes('--audition')) await auditionAfterRender(result.dir, result.candidates.length, { noShuffle: rest.includes('--no-shuffle') })
   process.stdout.write(`audition, then: beat score ${result.dir} <best> [2nd 3rd]\n`)
   process.stdout.write(`then register the winner: beat adopt ${result.dir} <best>\n`)
 }
@@ -2959,6 +3072,12 @@ async function main() {
       break
     case 'suggest':
       await suggestCmd(rest)
+      break
+    case 'taste-eval':
+      await tasteEvalCmd(rest)
+      break
+    case 'audition':
+      await auditionCmd(rest)
       break
     case 'preset':
       presetCmd(rest)
