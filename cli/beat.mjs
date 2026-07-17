@@ -14,8 +14,9 @@
 // Requires `npm run build` (reads compiled ../dist/src/core).
 
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
-import { basename, dirname, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import {
   parse,
   saveClip,
@@ -119,6 +120,7 @@ const PATHS_NOTE = `paths for set: bpm | loop_bars | selected_track | <track>.<s
 // command belongs to is half of understanding it (vary is meaningless without score/suggest).
 const HELP_FAMILIES = [
   ['vary', 'audition', 'score', 'adopt', 'suggest', 'taste-eval'], // the taste loop (docs/taste-loop-design.md)
+  ['taste-seeds', 'taste-collect', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval)
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
@@ -572,6 +574,34 @@ const HELP = [
                                                           splits under 5 batches are labeled smoke (JSON: smoke).
   beat taste-eval --doctor                                report the embedding sidecar's readiness (interpreter +
                                                           per-backend deps), JSON`,
+  },
+  {
+    cmd: 'taste-seeds',
+    text: `  beat taste-seeds <dir> [--count 8] [--seed 1]         generate synthetic seed SONGS (deterministic space:
+                                                          tempo, key, progression, palette, drum feel) as the raw
+                                                          material for taste data collection. Step 1 of the
+                                                          collect->rate->eval pipeline (docs/taste-loop-design.md).`,
+  },
+  {
+    cmd: 'taste-collect',
+    text: `  beat taste-collect <dir> [--per-seed 2] [--count 5] [--gen N] [--gen-backend fal|stub|stableaudio] [--seed 41]
+                                                          build the rating queue from a taste-seeds dir: --per-seed
+                                                          vary batches per seed song (random track x group incl.
+                                                          feel + drum voices, offline-rendered), plus --gen
+                                                          generated-sample batches from a stratified prompt bank
+                                                          (drum one-shots, bass/plucks, pads/textures, vox chops,
+                                                          risers — default backend fal, needs FAL_KEY). Failures
+                                                          skip with a warning; everything lands as ordinary
+                                                          score-able batches.`,
+  },
+  {
+    cmd: 'rate',
+    text: `  beat rate <dir> [--port 4321] [--log f]               local web UI over every UNSCORED rendered batch under
+                                                          <dir>: blind shuffled A/B/C players, click picks in
+                                                          preference order (best first, up to 3), saved through the
+                                                          standard score path into ONE beat-scores.jsonl at the dir
+                                                          root (--log overrides). Re-running resumes where you left
+                                                          off; then: beat taste-eval --log <dir>/beat-scores.jsonl`,
   },
   {
     cmd: 'audition',
@@ -1326,6 +1356,98 @@ function drumKitCmd(argv) {
 }
 
 // ---- variation-and-taste loop (rung 1) — docs/research/08-variation-loop-prior-art.md ------
+
+// ---- taste data-collection system (owner decision 2026-07-17; docs/taste-loop-design.md) ------
+// Synthetic seed songs -> vary batches -> offline renders -> `beat rate` web UI -> the SAME
+// beat-scores.jsonl every taste tool reads. The point: T1's ~20-batch gate becomes a listening
+// session instead of a music-production obligation, and the data covers many aesthetics.
+
+async function tasteSeedsCmd(argv) {
+  const known = new Set(['--count', '--seed'])
+  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --count, --seed)`)
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !known.has(argv[i - 1]))
+  const outDir = positional[0]
+  if (!outDir) throw new BeatEditError('taste-seeds needs an output directory: beat taste-seeds <dir> [--count 8] [--seed 1]')
+  const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 8
+  const seed0 = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 1
+  const { generateSeedBeat } = await import('../dist/src/taste/seeds.js')
+  const { mkdirSync } = await import('node:fs')
+  mkdirSync(outDir, { recursive: true })
+  for (let i = 0; i < count; i++) {
+    const seed = seed0 + i
+    const { text, description } = generateSeedBeat(seed)
+    parse(text) // a seed that doesn't parse is a generator bug — fail loudly, write nothing bad
+    const file = join(outDir, `seed-${String(seed).padStart(3, '0')}.beat`)
+    writeFileSync(file, text + '\n')
+    process.stdout.write(`${file}: ${description}\n`)
+  }
+  process.stdout.write(`next: beat taste-collect ${outDir} — render vary batches for rating\n`)
+}
+
+async function tasteCollectCmd(argv) {
+  const known = new Set(['--per-seed', '--count', '--seed', '--gen', '--gen-backend'])
+  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --per-seed, --count, --seed, --gen, --gen-backend)`)
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !known.has(argv[i - 1]))
+  const dir = positional[0]
+  if (!dir) throw new BeatEditError('taste-collect needs the taste-seeds directory: beat taste-collect <dir> [--per-seed 2] [--count 5] [--gen N]')
+  const perSeed = flagValue(argv, '--per-seed') ? Number(flagValue(argv, '--per-seed')) : 2
+  const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 5
+  const metaSeed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
+  const genCount = flagValue(argv, '--gen') ? Number(flagValue(argv, '--gen')) : 0
+  const genBackend = flagValue(argv, '--gen-backend') ?? 'fal'
+  const { mulberry32 } = await import('../dist/src/taste/eval.js')
+  const { generateGenPrompts } = await import('../dist/src/taste/seeds.js')
+  const { readdirSync } = await import('node:fs')
+  const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
+  if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
+  // 'feel' rides in the synth pool so timing/velocity taste gets sampled too (its own round type
+  // in taste-eval's splits comes from the group name in the manifest).
+  const SYNTH_GROUPS = ['filter', 'env', 'osc', 'mix', 'motion', 'feel']
+  const DRUM_GROUPS = ['kick', 'snare', 'hats']
+  const rng = mulberry32(metaSeed)
+  let made = 0
+  let failed = 0
+  for (const f of seedFiles) {
+    const file = join(dir, f)
+    const doc = parse(readFileSync(file, 'utf8'))
+    // every (track, group) target this seed supports; drums here are always the legacy 5-lane kit
+    const targets = doc.tracks.flatMap((t) => (t.kind === 'drums' ? DRUM_GROUPS : t.kind === 'synth' ? SYNTH_GROUPS : []).map((g) => [t.id, g]))
+    for (let b = 0; b < perSeed && targets.length > 0; b++) {
+      const [track, group] = targets.splice(Math.floor(rng() * targets.length), 1)[0]
+      const varySeed = Math.floor(rng() * 100000)
+      process.stderr.write(`\n=== ${f}: vary ${track} ${group} (seed ${varySeed}) ===\n`)
+      try {
+        execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'vary', file, track, group, '--count', String(count), '--seed', String(varySeed), '--render'], { stdio: ['ignore', 'ignore', 'inherit'] })
+        made += 1
+      } catch (err) {
+        failed += 1
+        process.stderr.write(`warning: vary ${track} ${group} on ${f} failed — skipping (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+      }
+    }
+  }
+  // Generated-sound batches (owner: "a lot of generation using fal as part of it — those
+  // generated sounds are some of the most interesting thus far"). One prompt -> `count`
+  // candidates across seeds, batched next to the FIRST seed file (any host works; the batch dir
+  // is what `beat rate` finds). Default backend fal (needs FAL_KEY + egress); stub keeps the
+  // whole pipeline testable offline.
+  let genMade = 0
+  if (genCount > 0) {
+    const hostFile = join(dir, seedFiles[0])
+    for (const spec of generateGenPrompts(metaSeed, genCount)) {
+      const seedFrom = Math.floor(rng() * 100000)
+      process.stderr.write(`\n=== gen ${spec.id}: "${spec.prompt}" (${spec.seconds}s x${count}, ${genBackend}) ===\n`)
+      try {
+        execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'source', 'gen', hostFile, spec.id, spec.prompt, '--count', String(count), '--seed-from', String(seedFrom), '--seconds', String(spec.seconds), '--backend', genBackend], { stdio: ['ignore', 'ignore', 'inherit'] })
+        genMade += 1
+      } catch (err) {
+        failed += 1
+        process.stderr.write(`warning: gen "${spec.id}" failed — skipping (${err instanceof Error ? err.message.split('\n')[0] : err})${genBackend === 'fal' ? ' — FAL_KEY set and fal.run reachable?' : ''}\n`)
+      }
+    }
+  }
+  process.stdout.write(`\n${made} vary batch(es) + ${genMade} gen batch(es) across ${seedFiles.length} seed song(s)${failed > 0 ? ` (${failed} failed)` : ''}\n`)
+  process.stdout.write(`next: beat rate ${dir} — rate them in the browser; then beat taste-eval --log ${join(dir, 'beat-scores.jsonl')}\n`)
+}
 
 function flagValue(argv, flag) {
   const i = argv.indexOf(flag)
@@ -3167,6 +3289,17 @@ async function main() {
     case 'suggest':
       await suggestCmd(rest)
       break
+    case 'taste-seeds':
+      await tasteSeedsCmd(rest)
+      break
+    case 'taste-collect':
+      await tasteCollectCmd(rest)
+      break
+    case 'rate': {
+      const { rateCommand } = await import('./rate.mjs')
+      await rateCommand(rest)
+      return // the rating server runs until ctrl-c
+    }
     case 'taste-eval':
       await tasteEvalCmd(rest)
       break

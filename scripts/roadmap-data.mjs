@@ -1273,6 +1273,12 @@ export const rows = [
     research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
   },
   {
+    area: 'Taste loop', feature: 'Taste data-collection system: seeds -> collect -> rate (owner decision 2026-07-17)',
+    description: 'T1\'s data engine, replacing organic-use-only scoring: `beat taste-seeds` (synthetic seed SONGS from a deterministic space — tempo/key/progression/palette/drum-feel, every file parse-validated), `beat taste-collect` (random track x group vary batches per seed incl. feel + drum voices, offline-rendered, PLUS generated-sample batches from a category-stratified prompt bank via fal — drum one-shots, bass/plucks, pads/textures, vox chops, risers x style treatments; stub backend keeps it testable offline), and `beat rate` (dependency-free local web UI: blind seeded-shuffle A/B/C players, click picks best-first up to 3, saved through the standard scoreBatch path into ONE beat-scores.jsonl; re-running resumes on unscored batches only). Target distribution + loudness-confound note in docs/taste-loop-design.md. Verified end-to-end with stub gen: 3 vary + 2 gen batches collected, rated via the HTTP API, entry landed with features, queue resumed correctly.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: null, plan: 'taste-loop-design.md',
+  },
+  {
     area: 'Taste loop', feature: 'T3: real-music taste prior (stems -> chops -> blind ratings)',
     description: 'Owner-curated loved/neutral/disliked playlists -> Demucs stems -> bar-boundary chops -> embeddings + blind chop ratings through the T0 clip-set audition flow -> a per-stem-class taste prior (loved-centroid distance first), tested for transfer against historical dotbeat picks. Immediate no-ML payoff: per-stem reference profiles from loved songs for lint --ref. Private data — never enters the repo.',
     core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',

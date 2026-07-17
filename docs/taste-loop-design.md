@@ -191,6 +191,33 @@ agent-buildable, ungated item in this plan is built. T4 is gated on T1's ~20 sco
 design; T5 on T4; T6 on T3's private dataset. Nothing more should be built ahead of that
 evidence — the next unit of progress is scored batches, not code.
 
+**Revision 2 (owner, same day): dedicated data-collection system instead of organic-use-only.**
+Rather than riding music-making alone, T1 data comes from a purpose-built pipeline:
+`beat taste-seeds` (synthetic seed songs sampled from a deterministic space — tempo, key,
+progression, palette, drum feel), `beat taste-collect` (vary batches + offline renders per seed,
+plus GENERATED-sound batches via fal — the owner: "those generated sounds are some of the most
+interesting thus far"), and `beat rate` (a local web UI: blind shuffled A/B/C players, click
+best/2nd/3rd, writes through scoreBatch into ONE beat-scores.jsonl). Organic scoring during real
+music-making still counts — same log — this just removes the production obligation from the
+data clock.
+
+**Target data distribution** (what ~40-60 rated batches should cover, so the model — and the
+per-type eval splits — can answer where taste signal lives; ≥5 batches per split escapes the
+smoke label):
+- **~40% synth-param vary** across groups (filter/env/osc/mix/motion) × track roles
+  (chords/bass/arp) × seed styles — the core "which sound do I prefer" signal.
+- **~10% feel** (timing/velocity humanize) — groove taste, a different axis entirely.
+- **~15% drum-voice vary** (kick/snare/hats) — transient/percussion taste.
+- **~30% generated samples** (fal, category-stratified prompts: drum one-shots, bass/pluck/stab,
+  pads/textures, vocal chops, risers/impacts × style treatments) — the owner's highest-interest
+  material, and the round type T5's generation steering will lean on.
+- **~5% first-light-context batches** (vary on the real song) — the non-stationarity/context
+  check: does taste measured on synthetic seeds transfer to the song that matters?
+- Known confound, tracked not hidden: loudness differences inside a batch can dominate naive
+  preference; lufs is an explicit feature so a "louder wins" component becomes a VISIBLE learned
+  weight rather than silent bias. If it dominates everything, loudness-normalize batch renders
+  and re-measure (a one-line change at stitch/render time, deferred until the data says so).
+
 **Revised near-term sequence:**
 1. **T1, made nearly free (owner ~1 evening total):** the offline default makes a scoring
    session cheap — each batch is one `vary ... --render --audition` (a couple of minutes,
