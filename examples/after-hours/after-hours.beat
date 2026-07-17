@@ -4,13 +4,13 @@ loop_bars 8
 selected_track bass
 
 media
-  sample rhodes sha256:29d8c9e90646d570cdaf33d06e0b0963809771ea63a3e2bda84aa16457eacf73 gen-rhodes-11/v1.wav
   sample stab sha256:825e60be2ffabbb35477ae02240bed57d5491758e9255fecffda1f6e4c70cdcb media/stab.wav
+  sample pluck sha256:34af0ac686f842b3e386efd787b99c05db09f03020ff6c8580c1287e2ca98dc5 media/pluck.wav
 
 track keys keys #c678dd drums
   synth
     osc sawtooth
-    volume 0
+    volume -7
     cutoff 12000
     resonance 0.1
     attack 0.01
@@ -18,26 +18,14 @@ track keys keys #c678dd drums
     sustain 0.6
     release 0.3
     pan 0
-  lane kick synth:membrane
-  lane snare synth:noise
-  lane rimshot synth:noise
-  lane clap synth:noise
-  lane hat synth:metal
-  lane openhat synth:metal
-  lane tom_lo synth:membrane
-  lane tom_mid synth:membrane
-  lane tom_hi synth:membrane
-  lane crash synth:metal
-  lane ride synth:metal
-  lane cowbell synth:membrane
-  lane f3 sample rhodes 0 12
-  lane g3 sample rhodes 0 14
-  lane gs3 sample rhodes 0 15
-  lane as3 sample rhodes 0 17
-  lane c4 sample rhodes 0 19
-  lane cs4 sample rhodes 0 20
-  lane ds4 sample rhodes 0 22
-  lane f4 sample rhodes 0 24
+  lane f3 sample pluck 0 -2 length=0.7 attack=0.004 decay=0.5
+  lane g3 sample pluck 0 0 length=0.7 attack=0.004 decay=0.5
+  lane gs3 sample pluck 0 1 length=0.7 attack=0.004 decay=0.5
+  lane as3 sample pluck 0 3 length=0.7 attack=0.004 decay=0.5
+  lane c4 sample pluck 0 5 length=0.7 attack=0.004 decay=0.5
+  lane cs4 sample pluck 0 6 length=0.7 attack=0.004 decay=0.5
+  lane ds4 sample pluck 0 8 length=0.7 attack=0.004 decay=0.5
+  lane f4 sample pluck 0 10 length=0.7 attack=0.004 decay=0.5
   hit h1 f4 2 0.65
   hit h2 c4 6 0.5
   hit h3 gs3 12 0.6
@@ -285,23 +273,20 @@ track chords chords #e5c07b drums
     pan 0
     duckSource drums
     duckAmount 0.4
-  lane fm sample stab -3 0
-  lane db sample stab -3 -4
-  lane ab sample stab -3 3
-  lane eb sample stab -3 -2
-  hit h1 fm 6 0.62
-  hit h2 fm 14 0.5
-  hit h3 fm 22 0.62
-  hit h4 fm 30 0.5
-  hit h5 db 38 0.62
-  hit h6 db 46 0.5
-  hit h7 db 54 0.62
-  hit h8 db 62 0.5
-  hit h9 ab 70 0.62
-  hit h10 ab 78 0.5
-  hit h11 ab 86 0.62
-  hit h12 ab 94 0.5
-  hit h13 eb 102 0.62
-  hit h14 eb 110 0.5
-  hit h15 eb 118 0.62
-  hit h16 eb 126 0.5
+  lane fm7 sample stab -3 5
+  hit h1 fm7 6 0.62
+  hit h2 fm7 14 0.5
+  hit h3 fm7 22 0.62
+  hit h4 fm7 30 0.5
+  hit h5 fm7 38 0.62
+  hit h6 fm7 46 0.5
+  hit h7 fm7 54 0.62
+  hit h8 fm7 62 0.5
+  hit h9 fm7 70 0.62
+  hit h10 fm7 78 0.5
+  hit h11 fm7 86 0.62
+  hit h12 fm7 94 0.5
+  hit h13 fm7 102 0.62
+  hit h14 fm7 110 0.5
+  hit h15 fm7 118 0.62
+  hit h16 fm7 126 0.5
