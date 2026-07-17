@@ -183,3 +183,37 @@ export function generateGenPrompts(seed: number, count: number): GenPromptSpec[]
   }
   return out
 }
+
+export interface GenStyleBatchSpec {
+  /** media-id-safe slug, unique within one collect run */
+  id: string
+  /** the subject label (manifest prompt / batch title) */
+  label: string
+  seconds: number
+  /** `variants` distinct-style prompts of the same subject — the within-batch material to rate */
+  prompts: string[]
+}
+
+/** `batchCount` gen batches, each ONE subject rendered in `variants` DISTINCT styles — the
+ * within-batch diversity fix (owner, 2026-07-17): a "hi-hat batch" is five different hi-hats, not
+ * five seeds of one, so every ranking spans real feature-space distance instead of comparing
+ * near-clones. Subjects are stratified (each used before any repeats); per batch, styles are sampled
+ * without replacement, cycling only if `variants` exceeds the style-bank size. Deterministic in `seed`. */
+export function generateGenStyleBatches(seed: number, batchCount: number, variants: number): GenStyleBatchSpec[] {
+  const rng = mulberry32(seed)
+  const subjects = [...GEN_SUBJECTS].sort(() => rng() - 0.5)
+  const out: GenStyleBatchSpec[] = []
+  for (let i = 0; i < batchCount; i++) {
+    const s = subjects[i % subjects.length]!
+    const shuffledStyles = [...GEN_STYLES].sort(() => rng() - 0.5)
+    const styles: string[] = []
+    for (let v = 0; v < variants; v++) styles.push(shuffledStyles[v % shuffledStyles.length]!)
+    out.push({
+      id: `${s.id}${Math.floor(i / subjects.length) + 1}`,
+      label: s.subject,
+      seconds: s.seconds,
+      prompts: styles.map((st) => `${s.subject}, ${st}`),
+    })
+  }
+  return out
+}

@@ -285,10 +285,19 @@ async function generateRaw({ prompt, seconds, seed, backend, provider, model, li
  *
  * Seeds are `seedFrom .. seedFrom+count-1` — contiguous and recorded per candidate, so a winner is
  * reproducible from its provenance sidecar exactly like a single-shot generation is. */
-export async function genSourceBatch({ beatFile, id, prompt, seconds = 2, seedFrom, count = 3, backend = 'stableaudio', provider = 'stable-audio-open', model, license, outDir, onProgress } = {}) {
+export async function genSourceBatch({ beatFile, id, prompt, prompts, seconds = 2, seedFrom, count = 3, backend = 'stableaudio', provider = 'stable-audio-open', model, license, outDir, onProgress } = {}) {
   if (!prompt || typeof prompt !== 'string') throw new SourceError('source gen needs a <prompt>, e.g. beat source gen song.beat snare "tight acoustic snare" --count 3')
-  if (!Number.isInteger(count) || count < 1) throw new SourceError(`source gen --count must be a positive integer, got ${count}`)
-  if (count > 16) throw new SourceError(`source gen --count is capped at 16 (asked for ${count}) — ranking more candidates adds fatigue, not signal (the same Edisyn reasoning that caps score at 3 picks)`)
+  // Optional per-variant prompts (taste-collect's within-batch STYLE diversity, owner insight
+  // 2026-07-17): same-prompt-different-seed one-shots are near-identical — especially tight 1s hits
+  // — and the taste model learns from FEATURE differences between compared items, so five near-clones
+  // carry almost no signal. When `prompts` is given, each variant uses its own prompt (same subject,
+  // different style treatment) instead of N seeds of one prompt; `prompt` stays the batch LABEL
+  // (manifest + baseSeed), and each variant's real prompt lands in its own provenance sidecar.
+  const perVariant = Array.isArray(prompts) && prompts.length > 0 ? prompts : null
+  if (perVariant && perVariant.some((p) => !p || typeof p !== 'string')) throw new SourceError('genSourceBatch prompts must all be non-empty strings')
+  const n = perVariant ? perVariant.length : count
+  if (!Number.isInteger(n) || n < 1) throw new SourceError(`source gen --count must be a positive integer, got ${count}`)
+  if (n > 16) throw new SourceError(`source gen --count is capped at 16 (asked for ${n}) — ranking more candidates adds fatigue, not signal (the same Edisyn reasoning that caps score at 3 picks)`)
   // Validates the .beat exists and is reachable BEFORE spending minutes generating — but note it
   // deliberately does not mkdir media/: a batch that nobody adopts must leave the project alone.
   resolveTarget(beatFile, id)
@@ -299,14 +308,15 @@ export async function genSourceBatch({ beatFile, id, prompt, seconds = 2, seedFr
   mkdirSync(dir, { recursive: true })
 
   const variants = []
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < n; i++) {
+    const variantPrompt = perVariant ? perVariant[i] : prompt
     const seed = baseSeed + i
-    onProgress?.(i + 1, count, seed)
+    onProgress?.(i + 1, n, seed)
     const rawWav = join(dir, `.v${i + 1}.gen.wav`)
     const candidateWav = join(dir, `v${i + 1}.wav`)
     try {
-      const { license: effectiveLicense, source, extra } = await generateRaw({ prompt, seconds, seed, backend, provider, model, license, outPath: rawWav })
-      const { sha256, durationSeconds, sidecar } = await prepCandidate({ inPath: rawWav, outPath: candidateWav, license: effectiveLicense, source, query: prompt, extra })
+      const { license: effectiveLicense, source, extra } = await generateRaw({ prompt: variantPrompt, seconds, seed, backend, provider, model, license, outPath: rawWav })
+      const { sha256, durationSeconds, sidecar } = await prepCandidate({ inPath: rawWav, outPath: candidateWav, license: effectiveLicense, source, query: variantPrompt, extra })
       variants.push({ media: { id, sha256, durationSeconds, license: effectiveLicense, source, seed, sidecar } })
     } finally {
       try { rmSync(rawWav) } catch { /* best-effort */ }

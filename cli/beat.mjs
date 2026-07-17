@@ -1397,7 +1397,7 @@ async function tasteCollectCmd(argv) {
   const genCount = flagValue(argv, '--gen') ? Number(flagValue(argv, '--gen')) : 0
   const genBackend = flagValue(argv, '--gen-backend') ?? 'fal'
   const { mulberry32 } = await import('../dist/src/taste/eval.js')
-  const { generateGenPrompts } = await import('../dist/src/taste/seeds.js')
+  const { generateGenStyleBatches } = await import('../dist/src/taste/seeds.js')
   const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
   if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
   // 'feel' rides in the synth pool so timing/velocity taste gets sampled too (its own round type
@@ -1433,22 +1433,27 @@ async function tasteCollectCmd(argv) {
   let genMade = 0
   if (genCount > 0) {
     const hostFile = join(dir, seedFiles[0])
-    for (const spec of generateGenPrompts(metaSeed, genCount)) {
+    // Each gen batch is ONE subject in `count` DISTINCT styles (owner insight 2026-07-17: five seeds
+    // of one tight one-shot prompt are near-identical and carry almost no preference signal — the
+    // model learns from feature differences between compared items). We call genSourceBatch directly
+    // (not a `source gen` subprocess) so we can hand it the per-variant `prompts` array; a gen batch
+    // is pure API + prep with no browser/daemon state that would need process isolation.
+    const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
+    for (const batch of generateGenStyleBatches(metaSeed, genCount, count)) {
       const seedFrom = Math.floor(rng() * 100000)
-      process.stderr.write(`\n=== gen ${spec.id}: "${spec.prompt}" (${spec.seconds}s x${count}, ${genBackend}) ===\n`)
+      process.stderr.write(`\n=== gen ${batch.id}: ${batch.label} — ${count} styles (${batch.seconds}s, ${genBackend}) ===\n`)
       try {
-        execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'source', 'gen', hostFile, spec.id, spec.prompt, '--count', String(count), '--seed-from', String(seedFrom), '--seconds', String(spec.seconds), '--backend', genBackend], { stdio: ['ignore', 'ignore', 'inherit'] })
+        await lib.genSourceBatch({ beatFile: hostFile, id: batch.id, prompt: batch.label, prompts: batch.prompts, seconds: batch.seconds, seedFrom, backend: genBackend })
         genMade += 1
-      } catch {
+      } catch (err) {
         failed += 1
-        // Pilot 112 (MEDIUM): the raw child error suggested `--backend stub` — a flag THIS
-        // command rejects (ours is --gen-backend) — and leaked the inner command line. Own the
-        // message; the child's real error already printed on the inherited stderr just above.
-        process.stderr.write(`warning: gen "${spec.id}" failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; retry with --gen-backend stub for placeholder audio, or --gen-backend stableaudio for local generation)' : ''}\n`)
+        // Pilot 112 (MEDIUM): own the message rather than leaking a child command line / a flag
+        // THIS command rejects (ours is --gen-backend, not --backend).
+        process.stderr.write(`warning: gen "${batch.id}" failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; retry with --gen-backend stub for placeholder audio, or --gen-backend stableaudio for local generation)' : ''} (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
         // a failed gen can leave its empty batch dir behind — remove it so `beat rate` never
         // queues a wav-less husk
         try {
-          const husk = join(dir, `gen-${spec.id}-${seedFrom}`)
+          const husk = join(dir, `gen-${batch.id}-${seedFrom}`)
           if (existsSync(husk) && !readdirSync(husk).some((x) => x.endsWith('.wav'))) rmSync(husk, { recursive: true })
         } catch { /* best-effort cleanup */ }
       }
