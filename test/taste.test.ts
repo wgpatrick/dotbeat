@@ -200,6 +200,44 @@ test('stitchAudition shuffles deterministically by seed and the index is the ans
   for (const e of r1.entries) assert.equal(e.wav, `${e.variant}.wav`)
 })
 
+// ---- pilot 108 fixes ------------------------------------------------------------------------------
+
+test('re-scoring an already-scored batch is flagged, and the harness keeps only the latest entry', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'taste-rescore-'))
+  const batchDir = join(dir, 'vary-filter-9')
+  mkdirSync(batchDir)
+  const manifest: VaryBatchManifest = {
+    parent: join(dir, 'song.beat'), parentSha256: 'abc', track: 'lead', group: 'filter', count: 3, seed: 9, createdAt: 'now',
+    variants: [{ file: 'v1.beat', edits: [] }, { file: 'v2.beat', edits: [] }, { file: 'v3.beat', edits: [] }],
+  }
+  writeFileSync(join(batchDir, 'manifest.json'), JSON.stringify(manifest))
+  writeFileSync(join(dir, 'song.beat'), 'x')
+  for (let i = 1; i <= 3; i++) writeFileSync(join(batchDir, `v${i}.wav`), toneWav(300 * i, 0.5))
+  const first = scoreBatch(batchDir, ['1', '3'])
+  assert.equal(first.previousPicks, undefined, 'first score of a batch carries no re-score note')
+  const second = scoreBatch(batchDir, ['2'])
+  assert.equal(second.previousPicks, 'v1 > v3', 'second score names the previous ranking')
+  assert.match(formatScoreResult(second), /already scored \(v1 > v3\).*LATEST/s)
+  const { batches, superseded } = loadTasteBatches(second.logPath)
+  assert.equal(superseded, 1)
+  assert.equal(batches.length, 1, 'one judgment per batch — no extra eval fold')
+  assert.equal(batches[0]!.picks[0], 'v2.beat', 'the latest ranking wins')
+})
+
+test('formatAuditionIndex withholds the answer key when shuffled', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'taste-blind-'))
+  for (let i = 1; i <= 4; i++) writeFileSync(join(dir, `v${i}.wav`), toneWav(300 * i, 0.5))
+  const { formatAuditionIndex } = await import('../src/vary/audition.js')
+  const shuffled = stitchAudition(dir, 4, { shuffleSeed: 7 })
+  assert.equal(shuffled.shuffled, true)
+  const blindLine = formatAuditionIndex(shuffled)
+  assert.doesNotMatch(blindLine, /v\d @ \d/, 'no variant-at-timecode mapping in the blind print')
+  assert.match(blindLine, /answer key/, 'points at audition.json for after ranking')
+  const plain = stitchAudition(dir, 4, {})
+  assert.equal(plain.shuffled, false)
+  assert.match(formatAuditionIndex(plain), /v1 @ 0:00\.0/, 'unshuffled keeps the classic index')
+})
+
 // ---- clip-set batches -----------------------------------------------------------------------------
 
 test('clip-set batch: audition + score work, adopt refuses', () => {

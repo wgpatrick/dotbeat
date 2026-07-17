@@ -341,6 +341,12 @@ export interface ScoreBatchResult {
    * the variant shape for the same reason usesRecipe is, not off the "gen:" group prefix. */
   usesMedia: boolean
   // ==== end Phase 40 Stream VB ====
+  /** Pilot 108: set when this batch dir already had one or more entries in the resolved log —
+   * the LATEST previous ranking, as display labels ("v1 > v3"), so the summary can flag the
+   * re-score instead of silently appending a contradiction. The log stays append-only (a
+   * re-score is a legitimate change of mind); the taste harness uses the latest entry per batch
+   * (src/taste/eval.ts) and this note is how the user learns that rule exists. */
+  previousPicks?: string
 }
 
 /** Read + parse a batch dir's manifest.json — shared by scoreBatch and adoptVariant so the
@@ -463,8 +469,26 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   // batch adds nothing and costs one existsSync per variant.
   const features = computeBatchFeatures(dir, manifest.variants.map((v) => v.file))
   if (Object.keys(features).length > 0) entry.features = features
+  // Pilot 108: detect a re-score of an already-scored batch BEFORE appending, so the summary can
+  // say so — a fat-fingered duplicate otherwise silently contradicts the taste log's history.
+  let previousPicks: string | undefined
+  if (existsSync(resolvedLog)) {
+    const fileToLabel = new Map(manifest.variants.map((v, i) => [v.file, `v${i + 1}`]))
+    for (const line of readFileSync(resolvedLog, 'utf8').split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      try {
+        const prev = JSON.parse(trimmed) as Partial<ScoreEntry>
+        if (prev.batch === dir && Array.isArray(prev.picks)) {
+          previousPicks = prev.picks.map((p) => fileToLabel.get(p.variant) ?? p.variant).join(' > ')
+        }
+      } catch {
+        /* non-entry line — ignore */
+      }
+    }
+  }
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
-  return { dir, logPath: resolvedLog, manifest, ranks, entry, usesRecipe, usesMedia }
+  return { dir, logPath: resolvedLog, manifest, ranks, entry, usesRecipe, usesMedia, ...(previousPicks !== undefined ? { previousPicks } : {}) }
 }
 
 /** The human-facing summary both surfaces emit after a score: the scored line plus the
@@ -473,6 +497,10 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
  * MCP-only agent); param batches keep the `beat set` replay, which survives the parent moving on. */
 export function formatScoreResult(r: ScoreBatchResult): string {
   let out = `scored ${r.dir}: ${r.ranks.map((n) => `v${n}`).join(' > ')} -> ${r.logPath}\n`
+  // Pilot 108: a re-score is legal (changed your mind) but never silent — and say which entry wins.
+  if (r.previousPicks !== undefined) {
+    out += `note: this batch was already scored (${r.previousPicks}) — the log keeps both, and beat taste-eval uses only the LATEST entry per batch\n`
+  }
   // Clip-set batches (T0 taste-loop): the picks ARE the product — they feed the taste log; there
   // is no parent to adopt into and no edits to replay, so say that instead of hinting either.
   if (r.manifest.parent === '') {

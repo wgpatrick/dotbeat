@@ -89,6 +89,10 @@ export interface AuditionResult {
   gapSeconds: number
   totalSeconds: number
   entries: AuditionEntry[]
+  /** Pilot 108: true when presentation order differs from generation order — the printed index
+   * then withholds the variant-at-timecode mapping (it IS the answer key; blindness shouldn't
+   * depend on the listener averting their eyes from the very line that names the wav). */
+  shuffled: boolean
 }
 
 /** Deterministic seeded RNG for reproducible presentation shuffles. */
@@ -202,12 +206,18 @@ export function stitchAudition(outDir: string, count: number, opts: StitchOption
   const wavPath = resolve(outDir, 'audition.wav')
   const jsonPath = resolve(outDir, 'audition.json')
   const totalSeconds = dataLength / first.blockAlign / first.sampleRate
+  const shuffled = order.some((n, i) => n !== i + 1)
   writeFileSync(wavPath, out)
-  writeFileSync(jsonPath, JSON.stringify({ gapSeconds, sampleRate: first.sampleRate, totalSeconds, entries }, null, 2) + '\n')
-  return { wavPath, jsonPath, sampleRate: first.sampleRate, gapSeconds, totalSeconds, entries }
+  writeFileSync(jsonPath, JSON.stringify({ gapSeconds, sampleRate: first.sampleRate, totalSeconds, shuffled, entries }, null, 2) + '\n')
+  return { wavPath, jsonPath, sampleRate: first.sampleRate, gapSeconds, totalSeconds, entries, shuffled }
 }
 
-/** The one-line timecode index both surfaces print: "audition.wav (0:28.1): v1 @ 0:00.0, v2 @ 0:09.2, ...". */
+/** The one-line index both surfaces print. Unshuffled: the timecode map as always. Shuffled
+ * (blind): the map is withheld — printing "v3 @ 0:00.0" next to the wav path would hand the
+ * listener the answer key before they listen (pilot 108); it lives in audition.json instead. */
 export function formatAuditionIndex(r: AuditionResult): string {
+  if (r.shuffled) {
+    return `${r.wavPath} (${formatTimecode(r.totalSeconds)}): ${r.entries.length} variants, order shuffled — listen and rank BEFORE looking at the answer key in ${r.jsonPath}\n`
+  }
   return `${r.wavPath} (${formatTimecode(r.totalSeconds)}): ${r.entries.map((e) => `${e.variant} @ ${e.timecode}`).join(', ')} — index in ${r.jsonPath}\n`
 }

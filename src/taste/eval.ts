@@ -34,6 +34,10 @@ export interface LoadResult {
   batches: TasteBatch[]
   /** batches present in the log but unusable, with the reason */
   skipped: { dir: string; group: string; reason: string }[]
+  /** Pilot 108: earlier entries superseded by a later re-score of the same batch dir — one human
+   * judgment per batch, the LATEST wins. Counting a contradictory re-score as an extra eval fold
+   * silently corrupted the harness (a 4-batch log reported 5 usable batches). */
+  superseded: number
 }
 
 interface RawEntry {
@@ -51,34 +55,44 @@ interface RawEntry {
 export function loadTasteBatches(logPath: string): LoadResult {
   const batches: TasteBatch[] = []
   const skipped: LoadResult['skipped'] = []
+  let superseded = 0
   let text: string
   try {
     text = readFileSync(logPath, 'utf8')
   } catch {
-    return { batches, skipped }
+    return { batches, skipped, superseded }
   }
+  // Pilot 108: one judgment per batch — a re-score supersedes earlier entries for the same batch
+  // dir (the append-only log keeps them; the harness must not count them as extra folds).
+  const rawEntries: RawEntry[] = []
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
-    let raw: RawEntry
     try {
-      raw = JSON.parse(trimmed) as RawEntry
+      rawEntries.push(JSON.parse(trimmed) as RawEntry)
     } catch {
       continue
     }
+  }
+  const latestByBatch = new Map<string, RawEntry>()
+  for (const raw of rawEntries) {
     if (typeof raw.batch !== 'string' || !Array.isArray(raw.picks) || raw.picks.length === 0) continue
-    const picks = [...raw.picks].sort((a, b) => a.rank - b.rank).map((p) => p.variant)
+    if (latestByBatch.has(raw.batch)) superseded += 1
+    latestByBatch.set(raw.batch, raw)
+  }
+  for (const [batchDir, raw] of latestByBatch) {
+    const picks = [...raw.picks!].sort((a, b) => a.rank - b.rank).map((p) => p.variant)
     const rejected = Array.isArray(raw.rejected) ? raw.rejected : []
     const allFiles = [...picks, ...rejected]
     let features = raw.features
     let featuresStored = true
     if (features === undefined) {
       featuresStored = false
-      features = existsSync(raw.batch) ? computeBatchFeatures(raw.batch, allFiles) : {}
+      features = existsSync(batchDir) ? computeBatchFeatures(batchDir, allFiles) : {}
     }
     const featured = allFiles.filter((f) => features![f] !== undefined)
     const batch: TasteBatch = {
-      dir: raw.batch,
+      dir: batchDir,
       group: raw.group ?? '?',
       ...(raw.track !== undefined ? { track: raw.track } : {}),
       picks,
@@ -87,16 +101,16 @@ export function loadTasteBatches(logPath: string): LoadResult {
       featuresStored,
     }
     if (featured.length < 2) {
-      skipped.push({ dir: raw.batch, group: batch.group, reason: featuresStored ? 'fewer than 2 variants carry features' : 'no renders found to derive features from (batch dir deleted or never rendered)' })
+      skipped.push({ dir: batchDir, group: batch.group, reason: featuresStored ? 'fewer than 2 variants carry features' : 'no renders found to derive features from (batch dir deleted or never rendered)' })
       continue
     }
     if (features[picks[0]!] === undefined) {
-      skipped.push({ dir: raw.batch, group: batch.group, reason: 'the rank-1 pick has no features (its render is missing)' })
+      skipped.push({ dir: batchDir, group: batch.group, reason: 'the rank-1 pick has no features (its render is missing)' })
       continue
     }
     batches.push(batch)
   }
-  return { batches, skipped }
+  return { batches, skipped, superseded }
 }
 
 /** A scorer ranks one held-out batch given every other batch as training data. Returns a score
@@ -161,6 +175,8 @@ export interface EvalReport {
   logPath: string
   usable: number
   skipped: LoadResult['skipped']
+  /** earlier entries superseded by re-scores of the same batch (latest wins) */
+  superseded: number
   storedFeatureBatches: number
   scorers: ScorerReport[]
   /** taste directions from the model trained on ALL usable batches */
@@ -170,7 +186,7 @@ export interface EvalReport {
 
 /** Leave-one-batch-out evaluation of every scorer over the log. */
 export function evaluate(logPath: string, opts: { seed?: number } = {}): EvalReport {
-  const { batches, skipped } = loadTasteBatches(logPath)
+  const { batches, skipped, superseded } = loadTasteBatches(logPath)
   const rng = mulberry32(opts.seed ?? 41)
   const reports: ScorerReport[] = []
   for (const [name, scorer] of Object.entries(SCORERS)) {
@@ -219,6 +235,7 @@ export function evaluate(logPath: string, opts: { seed?: number } = {}): EvalRep
     logPath,
     usable: batches.length,
     skipped,
+    superseded,
     storedFeatureBatches: batches.filter((b) => b.featuresStored).length,
     scorers: reports,
     weights: describeWeights(fullModel),
@@ -232,7 +249,8 @@ const pct = (x: number) => `${(x * 100).toFixed(0)}%`
 export function formatEvalReport(r: EvalReport): string {
   let out = `taste-eval over ${basename(r.logPath)} (${dirname(resolve(r.logPath))})\n`
   out += `usable batches: ${r.usable} (${r.storedFeatureBatches} with stored features, ${r.usable - r.storedFeatureBatches} lazily derived)`
-  out += r.skipped.length > 0 ? `; skipped: ${r.skipped.length}\n` : '\n'
+  out += r.skipped.length > 0 ? `; skipped: ${r.skipped.length}` : ''
+  out += r.superseded > 0 ? `; ${r.superseded} earlier re-score${r.superseded === 1 ? '' : 's'} superseded (latest entry per batch wins)\n` : '\n'
   for (const s of r.skipped) out += `  skipped ${s.dir} (${s.group}): ${s.reason}\n`
   if (r.usable === 0) {
     out += 'nothing to evaluate yet — score some rendered batches first (beat vary ... --render, then beat score)\n'

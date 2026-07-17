@@ -1255,6 +1255,12 @@ export const rows = [
     research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
   },
   {
+    area: 'Taste loop', feature: 'T0 pilot fixes: re-score integrity, discoverable help, init on-ramp, truly-blind audition',
+    description: 'Same-day fixes from the taste-loop usability pilot (research/108, run the hour T0 landed): (1) re-scoring an already-scored batch is flagged with the previous ranking and the harness dedupes to the LATEST entry per batch (a contradictory fat-finger used to silently count as an extra eval fold — 4 batches reported as 5); (2) the ~350-line help dump now advertises the per-command help that has existed since Phase 34, and the vary family grew to the full taste loop so "related:" teaches it; (3) beat init prints the add-sound on-ramp hint (a fresh project is silent — a first vary --render used to burn real-time renders on nothing); (4) a shuffled audition\'s printed index withholds the variant-at-timecode answer key (it used to print it on the same line that names the wav — blindness by user discipline). Not fixed, tracked: render output leaks engine internals into musician-facing flows (the stderr passthrough deliberately carries sample-load failures; needs a known-benign filter, not silencing).',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/108-usability-pilot-taste-loop.md', plan: 'taste-loop-design.md',
+  },
+  {
     area: 'Taste loop', feature: 'T2: audio-embedding features (LAION-CLAP + Audiobox axes)',
     description: 'Frozen LAION-CLAP larger_clap_music (Apache-2.0, 512-d) embeddings per variant render, PCA-reduced on unlabeled variants, plus Audiobox-Aesthetics\' four production-quality scores as explicit features; ablate DSP-only vs embedding-only vs both per variant type through the T0 harness. Python sidecar shape (same pattern as beat analyze).',
     core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',

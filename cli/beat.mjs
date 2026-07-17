@@ -118,7 +118,7 @@ const PATHS_NOTE = `paths for set: bpm | loop_bars | selected_track | <track>.<s
 // Natural command families, surfaced as a "related:" line under per-command help — the loop a
 // command belongs to is half of understanding it (vary is meaningless without score/suggest).
 const HELP_FAMILIES = [
-  ['vary', 'score', 'adopt', 'suggest'],
+  ['vary', 'audition', 'score', 'adopt', 'suggest', 'taste-eval'], // the taste loop (docs/taste-loop-design.md)
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
@@ -643,7 +643,9 @@ const HELP = [
   },
 ]
 
-const USAGE = `usage:\n${HELP.map((e) => e.text).join('\n')}\n\n${PATHS_NOTE}`
+// Pilot 108: the full dump is ~350 lines — say up front that per-command help exists, or nobody
+// finds it (it shipped in Phase 34 and the taste-loop pilot still grepped the wall instead).
+const USAGE = `usage (one command's block: beat help <command>, or beat <command> --help):\n${HELP.map((e) => e.text).join('\n')}\n\n${PATHS_NOTE}`
 
 /** The `beat <cmd> --help` / `beat help <cmd>` view: just that command's block, plus set's own
  * paths note and the command's family as a "related:" pointer. Returns null for unknown names
@@ -681,6 +683,9 @@ function initCmd(argv) {
   })
   writeFileSync(file, serialize(doc))
   process.stdout.write(`created ${file}: ${doc.bpm} bpm, ${doc.loopBars} bar(s), starter track "${doc.tracks[0].id}"\n`)
+  // Pilot 108: a fresh project is SILENT and nothing said so — a first `vary --render` would burn
+  // real-time renders on silence. Print the on-ramp, same then:-hint convention as vary/score.
+  process.stdout.write(`the starter track has no notes yet — then: beat add-note ${file} ${doc.tracks[0].id} 60 0 4 0.8, or beat add-track ${file} drums drums + beat drum-kit ${file} drums kit-909\n`)
 }
 
 function addTrackCmd(argv) {
