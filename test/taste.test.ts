@@ -176,6 +176,9 @@ test('taste-eval per-variant-type splits: mixed logs split by type, single-type 
   assert.equal(bt.byType.find((t) => t.type === 'vary')!.batches, 4)
   assert.equal(bt.byType.find((t) => t.type === 'gen')!.batches, 3)
   assert.equal(bt.byType.find((t) => t.type === 'clip-set')!.batches, 1)
+  // pilot 110: the smoke threshold is machine-readable, not prose-only
+  assert.equal(bt.byType.find((t) => t.type === 'vary')!.smoke, true, '4 batches < 5 -> smoke')
+  assert.equal(bt.byType.find((t) => t.type === 'gen')!.smoke, true)
   const text = formatEvalReport(report)
   assert.match(text, /vary\s+\(4 batches\)/)
   assert.match(text, /gen\s+\(3 batches\) .*\[small split — smoke, not evidence\]/)

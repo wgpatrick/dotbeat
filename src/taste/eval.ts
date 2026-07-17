@@ -271,11 +271,15 @@ export interface ScorerSplit {
   chanceTop3: number
 }
 
+/** Splits with fewer batches than this are labeled smoke in text AND carry `smoke: true` in JSON
+ * (pilot 110: script consumers shouldn't have to re-derive the threshold from the prose). */
+export const SPLIT_SMOKE_MIN_BATCHES = 5
+
 export interface ScorerReport extends ScorerSplit {
   scorer: string
   /** per-variant-type split of the SAME folds (same trained models — each fold's outcome is
    * attributed to its held-out batch's type). Present only when the log spans >1 type. */
-  byType?: (ScorerSplit & { type: VariantType })[]
+  byType?: (ScorerSplit & { type: VariantType; smoke: boolean })[]
 }
 
 export interface EvalReport {
@@ -358,7 +362,10 @@ function runScorer(name: string, scorer: Scorer, batches: TasteBatch[], rng: () 
   if (types.length > 1) {
     report.byType = types
       .sort()
-      .map((type) => ({ type, ...aggregateFolds(folds.filter((f) => f.type === type)) }))
+      .map((type) => {
+        const split = aggregateFolds(folds.filter((f) => f.type === type))
+        return { type, ...split, smoke: split.batches < SPLIT_SMOKE_MIN_BATCHES }
+      })
   }
   return report
 }
@@ -433,7 +440,7 @@ export function formatEvalReport(r: EvalReport): string {
   for (const s of r.scorers) {
     out += `  ${s.scorer.padEnd(8)} top-1 ${pct(s.top1)} (chance ${pct(s.chanceTop1)})  top-3 ${pct(s.top3)} (chance ${pct(s.chanceTop3)})  pairwise ${pct(s.pairwise)} of ${s.pairCount} (chance 50%)\n`
     for (const t of s.byType ?? []) {
-      out += `    ${t.type.padEnd(9)} (${t.batches} batch${t.batches === 1 ? '' : 'es'}) top-1 ${pct(t.top1)} (chance ${pct(t.chanceTop1)})  pairwise ${pct(t.pairwise)} of ${t.pairCount}${t.batches < 5 ? '  [small split — smoke, not evidence]' : ''}\n`
+      out += `    ${t.type.padEnd(9)} (${t.batches} batch${t.batches === 1 ? '' : 'es'}) top-1 ${pct(t.top1)} (chance ${pct(t.chanceTop1)})  top-3 ${pct(t.top3)} (chance ${pct(t.chanceTop3)})  pairwise ${pct(t.pairwise)} of ${t.pairCount}${t.smoke ? '  [small split — smoke, not evidence]' : ''}\n`
     }
   }
   if (r.trainedPairCount > 0) {
