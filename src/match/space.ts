@@ -232,7 +232,10 @@ export interface BaseDoc {
 export function buildBaseDoc(opts: BaseDocOptions): BaseDoc {
   const dur = Math.max(0.25, opts.durationSeconds)
   let bpm = Math.round(Math.min(300, Math.max(40, 240 / dur)))
-  let loopBars = Math.ceil((dur * bpm) / 240 - 1e-9)
+  // 2% slack: a chop one sample over a whole bar must not double the render window (the loss
+  // compares min(render, target) length anyway, so a sliver of truncation is free; an extra bar
+  // of rendered silence per candidate is not).
+  let loopBars = Math.ceil((dur * bpm) / 240 - 0.02)
   loopBars = Math.min(8, Math.max(1, loopBars))
   const renderSeconds = (loopBars * 240) / bpm
   const lines: string[] = ['format_version 0.10', `bpm ${bpm}`, `loop_bars ${loopBars}`, `selected_track ${MATCH_TRACK_ID}`, '']

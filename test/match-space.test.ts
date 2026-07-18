@@ -53,7 +53,9 @@ test('base synth doc parses, has the frozen-pitch note, and renders at least the
   assert.ok(track && track.kind === 'synth')
   assert.equal(track!.notes.length, 1)
   assert.equal(track!.notes[0]!.pitch, 57)
-  assert.ok(base.renderSeconds >= 1.3 - 1e-9, `renders ${base.renderSeconds}s for a 1.3s target`)
+  // The render window covers the chop up to the documented 2% bar-slop slack (a sliver of
+  // truncation is free — the loss compares min(render, target) — an extra bar of silence is not).
+  assert.ok(base.renderSeconds >= 1.3 * 0.98 - 1e-9, `renders ${base.renderSeconds}s for a 1.3s target`)
   assert.ok(base.renderSeconds < 4, 'render window should stay close to the chop length')
 })
 

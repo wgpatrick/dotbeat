@@ -437,6 +437,14 @@ export async function runMatch(opts: RunMatchOptions): Promise<MatchResult> {
         ...(bestLoss === null ? { note: 'skipped — budget exhausted by earlier stages' } : {}),
       })
     }
+    // A resumed run can finish with its best candidate never rendered IN THIS RUN (it came from
+    // the eval cache) — re-render it once so best.wav and the CLAP line always exist. A report
+    // artifact, not a search evaluation: it does not count against the budget.
+    const bestNow = evaluator.bestSoFar
+    if (bestNow !== null && bestNow.wav === null) {
+      log('best candidate came from the eval cache — rendering it once for best.wav')
+      bestNow.wav = await session.render(bestNow.text, base.renderSeconds)
+    }
   } finally {
     await session.close()
   }
