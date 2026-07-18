@@ -701,12 +701,25 @@ export async function startMatchRenderSession(scratchPath, initialText, opts = {
     async render(text, seconds) {
       if (text !== lastText) {
         const prevFingerprint = await session.page.evaluate(() => JSON.stringify(window.__store.getState().doc))
-        writeFileSync(scratchPath, text)
-        await session.page.waitForFunction(
-          (prev) => JSON.stringify(window.__store.getState().doc) !== prev,
-          prevFingerprint,
-          { timeout: 15000 },
-        )
+        // The daemon's file watcher can miss one write in a many-hundred-swap run (measured: a
+        // budget-800 self-match died at swap ~580 on a single dropped fs event) — so the swap
+        // RETRIES by rewriting the file (fresh mtime, fresh watch event) before giving up.
+        let swapped = false
+        for (let attempt = 0; attempt < 3 && !swapped; attempt++) {
+          writeFileSync(scratchPath, text)
+          try {
+            await session.page.waitForFunction(
+              (prev) => JSON.stringify(window.__store.getState().doc) !== prev,
+              prevFingerprint,
+              { timeout: 15000 },
+            )
+            swapped = true
+          } catch (err) {
+            if (attempt === 2) {
+              throw new Error(`render session lost a doc swap (3 writes, no store reload): ${err && err.message ? err.message.split('\n')[0] : err}`)
+            }
+          }
+        }
         await sleep(150) // let the engine's sync() tick absorb the new doc before capture
         lastText = text
       }
