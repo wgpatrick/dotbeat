@@ -266,6 +266,17 @@ export function makeRng(seed: number): () => number {
 const toSpace = (v: number, d: VaryRangeDef) => (d.scale === 'log' ? Math.log(Math.max(v, d.min > 0 ? d.min : 1e-4)) : v)
 const fromSpace = (s: number, d: VaryRangeDef) => (d.scale === 'log' ? Math.exp(s) : s)
 
+/** Spread-mode value: uniform draw inside quantile band `band` of [min,max] in scale space —
+ * variant i's band assignment comes from a per-param shuffle, so a batch tiles the whole range. */
+function spreadValue(def: VaryRangeDef, band: number, count: number, rng: () => number): number {
+  const lo = toSpace(def.min, def)
+  const hi = toSpace(def.max, def)
+  const q = (band + rng()) / count
+  let next = fromSpace(lo + q * (hi - lo), def)
+  if (def.integer) next = Math.round(next)
+  return next
+}
+
 /** One mutated value: jitter in scale space by (gaussian * amount * span), clamped to the
  * musical range. amount 0.25 ~= gentle neighborhood; 1 ~= anywhere-in-range leaps. */
 function mutateValue(current: number, def: VaryRangeDef, amount: number, rng: () => number): number {
@@ -287,6 +298,15 @@ export interface VaryOptions {
   amount?: number // 0..1, default 0.25 — the single strength knob
   seed?: number // required for reproducibility; caller should log it
   mutationProbability?: number // per-param chance of being touched, default 0.8
+  /** EXPLORATION mode (taste-collect, 2026-07-17): sample each param STRATIFIED ACROSS ITS FULL
+   * musical range instead of jittering around the parent's value. The default gaussian-around-
+   * current is deliberately local (MutaSynth: "variants of MY patch"), which is right for
+   * refinement but wrong for preference-data collection — when the parent's value sits near a
+   * range end (a 0.002s bass attack), even amount 0.6 leaves most variants clamped there, and
+   * the owner rightly reported five near-identical basses. With spread, variant i draws from the
+   * i-th shuffled quantile band of each param's range, so a batch of 5 GUARANTEES range-spanning,
+   * audibly distinct settings. `amount` is ignored in this mode. */
+  spread?: boolean
 }
 
 export interface VaryVariant {
@@ -315,14 +335,29 @@ function mutateVariants(
   if (amount <= 0 || amount > 1) throw new BeatVaryError(`amount must be in (0, 1], got ${amount}`)
   const rng = makeRng(opts.seed ?? 1)
 
+  // spread mode: one shuffled quantile-band permutation per param, so across the batch each
+  // param's variants tile its whole range in a different order (a latin-hypercube-lite). Every
+  // param is always touched — the point is maximal audible distinctness, not minimal diffs.
+  const bandPerm: Record<string, number[]> = {}
+  if (opts.spread) {
+    for (const def of defs) {
+      const p = Array.from({ length: count }, (_, k) => k)
+      for (let k = p.length - 1; k > 0; k--) {
+        const j = Math.floor(rng() * (k + 1))
+        ;[p[k], p[j]] = [p[j]!, p[k]!]
+      }
+      bandPerm[def.key] = p
+    }
+  }
+
   const variants: VaryVariant[] = []
   for (let i = 0; i < count; i++) {
     let edits: { path: string; value: string }[] = []
     for (let attempt = 0; attempt < 8 && edits.length === 0; attempt++) {
       for (const def of defs) {
-        if (rng() > probability) continue
+        if (!opts.spread && rng() > probability) continue
         const before = current(def.key)
-        const next = mutateValue(before, def, amount, rng)
+        const next = opts.spread ? spreadValue(def, bandPerm[def.key]![i]!, count, rng) : mutateValue(before, def, amount, rng)
         const text = formatNumber(next)
         if (text === formatNumber(before)) continue // no-op after canonical rounding
         edits.push({ path: path(def.key), value: text })

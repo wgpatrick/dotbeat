@@ -1425,7 +1425,9 @@ async function tasteCollectCmd(argv) {
       process.stderr.write(`\n=== ${f}: vary ${track} ${group} (seed ${varySeed}${group === 'feel' ? '' : `, amount ${amount}`}) ===\n`)
       try {
         // `feel` varies via timing/velocity, not --amount; every other group takes the bigger amount.
-        const amountArgs = group === 'feel' ? [] : ['--amount', String(amount)]
+        // spread (full-range stratified sampling) replaced --amount jitter here: mutation around a
+        // range-edge parent value is imperceptible no matter the amount (owner, twice, 2026-07-17).
+        const amountArgs = group === 'feel' ? [] : ['--spread']
         execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'vary', file, track, group, '--count', String(count), '--seed', String(varySeed), ...amountArgs, '--render'], { stdio: ['ignore', 'ignore', 'inherit'] })
         made += 1
       } catch (err) {
@@ -1483,7 +1485,7 @@ async function varyCmd(argv) {
   // Pilot 111 (MEDIUM): vary accepted ANY unknown flag silently — the pilot-109 fix landed on
   // render only. Same loud error, covering the feel/automation sub-commands too (they share this
   // argv). --live/--offline are the render-mode passthrough (see varyRenderMode below).
-  const knownBool = ['--groups', '--render', '--audition', '--no-shuffle', '--live', '--offline']
+  const knownBool = ['--groups', '--render', '--audition', '--no-shuffle', '--live', '--offline', '--spread']
   const knownVary = new Set([...valued, ...knownBool])
   for (const a of argv) {
     if (a.startsWith('--') && !knownVary.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...knownVary].join(', ')})`)
@@ -1550,6 +1552,10 @@ async function varyCmd(argv) {
   }
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
   const amount = flagValue(argv, '--amount') ? Number(flagValue(argv, '--amount')) : 0.25
+  // --spread: exploration mode — stratified sampling across each param's FULL musical range
+  // instead of jittering around the parent's value. For preference-data collection (taste-collect),
+  // where local mutation around a range-edge value yields near-identical variants (owner, 2026-07-17).
+  const spread = argv.includes('--spread')
   const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
   // Default out-dir sits NEXT TO the .beat file, not under the process cwd (Phase 35 OC,
   // pilot 101 medium 4) — an explicit --out-dir still resolves exactly as written.
@@ -1560,7 +1566,7 @@ async function varyCmd(argv) {
   const doc = parse(text)
   let variants
   try {
-    variants = varyTrack(doc, track, group, { count, amount, seed })
+    variants = varyTrack(doc, track, group, { count, amount, seed, spread })
   } catch (err) {
     if (err instanceof BeatVaryError) throw new BeatEditError(err.message)
     throw err
