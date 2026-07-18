@@ -59,6 +59,19 @@ test('beat add-note / rm-note round-trip and report themselves', () => {
   assert.match(rmOut, /note removed/)
 })
 
+// Pilot 103: `--name "Old drums"` used to error citing "v0.2" — stale (the format is far past
+// that) and wrongly implying a later version might allow whitespace. The rule is structural (the
+// .beat grammar has no quoting), so the message now says why and offers a name that works.
+test('multi-word track names are rejected with the structural reason and a working alternative, not a stale version', () => {
+  const file = tempProject()
+  const setOut = beat(['set', file, 'lead.name', 'Old drums'], { expectExit: 2 })
+  assert.match(setOut, /track names are single tokens — the \.beat text grammar has no quoting/)
+  assert.match(setOut, /try "Old_drums"/)
+  assert.doesNotMatch(setOut, /v0\.2/)
+  const addOut = beat(['add-track', file, 'olddrums', 'drums', '--name', 'Old drums'], { expectExit: 2 })
+  assert.match(addOut, /try "Old_drums"/)
+})
+
 test('beat set rejects bad paths with exit code 2 and a real error message', () => {
   const file = tempProject()
   const out = beat(['set', file, 'lead.wobble', '1'], { expectExit: 2 })
@@ -116,17 +129,56 @@ test('beat mcp-init writes a .mcp.json next to the project pointing at this beat
   assert.equal(config.mcpServers.beat.args[1], 'mcp')
 })
 
-test('beat mcp-init refuses to overwrite an existing .mcp.json without --force', () => {
+test('beat mcp-init refuses to overwrite existing files without a force flag, naming both files', () => {
   const file = tempProject()
   const dir = dirname(file)
   beat(['mcp-init', file])
+  // Pilot 103: the old refusal only mentioned .mcp.json and --force was all-or-nothing. A rerun
+  // with nothing to write now errors naming BOTH files and each file's own force flag.
   const out = beat(['mcp-init', file], { expectExit: 2 })
-  assert.match(out, /already exists.*--force/)
-  // --force does overwrite
+  assert.match(out, /nothing to write — both files already exist/)
+  assert.match(out, /\.mcp\.json \(--force-config/)
+  assert.match(out, /CLAUDE\.md \(--force-claude/)
+  assert.match(out, /--force overwrites both/)
+  // --force does overwrite (both)
   const forced = beat(['mcp-init', file, '--force'])
   assert.match(forced, /wrote .*\.mcp\.json/)
+  assert.match(forced, /wrote .*CLAUDE\.md/)
   const config = JSON.parse(readFileSync(join(dir, '.mcp.json'), 'utf8'))
   assert.equal(config.mcpServers.beat.args[1], 'mcp')
+})
+
+test('beat mcp-init --force-config refreshes .mcp.json without touching a customized CLAUDE.md', () => {
+  // Pilot 103's concrete loss scenario: refreshing a stale .mcp.json (repo moved, node path
+  // changed) used to require --force, which also clobbered the user's own CLAUDE.md notes.
+  const file = tempProject()
+  const dir = dirname(file)
+  beat(['mcp-init', file])
+  const customized = readFileSync(join(dir, 'CLAUDE.md'), 'utf8') + '\nMy own session notes — do not lose.\n'
+  writeFileSync(join(dir, 'CLAUDE.md'), customized)
+  writeFileSync(join(dir, '.mcp.json'), '{ "stale": true }\n')
+  const out = beat(['mcp-init', file, '--force-config'])
+  assert.match(out, /wrote .*\.mcp\.json/)
+  assert.match(out, /CLAUDE\.md already exists — left untouched/)
+  const config = JSON.parse(readFileSync(join(dir, '.mcp.json'), 'utf8'))
+  assert.equal(config.mcpServers.beat.args[1], 'mcp', '.mcp.json regenerated')
+  assert.equal(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), customized, 'customized CLAUDE.md preserved')
+})
+
+test('beat mcp-init --force-claude replaces only the CLAUDE.md scaffold', () => {
+  const file = tempProject()
+  const dir = dirname(file)
+  beat(['mcp-init', file])
+  const config = readFileSync(join(dir, '.mcp.json'), 'utf8')
+  writeFileSync(join(dir, 'CLAUDE.md'), '# stale scaffold\n')
+  const out = beat(['mcp-init', file, '--force-claude'])
+  assert.match(out, /\.mcp\.json already exists — left untouched/)
+  assert.match(out, /wrote .*CLAUDE\.md/)
+  assert.match(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), /MAKE MUSIC with dotbeat/)
+  assert.equal(readFileSync(join(dir, '.mcp.json'), 'utf8'), config, '.mcp.json untouched')
+  // unknown flags error instead of being silently swallowed (the pilot-101/103 dropped-arg family)
+  const bad = beat(['mcp-init', file, '--force-claud'], { expectExit: 2 })
+  assert.match(bad, /unknown flag "--force-claud"/)
 })
 
 test('beat mcp-init errors on a missing project file', () => {

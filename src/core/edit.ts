@@ -253,7 +253,7 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
 
   // track metadata
   if (rest === 'name') {
-    if (/\s/.test(value)) throw new BeatEditError('track names are single tokens in v0.2 (no whitespace)')
+    if (/\s/.test(value)) throw new BeatEditError(singleTokenNameError(value))
     return replaceTrack(doc, { ...track, name: value })
   }
   if (rest === 'color') {
@@ -628,9 +628,17 @@ export function setEffectEnabled(doc: BeatDocument, trackId: string, effectId: s
   return { doc: replaceTrack(doc, { ...track, effects }), effect: effects[idx]! }
 }
 
+/** Pilot 103: this used to cite "v0.2" — stale (the format is well past that), and wrongly implied
+ * a later version might allow whitespace. The single-token rule is structural, not versioned: the
+ * .beat text grammar is whitespace-separated with no quoting, so a multi-word name can never round-
+ * trip. Say that, and hand back a name that works. */
+function singleTokenNameError(name: string): string {
+  return `track names are single tokens — the .beat text grammar has no quoting, so a name can't contain whitespace; try "${name.trim().replace(/\s+/g, '_')}"`
+}
+
 function validateTrackIdentity(id: string, name: string, color: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new BeatEditError(`track ids are single alphanumeric/_/- tokens, got "${id}"`)
-  if (/\s/.test(name)) throw new BeatEditError('track names are single tokens in v0.2 (no whitespace)')
+  if (/\s/.test(name)) throw new BeatEditError(singleTokenNameError(name))
   if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatEditError(`color must be a lowercase hex color like #c678dd, got "${color}"`)
 }
 

@@ -154,6 +154,23 @@ test('parseScoresLog tolerates blank and malformed lines', () => {
   assert.deepEqual(entries[1]!.rejected, [])
 })
 
+test('user-facing reasoning never cites dotbeat source filenames (pilots 94/96/101/103)', () => {
+  // The reasoning lines are music-session text — a music-making agent must never be pointed into
+  // the dotbeat source tree ("see suggest.ts's module doc" persisted across four pilots). Cover
+  // the three reasoning shapes: cold start, ranked history, and a directional trend.
+  const highCutoffEdits = [['drums.cutoff 8000'], ['drums.cutoff 9000'], ['drums.cutoff 7500']]
+  const suggestions = [
+    suggestNext([], 'drums', { file: 'song.beat' }),
+    suggestNext([], 'lead', { file: 'song.beat', trackKind: 'synth' }),
+    suggestNext([round('drums', 'filter', 3, 6, highCutoffEdits), round('drums', 'kick', 1, 8)], 'drums', {}),
+  ]
+  for (const s of suggestions) {
+    for (const line of s.reasoning) {
+      assert.doesNotMatch(line, /\b\w+\.(ts|mjs|js)\b/, `source filename leaked into user-facing reasoning: "${line}"`)
+    }
+  }
+})
+
 test('a group with all variants picked (empty rejected) does not blow up (Laplace smoothing)', () => {
   const entries: ScoreEntry[] = [round('drums', 'kick', 3, 0)]
   const s = suggestNext(entries, 'drums', {})

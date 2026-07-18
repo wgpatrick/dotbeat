@@ -157,12 +157,36 @@ test('mix profile round-trips through JSON, including non-finite values (Phase 3
   // dual-mono: widthDb is exactly -Infinity — the value plain JSON.stringify would destroy
   assert.equal(m.stereo!.widthDb, -Infinity)
   const profile = buildProfile(m, 'ref.wav')
-  const back = parseProfile(serializeProfile(profile))
+  const text = serializeProfile(profile)
+  // Pilot 103: -Infinity serializes as JSON null (documented: "bottomed out at the log floor"),
+  // not as the string "-Infinity" among otherwise-numeric fields — a type landmine for consumers.
+  assert.match(text, /"widthDb": null/)
+  assert.doesNotMatch(text, /"-Infinity"/)
+  const back = parseProfile(text)
   assert.deepEqual(back, profile)
   assert.equal(back.format, PROFILE_FORMAT)
   assert.equal(back.source, 'ref.wav')
   assert.ok(!Number.isNaN(Date.parse(back.createdAt)), `createdAt "${back.createdAt}" should be an ISO date`)
   assert.equal(back.metrics.stereo!.widthDb, -Infinity)
+})
+
+test('parseProfile still reads pre-pilot-103 profiles that spell non-finite values as strings', () => {
+  // old serializer output: non-finite numbers as "Infinity"/"-Infinity"/"NaN" strings
+  const ch = sine(997, 2, 0.5)
+  const profile = buildProfile(analyze([ch, ch.slice()], FS), 'ref.wav')
+  const legacyText = JSON.stringify(profile, (_key, value) => (typeof value === 'number' && !Number.isFinite(value) ? String(value) : value), 2)
+  assert.match(legacyText, /"-Infinity"/, 'the legacy fixture must actually exercise the string spelling')
+  const back = parseProfile(legacyText)
+  assert.deepEqual(back, profile)
+  assert.equal(back.metrics.stereo!.widthDb, -Infinity)
+})
+
+test('a mono source profile keeps stereo: null (mono), distinct from a null metric leaf (log floor)', () => {
+  const profile = buildProfile(analyze([sine(997, 2, 0.5)], FS), 'mono.wav')
+  assert.equal(profile.metrics.stereo, null)
+  const back = parseProfile(serializeProfile(profile))
+  assert.deepEqual(back, profile)
+  assert.equal(back.metrics.stereo, null, 'stereo: null must survive as "mono", not become -Infinity')
 })
 
 test('parseProfile rejects non-profiles with actionable errors', () => {
@@ -179,12 +203,26 @@ test('ref-mode lint: a 6 dB quieter mix fires ref-loudness naming both values; i
   const loud = findings.find((f) => f.rule === 'ref-loudness')
   assert.ok(loud, `rules: ${findings.map((f) => f.rule).join(',')}`)
   assert.match(loud!.message, /6\.0 LU quieter than the reference \(ref\.wav: -\d+\.\d LUFS\)/)
-  assert.match(loud!.suggestion!, /raise all track volumes by ~6\.0 dB \(beat set song\.beat <track>\.volume <dB> per track\)/)
+  // pilot 103: with no .beat known, the fix line shows an honest <file.beat> placeholder (never
+  // the old song.beat, which read like a real file)
+  assert.match(loud!.suggestion!, /raise all track volumes by ~6\.0 dB \(beat set <file\.beat> <track>\.volume <dB> per track\)/)
   // same signal shape: band shares and crest match the reference — no delta findings there,
   // and the ABSOLUTE taste rules are off in ref mode (this mix is 20 LU under the -14 target)
   assert.ok(!findings.some((f) => f.rule.startsWith('ref-band-')), `rules: ${findings.map((f) => f.rule).join(',')}`)
   assert.ok(!findings.some((f) => f.rule === 'ref-crest'))
   assert.ok(!findings.some((f) => f.rule === 'loudness-vs-target'))
+})
+
+test('lint fix lines cite the real .beat when the caller knows it — beatPath (pilot 103)', () => {
+  const ref = buildProfile(analyze([pulsedTone(997, 0.4), pulsedTone(997, 0.4)], FS), 'ref.wav')
+  const m = analyze([pulsedTone(997, 0.2), pulsedTone(997, 0.2)], FS)
+  const findings = lint(m, { ref, beatPath: 'groove.beat' })
+  const loud = findings.find((f) => f.rule === 'ref-loudness')
+  assert.ok(loud, `rules: ${findings.map((f) => f.rule).join(',')}`)
+  assert.match(loud!.suggestion!, /beat set groove\.beat <track>\.volume <dB> per track/)
+  for (const f of findings) {
+    assert.ok(!f.suggestion?.includes('song.beat') && !f.suggestion?.includes('<file.beat>'), `placeholder leaked into: ${f.suggestion}`)
+  }
 })
 
 test('ref-mode lint: band-share deltas fire per band with direction (bass-heavy ref vs bright mix)', () => {
