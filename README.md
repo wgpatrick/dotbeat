@@ -11,7 +11,7 @@ blob you hope merges.
 
 ```bash
 npm install
-npm test                          # 893 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
+npm test                          # 890 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat bass.cutoff 900   # prints "bass: cutoff 700 -> 900"
@@ -77,7 +77,7 @@ the full thesis and prior-art comparison.
 
 | Path | What |
 |---|---|
-| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (317 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
+| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (338 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, prior-art comparison, research provenance. |
 | `src/core/` | The `.beat` format: types, parser, serializer, converter, semantic diff, edit primitives (quantize/humanize/transpose/fit-to-scale/groove/…), inspect. Pure TS, no GUI deps. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over HTTP/SSE, echo suppression by canonical-text comparison. |
@@ -88,7 +88,7 @@ the full thesis and prior-art comparison.
 | `ui/` | dotbeat's own GUI (Vite + React + Tone.js) — arrangement view, piano-roll/drum-lane clip editing, mixer, effects chain, content browser. Its own product design, not a wrapped teaching app (see `docs/decisions.md` D12). |
 | `desktop/` | Tauri desktop shell — early-stage, working toward a native Mac app (`docs/product-spec-desktop.md`). |
 | `cli/beat.mjs` | The unified `beat` CLI — run with no args for the full, current command list. |
-| `test/` | 893 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
+| `test/` | 890 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
 | `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
 | `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
 | `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
@@ -100,131 +100,53 @@ the full thesis and prior-art comparison.
 
 ## Status
 
-Well past the original v0 proof-of-concept: dotbeat now has its own GUI (arrangement view, clip
-authoring, mixer, effects chain, content browser — not a wrapped version of the BeatLab teaching
-app it started from), an 809-test suite, a session-local undo/redo stack alongside the git-backed
-checkpoint/restore history system, and a growing library of adversarially-researched design docs.
-Three research passes against Ableton Live 12's own reference manual have directly shaped recent
-work. A feature-by-feature comparison drove a batch of P0 shipments: in-session undo/redo, a real
-wavetable oscillator, Macro Controls, a drum-sampler voice, curved automation, generalized
-velocity/key modulation, instrument-track effect-chain parity, and two real audio correctness bugs
-fixed along the way. A follow-up implementation-level UI/UX pass — grounded in the manual's own
-screenshots plus live screenshots of dotbeat's own GUI, not text alone — then reshaped the
-arrangement view (real clip chrome in every mode, full-column bar-range selection, a genuine
-"currently dragging" state shared across every drag surface in the app), the clip view (a colored
-title bar, redesigned velocity/chance lanes, a two-sided loop handle, a local zoom control), the
-device panel (working macros on every track kind, a leading Activator-style bypass toggle,
-click-to-type knobs), the content browser (per-type icons, in-place preview feedback), and a
-cross-cutting design-token/typography pass plus a keyboard-shortcut reference panel. A round-2
-follow-up re-verified all of it live and caught real regressions between independently-shipped
-fixes before they could ship broken. A newer, complementary thread — exploratory usability pilots
-with no pre-scripted checklist, an agent driving the real app and reading its own screenshots
-like a human tester (`docs/usability-testing.md`) — surfaced ~30 real bugs and friction points the
-scripted verify suite structurally can't catch: a grid-click off-by-one, macro knobs desyncing from
-actual state after a preset swap, a clip editor that got stuck on a song's first scene once it had
-more than one, rapid grid clicks silently losing data, and a Mixer modal that quietly ate the
-topbar Undo button, among others. Phase 29 fixed all of it in six parallel streams, independently
-re-verified, catching one real cross-stream regression along the way (two streams' fixes to the
-same file shipped correctly in isolation but collided once merged). A follow-up round of pilots
-(87-89) audited core feature areas in breadth rather than end-to-end workflows; Phase 30 fixed what
-was real from those too — an unreliable Undo button, non-atomic multi-entity undo, a drum-hit-marker
-click target, several note-editor UX gaps, and Audio tracks' bottom panel showing an empty note-grid
-instead of real controls — while also catching that some of those pilots' findings were artifacts of
-testing against a checkout mid-merge, not real gaps, and leaving those alone rather than "fixing"
-something that wasn't broken. A third pilot round (90-93) added two detailed musical builds and a
-new variant — following real, independently-published Ableton beginner tutorials step by step in
-dotbeat instead of Ableton — which surfaced a genuine "Place in Arrangement" mistargeting bug, a
-client/daemon desync on rejected edits, and `+ capture scene` silently skipping Audio tracks; Phase
-31 fixed all of it, verifying two "sounds serious" findings against a stable checkout before touching
-anything (one turned out real, one didn't reproduce and got a regression guard instead of a guess).
-Bigger findings that don't fit a fix phase go straight into the roadmap as ordinary not-started rows
-rather than a second tracking system — and get promoted into a real stream once independently
-rediscovered enough times to be worth it rather than deferred again. Section/scene naming and
-right-click context menus (found by four and two separate pilots respectively) crossed that bar and
-shipped in Phase 32. A fourth pilot round (94-100) tried something new: testing the `beat` CLI and
-MCP tool surface directly instead of the GUI, cheap enough (~4 minutes per pilot) to run in volume —
-it found a genuine data-loss bug in `beat restore` (contradicting its own "never destroys work"
-guarantee), an MCP/CLI parity gap in drum-kit defaults, and several smaller correctness and
-error-handling gaps — Phase 33 fixed all of it, including one fix (`beat lint` naming the real
-offending track) that needed genuine per-track audio isolation rather than a heuristic, since a
-shallow guess would have reproduced the exact bug it was meant to fix. Phase 34 then closed the
-agent-surface gap those pilots mapped: the vary/score taste loop is now fully drivable over MCP
-(`beat_vary`/`beat_score`/`beat_sample`/`beat_lane`, with the batch logic extracted to one shared
-module both surfaces import so CLI/MCP parity is structural rather than reviewed-in — only
-`daemon`, a long-running process, remains CLI-only), the CLI got real per-command help
-(`beat <cmd> --help`), and render non-determinism was finally measured instead of guessed at:
-the capture-alignment hypothesis was refuted, the real cause is voice/LFO phase re-quantizing
-onto 128-sample render-quantum boundaries, and the measured variance is now encoded as named
-tolerance constants that `beat lint` pads its thresholds with so a finding can't flip between
-identical renders (`docs/render-determinism.md`). The pilot run against that new surface
-(research/101) promptly caught the next layer down: the drum param-group vary path silently
-mutates legacy params the engine never plays on modern declared-lane drum tracks — a
-high-severity no-op now tracked as a roadmap row, with its two contained MCP-side bugs (silent
-unknown-argument drops, a `beat_suggest` validation drift) fixed the same day. A multi-region
-audio placement schema (the one-clip-per-track-per-section ceiling, pilot 99) has a full design
-proposal awaiting an owner decision in `docs/multi-region-audio-design.md`. Phase 35 then went
-after where the silent no-ops cluster — the modern drum-lane surface — plus the owner's own
-dogfood asks: vary/suggest are lane-aware (targeting the params the engine actually plays,
-with byte-identical `beat set` replay), inspect finally shows per-lane truth and full-loop
-grids, a second drums track actually sounds (the engine was silently wiring only the first —
-found mid-song by the owner's music agent, fixed with a committed two-track render proof),
-the taste loop got one-WAV auditions (`--audition`) and a first-class `beat adopt` with a
-parent-hash safety check, `beat mcp-init` scaffolds a music-session CLAUDE.md so a helper
-agent produces music instead of repo hygiene, mix critique can run against a saved reference
-profile (`beat lint --ref`), and research/102 scoped the "learn from real tracks" pipeline
-(separation/structure/chords/melody) down to a recommended `beat analyze` first slice. Phase 37
-then turned the taste loop from "vary knobs" into a produce-and-critique loop: `beat feedback
---sections` renders a song once and reports its energy arc per section (LUFS/brightness/width per
-section + the biggest movers), `beat analyze-structure` reads arrangement structure with no render
-at all (onset density, scale-degree, "§3 is the drop, §4-6 repeat the intro"), `beat automate-shape`
-generates movement (ramp/sine/adsr automation) and `beat vary <track> automation:<param>` feeds that
-movement into the same audition/score/adopt loop, `beat render --stems` writes per-track WAVs, and
-`beat source` wires the Freesound CC0 pipeline into the loop (offline ingest with enforced provenance
-sidecars; live search egress-gated). Research/103 mapped the generative-audio direction and — with an
-owner-supplied primary-source correction on the ElevenLabs Music terms — landed on Stable Audio Open
-(local) as the licensing-clean path, deferred to sit alongside `beat analyze` in a later phase.
-Phase 38 then built that "learn from a real song" slice, introducing the project's first non-Node
-dependency in the most contained way possible: `beat analyze <song.wav>` runs a Python sidecar
-(`python/analyze.py`) that emits nothing but a JSON artifact of derived facts — tempo, beat/downbeat
-times, section boundaries — which `beat skeleton` turns into an empty, structure-matched `.beat` to
-write into. The Python surface is deliberately tiny and dumb (stdlib-only entry point, real models
-like Beat This importing lazily and running only on the owner's machine); all the sha256/caching,
-interpreter resolution, exit-code handling, and unit conversion live in TypeScript, and a
-deterministic stdlib `stub` backend exercises the identical plumbing so CI and dev containers stay
-green with zero Python packages installed and no network (`beat analyze --doctor` reports what's
-missing with copy-pasteable fixes). The analyzed audio is never registered into the project — only
-the JSON of numbers and labels is (decisions.md D17/D18). Stable Audio Open generation (`beat source
-gen`) is now formally deferred to a follow-up phase to reuse that same sidecar template. The same
-phase cleared the last pilot-104 papercuts (a `--clip` selector for automation vary, quieter render
-output, an explicit sample re-register note). Phase 39 then added the second Python sidecar —
-`beat source gen "<prompt>"` generates a custom one-shot locally via Stable Audio Open and registers
-it into `media/` with full provenance, reusing the exact analyze-sidecar template (stub backend for
-CI, real model owner-side; outputs are the user's under the Stability AI Community License) — and
-made the fill-and-hear loop trustworthy by fixing pilot 105's top trap: song mode plays only
-scene-placed content, so a groove on a track placed in no scene used to render **silent with no
-warning**, and now `inspect` and every `render` detect and flag it. That phase also made `render`
-auto-find a bundled Chromium instead of only documenting `CHROME_PATH`.
-Phase 40 built **the generative sampler**: pure-TS pitch detection (`beat sample-info`, with the
-top-partials table that tells a note from a chord) and `beat keymap`, which mints a playable,
-diffable sampler instrument — one command turns a generated one-shot into N pitch-named lanes;
-`beat source gen --count N` makes generation candidates a first-class scoreable batch (nothing
-registers until `beat adopt` picks the winner); and `beat regen --verify` makes "a fully-generated
-project is a recipe" executable — regeneration from provenance sidecars reproduced registered
-media byte-for-byte (same machine). The taste-model program (docs/taste-loop-design.md) then
-landed T0–T2 (instrumented score log, blind-shuffled rating web UI via `beat taste-seeds` →
-`taste-collect` → `beat rate`, CLAP embeddings + eval harness), exact offline render as the batch
-default (D22/D23 — ~3–4× realtime here, one engine), and hosted generation (`--backend fal`,
-seconds per one-shot; validated owner-side along with both local sidecars, which surfaced and
-fixed a stack of real dependency/API bugs). Owner-in-the-loop rating sessions then hardened the
-data collection itself: exploration-mode `--spread` (stratified full-range sampling — local
-MutaSynth mutation produces near-identical variants when the parent sits at a range edge), groove
-ARCHETYPES for feel batches on groove-capable tracks only, target-track solo/boost so the varied
-sound is audible, and an LFO-routing fix that turned every motion batch from a silent no-op into a
-tour of modulation character — six by-ear no-op classes found and closed. T3's loved-music prior
-ran end-to-end owner-side (purchased tracks → validated stems/beat-grids → bar chops → per-stem
-CLAP centroids → drums/bass reference profiles now driving `lint --ref` taste-referenced critique).
-`docs/product-roadmap.md` tracks every feature's real status;
-`ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
-built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a
-CLI, and an AI agent, all at once — turn a knob in the GUI and `git diff` shows exactly one changed
-line; edit the file by hand and the GUI hot-reloads without stopping playback.
+The core loop this project was built to prove works and is exercised daily: a hand-inspectable
+`.beat` file is the source of truth for a live GUI session, a CLI, and an AI agent, all at once —
+turn a knob in the GUI and `git diff` shows exactly one changed line; edit the file by hand and
+the GUI hot-reloads without stopping playback.
+
+**Built and stable** (146 of 338 tracked features done — the live list is
+[`docs/product-roadmap.md`](docs/product-roadmap.md)):
+
+- **The format and edit surface** — round-trip parser/serializer, semantic diff, edit primitives
+  (quantize/humanize/transpose/groove/fit-to-scale), track groups, drum kits, audio clips with
+  splitting, curved automation, and macros that resolve to real literal edits.
+- **dotbeat's own GUI** — arrangement view, piano-roll/drum-lane clip editing, mixer, device
+  panel, content browser, in-session undo/redo alongside the git-backed checkpoint/restore
+  history. Its design was shaped by three research passes against Ableton Live 12's own reference
+  manual and hardened by ~30 exploratory usability pilots.
+- **CLI/MCP parity** — the whole toolchain as MCP tools for AI agents, with shared batch logic so
+  parity is structural rather than reviewed-in; per-command `--help`; only `daemon` stays CLI-only.
+- **Render and guardrails** — headless renders (offline-exact by default, ~3-4× realtime), BS.1770
+  LUFS / true-peak / spectral / stereo metrics, and `beat lint` mix critique, including against
+  reference profiles derived from music the owner loves.
+- **ML sidecars, contained** — `beat analyze` (Beat This beat/downbeat detection), `beat source
+  gen` (Stable Audio Open locally, fal hosted), and CLAP + Audiobox-Aesthetics embeddings. Python
+  stays tiny and dumb; TypeScript owns caching/hashing/contracts; stub backends keep CI green with
+  zero Python; owner-side tests cover the real-model paths CI structurally can't. The proof:
+  [`examples/recipe-song/`](examples/recipe-song/) regenerates every audio asset byte-for-byte
+  from provenance sidecars.
+- **The generative sampler** — `beat sample-info` pitch detection, `beat keymap` minting a
+  playable, diffable sampler instrument from any one-shot, and generation candidates flowing
+  through the same score/adopt loop as everything else.
+
+**The active frontier: the taste-model program**
+([`docs/taste-loop-design.md`](docs/taste-loop-design.md)) — teach a model the owner's musical
+taste from blind-rated batches, then let it steer search. The model is advisory by construction;
+the owner's picks stay the only ground truth. As of 2026-07-18, on 37 blind-rated batches:
+DSP features predict vary picks at 40% top-1 (chance 20%); adding the validated CLAP embeddings
+lifts generated-sound batches from chance to 33%; the four Audiobox-Aesthetics axes alone reach
+44% on vary batches; and a prior built purely from loved records transfers at 27% with zero
+dotbeat labels. Batch renders are loudness-normalized by default so "louder" can't masquerade as
+"better." The data pipeline (`taste-seeds` → `taste-collect` → a blind web rating UI) was
+hardened by ear — six classes of silent no-op batches found and closed. T4 (`beat suggest
+--taste` pre-ranking and next-round proposals) is live; T5 (overnight critic-guided
+quality-diversity search) and T6 (sound matching against loved-record stems) are deliberately
+unbuilt until the rated-batch count earns them — the critical path is rated batches, not code.
+
+**How it's kept honest.** 890 tests plus Playwright-driven verify scripts assert known-correct
+behavior; exploratory usability pilots — an agent driving the real app or CLI with no checklist
+([`docs/usability-testing.md`](docs/usability-testing.md)) — keep finding what scripted suites
+structurally cannot, and their findings land as roadmap rows, never a second backlog. The
+phase-by-phase history that used to live in this section is in `docs/` (phase plans, 104+
+research passes) and the git log.
