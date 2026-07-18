@@ -1409,8 +1409,24 @@ async function tasteCollectCmd(argv) {
   if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
   // 'feel' rides in the synth pool so timing/velocity taste gets sampled too (its own round type
   // in taste-eval's splits comes from the group name in the manifest).
-  const SYNTH_GROUPS = ['filter', 'env', 'osc', 'mix', 'motion', 'feel']
-  const DRUM_GROUPS = ['kick', 'snare', 'hats']
+  // Feel (groove) eligibility, owner 2026-07-18: swing/timing act on NOTE ONSETS, so archetype
+  // batches are only audible on dense/offbeat material — hats-driven drums, 16th arps. On a
+  // sparse on-beat bassline even tight-vs-heavy-swing is near-silent ("very very little
+  // difference"). So: drums ALWAYS get feel (it was wrongly missing there entirely); synth tracks
+  // get it only when offbeat-dense enough to carry groove.
+  const SYNTH_GROUPS = ['filter', 'env', 'osc', 'mix', 'motion']
+  const DRUM_GROUPS = ['kick', 'snare', 'hats', 'feel']
+  // ...and only when the notes are SHORT — offbeat count alone wrongly admitted basslines (deep
+  // house bass IS offbeat), but sustained soft-attack notes mask timing shifts entirely (owner:
+  // "very little variation", every bass feel batch). Groove needs plucky onsets: median note
+  // duration <= 1 sixteenth-step, i.e. arps.
+  const grooveDense = (t) => {
+    if (t.kind !== 'synth') return false
+    const notes = t.notes ?? []
+    if (notes.filter((n) => n.start % 4 !== 0).length < 6) return false
+    const durs = notes.map((n) => n.duration).sort((a, b) => a - b)
+    return durs.length > 0 && durs[Math.floor(durs.length / 2)] <= 1
+  }
   const rng = mulberry32(metaSeed)
   let made = 0
   let failed = 0
@@ -1418,7 +1434,12 @@ async function tasteCollectCmd(argv) {
     const file = join(dir, f)
     const doc = parse(readFileSync(file, 'utf8'))
     // every (track, group) target this seed supports; drums here are always the legacy 5-lane kit
-    const targets = doc.tracks.flatMap((t) => (t.kind === 'drums' ? DRUM_GROUPS : t.kind === 'synth' ? SYNTH_GROUPS : []).map((g) => [t.id, g]))
+    // ENGINE BUG GUARD (2026-07-18): the osc group on POLYPHONIC tracks (simultaneous note
+    // starts, i.e. chords) makes the engine throw "Start time must be strictly greater than
+    // previous start time" on BOTH render paths — repro: vary seed-005.beat chords osc --render.
+    // Skip that combo until the engine scheduling fix lands (roadmap row).
+    const isPoly = (t) => { const starts = (t.notes ?? []).map((n) => n.start); return new Set(starts).size < starts.length }
+    const targets = doc.tracks.flatMap((t) => (t.kind === 'drums' ? DRUM_GROUPS : t.kind === 'synth' ? [...SYNTH_GROUPS.filter((g) => !(g === 'osc' && isPoly(t))), ...(grooveDense(t) ? ['feel'] : [])] : []).map((g) => [t.id, g]))
     for (let b = 0; b < perSeed && targets.length > 0; b++) {
       const [track, group] = targets.splice(Math.floor(rng() * targets.length), 1)[0]
       const varySeed = Math.floor(rng() * 100000)

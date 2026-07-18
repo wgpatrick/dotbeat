@@ -1963,6 +1963,13 @@ export const rows = [
     research: null, plan: null,
   },
 
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Engine: osc-group edits on polyphonic tracks break render scheduling',
+    description: 'Varying the osc group (osc2Level/osc2Detune/subLevel/unisonVoices/unisonWidth/wtPos) on a POLYPHONIC synth track (simultaneous note starts, i.e. chords) makes the engine throw "Start time must be strictly greater than previous start time" (Tone.js scheduling) on BOTH render paths — offline compute and live capture. Deterministic repro: `beat vary examples/taste-t1/seed-005.beat chords osc --count 2 --render` (also seed-007). Surfaced 2026-07-18 as the recurring "2 failed" in every taste-collect run. Likely the unison/osc2 voice (re)scheduling colliding on identical note start times. taste-collect guards the combo (skips osc on poly tracks) until fixed; monophonic osc batches are unaffected. Same engine-scheduling family as pilot-111\'s soundfont live-render failure.',
+    core: 'missing', cli: 'na', gui: 'na', status: 'not-started',
+    research: null, plan: null,
+  },
+
   // ── Desktop app / packaging ──────────────────────────────────────────────
   {
     area: 'Desktop app / packaging', feature: 'Tauri shell, compiled sidecar, bundled starter',
