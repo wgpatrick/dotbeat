@@ -99,6 +99,22 @@ test('unknown group and unknown track fail loudly', () => {
   assert.throws(() => varyTrack(doc, 'ghost', 'env', { seed: 1 }), /no track/)
 })
 
+test('exclude pins named params (pilot 113: taste-collect pins mix volume), and unknown/total exclusions error', () => {
+  const doc = project()
+  // spread mode is what taste-collect uses — every non-excluded param is always touched, so a
+  // pinned volume must be the ONLY mix param absent from every variant's edits
+  for (const v of varyTrack(doc, 'lead', 'mix', { seed: 11, count: 5, spread: true, exclude: ['volume'] })) {
+    assert.ok(v.edits.length > 0)
+    assert.ok(v.edits.every((e) => !e.path.endsWith('.volume')), `volume must stay pinned (${v.edits.map((e) => e.path).join(', ')})`)
+  }
+  // refinement mode honors it too
+  for (const v of varyTrack(doc, 'lead', 'mix', { seed: 11, count: 5, exclude: ['volume'] })) {
+    assert.ok(v.edits.every((e) => !e.path.endsWith('.volume')))
+  }
+  assert.throws(() => varyTrack(doc, 'lead', 'mix', { seed: 1, exclude: ['cutoff'] }), /does not vary/)
+  assert.throws(() => varyTrack(doc, 'lead', 'mix', { seed: 1, exclude: VARY_GROUPS.mix!.map((d) => d.key as string) }), /nothing left to vary/)
+})
+
 test('variant edits are replayable beat-set pairs that rebuild the variant doc', () => {
   const doc = project()
   for (const v of varyTrack(doc, 'drums', 'kick', { seed: 5, count: 3 })) {

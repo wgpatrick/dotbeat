@@ -2001,7 +2001,8 @@ const TOOLS: ToolDef[] = [
         port: { type: 'number', description: 'the running daemon\'s port — required with scope "selection" (same convention as beat_selection; default GUI port is 8420)' },
         render: { type: 'boolean', description: 'also render each variant to vN.wav — SLOW: real-time capture per variant in headless Chromium' },
         audition: { type: 'boolean', description: 'implies render: also stitch the rendered variants into one audition.wav (0.5s gaps) + timecode index + audition.json' },
-        normalize: { type: 'boolean', description: 'default true: rendered variants are loudness-normalized to a common LUFS (pure gain to the batch-median variant\'s level, -1 dBTP true-peak ceiling, recorded per-variant in the manifest) so picks rate sound rather than level — the taste log\'s "louder wins" confound. Pass false to keep raw render loudness.' },
+        normalize: { type: 'boolean', description: 'default true: rendered variants are loudness-normalized to a common LUFS (pure gain to the batch-median variant\'s level; upward gains capped at -1 dBTP true peak — an already-hot render is never attenuated; recorded per-variant in the manifest) so picks rate sound rather than level — the taste log\'s "louder wins" confound. Pass false to keep raw render loudness (levels still measured and recorded).' },
+        exclude: { type: 'array', items: { type: 'string' }, description: 'param groups only: group param keys to leave UNTOUCHED (e.g. ["volume"] on mix — normalization would cancel volume differences anyway); unknown keys error' },
       },
       required: ['file', 'track', 'group'],
     },
@@ -2090,7 +2091,7 @@ const TOOLS: ToolDef[] = [
       } else {
         const amount = typeof args.amount === 'number' ? args.amount : 0.25
         const outDir = typeof args.out_dir === 'string' ? args.out_dir : defaultBatchDir(file, group, seed)
-        const variants = varyTrack(doc, track, group, { count, amount, seed })
+        const variants = varyTrack(doc, track, group, { count, amount, seed, ...(Array.isArray(args.exclude) ? { exclude: (args.exclude as unknown[]).map(String) } : {}) })
         const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group, count, amount, seed, outDir, variants })
         lines.push(`${outDir}/: ${variants.length} variants of ${track}.${group} (amount ${amount}, seed ${seed})`)
         for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.edits!.join(', ')}`)

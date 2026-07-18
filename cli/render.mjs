@@ -110,6 +110,7 @@ function parseArgs(argv) {
     else if (a === '--batch') args.batch = argv[++i]
     else if (a === '--offline') args.offline = true
     else if (a === '--live') args.live = true
+    else if (a === '--no-normalize') args.noNormalize = true // --batch only; renderCommand rejects it
     // legacy no-ops: the engine is dotbeat's own now, so these are accepted-and-ignored rather
     // than errored, so old scripts/invocations don't break on an unknown flag.
     else if (a === '--beatlab-dir') i++ // swallow its value
@@ -118,7 +119,7 @@ function parseArgs(argv) {
       // Pilot 109 (MEDIUM): a typo'd flag used to be silently swallowed into the positional list
       // — `--offlin` ran a full LIVE render with exit 0, silently downgrading the one flag whose
       // entire point is exactness. Unknown flags are an immediate, loud error.
-      console.error(`error: unknown flag "${a}" (known: -o/--out, --tail, --daemon-port, --preview-port, --batch, --offline, --live)`)
+      console.error(`error: unknown flag "${a}" (known: -o/--out, --tail, --daemon-port, --preview-port, --batch, --offline, --live, --no-normalize)`)
       process.exit(2)
     } else args._.push(a)
   }
@@ -181,8 +182,27 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   // on an un-runnable readiness probe — is a real backstop rather than a second heuristic.
   const staleReason = uiDistStaleReason()
   if (staleReason) {
+    // Pilot 113: a fresh checkout's very first --render used to die HERE in a bare
+    // "Error: Command failed: npm run build" stack trace — the actual cause was ui/node_modules
+    // missing (npm install has never run in ui/), and the build's own output can be swallowed
+    // when render runs as a child with ignored stdio. Detect the known cause up front and print
+    // the actual fix; wrap a genuinely failing build in a pointer to where the full output is.
+    if (!existsSync(join(uiDir, 'node_modules'))) {
+      throw new Error(
+        `ui/ needs building (${staleReason}) but ui/node_modules is missing — install the UI's dependencies first:\n` +
+          `    cd ui && npm install\n` +
+          `  then re-run this command (the build itself runs automatically).`,
+      )
+    }
     console.error(`building ui/ (${staleReason})...`)
-    execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+    try {
+      execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+    } catch (err) {
+      throw new Error(
+        `the ui/ build failed (${err && err.message ? err.message.split('\n')[0] : err})\n` +
+          `  run it by hand to see the full compiler output: cd ui && npm run build`,
+      )
+    }
   }
 
   const { parse, unplacedContentTracks, unplacedContentWarning } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
@@ -449,6 +469,10 @@ export async function renderCommand(argv) {
     console.error('error: --offline and --live are mutually exclusive')
     process.exit(2)
   }
+  if (args.noNormalize) {
+    console.error('error: --no-normalize only applies to --batch (a single render is never loudness-normalized)')
+    process.exit(2)
+  }
   if (args.offline) {
     const refusal = await offlinePreflightRefusal(beatPath)
     if (refusal) {
@@ -626,6 +650,14 @@ export async function renderBatchCommand(argv) {
       writeFileSync(outPath, wavBytes)
       console.error(`wrote ${outPath} (${wavBytes.length} bytes)`)
     }
+    // Pilot 113 HIGH: re-rendering a NORMALIZED batch used to silently strip its normalization
+    // and leave the manifest describing audio that no longer exists. Re-apply it to the
+    // manifest's recorded target (refreshing every loudness field), measure-only refresh a batch
+    // recorded as raw, or honestly re-record as raw under --no-normalize; a manifest with no
+    // normalization record (a batch's FIRST render — vary's child call) is left to its caller.
+    const { refreshBatchLoudnessAfterRender, formatNormalizationResult } = await import(pathToFileURL(join(repoRoot, 'dist/src/vary/batch.js')).href)
+    const loudness = refreshBatchLoudnessAfterRender(dir, beatVariants.length, args.noNormalize ? { normalize: false } : {})
+    if (loudness) console.error(formatNormalizationResult(loudness).trimEnd())
   } finally {
     await session.close()
     try { rmSync(currentPath) } catch { /* best-effort scratch cleanup */ }

@@ -307,6 +307,11 @@ export interface VaryOptions {
    * i-th shuffled quantile band of each param's range, so a batch of 5 GUARANTEES range-spanning,
    * audibly distinct settings. `amount` is ignored in this mode. */
   spread?: boolean
+  /** Param keys to LEAVE UNTOUCHED within the targeted group (pilot 113: taste-collect's solo
+   * mix batches exclude `volume` — loudness normalization would gain-match the renders and
+   * cancel exactly the difference being rated). Unknown keys error loudly rather than silently
+   * varying a param the caller thought was pinned. */
+  exclude?: string[]
 }
 
 export interface VaryVariant {
@@ -333,6 +338,15 @@ function mutateVariants(
   const probability = opts.mutationProbability ?? 0.8
   if (count < 1 || count > 32) throw new BeatVaryError(`count must be 1-32, got ${count}`)
   if (amount <= 0 || amount > 1) throw new BeatVaryError(`amount must be in (0, 1], got ${amount}`)
+  // Pilot 113: opt-out of individual params within the group (taste-collect pins mix's volume).
+  // Filtering BEFORE any rng draw keeps un-excluded batches byte-identical under the same seed.
+  if (opts.exclude && opts.exclude.length > 0) {
+    const known = new Set(defs.map((d) => d.key))
+    const unknown = opts.exclude.filter((k) => !known.has(k))
+    if (unknown.length > 0) throw new BeatVaryError(`--exclude names param(s) "${target}" does not vary: ${unknown.join(', ')} (its params: ${[...known].join(', ')})`)
+    defs = defs.filter((d) => !opts.exclude!.includes(d.key))
+    if (defs.length === 0) throw new BeatVaryError(`--exclude removed every param of "${target}" — nothing left to vary`)
+  }
   const rng = makeRng(opts.seed ?? 1)
 
   // spread mode: one shuffled quantile-band permutation per param, so across the batch each
