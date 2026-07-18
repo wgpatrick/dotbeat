@@ -205,13 +205,25 @@ export async function attachEmbeddings(batches: TasteBatch[], opts: { backend?: 
  * it, so fitting across folds is not label leakage; the design doc's "PCA on unlabeled variants")
  * and project each batch's embeddings. kMax caps the projected dimensionality. */
 export function projectAllEmbeddings(batches: TasteBatch[], kMax = 16): number {
+  // Dims guard (owner-side 2026-07-18): CLAP fusion used to cache inconsistent vector lengths
+  // (65536 = 64 windows x 1024 unpooled). The sidecar now pools properly, but old corrupted
+  // caches survive on disk — vectors off the MAJORITY dim are excluded here (their batches just
+  // don't get embed scorers) instead of crashing fitPCA or silently corrupting the projection.
   const pooled: number[][] = []
   for (const b of batches) if (b.embeddings) pooled.push(...Object.values(b.embeddings))
   if (pooled.length < 2) return 0
-  const pca = fitPCA(pooled, kMax)
+  const dimCounts = new Map<number, number>()
+  for (const v of pooled) dimCounts.set(v.length, (dimCounts.get(v.length) ?? 0) + 1)
+  const majorityDim = [...dimCounts.entries()].sort((a, b) => b[1] - a[1])[0]![0]
+  const clean = pooled.filter((v) => v.length === majorityDim)
+  if (clean.length < 2) return 0
+  const pca = fitPCA(clean, kMax)
   for (const b of batches) {
     if (!b.embeddings) continue
-    b.embedProjected = new Map(Object.entries(b.embeddings).map(([f, vec]) => [f, projectPCA(pca, vec)]))
+    const entries = Object.entries(b.embeddings).filter(([, vec]) => vec.length === majorityDim)
+    if (entries.length >= 2 && entries.some(([f]) => f === b.picks[0])) {
+      b.embedProjected = new Map(entries.map(([f, vec]) => [f, projectPCA(pca, vec)]))
+    }
   }
   return pca.components.length
 }
