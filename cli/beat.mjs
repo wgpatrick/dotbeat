@@ -13,7 +13,7 @@
 // diff exit codes follow diff(1) convention: 0 = no musical changes, 1 = changes, 2 = error.
 // Requires `npm run build` (reads compiled ../dist/src/core).
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, mkdirSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -104,7 +104,7 @@ import { runAnalysis, sidecarDoctor, defaultAnalysisPath } from '../dist/src/ana
 // that turns a root into a keymap. keymap.js is deep-imported rather than routed through
 // core/index.js so this stream adds no line to a file two sibling streams are also editing.
 import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
-import { buildKeymap, noteToMidi, midiToNote, rateForPitch } from '../dist/src/core/keymap.js'
+import { buildKeymap, planKeymap, noteToMidi, midiToNote, rateForPitch } from '../dist/src/core/keymap.js'
 // ==== end Phase 40 Stream VA ====
 
 // ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
@@ -120,7 +120,7 @@ const PATHS_NOTE = `paths for set: bpm | loop_bars | selected_track | <track>.<s
 // command belongs to is half of understanding it (vary is meaningless without score/suggest).
 const HELP_FAMILIES = [
   ['vary', 'audition', 'score', 'adopt', 'suggest', 'taste-eval', 'match'], // the taste loop (docs/taste-loop-design.md)
-  ['taste-seeds', 'taste-collect', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval)
+  ['taste-seeds', 'taste-collect', 'showdown', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval; showdown = the per-role source comparison)
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
@@ -132,6 +132,9 @@ const HELP_FAMILIES = [
   // ==== Phase 40 Stream VA ====
   ['sample', 'sample-info', 'keymap', 'lane'], // Phase 40: register a sound -> read its pitch -> play a melody with it
   // ==== end Phase 40 Stream VA ====
+  // ==== gen-kit ====
+  ['gen-kit', 'source', 'rate', 'score', 'adopt', 'regen'], // compose from generated sounds -> re-pick through the taste loop
+  // ==== end gen-kit ====
 ]
 
 /** One entry per command, in the exact order the full dump prints them. `text` is the command's
@@ -446,6 +449,31 @@ const HELP = [
                                                           differing hash elsewhere is expected, not corruption.
                                                           Freesound/local-ingest media isn't generated, so it's skipped` },
   // ==== end Phase 40 Stream VC ====
+  // ==== gen-kit ====
+  {
+    cmd: 'gen-kit',
+    text: `  beat gen-kit <project-dir> [--roles kick,snare,hats,perc,bass,lead] [--candidates 4] [--bpm 96] [--key a] [--scale minorPentatonic] [--gen-backend fal|stub|stableaudio] [--seed 41]
+                                                          compose a PLAYABLE .beat project entirely from generated
+                                                          sounds — the recipe-song workflow as one command
+                                                          (docs/gen-kit-pipeline.md). Per role: N candidate one-shots
+                                                          (one subject x N distinct style prompts, taste-collect's
+                                                          convention) land as a scoreable batch dir (group
+                                                          genkit:<role>) registering NOTHING; a measurable default is
+                                                          picked — drums by spectral centroid vs the role's target
+                                                          band, bass/lead by pitch-detection confidence — and adopted
+                                                          (deferred registration: losers never touch the media block);
+                                                          tonal winners are keymapped into the project's key. Starter
+                                                          patterns (simple seeded groove + in-key phrases) are written,
+                                                          scene-placed and song-armed, so beat render is audible
+                                                          immediately. Everything is deterministic in --seed for a
+                                                          given backend; every asset carries a provenance sidecar, so
+                                                          beat regen --verify replays the whole kit. Re-pick any role
+                                                          later: beat rate <project-dir> (or beat score <batch> ...),
+                                                          then beat adopt <batch> vN --force. Default --gen-backend
+                                                          fal (needs FAL_KEY; seconds per sound); stub is the
+                                                          dependency-free deterministic tone bed CI runs.`,
+  },
+  // ==== end gen-kit ====
   {
     cmd: 'lane',
     text: `  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample ("none" reverts the lane
@@ -634,6 +662,31 @@ const HELP = [
                                                           risers — default backend fal, needs FAL_KEY). Failures
                                                           skip with a warning; everything lands as ordinary
                                                           score-able batches.`,
+  },
+  {
+    cmd: 'showdown',
+    text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
+                [--gen-backend fal|stub|stableaudio] [--ref-dir <path>] [--seconds S]
+                                                          build blind SOURCE-SHOWDOWN batches from a taste-seeds
+                                                          dir: each batch is ONE musical role x one clip per
+                                                          source — engine (the role's seed phrase, soloed, through
+                                                          dotbeat's own synth), gen (a fal-generated phrase from
+                                                          the prompt bank's phrase tier), keymap (a generated
+                                                          one-shot played as an instrument through the engine's
+                                                          sampler lanes), and optionally ref (--ref-dir). Clips
+                                                          are duration-matched (trim/pad; --seconds overrides the
+                                                          shortest-clip default) and loudness-normalized to a
+                                                          common LUFS; sources are seeded-shuffled into v-numbers
+                                                          so rating stays blind. Rate with beat rate as usual.
+  beat showdown --report [--log f] (or beat showdown <dir> --report [--json])
+                                                          the scoreboard: per-source win / top-half / pairwise
+                                                          rates from every scored showdown batch, overall and per
+                                                          role, small-n splits labeled smoke (same convention as
+                                                          taste-eval). See docs/source-showdown-eval.md.
+        --ref-dir clips are PRIVATE chops of commercial music: the tool only ever READS under that
+        path (originals untouched), the trimmed/level-matched working copies live in the batch dir
+        behind a generated .gitignore, the manifest records the origin path as a reference only,
+        and the shared scores log records the source KIND alone — never the path, title, or audio.`,
   },
   {
     cmd: 'rate',
@@ -1581,6 +1634,222 @@ async function tasteCollectCmd(argv) {
 function flagValue(argv, flag) {
   const i = argv.indexOf(flag)
   return i !== -1 ? argv[i + 1] : undefined
+}
+
+// Source-showdown eval (docs/source-showdown-eval.md): blind per-role comparison of WHERE good
+// sound comes from — engine synth vs fal generation vs keymap-repitched generation vs (opt-in,
+// private) reference chops. Collection builds clip-set batches `beat rate` scores through the
+// unchanged blind flow; --report is the standing scoreboard. A sibling of taste-collect rather
+// than a mode of it: taste-collect's rounds vary ONE pipeline against itself, a showdown round
+// varies the PIPELINE — different grammar (roles + sources, no --per-seed/--count), different
+// report, same seeds dir and rating loop.
+async function showdownCmd(argv) {
+  const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--ref-dir', '--seconds', '--log']
+  const known = new Set([...valued, '--report', '--json'])
+  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const dir = positional[0]
+  const showdown = await import('../dist/src/taste/showdown.js')
+
+  // ---- the scoreboard --------------------------------------------------------------------------
+  if (argv.includes('--report')) {
+    const logPath = flagValue(argv, '--log') ?? (dir ? join(dir, 'beat-scores.jsonl') : null)
+    if (!logPath || !existsSync(logPath)) {
+      throw new BeatEditError('showdown --report needs a scored collection: beat showdown <dir> --report (beat-scores.jsonl at the dir root) or --log <path>')
+    }
+    const report = showdown.computeShowdownReport(logPath)
+    process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : showdown.formatShowdownReport(report))
+    return
+  }
+  if (argv.includes('--json')) throw new BeatEditError('--json only applies to showdown --report')
+
+  // ---- collection ------------------------------------------------------------------------------
+  if (!dir) throw new BeatEditError('showdown needs the taste-seeds directory: beat showdown <dir> [--roles r1,r2] [--rounds 1] [--ref-dir <path>] (or --report)')
+  const { mulberry32 } = await import('../dist/src/taste/eval.js')
+  const { genSubject, genStyles } = await import('../dist/src/taste/seeds.js')
+  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
+  const { mkdirSync, copyFileSync } = await import('node:fs')
+  const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
+
+  const roles = (flagValue(argv, '--roles') ?? showdown.SHOWDOWN_ROLES.map((r) => r.role).join(','))
+    .split(',')
+    .filter(Boolean)
+    .map((r) => showdown.showdownRole(r)) // throws with the legal list on a typo
+  const rounds = flagValue(argv, '--rounds') ? Number(flagValue(argv, '--rounds')) : 1
+  const metaSeed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
+  const genBackend = flagValue(argv, '--gen-backend') ?? 'fal'
+  const targetSeconds = flagValue(argv, '--seconds') !== undefined ? Number(flagValue(argv, '--seconds')) : undefined
+  const refDir = flagValue(argv, '--ref-dir')
+  if (refDir !== undefined && !existsSync(refDir)) throw new BeatEditError(`no directory at --ref-dir ${refDir}`)
+
+  const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
+  if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
+  const seeds = seedFiles.map((f) => ({ file: f, doc: parse(readFileSync(join(dir, f), 'utf8')) }))
+
+  // Ref pool: wavs under --ref-dir, read-only. A <ref-dir>/<role>/ subdir scopes the pool to the
+  // role when present; otherwise any wav qualifies. Only .wav — the trim/normalize working copy
+  // is frame math on RIFF data, and transcoding someone's private chops is out of scope.
+  const refPool = (roleName) => {
+    if (refDir === undefined) return []
+    const scoped = join(refDir, roleName)
+    const base = existsSync(scoped) ? scoped : refDir
+    const out = []
+    const walk = (d) => {
+      let entries
+      try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
+      for (const e of entries) {
+        if (e.isDirectory() && !e.name.startsWith('.')) walk(join(d, e.name))
+        else if (e.name.toLowerCase().endsWith('.wav')) out.push(join(d, e.name))
+      }
+    }
+    walk(base)
+    return out.sort()
+  }
+
+  const rng = mulberry32(metaSeed)
+  let made = 0
+  let failed = 0
+  for (let round = 0; round < rounds; round++) {
+    for (const spec of roles) {
+      const batchSeed = Math.floor(rng() * 100000)
+      const genSeed = Math.floor(rng() * 100000)
+      const kmSeed = Math.floor(rng() * 100000)
+      const styles = genStyles()
+      const style = styles[Math.floor(rng() * styles.length)]
+      const kmStyle = styles[Math.floor(rng() * styles.length)]
+      const refPick = Math.floor(rng() * 100000) // drawn unconditionally so --ref-dir never shifts the other seeds
+      // a seed song that actually carries this role's track (the arp track is optional per seed)
+      const candidates = seeds.filter((s) => s.doc.tracks.some((t) => t.id === spec.seedTrack))
+      if (candidates.length === 0) {
+        failed += 1
+        process.stderr.write(`warning: no seed song has a "${spec.seedTrack}" track for role ${spec.role} — skipping (generate more seeds: beat taste-seeds ${dir})\n`)
+        continue
+      }
+      const seed = candidates[Math.floor(rng() * candidates.length)]
+      const seedPath = join(dir, seed.file)
+      const outDir = join(dir, `showdown-${spec.role}-${batchSeed}`)
+      const workDir = join(outDir, 'work')
+      process.stderr.write(`\n=== showdown ${spec.role}: ${seed.file} phrase — engine vs gen vs keymap${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
+      try {
+        mkdirSync(workDir, { recursive: true })
+        const extended = showdown.extendToFourBars(seed.doc)
+
+        // engine clip: the role's phrase soloed through dotbeat's own synth engine
+        const engineDoc = showdown.soloForShowdown(extended, spec.seedTrack)
+
+        // keymap clip: generated one-shot(s) registered into a scratch host, then played as an
+        // instrument through the engine's sampler lanes
+        const kmBase = join(workDir, 'km-base.beat')
+        let kmDoc
+        let kmFrom
+        if (spec.keymap.kind === 'pitched') {
+          writeFileSync(kmBase, showdown.keymapScratchText(seed.doc.bpm))
+          const oneShot = genSubject(spec.keymap.oneShotSubjectId)
+          const kmPrompt = `${oneShot.subject}, ${kmStyle}`
+          await lib.addGeneratedSource({ beatFile: kmBase, id: 'sdkm', prompt: kmPrompt, seconds: oneShot.seconds, seed: kmSeed, backend: genBackend })
+          const scratch = parse(readFileSync(kmBase, 'utf8'))
+          const { channels, sampleRate } = decodeWav(readFileSync(join(workDir, 'media', 'sdkm.wav')))
+          const pitch = detectPitch(channels, sampleRate)
+          // an automated pipeline takes the best available root rather than refusing: detected
+          // pitch, else the strongest-low-partial suggestion, else a4 — the root is recorded
+          const rootMidi = pitch.midi ?? (pitch.suggestedRootNote ? noteToMidi(pitch.suggestedRootNote) : 69)
+          const phrase = showdown.phraseFromSeed(extended, spec.seedTrack)
+          const built = showdown.buildPitchedKeymapPhrase(scratch, 'sdkm', rootMidi, phrase)
+          kmDoc = built.doc
+          kmFrom = `keymap of "${kmPrompt}" (root ${midiToNote(Math.round(rootMidi))}, ${pitch.level ?? 'no'} confidence) playing ${seed.file} ${spec.seedTrack}`
+        } else {
+          const drumsOnly = showdown.isolateTrack(extended, spec.seedTrack)
+          writeFileSync(kmBase, showdown.serializeChecked(drumsOnly))
+          const samplesByLane = {}
+          const promptsUsed = []
+          for (const [lane, subjectId] of Object.entries(spec.keymap.laneSubjects)) {
+            const oneShot = genSubject(subjectId)
+            const prompt = `${oneShot.subject}, ${kmStyle}`
+            await lib.addGeneratedSource({ beatFile: kmBase, id: `sd${lane}`, prompt, seconds: oneShot.seconds, seed: kmSeed + promptsUsed.length, backend: genBackend })
+            samplesByLane[lane] = `sd${lane}`
+            promptsUsed.push(prompt)
+          }
+          kmDoc = showdown.buildKitPhrase(parse(readFileSync(kmBase, 'utf8')), spec.seedTrack, samplesByLane)
+          kmFrom = `sample-lane kit of generated one-shots ("${kmStyle}") playing ${seed.file} ${spec.seedTrack}`
+        }
+
+        // render engine + keymap in ONE batch boot (offline by default; raw levels — the whole
+        // showdown batch is normalized together below, across sources)
+        writeVaryBatch({
+          parentPath: seedPath,
+          parentText: readFileSync(seedPath, 'utf8'),
+          track: spec.seedTrack,
+          group: 'showdown-work',
+          count: 2,
+          seed: batchSeed,
+          outDir: workDir,
+          variants: [
+            { doc: engineDoc, recipe: `engine ${spec.seedTrack} solo` },
+            { doc: kmDoc, recipe: 'keymap phrase' },
+          ],
+        })
+        renderVaryBatch(workDir, 2, { normalize: false })
+
+        // gen clip: the role's phrase-tier prompt, one candidate (prep pipeline included)
+        const phraseSubject = genSubject(spec.phraseSubjectId)
+        const genPrompt = `${phraseSubject.subject}, ${style}`
+        const genDir = join(workDir, 'gen')
+        await lib.genSourceBatch({
+          beatFile: seedPath,
+          id: `sd${spec.role.replace(/-/g, '')}`,
+          prompt: phraseSubject.subject,
+          prompts: [genPrompt],
+          seconds: phraseSubject.seconds,
+          seedFrom: genSeed,
+          backend: genBackend,
+          outDir: genDir,
+        })
+
+        const clips = [
+          { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
+          { kind: 'keymap', wav: join(workDir, 'v2.wav'), from: kmFrom },
+          { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
+        ]
+        if (refDir !== undefined) {
+          const pool = refPool(spec.role)
+          if (pool.length === 0) {
+            process.stderr.write(`warning: no .wav under ${refDir}${existsSync(join(refDir, spec.role)) ? `/${spec.role}` : ''} — building this ${spec.role} batch without a ref clip\n`)
+          } else {
+            const refPath = resolve(pool[refPick % pool.length])
+            clips.push({ kind: 'ref', wav: refPath, from: refPath })
+          }
+        }
+
+        // assemble: seeded source->v-number shuffle (first blinding layer; beat rate shuffles
+        // presentation again), then manifest + duration match + loudness normalization
+        const order = showdown.assignClipOrder(clips.length, batchSeed)
+        const files = new Array(clips.length)
+        for (let v = 0; v < clips.length; v++) {
+          const clip = clips[order[v]]
+          copyFileSync(clip.wav, join(outDir, `v${v + 1}.wav`))
+          files[v] = { file: `v${v + 1}.wav`, source: { kind: clip.kind, from: clip.from } }
+        }
+        rmSync(workDir, { recursive: true }) // never leave a scoreable work batch for beat rate to find
+        showdown.writeShowdownBatch(outDir, spec.role, files, { seed: batchSeed })
+        const match = showdown.matchClipDurations(outDir, files.map((f) => f.file), targetSeconds !== undefined ? { targetSeconds } : {})
+        process.stdout.write(`${outDir}/: ${files.length} clips (${clips.map((c) => c.kind).sort().join(' vs ')}), duration-matched to ${match.targetSeconds}s`)
+        const adjusted = match.clips.filter((c) => c.action !== 'kept')
+        process.stdout.write(adjusted.length > 0 ? ` (${adjusted.map((c) => `${c.file} ${c.action} ${c.fromSeconds}s -> ${c.toSeconds}s`).join(', ')})\n` : '\n')
+        const norm = normalizeBatchLoudness(outDir, files.length)
+        if (norm) process.stdout.write(formatNormalizationResult(norm))
+        made += 1
+      } catch (err) {
+        failed += 1
+        process.stderr.write(`warning: showdown ${spec.role} failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; --gen-backend stub builds placeholder audio)' : ''} (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+        // never leave a half-built batch for beat rate to queue
+        try {
+          if (existsSync(outDir) && !existsSync(join(outDir, 'manifest.json'))) rmSync(outDir, { recursive: true })
+        } catch { /* best-effort cleanup */ }
+      }
+    }
+  }
+  process.stdout.write(`\n${made} showdown batch(es)${failed > 0 ? ` (${failed} failed)` : ''} — sources are blind: the manifest is the answer key, don't peek before rating\n`)
+  process.stdout.write(`next: beat rate ${dir} — then beat showdown ${dir} --report for the per-source scoreboard\n`)
 }
 
 async function varyCmd(argv) {
@@ -2580,6 +2849,174 @@ async function regenCmd(argv) {
 }
 // ==== end Phase 40 Stream VC ====
 
+// ==== gen-kit begin ====
+// `beat gen-kit <project-dir>` — compose a playable .beat project entirely from generated sounds:
+// the examples/recipe-song workflow (built by hand on 2026-07-14) as one command, on the Phase 40
+// pieces. Per role it runs the SAME machinery the taste loop runs — genSourceBatch (deferred
+// registration, style-contrast prompts), a measurable pick, adoptVariant (registers the winner
+// ALONE), keymap for tonal roles — then writes seeded starter patterns and scene-places everything
+// (song mode renders only scene-placed content; the Phase 39 silent-render trap). The pure logic
+// (role specs, prompts, picks, spans, patterns) lives in src/analysis/genkit.ts; this function is
+// the loop. See docs/gen-kit-pipeline.md.
+async function genKitCmd(argv) {
+  const VALUE_FLAGS = new Set(['--roles', '--candidates', '--bpm', '--key', '--scale', '--gen-backend', '--seed'])
+  for (const a of argv) if (a.startsWith('--') && !VALUE_FLAGS.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...VALUE_FLAGS].join(', ')})`)
+  const flag = (name) => {
+    const i = argv.indexOf(name)
+    return i !== -1 ? argv[i + 1] : undefined
+  }
+  const positionals = argv.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]))
+  const projectDir = positionals[0]
+  if (!projectDir) {
+    throw new BeatEditError('gen-kit needs a <project-dir>, e.g. beat gen-kit my-kit --gen-backend stub\n  (creates <project-dir>/<project-dir>.beat plus one rateable candidate batch per role)')
+  }
+  const genkit = await import(new URL('../dist/src/analysis/index.js', import.meta.url).href)
+  const { adoptVariant } = await import(new URL('../dist/src/vary/batch.js', import.meta.url).href)
+  const { mulberry32 } = await import(new URL('../dist/src/taste/eval.js', import.meta.url).href)
+  const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
+
+  let roles
+  try {
+    roles = genkit.parseGenKitRoles(flag('--roles'))
+  } catch (err) {
+    if (err && err.name === 'BeatGenKitError') throw new BeatEditError(err.message)
+    throw err
+  }
+  const candidates = flag('--candidates') !== undefined ? Number(flag('--candidates')) : 4
+  if (!Number.isInteger(candidates) || candidates < 1) throw new BeatEditError(`--candidates must be a positive integer, got ${flag('--candidates')}`)
+  const bpm = flag('--bpm') !== undefined ? Number(flag('--bpm')) : 96
+  const keyText = flag('--key') ?? 'a'
+  const keyMidi = parseKeyNote(keyText) // liberal: "a", "c#", or a full note like a2
+  const keyPc = ((keyMidi % 12) + 12) % 12
+  const scale = flag('--scale') ?? 'minorPentatonic'
+  if (!SCALE_NAMES.includes(scale)) throw new BeatEditError(`unknown scale "${scale}" (have: ${SCALE_NAMES.join(', ')})`)
+  const backend = flag('--gen-backend') ?? 'fal'
+  if (!['fal', 'stub', 'stableaudio'].includes(backend)) throw new BeatEditError(`--gen-backend must be fal, stub or stableaudio, got "${backend}"`)
+  const metaSeed = flag('--seed') !== undefined ? Number(flag('--seed')) : 41
+  if (!Number.isInteger(metaSeed)) throw new BeatEditError(`--seed must be an integer, got ${flag('--seed')}`)
+
+  // <dir>/<basename>.beat when the basename is a clean token, else <dir>/song.beat.
+  mkdirSync(projectDir, { recursive: true })
+  const base = basename(resolve(projectDir))
+  const beatFile = join(projectDir, `${/^[a-zA-Z0-9._-]+$/.test(base) ? base : 'song'}.beat`)
+  if (existsSync(beatFile)) throw new BeatEditError(`${beatFile} already exists — gen-kit composes a FRESH project; pick a new directory or remove the file`)
+
+  const LOOP_BARS = 2
+  const SECTION_BARS = 8
+  // A fresh project. The 'starter' synth track is scaffolding only — a document must always carry
+  // at least one track, so it stays until the kit's real tracks exist and is removed below.
+  writeFileSync(beatFile, serialize(initDocument({ bpm, loopBars: LOOP_BARS, trackId: 'starter' })))
+  process.stdout.write(`gen-kit: ${beatFile} — ${roles.map((r) => r.role).join(', ')} @ ${candidates} candidate(s) each, ${backend} backend, key ${pitchClassName(keyMidi)} ${scale}, seed ${metaSeed}\n`)
+
+  // One rng, drawn in a fixed order, so the whole kit is deterministic in --seed (given the same
+  // roles/candidates/backend): per role a prompt-style seed + a generation seedFrom, then the
+  // three pattern seeds.
+  const rng = mulberry32(metaSeed)
+  const picks = [] // { spec, dir, pick, keymap? }
+  for (const spec of roles) {
+    const styleSeed = Math.floor(rng() * 1e9)
+    const seedFrom = Math.floor(rng() * 100000)
+    const prompts = genkit.genkitPrompts(spec, candidates, styleSeed)
+    process.stdout.write(`\n=== ${spec.role}: ${candidates} candidate(s) of "${spec.subject}" (${spec.seconds}s, seeds ${seedFrom}${candidates > 1 ? `-${seedFrom + candidates - 1}` : ''}) ===\n`)
+    const batch = await lib.genSourceBatch({
+      beatFile,
+      id: spec.role,
+      prompt: spec.subject,
+      prompts,
+      seconds: spec.seconds,
+      seedFrom,
+      backend,
+      group: `genkit:${spec.role}`,
+      onProgress: (i, n) => process.stdout.write(`  generating v${i}/${n}...\n`),
+    })
+    // Measure every candidate from the batch dir — the exact prepped bytes an adopt would register.
+    const measured = batch.candidates.map((c) => {
+      try {
+        return decodeWav(readFileSync(c.wav))
+      } catch {
+        return null
+      }
+    })
+    let pick
+    if (spec.kind === 'drum') {
+      const centroids = measured.map((m) => (m === null ? null : analyze(m.channels, m.sampleRate).spectral.centroidHz))
+      pick = genkit.pickDrumCandidate(spec, centroids)
+    } else {
+      const pitches = measured.map((m, i) => {
+        if (m === null) return { hz: null, midi: null, note: null, cents: null, confidence: -1, level: 'low', method: 'undecodable', periodicity: 0, harmonicity: 0, partials: [], suggestedRootNote: null, suggestedRootHz: null, sampleRate: 0, durationSeconds: 0, analyzedFromSeconds: 0, analyzedToSeconds: 0 }
+        return detectPitch(m.channels, m.sampleRate)
+      })
+      try {
+        pick = genkit.pickTonalCandidate(pitches)
+      } catch (err) {
+        if (err && err.name === 'BeatGenKitError') throw new BeatEditError(`${spec.role}: ${err.message}`)
+        throw err
+      }
+    }
+    // Deferred registration pays off here: adopt registers the WINNER alone; the losers stay in
+    // the batch dir as an ordinary rateable batch for the owner (or the critic) to re-pick.
+    adoptVariant(batch.dir, `v${pick.index + 1}`)
+    process.stdout.write(`  picked v${pick.index + 1}/${candidates}: ${pick.reason}\n`)
+    process.stdout.write(`  registered ${spec.role}; all ${candidates} candidate(s) stay scoreable in ${batch.dir}\n`)
+    picks.push({ spec, dir: batch.dir, pick })
+  }
+  const drumSeed = Math.floor(rng() * 1e9)
+  const bassSeed = Math.floor(rng() * 1e9)
+  const leadSeed = Math.floor(rng() * 1e9)
+
+  // Build the playable document over the registered winners: kit lanes + keymapped tonal tracks,
+  // starter patterns, then clip -> scene -> song so every track is scene-placed (song mode renders
+  // only scene-placed content — the Phase 39 silent-render trap this command must never re-open).
+  let doc = readDoc(beatFile)
+  const drumRoles = picks.filter((p) => p.spec.kind === 'drum')
+  const slots = {}
+  // A declared sample lane, built directly (addLane refuses on a zero-lane drums track — that
+  // shape means "legacy implicit 5-lane" — so fresh gen-kit tracks are born with their lane lists).
+  const sampleLaneDecl = (name, sampleId, gainDb, tune) => ({
+    name,
+    backing: { type: 'sample', sample: sampleId, gainDb, tune, params: {}, filterType: 'lowpass', effects: [] },
+  })
+  process.stdout.write('\n')
+  if (drumRoles.length > 0) {
+    doc = addTrack(doc, { id: 'kit', kind: 'drums', name: 'kit', lanes: drumRoles.map((p) => sampleLaneDecl(p.spec.role, p.spec.role, p.spec.laneGainDb, 0)) }).doc
+    for (const h of genkit.planDrumHits(drumRoles.map((p) => p.spec.role), LOOP_BARS, drumSeed)) {
+      doc = addHit(doc, 'kit', h).doc
+    }
+    doc = saveClip(doc, 'kit', 'groove').doc
+    slots.kit = [{ clip: 'groove', at: 0 }]
+    process.stdout.write(`kit: lanes ${drumRoles.map((p) => p.spec.role).join(', ')} — starter groove written (clip "groove")\n`)
+  }
+  for (const p of picks.filter((x) => x.spec.kind === 'tonal')) {
+    const role = p.spec.role
+    const { fromMidi, toMidi } = genkit.keymapSpanForRoot(p.pick.rootMidi, keyPc)
+    // The keymap plan (Phase 40 VA): one lane per scale degree, tuned from the sample's measured
+    // root — minted directly into the fresh track's lane list.
+    const plan = planKeymap({ rootMidi: p.pick.rootMidi, scaleRootMidi: keyPc, scale, fromMidi, toMidi })
+    doc = addTrack(doc, { id: role, kind: 'drums', name: role, lanes: plan.map((l) => sampleLaneDecl(l.name, role, p.spec.laneGainDb, l.tune)) }).doc
+    const laneNames = plan.map((l) => l.name)
+    const clipId = role === 'bass' ? 'bline' : 'mel'
+    const hits = role === 'bass' ? genkit.planBassHits(laneNames, LOOP_BARS, bassSeed) : genkit.planLeadHits(laneNames, LOOP_BARS, leadSeed)
+    for (const h of hits) doc = addHit(doc, role, h).doc
+    doc = saveClip(doc, role, clipId).doc
+    slots[role] = [{ clip: clipId, at: 0 }]
+    process.stdout.write(`${role}: keymapped ${laneNames.length} lanes (${laneNames[0]}..${laneNames[laneNames.length - 1]}, ${scale} in ${pitchClassName(keyMidi)}) — root ${p.pick.rootSource} ${midiToNote(p.pick.rootMidi)}; starter phrase written (clip "${clipId}")\n`)
+  }
+  doc = removeTrack(doc, 'starter').doc // the scaffolding track — the kit's real tracks exist now
+  doc = setScene(doc, 'main', slots)
+  doc = setSong(doc, [{ scene: 'main', bars: SECTION_BARS }])
+  doc = { ...doc, selectedTrack: doc.tracks[0].id }
+  writeFileSync(beatFile, serialize(doc))
+
+  process.stdout.write(
+    `\n${beatFile}: ${doc.tracks.length} track(s), scene "main" placed for all of them, song ${SECTION_BARS} bars — a normal .beat project\n` +
+    `  hear it:        beat render ${beatFile} && beat metrics ${beatFile.replace(/\.beat$/, '.wav')}\n` +
+    `  make it yours:  beat vary ${beatFile} kit --groups   (and beat vary ... feel)\n` +
+    `  re-pick a role: beat rate ${projectDir}   (or beat score <batch-dir> <best> ...), then beat adopt <batch-dir> vN --force\n` +
+    `  prove the recipe: beat regen ${beatFile} --verify\n`,
+  )
+}
+// ==== gen-kit end ====
+
 function laneCmd(argv) {
   // Phase 35 Stream OB: `--clear-legacy` is the one-shot explicit cleanup for stale v0.5
   // laneSamples lines on a declared-lane track (inspect flags them; playback ignores them there).
@@ -3545,6 +3982,11 @@ async function main() {
       await regenCmd(rest)
       break
     // ==== end Phase 40 Stream VC ====
+    // ==== gen-kit ====
+    case 'gen-kit':
+      await genKitCmd(rest)
+      break
+    // ==== end gen-kit ====
     case 'lane':
       laneCmd(rest)
       break
@@ -3591,6 +4033,9 @@ async function main() {
       break
     case 'taste-collect':
       await tasteCollectCmd(rest)
+      break
+    case 'showdown':
+      await showdownCmd(rest)
       break
     case 'rate': {
       const { rateCommand } = await import('./rate.mjs')
@@ -3695,7 +4140,12 @@ main().catch((err) => {
     err instanceof BeatAnalysisError ||
     err.name === 'HistoryError' ||
     err.name === 'WavDecodeError' ||
-    err.name === 'AutomationShapeError'
+    err.name === 'AutomationShapeError' ||
+    // gen-kit orchestrates source-lib + batch adopt + its own planning directly, so their typed
+    // errors surface here (every other verb rewraps them closer to the call site).
+    err.name === 'SourceError' ||
+    err.name === 'BeatBatchError' ||
+    err.name === 'BeatGenKitError'
   ) {
     console.error(`error: ${err.message}`)
     process.exitCode = 2

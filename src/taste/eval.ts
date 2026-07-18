@@ -312,11 +312,18 @@ export const SCORERS: Record<string, Scorer> = {
 /** T2 leftover (roadmap): which kind of round produced a batch. Ablation splits key on this —
  * a taste model can be predictive on synth-param vary rounds and at chance on gen rounds (or
  * vice versa), and one pooled number hides that. Classification uses the manifest conventions:
- * `gen:<id>` groups are generation rounds (D21); track-bearing entries are vary rounds; a
- * trackless non-gen batch is a stitched clip-set (`beat audition <dir>`, any group name). */
-export type VariantType = 'vary' | 'gen' | 'clip-set'
+ * `gen:<id>` groups are generation rounds (D21), as are `genkit:<role>` groups (`beat gen-kit`'s
+ * per-role candidate batches — same media-variant shape, different label); track-bearing entries
+ * are vary rounds; a trackless non-gen batch is a stitched clip-set (`beat audition <dir>`, any
+ * group name). */
+export type VariantType = 'vary' | 'gen' | 'clip-set' | 'showdown'
 export function variantTypeOf(b: { group: string; track?: string }): VariantType {
-  if (b.group.startsWith('gen:')) return 'gen'
+  if (b.group.startsWith('gen:') || b.group.startsWith('genkit:')) return 'gen'
+  // Source-showdown rounds (`showdown:<role>` clip-set batches, docs/source-showdown-eval.md) are
+  // their own split: their within-batch contrast is SOURCE PIPELINE (engine vs gen vs keymap vs
+  // ref), a different question from any vary/gen round, and pooling them into clip-set would hide
+  // whether the taste model can predict cross-source picks at all.
+  if (b.group.startsWith('showdown:')) return 'showdown'
   if (b.track !== undefined) return 'vary'
   return 'clip-set'
 }

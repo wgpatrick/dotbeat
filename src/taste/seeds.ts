@@ -160,6 +160,10 @@ const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
   { id: 'melody', subject: 'a melodic synth lead phrase, 4 bar loop, catchy and emotive', seconds: 8 },
   { id: 'bassline', subject: 'a rolling deep house bassline loop, 4 bars, groovy and hypnotic', seconds: 8 },
   { id: 'chords', subject: 'a chord progression loop, lush warm chords, 4 bars', seconds: 8 },
+  // Completes the phrase tier for the source-showdown eval (docs/source-showdown-eval.md): the
+  // drum-loop ROLE needs a phrase-level gen candidate the way bassline/chords/melody already have
+  // one — one-shot drum subjects cover atomic hits, not a groove.
+  { id: 'drumloop', subject: 'a full drum loop, 4 bars, punchy and groovy', seconds: 8 },
 ]
 const GEN_STYLES = [
   'analog warmth, tape saturation',
@@ -171,6 +175,22 @@ const GEN_STYLES = [
   'gritty distorted electronic',
   'soft, intimate, close-mic feel',
 ]
+
+/** Look up one subject of the prompt bank by id — the source-showdown eval (src/taste/showdown.ts)
+ * builds its gen and keymap clips from NAMED bank entries (phrase tier for the role's gen clip,
+ * one-shot tier for the keymap sample) so showdown prompts and taste-collect prompts stay one
+ * vocabulary instead of drifting into a second bank. */
+export function genSubject(id: string): { id: string; subject: string; seconds: number } {
+  const s = GEN_SUBJECTS.find((x) => x.id === id)
+  if (!s) throw new Error(`unknown gen subject "${id}" (have: ${GEN_SUBJECTS.map((x) => x.id).join(', ')})`)
+  return s
+}
+
+/** The style-treatment bank, exported for the same reason as genSubject: showdown styles ARE
+ * taste-collect styles. */
+export function genStyles(): readonly string[] {
+  return GEN_STYLES
+}
 
 export interface GenPromptSpec {
   /** media-id-safe slug, unique within one collect run */
@@ -213,6 +233,22 @@ export function generateGenPrompts(seed: number, count: number): GenPromptSpec[]
   }
   return out
 }
+
+// ==== gen-kit (docs/gen-kit-pipeline.md) ====
+/** ONE subject in `n` DISTINCT styles — the per-candidate prompt convention taste-collect's
+ * style-contrast batches use (owner insight 2026-07-17: N seeds of one prompt are near-clones;
+ * N style treatments of one subject span real feature-space distance). Styles are sampled without
+ * replacement from the shared GEN_STYLES bank, cycling only if `n` exceeds the bank. Deterministic
+ * in `seed`. Exported for `beat gen-kit`, whose role batches must land in the SAME prompt
+ * vocabulary the taste loop already collects and scores. */
+export function stylePromptsFor(subject: string, n: number, seed: number): string[] {
+  const rng = mulberry32(seed)
+  const shuffled = [...GEN_STYLES].sort(() => rng() - 0.5)
+  const prompts: string[] = []
+  for (let i = 0; i < n; i++) prompts.push(`${subject}, ${shuffled[i % shuffled.length]!}`)
+  return prompts
+}
+// ==== end gen-kit ====
 
 export interface GenStyleBatchSpec {
   /** media-id-safe slug, unique within one collect run */
