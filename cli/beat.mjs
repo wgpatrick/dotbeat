@@ -646,7 +646,9 @@ const HELP = [
                                                           deltas) — full-mix statics only: a profile can't
                                                           hear arrangement, sections, or masking;
                                                           --doc renders each track solo to name the actual
-                                                          offending track in each finding's suggestion`,
+                                                          offending track in each finding's suggestion, and
+                                                          makes fix lines cite that .beat by name (without it
+                                                          they show an honest <file.beat> placeholder)`,
   },
   {
     cmd: 'render',
@@ -721,12 +723,17 @@ const HELP = [
   },
   {
     cmd: 'mcp-init',
-    text: `  beat mcp-init <file> [--force]                          write a .mcp.json next to <file> so Claude Code
+    text: `  beat mcp-init <file> [--force | --force-config | --force-claude]
+                                                          write a .mcp.json next to <file> so Claude Code
                                                           (or any MCP client) auto-discovers 'beat mcp' there,
                                                           plus a music-session CLAUDE.md scaffold (you're making
                                                           music, not developing dotbeat; render->metrics->lint;
-                                                          vary/score for taste; units) — an existing CLAUDE.md
-                                                          is never overwritten without --force`,
+                                                          vary/score for taste; units). Existing files are never
+                                                          overwritten without a force flag, per file:
+                                                          --force-config regenerates just .mcp.json (e.g. after
+                                                          this repo moves), --force-claude replaces just the
+                                                          CLAUDE.md scaffold (your own edits to it are lost),
+                                                          --force overwrites both`,
   },
 ]
 
@@ -2927,7 +2934,12 @@ async function lintCmd(argv) {
     throw new BeatEditError(`no profile at ${refPath} — write one with: beat metrics <ref.wav> --save-profile ${refPath}`)
   }
   const { channels, sampleRate } = decodeWav(readFileSync(file))
-  const lintOpts = refPath !== undefined ? { ref: parseProfile(readFileSync(refPath, 'utf8'), refPath) } : target !== undefined ? { targetLufs: target } : {}
+  // Pilot 103: fix lines used to hardcode a `song.beat` placeholder that reads like a real file.
+  // With --doc, they cite the actual .beat; without it, an honest `<file.beat>` placeholder.
+  const lintOpts = {
+    ...(docPath ? { beatPath: docPath } : {}),
+    ...(refPath !== undefined ? { ref: parseProfile(readFileSync(refPath, 'utf8'), refPath) } : target !== undefined ? { targetLufs: target } : {}),
+  }
   let findings = lint(analyze(channels, sampleRate), lintOpts)
 
   if (docPath && findings.some((f) => f.suggestion)) {
@@ -2991,7 +3003,7 @@ async function feedbackCmd(argv) {
     process.stdout.write(json ? JSON.stringify({ sections: secMetrics, ...(ref ? { ref: ref.source } : {}) }, null, 2) + '\n' : formatSectionFeedback(secMetrics, ref))
   } else {
     const m = analyze(channels, sampleRate)
-    const findings = lint(m, ref ? { ref } : {})
+    const findings = lint(m, { beatPath: file, ...(ref ? { ref } : {}) })
     process.exitCode = findings.some((f) => f.level === 'warn') ? 1 : 0
     process.stdout.write(json ? JSON.stringify({ metrics: m, findings }, null, 2) + '\n' : formatWholeSongFeedback(m, findings))
   }
@@ -3236,26 +3248,49 @@ function mcpInitCmd(argv) {
   const file = argv.find((a) => !a.startsWith('--'))
   if (!file) throw new BeatEditError('mcp-init needs a <file> — the .beat project to point an MCP client at')
   if (!existsSync(file)) throw new BeatEditError(`${file} does not exist — run \`beat init ${file}\` first`)
-  const force = argv.includes('--force')
+  // Pilot 103: --force used to be all-or-nothing — refreshing a stale .mcp.json (repo moved, node
+  // path changed) clobbered a user-customized CLAUDE.md along with it. The two files have
+  // different owners (.mcp.json is machine-generated config; CLAUDE.md is the user's own once
+  // they've touched it), so each gets its own force flag; plain --force still means both.
+  const known = ['--force', '--force-config', '--force-claude']
+  for (const a of argv) if (a.startsWith('--') && !known.includes(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${known.join(', ')})`)
+  const forceAll = argv.includes('--force')
+  const forceConfig = forceAll || argv.includes('--force-config')
+  const forceClaude = forceAll || argv.includes('--force-claude')
   const beatScript = new URL(import.meta.url).pathname // this file's own absolute path
   const projectDir = dirname(resolve(file))
   const configPath = resolve(projectDir, '.mcp.json')
-  if (existsSync(configPath) && !force) throw new BeatEditError(`${configPath} already exists — pass --force to overwrite`)
-  const config = { mcpServers: { beat: { command: 'node', args: [beatScript, 'mcp'] } } }
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n')
-  // Phase 35 OC: also scaffold a music-session CLAUDE.md next to the project. An existing
-  // CLAUDE.md is the user's own (or an earlier scaffold they may have edited) — never
-  // overwritten without --force, but its presence doesn't block the .mcp.json half above.
   const claudePath = resolve(projectDir, 'CLAUDE.md')
-  let claudeNote
-  if (existsSync(claudePath) && !force) {
-    claudeNote = `${claudePath} already exists — left untouched (--force overwrites it with the music-session scaffold)`
+  // Per-file granularity: each file is written if missing or its own force flag is set; an
+  // existing file the caller didn't force is reported, never silently skipped. Neither file's
+  // presence blocks the other from being (re)written.
+  const notes = []
+  let wroteAny = false
+  if (!existsSync(configPath) || forceConfig) {
+    const config = { mcpServers: { beat: { command: 'node', args: [beatScript, 'mcp'] } } }
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n')
+    notes.push(`wrote ${configPath}`)
+    wroteAny = true
   } else {
+    notes.push(`${configPath} already exists — left untouched (--force-config regenerates just it, e.g. after this repo moves)`)
+  }
+  if (!existsSync(claudePath) || forceClaude) {
     writeFileSync(claudePath, musicSessionScaffold(basename(file)))
-    claudeNote = `wrote ${claudePath} (music-session ground rules for the agent)`
+    notes.push(`wrote ${claudePath} (music-session ground rules for the agent)`)
+    wroteAny = true
+  } else {
+    notes.push(`${claudePath} already exists — left untouched (--force-claude replaces just it with the fresh scaffold)`)
+  }
+  if (!wroteAny) {
+    throw new BeatEditError(
+      `nothing to write — both files already exist:\n` +
+        `  ${configPath} (--force-config regenerates just it, e.g. after this repo moves)\n` +
+        `  ${claudePath} (--force-claude replaces just it — careful, it may hold your own session notes)\n` +
+        `--force overwrites both`,
+    )
   }
   process.stdout.write(
-    `wrote ${configPath}\n${claudeNote}\n\n` +
+    `${notes.join('\n')}\n\n` +
       `next: open ${projectDir} in Claude Code (or any MCP client that reads .mcp.json) — the\n` +
       `"beat" server is auto-discovered. Try a tool call: beat_inspect on "${basename(file)}".\n`,
   )

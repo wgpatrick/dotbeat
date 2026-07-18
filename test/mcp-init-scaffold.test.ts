@@ -66,7 +66,7 @@ test('beat mcp-init never overwrites an existing CLAUDE.md without --force (but 
 
   const out = beat(['mcp-init', file])
   assert.match(out, /wrote .*\.mcp\.json/)
-  assert.match(out, /CLAUDE\.md already exists — left untouched \(--force overwrites/)
+  assert.match(out, /CLAUDE\.md already exists — left untouched \(--force-claude replaces just it/)
   assert.equal(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), own, 'existing CLAUDE.md untouched')
 
   // --force replaces it with the scaffold (and .mcp.json too, as before)

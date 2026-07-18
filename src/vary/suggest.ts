@@ -296,7 +296,7 @@ export function suggestNext(entries: ScoreEntry[], track: string, opts: SuggestO
       ? `this is a declared-lane drums track, so its REAL vary targets are its own lanes (each lane's backing params are what actually sound) plus the track-wide bus groups (${coldCandidates.join(', ')}): recommending lane "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
       : opts.trackKind
         ? `recommending the first group legal for a "${opts.trackKind}" track (${coldCandidates.join(', ')}): "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
-        : `recommending the first group in vary.ts's declared order (${Object.keys(VARY_GROUPS).join(', ')}): "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
+        : `recommending the first group in the declared vary-group order (${Object.keys(VARY_GROUPS).join(', ')}): "${group}", at the rung-1 default amount (${AMOUNT_DEFAULT}).`
     return {
       coldStart: true,
       track,
@@ -351,12 +351,16 @@ export function suggestNext(entries: ScoreEntry[], track: string, opts: SuggestO
       `skipping "${s.group}" despite its record: it is not a live vary target on this track (on a declared-lane drums track the legacy drum-voice groups mutate params the engine never plays — those wins were rated on inaudible differences).`,
     )
   }
+  // The method's full caveats live in this module's doc comment — deliberately NOT cited by
+  // filename here: reasoning lines are user-facing music-session text, and pilots 94/96/101/103
+  // all flagged the "see suggest.ts's module doc" source-file leak (a music-making agent should
+  // never be pointed into the dotbeat source tree).
   reasoning.push(
-    `"${top.group}" ranks highest${skipped.length ? " among this track's LIVE targets" : ''} by picked-vs-rejected odds (Bradley-Terry odds-form against an implicit "not picked" baseline — groups never appear in the same batch by rung-1's design, so this is a ranking signal, not a proven head-to-head win; see suggest.ts's module doc).`,
+    `"${top.group}" ranks highest${skipped.length ? " among this track's LIVE targets" : ''} by picked-vs-rejected odds (Bradley-Terry odds-form against an implicit "not picked" baseline — groups never appear in the same batch by rung-1's design, so this is a ranking signal, not a proven head-to-head win).`,
   )
   if (directions.length) {
     for (const d of directions) {
-      reasoning.push(`  within "${top.group}", picks trend ${d.label} on ${d.param} (mean position ${(d.meanNorm * 100).toFixed(0)}% of its vary.ts range, n=${d.samples}).`)
+      reasoning.push(`  within "${top.group}", picks trend ${d.label} on ${d.param} (mean position ${(d.meanNorm * 100).toFixed(0)}% of its mutation range, n=${d.samples}).`)
     }
   } else {
     reasoning.push(`  no clear directional trend within "${top.group}" yet (need more overlapping-param picks).`)
