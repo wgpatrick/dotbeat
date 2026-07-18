@@ -44,7 +44,15 @@ export interface LintOptions {
    * Honest limits: the profile is full-mix statics — this comparison cannot hear arrangement,
    * sections, or masking, only gross static differences. */
   ref?: MixProfile
+  /** The .beat file to name in each finding's `beat set ...` fix line, when the caller knows it
+   * (`beat lint --doc <file.beat>`, `beat feedback <file>`). Pilot 103: fix lines used to
+   * hardcode a placeholder `song.beat` that reads like a real file — without a known .beat the
+   * fix line now says `<file.beat>`, which is honest about being a placeholder. */
+  beatPath?: string
 }
+
+/** Lint only sees a WAV; the .beat the fix would edit is unknowable unless the caller says so. */
+const BEAT_PLACEHOLDER = '<file.beat>'
 
 const fmt = (x: number, digits = 1) => (Number.isFinite(x) ? x.toFixed(digits) : String(x))
 
@@ -85,27 +93,28 @@ const REF_BAND_TOLERANCE_PCT = 5
 const REF_WIDTH_TOLERANCE_DB = 3
 const REF_CREST_TOLERANCE_DB = 2
 
-/** Per-band .beat edits to try when a band share is above/below the reference's. */
-const BAND_EDITS: Record<keyof SpectralBands, { above: string; below: string }> = {
+/** Per-band .beat edits to try when a band share is above/below the reference's. Functions of the
+ * .beat filename the fix line should cite (the real file when known, `<file.beat>` otherwise). */
+const BAND_EDITS: Record<keyof SpectralBands, { above: (beat: string) => string; below: (beat: string) => string }> = {
   sub: {
-    above: 'reduce sub energy: lower the bass/kick track volume (beat set song.beat <track>.volume <dB>) or raise its cutoff (beat set song.beat <track>.cutoff <Hz>)',
-    below: 'add sub weight: raise the bass/kick track volume (beat set song.beat <track>.volume <dB>) or lower its cutoff (beat set song.beat <track>.cutoff <Hz>)',
+    above: (beat) => `reduce sub energy: lower the bass/kick track volume (beat set ${beat} <track>.volume <dB>) or raise its cutoff (beat set ${beat} <track>.cutoff <Hz>)`,
+    below: (beat) => `add sub weight: raise the bass/kick track volume (beat set ${beat} <track>.volume <dB>) or lower its cutoff (beat set ${beat} <track>.cutoff <Hz>)`,
   },
   bass: {
-    above: 'reduce bass energy: lower bass-range track volume (beat set song.beat <track>.volume <dB>) or raise its cutoff (beat set song.beat <track>.cutoff <Hz>)',
-    below: 'add bass energy: raise bass-range track volume (beat set song.beat <track>.volume <dB>) or lower its cutoff (beat set song.beat <track>.cutoff <Hz>)',
+    above: (beat) => `reduce bass energy: lower bass-range track volume (beat set ${beat} <track>.volume <dB>) or raise its cutoff (beat set ${beat} <track>.cutoff <Hz>)`,
+    below: (beat) => `add bass energy: raise bass-range track volume (beat set ${beat} <track>.volume <dB>) or lower its cutoff (beat set ${beat} <track>.cutoff <Hz>)`,
   },
   mids: {
-    above: 'thin the midrange: lower chord/lead track volume (beat set song.beat <track>.volume <dB>)',
-    below: 'fill the midrange: raise chord/lead track volume (beat set song.beat <track>.volume <dB>)',
+    above: (beat) => `thin the midrange: lower chord/lead track volume (beat set ${beat} <track>.volume <dB>)`,
+    below: (beat) => `fill the midrange: raise chord/lead track volume (beat set ${beat} <track>.volume <dB>)`,
   },
   presence: {
-    above: 'soften the presence range: lower cutoff on lead/hat tracks (beat set song.beat <track>.cutoff <Hz>)',
-    below: 'add presence: open filters on lead/hat tracks (beat set song.beat <track>.cutoff <Hz>)',
+    above: (beat) => `soften the presence range: lower cutoff on lead/hat tracks (beat set ${beat} <track>.cutoff <Hz>)`,
+    below: (beat) => `add presence: open filters on lead/hat tracks (beat set ${beat} <track>.cutoff <Hz>)`,
   },
   air: {
-    above: 'tame the top end: lower cutoff on hat/noise tracks (beat set song.beat <track>.cutoff <Hz>)',
-    below: 'add air: open filters on hat/noise tracks (beat set song.beat <track>.cutoff <Hz>), or brighten with a brighter voice/sample',
+    above: (beat) => `tame the top end: lower cutoff on hat/noise tracks (beat set ${beat} <track>.cutoff <Hz>)`,
+    below: (beat) => `add air: open filters on hat/noise tracks (beat set ${beat} <track>.cutoff <Hz>), or brighten with a brighter voice/sample`,
   },
 }
 
@@ -113,7 +122,7 @@ const BAND_EDITS: Record<keyof SpectralBands, { above: string; below: string }> 
  * render-run variance. Every finding names the reference value, the measured value, and a .beat
  * edit to try — the same actionable-finding discipline as the absolute rules. All level 'info':
  * distance from a reference is taste information, not a defect. */
-export function refFindings(m: MixMetrics, ref: MixProfile, trackMetrics?: TrackContribution[]): LintFinding[] {
+export function refFindings(m: MixMetrics, ref: MixProfile, trackMetrics?: TrackContribution[], beat: string = BEAT_PLACEHOLDER): LintFinding[] {
   const out: LintFinding[] = []
   const r = ref.metrics
   const refName = ref.source
@@ -130,8 +139,8 @@ export function refFindings(m: MixMetrics, ref: MixProfile, trackMetrics?: Track
       threshold: lufsThreshold,
       message: `integrated loudness ${fmt(m.integratedLufs)} LUFS is ${fmt(Math.abs(lufsDelta))} LU ${louder ? 'louder' : 'quieter'} than the reference (${refName}: ${fmt(r.integratedLufs)} LUFS)`,
       suggestion: offender
-        ? `${trackLabel(offender)} is the ${louder ? 'loudest' : 'quietest'} track (${fmt(offender.metrics.integratedLufs)} LUFS solo) — ${louder ? 'lower' : 'raise'} its volume first (beat set song.beat ${offender.id}.volume <dB>), then re-check against the reference`
-        : `${louder ? 'lower' : 'raise'} all track volumes by ~${fmt(Math.abs(lufsDelta))} dB (beat set song.beat <track>.volume <dB> per track)`,
+        ? `${trackLabel(offender)} is the ${louder ? 'loudest' : 'quietest'} track (${fmt(offender.metrics.integratedLufs)} LUFS solo) — ${louder ? 'lower' : 'raise'} its volume first (beat set ${beat} ${offender.id}.volume <dB>), then re-check against the reference`
+        : `${louder ? 'lower' : 'raise'} all track volumes by ~${fmt(Math.abs(lufsDelta))} dB (beat set ${beat} <track>.volume <dB> per track)`,
     })
   }
 
@@ -148,7 +157,7 @@ export function refFindings(m: MixMetrics, ref: MixProfile, trackMetrics?: Track
       measured,
       threshold: bandThreshold,
       message: `${band} band carries ${fmt(measured, 0)}% of spectral energy vs the reference's ${fmt(reference, 0)}% (${refName}) — ${fmt(Math.abs(delta), 0)} points ${above ? 'more' : 'less'}`,
-      suggestion: BAND_EDITS[band][above ? 'above' : 'below'],
+      suggestion: BAND_EDITS[band][above ? 'above' : 'below'](beat),
     })
   }
 
@@ -166,8 +175,8 @@ export function refFindings(m: MixMetrics, ref: MixProfile, trackMetrics?: Track
         threshold: widthThreshold,
         message: `stereo width ${fmt(m.stereo.widthDb)} dB vs the reference's ${fmt(r.stereo.widthDb)} dB (${refName}) — the mix is ${narrower ? 'narrower' : 'wider'} than the reference`,
         suggestion: narrower
-          ? 'pan tracks apart (beat set song.beat <track>.pan <-1..1>)'
-          : 'pull panned tracks toward center (beat set song.beat <track>.pan <-1..1>)',
+          ? `pan tracks apart (beat set ${beat} <track>.pan <-1..1>)`
+          : `pull panned tracks toward center (beat set ${beat} <track>.pan <-1..1>)`,
       })
     }
   }
@@ -183,8 +192,8 @@ export function refFindings(m: MixMetrics, ref: MixProfile, trackMetrics?: Track
       threshold: crestThreshold,
       message: `crest factor ${fmt(m.crestDb)} dB vs the reference's ${fmt(r.crestDb)} dB (${refName}) — the mix is ${squashed ? 'more squashed' : 'more dynamic'} than the reference`,
       suggestion: squashed
-        ? 'restore dynamic contrast: lower sustained track volumes (beat set song.beat <track>.volume <dB>) or vary hit velocities (beat humanize song.beat <track> --velocity 0.1)'
-        : 'even out dynamics: raise quiet elements (beat set song.beat <track>.volume <dB>) or reduce velocity spread (beat quantize / lower --velocity on beat humanize)',
+        ? `restore dynamic contrast: lower sustained track volumes (beat set ${beat} <track>.volume <dB>) or vary hit velocities (beat humanize ${beat} <track> --velocity 0.1)`
+        : `even out dynamics: raise quiet elements (beat set ${beat} <track>.volume <dB>) or reduce velocity spread (beat quantize / lower --velocity on beat humanize)`,
     })
   }
 
@@ -196,6 +205,7 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
     throw new Error('pick one comparison frame: a reference profile (ref / --ref) or an absolute loudness target (targetLufs / --target) — not both')
   }
   const target = opts.targetLufs ?? -14
+  const beat = opts.beatPath ?? BEAT_PLACEHOLDER
   const out: LintFinding[] = []
 
   const truePeakThreshold = -1 + RENDER_RUN_VARIANCE_PEAK_DB
@@ -208,14 +218,14 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
       threshold: truePeakThreshold,
       message: `true peak ${fmt(m.truePeakDbtp)} dBTP is above -1 dBTP — inter-sample clipping risk on lossy encoders`,
       suggestion: offender
-        ? `${trackLabel(offender)} is the loudest contributor (true peak ${fmt(offender.metrics.truePeakDbtp)} dBTP solo) — lower its volume first (beat set song.beat ${offender.id}.volume <dB>) until the mix's true peak sits below -1 dBTP`
-        : 'lower track volumes (e.g. beat set song.beat <track>.volume <dB>) until true peak sits below -1 dBTP',
+        ? `${trackLabel(offender)} is the loudest contributor (true peak ${fmt(offender.metrics.truePeakDbtp)} dBTP solo) — lower its volume first (beat set ${beat} ${offender.id}.volume <dB>) until the mix's true peak sits below -1 dBTP`
+        : `lower track volumes (e.g. beat set ${beat} <track>.volume <dB>) until true peak sits below -1 dBTP`,
     })
   }
 
   // Ref mode swaps the four TASTE comparisons (loudness / bands / width / crest) for deltas
   // against the reference profile; the absolute versions below are all `!opts.ref`-guarded.
-  if (opts.ref) out.push(...refFindings(m, opts.ref, opts.trackMetrics))
+  if (opts.ref) out.push(...refFindings(m, opts.ref, opts.trackMetrics, beat))
 
   const lufsDelta = m.integratedLufs - target
   if (!opts.ref && Number.isFinite(m.integratedLufs) && Math.abs(lufsDelta) > 1.5 + RENDER_RUN_VARIANCE_LU) {
@@ -228,8 +238,8 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
       threshold: target,
       message: `integrated loudness ${fmt(m.integratedLufs)} LUFS is ${fmt(Math.abs(lufsDelta))} LU ${lufsDelta > 0 ? 'above' : 'below'} the ${fmt(target)} LUFS target`,
       suggestion: offender
-        ? `${trackLabel(offender)} is the ${tooLoud ? 'loudest' : 'quietest'} track (${fmt(offender.metrics.integratedLufs)} LUFS solo) — ${tooLoud ? 'lower' : 'raise'} its volume first (beat set song.beat ${offender.id}.volume <dB>), then re-check the mix`
-        : `${lufsDelta > 0 ? 'lower' : 'raise'} all track volumes by ~${fmt(Math.abs(lufsDelta))} dB (beat set song.beat <track>.volume <dB> per track)`,
+        ? `${trackLabel(offender)} is the ${tooLoud ? 'loudest' : 'quietest'} track (${fmt(offender.metrics.integratedLufs)} LUFS solo) — ${tooLoud ? 'lower' : 'raise'} its volume first (beat set ${beat} ${offender.id}.volume <dB>), then re-check the mix`
+        : `${lufsDelta > 0 ? 'lower' : 'raise'} all track volumes by ~${fmt(Math.abs(lufsDelta))} dB (beat set ${beat} <track>.volume <dB> per track)`,
     })
   }
 
@@ -255,8 +265,8 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
       threshold: lowShareThreshold,
       message: `${fmt(lowShare, 0)}% of spectral energy sits below 250 Hz — the mix likely reads as muddy on small speakers`,
       suggestion: offender
-        ? `${trackLabel(offender)} carries the most low end (${fmt(offender.metrics.spectral.bandsPct.sub + offender.metrics.spectral.bandsPct.bass, 0)}% sub+bass solo) — raise its cutoff or reduce its volume first (beat set song.beat ${offender.id}.cutoff <Hz>)`
-        : 'raise cutoff / reduce volume on bass-range tracks, or brighten leads (beat set song.beat <track>.cutoff <Hz>)',
+        ? `${trackLabel(offender)} carries the most low end (${fmt(offender.metrics.spectral.bandsPct.sub + offender.metrics.spectral.bandsPct.bass, 0)}% sub+bass solo) — raise its cutoff or reduce its volume first (beat set ${beat} ${offender.id}.cutoff <Hz>)`
+        : `raise cutoff / reduce volume on bass-range tracks, or brighten leads (beat set ${beat} <track>.cutoff <Hz>)`,
     })
   }
   const highShare = m.spectral.bandsPct.presence + m.spectral.bandsPct.air
@@ -270,8 +280,8 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
       threshold: highShareThreshold,
       message: `only ${fmt(highShare, 1)}% of spectral energy sits above 2 kHz — the mix likely reads as dull/dark`,
       suggestion: offender
-        ? `${trackLabel(offender)} contributes the least top end (${fmt(offender.metrics.spectral.bandsPct.presence + offender.metrics.spectral.bandsPct.air, 1)}% presence+air solo) — try opening its filter first (beat set song.beat ${offender.id}.cutoff <Hz>)`
-        : 'open filters on lead/hat tracks (beat set song.beat <track>.cutoff <Hz>)',
+        ? `${trackLabel(offender)} contributes the least top end (${fmt(offender.metrics.spectral.bandsPct.presence + offender.metrics.spectral.bandsPct.air, 1)}% presence+air solo) — try opening its filter first (beat set ${beat} ${offender.id}.cutoff <Hz>)`
+        : `open filters on lead/hat tracks (beat set ${beat} <track>.cutoff <Hz>)`,
     })
   }
 
@@ -293,8 +303,8 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
         threshold: -30 - RENDER_RUN_VARIANCE_WIDTH_DB,
         message: `stereo width ${fmt(m.stereo.widthDb)} dB (correlation ${fmt(m.stereo.correlation, 3)}) — the mix is effectively mono`,
         suggestion: offender
-          ? `${trackLabel(offender)} is the narrowest track (width ${fmt(offender.metrics.stereo?.widthDb ?? NaN)} dB solo) — try panning it first (beat set song.beat ${offender.id}.pan <-1..1>)`
-          : 'pan tracks apart (beat set song.beat <track>.pan <-1..1>)',
+          ? `${trackLabel(offender)} is the narrowest track (width ${fmt(offender.metrics.stereo?.widthDb ?? NaN)} dB solo) — try panning it first (beat set ${beat} ${offender.id}.pan <-1..1>)`
+          : `pan tracks apart (beat set ${beat} <track>.pan <-1..1>)`,
       })
     }
   }
@@ -304,5 +314,9 @@ export function lint(m: MixMetrics, opts: LintOptions = {}): LintFinding[] {
 
 export function formatLint(findings: LintFinding[]): string {
   if (findings.length === 0) return 'no findings — all lint rules pass\n'
-  return findings.map((f) => `${f.level.toUpperCase().padEnd(4)} [${f.rule}] ${f.message}${f.suggestion ? `\n     fix: ${f.suggestion}` : ''}`).join('\n') + '\n'
+  const body = findings.map((f) => `${f.level.toUpperCase().padEnd(4)} [${f.rule}] ${f.message}${f.suggestion ? `\n     fix: ${f.suggestion}` : ''}`).join('\n')
+  // Pilot 103: the two levels looked like a dead channel when a session only hit INFO rules. Say
+  // what they honestly mean — WARN is reserved for safety defects, however small; INFO is taste
+  // distance, however large (the magnitude lives in each finding's numbers, not in its level).
+  return `${body}\n(levels: WARN = safety defect on some playback path — clipping, phase cancellation, crushed dynamics; INFO = taste distance from the target/reference, sized by its numbers)\n`
 }
