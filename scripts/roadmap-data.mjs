@@ -789,8 +789,8 @@ export const rows = [
   },
   {
     area: 'Instrument / SoundFont tracks', feature: 'Fix live render of soundfont songs failing with "Start time must be strictly greater than" (pilot 111)',
-    description: 'Pilot 111 (research/111): a plain LIVE `beat render` of examples/night-shift-song.beat fails after the full ~77s wait with a spessasynth/engine scheduling error ("Start time must be strictly greater...") — and the CLI reports it as "page error(s) during render:" with an EMPTY list, so the user sees a failure with no reason. Two parts: the engine scheduling bug itself (instrument-track path), and the error-reporting path that can produce an empty page-error list.',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    description: 'Pilot 111 (research/111): a plain LIVE `beat render` of examples/night-shift-song.beat fails after the full ~77s wait with a spessasynth/engine scheduling error ("Start time must be strictly greater...") — and the CLI reports it as "page error(s) during render:" with an EMPTY list, so the user sees a failure with no reason. Two parts: the engine scheduling bug itself (instrument-track path), and the error-reporting path that can produce an empty page-error list. FIXED 2026-07-18, both halves: the throw was NOT the instrument path — chain.noise is one persistent Tone.Noise shared by every note on a synth track, and a CHORD retriggered it once per note at the identical slot time (Tone.Source.start throws on non-increasing starts; uncaught tick-time throw = failed render) — closed with a monotonic guard (SynthChain.lastNoiseStart, the lastLaneTriggerTime convention); and the empty error list was the pilot-109 first-line-only formatter discarding multi-line payloads — every meaningful line prints now. night-shift-song renders clean (63.9s, -12.8 LUFS, zero errors).',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: 'research/111-usability-pilot-batch-offline-default.md', plan: null,
   },
   {

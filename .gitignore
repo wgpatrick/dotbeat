@@ -21,3 +21,4 @@ python/.venv/
 
 # CLI render outputs inside example projects — regenerable from the .beat + media.
 examples/*/render-*.wav
+examples/media/*.sf2
