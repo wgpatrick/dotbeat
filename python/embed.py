@@ -133,10 +133,19 @@ def run_clap(input_path, model_id):
     try:
         model = ClapModel.from_pretrained(model_id)
         processor = ClapProcessor.from_pretrained(model_id)
-        inputs = processor(audios=audio, sampling_rate=48000, return_tensors="pt")
+        # transformers 5.x removed the deprecated `audios=` kwarg (hard ValueError); 4.38-era only
+        # knows `audios=`. Try the current name first, fall back for older pins (confirmed
+        # owner-side 2026-07-17 on transformers 5.13: `audios=` raises).
+        try:
+            inputs = processor(audio=audio, sampling_rate=48000, return_tensors="pt")
+        except (ValueError, TypeError):
+            inputs = processor(audios=audio, sampling_rate=48000, return_tensors="pt")
         with torch.no_grad():
             features = model.get_audio_features(**inputs)
-        vector = features[0].tolist()
+        # transformers 5.x returns an extra leading dim ((1, 1, 1024) rather than (1, 1024) — confirmed
+        # owner-side 2026-07-17), which made `features[0].tolist()` cache a NESTED [1][1024] vector
+        # with a reported dims of 1. Flatten to the 1-D clip embedding regardless of version.
+        vector = features[0].reshape(-1).tolist()
     except Exception as e:
         raise EmbeddingError(f"CLAP embedding failed: {e}")
     return {
