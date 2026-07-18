@@ -43,8 +43,10 @@ function rms(channels: Float64Array[]): number {
 }
 
 /** True-peak estimate per BS.1770's method: oversample (here 4x, 48-tap windowed-sinc
- * interpolation) and take the max. Catches inter-sample peaks a sample-peak read misses. */
-function truePeak(channels: Float64Array[]): number {
+ * interpolation) and take the max. Catches inter-sample peaks a sample-peak read misses.
+ * Exported (loudness normalization, src/vary/batch.ts) so the batch normalizer's -1 dBTP
+ * ceiling uses the same estimator `beat metrics` reports; returns LINEAR peak (1.0 = 0 dBTP). */
+export function truePeak(channels: Float64Array[]): number {
   const FACTOR = 4
   const HALF_TAPS = 12 // 24 input taps per phase — plenty for a ±0.1 dB estimate
   // precompute polyphase kernels: phase p interpolates at fractional offset p/FACTOR
