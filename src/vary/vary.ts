@@ -421,7 +421,24 @@ export function varyTrack(doc: BeatDocument, trackId: string, group: string, opt
       `group "${group}" mutates ${legalKinds.join('/')}-track params that a ${track.kind} track never plays — an inaudible no-op batch; legal groups for "${trackId}": ${legalGroupsForKind(track.kind).join(', ')}${track.kind === 'synth' ? ' (or "feel")' : ''}`,
     )
   }
-  return mutateVariants(doc, group, defs, (key) => track.synth[key as keyof BeatSynth] as number, (key) => `${trackId}.${key}`, opts)
+  const variants = mutateVariants(doc, group, defs, (key) => track.synth[key as keyof BeatSynth] as number, (key) => `${trackId}.${key}`, opts)
+  // Silent-no-op guard, found by ear (owner, 2026-07-18, two batches: "all the same"): the motion
+  // group varies lfoRate/lfoDepth — but lfoDest DEFAULTS TO 'off', so on a track that never set a
+  // destination every variant modulates a disconnected LFO: byte-different documents, identical
+  // audio. In spread mode (exploration), route the LFO too — cycle destinations across variants so
+  // the batch tours modulation CHARACTER (vibrato / filter wobble / tremolo). Refinement mode is
+  // left alone: silently rewiring a patch the user is refining would be a bigger surprise than a
+  // subtle batch.
+  if (opts.spread && group === 'motion' && (track.synth.lfoDest === undefined || track.synth.lfoDest === 'off')) {
+    const DESTS = ['pitch', 'cutoff', 'amp'] as const
+    for (let i = 0; i < variants.length; i++) {
+      const dest = DESTS[i % DESTS.length]!
+      const v = variants[i]!
+      v.doc = setValue(v.doc, `${trackId}.lfoDest`, dest)
+      v.edits.push({ path: `${trackId}.lfoDest`, value: dest })
+    }
+  }
+  return variants
 }
 
 export interface FeelVaryOptions {
