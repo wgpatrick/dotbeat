@@ -544,6 +544,11 @@ const HELP = [
                                                           taste model trained on your whole scores log — a listen-
                                                           in-this-order hint. ADVISORY only: never adopts, never
                                                           writes; your beat score pick is still the data.
+  beat suggest --taste-next <collection-dir> [--log f]    T4 next-round proposal: coverage of your scored batches
+                                                          vs the target data mix (taste-loop-design.md), concrete
+                                                          collect commands for the under-covered splits, one
+                                                          repeat-probe (self-consistency ceiling), and the
+                                                          connectivity-anchor reminder. Advisory: runs nothing.
   beat suggest <file> <track> [--target <lane-or-id>] [--log f]
                                                           read the scores log and propose the next beat-vary round
                                                           (--log defaults to beat-scores.jsonl next to the .beat);
@@ -1992,7 +1997,55 @@ async function tasteSuggestCmd(argv) {
   process.stdout.write(`(held-out accuracy for this model class: beat taste-eval --log ${logPath})\n`)
 }
 
+/** T4 v2 — next-round composition proposal. Acquisition v1 is COVERAGE-based (the honest
+ * simplification: with a linear BT model and this little data, under-sampled splits are where
+ * new labels buy the most; posterior-variance acquisition can replace this scoring rule without
+ * changing the command's shape). Also proposes one REPEAT PROBE (the self-consistency ceiling
+ * from the design doc's distribution) — a copy of a scored batch re-queued under a fresh dir.
+ * Advisory: prints commands, runs nothing. */
+async function tasteNextCmd(argv) {
+  const valued = ['--log']
+  for (const a of argv) if (a.startsWith('--') && !valued.includes(a)) throw new BeatEditError(`unknown flag "${a}" (known for --taste-next mode: --log)`)
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const root = positional[0]
+  const logPath = flagValue(argv, '--log') ?? (root ? join(root, 'beat-scores.jsonl') : null)
+  if (!logPath || !existsSync(logPath)) throw new BeatEditError('suggest --taste-next needs a collection dir with beat-scores.jsonl (or --log <path>)')
+  const { loadTasteBatches, variantTypeOf } = await import('../dist/src/taste/eval.js')
+  const { batches } = loadTasteBatches(logPath)
+  if (batches.length === 0) throw new BeatEditError(`no scored batches in ${logPath} yet — rate some first (beat rate)`)
+  // coverage by round kind + group, vs the design doc's target mix
+  const count = (fn) => batches.filter(fn).length
+  const n = batches.length
+  const shares = [
+    ['synth-param vary', 0.35, count((b) => variantTypeOf(b) === 'vary' && !['feel', 'kick', 'snare', 'hats'].includes(b.group))],
+    ['feel', 0.10, count((b) => b.group === 'feel' || b.group.startsWith('feel'))],
+    ['drum voices', 0.10, count((b) => ['kick', 'snare', 'hats'].includes(b.group))],
+    ['gen realization', 0.15, count((b) => b.group.startsWith('gen:'))],
+    ['gen style-contrast', 0.15, count((b) => b.group.startsWith('style:'))],
+  ]
+  process.stdout.write(`next-round proposal from ${n} scored batch(es) in ${logPath}\n`)
+  process.stdout.write(`coverage vs the target mix (docs/taste-loop-design.md):\n`)
+  const gaps = shares.map(([name, target, have]) => ({ name, target, have, gap: target - have / n })).sort((a, b) => b.gap - a.gap)
+  for (const g of gaps) process.stdout.write(`  ${String(g.name).padEnd(20)} ${g.have}/${n} (${Math.round((100 * g.have) / n)}%, target ${Math.round(g.target * 100)}%)${g.gap > 0.05 ? '  <- under-covered' : ''}\n`)
+  const dir = root ?? dirname(resolve(logPath))
+  const top = gaps.filter((g) => g.gap > 0.05).slice(0, 2)
+  process.stdout.write(`proposed next round:\n`)
+  for (const g of top) {
+    if (g.name === 'gen realization' || g.name === 'gen style-contrast') process.stdout.write(`  beat taste-collect ${dir} --per-seed 0 --gen 4   # (fal on your machine; --gen-backend stub elsewhere)\n`)
+    else process.stdout.write(`  beat taste-collect ${dir} --per-seed 2 --count 5   # weighted toward ${g.name} by the group pools\n`)
+  }
+  // repeat probe: the OLDEST scored batch whose renders still exist — measures self-consistency
+  const probe = batches.find((b) => existsSync(b.dir))
+  if (probe) {
+    process.stdout.write(`repeat probe (self-consistency ceiling — rate it again blind, analysis keys on parent+group+seed):\n`)
+    process.stdout.write(`  cp -r ${probe.dir} ${probe.dir}-probe && beat rate ${dir}\n`)
+  }
+  process.stdout.write(`connectivity anchor: when scoring the new round, re-listen to one past winner alongside it\n`)
+  process.stdout.write(`(advisory only — nothing was generated or written)\n`)
+}
+
 async function suggestCmd(argv) {
+  if (argv.includes('--taste-next')) return tasteNextCmd(argv.filter((a) => a !== '--taste-next'))
   if (argv.includes('--taste')) return tasteSuggestCmd(argv.filter((a) => a !== '--taste'))
   const { suggestNext, parseScoresLog } = await import('../dist/src/vary/suggest.js')
   const valued = ['--target', '--log']

@@ -1286,8 +1286,8 @@ export const rows = [
   },
   {
     area: 'Taste loop', feature: 'T4: suggest --taste (advisory pre-rank + active batch proposal)',
-    description: 'The v0 ranker pre-ranks new batches and proposes next-batch composition by acquisition value under the current posterior, with a comparison-graph connectivity anchor (one past winner per batch). Never auto-adopts. Gate: T0 harness shows dsp-bt meaningfully above chance at ~20 scored batches. GATE PASSED 2026-07-18 (32% top-1 vs 20% chance on 37 owner-rated batches); v1 landed same day: `beat suggest --taste <batch-dir>` pre-ranks an unscored rendered batch with the model trained on the whole log (batch-being-ranked excluded), advisory-only by construction. Remaining for the full row: next-batch composition proposal by acquisition value + the connectivity anchor.',
-    core: 'done', cli: 'done', gui: 'na', status: 'in-progress',
+    description: 'The v0 ranker pre-ranks new batches and proposes next-batch composition by acquisition value under the current posterior, with a comparison-graph connectivity anchor (one past winner per batch). Never auto-adopts. Gate: T0 harness shows dsp-bt meaningfully above chance at ~20 scored batches. GATE PASSED 2026-07-18 (32% top-1 vs 20% chance on 37 owner-rated batches); v1 landed same day: `beat suggest --taste <batch-dir>` pre-ranks an unscored rendered batch with the model trained on the whole log (batch-being-ranked excluded), advisory-only by construction. v2 landed 2026-07-18: `beat suggest --taste-next <collection-dir>` — coverage of the scored log vs the design doc\'s target mix, concrete collect commands for under-covered splits, a repeat-probe proposal (self-consistency ceiling), and the connectivity-anchor reminder; acquisition v1 is coverage-based (honest simplification — posterior-variance can replace the scoring rule without changing the command shape). Row complete pending real-use feedback.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
   },
   {
