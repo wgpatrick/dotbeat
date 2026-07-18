@@ -539,7 +539,12 @@ const HELP = [
   },
   {
     cmd: 'suggest',
-    text: `  beat suggest <file> <track> [--target <lane-or-id>] [--log f]
+    text: `  beat suggest --taste <batch-dir> [--log f]            T4 (gate passed on 37 rated batches, 32% top-1 vs 20%
+                                                          chance): pre-rank an UNSCORED rendered batch with the
+                                                          taste model trained on your whole scores log — a listen-
+                                                          in-this-order hint. ADVISORY only: never adopts, never
+                                                          writes; your beat score pick is still the data.
+  beat suggest <file> <track> [--target <lane-or-id>] [--log f]
                                                           read the scores log and propose the next beat-vary round
                                                           (--log defaults to beat-scores.jsonl next to the .beat);
                                                           lane-aware on declared-lane drums tracks (cold start
@@ -1945,7 +1950,50 @@ async function adoptCmd(argv) {
   }
 }
 
+/** T4 v1 (gate passed 2026-07-18: dsp-bt 32% top-1 vs 20% chance on the owner's 37 batches):
+ * `beat suggest --taste <batch-dir>` — ADVISORY pre-rank of an unscored rendered batch by the
+ * taste model trained on the whole scores log. Prints a predicted ranking, never adopts, never
+ * writes: the rating still comes from the owner's ears (the model just says where to listen
+ * first). */
+async function tasteSuggestCmd(argv) {
+  const valued = ['--log']
+  for (const a of argv) if (a.startsWith('--') && !valued.includes(a)) throw new BeatEditError(`unknown flag "${a}" (known for --taste mode: --log)`)
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const dir = positional[0]
+  if (!dir) throw new BeatEditError('suggest --taste needs a rendered batch dir: beat suggest --taste <batch-dir> [--log f]')
+  const manifestPath = join(dir, 'manifest.json')
+  if (!existsSync(manifestPath)) throw new BeatEditError(`${dir} has no manifest.json — point at a vary/gen/clip-set batch dir`)
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const wavs = manifest.variants.map((v) => v.file.replace(/\.beat$/, '.wav'))
+  if (!wavs.every((w) => existsSync(join(dir, w)))) throw new BeatEditError(`${dir} is not fully rendered — render it first (beat render --batch ${dir})`)
+  const explicitLog = flagValue(argv, '--log')
+  const siblingLog = join(dirname(resolve(dir)), 'beat-scores.jsonl')
+  const logPath = explicitLog ?? (existsSync(siblingLog) ? siblingLog : null)
+  if (logPath === null || !existsSync(logPath)) throw new BeatEditError(`no scores log found next to ${dir} — pass --log <beat-scores.jsonl> (the taste model needs YOUR past ratings to rank with)`)
+  const { loadTasteBatches, trainOnBatches } = await import('../dist/src/taste/eval.js')
+  const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+  const { standardizeBatch, scoreVector } = await import('../dist/src/taste/ranker.js')
+  const { batches } = loadTasteBatches(logPath)
+  const training = batches.filter((b) => resolve(b.dir) !== resolve(dir)) // never train on the batch being ranked
+  const model = trainOnBatches(training)
+  if (model.pairCount === 0) throw new BeatEditError(`the log at ${logPath} has no usable scored batches yet — rate some first (beat rate)`)
+  const features = computeBatchFeatures(dir, manifest.variants.map((v) => v.file))
+  const files = manifest.variants.map((v) => v.file).filter((f) => features[f] !== undefined)
+  if (files.length < 2) throw new BeatEditError(`fewer than 2 variants in ${dir} have derivable features — are the renders present and non-empty?`)
+  const standardized = standardizeBatch(files.map((f) => features[f]))
+  const ranked = files
+    .map((f, i) => ({ file: f.replace(/\.beat$/, ''), score: scoreVector(model, standardized[i]) }))
+    .sort((a, b) => b.score - a.score)
+  process.stdout.write(`taste pre-rank of ${dir} — ADVISORY (trained on ${training.length} of your rated batches, ${model.pairCount} pairwise comparisons)\n`)
+  for (let i = 0; i < ranked.length; i++) {
+    process.stdout.write(`  ${i + 1}. ${ranked[i].file}  ${ranked[i].score >= 0 ? '+' : ''}${ranked[i].score.toFixed(2)}\n`)
+  }
+  process.stdout.write(`listen in that order, but YOUR pick is the data: beat score ${dir} <best> [2nd 3rd]\n`)
+  process.stdout.write(`(held-out accuracy for this model class: beat taste-eval --log ${logPath})\n`)
+}
+
 async function suggestCmd(argv) {
+  if (argv.includes('--taste')) return tasteSuggestCmd(argv.filter((a) => a !== '--taste'))
   const { suggestNext, parseScoresLog } = await import('../dist/src/vary/suggest.js')
   const valued = ['--target', '--log']
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))

@@ -149,17 +149,26 @@ def run_clap(input_path, model_id):
             inputs = processor(audios=audio, sampling_rate=48000, return_tensors="pt")
         with torch.no_grad():
             features = model.get_audio_features(**inputs)
-        # Shape normalization, confirmed owner-side 2026-07-17/18: transformers 5.x returns an
-        # extra leading dim, and for some clip lengths CLAP feature-fusion yields MULTIPLE 1024-d
-        # windows (observed flat 65536 = 64x1024) — raw flattening cached wildly inconsistent dims
-        # that silently corrupted centroid math. Mean-pool windows to ONE fixed 1024-d clip vector.
-        # KNOWN OPEN ISSUE (2026-07-18, owner-side): for SOME clip lengths this path yields
-        # 65536 = 64x1024 fused-window features instead of one 1024-d clip vector (observed on
-        # ~0.2-4s one-shots; other clips give 1024). Downstream centroid math REQUIRES fixed dims —
-        # taste-eval/t3 must treat non-1024 vectors as invalid until the CLAP fusion pooling is
-        # properly implemented (naive .reshape/.mean attempts returned a ModelOutput field of the
-        # wrong shape; needs a focused session against the transformers 5.x CLAP API).
-        vector = features[0].reshape(-1).tolist()
+        # Shape normalization (owner-side 2026-07-17/18 + the focused fix): transformers 5.x can
+        # return the projected features with extra leading dims, and for some clip lengths CLAP
+        # feature-fusion yields MULTIPLE per-window vectors (observed flat 65536 = 64x1024) —
+        # raw flattening cached wildly inconsistent dims that silently corrupted centroid math.
+        # The projection dim is authoritative from the model config (projection_dim, 512 for the
+        # laion checkpoints; some ports use 1024) — reshape to (-1, dim) and mean-pool the window
+        # axis, so EVERY clip length yields exactly one fixed-length clip vector. A feature count
+        # not divisible by the projection dim is a hard error (cache nothing wrong), not a guess.
+        proj_dim = getattr(getattr(model, "config", None), "projection_dim", None)
+        flat = features.reshape(-1)
+        if not proj_dim or flat.numel() % int(proj_dim) != 0:
+            # fall back to the observed per-window width when the config is silent but the
+            # count factors cleanly; otherwise refuse loudly
+            for candidate in (512, 1024):
+                if flat.numel() % candidate == 0:
+                    proj_dim = candidate
+                    break
+            else:
+                raise EmbeddingError(f"CLAP returned {flat.numel()} features, not divisible by any known projection dim (512/1024) — refusing to cache a malformed vector")
+        vector = flat.reshape(-1, int(proj_dim)).mean(dim=0).tolist()
     except Exception as e:
         raise EmbeddingError(f"CLAP embedding failed: {e}")
     return {
