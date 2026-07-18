@@ -1,0 +1,124 @@
+format_version 0.11
+bpm 120
+loop_bars 2
+selected_track chords
+
+track chords Chords #98c379 synth
+  synth
+    osc triangle
+    volume -11.1
+    cutoff 1538
+    resonance 0.92
+    attack 0.237
+    decay 0.42
+    sustain 0.6
+    release 1.14
+    pan 0
+  note u100 67 0 8 0.58
+  note u101 70 0 8 0.72
+  note u102 74 0 8 0.75
+  note u103 77 8 8 0.7
+  note u104 81 8 8 0.61
+  note u105 84 8 8 0.72
+  note u106 75 16 8 0.66
+  note u107 79 16 8 0.65
+  note u108 82 16 8 0.72
+  note u109 77 24 8 0.53
+  note u110 81 24 8 0.64
+  note u111 84 24 8 0.51
+
+track bass Bass #f7c948 synth
+  synth
+    osc square
+    volume -12.2
+    cutoff 755
+    resonance 0.71
+    attack 0.005
+    decay 0.24
+    sustain 0.52
+    release 0.07
+    pan 0
+  note u112 43 0 2 0.62
+  note u113 43 2 2 0.63
+  note u114 43 4 2 0.67
+  note u115 43 6 2 0.68
+  note u116 53 8 2 0.85
+  note u117 53 10 2 0.65
+  note u118 53 12 2 0.64
+  note u119 53 14 2 0.6
+  note u120 51 16 2 0.66
+  note u121 51 18 2 0.67
+  note u122 51 20 2 0.65
+  note u123 51 22 2 0.79
+  note u124 53 24 2 0.64
+  note u125 53 26 2 0.71
+  note u126 53 28 2 0.7
+  note u127 53 30 2 0.7
+
+track arp Arp #e06c75 synth
+  synth
+    osc sawtooth
+    volume -16.6
+    cutoff 3199
+    resonance 0.41
+    attack 0.003
+    decay 0.07
+    sustain 0.14
+    release 0.12
+    pan 0
+  note u128 86 0 1 0.59
+  note u129 79 2 1 0.5
+  note u130 82 3 1 0.39
+  note u131 86 4 1 0.36
+  note u132 82 5 1 0.49
+  note u133 82 7 1 0.57
+  note u134 96 8 1 0.6
+  note u135 93 9 1 0.49
+  note u136 96 12 1 0.55
+  note u137 93 13 1 0.5
+  note u138 89 14 1 0.48
+  note u139 93 15 1 0.53
+  note u140 94 16 1 0.56
+  note u141 91 17 1 0.39
+  note u142 87 18 1 0.35
+  note u143 94 20 1 0.43
+  note u144 87 22 1 0.48
+  note u145 91 23 1 0.49
+  note u146 96 24 1 0.46
+  note u147 93 25 1 0.5
+  note u148 93 27 1 0.48
+  note u149 96 28 1 0.52
+  note u150 93 29 1 0.38
+  note u151 89 30 1 0.36
+
+track drums Drums #56b6c2 drums
+  synth
+    osc triangle
+    volume -8.1
+    cutoff 8000
+    resonance 0.55
+    attack 0.001
+    decay 0.2
+    sustain 0.5
+    release 0.2
+    pan 0
+  hit h1 kick 0 0.84
+  hit h7 hat 2 0.46
+  hit h2 kick 4 0.88
+  hit h5 snare 4 0.81
+  hit h8 hat 6 0.41
+  hit h3 kick 8 0.91
+  hit h9 hat 10 0.52
+  hit h4 kick 12 0.95
+  hit h6 snare 12 0.83
+  hit h10 hat 14 0.36
+  hit h11 kick 16 0.91
+  hit h17 hat 18 0.31
+  hit h12 kick 20 0.9
+  hit h15 snare 20 0.76
+  hit h18 hat 22 0.3
+  hit h13 kick 24 0.91
+  hit h19 hat 26 0.52
+  hit h14 kick 28 0.87
+  hit h16 snare 28 0.84
+  hit h20 hat 30 0.5
