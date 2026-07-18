@@ -1,0 +1,47 @@
+// T6 sound matching (`beat match`) — public surface. See docs/t6-sound-matching.md.
+export { CmaEs, SeededRandom, jacobiEigen, minimize, type CmaEsOptions, type CmaEsBest } from './cmaes.js'
+export {
+  ANALYSIS_RATE,
+  MATCH_TARGET_LUFS,
+  monoMix,
+  resampleLinear,
+  normalizeLoudness,
+  prepareSignal,
+  logMelSpectrogram,
+  mfccFrames,
+  amplitudeEnvelope,
+  cosineSimilarity,
+  prepareTarget,
+  matchLoss,
+  type MatchLossDetail,
+  type PreparedTarget,
+} from './loss.js'
+export {
+  MATCH_TRACK_ID,
+  buildMatchSpace,
+  buildBaseDoc,
+  buildCandidateDoc,
+  initGenome,
+  genomeToEdits,
+  denormalizeParam,
+  normalizeParam,
+  sha256Text,
+  type MatchTrackKind,
+  type MatchParamDef,
+  type MatchSpace,
+  type DiscreteChoice,
+  type BaseDoc,
+} from './space.js'
+export {
+  runMatch,
+  freezeMidi,
+  formatMatchReport,
+  BeatMatchError,
+  MATCH_LOSS_VERSION,
+  type RunMatchOptions,
+  type MatchResult,
+  type MatchReport,
+  type MatchRenderSession,
+  type MatchSessionFactory,
+  type LossCurvePoint,
+} from './harness.js'

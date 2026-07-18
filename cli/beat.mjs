@@ -119,7 +119,7 @@ const PATHS_NOTE = `paths for set: bpm | loop_bars | selected_track | <track>.<s
 // Natural command families, surfaced as a "related:" line under per-command help — the loop a
 // command belongs to is half of understanding it (vary is meaningless without score/suggest).
 const HELP_FAMILIES = [
-  ['vary', 'audition', 'score', 'adopt', 'suggest', 'taste-eval'], // the taste loop (docs/taste-loop-design.md)
+  ['vary', 'audition', 'score', 'adopt', 'suggest', 'taste-eval', 'match'], // the taste loop (docs/taste-loop-design.md)
   ['taste-seeds', 'taste-collect', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval)
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
@@ -595,6 +595,25 @@ const HELP = [
                                                           splits under 5 batches are labeled smoke (JSON: smoke).
   beat taste-eval --doctor                                report the embedding sidecar's readiness (interpreter +
                                                           per-backend deps), JSON`,
+  },
+  {
+    cmd: 'match',
+    text: `  beat match <target.wav> [--track-kind synth|drum-sampler] [--budget N] [--population N] [--out <dir>] [--seed N] [--no-clap]
+                                                          T6 sound matching (docs/t6-sound-matching.md): CMA-ES
+                                                          over the engine's continuous params against a 1-2s
+                                                          target chop — can the engine make THIS sound, and how
+                                                          close? Pitch frozen from f0 detection; osc/filter types
+                                                          enumerated as short screening runs; staged search
+                                                          (source params, then insert effects); target and every
+                                                          candidate loudness-normalized before the loss (log-mel
+                                                          multi-scale + MFCC + envelope). One offline engine
+                                                          session serves the whole run; evals cached by candidate
+                                                          hash (re-runs with a bigger --budget resume free).
+                                                          Writes best.beat + best.wav, patch.txt (beat set lines),
+                                                          loss-curve.jsonl, report.json (ceiling in MFCC + CLAP
+                                                          cosine; CLAP degrades to a named reason without the
+                                                          python sidecar). Default --budget 50 is smoke-scale;
+                                                          real ceiling runs want 2000-5000.`,
   },
   {
     cmd: 'taste-seeds',
@@ -3581,6 +3600,11 @@ async function main() {
     case 'taste-eval':
       await tasteEvalCmd(rest)
       break
+    case 'match': {
+      const { matchCommand } = await import('./match.mjs')
+      await matchCommand(rest)
+      return // matchCommand process.exit()s (chromium/vite stragglers)
+    }
     case 'audition':
       await auditionCmd(rest)
       break
