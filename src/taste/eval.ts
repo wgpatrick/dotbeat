@@ -312,11 +312,13 @@ export const SCORERS: Record<string, Scorer> = {
 /** T2 leftover (roadmap): which kind of round produced a batch. Ablation splits key on this —
  * a taste model can be predictive on synth-param vary rounds and at chance on gen rounds (or
  * vice versa), and one pooled number hides that. Classification uses the manifest conventions:
- * `gen:<id>` groups are generation rounds (D21); track-bearing entries are vary rounds; a
- * trackless non-gen batch is a stitched clip-set (`beat audition <dir>`, any group name). */
+ * `gen:<id>` groups are generation rounds (D21), as are `genkit:<role>` groups (`beat gen-kit`'s
+ * per-role candidate batches — same media-variant shape, different label); track-bearing entries
+ * are vary rounds; a trackless non-gen batch is a stitched clip-set (`beat audition <dir>`, any
+ * group name). */
 export type VariantType = 'vary' | 'gen' | 'clip-set'
 export function variantTypeOf(b: { group: string; track?: string }): VariantType {
-  if (b.group.startsWith('gen:')) return 'gen'
+  if (b.group.startsWith('gen:') || b.group.startsWith('genkit:')) return 'gen'
   if (b.track !== undefined) return 'vary'
   return 'clip-set'
 }

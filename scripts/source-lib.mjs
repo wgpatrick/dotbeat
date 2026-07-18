@@ -285,7 +285,7 @@ async function generateRaw({ prompt, seconds, seed, backend, provider, model, li
  *
  * Seeds are `seedFrom .. seedFrom+count-1` — contiguous and recorded per candidate, so a winner is
  * reproducible from its provenance sidecar exactly like a single-shot generation is. */
-export async function genSourceBatch({ beatFile, id, prompt, prompts, seconds = 2, seedFrom, count = 3, backend = 'stableaudio', provider = 'stable-audio-open', model, license, outDir, onProgress } = {}) {
+export async function genSourceBatch({ beatFile, id, prompt, prompts, seconds = 2, seedFrom, count = 3, backend = 'stableaudio', provider = 'stable-audio-open', model, license, outDir, group, onProgress } = {}) {
   if (!prompt || typeof prompt !== 'string') throw new SourceError('source gen needs a <prompt>, e.g. beat source gen song.beat snare "tight acoustic snare" --count 3')
   // Optional per-variant prompts (taste-collect's within-batch STYLE diversity, owner insight
   // 2026-07-17): same-prompt-different-seed one-shots are near-identical — especially tight 1s hits
@@ -322,7 +322,7 @@ export async function genSourceBatch({ beatFile, id, prompt, prompts, seconds = 
       try { rmSync(rawWav) } catch { /* best-effort */ }
     }
   }
-  const manifest = writeGenBatch({ parentPath: beatFile, parentText, id, prompt, seed: baseSeed, outDir: dir, variants })
+  const manifest = writeGenBatch({ parentPath: beatFile, parentText, id, prompt, seed: baseSeed, outDir: dir, variants, ...(group !== undefined ? { group } : {}) })
   return { dir, manifest, seedFrom: baseSeed, candidates: variants.map((v, i) => ({ variant: `v${i + 1}`, wav: join(dir, `v${i + 1}.wav`), ...v.media })) }
 }
 // ==== Phase 40 Stream VB end ====

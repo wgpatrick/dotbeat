@@ -420,6 +420,10 @@ export interface WriteGenBatchOptions {
   prompt: string
   /** The FIRST seed of the run (candidate i has seed + i) — the batch's identity, like vary's. */
   seed: number
+  /** Manifest group override (default `gen:<id>`). `beat gen-kit` passes `genkit:<role>` so a
+   * kit run's role batches are distinguishable in the one scores log while still classifying as
+   * generation rounds (variantTypeOf treats both prefixes as 'gen'). */
+  group?: string
   outDir: string
   /** One per candidate in v1..vN order; each candidate's PREPPED wav must already be written to
    * outDir/v<i+1>.wav by the caller (source-lib's prep half). */
@@ -443,7 +447,7 @@ export function writeGenBatch(opts: WriteGenBatchOptions): VaryBatchManifest {
     parent: opts.parentPath,
     parentSha256: createHash('sha256').update(opts.parentText).digest('hex'),
     // no `track` — see the D21 strain (b) note on the interface
-    group: `gen:${opts.id}`,
+    group: opts.group ?? `gen:${opts.id}`,
     count: opts.variants.length,
     seed: opts.seed,
     createdAt: new Date().toISOString(),
