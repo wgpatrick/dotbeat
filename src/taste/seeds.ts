@@ -234,6 +234,22 @@ export function generateGenPrompts(seed: number, count: number): GenPromptSpec[]
   return out
 }
 
+// ==== gen-kit (docs/gen-kit-pipeline.md) ====
+/** ONE subject in `n` DISTINCT styles — the per-candidate prompt convention taste-collect's
+ * style-contrast batches use (owner insight 2026-07-17: N seeds of one prompt are near-clones;
+ * N style treatments of one subject span real feature-space distance). Styles are sampled without
+ * replacement from the shared GEN_STYLES bank, cycling only if `n` exceeds the bank. Deterministic
+ * in `seed`. Exported for `beat gen-kit`, whose role batches must land in the SAME prompt
+ * vocabulary the taste loop already collects and scores. */
+export function stylePromptsFor(subject: string, n: number, seed: number): string[] {
+  const rng = mulberry32(seed)
+  const shuffled = [...GEN_STYLES].sort(() => rng() - 0.5)
+  const prompts: string[] = []
+  for (let i = 0; i < n; i++) prompts.push(`${subject}, ${shuffled[i % shuffled.length]!}`)
+  return prompts
+}
+// ==== end gen-kit ====
+
 export interface GenStyleBatchSpec {
   /** media-id-safe slug, unique within one collect run */
   id: string

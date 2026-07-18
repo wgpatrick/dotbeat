@@ -13,7 +13,7 @@
 // diff exit codes follow diff(1) convention: 0 = no musical changes, 1 = changes, 2 = error.
 // Requires `npm run build` (reads compiled ../dist/src/core).
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, mkdirSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -104,7 +104,7 @@ import { runAnalysis, sidecarDoctor, defaultAnalysisPath } from '../dist/src/ana
 // that turns a root into a keymap. keymap.js is deep-imported rather than routed through
 // core/index.js so this stream adds no line to a file two sibling streams are also editing.
 import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
-import { buildKeymap, noteToMidi, midiToNote, rateForPitch } from '../dist/src/core/keymap.js'
+import { buildKeymap, planKeymap, noteToMidi, midiToNote, rateForPitch } from '../dist/src/core/keymap.js'
 // ==== end Phase 40 Stream VA ====
 
 // ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
@@ -132,6 +132,9 @@ const HELP_FAMILIES = [
   // ==== Phase 40 Stream VA ====
   ['sample', 'sample-info', 'keymap', 'lane'], // Phase 40: register a sound -> read its pitch -> play a melody with it
   // ==== end Phase 40 Stream VA ====
+  // ==== gen-kit ====
+  ['gen-kit', 'source', 'rate', 'score', 'adopt', 'regen'], // compose from generated sounds -> re-pick through the taste loop
+  // ==== end gen-kit ====
 ]
 
 /** One entry per command, in the exact order the full dump prints them. `text` is the command's
@@ -446,6 +449,31 @@ const HELP = [
                                                           differing hash elsewhere is expected, not corruption.
                                                           Freesound/local-ingest media isn't generated, so it's skipped` },
   // ==== end Phase 40 Stream VC ====
+  // ==== gen-kit ====
+  {
+    cmd: 'gen-kit',
+    text: `  beat gen-kit <project-dir> [--roles kick,snare,hats,perc,bass,lead] [--candidates 4] [--bpm 96] [--key a] [--scale minorPentatonic] [--gen-backend fal|stub|stableaudio] [--seed 41]
+                                                          compose a PLAYABLE .beat project entirely from generated
+                                                          sounds — the recipe-song workflow as one command
+                                                          (docs/gen-kit-pipeline.md). Per role: N candidate one-shots
+                                                          (one subject x N distinct style prompts, taste-collect's
+                                                          convention) land as a scoreable batch dir (group
+                                                          genkit:<role>) registering NOTHING; a measurable default is
+                                                          picked — drums by spectral centroid vs the role's target
+                                                          band, bass/lead by pitch-detection confidence — and adopted
+                                                          (deferred registration: losers never touch the media block);
+                                                          tonal winners are keymapped into the project's key. Starter
+                                                          patterns (simple seeded groove + in-key phrases) are written,
+                                                          scene-placed and song-armed, so beat render is audible
+                                                          immediately. Everything is deterministic in --seed for a
+                                                          given backend; every asset carries a provenance sidecar, so
+                                                          beat regen --verify replays the whole kit. Re-pick any role
+                                                          later: beat rate <project-dir> (or beat score <batch> ...),
+                                                          then beat adopt <batch> vN --force. Default --gen-backend
+                                                          fal (needs FAL_KEY; seconds per sound); stub is the
+                                                          dependency-free deterministic tone bed CI runs.`,
+  },
+  // ==== end gen-kit ====
   {
     cmd: 'lane',
     text: `  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample ("none" reverts the lane
@@ -2802,6 +2830,174 @@ async function regenCmd(argv) {
 }
 // ==== end Phase 40 Stream VC ====
 
+// ==== gen-kit begin ====
+// `beat gen-kit <project-dir>` — compose a playable .beat project entirely from generated sounds:
+// the examples/recipe-song workflow (built by hand on 2026-07-14) as one command, on the Phase 40
+// pieces. Per role it runs the SAME machinery the taste loop runs — genSourceBatch (deferred
+// registration, style-contrast prompts), a measurable pick, adoptVariant (registers the winner
+// ALONE), keymap for tonal roles — then writes seeded starter patterns and scene-places everything
+// (song mode renders only scene-placed content; the Phase 39 silent-render trap). The pure logic
+// (role specs, prompts, picks, spans, patterns) lives in src/analysis/genkit.ts; this function is
+// the loop. See docs/gen-kit-pipeline.md.
+async function genKitCmd(argv) {
+  const VALUE_FLAGS = new Set(['--roles', '--candidates', '--bpm', '--key', '--scale', '--gen-backend', '--seed'])
+  for (const a of argv) if (a.startsWith('--') && !VALUE_FLAGS.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...VALUE_FLAGS].join(', ')})`)
+  const flag = (name) => {
+    const i = argv.indexOf(name)
+    return i !== -1 ? argv[i + 1] : undefined
+  }
+  const positionals = argv.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]))
+  const projectDir = positionals[0]
+  if (!projectDir) {
+    throw new BeatEditError('gen-kit needs a <project-dir>, e.g. beat gen-kit my-kit --gen-backend stub\n  (creates <project-dir>/<project-dir>.beat plus one rateable candidate batch per role)')
+  }
+  const genkit = await import(new URL('../dist/src/analysis/index.js', import.meta.url).href)
+  const { adoptVariant } = await import(new URL('../dist/src/vary/batch.js', import.meta.url).href)
+  const { mulberry32 } = await import(new URL('../dist/src/taste/eval.js', import.meta.url).href)
+  const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
+
+  let roles
+  try {
+    roles = genkit.parseGenKitRoles(flag('--roles'))
+  } catch (err) {
+    if (err && err.name === 'BeatGenKitError') throw new BeatEditError(err.message)
+    throw err
+  }
+  const candidates = flag('--candidates') !== undefined ? Number(flag('--candidates')) : 4
+  if (!Number.isInteger(candidates) || candidates < 1) throw new BeatEditError(`--candidates must be a positive integer, got ${flag('--candidates')}`)
+  const bpm = flag('--bpm') !== undefined ? Number(flag('--bpm')) : 96
+  const keyText = flag('--key') ?? 'a'
+  const keyMidi = parseKeyNote(keyText) // liberal: "a", "c#", or a full note like a2
+  const keyPc = ((keyMidi % 12) + 12) % 12
+  const scale = flag('--scale') ?? 'minorPentatonic'
+  if (!SCALE_NAMES.includes(scale)) throw new BeatEditError(`unknown scale "${scale}" (have: ${SCALE_NAMES.join(', ')})`)
+  const backend = flag('--gen-backend') ?? 'fal'
+  if (!['fal', 'stub', 'stableaudio'].includes(backend)) throw new BeatEditError(`--gen-backend must be fal, stub or stableaudio, got "${backend}"`)
+  const metaSeed = flag('--seed') !== undefined ? Number(flag('--seed')) : 41
+  if (!Number.isInteger(metaSeed)) throw new BeatEditError(`--seed must be an integer, got ${flag('--seed')}`)
+
+  // <dir>/<basename>.beat when the basename is a clean token, else <dir>/song.beat.
+  mkdirSync(projectDir, { recursive: true })
+  const base = basename(resolve(projectDir))
+  const beatFile = join(projectDir, `${/^[a-zA-Z0-9._-]+$/.test(base) ? base : 'song'}.beat`)
+  if (existsSync(beatFile)) throw new BeatEditError(`${beatFile} already exists — gen-kit composes a FRESH project; pick a new directory or remove the file`)
+
+  const LOOP_BARS = 2
+  const SECTION_BARS = 8
+  // A fresh project. The 'starter' synth track is scaffolding only — a document must always carry
+  // at least one track, so it stays until the kit's real tracks exist and is removed below.
+  writeFileSync(beatFile, serialize(initDocument({ bpm, loopBars: LOOP_BARS, trackId: 'starter' })))
+  process.stdout.write(`gen-kit: ${beatFile} — ${roles.map((r) => r.role).join(', ')} @ ${candidates} candidate(s) each, ${backend} backend, key ${pitchClassName(keyMidi)} ${scale}, seed ${metaSeed}\n`)
+
+  // One rng, drawn in a fixed order, so the whole kit is deterministic in --seed (given the same
+  // roles/candidates/backend): per role a prompt-style seed + a generation seedFrom, then the
+  // three pattern seeds.
+  const rng = mulberry32(metaSeed)
+  const picks = [] // { spec, dir, pick, keymap? }
+  for (const spec of roles) {
+    const styleSeed = Math.floor(rng() * 1e9)
+    const seedFrom = Math.floor(rng() * 100000)
+    const prompts = genkit.genkitPrompts(spec, candidates, styleSeed)
+    process.stdout.write(`\n=== ${spec.role}: ${candidates} candidate(s) of "${spec.subject}" (${spec.seconds}s, seeds ${seedFrom}${candidates > 1 ? `-${seedFrom + candidates - 1}` : ''}) ===\n`)
+    const batch = await lib.genSourceBatch({
+      beatFile,
+      id: spec.role,
+      prompt: spec.subject,
+      prompts,
+      seconds: spec.seconds,
+      seedFrom,
+      backend,
+      group: `genkit:${spec.role}`,
+      onProgress: (i, n) => process.stdout.write(`  generating v${i}/${n}...\n`),
+    })
+    // Measure every candidate from the batch dir — the exact prepped bytes an adopt would register.
+    const measured = batch.candidates.map((c) => {
+      try {
+        return decodeWav(readFileSync(c.wav))
+      } catch {
+        return null
+      }
+    })
+    let pick
+    if (spec.kind === 'drum') {
+      const centroids = measured.map((m) => (m === null ? null : analyze(m.channels, m.sampleRate).spectral.centroidHz))
+      pick = genkit.pickDrumCandidate(spec, centroids)
+    } else {
+      const pitches = measured.map((m, i) => {
+        if (m === null) return { hz: null, midi: null, note: null, cents: null, confidence: -1, level: 'low', method: 'undecodable', periodicity: 0, harmonicity: 0, partials: [], suggestedRootNote: null, suggestedRootHz: null, sampleRate: 0, durationSeconds: 0, analyzedFromSeconds: 0, analyzedToSeconds: 0 }
+        return detectPitch(m.channels, m.sampleRate)
+      })
+      try {
+        pick = genkit.pickTonalCandidate(pitches)
+      } catch (err) {
+        if (err && err.name === 'BeatGenKitError') throw new BeatEditError(`${spec.role}: ${err.message}`)
+        throw err
+      }
+    }
+    // Deferred registration pays off here: adopt registers the WINNER alone; the losers stay in
+    // the batch dir as an ordinary rateable batch for the owner (or the critic) to re-pick.
+    adoptVariant(batch.dir, `v${pick.index + 1}`)
+    process.stdout.write(`  picked v${pick.index + 1}/${candidates}: ${pick.reason}\n`)
+    process.stdout.write(`  registered ${spec.role}; all ${candidates} candidate(s) stay scoreable in ${batch.dir}\n`)
+    picks.push({ spec, dir: batch.dir, pick })
+  }
+  const drumSeed = Math.floor(rng() * 1e9)
+  const bassSeed = Math.floor(rng() * 1e9)
+  const leadSeed = Math.floor(rng() * 1e9)
+
+  // Build the playable document over the registered winners: kit lanes + keymapped tonal tracks,
+  // starter patterns, then clip -> scene -> song so every track is scene-placed (song mode renders
+  // only scene-placed content — the Phase 39 silent-render trap this command must never re-open).
+  let doc = readDoc(beatFile)
+  const drumRoles = picks.filter((p) => p.spec.kind === 'drum')
+  const slots = {}
+  // A declared sample lane, built directly (addLane refuses on a zero-lane drums track — that
+  // shape means "legacy implicit 5-lane" — so fresh gen-kit tracks are born with their lane lists).
+  const sampleLaneDecl = (name, sampleId, gainDb, tune) => ({
+    name,
+    backing: { type: 'sample', sample: sampleId, gainDb, tune, params: {}, filterType: 'lowpass', effects: [] },
+  })
+  process.stdout.write('\n')
+  if (drumRoles.length > 0) {
+    doc = addTrack(doc, { id: 'kit', kind: 'drums', name: 'kit', lanes: drumRoles.map((p) => sampleLaneDecl(p.spec.role, p.spec.role, p.spec.laneGainDb, 0)) }).doc
+    for (const h of genkit.planDrumHits(drumRoles.map((p) => p.spec.role), LOOP_BARS, drumSeed)) {
+      doc = addHit(doc, 'kit', h).doc
+    }
+    doc = saveClip(doc, 'kit', 'groove').doc
+    slots.kit = [{ clip: 'groove', at: 0 }]
+    process.stdout.write(`kit: lanes ${drumRoles.map((p) => p.spec.role).join(', ')} — starter groove written (clip "groove")\n`)
+  }
+  for (const p of picks.filter((x) => x.spec.kind === 'tonal')) {
+    const role = p.spec.role
+    const { fromMidi, toMidi } = genkit.keymapSpanForRoot(p.pick.rootMidi, keyPc)
+    // The keymap plan (Phase 40 VA): one lane per scale degree, tuned from the sample's measured
+    // root — minted directly into the fresh track's lane list.
+    const plan = planKeymap({ rootMidi: p.pick.rootMidi, scaleRootMidi: keyPc, scale, fromMidi, toMidi })
+    doc = addTrack(doc, { id: role, kind: 'drums', name: role, lanes: plan.map((l) => sampleLaneDecl(l.name, role, p.spec.laneGainDb, l.tune)) }).doc
+    const laneNames = plan.map((l) => l.name)
+    const clipId = role === 'bass' ? 'bline' : 'mel'
+    const hits = role === 'bass' ? genkit.planBassHits(laneNames, LOOP_BARS, bassSeed) : genkit.planLeadHits(laneNames, LOOP_BARS, leadSeed)
+    for (const h of hits) doc = addHit(doc, role, h).doc
+    doc = saveClip(doc, role, clipId).doc
+    slots[role] = [{ clip: clipId, at: 0 }]
+    process.stdout.write(`${role}: keymapped ${laneNames.length} lanes (${laneNames[0]}..${laneNames[laneNames.length - 1]}, ${scale} in ${pitchClassName(keyMidi)}) — root ${p.pick.rootSource} ${midiToNote(p.pick.rootMidi)}; starter phrase written (clip "${clipId}")\n`)
+  }
+  doc = removeTrack(doc, 'starter').doc // the scaffolding track — the kit's real tracks exist now
+  doc = setScene(doc, 'main', slots)
+  doc = setSong(doc, [{ scene: 'main', bars: SECTION_BARS }])
+  doc = { ...doc, selectedTrack: doc.tracks[0].id }
+  writeFileSync(beatFile, serialize(doc))
+
+  process.stdout.write(
+    `\n${beatFile}: ${doc.tracks.length} track(s), scene "main" placed for all of them, song ${SECTION_BARS} bars — a normal .beat project\n` +
+    `  hear it:        beat render ${beatFile} && beat metrics ${beatFile.replace(/\.beat$/, '.wav')}\n` +
+    `  make it yours:  beat vary ${beatFile} kit --groups   (and beat vary ... feel)\n` +
+    `  re-pick a role: beat rate ${projectDir}   (or beat score <batch-dir> <best> ...), then beat adopt <batch-dir> vN --force\n` +
+    `  prove the recipe: beat regen ${beatFile} --verify\n`,
+  )
+}
+// ==== gen-kit end ====
+
 function laneCmd(argv) {
   // Phase 35 Stream OB: `--clear-legacy` is the one-shot explicit cleanup for stale v0.5
   // laneSamples lines on a declared-lane track (inspect flags them; playback ignores them there).
@@ -3767,6 +3963,11 @@ async function main() {
       await regenCmd(rest)
       break
     // ==== end Phase 40 Stream VC ====
+    // ==== gen-kit ====
+    case 'gen-kit':
+      await genKitCmd(rest)
+      break
+    // ==== end gen-kit ====
     case 'lane':
       laneCmd(rest)
       break
@@ -3915,7 +4116,12 @@ main().catch((err) => {
     err instanceof BeatAnalysisError ||
     err.name === 'HistoryError' ||
     err.name === 'WavDecodeError' ||
-    err.name === 'AutomationShapeError'
+    err.name === 'AutomationShapeError' ||
+    // gen-kit orchestrates source-lib + batch adopt + its own planning directly, so their typed
+    // errors surface here (every other verb rewraps them closer to the call site).
+    err.name === 'SourceError' ||
+    err.name === 'BeatBatchError' ||
+    err.name === 'BeatGenKitError'
   ) {
     console.error(`error: ${err.message}`)
     process.exitCode = 2

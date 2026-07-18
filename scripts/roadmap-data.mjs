@@ -1320,6 +1320,12 @@ export const rows = [
     core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
     research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
   },
+  {
+    area: 'Taste loop', feature: 'Gen-kit pipeline: compose a playable beat entirely from generated sounds (`beat gen-kit`)',
+    description: 'One command automating the examples/recipe-song workflow on the Phase 40 pieces (the direction chosen after the owner found fal-generated sounds more compelling than the synth engine): `beat gen-kit <project-dir> [--roles kick,snare,hats,perc,bass,lead] [--candidates N] [--bpm/--key/--scale] [--gen-backend fal|stub|stableaudio] [--seed N]`. Per role: N candidate one-shots as a deferred-registration batch (taste-collect\'s style-contrast prompt convention — one subject x N distinct style treatments), a measurable default pick (drums: spectral centroid vs the role\'s target band, exactly the recipe-song\'s by-hand snare pick; bass/lead: pitch-detection confidence, low-confidence winners rooted on their lowest strong partial), adopt registers the winner ALONE, tonal winners keymapped into the project\'s key (span anchored to the sample\'s own register so tunes always fit the ±24 clamp). Seeded starter patterns (simple groove + in-key phrases over the keymap lanes), clip->scene->song placement (unplacedContentTracks asserted empty — the Phase 39 silent-render trap), byte-deterministic .beat per --seed on the stub backend, `beat regen --verify` replays the whole kit from sidecars. Each role\'s batch stays behind as an ordinary rateable dir (group genkit:<role>, classified as a gen round by taste-eval), so every kit run feeds the taste loop — and the pick heuristic is the explicit placeholder the trained critic (T4/T5) eventually replaces. Verified end-to-end with stub: gen-kit -> render (real engine) -> metrics non-silent (-18.9 LUFS). CLI-only v1 (no MCP twin yet); pure logic in src/analysis/genkit.ts, loop in cli/beat.mjs.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: null, plan: 'gen-kit-pipeline.md',
+  },
 
   // ── Render / export ──────────────────────────────────────────────────────
   {
