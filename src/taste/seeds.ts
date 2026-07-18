@@ -160,6 +160,10 @@ const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
   { id: 'melody', subject: 'a melodic synth lead phrase, 4 bar loop, catchy and emotive', seconds: 8 },
   { id: 'bassline', subject: 'a rolling deep house bassline loop, 4 bars, groovy and hypnotic', seconds: 8 },
   { id: 'chords', subject: 'a chord progression loop, lush warm chords, 4 bars', seconds: 8 },
+  // Completes the phrase tier for the source-showdown eval (docs/source-showdown-eval.md): the
+  // drum-loop ROLE needs a phrase-level gen candidate the way bassline/chords/melody already have
+  // one — one-shot drum subjects cover atomic hits, not a groove.
+  { id: 'drumloop', subject: 'a full drum loop, 4 bars, punchy and groovy', seconds: 8 },
 ]
 const GEN_STYLES = [
   'analog warmth, tape saturation',
@@ -171,6 +175,22 @@ const GEN_STYLES = [
   'gritty distorted electronic',
   'soft, intimate, close-mic feel',
 ]
+
+/** Look up one subject of the prompt bank by id — the source-showdown eval (src/taste/showdown.ts)
+ * builds its gen and keymap clips from NAMED bank entries (phrase tier for the role's gen clip,
+ * one-shot tier for the keymap sample) so showdown prompts and taste-collect prompts stay one
+ * vocabulary instead of drifting into a second bank. */
+export function genSubject(id: string): { id: string; subject: string; seconds: number } {
+  const s = GEN_SUBJECTS.find((x) => x.id === id)
+  if (!s) throw new Error(`unknown gen subject "${id}" (have: ${GEN_SUBJECTS.map((x) => x.id).join(', ')})`)
+  return s
+}
+
+/** The style-treatment bank, exported for the same reason as genSubject: showdown styles ARE
+ * taste-collect styles. */
+export function genStyles(): readonly string[] {
+  return GEN_STYLES
+}
 
 export interface GenPromptSpec {
   /** media-id-safe slug, unique within one collect run */

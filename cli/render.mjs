@@ -638,6 +638,16 @@ export async function renderBatchCommand(argv) {
           { timeout: 15000 },
         )
         await sleep(200) // let the engine's sync() tick absorb the new doc before capture
+        // A later variant can introduce media the boot doc never referenced (source-showdown's
+        // keymap clips do exactly this), and the boot-time pendingMediaCount wait has long since
+        // passed — without re-waiting here, the offline path refuses ("media not decoded yet")
+        // and live capture would play the silent fallback. Same guarded wait as boot: timeout =
+        // warn and render anyway (the console forwarding names the failed load).
+        try {
+          await session.page.waitForFunction(() => typeof window.__engine.pendingMediaCount === 'function' && window.__engine.pendingMediaCount() === 0, { timeout: 30000 })
+        } catch {
+          console.error('warning: media load(s) still pending 30s after the variant swap — sample-backed lanes/clips may play their fallback voice or silence in this render')
+        }
       }
       const doc = parse(readFileSync(join(dir, v.file), 'utf8'))
       const renderBars = doc.song && doc.song.length > 0 ? doc.song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars

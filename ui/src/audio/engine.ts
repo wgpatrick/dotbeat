@@ -2531,9 +2531,16 @@ export class Engine {
    * this explicitly, then waits for pendingMediaCount() to reach 0 before seeding the offline
    * instance from exportAudioBuffers(). */
   async warmMediaLoads(): Promise<void> {
-    await this.ensureStarted() // syncDrumTracks inside kicks lane-sample loads
+    await this.ensureStarted() // syncDrumTracks inside kicks lane-sample loads (first start only)
     const doc = useStore.getState().doc
-    if (doc) this.syncAudioTracks(doc)
+    if (!doc) return
+    // ensureStarted is a no-op once started, and its syncDrumTracks ran against whatever doc was
+    // loaded THEN — a doc hot-swapped in since (render --batch swaps variants through one session;
+    // source-showdown's keymap variants introduce sample lanes the boot doc never had) has kicked
+    // no lane-sample loads yet. syncDrumTracks is the same reconcile sync() runs every tick, so
+    // re-running it here is idempotent and warms exactly the pending set the caller polls.
+    this.syncDrumTracks(doc)
+    this.syncAudioTracks(doc)
   }
 
   async ensureStarted(): Promise<void> {
