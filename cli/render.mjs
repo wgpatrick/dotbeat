@@ -480,10 +480,16 @@ export async function renderCommand(argv) {
     await Promise.race([session.close(), sleep(5000)])
   }
   if (failure) {
-    // First meaningful line only — the playwright page.evaluate wrapper adds minified-bundle
-    // frames that read as noise next to the (already good) refusal message itself.
-    const line = String(failure.message ?? failure).split('\n').find((l) => l.trim()) ?? 'render failed'
-    console.error(`error: ${line.replace(/^page\.evaluate:\s*Error:\s*/, '')}`)
+    // Pilot 111 found the original first-line-only formatter DISCARDED the payload of multi-line
+    // errors: 'page error(s) during render:' printed with an empty list because the real errors
+    // sat on the following lines. Keep every meaningful line; drop only stack frames (the
+    // playwright/minified-bundle noise).
+    const lines = String(failure.message ?? failure)
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l !== '' && !l.startsWith('at '))
+    const text = (lines.length ? lines : ['render failed']).join('\n  ')
+    console.error(`error: ${text.replace(/^page\.evaluate:\s*Error:\s*/, '')}`)
     process.exit(1)
   }
 }
