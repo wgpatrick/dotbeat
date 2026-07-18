@@ -105,6 +105,7 @@ import { AUTOMATION_SHAPES } from '../core/automation-shape.js'
 import {
   writeVaryBatch,
   renderVaryBatch,
+  formatNormalizationResult,
   scoreBatch,
   formatScoreResult,
   adoptVariant,
@@ -1977,7 +1978,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_vary',
     description:
-      `Batch-generate small-diff variants of one track into an out-dir — the generate half of dotbeat's vary -> audition -> score taste loop (beat_score records ranked picks; beat_adopt takes a winner; beat_suggest proposes the next round). Same semantics and defaults as \`beat vary\`. Choosing the target: on a DECLARED-LANE drums track (every drums track this server creates — beat_add_track/beat_drum_kit declare lanes), group is a LANE NAME (e.g. kick, hat, tom_lo — any declared lane): variants mutate that lane's OWN backing params, the ones the engine actually plays (synth-backed: the voice's tune/punch/decay/tone; sample-backed: start/length/attack/hold/decay/cutoff/resonance plus gainDb/tune), written as replayable beat_set lane paths (<track>.lane.<name>.<param>); the legacy kick/snare/hats groups ERROR there because they mutate track-wide params a declared-lane track never plays (an inaudible no-op batch, pilot 101's headline bug). Track-wide bus groups (filter, env, filterenv, fx, sends, mix) still apply to any drums track, and on legacy tracks and synth tracks group is a param group as before (${Object.keys(VARY_GROUPS).join(', ')} — seeded mutations of that group's synth params, strength set by amount 0-1, default 0.25). The special group "feel" batches humanized timing/velocity variants of the track's own notes/hits — content variation, not param variation. Writes v1.beat..vN.beat plus manifest.json into out_dir (default "vary-<group>-<seed>" NEXT TO the .beat file — NOT the server's working directory; an explicit out_dir resolves as written) — the exact manifest \`beat score\`/beat_score read, so a batch generated here can be scored from either surface. count defaults to 9, seed to the clock (pass one for reproducibility; it's recorded in the manifest either way). feel-only options: timing/velocity/push_late/swing (humanize knobs, defaults 0.15/0.06/0/0) and ONE way to scope the variation — lanes, ids, or scope "selection" with port (reads the user's live GUI selection off the daemon running on that port and resolves it to lanes/ids, exactly like the CLI's --scope selection: what the user has highlighted IS the referent of "vary this"). Pass render true to also render each variant to vN.wav through dotbeat's real engine — honest cost warning: that is a REAL-TIME capture per variant in headless Chromium, so a batch takes roughly count x loop-length plus a few seconds of browser startup each; a 9-variant batch of an 8-second loop is well over a minute. Pass audition true (implies render) to additionally stitch the rendered variants into ONE audition.wav in pick order with 0.5s gaps, returning a timecode index ("v1 @ 0:00.0, v2 @ 0:09.2, ...") and writing the same map to audition.json — one file to listen through instead of count files to juggle. Returns the batch summary, one line per variant (its edits, or its feel recipe).`,    inputSchema: {
+      `Batch-generate small-diff variants of one track into an out-dir — the generate half of dotbeat's vary -> audition -> score taste loop (beat_score records ranked picks; beat_adopt takes a winner; beat_suggest proposes the next round). Same semantics and defaults as \`beat vary\`. Choosing the target: on a DECLARED-LANE drums track (every drums track this server creates — beat_add_track/beat_drum_kit declare lanes), group is a LANE NAME (e.g. kick, hat, tom_lo — any declared lane): variants mutate that lane's OWN backing params, the ones the engine actually plays (synth-backed: the voice's tune/punch/decay/tone; sample-backed: start/length/attack/hold/decay/cutoff/resonance plus gainDb/tune), written as replayable beat_set lane paths (<track>.lane.<name>.<param>); the legacy kick/snare/hats groups ERROR there because they mutate track-wide params a declared-lane track never plays (an inaudible no-op batch, pilot 101's headline bug). Track-wide bus groups (filter, env, filterenv, fx, sends, mix) still apply to any drums track, and on legacy tracks and synth tracks group is a param group as before (${Object.keys(VARY_GROUPS).join(', ')} — seeded mutations of that group's synth params, strength set by amount 0-1, default 0.25). The special group "feel" batches humanized timing/velocity variants of the track's own notes/hits — content variation, not param variation. Writes v1.beat..vN.beat plus manifest.json into out_dir (default "vary-<group>-<seed>" NEXT TO the .beat file — NOT the server's working directory; an explicit out_dir resolves as written) — the exact manifest \`beat score\`/beat_score read, so a batch generated here can be scored from either surface. count defaults to 9, seed to the clock (pass one for reproducibility; it's recorded in the manifest either way). feel-only options: timing/velocity/push_late/swing (humanize knobs, defaults 0.15/0.06/0/0) and ONE way to scope the variation — lanes, ids, or scope "selection" with port (reads the user's live GUI selection off the daemon running on that port and resolves it to lanes/ids, exactly like the CLI's --scope selection: what the user has highlighted IS the referent of "vary this"). Pass render true to also render each variant to vN.wav through dotbeat's real engine — honest cost warning: that is a REAL-TIME capture per variant in headless Chromium, so a batch takes roughly count x loop-length plus a few seconds of browser startup each; a 9-variant batch of an 8-second loop is well over a minute. Pass audition true (implies render) to additionally stitch the rendered variants into ONE audition.wav in pick order with 0.5s gaps, returning a timecode index ("v1 @ 0:00.0, v2 @ 0:09.2, ...") and writing the same map to audition.json — one file to listen through instead of count files to juggle. Rendered batches are loudness-normalized by default (pure gain matching every variant to the batch-median variant's integrated LUFS, upward gains capped at -1 dBTP true peak, measured LUFS / applied gain / capped flag recorded per-variant in the manifest) so audition picks rate SOUND rather than level — the taste log's "louder wins" confound; pass normalize false to keep raw render loudness. Returns the batch summary, one line per variant (its edits, or its feel recipe).`,    inputSchema: {
       type: 'object',
       properties: {
         file: { type: 'string' },
@@ -2000,6 +2001,7 @@ const TOOLS: ToolDef[] = [
         port: { type: 'number', description: 'the running daemon\'s port — required with scope "selection" (same convention as beat_selection; default GUI port is 8420)' },
         render: { type: 'boolean', description: 'also render each variant to vN.wav — SLOW: real-time capture per variant in headless Chromium' },
         audition: { type: 'boolean', description: 'implies render: also stitch the rendered variants into one audition.wav (0.5s gaps) + timecode index + audition.json' },
+        normalize: { type: 'boolean', description: 'default true: rendered variants are loudness-normalized to a common LUFS (pure gain to the batch-median variant\'s level, -1 dBTP true-peak ceiling, recorded per-variant in the manifest) so picks rate sound rather than level — the taste log\'s "louder wins" confound. Pass false to keep raw render loudness.' },
       },
       required: ['file', 'track', 'group'],
     },
@@ -2055,8 +2057,9 @@ const TOOLS: ToolDef[] = [
         lines.push(`${outDir}/: ${variants.length} automation variants of ${track}.${param} (seed ${seed})`)
         for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.recipe}`)
         if (render) {
-          renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
+          const norm = renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...(args.normalize === false ? { normalize: false } : {}) })
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
+          if (norm) lines.push(formatNormalizationResult(norm).trimEnd())
           if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
         }
         return lines.join('\n') + '\n'
@@ -2079,8 +2082,9 @@ const TOOLS: ToolDef[] = [
         lines.push(`${outDir}/: ${variants.length} feel variants of ${track} (seed ${seed})`)
         for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.recipe}`)
         if (render) {
-          renderVaryBatch(outDir, variants.length, { linkMediaFrom: file })
+          const norm = renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...(args.normalize === false ? { normalize: false } : {}) })
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
+          if (norm) lines.push(formatNormalizationResult(norm).trimEnd())
           if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
         }
       } else {
@@ -2091,8 +2095,9 @@ const TOOLS: ToolDef[] = [
         lines.push(`${outDir}/: ${variants.length} variants of ${track}.${group} (amount ${amount}, seed ${seed})`)
         for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.edits!.join(', ')}`)
         if (render) {
-          renderVaryBatch(outDir, variants.length)
+          const norm = renderVaryBatch(outDir, variants.length, args.normalize === false ? { normalize: false } : {})
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
+          if (norm) lines.push(formatNormalizationResult(norm).trimEnd())
           if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
         }
       }
