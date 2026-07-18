@@ -1386,12 +1386,19 @@ async function tasteSeedsCmd(argv) {
 }
 
 async function tasteCollectCmd(argv) {
-  const known = new Set(['--per-seed', '--count', '--seed', '--gen', '--gen-backend'])
-  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --per-seed, --count, --seed, --gen, --gen-backend)`)
+  const known = new Set(['--per-seed', '--count', '--seed', '--gen', '--gen-backend', '--amount'])
+  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --per-seed, --count, --seed, --gen, --gen-backend, --amount)`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !known.has(argv[i - 1]))
   const dir = positional[0]
   if (!dir) throw new BeatEditError('taste-collect needs the taste-seeds directory: beat taste-collect <dir> [--per-seed 2] [--count 5] [--gen N]')
   const perSeed = flagValue(argv, '--per-seed') ? Number(flagValue(argv, '--per-seed')) : 2
+  // Perturbation strength for synth-param / drum-voice vary batches. vary's own default is 0.25,
+  // but owner feedback while rating (2026-07-17): at 0.25 the changes are below the just-noticeable
+  // threshold — a "bass env" batch shifted attack by ~0.003s (imperceptible) — so the variants read
+  // as near-identical and carry little preference signal, the same failure the gen one-shots had.
+  // A bigger default makes each variant audibly distinct. (Not applied to `feel`, which varies via
+  // its own timing/velocity knobs, not --amount.)
+  const amount = flagValue(argv, '--amount') ? Number(flagValue(argv, '--amount')) : 0.6
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 5
   const metaSeed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
   const genCount = flagValue(argv, '--gen') ? Number(flagValue(argv, '--gen')) : 0
@@ -1415,9 +1422,11 @@ async function tasteCollectCmd(argv) {
     for (let b = 0; b < perSeed && targets.length > 0; b++) {
       const [track, group] = targets.splice(Math.floor(rng() * targets.length), 1)[0]
       const varySeed = Math.floor(rng() * 100000)
-      process.stderr.write(`\n=== ${f}: vary ${track} ${group} (seed ${varySeed}) ===\n`)
+      process.stderr.write(`\n=== ${f}: vary ${track} ${group} (seed ${varySeed}${group === 'feel' ? '' : `, amount ${amount}`}) ===\n`)
       try {
-        execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'vary', file, track, group, '--count', String(count), '--seed', String(varySeed), '--render'], { stdio: ['ignore', 'ignore', 'inherit'] })
+        // `feel` varies via timing/velocity, not --amount; every other group takes the bigger amount.
+        const amountArgs = group === 'feel' ? [] : ['--amount', String(amount)]
+        execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'vary', file, track, group, '--count', String(count), '--seed', String(varySeed), ...amountArgs, '--render'], { stdio: ['ignore', 'ignore', 'inherit'] })
         made += 1
       } catch (err) {
         failed += 1
