@@ -120,7 +120,7 @@ const PATHS_NOTE = `paths for set: bpm | loop_bars | selected_track | <track>.<s
 // command belongs to is half of understanding it (vary is meaningless without score/suggest).
 const HELP_FAMILIES = [
   ['vary', 'audition', 'score', 'adopt', 'suggest', 'taste-eval'], // the taste loop (docs/taste-loop-design.md)
-  ['taste-seeds', 'taste-collect', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval)
+  ['taste-seeds', 'taste-collect', 'showdown', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval; showdown = the per-role source comparison)
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
@@ -615,6 +615,31 @@ const HELP = [
                                                           risers — default backend fal, needs FAL_KEY). Failures
                                                           skip with a warning; everything lands as ordinary
                                                           score-able batches.`,
+  },
+  {
+    cmd: 'showdown',
+    text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
+                [--gen-backend fal|stub|stableaudio] [--ref-dir <path>] [--seconds S]
+                                                          build blind SOURCE-SHOWDOWN batches from a taste-seeds
+                                                          dir: each batch is ONE musical role x one clip per
+                                                          source — engine (the role's seed phrase, soloed, through
+                                                          dotbeat's own synth), gen (a fal-generated phrase from
+                                                          the prompt bank's phrase tier), keymap (a generated
+                                                          one-shot played as an instrument through the engine's
+                                                          sampler lanes), and optionally ref (--ref-dir). Clips
+                                                          are duration-matched (trim/pad; --seconds overrides the
+                                                          shortest-clip default) and loudness-normalized to a
+                                                          common LUFS; sources are seeded-shuffled into v-numbers
+                                                          so rating stays blind. Rate with beat rate as usual.
+  beat showdown --report [--log f] (or beat showdown <dir> --report [--json])
+                                                          the scoreboard: per-source win / top-half / pairwise
+                                                          rates from every scored showdown batch, overall and per
+                                                          role, small-n splits labeled smoke (same convention as
+                                                          taste-eval). See docs/source-showdown-eval.md.
+        --ref-dir clips are PRIVATE chops of commercial music: the tool only ever READS under that
+        path (originals untouched), the trimmed/level-matched working copies live in the batch dir
+        behind a generated .gitignore, the manifest records the origin path as a reference only,
+        and the shared scores log records the source KIND alone — never the path, title, or audio.`,
   },
   {
     cmd: 'rate',
@@ -1562,6 +1587,222 @@ async function tasteCollectCmd(argv) {
 function flagValue(argv, flag) {
   const i = argv.indexOf(flag)
   return i !== -1 ? argv[i + 1] : undefined
+}
+
+// Source-showdown eval (docs/source-showdown-eval.md): blind per-role comparison of WHERE good
+// sound comes from — engine synth vs fal generation vs keymap-repitched generation vs (opt-in,
+// private) reference chops. Collection builds clip-set batches `beat rate` scores through the
+// unchanged blind flow; --report is the standing scoreboard. A sibling of taste-collect rather
+// than a mode of it: taste-collect's rounds vary ONE pipeline against itself, a showdown round
+// varies the PIPELINE — different grammar (roles + sources, no --per-seed/--count), different
+// report, same seeds dir and rating loop.
+async function showdownCmd(argv) {
+  const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--ref-dir', '--seconds', '--log']
+  const known = new Set([...valued, '--report', '--json'])
+  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const dir = positional[0]
+  const showdown = await import('../dist/src/taste/showdown.js')
+
+  // ---- the scoreboard --------------------------------------------------------------------------
+  if (argv.includes('--report')) {
+    const logPath = flagValue(argv, '--log') ?? (dir ? join(dir, 'beat-scores.jsonl') : null)
+    if (!logPath || !existsSync(logPath)) {
+      throw new BeatEditError('showdown --report needs a scored collection: beat showdown <dir> --report (beat-scores.jsonl at the dir root) or --log <path>')
+    }
+    const report = showdown.computeShowdownReport(logPath)
+    process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : showdown.formatShowdownReport(report))
+    return
+  }
+  if (argv.includes('--json')) throw new BeatEditError('--json only applies to showdown --report')
+
+  // ---- collection ------------------------------------------------------------------------------
+  if (!dir) throw new BeatEditError('showdown needs the taste-seeds directory: beat showdown <dir> [--roles r1,r2] [--rounds 1] [--ref-dir <path>] (or --report)')
+  const { mulberry32 } = await import('../dist/src/taste/eval.js')
+  const { genSubject, genStyles } = await import('../dist/src/taste/seeds.js')
+  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
+  const { mkdirSync, copyFileSync } = await import('node:fs')
+  const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
+
+  const roles = (flagValue(argv, '--roles') ?? showdown.SHOWDOWN_ROLES.map((r) => r.role).join(','))
+    .split(',')
+    .filter(Boolean)
+    .map((r) => showdown.showdownRole(r)) // throws with the legal list on a typo
+  const rounds = flagValue(argv, '--rounds') ? Number(flagValue(argv, '--rounds')) : 1
+  const metaSeed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
+  const genBackend = flagValue(argv, '--gen-backend') ?? 'fal'
+  const targetSeconds = flagValue(argv, '--seconds') !== undefined ? Number(flagValue(argv, '--seconds')) : undefined
+  const refDir = flagValue(argv, '--ref-dir')
+  if (refDir !== undefined && !existsSync(refDir)) throw new BeatEditError(`no directory at --ref-dir ${refDir}`)
+
+  const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
+  if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
+  const seeds = seedFiles.map((f) => ({ file: f, doc: parse(readFileSync(join(dir, f), 'utf8')) }))
+
+  // Ref pool: wavs under --ref-dir, read-only. A <ref-dir>/<role>/ subdir scopes the pool to the
+  // role when present; otherwise any wav qualifies. Only .wav — the trim/normalize working copy
+  // is frame math on RIFF data, and transcoding someone's private chops is out of scope.
+  const refPool = (roleName) => {
+    if (refDir === undefined) return []
+    const scoped = join(refDir, roleName)
+    const base = existsSync(scoped) ? scoped : refDir
+    const out = []
+    const walk = (d) => {
+      let entries
+      try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
+      for (const e of entries) {
+        if (e.isDirectory() && !e.name.startsWith('.')) walk(join(d, e.name))
+        else if (e.name.toLowerCase().endsWith('.wav')) out.push(join(d, e.name))
+      }
+    }
+    walk(base)
+    return out.sort()
+  }
+
+  const rng = mulberry32(metaSeed)
+  let made = 0
+  let failed = 0
+  for (let round = 0; round < rounds; round++) {
+    for (const spec of roles) {
+      const batchSeed = Math.floor(rng() * 100000)
+      const genSeed = Math.floor(rng() * 100000)
+      const kmSeed = Math.floor(rng() * 100000)
+      const styles = genStyles()
+      const style = styles[Math.floor(rng() * styles.length)]
+      const kmStyle = styles[Math.floor(rng() * styles.length)]
+      const refPick = Math.floor(rng() * 100000) // drawn unconditionally so --ref-dir never shifts the other seeds
+      // a seed song that actually carries this role's track (the arp track is optional per seed)
+      const candidates = seeds.filter((s) => s.doc.tracks.some((t) => t.id === spec.seedTrack))
+      if (candidates.length === 0) {
+        failed += 1
+        process.stderr.write(`warning: no seed song has a "${spec.seedTrack}" track for role ${spec.role} — skipping (generate more seeds: beat taste-seeds ${dir})\n`)
+        continue
+      }
+      const seed = candidates[Math.floor(rng() * candidates.length)]
+      const seedPath = join(dir, seed.file)
+      const outDir = join(dir, `showdown-${spec.role}-${batchSeed}`)
+      const workDir = join(outDir, 'work')
+      process.stderr.write(`\n=== showdown ${spec.role}: ${seed.file} phrase — engine vs gen vs keymap${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
+      try {
+        mkdirSync(workDir, { recursive: true })
+        const extended = showdown.extendToFourBars(seed.doc)
+
+        // engine clip: the role's phrase soloed through dotbeat's own synth engine
+        const engineDoc = showdown.soloForShowdown(extended, spec.seedTrack)
+
+        // keymap clip: generated one-shot(s) registered into a scratch host, then played as an
+        // instrument through the engine's sampler lanes
+        const kmBase = join(workDir, 'km-base.beat')
+        let kmDoc
+        let kmFrom
+        if (spec.keymap.kind === 'pitched') {
+          writeFileSync(kmBase, showdown.keymapScratchText(seed.doc.bpm))
+          const oneShot = genSubject(spec.keymap.oneShotSubjectId)
+          const kmPrompt = `${oneShot.subject}, ${kmStyle}`
+          await lib.addGeneratedSource({ beatFile: kmBase, id: 'sdkm', prompt: kmPrompt, seconds: oneShot.seconds, seed: kmSeed, backend: genBackend })
+          const scratch = parse(readFileSync(kmBase, 'utf8'))
+          const { channels, sampleRate } = decodeWav(readFileSync(join(workDir, 'media', 'sdkm.wav')))
+          const pitch = detectPitch(channels, sampleRate)
+          // an automated pipeline takes the best available root rather than refusing: detected
+          // pitch, else the strongest-low-partial suggestion, else a4 — the root is recorded
+          const rootMidi = pitch.midi ?? (pitch.suggestedRootNote ? noteToMidi(pitch.suggestedRootNote) : 69)
+          const phrase = showdown.phraseFromSeed(extended, spec.seedTrack)
+          const built = showdown.buildPitchedKeymapPhrase(scratch, 'sdkm', rootMidi, phrase)
+          kmDoc = built.doc
+          kmFrom = `keymap of "${kmPrompt}" (root ${midiToNote(Math.round(rootMidi))}, ${pitch.level ?? 'no'} confidence) playing ${seed.file} ${spec.seedTrack}`
+        } else {
+          const drumsOnly = showdown.isolateTrack(extended, spec.seedTrack)
+          writeFileSync(kmBase, showdown.serializeChecked(drumsOnly))
+          const samplesByLane = {}
+          const promptsUsed = []
+          for (const [lane, subjectId] of Object.entries(spec.keymap.laneSubjects)) {
+            const oneShot = genSubject(subjectId)
+            const prompt = `${oneShot.subject}, ${kmStyle}`
+            await lib.addGeneratedSource({ beatFile: kmBase, id: `sd${lane}`, prompt, seconds: oneShot.seconds, seed: kmSeed + promptsUsed.length, backend: genBackend })
+            samplesByLane[lane] = `sd${lane}`
+            promptsUsed.push(prompt)
+          }
+          kmDoc = showdown.buildKitPhrase(parse(readFileSync(kmBase, 'utf8')), spec.seedTrack, samplesByLane)
+          kmFrom = `sample-lane kit of generated one-shots ("${kmStyle}") playing ${seed.file} ${spec.seedTrack}`
+        }
+
+        // render engine + keymap in ONE batch boot (offline by default; raw levels — the whole
+        // showdown batch is normalized together below, across sources)
+        writeVaryBatch({
+          parentPath: seedPath,
+          parentText: readFileSync(seedPath, 'utf8'),
+          track: spec.seedTrack,
+          group: 'showdown-work',
+          count: 2,
+          seed: batchSeed,
+          outDir: workDir,
+          variants: [
+            { doc: engineDoc, recipe: `engine ${spec.seedTrack} solo` },
+            { doc: kmDoc, recipe: 'keymap phrase' },
+          ],
+        })
+        renderVaryBatch(workDir, 2, { normalize: false })
+
+        // gen clip: the role's phrase-tier prompt, one candidate (prep pipeline included)
+        const phraseSubject = genSubject(spec.phraseSubjectId)
+        const genPrompt = `${phraseSubject.subject}, ${style}`
+        const genDir = join(workDir, 'gen')
+        await lib.genSourceBatch({
+          beatFile: seedPath,
+          id: `sd${spec.role.replace(/-/g, '')}`,
+          prompt: phraseSubject.subject,
+          prompts: [genPrompt],
+          seconds: phraseSubject.seconds,
+          seedFrom: genSeed,
+          backend: genBackend,
+          outDir: genDir,
+        })
+
+        const clips = [
+          { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
+          { kind: 'keymap', wav: join(workDir, 'v2.wav'), from: kmFrom },
+          { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
+        ]
+        if (refDir !== undefined) {
+          const pool = refPool(spec.role)
+          if (pool.length === 0) {
+            process.stderr.write(`warning: no .wav under ${refDir}${existsSync(join(refDir, spec.role)) ? `/${spec.role}` : ''} — building this ${spec.role} batch without a ref clip\n`)
+          } else {
+            const refPath = resolve(pool[refPick % pool.length])
+            clips.push({ kind: 'ref', wav: refPath, from: refPath })
+          }
+        }
+
+        // assemble: seeded source->v-number shuffle (first blinding layer; beat rate shuffles
+        // presentation again), then manifest + duration match + loudness normalization
+        const order = showdown.assignClipOrder(clips.length, batchSeed)
+        const files = new Array(clips.length)
+        for (let v = 0; v < clips.length; v++) {
+          const clip = clips[order[v]]
+          copyFileSync(clip.wav, join(outDir, `v${v + 1}.wav`))
+          files[v] = { file: `v${v + 1}.wav`, source: { kind: clip.kind, from: clip.from } }
+        }
+        rmSync(workDir, { recursive: true }) // never leave a scoreable work batch for beat rate to find
+        showdown.writeShowdownBatch(outDir, spec.role, files, { seed: batchSeed })
+        const match = showdown.matchClipDurations(outDir, files.map((f) => f.file), targetSeconds !== undefined ? { targetSeconds } : {})
+        process.stdout.write(`${outDir}/: ${files.length} clips (${clips.map((c) => c.kind).sort().join(' vs ')}), duration-matched to ${match.targetSeconds}s`)
+        const adjusted = match.clips.filter((c) => c.action !== 'kept')
+        process.stdout.write(adjusted.length > 0 ? ` (${adjusted.map((c) => `${c.file} ${c.action} ${c.fromSeconds}s -> ${c.toSeconds}s`).join(', ')})\n` : '\n')
+        const norm = normalizeBatchLoudness(outDir, files.length)
+        if (norm) process.stdout.write(formatNormalizationResult(norm))
+        made += 1
+      } catch (err) {
+        failed += 1
+        process.stderr.write(`warning: showdown ${spec.role} failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; --gen-backend stub builds placeholder audio)' : ''} (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+        // never leave a half-built batch for beat rate to queue
+        try {
+          if (existsSync(outDir) && !existsSync(join(outDir, 'manifest.json'))) rmSync(outDir, { recursive: true })
+        } catch { /* best-effort cleanup */ }
+      }
+    }
+  }
+  process.stdout.write(`\n${made} showdown batch(es)${failed > 0 ? ` (${failed} failed)` : ''} — sources are blind: the manifest is the answer key, don't peek before rating\n`)
+  process.stdout.write(`next: beat rate ${dir} — then beat showdown ${dir} --report for the per-source scoreboard\n`)
 }
 
 async function varyCmd(argv) {
@@ -3572,6 +3813,9 @@ async function main() {
       break
     case 'taste-collect':
       await tasteCollectCmd(rest)
+      break
+    case 'showdown':
+      await showdownCmd(rest)
       break
     case 'rate': {
       const { rateCommand } = await import('./rate.mjs')

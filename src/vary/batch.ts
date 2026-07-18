@@ -111,7 +111,13 @@ export interface VaryBatchManifest {
   // ==== end loudness normalization ====
   // D21 strain (a): `file` is "vN.beat" for vary batches and "vN.wav" for gen batches — every
   // reader below resolves the variant through THIS field rather than re-deriving "vN.beat".
-  variants: { file: string; edits?: string[]; recipe?: string; media?: VariantMedia; loudness?: VariantLoudness }[]
+  // `source` (source-showdown eval, docs/source-showdown-eval.md): which PIPELINE produced this
+  // clip — kind is engine|gen|keymap|ref; `from` is a human-readable provenance label (seed file
+  // + track for engine clips, the prompt for gen/keymap clips, the ORIGINAL absolute path for ref
+  // clips, which is a reference only — ref audio is private and its bytes/identity never travel
+  // beyond the batch dir). scoreBatch copies the KINDS (never `from`) into the log entry so
+  // per-source win rates survive batch-dir deletion.
+  variants: { file: string; edits?: string[]; recipe?: string; media?: VariantMedia; loudness?: VariantLoudness; source?: { kind: string; from?: string } }[]
 }
 
 // ---- post-render loudness normalization (taste-loop) ------------------------------------------
@@ -595,6 +601,11 @@ export interface ScoreEntry {
    * was never rendered (scoring un-rendered batches stays legal and cheap). Batch dirs get
    * deleted after adopt; this makes the log self-contained for training. */
   features?: Record<string, Record<string, number>>
+  /** Source-showdown batches (docs/source-showdown-eval.md): each variant's source KIND
+   * (engine|gen|keymap|ref) keyed by variant file — what `beat showdown --report` aggregates
+   * into per-source win rates, durable after the batch dir is gone. Deliberately the kind ONLY:
+   * a ref clip's origin path stays in the batch dir's manifest, never in the shared log. */
+  sources?: Record<string, string>
 }
 
 export interface ScoreBatchResult {
@@ -742,6 +753,10 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   // batch adds nothing and costs one existsSync per variant.
   const features = computeBatchFeatures(dir, manifest.variants.map((v) => v.file))
   if (Object.keys(features).length > 0) entry.features = features
+  // Source-showdown enrichment: carry each variant's source KIND into the entry (see the
+  // ScoreEntry field comment — kinds only, a ref clip's path never leaves the batch dir).
+  const sources = Object.fromEntries(manifest.variants.filter((v) => v.source !== undefined).map((v) => [v.file, v.source!.kind]))
+  if (Object.keys(sources).length > 0) entry.sources = sources
   // Pilot 108: detect a re-score of an already-scored batch BEFORE appending, so the summary can
   // say so — a fat-fingered duplicate otherwise silently contradicts the taste log's history.
   let previousPicks: string | undefined
