@@ -153,12 +153,13 @@ const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
   { id: 'riser', subject: 'a rising sweep transition effect', seconds: 3 },
   { id: 'impact', subject: 'a cinematic impact hit with a tail', seconds: 3 },
   // Musical-material tier (owner, 2026-07-17): one-shots cover atomic sound taste, but actual
-  // music-making decisions live at the PHRASE level — melodies, basslines, progressions. ~15s ≈ 8
-  // bars at house tempo. These are the tier the real-music chops (T3) compare against, and the
-  // material T5's generation steering will lean on hardest.
-  { id: 'melody', subject: 'a melodic synth lead phrase, 8 bar loop, catchy and emotive', seconds: 15 },
-  { id: 'bassline', subject: 'a rolling deep house bassline loop, 8 bars, groovy and hypnotic', seconds: 15 },
-  { id: 'chords', subject: 'a chord progression loop, lush warm chords, 8 bars', seconds: 15 },
+  // music-making decisions live at the PHRASE level — melodies, basslines, progressions. ~8s ≈ 4
+  // bars at house tempo (owner, 2026-07-18, after the first chords batch: 8-bar/15s phrases were
+  // longer than a rating needs — halve them). These are the tier the real-music chops (T3)
+  // compare against, and the material T5's generation steering will lean on hardest.
+  { id: 'melody', subject: 'a melodic synth lead phrase, 4 bar loop, catchy and emotive', seconds: 8 },
+  { id: 'bassline', subject: 'a rolling deep house bassline loop, 4 bars, groovy and hypnotic', seconds: 8 },
+  { id: 'chords', subject: 'a chord progression loop, lush warm chords, 4 bars', seconds: 8 },
 ]
 const GEN_STYLES = [
   'analog warmth, tape saturation',

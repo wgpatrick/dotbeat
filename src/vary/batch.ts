@@ -100,10 +100,14 @@ export interface VaryBatchManifest {
   prompt?: string
   // ==== end Phase 40 Stream VB ====
   // ==== loudness normalization (taste-loop) ====
-  // Present when renderVaryBatch loudness-normalized this batch's renders (the default):
-  // the common LUFS every measurable vN.wav was gained to (the batch MEDIAN variant's own
-  // measured LUFS) and the true-peak ceiling that capped upward gains. See VariantLoudness.
-  normalization?: { targetLufs: number; truePeakCeilingDbtp: number }
+  // Present once renderVaryBatch (or `beat render --batch`) has MEASURED this batch's renders.
+  // normalized: true (the default path) — every measurable vN.wav was gained to targetLufs (the
+  // batch MEDIAN variant's own measured LUFS) under the true-peak ceiling. normalized: false
+  // (--no-normalize, pilot 113) — the renders keep their raw loudness but the measured levels are
+  // still recorded (per-variant loudness with gainDb 0), so a raw batch is distinguishable from a
+  // pre-normalization one and its levels leave a trail. Older manifests lack `normalized`; treat
+  // absent as true (they were only ever written by the normalizing path). See VariantLoudness.
+  normalization?: { targetLufs?: number; truePeakCeilingDbtp: number; normalized?: boolean }
   // ==== end loudness normalization ====
   // D21 strain (a): `file` is "vN.beat" for vary batches and "vN.wav" for gen batches — every
   // reader below resolves the variant through THIS field rather than re-deriving "vN.beat".
@@ -140,11 +144,24 @@ export interface VariantLoudness {
   /** True when the NORMALIZE_TRUE_PEAK_CEILING_DBTP ceiling limited an upward gain below full
    * normalization — this variant still renders quieter than the batch target. */
   capped: boolean
+  /** Estimated true peak of vN.wav as rendered (dBTP, BEFORE the gain) — pilot 113: the number
+   * that makes a "capped" record readable on its own. Absent when immeasurable. */
+  truePeakDbtp?: number
+  /** The gain full normalization WANTED (target - measured) before the ceiling cap / min-gain
+   * rounding — equals gainDb whenever nothing limited it. Absent when immeasurable or when the
+   * batch was not normalized. */
+  wantedGainDb?: number
 }
 
 export interface NormalizeBatchResult {
-  /** The common LUFS the batch was gained to: the median variant's own measured loudness. */
-  targetLufs: number
+  /** False when normalization was skipped (--no-normalize / a batch recorded as raw): the levels
+   * below were measured and recorded, but no gain was applied and no target exists. */
+  normalized: boolean
+  /** The common LUFS the batch was gained to. Absent when normalized is false. */
+  targetLufs?: number
+  /** Where targetLufs came from: 'batch median' (fresh normalization) or 'manifest target'
+   * (a `render --batch` re-render honoring the batch's recorded target). */
+  basis?: string
   /** One entry per variant, v1..vN order; `file` is the render ("vN.wav"). */
   variants: (VariantLoudness & { file: string })[]
 }
@@ -189,50 +206,80 @@ function applyWavGain(path: string, gainDb: number): void {
   writeFileSync(path, bytes)
 }
 
-/** Gain-match outDir's v1.wav..vN.wav to a common integrated LUFS (the batch MEDIAN variant's
- * own measured loudness — for even counts, the lower-middle variant, so the target is always an
- * actual variant's level). Immeasurable variants (silence, missing render) are left untouched
- * and recorded as such; upward gains are capped at NORMALIZE_TRUE_PEAK_CEILING_DBTP true peak.
- * Records the outcome into outDir's manifest.json when one exists (per-variant `loudness` +
- * batch-level `normalization` — D21 additive fields) and returns it either way. Returns null
- * when nothing was measurable (nothing rendered, or an all-silent batch). */
-export function normalizeBatchLoudness(outDir: string, count: number): NormalizeBatchResult | null {
-  if (count < 1) return null
-  const measured: (number | null)[] = []
+/** Measure v1.wav..vN.wav once each: integrated LUFS + estimated true peak (both from the same
+ * decode). null = immeasurable (silence, missing/undecodable render). */
+function measureVariantLevels(outDir: string, count: number): ({ lufs: number; truePeakDb: number } | null)[] {
+  const measured: ({ lufs: number; truePeakDb: number } | null)[] = []
   for (let i = 1; i <= count; i++) {
-    let lufs: number | null = null
+    let m: { lufs: number; truePeakDb: number } | null = null
     try {
       const decoded = decodeWav(readFileSync(resolve(outDir, `v${i}.wav`)))
       const l = integratedLoudness(decoded.channels, decoded.sampleRate).integratedLufs
-      if (Number.isFinite(l)) lufs = l
+      if (Number.isFinite(l)) m = { lufs: l, truePeakDb: 20 * Math.log10(truePeak(decoded.channels)) }
     } catch {
       /* missing/undecodable render — recorded as immeasurable, left untouched */
     }
-    measured.push(lufs)
+    measured.push(m)
   }
-  const measurable = measured.filter((l): l is number => l !== null)
+  return measured
+}
+
+/** Record a loudness outcome into outDir's manifest.json when one exists (per-variant `loudness`
+ * + batch-level `normalization` — D21 additive fields) so score-time readers and the training
+ * log can see what happened. Tolerant of a missing manifest so the normalizer stays usable on
+ * bare wav dirs (mirrors stitchAudition's posture). */
+function recordLoudnessInManifest(outDir: string, count: number, normalization: NonNullable<VaryBatchManifest['normalization']>, variants: NormalizeBatchResult['variants']): void {
+  const manifestPath = resolve(outDir, 'manifest.json')
+  if (!existsSync(manifestPath)) return
+  const manifest = readBatchManifest(outDir)
+  manifest.normalization = normalization
+  for (let i = 0; i < Math.min(count, manifest.variants.length); i++) {
+    const v = variants[i]!
+    manifest.variants[i]!.loudness = {
+      measuredLufs: v.measuredLufs,
+      gainDb: v.gainDb,
+      capped: v.capped,
+      ...(v.truePeakDbtp !== undefined ? { truePeakDbtp: v.truePeakDbtp } : {}),
+      ...(v.wantedGainDb !== undefined ? { wantedGainDb: v.wantedGainDb } : {}),
+    }
+  }
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+}
+
+/** Gain-match outDir's v1.wav..vN.wav to a common integrated LUFS (default: the batch MEDIAN
+ * variant's own measured loudness — for even counts, the lower-middle variant, so the target is
+ * always an actual variant's level; opts.targetLufs overrides it, e.g. `render --batch`
+ * re-rendering a batch to its manifest's recorded target). Immeasurable variants (silence,
+ * missing render) are left untouched and recorded as such; upward gains are capped at
+ * NORMALIZE_TRUE_PEAK_CEILING_DBTP true peak — the cap is UPWARD-ONLY: a variant already over
+ * the ceiling as rendered is never attenuated (pilot 113: say so, don't imply a hard ceiling).
+ * Records the outcome into outDir's manifest.json when one exists and returns it either way.
+ * Returns null when nothing was measurable (nothing rendered, or an all-silent batch). */
+export function normalizeBatchLoudness(outDir: string, count: number, opts: { targetLufs?: number; basis?: string } = {}): NormalizeBatchResult | null {
+  if (count < 1) return null
+  const measured = measureVariantLevels(outDir, count)
+  const measurable = measured.filter((m): m is { lufs: number; truePeakDb: number } => m !== null)
   if (measurable.length === 0) return null
-  const sorted = [...measurable].sort((a, b) => a - b)
-  const targetLufs = sorted[Math.floor((sorted.length - 1) / 2)]!
+  const sorted = measurable.map((m) => m.lufs).sort((a, b) => a - b)
+  const targetLufs = opts.targetLufs ?? sorted[Math.floor((sorted.length - 1) / 2)]!
 
   const variants: NormalizeBatchResult['variants'] = []
   for (let i = 1; i <= count; i++) {
     const file = `v${i}.wav`
-    const lufs = measured[i - 1]!
-    if (lufs === null) {
+    const m = measured[i - 1]!
+    if (m === null) {
       variants.push({ file, measuredLufs: null, gainDb: 0, capped: false })
       continue
     }
-    let gainDb = targetLufs - lufs
+    const wantedGainDb = targetLufs - m.lufs
+    let gainDb = wantedGainDb
     let capped = false
     if (gainDb > 0) {
       // Boosting can push peaks toward clipping — cap the gain so the ESTIMATED true peak
       // (pre-peak + gain: a pure gain shifts true peak by exactly the gain) stays at or below
       // the ceiling. Never cap below 0: a variant already over the ceiling as rendered is the
       // render's business, not normalization's — we just refuse to make it worse.
-      const decoded = decodeWav(readFileSync(resolve(outDir, file)))
-      const truePeakDb = 20 * Math.log10(truePeak(decoded.channels))
-      const maxUp = NORMALIZE_TRUE_PEAK_CEILING_DBTP - truePeakDb
+      const maxUp = NORMALIZE_TRUE_PEAK_CEILING_DBTP - m.truePeakDb
       if (gainDb > maxUp) {
         gainDb = Math.max(0, maxUp)
         capped = true
@@ -240,34 +287,75 @@ export function normalizeBatchLoudness(outDir: string, count: number): Normalize
     }
     if (Math.abs(gainDb) >= NORMALIZE_MIN_GAIN_DB) applyWavGain(resolve(outDir, file), gainDb)
     else gainDb = 0
-    variants.push({ file, measuredLufs: round2(lufs), gainDb: round2(gainDb), capped })
+    variants.push({ file, measuredLufs: round2(m.lufs), gainDb: round2(gainDb), capped, truePeakDbtp: round2(m.truePeakDb), wantedGainDb: round2(wantedGainDb) })
   }
 
-  // Record into the batch manifest (written by writeVaryBatch BEFORE rendering) so score-time
-  // readers and the training log can see what happened. Tolerant of a missing manifest so the
-  // normalizer stays usable on bare wav dirs (mirrors stitchAudition's posture).
-  const manifestPath = resolve(outDir, 'manifest.json')
-  if (existsSync(manifestPath)) {
-    const manifest = readBatchManifest(outDir)
-    manifest.normalization = { targetLufs: round2(targetLufs), truePeakCeilingDbtp: NORMALIZE_TRUE_PEAK_CEILING_DBTP }
-    for (let i = 0; i < Math.min(count, manifest.variants.length); i++) {
-      const v = variants[i]!
-      manifest.variants[i]!.loudness = { measuredLufs: v.measuredLufs, gainDb: v.gainDb, capped: v.capped }
-    }
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
-  }
-  return { targetLufs: round2(targetLufs), variants }
+  recordLoudnessInManifest(outDir, count, { targetLufs: round2(targetLufs), truePeakCeilingDbtp: NORMALIZE_TRUE_PEAK_CEILING_DBTP, normalized: true }, variants)
+  return { normalized: true, targetLufs: round2(targetLufs), basis: opts.basis ?? 'batch median', variants }
 }
 
-/** The one-line normalization summary both surfaces print after a rendered batch. */
+/** The --no-normalize half (pilot 113): measure v1.wav..vN.wav and RECORD the levels (per-variant
+ * loudness with gainDb 0, batch-level normalized: false) without touching a byte of audio — so a
+ * raw batch still leaves a measured-LUFS trail and is distinguishable from a pre-normalization
+ * one. Returns null when nothing was measurable, same as normalizeBatchLoudness. */
+export function measureBatchLoudness(outDir: string, count: number): NormalizeBatchResult | null {
+  if (count < 1) return null
+  const measured = measureVariantLevels(outDir, count)
+  if (!measured.some((m) => m !== null)) return null
+  const variants: NormalizeBatchResult['variants'] = measured.map((m, i) =>
+    m === null
+      ? { file: `v${i + 1}.wav`, measuredLufs: null, gainDb: 0, capped: false }
+      : { file: `v${i + 1}.wav`, measuredLufs: round2(m.lufs), gainDb: 0, capped: false, truePeakDbtp: round2(m.truePeakDb) },
+  )
+  recordLoudnessInManifest(outDir, count, { truePeakCeilingDbtp: NORMALIZE_TRUE_PEAK_CEILING_DBTP, normalized: false }, variants)
+  return { normalized: false, variants }
+}
+
+/** The post-`render --batch` loudness policy (pilot 113 HIGH 1: a re-render used to silently
+ * strip normalization and leave the manifest lying about the audio). Reads the batch manifest
+ * and: re-applies normalization to the manifest's RECORDED target when the batch was normalized
+ * (refreshing every loudness field); measure-only refreshes a batch recorded as raw; with
+ * normalize: false (--no-normalize) measure-only refreshes and honestly re-records the batch as
+ * not normalized. A manifest with no normalization record at all returns null untouched — that
+ * is a batch being rendered for the FIRST time (renderVaryBatch's child call), whose caller owns
+ * the normalize-or-measure decision. */
+export function refreshBatchLoudnessAfterRender(outDir: string, count: number, opts: { normalize?: boolean } = {}): NormalizeBatchResult | null {
+  if (!existsSync(resolve(outDir, 'manifest.json'))) return null
+  const recorded = readBatchManifest(outDir).normalization
+  if (opts.normalize === false) return measureBatchLoudness(outDir, count)
+  if (recorded === undefined) return null
+  // Older manifests lack `normalized` — absent means true (see the manifest field comment).
+  if (recorded.normalized === false) return measureBatchLoudness(outDir, count)
+  return normalizeBatchLoudness(outDir, count, { ...(recorded.targetLufs !== undefined ? { targetLufs: recorded.targetLufs, basis: 'manifest target' } : {}) })
+}
+
+/** The one-line loudness summary both surfaces print after a rendered batch — the normalization
+ * line, or the explicit not-normalized line (pilot 113: an opt-out run must say so). Capped
+ * variants print what was WANTED and why it was held back (a bare "+0.0 dB (capped)" was
+ * unreadable), and a batch whose renders exceed the ceiling on their own gets an honest note —
+ * the cap only limits normalization boosts, it never attenuates a hot render. */
 export function formatNormalizationResult(r: NormalizeBatchResult): string {
   const fmt = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(1)}`
-  const parts = r.variants.map((v, i) =>
-    v.measuredLufs === null
-      ? `v${i + 1} silent (untouched)`
-      : `v${i + 1} ${fmt(v.gainDb)} dB${v.capped ? ` (capped at ${NORMALIZE_TRUE_PEAK_CEILING_DBTP} dBTP)` : ''}`,
-  )
-  return `loudness-normalized to ${r.targetLufs.toFixed(1)} LUFS (batch median): ${parts.join(', ')}\n`
+  let out: string
+  if (!r.normalized) {
+    const parts = r.variants.map((v, i) => (v.measuredLufs === null ? `v${i + 1} silent` : `v${i + 1} ${v.measuredLufs.toFixed(1)} LUFS`))
+    out = `not loudness-normalized (raw render loudness kept; measured levels recorded in the manifest): ${parts.join(', ')}\n`
+  } else {
+    const parts = r.variants.map((v, i) => {
+      if (v.measuredLufs === null) return `v${i + 1} silent (untouched)`
+      if (!v.capped) return `v${i + 1} ${fmt(v.gainDb)} dB`
+      const wanted = v.wantedGainDb ?? v.gainDb
+      return v.gainDb === 0
+        ? `v${i + 1} +0.0 dB applied (wanted ${fmt(wanted)}, capped: already at ${fmt(v.truePeakDbtp ?? 0)} dBTP)`
+        : `v${i + 1} ${fmt(v.gainDb)} dB applied (wanted ${fmt(wanted)}, capped at the ${NORMALIZE_TRUE_PEAK_CEILING_DBTP} dBTP ceiling)`
+    })
+    out = `loudness-normalized to ${r.targetLufs!.toFixed(1)} LUFS (${r.basis ?? 'batch median'}): ${parts.join(', ')}\n`
+  }
+  const hot = r.variants.filter((v) => v.truePeakDbtp !== undefined && v.truePeakDbtp + v.gainDb > NORMALIZE_TRUE_PEAK_CEILING_DBTP + 0.01)
+  if (hot.length > 0) {
+    out += `note: ${hot.length} of ${r.variants.length} variant(s) exceed ${NORMALIZE_TRUE_PEAK_CEILING_DBTP} dBTP as rendered — the ceiling only caps normalization boosts, it never attenuates a hot render (beat lint flags true-peak clipping)\n`
+  }
+  return out
 }
 
 export interface WriteVaryBatchOptions {
@@ -442,9 +530,9 @@ export interface RenderBatchOptions {
    * silently — the render child never saw it). Omitted = render --batch's own default (offline
    * when the project is eligible, live otherwise). */
   mode?: 'live' | 'offline'
-  /** false = skip post-render loudness normalization (`--no-normalize` / normalize:false).
-   * Normalized is the default: see normalizeBatchLoudness above for why (the taste log's
-   * "louder wins" confound). */
+  /** false = skip post-render loudness normalization (`--no-normalize` / normalize:false) —
+   * levels are still measured and recorded (measureBatchLoudness, pilot 113). Normalized is the
+   * default: see normalizeBatchLoudness above for why (the taste log's "louder wins" confound). */
   normalize?: boolean
 }
 
@@ -455,10 +543,12 @@ export interface RenderBatchOptions {
  * still applies; the child prints per-variant progress on stderr (inherited).
  *
  * After rendering, the batch is loudness-normalized by default (normalizeBatchLoudness above —
- * gain-matched to the median variant's LUFS, -1 dBTP ceiling, recorded in the manifest) unless
- * opts.normalize is false; the returned result is the normalization summary for the caller to
- * print (null when disabled or nothing was measurable). Audition stitching happens AFTER this
- * in every caller, so audition.wav is built from the normalized renders. */
+ * gain-matched to the median variant's LUFS, upward gains capped at -1 dBTP true peak, recorded
+ * in the manifest). opts.normalize false skips the gain but still MEASURES and records the raw
+ * levels (measureBatchLoudness — pilot 113: an opt-out run says so and leaves a loudness trail).
+ * The returned result is the loudness summary for the caller to print via
+ * formatNormalizationResult (null when nothing was measurable). Audition stitching happens AFTER
+ * this in every caller, so audition.wav is built from the normalized renders. */
 export function renderVaryBatch(outDir: string, count: number, opts: RenderBatchOptions = {}): NormalizeBatchResult | null {
   if (count < 1) return null
   if (opts.linkMediaFrom !== undefined) {
@@ -478,7 +568,7 @@ export function renderVaryBatch(outDir: string, count: number, opts: RenderBatch
   execFileSync(process.execPath, args, {
     stdio: ['ignore', 'ignore', 'inherit'],
   })
-  if (opts.normalize === false) return null
+  if (opts.normalize === false) return measureBatchLoudness(outDir, count)
   return normalizeBatchLoudness(outDir, count)
 }
 

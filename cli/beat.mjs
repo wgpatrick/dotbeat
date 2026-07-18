@@ -258,7 +258,7 @@ const HELP = [
   { cmd: 'drum-kit', text: `  beat drum-kit <file> <track> <name>                      apply a drum kit to a track (replaces its whole lane list)` },
   {
     cmd: 'vary',
-    text: `  beat vary <file> <track> <group-or-lane> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render] [--audition] [--no-normalize]
+    text: `  beat vary <file> <track> <group-or-lane> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render] [--audition] [--no-normalize] [--spread] [--exclude p1,p2]
                                                           batch-generate small-diff variants. On a declared-lane
                                                           drums track (every fresh/kit drums track), target a LANE
                                                           NAME (kick, hat, tom_lo, ...) — mutates that lane's own
@@ -271,12 +271,18 @@ const HELP = [
                                                           --out-dir defaults to vary-<target>-<seed> NEXT TO the
                                                           .beat file, not the cwd; --audition implies --render and
                                                           stitches the wavs into one audition.wav + timecode index.
+                                                          --spread explores each param's FULL musical range
+                                                          (stratified bands — audibly distinct variants, what
+                                                          taste-collect uses) instead of jittering near the current
+                                                          value; --exclude leaves the named group params untouched.
                                                           Rendered variants are loudness-normalized by default (pure
-                                                          gain to the batch-median LUFS, -1 dBTP ceiling, recorded in
-                                                          the manifest) so picks rate sound, not level — the taste
-                                                          log's "louder wins" confound; --no-normalize keeps the raw
-                                                          render loudness.
-  beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,openhat | --ids a,b] [--render] [--audition]
+                                                          gain to the batch-median LUFS; upward gains capped at -1
+                                                          dBTP true peak — an already-hot render is never attenuated
+                                                          — recorded in the manifest) so picks rate sound, not level
+                                                          — the taste log's "louder wins" confound; --no-normalize
+                                                          keeps the raw render loudness (levels still measured and
+                                                          recorded).
+  beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,openhat | --ids a,b] [--spread] [--render] [--audition]
                                                           batch humanized FEEL variants (content variation) to audition + score
   beat vary <file> <track> feel --scope selection --port <p> [...same feel flags, minus --lanes/--ids]
                                                           scope to the GUI selection held by a running daemon instead of
@@ -663,13 +669,20 @@ const HELP = [
                                                           Refuses soundfont (instrument/sf-lane) projects;
                                                           an ACTIVE bitcrushRate (>1 with bitcrushMix >0)
                                                           renders as passthrough (caveat printed).
-  beat render --batch <dir> [--live | --offline]          render every .beat variant in a vary-batch dir through
+  beat render --batch <dir> [--live | --offline] [--no-normalize]
+                                                          render every .beat variant in a vary-batch dir through
                                                           ONE harness boot (what vary --render calls). Defaults
                                                           to OFFLINE compute — short clips are where it is both
                                                           exact and fast — falling back to live capture with a
                                                           printed reason when the project uses soundfonts.
                                                           --live forces realtime capture; --offline errors
-                                                          instead of falling back.
+                                                          instead of falling back. Re-rendering a batch whose
+                                                          manifest records loudness normalization re-applies it
+                                                          (to the recorded target LUFS) and refreshes the
+                                                          manifest's measured levels, so the manifest keeps
+                                                          describing the actual audio; --no-normalize keeps the
+                                                          raw re-render loudness and honestly re-records the
+                                                          batch as not normalized.
   beat render <file> --stems [--out-dir d]                Phase 37: one solo WAV per track into an out dir
                                                           (default stems-<file> next to the .beat) — stems for
                                                           external mixing or per-track metrics
@@ -1481,9 +1494,16 @@ async function tasteCollectCmd(argv) {
       try {
         // spread replaced --amount jitter for param groups (owner, 2026-07-17) AND fixed-knob feel
         // jitter (owner, 2026-07-18: groove archetypes instead of count rolls of one subtle dice).
+        // Pilot 113 (owner-approved): SOLO mix batches exclude `volume` from the varied params.
+        // These batches are loudness-normalized before rating, and volume-level differences are
+        // precisely the loudness confound the taste program controls away (docs/taste-loop-design.md
+        // "Confounds"): normalization gained a -19 dB volume edit right back (+14.9 dB), so the
+        // rater heard level-matched audio while the log recorded the volume edit as the preference
+        // — and adopting that winner writes a volume nothing normalizes into the project. Pan/eq/
+        // duck and the other mix params remain varied; they survive normalization audibly.
         for (const [id, v] of volumes) setVol(id, v.to)
         try {
-          execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'vary', file, track, group, '--count', String(count), '--seed', String(varySeed), '--spread', '--render'], { stdio: ['ignore', 'ignore', 'inherit'] })
+          execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'vary', file, track, group, '--count', String(count), '--seed', String(varySeed), '--spread', '--render', ...(solo && group === 'mix' ? ['--exclude', 'volume'] : [])], { stdio: ['ignore', 'ignore', 'inherit'] })
         } finally {
           for (const [id, v] of volumes) setVol(id, v.from)
         }
@@ -1539,7 +1559,7 @@ function flagValue(argv, flag) {
 
 async function varyCmd(argv) {
   const { VARY_GROUPS, LEGACY_DRUM_VOICE_GROUPS, laneVaryDefs, varyTrack, BeatVaryError } = await import('../dist/src/vary/vary.js')
-  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids', '--scope', '--port', '--clip', '--points', '--bars']
+  const valued = ['--count', '--amount', '--seed', '--out-dir', '--timing', '--velocity', '--push-late', '--swing', '--lanes', '--ids', '--scope', '--port', '--clip', '--points', '--bars', '--exclude']
   // Pilot 111 (MEDIUM): vary accepted ANY unknown flag silently — the pilot-109 fix landed on
   // render only. Same loud error, covering the feel/automation sub-commands too (they share this
   // argv). --live/--offline are the render-mode passthrough (see varyRenderMode below).
@@ -1620,11 +1640,15 @@ async function varyCmd(argv) {
   const { defaultBatchDir } = await import('../dist/src/vary/batch.js')
   const outDir = flagValue(argv, '--out-dir') ?? defaultBatchDir(file, group, seed)
 
+  // --exclude p1,p2: leave the named group params untouched (pilot 113: taste-collect pins mix's
+  // volume — normalization would gain-match the renders and cancel the difference being rated).
+  const exclude = flagValue(argv, '--exclude') !== undefined ? flagValue(argv, '--exclude').split(',').filter(Boolean) : undefined
+
   const text = readFileSync(file, 'utf8')
   const doc = parse(text)
   let variants
   try {
-    variants = varyTrack(doc, track, group, { count, amount, seed, spread })
+    variants = varyTrack(doc, track, group, { count, amount, seed, spread, ...(exclude !== undefined ? { exclude } : {}) })
   } catch (err) {
     if (err instanceof BeatVaryError) throw new BeatEditError(err.message)
     throw err
@@ -1640,6 +1664,12 @@ async function varyCmd(argv) {
   }
 
   if (argv.includes('--render') || argv.includes('--audition')) {
+    // Pilot 113 (MEDIUM-HIGH): a batch that varies `volume` while loudness normalization is on
+    // rates level-matched audio — the rater never hears the very difference the batch mutates,
+    // yet adopting the winner writes that volume into a project nothing normalizes. Say so.
+    if (!argv.includes('--no-normalize') && variants.some((v) => v.edits.some((e) => e.path.endsWith('.volume')))) {
+      process.stdout.write(`note: this batch varies volume, but loudness normalization will gain-match the renders — the volume differences will be largely inaudible when auditioning (pass --no-normalize to hear them raw)\n`)
+    }
     // D15/D23: the one render path is dotbeat's own engine driven headless via render.mjs --batch
     // (one harness boot per batch; offline compute by default, live fallback for soundfont
     // projects — the child prints which). Pilot 111: linkMediaFrom was missing HERE while the
@@ -2041,12 +2071,37 @@ async function tasteNextCmd(argv) {
   const gaps = shares.map(([name, target, have]) => ({ name, target, have, gap: target - have / n })).sort((a, b) => b.gap - a.gap)
   for (const g of gaps) process.stdout.write(`  ${String(g.name).padEnd(20)} ${g.have}/${n} (${Math.round((100 * g.have) / n)}%, target ${Math.round(g.target * 100)}%)${g.gap > 0.05 ? '  <- under-covered' : ''}\n`)
   const dir = root ?? dirname(resolve(logPath))
-  const top = gaps.filter((g) => g.gap > 0.05).slice(0, 2)
-  process.stdout.write(`proposed next round:\n`)
-  for (const g of top) {
-    if (g.name === 'gen realization' || g.name === 'gen style-contrast') process.stdout.write(`  beat taste-collect ${dir} --per-seed 0 --gen 4   # (fal on your machine; --gen-backend stub elsewhere)\n`)
-    else process.stdout.write(`  beat taste-collect ${dir} --per-seed 2 --count 5   # weighted toward ${g.name} by the group pools\n`)
+  // Pilot 113 (MEDIUM): this used to print the SAME gen command twice (both gen splits mapped to
+  // one string), .slice(0, 2) starved equally-under-covered feel/drum-voice splits of any command
+  // at all, and the gen proposal skipped its own prerequisite (taste-collect ERRORS without
+  // seed-*.beat in the dir — the seeds host the gen batches too, even with --per-seed 0). Now:
+  // one concrete command per under-covered split, identical commands merged into one line naming
+  // every split they serve, and a seedless dir gets the taste-seeds step prepended so the printed
+  // command matches what actually runs.
+  let seedFiles = []
+  try {
+    seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
+  } catch { /* dir unreadable/missing — treated as seedless */ }
+  const hostSeed = seedFiles.length > 0 ? join(dir, seedFiles[0]) : null
+  const seedsFirst = hostSeed === null ? `beat taste-seeds ${dir} && ` : ''
+  // Feel + drum-voice proposals vary the collection's own seeds directly (every generated seed
+  // has a legacy-kit `drums` track, so feel and the kick/snare/hats voice groups are real there).
+  const cmdFor = (name) => {
+    if (name === 'gen realization' || name === 'gen style-contrast') return [`${seedsFirst}beat taste-collect ${dir} --per-seed 0 --gen 4`, 'fal on your machine; --gen-backend stub elsewhere']
+    if (name === 'feel' && hostSeed) return [`beat vary ${hostSeed} drums feel --spread --count 5 --render`, 'groove archetypes on a collection seed']
+    if (name === 'drum voices' && hostSeed) return [`beat vary ${hostSeed} drums kick --spread --count 5 --render`, 'a drum-voice batch on a collection seed; also: snare, hats']
+    return [`${seedsFirst}beat taste-collect ${dir} --per-seed 2 --count 5`, `covered by taste-collect's random track x group pools`]
   }
+  process.stdout.write(`proposed next round:\n`)
+  const under = gaps.filter((g) => g.gap > 0.05)
+  if (under.length === 0) process.stdout.write(`  (no split is under-covered vs the target mix — collect whichever round you enjoy rating)\n`)
+  const byCmd = new Map() // command -> { note, splits[] } — merge, never repeat a line
+  for (const g of under) {
+    const [cmd, note] = cmdFor(g.name)
+    if (byCmd.has(cmd)) byCmd.get(cmd).splits.push(g.name)
+    else byCmd.set(cmd, { note, splits: [g.name] })
+  }
+  for (const [cmd, { note, splits }] of byCmd) process.stdout.write(`  ${cmd}   # ${splits.join(' + ')} (${note})\n`)
   // repeat probe: the OLDEST scored batch whose renders still exist — measures self-consistency
   const probe = batches.find((b) => existsSync(b.dir))
   if (probe) {
