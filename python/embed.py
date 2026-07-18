@@ -30,6 +30,7 @@ import argparse
 import importlib.util
 import json
 import math
+import os
 import struct
 import sys
 import wave
@@ -137,9 +138,19 @@ def run_clap(input_path, model_id):
     except Exception as e:  # librosa raises many types; the message is the useful part
         raise EmbeddingError(f"could not load {input_path}: {e}")
     try:
+        # Cached loads must never touch the network: a flaky connection leaves the hub's HEAD
+        # request in an SSL-handshake retry loop for many minutes (observed 2026-07-18, three
+        # loads hung at 0% CPU on `resolve/main/model.safetensors`). local_files_only first;
+        # the online path only runs when the model genuinely isn't cached yet.
+        def _load(cls):
+            try:
+                return cls.from_pretrained(model_id, local_files_only=True)
+            except Exception:
+                return cls.from_pretrained(model_id)
+
         with contextlib.redirect_stdout(sys.stderr):
-            model = ClapModel.from_pretrained(model_id)
-            processor = ClapProcessor.from_pretrained(model_id)
+            model = _load(ClapModel)
+            processor = _load(ClapProcessor)
         # transformers 5.x removed the deprecated `audios=` kwarg (hard ValueError); 4.38-era only
         # knows `audios=`. Try the current name first, fall back for older pins (confirmed
         # owner-side 2026-07-17 on transformers 5.13: `audios=` raises).
@@ -148,27 +159,25 @@ def run_clap(input_path, model_id):
         except (ValueError, TypeError):
             inputs = processor(audios=audio, sampling_rate=48000, return_tensors="pt")
         with torch.no_grad():
-            features = model.get_audio_features(**inputs)
-        # Shape normalization (owner-side 2026-07-17/18 + the focused fix): transformers 5.x can
-        # return the projected features with extra leading dims, and for some clip lengths CLAP
-        # feature-fusion yields MULTIPLE per-window vectors (observed flat 65536 = 64x1024) —
-        # raw flattening cached wildly inconsistent dims that silently corrupted centroid math.
-        # The projection dim is authoritative from the model config (projection_dim, 512 for the
-        # laion checkpoints; some ports use 1024) — reshape to (-1, dim) and mean-pool the window
-        # axis, so EVERY clip length yields exactly one fixed-length clip vector. A feature count
-        # not divisible by the projection dim is a hard error (cache nothing wrong), not a guess.
+            out = model.get_audio_features(**inputs)
+        # transformers 5.x get_audio_features returns BaseModelOutputWithPooling whose
+        # .pooler_output IS the projected + L2-normalized clip embedding (modeling_clap.py:
+        # audio_outputs.pooler_output = F.normalize(self.audio_projection(...))); indexing the
+        # output like a tuple grabs last_hidden_state instead — variable token counts, the
+        # cached 1024-vs-65536 dims chaos. Older transformers return the projected tensor
+        # directly; feature-fusion there can still yield one row per window, so mean-pool any
+        # extra leading rows. A final width check against the model's projection_dim refuses
+        # loudly rather than caching a hidden-state-shaped vector.
+        features = getattr(out, "pooler_output", None)
+        if features is None:
+            if not torch.is_tensor(out):
+                raise EmbeddingError(f"CLAP returned {type(out).__name__} with no pooler_output and no tensor form — refusing to cache a malformed vector")
+            features = out
+        rows = features.reshape(-1, features.shape[-1])
         proj_dim = getattr(getattr(model, "config", None), "projection_dim", None)
-        flat = features.reshape(-1)
-        if not proj_dim or flat.numel() % int(proj_dim) != 0:
-            # fall back to the observed per-window width when the config is silent but the
-            # count factors cleanly; otherwise refuse loudly
-            for candidate in (512, 1024):
-                if flat.numel() % candidate == 0:
-                    proj_dim = candidate
-                    break
-            else:
-                raise EmbeddingError(f"CLAP returned {flat.numel()} features, not divisible by any known projection dim (512/1024) — refusing to cache a malformed vector")
-        vector = flat.reshape(-1, int(proj_dim)).mean(dim=0).tolist()
+        if proj_dim and rows.shape[-1] != int(proj_dim):
+            raise EmbeddingError(f"CLAP vector width {rows.shape[-1]} != model projection_dim {proj_dim} — refusing to cache a malformed vector")
+        vector = rows.mean(dim=0).tolist()
     except Exception as e:
         raise EmbeddingError(f"CLAP embedding failed: {e}")
     return {
@@ -328,7 +337,13 @@ def main(argv):
     else:
         result = run_clap(args.input, args.model or DEFAULT_CLAP_MODEL)
     print(json.dumps(result))
-    return 0
+    # Hard-exit once the JSON is out: huggingface_hub can leave a non-daemon network thread
+    # blocked in an SSL-handshake retry, and normal interpreter shutdown waits on it forever —
+    # observed 2026-07-18 as a 0%-CPU process stuck in wait_for_thread_shutdown AFTER printing
+    # its result. The sidecar's whole contract is that one line; nothing after it matters.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":

@@ -117,6 +117,77 @@ test('beat analyze --backend beatthis really analyzes a WAV (the path CI can onl
   assert.equal(a.source.durationSeconds, 6)
 })
 
+// ---- embed sidecar (taste loop) ---------------------------------------------------------------
+
+const embedPy = join(repoRoot, 'python', 'embed.py')
+
+/** Same resolution order as src/analysis/sidecar.ts resolvePython — BEAT_PYTHON, repo venv, PATH. */
+function resolveSidecarPython(): string {
+  const override = process.env.BEAT_PYTHON
+  if (override && override.trim() !== '') return override.trim()
+  const venv = join(repoRoot, 'python', '.venv', 'bin', 'python3')
+  if (existsSync(venv)) return venv
+  return 'python3'
+}
+
+function embedSidecar(args: string[]): { status: number; stdout: string; stderr: string } {
+  try {
+    return {
+      status: 0,
+      stdout: execFileSync(resolveSidecarPython(), [embedPy, ...args], {
+        encoding: 'utf8',
+        // The owner's stored HF token has gone invalid before, and a bad implicit token makes
+        // hub requests for PUBLIC repos hang/401 (observed 2026-07-18: three model loads hung
+        // at 0% CPU). The models embed.py loads are all public — never send the stored token.
+        env: { ...process.env, HF_HUB_DISABLE_IMPLICIT_TOKEN: '1' },
+      }),
+      stderr: '',
+    }
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string; stderr?: string }
+    return { status: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' }
+  }
+}
+
+function embedDoctor(): Record<string, any> | null {
+  const out = embedSidecar(['--doctor'])
+  if (out.status !== 0) return null
+  try {
+    return JSON.parse(out.stdout)
+  } catch {
+    return null
+  }
+}
+
+const embedDoc = embedDoctor()
+const hasClap = embedDoc?.backends?.clap?.available === true
+
+test('clap embeds SHORT and LONG clips to the same fixed dims (the fusion-pooling regression)', (t) => {
+  if (!hasClap) return t.skip(SETUP_HINT)
+  // The 2026-07-18 bug: transformers 5.x get_audio_features returns an output object whose
+  // pooler_output is the projected clip embedding; grabbing it positionally cached
+  // last_hidden_state instead — dims that VARIED with clip length (1024 vs 65536), silently
+  // corrupting every centroid built from them. A >10s clip triggers CLAP's feature-fusion
+  // path (multiple windows), so short-vs-long is exactly the contrast that regresses.
+  const dir = mkdtempSync(join(tmpdir(), 'beat-owner-embed-'))
+  const short = join(dir, 'short.wav')
+  const long = join(dir, 'long.wav')
+  writeTestWav(short, 440, 1)
+  writeTestWav(long, 220, 12)
+  const results = [short, long].map((wav) => {
+    const out = embedSidecar(['--backend', 'clap', '--input', wav])
+    assert.equal(out.status, 0, `real clap embed failed on ${wav}:\n${out.stdout}${out.stderr}`)
+    const parsed = JSON.parse(out.stdout) as { backend: string; dims: number; embedding: number[] }
+    assert.equal(parsed.backend, 'clap')
+    assert.equal(parsed.dims, parsed.embedding.length)
+    return parsed
+  })
+  assert.equal(results[0]!.dims, results[1]!.dims, 'clip length must never change embedding dims')
+  // The default checkpoint (laion/larger_clap_music) projects to exactly 512; a 1024-wide vector
+  // here means hidden states leaked through again.
+  assert.equal(results[0]!.dims, 512)
+})
+
 test('beat source gen --backend stub still routes through the venv interpreter', (t) => {
   if (!hasStableaudio) return t.skip(SETUP_HINT)
   // Cheap guard on the contract Phase 39 found broken owner-side: stable-audio-tools print()s
