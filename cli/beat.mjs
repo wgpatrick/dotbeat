@@ -1449,12 +1449,13 @@ async function tasteCollectCmd(argv) {
     const file = join(dir, f)
     const doc = parse(readFileSync(file, 'utf8'))
     // every (track, group) target this seed supports; drums here are always the legacy 5-lane kit
-    // ENGINE BUG GUARD (2026-07-18): the osc group on POLYPHONIC tracks (simultaneous note
-    // starts, i.e. chords) makes the engine throw "Start time must be strictly greater than
-    // previous start time" on BOTH render paths — repro: vary seed-005.beat chords osc --render.
-    // Skip that combo until the engine scheduling fix lands (roadmap row).
-    const isPoly = (t) => { const starts = (t.notes ?? []).map((n) => n.start); return new Set(starts).size < starts.length }
-    const targets = doc.tracks.flatMap((t) => (t.kind === 'drums' ? DRUM_GROUPS : t.kind === 'synth' ? [...SYNTH_GROUPS.filter((g) => !(g === 'osc' && isPoly(t))), ...(grooveDense(t) ? ['feel'] : [])] : []).map((g) => [t.id, g]))
+    // (2026-07-18) osc used to be SKIPPED on polyphonic tracks here — every osc batch on chords
+    // died with Tone's "Start time must be strictly greater than previous start time". Root cause
+    // was NOT osc2/sub/unison scheduling: the osc vary group includes noiseLevel, and chain.noise
+    // is ONE persistent Tone source shared by every note, retriggered once per chord note at the
+    // identical slot time. Fixed in the engine by a7ac2c6 (SynthChain.lastNoiseStart monotonic
+    // guard); osc-on-poly verified clean on both render paths, so the skip is gone.
+    const targets = doc.tracks.flatMap((t) => (t.kind === 'drums' ? DRUM_GROUPS : t.kind === 'synth' ? [...SYNTH_GROUPS, ...(grooveDense(t) ? ['feel'] : [])] : []).map((g) => [t.id, g]))
     for (let b = 0; b < perSeed && targets.length > 0; b++) {
       const [track, group] = targets.splice(Math.floor(rng() * targets.length), 1)[0]
       const varySeed = Math.floor(rng() * 100000)
