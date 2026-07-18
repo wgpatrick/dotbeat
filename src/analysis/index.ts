@@ -79,6 +79,28 @@ export {
 } from './regen.js'
 // ==== end Phase 40 Stream VC ====
 
+// ==== gen-kit begin ====
+// `beat gen-kit`: compose a playable project entirely from generated sounds — the pure half
+// (role vocabulary, pick heuristics, keymap span, seeded pattern plans). Orchestration lives in
+// cli/beat.mjs. See docs/gen-kit-pipeline.md.
+export {
+  GENKIT_ROLES,
+  parseGenKitRoles,
+  genkitPrompts,
+  pickDrumCandidate,
+  pickTonalCandidate,
+  keymapSpanForRoot,
+  planDrumHits,
+  planBassHits,
+  planLeadHits,
+  BeatGenKitError,
+  type GenKitRoleSpec,
+  type GenKitPick,
+  type GenKitTonalPick,
+  type PlannedHit,
+} from './genkit.js'
+// ==== gen-kit end ====
+
 // ==== Phase 40 Stream VA begin ====
 // Pitch detection for one-shots — pure TS, zero deps, no Python (decisions.md D20). Reuses
 // src/metrics/'s FFT and WAV decoder, so the dependency direction stays analysis -> metrics.
