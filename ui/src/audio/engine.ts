@@ -1582,6 +1582,14 @@ interface SynthChain extends EffectHost {
   sub: Tone.PolySynth<Tone.Synth>
   subGain: Tone.Gain
   noise: Tone.NoiseSynth
+  /** Pilot 111's night-shift render failure: chain.noise is ONE persistent Tone.Noise source
+   * shared by every note on the track, and a CHORD triggers it once per note at the identical
+   * slot time — Tone.Source.start throws "Start time must be strictly greater than previous
+   * start time" on every simultaneous restart (an uncaught tick-time throw = a failed render).
+   * Monotonic guard, same convention as DrumTrackState.lastLaneTriggerTime: the noise layer
+   * fires once per strictly-increasing slot time (musically identical — the layer is the same
+   * white noise either way), and float-rounding non-increasing retriggers are skipped too. */
+  lastNoiseStart: number
   noiseGain: Tone.Gain
   fm: Tone.PolySynth<Tone.FMSynth>
   fmGain: Tone.Gain
@@ -2633,6 +2641,7 @@ export class Engine {
 
     return {
       synth, osc2, osc2Gain, osc2Pan, osc3, osc3Gain, osc3Pan, uniPairs, sub, subGain, noise, noiseGain, fm, fmGain,
+      lastNoiseStart: -1,
       filter, headroom, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET, saturator, chorus, phaser, pingPong,
       muteGain, levelTap, panner, vol, reverbSend, delaySend, lastOsc: null,
       lastWtTable: null, lastWtPos: null,
@@ -3679,7 +3688,10 @@ export class Engine {
         if (p.unisonVoices >= u.minVoices && p.osc2Level > 0) u.poly.triggerAttackRelease(freq * Math.pow(2, (u.mul * p.osc2Detune) / 1200), dur, slotTime, n.velocity)
       }
       if (p.subLevel > 0) chain.sub.triggerAttackRelease(freq / 2, dur, slotTime, n.velocity)
-      if (p.noiseLevel > 0) chain.noise.triggerAttackRelease(dur, slotTime, n.velocity)
+      if (p.noiseLevel > 0 && slotTime > chain.lastNoiseStart) {
+        chain.noise.triggerAttackRelease(dur, slotTime, n.velocity) // see SynthChain.lastNoiseStart
+        chain.lastNoiseStart = slotTime
+      }
       if (p.fmLevel > 0) chain.fm.triggerAttackRelease(freq, dur, slotTime, n.velocity)
       // Phase 26 Stream DL: the trigger condition below gained two new OR-clauses (keyDest/velDest
       // === 'cutoff') but the legacy keytrackMult/velMult terms and the original three OR-clauses
