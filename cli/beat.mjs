@@ -1422,13 +1422,34 @@ async function tasteCollectCmd(argv) {
     for (let b = 0; b < perSeed && targets.length > 0; b++) {
       const [track, group] = targets.splice(Math.floor(rng() * targets.length), 1)[0]
       const varySeed = Math.floor(rng() * 100000)
-      process.stderr.write(`\n=== ${f}: vary ${track} ${group} (seed ${varySeed}${group === 'feel' ? '' : `, amount ${amount}`}) ===\n`)
+      // Target-track salience (owner, 2026-07-18, twice: "the arp... is too quiet"; "chords are
+      // too quiet... maybe just the stem?"). A quiet varied track in a full mix is unratable.
+      //   - param groups (timbre judgments): SOLO the target — mute every other track, boost the
+      //     target to a prominent level. Pure A/B of the sound being varied.
+      //   - feel (groove judgments): keep the full mix but boost the target — groove is only
+      //     judgeable against the rest of the rhythm section.
+      // All level changes are batch-constant (fair comparisons) and restored right after.
+      const PROMINENT_DB = -4
+      const MUTE_DB = -60
+      const solo = group !== 'feel'
+      const volumes = new Map() // trackId -> original volume, for restore
+      for (const t of doc.tracks) {
+        const v = t.synth?.volume
+        if (typeof v !== 'number') continue
+        if (t.id === track && v < PROMINENT_DB) volumes.set(t.id, { from: v, to: PROMINENT_DB })
+        else if (solo && t.id !== track) volumes.set(t.id, { from: v, to: MUTE_DB })
+      }
+      const setVol = (id, v) => execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'set', file, `${id}.volume`, String(v)], { stdio: 'ignore' })
+      process.stderr.write(`\n=== ${f}: vary ${track} ${group} (seed ${varySeed}, spread${solo ? ', target solo' : ', full mix + boost'}) ===\n`)
       try {
-        // `feel` varies via timing/velocity, not --amount; every other group takes the bigger amount.
-        // spread (full-range stratified sampling) replaced --amount jitter here: mutation around a
-        // range-edge parent value is imperceptible no matter the amount (owner, twice, 2026-07-17).
-        const amountArgs = group === 'feel' ? [] : ['--spread']
-        execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'vary', file, track, group, '--count', String(count), '--seed', String(varySeed), ...amountArgs, '--render'], { stdio: ['ignore', 'ignore', 'inherit'] })
+        // spread replaced --amount jitter for param groups (owner, 2026-07-17) AND fixed-knob feel
+        // jitter (owner, 2026-07-18: groove archetypes instead of count rolls of one subtle dice).
+        for (const [id, v] of volumes) setVol(id, v.to)
+        try {
+          execFileSync(process.execPath, [fileURLToPath(import.meta.url), 'vary', file, track, group, '--count', String(count), '--seed', String(varySeed), '--spread', '--render'], { stdio: ['ignore', 'ignore', 'inherit'] })
+        } finally {
+          for (const [id, v] of volumes) setVol(id, v.from)
+        }
         made += 1
       } catch (err) {
         failed += 1
@@ -1661,6 +1682,9 @@ async function varyFeelCmd(argv, file, track) {
   const opts = {
     count,
     seed,
+    // --spread: groove-archetype batches (tight/light-swing/heavy-swing/laid-back/loose) — the
+    // owner flagged every fixed-knob feel batch as "all very similar" (2026-07-17/18).
+    ...(argv.includes('--spread') ? { spread: true } : {}),
     ...(flagValue(argv, '--timing') !== undefined ? { timing: Number(flagValue(argv, '--timing')) } : {}),
     ...(flagValue(argv, '--velocity') !== undefined ? { velocity: Number(flagValue(argv, '--velocity')) } : {}),
     ...(flagValue(argv, '--push-late') !== undefined ? { pushLate: Number(flagValue(argv, '--push-late')) } : {}),

@@ -433,7 +433,23 @@ export interface FeelVaryOptions {
   swing?: number
   lanes?: string[] // drum tracks: scope to these lanes
   ids?: string[] // or explicit note/hit ids
+  /** EXPLORATION mode (taste-collect, 2026-07-18): each variant gets a distinct GROOVE ARCHETYPE
+   * (tight -> light swing -> heavy swing -> laid-back -> loose) instead of `count` random rolls
+   * of one fixed-strength jitter — the owner flagged every default feel batch as "all very
+   * similar", and structurally they were: same knobs, different dice. Archetypes make the feel
+   * axis itself the variation. Explicit timing/velocity/pushLate/swing knobs are ignored. */
+  spread?: boolean
 }
+
+/** Groove archetypes for spread-mode feel batches, ordered mild -> extreme; variant i cycles
+ * through these. Values chosen to be unmistakably distinct on both drums and tonal parts. */
+const FEEL_ARCHETYPES: { label: string; timing: number; velocity: number; pushLate: number; swing: number }[] = [
+  { label: 'tight',     timing: 0.02, velocity: 0.02, pushLate: 0,    swing: 0 },
+  { label: 'light-swing', timing: 0.06, velocity: 0.05, pushLate: 0,  swing: 0.22 },
+  { label: 'heavy-swing', timing: 0.08, velocity: 0.08, pushLate: 0.04, swing: 0.55 },
+  { label: 'laid-back', timing: 0.06, velocity: 0.06, pushLate: 0.22, swing: 0.12 },
+  { label: 'loose',     timing: 0.32, velocity: 0.18, pushLate: 0.08, swing: 0.3 },
+]
 
 export interface FeelVariant {
   doc: BeatDocument
@@ -469,13 +485,15 @@ export function varyFeel(doc: BeatDocument, trackId: string, opts: FeelVaryOptio
   const variants: FeelVariant[] = []
   for (let i = 0; i < count; i++) {
     const seed = base + i
-    const { doc: next } = humanize(doc, trackId, { timing, velocity, pushLate, swing, seed, ...(ids ? { ids } : {}) })
-    const parts = [`seed=${seed}`, `timing=${formatNumber(timing)}`]
-    if (velocity) parts.push(`velocity=${formatNumber(velocity)}`)
-    if (pushLate) parts.push(`push-late=${formatNumber(pushLate)}`)
-    if (swing) parts.push(`swing=${formatNumber(swing)}`)
+    const arch = opts.spread ? FEEL_ARCHETYPES[i % FEEL_ARCHETYPES.length]! : undefined
+    const knobs = arch ?? { timing, velocity, pushLate, swing }
+    const { doc: next } = humanize(doc, trackId, { timing: knobs.timing, velocity: knobs.velocity, pushLate: knobs.pushLate, swing: knobs.swing, seed, ...(ids ? { ids } : {}) })
+    const parts = [`seed=${seed}`, `timing=${formatNumber(knobs.timing)}`]
+    if (knobs.velocity) parts.push(`velocity=${formatNumber(knobs.velocity)}`)
+    if (knobs.pushLate) parts.push(`push-late=${formatNumber(knobs.pushLate)}`)
+    if (knobs.swing) parts.push(`swing=${formatNumber(knobs.swing)}`)
     if (opts.lanes && opts.lanes.length) parts.push(`lanes=${opts.lanes.join('+')}`)
-    variants.push({ doc: next, recipe: `humanize ${parts.join(' ')}` })
+    variants.push({ doc: next, recipe: `humanize ${parts.join(' ')}${arch ? `  # ${arch.label}` : ''}` })
   }
   return variants
 }
