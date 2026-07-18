@@ -11,7 +11,7 @@ blob you hope merges.
 
 ```bash
 npm install
-npm test                          # 893 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
+npm test                          # 890 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat bass.cutoff 900   # prints "bass: cutoff 700 -> 900"
@@ -88,7 +88,7 @@ the full thesis and prior-art comparison.
 | `ui/` | dotbeat's own GUI (Vite + React + Tone.js) — arrangement view, piano-roll/drum-lane clip editing, mixer, effects chain, content browser. Its own product design, not a wrapped teaching app (see `docs/decisions.md` D12). |
 | `desktop/` | Tauri desktop shell — early-stage, working toward a native Mac app (`docs/product-spec-desktop.md`). |
 | `cli/beat.mjs` | The unified `beat` CLI — run with no args for the full, current command list. |
-| `test/` | 893 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
+| `test/` | 890 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
 | `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
 | `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
 | `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
@@ -223,6 +223,22 @@ sound is audible, and an LFO-routing fix that turned every motion batch from a s
 tour of modulation character — six by-ear no-op classes found and closed. T3's loved-music prior
 ran end-to-end owner-side (purchased tracks → validated stems/beat-grids → bar chops → per-stem
 CLAP centroids → drums/bass reference profiles now driving `lint --ref` taste-referenced critique).
+A dedicated debt-clearing session (2026-07-18) then made the embedding layer trustworthy end to
+end: probing transformers 5.x against the real model proved CLAP's `pooler_output` is the one true
+512-d clip vector — the interim reshape fix, written without torch, would have thrown on every
+real embed — so `run_clap` now takes the pooler path (owner-side regression test: a 1s and a 12s
+feature-fusion clip must embed to identical 512 dims), loads cached models offline-first (a flaky
+connection had been parking sidecar loads at 0% CPU in an SSL-handshake retry loop), and
+hard-exits after its one JSON line; all 448 stale embedding caches were rebuilt and the T3
+centroids/prior re-derived in the corrected space (cohesion up), the Audiobox-Aesthetics backend
+was verified live, vary-batch renders are now loudness-normalized to the batch median by default
+(removing the measured +0.57 louder-wins confound from all future ratings), and the "poly-osc
+engine bug" dissolved under investigation — the osc vary group includes `noiseLevel`, so it was
+the already-fixed shared-noise-source bug, and its taste-collect guard is gone. The
+feature-complete eval then delivered the taste program's headline: gen-batch taste, stuck at
+chance on DSP features alone, reaches 33% top-1 (chance 20%) with DSP+CLAP, the aesthetics axes
+alone predict vary picks at 44% top-1, and the loved-music prior transfers at 27% with zero
+dotbeat labels — the critical path now runs through more rated batches, not more code.
 `docs/product-roadmap.md` tracks every feature's real status;
 `ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
 built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a
