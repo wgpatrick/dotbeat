@@ -11,7 +11,7 @@ blob you hope merges.
 
 ```bash
 npm install
-npm test                          # 773 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
+npm test                          # 893 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat bass.cutoff 900   # prints "bass: cutoff 700 -> 900"
@@ -88,7 +88,7 @@ the full thesis and prior-art comparison.
 | `ui/` | dotbeat's own GUI (Vite + React + Tone.js) — arrangement view, piano-roll/drum-lane clip editing, mixer, effects chain, content browser. Its own product design, not a wrapped teaching app (see `docs/decisions.md` D12). |
 | `desktop/` | Tauri desktop shell — early-stage, working toward a native Mac app (`docs/product-spec-desktop.md`). |
 | `cli/beat.mjs` | The unified `beat` CLI — run with no args for the full, current command list. |
-| `test/` | 773 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
+| `test/` | 893 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
 | `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
 | `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
 | `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
@@ -204,6 +204,25 @@ made the fill-and-hear loop trustworthy by fixing pilot 105's top trap: song mod
 scene-placed content, so a groove on a track placed in no scene used to render **silent with no
 warning**, and now `inspect` and every `render` detect and flag it. That phase also made `render`
 auto-find a bundled Chromium instead of only documenting `CHROME_PATH`.
+Phase 40 built **the generative sampler**: pure-TS pitch detection (`beat sample-info`, with the
+top-partials table that tells a note from a chord) and `beat keymap`, which mints a playable,
+diffable sampler instrument — one command turns a generated one-shot into N pitch-named lanes;
+`beat source gen --count N` makes generation candidates a first-class scoreable batch (nothing
+registers until `beat adopt` picks the winner); and `beat regen --verify` makes "a fully-generated
+project is a recipe" executable — regeneration from provenance sidecars reproduced registered
+media byte-for-byte (same machine). The taste-model program (docs/taste-loop-design.md) then
+landed T0–T2 (instrumented score log, blind-shuffled rating web UI via `beat taste-seeds` →
+`taste-collect` → `beat rate`, CLAP embeddings + eval harness), exact offline render as the batch
+default (D22/D23 — ~3–4× realtime here, one engine), and hosted generation (`--backend fal`,
+seconds per one-shot; validated owner-side along with both local sidecars, which surfaced and
+fixed a stack of real dependency/API bugs). Owner-in-the-loop rating sessions then hardened the
+data collection itself: exploration-mode `--spread` (stratified full-range sampling — local
+MutaSynth mutation produces near-identical variants when the parent sits at a range edge), groove
+ARCHETYPES for feel batches on groove-capable tracks only, target-track solo/boost so the varied
+sound is audible, and an LFO-routing fix that turned every motion batch from a silent no-op into a
+tour of modulation character — six by-ear no-op classes found and closed. T3's loved-music prior
+ran end-to-end owner-side (purchased tracks → validated stems/beat-grids → bar chops → per-stem
+CLAP centroids → drums/bass reference profiles now driving `lint --ref` taste-referenced critique).
 `docs/product-roadmap.md` tracks every feature's real status;
 `ROADMAP.md` has the thesis and architecture. The core loop is still the same one this project was
 built to prove: a hand-inspectable `.beat` file is the source of truth for a live GUI session, a

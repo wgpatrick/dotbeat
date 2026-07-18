@@ -1280,8 +1280,8 @@ export const rows = [
   },
   {
     area: 'Taste loop', feature: 'T3: real-music taste prior (stems -> chops -> blind ratings)',
-    description: 'Owner-curated loved/neutral/disliked playlists -> Demucs stems -> bar-boundary chops -> embeddings + blind chop ratings through the T0 clip-set audition flow -> a per-stem-class taste prior (loved-centroid distance first), tested for transfer against historical dotbeat picks. Immediate no-ML payoff: per-stem reference profiles from loved songs for lint --ref. Private data — never enters the repo.',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    description: 'Owner-curated loved/neutral/disliked playlists -> Demucs stems -> bar-boundary chops -> embeddings + blind chop ratings through the T0 clip-set audition flow -> a per-stem-class taste prior (loved-centroid distance first), tested for transfer against historical dotbeat picks. Immediate no-ML payoff: per-stem reference profiles from loved songs for lint --ref. Private data — never enters the repo. STATUS 2026-07-18: the LOVED bucket ran end-to-end owner-side (20 purchased tracks -> htdemucs stems -> beat-grid-validated bar chops [owner click-check pass: 14 clean grids, 2 rescued, 3 excluded, 1 half-trimmed] -> CLAP per-stem centroids, cohesion .93-.97 -> drums/bass ref-profiles wired into lint --ref, first taste-referenced critique delivered). Whole-song prior transfer vs owner picks: 27% top-1 vs 20% chance at n=37 — promising, below significance. Pending: meh/disliked buckets (contrast direction), blind chop ratings, artifact-aware chop selection.',
+    core: 'progress', cli: 'progress', gui: 'na', status: 'progress',
     research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
   },
   {
@@ -1950,16 +1950,16 @@ export const rows = [
   },
 
   {
-    area: 'Known usability gaps (backlog)', feature: 'Render silently uses a stale ui/dist after git pull',
+    area: 'Known usability gaps (backlog)', feature: 'Render silently uses a stale ui/dist after git pull — resolved Phase 40 VC',
     description: 'cli/render.mjs serves ui/ via `vite preview` and auto-builds ui/dist only when the directory is MISSING entirely — after a git pull that changes the engine, an existing stale ui/dist is served as-is, and the render harness cannot even detect it (the first real all-sample-lanes render after Phase 39 came back pure silence because the served engine build predated sample-lane playback; the pendingMediaCount readiness probe printed the nonsense count -1 because the OLD bundle lacks the function — the very trap Phase 39 UA was built to close, reopened by staleness). Fix direction: compare ui/dist mtime against ui/src (or embed a build hash the harness checks) and rebuild/refuse instead of serving stale; found 2026-07-14 building examples/recipe-song, the first project exercising sample-backed lanes end-to-end through render.',
-    core: 'na', cli: 'missing', gui: 'na', status: 'not-started',
+    core: 'na', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: null,
   },
 
   {
-    area: 'Known usability gaps (backlog)', feature: 'beat score cannot rank `beat source gen` seed candidates',
+    area: 'Known usability gaps (backlog)', feature: 'beat score cannot rank `beat source gen` seed candidates — resolved Phase 40 VB',
     description: 'The natural generative-audio audition loop — same prompt, N seeds, rank the candidates, adopt the winner — cannot route through beat score/adopt, which require a beat-vary batch manifest that generation never produces. Building examples/recipe-song (2026-07-14), the snare had to be picked from its three seed candidates by out-of-band FFT metrics instead of the taste loop, and the two losing samples stay registered in the media block with no record of the audition outcome. Fix direction: let `beat source gen` emit N seed variants as a scoreable batch (manifest + optional stitched audition.wav, mirroring vary --audition), so generated sounds join the same score/suggest/adopt history as synth-param variants.',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: null,
   },
 

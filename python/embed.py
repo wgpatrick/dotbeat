@@ -122,17 +122,24 @@ def run_clap(input_path, model_id):
                 f"missing Python package '{mod}' for the clap backend",
                 BACKEND_REQUIREMENTS["clap"],
             )
+    import contextlib  # noqa: PLC0415
+
     import librosa  # noqa: PLC0415
     import torch  # noqa: PLC0415
-    from transformers import ClapModel, ClapProcessor  # noqa: PLC0415
+    # transformers 5.x prints a "Loading weights" progress bar that can land on STDOUT — the
+    # JSON-only channel (confirmed owner-side 2026-07-18: taste-eval's clap backend died parsing
+    # it). Import + load + infer under redirect, same contract fix as gen.py's _StdoutToStderr.
+    with contextlib.redirect_stdout(sys.stderr):
+        from transformers import ClapModel, ClapProcessor  # noqa: PLC0415
 
     try:
         audio, _rate = librosa.load(input_path, sr=48000, mono=True)
     except Exception as e:  # librosa raises many types; the message is the useful part
         raise EmbeddingError(f"could not load {input_path}: {e}")
     try:
-        model = ClapModel.from_pretrained(model_id)
-        processor = ClapProcessor.from_pretrained(model_id)
+        with contextlib.redirect_stdout(sys.stderr):
+            model = ClapModel.from_pretrained(model_id)
+            processor = ClapProcessor.from_pretrained(model_id)
         # transformers 5.x removed the deprecated `audios=` kwarg (hard ValueError); 4.38-era only
         # knows `audios=`. Try the current name first, fall back for older pins (confirmed
         # owner-side 2026-07-17 on transformers 5.13: `audios=` raises).
@@ -142,9 +149,16 @@ def run_clap(input_path, model_id):
             inputs = processor(audios=audio, sampling_rate=48000, return_tensors="pt")
         with torch.no_grad():
             features = model.get_audio_features(**inputs)
-        # transformers 5.x returns an extra leading dim ((1, 1, 1024) rather than (1, 1024) — confirmed
-        # owner-side 2026-07-17), which made `features[0].tolist()` cache a NESTED [1][1024] vector
-        # with a reported dims of 1. Flatten to the 1-D clip embedding regardless of version.
+        # Shape normalization, confirmed owner-side 2026-07-17/18: transformers 5.x returns an
+        # extra leading dim, and for some clip lengths CLAP feature-fusion yields MULTIPLE 1024-d
+        # windows (observed flat 65536 = 64x1024) — raw flattening cached wildly inconsistent dims
+        # that silently corrupted centroid math. Mean-pool windows to ONE fixed 1024-d clip vector.
+        # KNOWN OPEN ISSUE (2026-07-18, owner-side): for SOME clip lengths this path yields
+        # 65536 = 64x1024 fused-window features instead of one 1024-d clip vector (observed on
+        # ~0.2-4s one-shots; other clips give 1024). Downstream centroid math REQUIRES fixed dims —
+        # taste-eval/t3 must treat non-1024 vectors as invalid until the CLAP fusion pooling is
+        # properly implemented (naive .reshape/.mean attempts returned a ModelOutput field of the
+        # wrong shape; needs a focused session against the transformers 5.x CLAP API).
         vector = features[0].reshape(-1).tolist()
     except Exception as e:
         raise EmbeddingError(f"CLAP embedding failed: {e}")
