@@ -60,9 +60,12 @@ beat match <target.wav> [--track-kind synth|drum-sampler] [--budget N] [--popula
    matching).
 5. **Rendering** is the slow step, engineered accordingly: ONE offline-compute engine session
    (daemon + vite + headless Chromium, the same machinery `render --batch` boots per batch)
-   serves the entire run via the daemon's file-watch hot-swap; every evaluation is **cached** by
-   candidate-content hash (`<out>/eval-cache.jsonl`), so re-running with a bigger `--budget`
-   replays the identical trajectory for free and spends renders only on the extension.
+   serves the entire run via the daemon's file-watch hot-swap — recycled every ~350 renders
+   (measured: the headless page degrades near render ~580; a fresh page every 350 costs one
+   boot per ~6 minutes of rendering). Every evaluation is **cached** by candidate-content hash
+   (`<out>/eval-cache.jsonl`), so re-running with a bigger `--budget` replays the identical
+   trajectory for free and spends renders only on the extension — this also makes a killed or
+   crashed run resumable by simply re-running the same command.
 6. **CMA-ES itself** (`src/match/cmaes.ts`) is a dependency-free ~250-line implementation of the
    standard algorithm (Hansen's tutorial: CSA step-size, rank-one + rank-mu covariance, Jacobi
    eigendecomposition per generation), unit-tested on sphere/rosenbrock/bounded functions before
@@ -130,12 +133,23 @@ itself information.
   `test/match-harness.test.ts` — a full self-match through a fake pure-TS engine that reads the
   same candidate documents (staging, budget accounting, caching, artifacts, patch replayability,
   cutoff recovery within an octave).
-- **Real-engine self-match** (run 2026-07-18, this machine): target = a known patch (sawtooth,
-  cutoff 900, res 1.5, A 0.01 / D 0.3 / S 0.3 / R 0.4, subLevel 0.4, MIDI 57) rendered offline,
-  then `beat match target.wav --budget 300 --population 16`. Result in the PR description and
-  the roadmap row: the harness recovers the sound class and the dominant params from the
-  engine's own render with a smoke-scale budget, which is the correctness proof that needs no
-  taste and no big budget.
+- **Real-engine self-match** (run 2026-07-18, this machine): target = a known patch (sawtooth /
+  lowpass, cutoff 1800, res 0.8, A 0.02 / D 0.25 / S 0.5 / R 0.3, note A3, gate 10/16 steps)
+  rendered offline, then `beat match target2.wav --budget 800 --population 16`. Result:
+  - pitch frozen at MIDI 57 = the exact target note (f0 detection, high confidence);
+  - discrete screen recovered **sawtooth/lowpass** (with spectral init; without it the screen
+    picked triangle/bandpass — that failure is what motivated the centroid-seeded cutoff);
+  - loss 5.90 (first probe) -> **0.7684** (mel 0.40, mfcc 0.31, env 0.06), 87% reduction;
+    ceiling MFCC distance 15.3; stub-CLAP cosine 0.956 (labeled not-real — no torch here);
+  - param recovery: cutoff 1654 vs 1800 (~1/8 octave), release 0.40 vs 0.30, gate 9 vs 10
+    steps, attack both effectively-instant; decay/sustain traded against each other
+    (0.65/0.69 vs 0.25/0.5) and a same-pitch osc2 layer appeared — the expected
+    parameter-non-identifiability (audio-space match, not param-space; Masuda & Saito);
+  - throughput: ~0.4-0.6s/render; the 800-eval run ~9 min of rendering total, resumed twice
+    from cache across harness fixes (581 cache hits on the final invocation, 87s wall).
+  Two real bugs were found BY this run and fixed with regression cover: the stage-2 handoff
+  dropped the winner's note gate, and the headless page wedges near ~580 offline renders
+  (session now recycles every 350).
 
 ## Deliberate simplifications (and where they'd go next)
 

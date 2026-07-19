@@ -83,12 +83,30 @@ export async function matchCommand(argv) {
       clap: !args.noClap,
       log: (line) => console.error(line),
       sessionFactory: async (projectDir, initialText) => {
+        // One offline engine session serves the run — but RECYCLED every ~350 renders: the
+        // headless page degrades after roughly 570-600 offline renders (measured twice — a
+        // budget-800 run wedged near render 580 both times; each offline render builds a full
+        // engine graph in a fresh OfflineContext and the page's heap never fully recovers).
+        // A recycle costs one ~15s boot per 350 renders — noise next to the renders themselves.
+        const RECYCLE_EVERY = 350
+        const scratchPath = join(projectDir, 'current.beat')
+        const bootOpts = { daemonPort: args.daemonPort, previewPort: args.previewPort }
         console.error('booting one offline render session for the whole run (daemon + vite + headless Chromium)...')
-        const session = await startMatchRenderSession(join(projectDir, 'current.beat'), initialText, {
-          daemonPort: args.daemonPort,
-          previewPort: args.previewPort,
-        })
-        return session
+        let inner = await startMatchRenderSession(scratchPath, initialText, bootOpts)
+        let sessionRenders = 0
+        return {
+          async render(text, seconds) {
+            if (sessionRenders >= RECYCLE_EVERY) {
+              console.error(`recycling the render session after ${sessionRenders} renders (fresh page; the search continues)...`)
+              await inner.close()
+              inner = await startMatchRenderSession(scratchPath, text, bootOpts)
+              sessionRenders = 0
+            }
+            sessionRenders++
+            return inner.render(text, seconds)
+          },
+          close: () => inner.close(),
+        }
       },
     })
     console.log(formatMatchReport(result.report))
