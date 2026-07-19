@@ -69,6 +69,9 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>beat rate</title>
   <div id="list"></div>
   <div class="bar"><button id="submit">save ranking</button><button id="clear">clear</button><button id="skip">skip batch</button></div>
   <div class="hint">click "pick" in preference order (best first, up to 3) — letters are shuffled per batch, so listen, don't pattern-match. keys: 1-9 pick, enter save, s skip.</div>
+  <div class="hint" id="sinkrow">output: <select id="sink"><option value="">system default</option></select>
+    <button id="sinkbtn" title="list this machine's outputs (asks a one-time permission so device names show)">find headphones…</button>
+    — moves ONLY this page's audio; the rest of the system stays where it was.</div>
 </main>
 <script>
 let queue=[],idx=0,picks=[]
@@ -84,6 +87,7 @@ function show(){
     const letter=String.fromCharCode(65+i)
     return '<div class="v" id="v'+i+'"><b>'+letter+'</b><audio controls preload="none" src="/audio?b='+encodeURIComponent(b.id)+'&f='+encodeURIComponent(v)+'"></audio><span class="rank" id="r'+i+'"></span><button onclick="togglePick('+i+')">pick</button></div>'
   }).join('')
+  applySink()
 }
 function paint(){
   const b=queue[idx]
@@ -105,6 +109,24 @@ async function submit(){
 $('submit').onclick=submit
 $('clear').onclick=()=>{picks=[];paint()}
 $('skip').onclick=()=>{idx++;show()}
+// Per-page audio output (setSinkId): rate through Bluetooth headphones while the system default
+// (someone else's audio) stays on another device. Labels need a one-time mic permission grant —
+// Chrome only exposes device names after getUserMedia; the stream is stopped immediately.
+let sinkId=localStorage.getItem('rateSink')||''
+async function populateSinks(unlock){
+  if(!('setSinkId' in HTMLMediaElement.prototype)){$('sinkrow').style.display='none';return}
+  try{
+    if(unlock){const s=await navigator.mediaDevices.getUserMedia({audio:true});s.getTracks().forEach(t=>t.stop())}
+    const outs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audiooutput')
+    $('sink').innerHTML='<option value="">system default</option>'+outs.map(d=>
+      '<option value="'+d.deviceId+'"'+(d.deviceId===sinkId?' selected':'')+'>'+(d.label||'output '+d.deviceId.slice(0,6))+'</option>').join('')
+  }catch(e){/* permission denied: selector keeps whatever it has */}
+}
+function applySink(){document.querySelectorAll('audio').forEach(a=>{if(a.setSinkId)a.setSinkId(sinkId).catch(()=>{})})}
+$('sink').onchange=()=>{sinkId=$('sink').value;localStorage.setItem('rateSink',sinkId);applySink()}
+$('sinkbtn').onclick=()=>populateSinks(true)
+if(navigator.mediaDevices)navigator.mediaDevices.addEventListener?.('devicechange',()=>populateSinks(false))
+populateSinks(false)
 document.addEventListener('keydown',(e)=>{
   if(e.key==='Enter')submit()
   else if(e.key==='s')(idx++,show())
