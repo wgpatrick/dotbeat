@@ -374,8 +374,8 @@ async function captureWav(page, seconds, pageErrors) {
  * as the CPU allows. The buffer is exact-length by construction (no recorder spin-up, no trim,
  * no underrun class of bug). Refusals (soundfont tracks, undecoded media) throw with the page's
  * own reason so callers can fall back to live capture deliberately. */
-async function captureOfflineWav(page, seconds, pageErrors) {
-  console.error("rendering (offline compute through dotbeat's own engine)...")
+async function captureOfflineWav(page, seconds, pageErrors, quiet = false) {
+  if (!quiet) console.error("rendering (offline compute through dotbeat's own engine)...")
   const result = await page.evaluate(async (secs) => {
     const { blob, caveats, renderMs } = await window.__renderOffline(secs)
     const buf = await blob.arrayBuffer()
@@ -385,15 +385,17 @@ async function captureOfflineWav(page, seconds, pageErrors) {
     return { base64: btoa(binary), caveats, renderMs }
   }, seconds)
   if (pageErrors.length) throw new Error('page error(s) during offline render:\n' + pageErrors.join('\n'))
-  for (const caveat of result.caveats) console.error(`offline caveat: ${caveat}`)
   const ratio = (seconds * 1000) / Math.max(1, result.renderMs)
-  console.error(`offline compute: ${(result.renderMs / 1000).toFixed(2)}s for ${seconds.toFixed(2)}s of audio (${ratio.toFixed(1)}x realtime)`)
+  if (!quiet) {
+    for (const caveat of result.caveats) console.error(`offline caveat: ${caveat}`)
+    console.error(`offline compute: ${(result.renderMs / 1000).toFixed(2)}s for ${seconds.toFixed(2)}s of audio (${ratio.toFixed(1)}x realtime)`)
+  }
   // Honesty note, not an error: offline compute is CPU-bound and Tone's schedule-then-render
   // architecture keeps every one-shot voice node alive for the whole render (see
   // ui/src/audio/offline.ts header), so long/dense songs on a slow machine can compute SLOWER
   // than the live capture would have taken. The output is still exact — this is purely a
   // wall-clock heads-up so nobody assumes --offline is unconditionally the fast path.
-  if (ratio < 1) console.error(`note: offline computed slower than realtime on this machine — plain live capture may be faster for this project`)
+  if (!quiet && ratio < 1) console.error(`note: offline computed slower than realtime on this machine — plain live capture may be faster for this project`)
   return Buffer.from(result.base64, 'base64')
 }
 
@@ -671,6 +673,63 @@ export async function renderBatchCommand(argv) {
   } finally {
     await session.close()
     try { rmSync(currentPath) } catch { /* best-effort scratch cleanup */ }
+  }
+}
+
+/**
+ * T6 sound matching (`beat match`, cli/match.mjs): a PERSISTENT offline render session over ONE
+ * scratch .beat file — the same daemon-watched-file hot-swap mechanism renderBatchCommand uses
+ * per batch, kept open for thousands of candidate renders so the whole CMA-ES run pays the
+ * daemon + vite + Chromium boot cost exactly once. Offline-compute only (candidate projects are
+ * generated one-note synth/sample docs — always offline-eligible; a refusal is a hard error, not
+ * a live-capture fallback, because match's loss depends on offline's exactness).
+ *
+ * `scratchPath` must sit in the candidate project dir (so relative media/ resolves); it is
+ * created here with `initialText` and left on disk at close (the harness's own out-dir hygiene).
+ */
+export async function startMatchRenderSession(scratchPath, initialText, opts = {}) {
+  writeFileSync(scratchPath, initialText)
+  const refusal = await offlinePreflightRefusal(scratchPath)
+  if (refusal) throw new Error(`offline render refused: ${refusal}`)
+  const session = await bootRenderSession(scratchPath, {
+    daemonPort: opts.daemonPort !== undefined ? Number(opts.daemonPort) : 0,
+    previewPort: opts.previewPort !== undefined ? Number(opts.previewPort) : 5899,
+  })
+  let lastText = initialText
+  return {
+    /** Render `text` for `seconds`; returns WAV bytes (Buffer). */
+    async render(text, seconds) {
+      if (text !== lastText) {
+        const prevFingerprint = await session.page.evaluate(() => JSON.stringify(window.__store.getState().doc))
+        // The daemon's file watcher can miss one write in a many-hundred-swap run (measured: a
+        // budget-800 self-match died at swap ~580 on a single dropped fs event) — so the swap
+        // RETRIES by rewriting the file (fresh mtime, fresh watch event) before giving up.
+        let swapped = false
+        for (let attempt = 0; attempt < 3 && !swapped; attempt++) {
+          writeFileSync(scratchPath, text)
+          try {
+            await session.page.waitForFunction(
+              (prev) => JSON.stringify(window.__store.getState().doc) !== prev,
+              prevFingerprint,
+              { timeout: 15000 },
+            )
+            swapped = true
+          } catch (err) {
+            if (attempt === 2) {
+              throw new Error(`render session lost a doc swap (3 writes, no store reload): ${err && err.message ? err.message.split('\n')[0] : err}`)
+            }
+          }
+        }
+        await sleep(150) // let the engine's sync() tick absorb the new doc before capture
+        lastText = text
+      }
+      const bytes = await captureOfflineWav(session.page, seconds, session.pageErrors, true)
+      session.pageErrors.length = 0
+      return bytes
+    },
+    async close() {
+      await session.close()
+    },
   }
 }
 

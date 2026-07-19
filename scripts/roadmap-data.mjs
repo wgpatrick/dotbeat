@@ -1316,9 +1316,9 @@ export const rows = [
   },
   {
     area: 'Taste loop', feature: 'T6: sound matching / expressiveness ceiling (CMA-ES)',
-    description: 'Per-target CMA-ES (population ~24 parallel renders, 2-5K budget) against loudness-normalized reference stem chops: log-mel MSS + MFCC + envelope loss, pitch frozen from f0 detection, discrete params enumerated, staged source-then-inserts search; ceiling reported in MFCC + CLAP cosine per sound class. Doubles as auto-preset-from-reference; unreachable classes become an evidence-backed engine feature list (INSTRUMENTAL: unison + noise floor was the single biggest lever).',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
-    research: 'research/107-taste-model-program.md', plan: 'taste-loop-design.md',
+    description: 'Per-target CMA-ES (population ~24, 2-5K budget) against loudness-normalized reference stem chops: log-mel MSS + MFCC + envelope loss, pitch frozen from f0 detection, discrete params enumerated, staged source-then-inserts search; ceiling reported in MFCC + CLAP cosine per sound class. Doubles as auto-preset-from-reference; unreachable classes become an evidence-backed engine feature list (INSTRUMENTAL: unison + noise floor was the single biggest lever). HARNESS DONE 2026-07-18: `beat match <chop.wav> [--track-kind synth|drum-sampler] [--budget N] [--population 24] [--out dir]` (docs/t6-sound-matching.md) — dependency-free CMA-ES in src/match/ (unit-tested on sphere/rosenbrock before touching audio), one persistent offline engine session for the whole run (daemon hot-swap, same machinery as render --batch), evals cached by candidate hash (bigger-budget re-runs resume free), outputs best.beat + patch.txt (plain beat-set lines) + loss-curve.jsonl + report.json (MFCC + CLAP cosine via the embed sidecar, named-reason degrade without python — torch never required). Verified by a real-engine SELF-MATCH (recovering a known patch from its own render) plus a browser-free fake-engine self-match in CI. PENDING: the actual ceiling study — owner picks 5-10 stem chops, 2-5K budget runs per target.',
+    core: 'progress', cli: 'progress', gui: 'na', status: 'progress',
+    research: 'research/107-taste-model-program.md', plan: 't6-sound-matching.md',
   },
   {
     area: 'Taste loop', feature: 'Gen-kit pipeline: compose a playable beat entirely from generated sounds (`beat gen-kit`)',

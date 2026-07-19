@@ -210,7 +210,8 @@ test('beat help <cmd> works and appends the command\'s "related:" family', () =>
   assert.match(out, /^usage:\n {2}beat vary <file> <track> <group-or-lane>/)
   assert.match(out, /beat vary --groups/)
   // Pilot 108: the family is the whole taste loop now — audition and taste-eval joined it
-  assert.match(out, /\nrelated: beat audition, beat score, beat adopt, beat suggest, beat taste-eval\n$/)
+  // (and T6's beat match joined the same family)
+  assert.match(out, /\nrelated: beat audition, beat score, beat adopt, beat suggest, beat taste-eval, beat match\n$/)
   // set's per-command view carries its paths footer
   const setHelp = beat(['set', '--help'])
   assert.match(setHelp, /paths for set: bpm \| loop_bars/)
