@@ -18,6 +18,7 @@ import {
   extendToFourBars,
   soloForShowdown,
   applyProductionTreatment,
+  foldBpmToRange,
   keymapScratchText,
   phraseFromSeed,
   buildPitchedKeymapPhrase,
@@ -620,4 +621,16 @@ test('a showdown batch dir looks exactly like any other rateable batch (manifest
   // and its label surface (track ?? '' + group) carries no per-clip source hint
   assert.equal(manifest.track, undefined)
   assert.equal(manifest.group, 'showdown:lead')
+})
+
+test('foldBpmToRange: half/double-time readings fold into [70,180], integers out, bad input throws', () => {
+  assert.equal(foldBpmToRange(61.2), 122) // half-time reading of a 122 house chop
+  assert.equal(foldBpmToRange(244.8), 122) // double-time reading of the same
+  assert.equal(foldBpmToRange(128), 128) // in-range passes through
+  assert.equal(foldBpmToRange(35), 70) // one doubling lands on the low edge
+  assert.equal(foldBpmToRange(172.4), 172) // rounds, no fold
+  // a pathological narrow range can't oscillate forever — the final clamp keeps it honest
+  assert.equal(foldBpmToRange(80, 100, 150), 100)
+  assert.throws(() => foldBpmToRange(0))
+  assert.throws(() => foldBpmToRange(-120))
 })

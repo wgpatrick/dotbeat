@@ -1744,7 +1744,33 @@ async function showdownCmd(argv) {
       process.stderr.write(`\n=== showdown ${spec.role}: composed figure in ${seed.file}'s key — engine vs ${withProduced ? 'engineplus vs ' : ''}gen vs keymap${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
       try {
         mkdirSync(workDir, { recursive: true })
-        const extended = showdown.extendToFourBars(seed.doc)
+
+        // BPM matching (owner, 2026-07-21, mid-rating: mixed tempos in one blind batch are both
+        // a tell and a comparison killer). The ref clip is the only source that can't be
+        // re-rendered, so the whole batch conforms to IT: detect its tempo with the analysis
+        // sidecar (cached next to the wav), fold half/double-time readings into range, and
+        // render engine/keymap/engineplus at that bpm; the gen prompt gets the same bpm as an
+        // explicit hint. No ref (or sidecar unavailable — e.g. stub/CI): the seed's own bpm is
+        // used, which still pins gen to the composed clips.
+        const refPathEarly = (() => {
+          if (refDir === undefined) return null
+          const pool = refPool(spec.role)
+          return pool.length > 0 ? resolve(pool[refPick % pool.length]) : null
+        })()
+        let batchBpm = seed.doc.bpm
+        if (refPathEarly !== null && genBackend !== 'stub') {
+          try {
+            const { runAnalysis } = await import('../dist/src/analysis/sidecar.js')
+            const { artifact } = await runAnalysis({ audioPath: refPathEarly, backend: 'beatthis' })
+            if (typeof artifact.bpm === 'number' && artifact.bpm > 0) {
+              batchBpm = showdown.foldBpmToRange(artifact.bpm)
+              process.stderr.write(`bpm-matched to ref: ${batchBpm} BPM (detected ${artifact.bpm.toFixed(1)}, ${artifact.bpmMethod})\n`)
+            }
+          } catch (err) {
+            process.stderr.write(`bpm match skipped (${err?.message?.split('\n')[0] ?? err}) — using seed bpm ${batchBpm}\n`)
+          }
+        }
+        const extended = { ...showdown.extendToFourBars(seed.doc), bpm: batchBpm }
 
         // per-batch composed figure (un-blinding fix, owner 2026-07-21: the seed's own phrases
         // were narrow enough to fingerprint across batches). Engine and keymap share this ONE
@@ -1779,7 +1805,7 @@ async function showdownCmd(argv) {
         let kmDoc
         let kmFrom
         if (spec.keymap.kind === 'pitched') {
-          writeFileSync(kmBase, showdown.keymapScratchText(seed.doc.bpm))
+          writeFileSync(kmBase, showdown.keymapScratchText(batchBpm))
           const oneShot = genSubject(spec.keymap.oneShotSubjectId)
           const kmPrompt = `${oneShot.subject}, ${kmStyle}`
           await lib.addGeneratedSource({ beatFile: kmBase, id: 'sdkm', prompt: kmPrompt, seconds: oneShot.seconds, seed: kmSeed, backend: genBackend })
@@ -1833,7 +1859,7 @@ async function showdownCmd(argv) {
         // showdown round's gen clip isn't recognizable by always being the same musical
         // character (owner, 2026-07-21).
         const phraseSubject = genSubjectVaried(spec.phraseSubjectId, rng)
-        const genPrompt = `${phraseSubject.subject}, ${style}`
+        const genPrompt = `${phraseSubject.subject}, ${style}, ${batchBpm} BPM`
         const genDir = join(workDir, 'gen')
         await lib.genSourceBatch({
           beatFile: seedPath,
@@ -1855,12 +1881,10 @@ async function showdownCmd(argv) {
           { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
         ]
         if (refDir !== undefined) {
-          const pool = refPool(spec.role)
-          if (pool.length === 0) {
+          if (refPathEarly === null) {
             process.stderr.write(`warning: no .wav under ${refDir}${existsSync(join(refDir, spec.role)) ? `/${spec.role}` : ''} — building this ${spec.role} batch without a ref clip\n`)
           } else {
-            const refPath = resolve(pool[refPick % pool.length])
-            clips.push({ kind: 'ref', wav: refPath, from: refPath })
+            clips.push({ kind: 'ref', wav: refPathEarly, from: refPathEarly })
           }
         }
 

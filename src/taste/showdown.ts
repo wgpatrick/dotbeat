@@ -198,6 +198,20 @@ export function applyProductionTreatment(doc: BeatDocument, trackId: string): Pr
   return { doc: out, applied }
 }
 
+/** Fold a detected tempo into the plausible showdown range by octave-doubling/halving — beat
+ * trackers on short chops routinely report half- or double-time (a 61 BPM reading of a 122 BPM
+ * house chop). [70, 180] covers the taste-seed space (90-160) with headroom on both sides; the
+ * result is rounded to an integer because .beat bpm and gen prompts both want whole numbers. */
+export function foldBpmToRange(bpm: number, lo = 70, hi = 180): number {
+  if (!Number.isFinite(bpm) || bpm <= 0) throw new BeatBatchError(`cannot fold a non-positive bpm (${bpm})`)
+  let b = bpm
+  while (b < lo) b *= 2
+  while (b > hi) b /= 2
+  // a pathological input can oscillate (e.g. lo=100 hi=150, bpm=80 -> 160 -> 80); one final
+  // clamp keeps the result honest rather than looping forever
+  return Math.round(Math.min(Math.max(b, lo), hi))
+}
+
 /** Minimal host project for a pitched keymap phrase: one drums-kind track ("phrase") the CLI
  * registers the generated one-shot into (beat source gen -> media/) before buildPitchedKeymapPhrase
  * declares the lanes and writes the hits. Emitted as text and parse-validated by the caller, same

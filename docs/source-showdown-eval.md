@@ -63,6 +63,13 @@ Per role, per round, from a `beat taste-seeds` directory:
    shortest clip; `--seconds` overrides), and the whole batch is gain-matched to a common LUFS by
    the same `normalizeBatchLoudness` every vary batch uses — cross-source loudness differences
    are exactly the confound the taste program controls away.
+8. **BPM matching** (owner, 2026-07-21, mid-rating: mixed tempos in one blind batch are both a
+   tell and a comparison killer): the ref clip is the only source that can't be re-rendered, so
+   the batch conforms to IT — its tempo is detected with the analysis sidecar (`beat analyze`
+   beatthis, cached next to the wav), folded out of half/double-time into 70-180
+   (`foldBpmToRange`), and the composed clips render at that bpm while the gen prompt carries it
+   as an explicit `N BPM` hint. Without a ref (or without the sidecar — stub/CI), everything
+   conforms to the seed's own bpm, which still pins gen to the composed clips.
 
 The batch is an ordinary clip-set batch (empty parent: score works, adopt refuses), group
 `showdown:<role>`, so `beat rate` queues it, `beat score` logs it, and taste-eval's ablation
