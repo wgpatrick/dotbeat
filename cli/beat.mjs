@@ -666,16 +666,21 @@ const HELP = [
   {
     cmd: 'showdown',
     text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
-                [--gen-backend fal|stub|stableaudio] [--ref-dir <path>] [--seconds S]
+                [--gen-backend fal|stub|stableaudio] [--with-produced] [--ref-dir <path>] [--seconds S]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
                                                           source — engine (the role's seed phrase, soloed, through
                                                           dotbeat's own synth), gen (a fal-generated phrase from
                                                           the prompt bank's phrase tier), keymap (a generated
                                                           one-shot played as an instrument through the engine's
-                                                          sampler lanes), and optionally ref (--ref-dir). Clips
-                                                          are duration-matched (trim/pad; --seconds overrides the
-                                                          shortest-clip default) and loudness-normalized to a
+                                                          sampler lanes), optionally engineplus (--with-produced:
+                                                          the SAME figure and patch as the engine clip plus a
+                                                          production pass — unison/chorus width, saturation,
+                                                          reverb/delay sends, eqHigh air — the "is it the synth
+                                                          or the production?" ablation), and optionally ref
+                                                          (--ref-dir). Clips are duration-matched (trim/pad;
+                                                          --seconds overrides the shortest-clip default) and
+                                                          loudness-normalized to a
                                                           common LUFS; sources are seeded-shuffled into v-numbers
                                                           so rating stays blind. Rate with beat rate as usual.
   beat showdown --report [--log f] (or beat showdown <dir> --report [--json])
@@ -1645,7 +1650,7 @@ function flagValue(argv, flag) {
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
   const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--ref-dir', '--seconds', '--log']
-  const known = new Set([...valued, '--report', '--json'])
+  const known = new Set([...valued, '--report', '--json', '--with-produced'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const dir = positional[0]
@@ -1664,7 +1669,7 @@ async function showdownCmd(argv) {
   if (argv.includes('--json')) throw new BeatEditError('--json only applies to showdown --report')
 
   // ---- collection ------------------------------------------------------------------------------
-  if (!dir) throw new BeatEditError('showdown needs the taste-seeds directory: beat showdown <dir> [--roles r1,r2] [--rounds 1] [--ref-dir <path>] (or --report)')
+  if (!dir) throw new BeatEditError('showdown needs the taste-seeds directory: beat showdown <dir> [--roles r1,r2] [--rounds 1] [--with-produced] [--ref-dir <path>] (or --report)')
   const { mulberry32 } = await import('../dist/src/taste/eval.js')
   const { genSubject, genSubjectVaried, genStyles } = await import('../dist/src/taste/seeds.js')
   const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
@@ -1679,6 +1684,10 @@ async function showdownCmd(argv) {
   const metaSeed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
   const genBackend = flagValue(argv, '--gen-backend') ?? 'fal'
   const targetSeconds = flagValue(argv, '--seconds') !== undefined ? Number(flagValue(argv, '--seconds')) : undefined
+  // the engineplus ablation (docs/source-showdown-eval.md): a fifth clip — same figure, same
+  // patch, plus a production pass as ordinary .beat edits — measuring how much of the engine's
+  // blind-rating deficit is production (width/air/glue) rather than raw synth timbre
+  const withProduced = argv.includes('--with-produced')
   const refDir = flagValue(argv, '--ref-dir')
   if (refDir !== undefined && !existsSync(refDir)) throw new BeatEditError(`no directory at --ref-dir ${refDir}`)
 
@@ -1732,7 +1741,7 @@ async function showdownCmd(argv) {
       const seedPath = join(dir, seed.file)
       const outDir = join(dir, `showdown-${spec.role}-${batchSeed}`)
       const workDir = join(outDir, 'work')
-      process.stderr.write(`\n=== showdown ${spec.role}: composed figure in ${seed.file}'s key — engine vs gen vs keymap${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
+      process.stderr.write(`\n=== showdown ${spec.role}: composed figure in ${seed.file}'s key — engine vs ${withProduced ? 'engineplus vs ' : ''}gen vs keymap${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
       try {
         mkdirSync(workDir, { recursive: true })
         const extended = showdown.extendToFourBars(seed.doc)
@@ -1758,6 +1767,11 @@ async function showdownCmd(argv) {
 
         // engine clip: the composed figure soloed through dotbeat's own synth engine
         const engineDoc = showdown.soloForShowdown(phrased, spec.seedTrack)
+
+        // engineplus clip (--with-produced): the SAME soloed doc — identical notes, identical
+        // patch — plus the production pass (width/air/glue as ordinary .beat edits)
+        let produced = null
+        if (withProduced) produced = showdown.applyProductionTreatment(engineDoc, spec.seedTrack)
 
         // keymap clip: generated one-shot(s) registered into a scratch host, then played as an
         // instrument through the engine's sampler lanes
@@ -1795,22 +1809,24 @@ async function showdownCmd(argv) {
           kmFrom = `sample-lane kit of generated one-shots ("${kmStyle}") playing the composed ${figure} groove`
         }
 
-        // render engine + keymap in ONE batch boot (offline by default; raw levels — the whole
-        // showdown batch is normalized together below, across sources)
+        // render engine (+ engineplus) + keymap in ONE batch boot (offline by default; raw
+        // levels — the whole showdown batch is normalized together below, across sources)
+        const workVariants = [
+          { doc: engineDoc, recipe: `engine ${spec.seedTrack} solo (composed ${figure})` },
+          ...(produced ? [{ doc: produced.doc, recipe: `engine ${spec.seedTrack} solo + production pass (composed ${figure})` }] : []),
+          { doc: kmDoc, recipe: `keymap phrase (composed ${figure})` },
+        ]
         writeVaryBatch({
           parentPath: seedPath,
           parentText: readFileSync(seedPath, 'utf8'),
           track: spec.seedTrack,
           group: 'showdown-work',
-          count: 2,
+          count: workVariants.length,
           seed: batchSeed,
           outDir: workDir,
-          variants: [
-            { doc: engineDoc, recipe: `engine ${spec.seedTrack} solo (composed ${figure})` },
-            { doc: kmDoc, recipe: `keymap phrase (composed ${figure})` },
-          ],
+          variants: workVariants,
         })
-        renderVaryBatch(workDir, 2, { normalize: false })
+        renderVaryBatch(workDir, workVariants.length, { normalize: false })
 
         // gen clip: the role's phrase-tier prompt, one candidate (prep pipeline included).
         // genSubjectVaried draws a genre/mood variant (not just a style treatment) so every
@@ -1832,7 +1848,10 @@ async function showdownCmd(argv) {
 
         const clips = [
           { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `composed ${figure} figure on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
-          { kind: 'keymap', wav: join(workDir, 'v2.wav'), from: kmFrom },
+          ...(produced
+            ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: `same composed ${figure} figure and patch as the engine clip + production pass: ${produced.applied.join(', ')} (dotbeat engine)` }]
+            : []),
+          { kind: 'keymap', wav: join(workDir, produced ? 'v3.wav' : 'v2.wav'), from: kmFrom },
           { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
         ]
         if (refDir !== undefined) {

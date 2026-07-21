@@ -4,6 +4,9 @@
 //
 //   engine  — the role's phrase from a taste-seed song, soloed, rendered through dotbeat's own
 //             synth engine (the "can our synth carry this part?" baseline)
+//   engineplus — (opt-in, --with-produced) the SAME figure through the SAME patch plus a
+//             production pass expressed as ordinary .beat edits (width/air/glue — see
+//             applyProductionTreatment) — the ablation separating "bad synth" from "no production"
 //   gen     — a fal/stub-generated phrase for the same role (the prompt bank's phrase tier)
 //   keymap  — a generated ONE-SHOT turned into an instrument (beat keymap / sample lanes) playing
 //             the SAME phrase through the engine's sampler — the hybrid the owner is curious about
@@ -22,6 +25,7 @@ import { resolve } from 'node:path'
 import {
   parse,
   serialize,
+  addEffect,
   addHit,
   addLane,
   removeLane,
@@ -36,7 +40,7 @@ import { shuffledOrder } from '../vary/audition.js'
 import { genSubject } from './seeds.js'
 import { SPLIT_SMOKE_MIN_BATCHES, mulberry32 } from './eval.js'
 
-export type ShowdownSourceKind = 'engine' | 'gen' | 'keymap' | 'ref'
+export type ShowdownSourceKind = 'engine' | 'engineplus' | 'gen' | 'keymap' | 'ref'
 
 /** Volume levels shared with taste-collect's solo logic (owner feedback 2026-07-18: a quiet
  * varied track in a full mix is unratable — the showdown compares the SOUND of one role, so the
@@ -111,6 +115,87 @@ export function soloForShowdown(doc: BeatDocument, trackId: string): BeatDocumen
     return { ...t, synth: { ...t.synth, volume: SHOWDOWN_MUTE_DB } }
   })
   return { ...doc, tracks }
+}
+
+// ---- production treatment (the engineplus ablation) --------------------------------------------
+// Feature-mining the first 21 rated showdown batches (2026-07-21) showed the engine's clips lose
+// on PRODUCTION, not (only) raw timbre: dead mono (stereo correlation 1.00, width -52 dB vs ref
+// -11 dB — the batch solos one center-panned single-voice track), near-zero air band (0.22% vs
+// 1.89% energy above ~10 kHz), and the lowest production-complexity score, while production-
+// QUALITY was flat across sources. `engineplus` isolates that variable: the SAME composed figure
+// through the SAME synth patch, plus a production pass expressed entirely as ordinary .beat edits
+// (existing SYNTH_FIELDS + the effect chain — no new engine features). If engineplus closes most
+// of the engine's blind-rating deficit, the fix is production defaults, not a new synth.
+//
+// Every treatment requested for this ablation exists in the format vocabulary already, so nothing
+// is skipped: width comes from the osc bank's own unison stack (osc2 detune layer + unisonWidth
+// stereo spread) plus a light chorus insert — honest stereo, no opposite-panned duplicate track
+// needed; "gentle saturation" is the always-wired saturator insert (saturatorDrive/Mix); space is
+// the shared reverb/delay return buses (sendReverb/sendDelay); the air lift is eq3's high shelf
+// (eqHigh), present in every migrated default chain. Values only ever INTENSIFY (Math.max against
+// the patch's own settings) so a seed patch that already carries some production keeps it.
+
+export interface ProductionTreatment {
+  doc: BeatDocument
+  /** honest, human-readable list of what was actually changed — the manifest's `from` record */
+  applied: string[]
+}
+
+/** Apply the engineplus production pass to `trackId` (synth or drums — the four showdown roles).
+ * Notes/hits are untouched by construction: the comparison against the plain engine clip holds
+ * the figure and patch constant and varies ONLY production. */
+export function applyProductionTreatment(doc: BeatDocument, trackId: string): ProductionTreatment {
+  const track = doc.tracks.find((t) => t.id === trackId)
+  if (!track) throw new BeatBatchError(`no track "${trackId}" to produce (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
+  if (track.kind !== 'synth' && track.kind !== 'drums') {
+    throw new BeatBatchError(`production treatment covers synth/drums tracks, and "${trackId}" is ${track.kind}`)
+  }
+  const applied: string[] = []
+  const s = { ...track.synth }
+  // width — synth tracks use the osc bank's unison stack (osc3 + outer pairs only sound when
+  // unisonVoices >= 3 AND osc2Level > 0, engine applyParams); drum voices don't read the osc
+  // bank, so a drums track's width comes from the chorus insert + the stereo reverb return.
+  if (track.kind === 'synth') {
+    if (s.osc2Level <= 0) {
+      s.osc2Type = s.osc // a detuned layer of the same voice — thickness, not a new timbre
+      s.osc2Level = 0.35
+      s.osc2Detune = 10 // cents: audible width/thickening, not a second pitch
+      applied.push('osc2 layer (same osc, +10c, level 0.35)')
+    }
+    if (s.unisonVoices < 5 || s.unisonWidth < 0.6) {
+      s.unisonVoices = Math.max(s.unisonVoices, 5)
+      s.unisonWidth = Math.max(s.unisonWidth, 0.6)
+      applied.push(`unison ${s.unisonVoices} voices width ${rnd2(s.unisonWidth)}`)
+    }
+  }
+  const chorusTarget = track.kind === 'drums' ? 0.15 : 0.25 // lighter on drums — keep the kick's mono punch
+  if (s.chorusMode === 'off' || s.chorusMix < chorusTarget) {
+    if (s.chorusMode === 'off') s.chorusMode = 'chorus'
+    s.chorusMix = Math.max(s.chorusMix, chorusTarget)
+    applied.push(`chorus mix ${rnd2(s.chorusMix)}`)
+  }
+  if (s.saturatorDrive < 0.25 || s.saturatorMix < 0.3) {
+    s.saturatorDrive = Math.max(s.saturatorDrive, 0.25)
+    s.saturatorMix = Math.max(s.saturatorMix, 0.3)
+    applied.push(`saturator drive ${rnd2(s.saturatorDrive)} mix ${rnd2(s.saturatorMix)}`)
+  }
+  if (s.sendReverb < 0.18) {
+    s.sendReverb = 0.18
+    applied.push('sendReverb 0.18')
+  }
+  if (track.kind === 'synth' && s.sendDelay < 0.08) {
+    s.sendDelay = 0.08 // a touch of delay glue on pitched roles; skipped on drums (it re-writes the groove)
+    applied.push('sendDelay 0.08')
+  }
+  if (s.eqHigh < 2.5) {
+    s.eqHigh = 2.5
+    applied.push('eqHigh +2.5 dB air')
+  }
+  let out: BeatDocument = { ...doc, tracks: doc.tracks.map((t) => (t.id === trackId ? { ...t, synth: s } : t)) }
+  // eqHigh only sounds through an eq3 insert; every migrated track has one by default, but a
+  // chain explicitly emptied with `effects none` would not — re-add rather than silently no-op.
+  if (!track.effects.some((e) => e.type === 'eq3' && e.enabled)) out = addEffect(out, trackId, 'eq3').doc
+  return { doc: out, applied }
 }
 
 /** Minimal host project for a pitched keymap phrase: one drums-kind track ("phrase") the CLI
@@ -980,8 +1065,9 @@ export function computeShowdownReport(logPath: string): ShowdownReport {
 const pct = (num: number, den: number) => (den === 0 ? '—' : `${Math.round((100 * num) / den)}%`)
 
 function statLine(s: SourceStat, indent: string): string {
+  // pad to the longest kind name ('engineplus') so mixed-kind scoreboards stay column-aligned
   return (
-    `${indent}${s.kind.padEnd(7)} win ${pct(s.wins, s.batches)} (${s.wins}/${s.batches})` +
+    `${indent}${s.kind.padEnd(10)} win ${pct(s.wins, s.batches)} (${s.wins}/${s.batches})` +
     `  top-half ${pct(s.topHalf, s.batches)} (${s.topHalf}/${s.batches})` +
     `  pairwise ${pct(s.pairsWon, s.pairCount)} of ${s.pairCount}\n`
   )

@@ -13,6 +13,7 @@ per **source pipeline**, blind, loudness-matched, duration-matched:
 | source   | what it is | what a win means |
 |----------|------------|------------------|
 | `engine` | the role's phrase from a taste-seed song, soloed, rendered through dotbeat's own synth engine | the synth engine can carry this part |
+| `engineplus` | (opt-in, `--with-produced`) the **same figure and patch** as the engine clip plus a production pass applied as ordinary `.beat` edits | the engine's deficit is production, not timbre — see "The engineplus ablation" below |
 | `gen`    | a hosted-generation phrase (fal, Stable Audio; the prompt bank's phrase tier — bassline / chords / melody / drumloop subjects, 4 bars) | raw generation beats everything the engine does |
 | `keymap` | a generated **one-shot** turned into an instrument (`beat keymap` for pitched roles, sample-backed drum lanes for the drum-loop role) playing the **same seed phrase** through the engine's sampler | the hybrid wins: generated *timbre* + engine *notes* |
 | `ref`    | (opt-in, off by default) a clip from a private directory of commercial-music chops | the private ceiling — how far every pipeline still is from records the owner loves |
@@ -49,11 +50,14 @@ Per role, per round, from a `beat taste-seeds` directory:
    and write the seed phrase as hits; drum-loop — re-back the seed's kick/snare/hat lanes with
    the generated one-shots, pattern untouched. Rendered in the same one-boot batch render as the
    engine clip.
-4. **gen**: one phrase-tier candidate through the standard `genSourceBatch` prep pipeline
+4. **engineplus** (only with `--with-produced`): `applyProductionTreatment` on the engine clip's
+   own soloed doc — identical notes, identical patch — rendered in the same one-boot batch as the
+   engine and keymap clips.
+5. **gen**: one phrase-tier candidate through the standard `genSourceBatch` prep pipeline
    (`--gen-backend stub` for CI/testing, `fal` for real collection).
-5. **ref** (only with `--ref-dir`): pick a `.wav` under the given path (a `<ref-dir>/<role>/`
+6. **ref** (only with `--ref-dir`): pick a `.wav` under the given path (a `<ref-dir>/<role>/`
    subdir scopes the pool when present).
-6. Assemble: sources are shuffled into `v1..vN.wav` with a seeded permutation (first blinding
+7. Assemble: sources are shuffled into `v1..vN.wav` with a seeded permutation (first blinding
    layer — `beat rate` shuffles presentation again), the manifest records each clip's
    `source.kind` + provenance, clips are duration-matched (trim-with-fade / zero-pad to the
    shortest clip; `--seconds` overrides), and the whole batch is gain-matched to a common LUFS by
@@ -63,6 +67,39 @@ Per role, per round, from a `beat taste-seeds` directory:
 The batch is an ordinary clip-set batch (empty parent: score works, adopt refuses), group
 `showdown:<role>`, so `beat rate` queues it, `beat score` logs it, and taste-eval's ablation
 splits classify it as its own `showdown` variant type.
+
+## The engineplus ablation (`--with-produced`)
+
+Feature-mining the first 21 rated batches (2026-07-21) found the engine losing (4% pairwise wins
+vs ref's 94%) on **production**, not obviously on timbre: its clips were dead mono (stereo
+correlation 1.00, width −52 dB vs ref −11 dB — the batch solos one center-panned single-voice
+track), had near-zero air band (0.22% vs 1.89% of energy above ~10 kHz), and scored lowest on
+Audiobox's production-*complexity* axis while production-*quality* was flat across sources. That
+leaves the causal question open: **is the engine's deficit the synth, or the absence of a
+production pass?**
+
+`engineplus` answers it as a controlled ablation. It is the engine clip's own soloed document —
+same composed figure to the note, same patch — plus a production treatment applied entirely as
+ordinary `.beat` edits from the existing format vocabulary (`applyProductionTreatment` in
+`src/taste/showdown.ts`; no new engine features):
+
+- **width/thickness** — an `osc2` detune layer of the same oscillator (+10 cents, level 0.35)
+  plus the unison stack's real stereo spread (`unisonVoices 5`, `unisonWidth 0.6`), and a light
+  chorus insert; drum tracks skip the osc-bank edits (drum voices don't read them) and get their
+  width from the chorus + the stereo reverb return
+- **glue/drive** — the always-wired saturator insert (`saturatorDrive 0.25`, `saturatorMix 0.3`)
+- **space** — shared return-bus sends (`sendReverb 0.18`; `sendDelay 0.08` on pitched roles only —
+  a delay on drums re-writes the groove)
+- **air** — `eqHigh +2.5 dB` through the default `eq3` insert's high shelf
+
+Every treatment on the wishlist existed in the format already, so none were skipped; values only
+ever *intensify* (`Math.max` against the patch's own settings), so a seed patch that already
+carries production keeps it. The manifest's `from` records exactly which edits were applied; the
+scores log records the kind only, like every other source.
+
+**Reading the result**: engineplus ≈ ref-ward of engine by a large margin means the cheap fix is
+production defaults (width/air/sends out of the box), not a new synth. engineplus ≈ engine means
+the deficit really is timbre, and the synth itself is the work.
 
 ## The ref-dir licensing stance
 
@@ -88,6 +125,7 @@ dataset (`docs/taste-loop-design.md`, "Licensing note"), enforced in the tool, n
 ```
 beat taste-seeds ~/showdown            # once — seed songs (any existing collection dir works too)
 beat showdown ~/showdown               # 4 batches (one per role) via fal; add --rounds 2 for 8
+beat showdown ~/showdown --with-produced     # same, plus an engineplus clip per batch (the production ablation)
 beat showdown ~/showdown --ref-dir ~/chops   # same, plus a private ref clip per batch
 beat rate ~/showdown                   # rate them blind in the browser, as usual
 beat showdown ~/showdown --report      # the scoreboard (add --json for scripts)
@@ -95,7 +133,8 @@ beat showdown ~/showdown --report      # the scoreboard (add --json for scripts)
 
 Everything tests offline with `--gen-backend stub` (deterministic tone beds — the pipeline's
 plumbing truth, no fal spend); real rounds are owner-side with `FAL_KEY` set. A round of 4
-batches costs 8 engine renders (two per batch, one harness boot each) plus 4–6 fal generations.
+batches costs 8 engine renders (two per batch, one harness boot each — three per batch with
+`--with-produced`, still one boot) plus 4–6 fal generations.
 Rounds accumulate: the report reads the whole log, and per-role splits shed their smoke label at
 5 batches per role (~5 rounds).
 

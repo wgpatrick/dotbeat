@@ -17,6 +17,7 @@ import {
   showdownRole,
   extendToFourBars,
   soloForShowdown,
+  applyProductionTreatment,
   keymapScratchText,
   phraseFromSeed,
   buildPitchedKeymapPhrase,
@@ -122,6 +123,90 @@ test('soloForShowdown: target boosted to prominent, everything else muted', () =
     else assert.equal(t.synth.volume, SHOWDOWN_MUTE_DB)
   }
   assert.throws(() => soloForShowdown(doc, 'nope'), /no track "nope"/)
+})
+
+// ---- production treatment (the engineplus ablation) --------------------------------------------
+
+test('applyProductionTreatment on a synth track: notes and patch identity preserved, width/glue/space/air applied', () => {
+  const seed = extendToFourBars(parse(generateSeedBeat(3).text))
+  const phrased = applyComposedPhrase(seed, 'bass', composePitchedPhrase('bassline', inferSeedKey(seed), 4242))
+  const engineDoc = soloForShowdown(phrased, 'bass')
+  const { doc, applied } = applyProductionTreatment(engineDoc, 'bass')
+  assert.ok(applied.length >= 4, `treatment reports what it did (${applied.join(', ')})`)
+  const before = engineDoc.tracks.find((t) => t.id === 'bass')!
+  const after = doc.tracks.find((t) => t.id === 'bass')!
+  assert.equal(after.kind, 'synth')
+  if (before.kind !== 'synth' || after.kind !== 'synth') return
+  // the comparison isolates production: the figure is IDENTICAL down to every note field
+  assert.deepEqual(after.notes, before.notes)
+  // ...and the core patch identity (osc/filter/envelope/volume) is untouched
+  for (const key of ['osc', 'volume', 'cutoff', 'resonance', 'attack', 'decay', 'sustain', 'release'] as const) {
+    assert.deepEqual(after.synth[key], before.synth[key], `core patch field ${key} unchanged`)
+  }
+  // width: osc2 detune layer of the same voice + unison stereo spread (the engine only spreads
+  // unison pairs when unisonVoices >= 3 and osc2Level > 0)
+  assert.ok(after.synth.osc2Level > 0, 'osc2 layer on')
+  assert.equal(after.synth.osc2Type, before.synth.osc)
+  assert.ok(after.synth.unisonVoices >= 3 && after.synth.unisonWidth >= 0.6, 'unison width engaged')
+  assert.notEqual(after.synth.chorusMode, 'off')
+  assert.ok(after.synth.chorusMix >= 0.25)
+  // glue / space / air
+  assert.ok(after.synth.saturatorDrive >= 0.25 && after.synth.saturatorMix >= 0.3)
+  assert.ok(after.synth.sendReverb >= 0.18 && after.synth.sendDelay >= 0.08)
+  assert.ok(after.synth.eqHigh >= 2.5)
+  assert.ok(after.effects.some((e) => e.type === 'eq3' && e.enabled), 'an enabled eq3 insert carries the air lift')
+  // other tracks (muted in the solo) are untouched, and the produced doc survives its own format
+  for (const t of doc.tracks) if (t.id !== 'bass') assert.deepEqual(t, engineDoc.tracks.find((o) => o.id === t.id))
+  serializeChecked(doc)
+  // deterministic — same input, same treatment
+  assert.deepEqual(applyProductionTreatment(engineDoc, 'bass').applied, applied)
+})
+
+test('applyProductionTreatment on a drums track: no osc-bank edits (drum voices ignore them), bus production applied', () => {
+  const seed = extendToFourBars(parse(generateSeedBeat(3).text))
+  const phrased = applyComposedDrums(seed, 'drums', composeDrumPhrase(777))
+  const engineDoc = soloForShowdown(phrased, 'drums')
+  const { doc, applied } = applyProductionTreatment(engineDoc, 'drums')
+  const before = engineDoc.tracks.find((t) => t.id === 'drums')!
+  const after = doc.tracks.find((t) => t.id === 'drums')!
+  assert.equal(after.kind, 'drums')
+  if (before.kind !== 'drums' || after.kind !== 'drums') return
+  assert.deepEqual(after.hits, before.hits, 'the groove is untouched')
+  // the osc bank is dead weight on drum voices — the treatment must not pretend otherwise
+  assert.equal(after.synth.osc2Level, before.synth.osc2Level)
+  assert.equal(after.synth.unisonVoices, before.synth.unisonVoices)
+  assert.ok(!applied.some((a) => a.includes('osc2') || a.includes('unison')), `no osc-bank claims on drums (${applied.join(', ')})`)
+  // drum-bus production: light chorus width, saturation glue, reverb space, eqHigh air — no
+  // delay send (it would re-write the groove)
+  assert.ok(after.synth.chorusMix >= 0.15 && after.synth.chorusMode !== 'off')
+  assert.ok(after.synth.saturatorDrive >= 0.25 && after.synth.saturatorMix >= 0.3)
+  assert.ok(after.synth.sendReverb >= 0.18)
+  assert.equal(after.synth.sendDelay, before.synth.sendDelay)
+  assert.ok(after.synth.eqHigh >= 2.5)
+  serializeChecked(doc)
+})
+
+test('applyProductionTreatment: only intensifies — a patch already carrying production keeps its own settings', () => {
+  const seed = extendToFourBars(parse(generateSeedBeat(3).text))
+  const base = soloForShowdown(applyComposedPhrase(seed, 'bass', composePitchedPhrase('bassline', inferSeedKey(seed), 99)), 'bass')
+  const rich = {
+    ...base,
+    tracks: base.tracks.map((t) =>
+      t.id === 'bass' && t.kind === 'synth'
+        ? { ...t, synth: { ...t.synth, osc2Level: 0.8, osc2Detune: 25, sendReverb: 0.5, eqHigh: 6, saturatorDrive: 0.7, saturatorMix: 0.9 } }
+        : t,
+    ),
+  }
+  const { doc } = applyProductionTreatment(rich, 'bass')
+  const after = doc.tracks.find((t) => t.id === 'bass')!
+  if (after.kind !== 'synth') return
+  assert.equal(after.synth.osc2Level, 0.8, 'existing osc2 layer kept, not overwritten')
+  assert.equal(after.synth.osc2Detune, 25)
+  assert.equal(after.synth.sendReverb, 0.5)
+  assert.equal(after.synth.eqHigh, 6)
+  assert.equal(after.synth.saturatorDrive, 0.7)
+  assert.equal(after.synth.saturatorMix, 0.9)
+  assert.throws(() => applyProductionTreatment(base, 'nope'), /no track "nope"/)
 })
 
 test('buildPitchedKeymapPhrase: sample lanes over the recentred phrase span, one hit per note, round-trips', () => {
@@ -341,6 +426,37 @@ test('writeShowdownBatch: showdown:<role> clip-set manifest with source records;
   // the entry never carries the `from` provenance — kinds only (ref privacy contract)
   assert.ok(!JSON.stringify(result.entry).includes('seed-003'), 'source provenance stays out of the log entry')
   assert.throws(() => adoptVariant(dir, '2'), /clip-set batch/)
+})
+
+test('an engineplus clip flows through batch -> score -> report as a fifth kind', () => {
+  // nest the batch inside a container so scoreBatch's clip-set log (written NEXT TO the batch
+  // dir) stays isolated to this test rather than landing in the shared tmpdir
+  const container = mkdtempSync(join(tmpdir(), 'beat-showdown-plus-'))
+  const dir = join(container, 'showdown-chords-5')
+  mkdirSync(dir)
+  writeFileSync(join(dir, 'v1.wav'), toneWav(220, 0.4))
+  writeFileSync(join(dir, 'v2.wav'), toneWav(440, 0.3))
+  writeFileSync(join(dir, 'v3.wav'), toneWav(880, 0.2))
+  writeFileSync(join(dir, 'v4.wav'), toneWav(330, 0.3))
+  writeShowdownBatch(dir, 'chords', [
+    { file: 'v1.wav', source: { kind: 'engine', from: 'composed sustained-pad figure on seed-003.beat chords solo' } },
+    { file: 'v2.wav', source: { kind: 'engineplus', from: 'same composed sustained-pad figure and patch + production pass: unison 5 voices width 0.6, chorus mix 0.25' } },
+    { file: 'v3.wav', source: { kind: 'gen', from: '"a lush chord progression" (stub)' } },
+    { file: 'v4.wav', source: { kind: 'keymap', from: 'keymap of "a warm stab"' } },
+  ], { seed: 5 })
+  const result = scoreBatch(dir, ['2', '1', '4'])
+  assert.deepEqual(result.entry.sources, { 'v1.wav': 'engine', 'v2.wav': 'engineplus', 'v3.wav': 'gen', 'v4.wav': 'keymap' })
+
+  const report = computeShowdownReport(result.logPath)
+  assert.equal(report.totalBatches, 1)
+  const overall = Object.fromEntries(report.overall.map((s) => [s.kind, s]))
+  assert.equal(overall.engineplus!.wins, 1, 'engineplus counted as its own kind')
+  assert.equal(overall.engineplus!.batches, 1)
+  assert.equal(overall.engine!.wins, 0)
+  // pairwise: engineplus beat engine, keymap, and the rejected gen
+  assert.equal(overall.engineplus!.pairsWon, 3)
+  const text = formatShowdownReport(report)
+  assert.ok(text.match(/engineplus\s+win 100% \(1\/1\)/), `engineplus row present:\n${text}`)
 })
 
 test('writeShowdownBatch: a ref clip gates the whole batch dir behind .gitignore', () => {
