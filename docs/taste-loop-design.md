@@ -293,6 +293,30 @@ against" — and each downstream consumer needs a different kind of contrast cov
   PCA fit on unlabeled variants (free — render as many as needed).
 - Ablate via the harness: DSP-only vs embedding-only vs both, split by variant type.
 
+**Status 2026-07-21 — CLAP retired from the active ensemble.** After fixing the `pooler_output`
+fusion-dims bug (embed vectors were previously corrupted) and rerunning `beat taste-eval` on the
+now-66-batch log, `embed-bt` (CLAP alone) scores *below chance held-out* (top1 16.7% vs 20.6%
+chance; pairwise 42.0% vs 50% — not noise-around-chance, ~3 SE below over 398 pairs) and
+`both-bt` (DSP+CLAP) underperforms `dsp-bt` alone. This reverses the earlier n=37, pre-fix
+reading ("embeddings unlock gen taste") — that result was an artifact of the corrupted
+embeddings, not real signal. Two compounding causes, not mutually exclusive: (1) `larger_clap_music`
+is a clip-level contrastive text-audio *retrieval* embedding — its training objective rewards
+separating genre/instrumentation/semantic content, not the fine intra-batch production nuance
+("this filter cutoff vs that one, same patch") the taste labels are actually about; (2) the PCA
+is fit globally across every batch type at once (`projectAllEmbeddings`), so its top components
+likely spend their variance on between-type structure (a real commercial ref chop vs a synth
+render is a huge spectral gap) rather than within-batch taste-relevant structure — for a vary
+batch (same patch, one parameter nudged), the components that matter for taste may have near-zero
+true within-batch variance, and `zScoreColumns`' per-batch z-scoring (correctly, not a bug)
+inflates whatever's left — including noise — to unit variance before a fixed `l2=0.05` BT
+model trains on it, a classic overfit-to-noise setup. **Audiobox-Aesthetics does not have this
+problem** (trained directly on human aesthetic judgments, not retrieval) and is now the strongest
+single scorer, especially on showdown batches (81% pairwise). Net: lead with `dsp+aes-bt`; treat
+CLAP as parked, not deleted — Part 4's model table (MERT, MuQ, PANNs) has alternatives that were
+never tried, and a differently-trained (non-retrieval, perceptually-supervised) audio embedding
+could still be worth a future look. This finding is ablation-study-only — `beat suggest --taste`
+never used embeddings (DSP-only from the start), so no live-tool fix is needed.
+
 ### T3 — Real-music dataset and taste prior (owner-led data, agent-led pipeline)
 - **Owner:** curate three playlists — loved / neutral / disliked — as local audio files
   (~50 songs each to start; more later). These files and everything derived from them stay out

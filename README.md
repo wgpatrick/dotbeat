@@ -105,7 +105,7 @@ The core loop this project was built to prove works and is exercised daily: a ha
 turn a knob in the GUI and `git diff` shows exactly one changed line; edit the file by hand and
 the GUI hot-reloads without stopping playback.
 
-**Built and stable** (146 of 338 tracked features done — the live list is
+**Built and stable** (152 of 342 tracked features done — the live list is
 [`docs/product-roadmap.md`](docs/product-roadmap.md)):
 
 - **The format and edit surface** — round-trip parser/serializer, semantic diff, edit primitives
@@ -133,16 +133,30 @@ the GUI hot-reloads without stopping playback.
 **The active frontier: the taste-model program**
 ([`docs/taste-loop-design.md`](docs/taste-loop-design.md)) — teach a model the owner's musical
 taste from blind-rated batches, then let it steer search. The model is advisory by construction;
-the owner's picks stay the only ground truth. As of 2026-07-18, on 37 blind-rated batches:
-DSP features predict vary picks at 40% top-1 (chance 20%); adding the validated CLAP embeddings
-lifts generated-sound batches from chance to 33%; the four Audiobox-Aesthetics axes alone reach
-44% on vary batches; and a prior built purely from loved records transfers at 27% with zero
-dotbeat labels. Batch renders are loudness-normalized by default so "louder" can't masquerade as
-"better." The data pipeline (`taste-seeds` → `taste-collect` → a blind web rating UI) was
-hardened by ear — six classes of silent no-op batches found and closed. T4 (`beat suggest
---taste` pre-ranking and next-round proposals) is live; T5 (overnight critic-guided
-quality-diversity search) and T6 (sound matching against loved-record stems) are deliberately
-unbuilt until the rated-batch count earns them — the critical path is rated batches, not code.
+the owner's picks stay the only ground truth. As of 2026-07-21, on 66 blind-rated batches
+(re-evaluated after fixing the CLAP fusion bug below): the DSP Bradley-Terry ranker predicts
+held-out picks at 33% top-1 / 62% pairwise (chance 21%/50%) — replicates the earlier 37-batch
+result; the four Audiobox-Aesthetics axes alone reach a similar 33% top-1 but a much stronger 81%
+pairwise on **source-showdown** batches specifically; **DSP+Aesthetics combined is now the best
+scorer** (36% top-1, 65% pairwise). **CLAP embeddings, once correctly pooled, turned out to hurt
+rather than help** — `embed-bt` scores *below* chance held-out, and adding CLAP to DSP makes the
+combined scorer worse than DSP alone (see `docs/taste-loop-design.md` "CLAP retired from the
+active ensemble" for the diagnosis). This doesn't touch the live `beat suggest --taste` tool,
+which was DSP-only already — it's an ablation-study-only finding. Batch renders are
+loudness-normalized by default so "louder" can't masquerade as "better." The data pipeline
+(`taste-seeds` → `taste-collect` → a blind web rating UI) was hardened by ear — six classes of
+silent no-op batches found and closed.
+
+**Beyond the critic, the pivot toward "the generator is the bottleneck"** (owner, after hearing
+eval batches) is now backed by blind data, not just impression: `beat showdown` (blind per-role
+engine-vs-gen-vs-keymap-vs-reference-chop comparisons) shows dotbeat's own synth engine has won
+**zero** of 15 pairwise comparisons across 8 rated rounds — fal-generated sounds are a clear
+second to real commercial reference chops, engine and keymap-repitched one-shots trail badly.
+`beat gen-kit` (compose a whole playable beat from generated sounds) and `beat match` (T6:
+CMA-ES sound-matching against a reference chop, self-match verified) are both built. T4
+(`beat suggest --taste` pre-ranking and next-round proposals) is live; T5 (overnight
+critic-guided quality-diversity search) is still not started — the critical path remains rated
+batches, not code.
 
 **How it's kept honest.** 890 tests plus Playwright-driven verify scripts assert known-correct
 behavior; exploratory usability pilots — an agent driving the real app or CLI with no checklist
