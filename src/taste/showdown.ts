@@ -21,7 +21,7 @@
 // the generation calls, so everything here tests on synthetic audio.
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   parse,
   serialize,
@@ -1021,6 +1021,10 @@ export interface ShowdownReport {
   /** entries without a sources map (pre-showdown clip-set scores that happened to use the group) */
   skipped: number
   overall: SourceStat[]
+  /** ref rows re-kinded by origin pool (ref:familiar / ref:unfamiliar / ref:other) — computed
+   * from local batch manifests only, so the shared log stays kind-only; empty when no ref batch
+   * still has its manifest on disk */
+  refPools: SourceStat[]
   roles: { role: string; batches: number; smoke: boolean; stats: SourceStat[] }[]
   smokeMinBatches: number
 }
@@ -1058,6 +1062,45 @@ function tally(entries: ShowdownLogEntry[]): SourceStat[] {
   return [...stats.values()].sort((a, b) => b.wins / Math.max(1, b.batches) - a.wins / Math.max(1, a.batches) || b.pairsWon / Math.max(1, b.pairCount) - a.pairsWon / Math.max(1, a.pairCount))
 }
 
+/** Classify a ref clip's origin pool from its manifest `from` path. The SHARED scores log
+ * records the source kind only (the licensing posture) — the pool split is computed at report
+ * time from the batch dir's own manifest, so only someone who already has the batches (and the
+ * refs) can see it. Pools are the taste-dataset convention: refs-familiar/ = chops of songs the
+ * owner loves, refs-unfamiliar/ = competent-but-unknown tracks — "my taste is unreachable" and
+ * "any commercial track is unreachable" are different findings. */
+export function classifyRefPool(fromPath: string): 'ref:familiar' | 'ref:unfamiliar' | 'ref:other' {
+  if (/refs-familiar\b/.test(fromPath)) return 'ref:familiar'
+  if (/refs-unfamiliar\b/.test(fromPath)) return 'ref:unfamiliar'
+  return 'ref:other'
+}
+
+/** Re-kind each entry's ref variants by pool (reading the batch manifest when it still exists);
+ * entries whose dir/manifest is gone keep plain 'ref' and land in ref:other only if classified. */
+function refPoolTally(entries: ShowdownLogEntry[]): SourceStat[] {
+  const augmented: ShowdownLogEntry[] = []
+  for (const e of entries) {
+    if (!Object.values(e.sources).includes('ref')) continue
+    const manifestPath = join(e.batch, 'manifest.json')
+    if (!existsSync(manifestPath)) continue
+    let manifest: VaryBatchManifest & { variants: { file: string; source?: { kind?: string; from?: string } }[] }
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    } catch {
+      continue
+    }
+    const sources: Record<string, string> = { ...e.sources }
+    for (const v of manifest.variants ?? []) {
+      if (v.source?.kind === 'ref' && typeof v.source.from === 'string') {
+        const wav = v.file.replace(/\.beat$/, '.wav')
+        if (sources[wav] === 'ref') sources[wav] = classifyRefPool(v.source.from)
+        else if (sources[v.file] === 'ref') sources[v.file] = classifyRefPool(v.source.from)
+      }
+    }
+    augmented.push({ ...e, sources })
+  }
+  return tally(augmented).filter((s) => s.kind.startsWith('ref:'))
+}
+
 /** The scoreboard: per-source win rates from every scored showdown batch, overall and per role,
  * with the same small-n smoke convention as taste-eval's splits. */
 export function computeShowdownReport(logPath: string): ShowdownReport {
@@ -1071,6 +1114,7 @@ export function computeShowdownReport(logPath: string): ShowdownReport {
     totalBatches: entries.length,
     skipped,
     overall: tally(entries),
+    refPools: refPoolTally(entries),
     roles,
     smokeMinBatches: SPLIT_SMOKE_MIN_BATCHES,
   }
@@ -1097,6 +1141,10 @@ export function formatShowdownReport(r: ShowdownReport): string {
   }
   out += `overall${r.totalBatches < r.smokeMinBatches ? '  [small n — smoke, not evidence]' : ''}:\n`
   for (const s of r.overall) out += statLine(s, '  ')
+  if (r.refPools.length > 0) {
+    out += `ref by pool (local manifests only — the shared log stays kind-only):\n`
+    for (const s of r.refPools) out += statLine(s, '  ')
+  }
   out += `by role:\n`
   for (const role of r.roles) {
     out += `  ${role.role} (${role.batches} batch${role.batches === 1 ? '' : 'es'})${role.smoke ? '  [small n — smoke, not evidence]' : ''}\n`

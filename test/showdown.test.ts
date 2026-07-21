@@ -29,6 +29,7 @@ import {
   writeShowdownBatch,
   matchClipDurations,
   loadShowdownEntries,
+  classifyRefPool,
   computeShowdownReport,
   formatShowdownReport,
   SHOWDOWN_MUTE_DB,
@@ -633,4 +634,35 @@ test('foldBpmToRange: half/double-time readings fold into [70,180], integers out
   assert.equal(foldBpmToRange(80, 100, 150), 100)
   assert.throws(() => foldBpmToRange(0))
   assert.throws(() => foldBpmToRange(-120))
+})
+
+test('refPools: ref rows split by origin pool from local manifests; the log itself stays kind-only', () => {
+  const container = mkdtempSync(join(tmpdir(), 'beat-showdown-pools-'))
+  const mk = (name: string, refFrom: string, picks: string[]) => {
+    const dir = join(container, name)
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'v1.wav'), toneWav(220, 0.4))
+    writeFileSync(join(dir, 'v2.wav'), toneWav(440, 0.3))
+    writeShowdownBatch(dir, 'bassline', [
+      { file: 'v1.wav', source: { kind: 'engine', from: 'composed figure, engine solo' } },
+      { file: 'v2.wav', source: { kind: 'ref', from: refFrom } },
+    ], { seed: 3 })
+    return scoreBatch(dir, picks)
+  }
+  mk('showdown-bassline-1', '/private/taste-dataset/refs-familiar/bassline/song-bass-c1.wav', ['2', '1'])
+  const result = mk('showdown-bassline-2', '/private/taste-dataset/refs-unfamiliar/bassline/other-bass-c2.wav', ['1', '2'])
+
+  const report = computeShowdownReport(result.logPath)
+  const pools = Object.fromEntries(report.refPools.map((s) => [s.kind, s]))
+  assert.equal(pools['ref:familiar']!.wins, 1, 'familiar ref won its batch')
+  assert.equal(pools['ref:familiar']!.batches, 1)
+  assert.equal(pools['ref:unfamiliar']!.wins, 0, 'unfamiliar ref lost its batch')
+  assert.equal(pools['ref:unfamiliar']!.batches, 1)
+  // the split never re-kinds the plain scoreboard or the log: overall still has one 'ref' row
+  assert.ok(report.overall.some((s) => s.kind === 'ref' && s.batches === 2))
+  assert.ok(!readFileSync(result.logPath, 'utf8').includes('refs-familiar'), 'pool paths stay out of the shared log')
+  // classifier corner: unknown origins fold to ref:other
+  assert.equal(classifyRefPool('/somewhere/else/chop.wav'), 'ref:other')
+  // the human report prints the section
+  assert.match(formatShowdownReport(report), /ref by pool/)
 })
