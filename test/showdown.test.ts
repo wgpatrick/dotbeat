@@ -31,6 +31,14 @@ import {
   formatShowdownReport,
   SHOWDOWN_MUTE_DB,
   SHOWDOWN_PROMINENT_DB,
+  inferSeedKey,
+  scalePitchClasses,
+  composePitchedPhrase,
+  composeDrumPhrase,
+  applyComposedPhrase,
+  applyComposedDrums,
+  BASSLINE_ARCHETYPES,
+  type PhraseKey,
 } from '../src/taste/showdown.js'
 import { variantTypeOf } from '../src/taste/eval.js'
 import { scoreBatch, adoptVariant, normalizeBatchLoudness, readBatchManifest, BeatBatchError } from '../src/vary/batch.js'
@@ -167,6 +175,140 @@ test('buildKitPhrase + isolateTrack: the seed drum pattern re-backed by sample l
   const before = drumsOnly.tracks[0]!
   if (before.kind === 'drums' && track.kind === 'drums') assert.equal(track.hits.length, before.hits.length)
   serializeChecked(doc)
+})
+
+// ---- composed phrase bank (the 2026-07-21 un-blinding fix) -------------------------------------
+
+const COMPOSE_KEYS: PhraseKey[] = [
+  { root: 48, minor: false },
+  { root: 53, minor: true },
+  { root: 57, minor: true },
+  { root: 50, minor: false },
+]
+
+const inScalePc = (key: PhraseKey): Set<number> => new Set(scalePitchClasses(key).map((pc) => (pc + key.root) % 12))
+
+test('inferSeedKey: deterministic, in the seed-generator range, and actually covers the seed notes', () => {
+  for (let s = 1; s <= 20; s++) {
+    const doc = parse(generateSeedBeat(s).text)
+    const key = inferSeedKey(doc)
+    assert.deepEqual(inferSeedKey(doc), key)
+    assert.ok(key.root >= 48 && key.root < 60, `root ${key.root} in the generator's 48..59 range`)
+    const pcs = inScalePc(key)
+    let inScale = 0
+    let total = 0
+    for (const t of doc.tracks) {
+      if (t.kind !== 'synth') continue
+      for (const n of t.notes) {
+        total += 1
+        if (pcs.has(((n.pitch % 12) + 12) % 12)) inScale += 1
+      }
+    }
+    assert.ok(inScale / total >= 0.8, `seed ${s}: ${inScale}/${total} notes in the inferred scale`)
+  }
+})
+
+test('composePitchedPhrase: deterministic per seed, every note diatonic and inside the 4-bar loop', () => {
+  for (const role of ['bassline', 'chords', 'lead'] as const) {
+    for (const key of COMPOSE_KEYS) {
+      const pcs = inScalePc(key)
+      for (let seed = 1; seed <= 8; seed++) {
+        const a = composePitchedPhrase(role, key, seed * 331)
+        assert.deepEqual(composePitchedPhrase(role, key, seed * 331), a, `${role} seed ${seed} deterministic`)
+        assert.ok(a.notes.length > 0)
+        for (const n of a.notes) {
+          assert.ok(pcs.has(((n.pitch % 12) + 12) % 12), `${role}/${a.archetype}: pitch ${n.pitch} in ${key.minor ? 'minor' : 'major'} on root ${key.root}`)
+          assert.ok(n.pitch >= 0 && n.pitch <= 127)
+          assert.ok(n.start >= 0 && n.start < 64, `start ${n.start} inside the 4-bar loop`)
+          assert.ok(n.duration > 0 && n.velocity > 0 && n.velocity <= 1)
+        }
+      }
+    }
+  }
+})
+
+test('composePitchedPhrase: different batch seeds produce genuinely different figures (the un-blinding fix)', () => {
+  const key: PhraseKey = { root: 48, minor: true }
+  for (const role of ['bassline', 'chords', 'lead'] as const) {
+    const signatures = new Set<string>()
+    const archetypes = new Set<string>()
+    for (let seed = 1; seed <= 12; seed++) {
+      const p = composePitchedPhrase(role, key, seed * 977)
+      archetypes.add(p.archetype)
+      signatures.add(p.notes.map((n) => `${n.pitch}@${n.start}:${n.duration}`).join(' '))
+    }
+    assert.equal(signatures.size, 12, `${role}: 12 seeds -> 12 distinct note sequences`)
+    assert.ok(archetypes.size >= 3, `${role}: the archetype bank actually varies (got ${[...archetypes].join(', ')})`)
+  }
+})
+
+test('composePitchedPhrase: exclude steers the archetype so no two batches in a session share a figure', () => {
+  const key: PhraseKey = { root: 50, minor: false }
+  const used: string[] = []
+  for (let seed = 1; seed <= BASSLINE_ARCHETYPES.length; seed++) {
+    const p = composePitchedPhrase('bassline', key, seed, { exclude: used })
+    assert.ok(!used.includes(p.archetype), `${p.archetype} not reused while the bank still has unused figures`)
+    used.push(p.archetype)
+  }
+  assert.equal(new Set(used).size, BASSLINE_ARCHETYPES.length, 'a full session walks the whole bank')
+})
+
+test('composeDrumPhrase: deterministic, diverse across seeds, kit lanes only, inside the loop', () => {
+  const signatures = new Set<string>()
+  const archetypes = new Set<string>()
+  for (let seed = 1; seed <= 12; seed++) {
+    const a = composeDrumPhrase(seed * 613)
+    assert.deepEqual(composeDrumPhrase(seed * 613), a)
+    archetypes.add(a.archetype)
+    signatures.add(a.hits.map((h) => `${h.lane}@${h.start}`).join(' '))
+    for (const h of a.hits) {
+      assert.ok(['kick', 'snare', 'hat'].includes(h.lane), `lane ${h.lane} is a kit lane`)
+      assert.ok(h.start >= 0 && h.start < 64 && h.velocity > 0 && h.velocity <= 1)
+    }
+  }
+  assert.ok(signatures.size >= 11, `12 seeds -> ${signatures.size} distinct grooves`)
+  assert.ok(archetypes.size >= 3, `drum archetype bank actually varies (got ${[...archetypes].join(', ')})`)
+})
+
+test('engine and keymap clips share the composed figure within one batch (the comparison holds notes constant)', () => {
+  const seed = extendToFourBars(parse(generateSeedBeat(3).text))
+  const composed = composePitchedPhrase('bassline', inferSeedKey(seed), 4242)
+  const phrased = applyComposedPhrase(seed, 'bass', composed)
+  const plain = composed.notes.map((n) => ({ pitch: n.pitch, start: n.start, velocity: n.velocity }))
+  // the engine doc plays exactly the composed notes...
+  const engineTrack = soloForShowdown(phrased, 'bass').tracks.find((t) => t.id === 'bass')!
+  assert.equal(engineTrack.kind, 'synth')
+  if (engineTrack.kind !== 'synth') return
+  assert.deepEqual(engineTrack.notes.map((n) => ({ pitch: n.pitch, start: n.start, velocity: n.velocity })), plain)
+  // ...and the keymap phrase reads the SAME notes back off the same doc (the CLI's construction)
+  const phrase = phraseFromSeed(phrased, 'bass')
+  assert.deepEqual(phrase, plain)
+  // the built keymap clip carries one hit per composed note, and the phrased doc round-trips
+  let scratch = parse(keymapScratchText(seed.bpm))
+  scratch = setMediaSample(scratch, 'sdkm', 'a'.repeat(64), 'media/sdkm.wav')
+  const { doc } = buildPitchedKeymapPhrase(scratch, 'sdkm', 45, phrase)
+  const km = doc.tracks.find((t) => t.id === 'phrase')!
+  if (km.kind === 'drums') assert.equal(km.hits.length, composed.notes.length)
+  serializeChecked(phrased)
+  assert.throws(() => applyComposedPhrase(seed, 'drums', composed), /needs synth track/)
+})
+
+test('applyComposedDrums: engine and kit clips share the composed groove, and the doc round-trips', () => {
+  const seed = extendToFourBars(parse(generateSeedBeat(3).text))
+  const groove = composeDrumPhrase(777)
+  const phrased = applyComposedDrums(seed, 'drums', groove)
+  let drumsOnly = isolateTrack(phrased, 'drums')
+  for (const lane of ['kick', 'snare', 'hat']) drumsOnly = setMediaSample(drumsOnly, `sd${lane}`, 'b'.repeat(64), `media/sd${lane}.wav`)
+  const kit = buildKitPhrase(drumsOnly, 'drums', { kick: 'sdkick', snare: 'sdsnare', hat: 'sdhat' })
+  const kitTrack = kit.tracks.find((t) => t.id === 'drums')!
+  const engTrack = phrased.tracks.find((t) => t.id === 'drums')!
+  assert.equal(kitTrack.kind, 'drums')
+  assert.equal(engTrack.kind, 'drums')
+  if (kitTrack.kind !== 'drums' || engTrack.kind !== 'drums') return
+  assert.deepEqual(kitTrack.hits.map((h) => `${h.lane}@${h.start}`), engTrack.hits.map((h) => `${h.lane}@${h.start}`))
+  assert.equal(engTrack.hits.length, groove.hits.length)
+  serializeChecked(phrased)
+  assert.throws(() => applyComposedDrums(seed, 'bass', groove), /needs drums track/)
 })
 
 // ---- batch assembly ----------------------------------------------------------------------------
