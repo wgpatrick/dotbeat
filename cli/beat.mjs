@@ -1666,7 +1666,7 @@ async function showdownCmd(argv) {
   // ---- collection ------------------------------------------------------------------------------
   if (!dir) throw new BeatEditError('showdown needs the taste-seeds directory: beat showdown <dir> [--roles r1,r2] [--rounds 1] [--ref-dir <path>] (or --report)')
   const { mulberry32 } = await import('../dist/src/taste/eval.js')
-  const { genSubject, genStyles } = await import('../dist/src/taste/seeds.js')
+  const { genSubject, genSubjectVaried, genStyles } = await import('../dist/src/taste/seeds.js')
   const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
   const { mkdirSync, copyFileSync } = await import('node:fs')
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
@@ -1812,8 +1812,11 @@ async function showdownCmd(argv) {
         })
         renderVaryBatch(workDir, 2, { normalize: false })
 
-        // gen clip: the role's phrase-tier prompt, one candidate (prep pipeline included)
-        const phraseSubject = genSubject(spec.phraseSubjectId)
+        // gen clip: the role's phrase-tier prompt, one candidate (prep pipeline included).
+        // genSubjectVaried draws a genre/mood variant (not just a style treatment) so every
+        // showdown round's gen clip isn't recognizable by always being the same musical
+        // character (owner, 2026-07-21).
+        const phraseSubject = genSubjectVaried(spec.phraseSubjectId, rng)
         const genPrompt = `${phraseSubject.subject}, ${style}`
         const genDir = join(workDir, 'gen')
         await lib.genSourceBatch({

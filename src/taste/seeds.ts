@@ -156,7 +156,12 @@ const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
   // music-making decisions live at the PHRASE level — melodies, basslines, progressions. ~8s ≈ 4
   // bars at house tempo (owner, 2026-07-18, after the first chords batch: 8-bar/15s phrases were
   // longer than a rating needs — halve them). These are the tier the real-music chops (T3)
-  // compare against, and the material T5's generation steering will lean on hardest.
+  // compare against, and the material T5's generation steering will lean on hardest. The
+  // `.subject` text below is ONLY the fallback/default (kept for anything that still reads it
+  // directly) — real batches should draw from PHRASE_VARIANTS via genSubjectVaried so every gen
+  // phrase isn't the same one genre/mood every time (owner, 2026-07-21: identical musical
+  // character across batches made the generated clip obvious by ear regardless of the style
+  // treatment layered on top).
   { id: 'melody', subject: 'a melodic synth lead phrase, 4 bar loop, catchy and emotive', seconds: 8 },
   { id: 'bassline', subject: 'a rolling deep house bassline loop, 4 bars, groovy and hypnotic', seconds: 8 },
   { id: 'chords', subject: 'a chord progression loop, lush warm chords, 4 bars', seconds: 8 },
@@ -165,6 +170,61 @@ const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
   // one — one-shot drum subjects cover atomic hits, not a groove.
   { id: 'drumloop', subject: 'a full drum loop, 4 bars, punchy and groovy', seconds: 8 },
 ]
+
+/** Content variants per phrase-tier subject id — genre/mood/rhythmic-feel, distinct from
+ * GEN_STYLES (which is a production-texture treatment layered on TOP of whichever variant is
+ * picked). Only ids that need real musical variety are listed; one-shot subjects (kick, bass,
+ * etc.) aren't — a "punchy kick drum" doesn't have a genre. Each list's first entry is the
+ * original fixed subject (kept so nothing that reads GEN_SUBJECTS directly changes meaning). */
+const PHRASE_VARIANTS: Record<string, string[]> = {
+  melody: [
+    'a melodic synth lead phrase, 4 bar loop, catchy and emotive',
+    'a dark minor-key arpeggio lead phrase, 4 bars, moody and driving',
+    'an uplifting trance lead phrase, 4 bars, soaring and bright',
+    'a breezy pop synth topline, 4 bars, simple and hooky',
+    'an aggressive acid-style lead phrase, 4 bars, squelchy and relentless',
+    'a jazzy, syncopated synth lead phrase, 4 bars, playful and loose',
+    'a sparse, spacious ambient lead phrase, 4 bars, slow and airy',
+  ],
+  bassline: [
+    'a rolling deep house bassline loop, 4 bars, groovy and hypnotic',
+    'a dark techno sub bassline loop, 4 bars, driving and hypnotic',
+    'a funky disco bassline loop, 4 bars, syncopated and bouncy',
+    'a moody drum-and-bass reese bassline loop, 4 bars, growling and dense',
+    'a laid-back downtempo bassline loop, 4 bars, warm and round',
+    'a trap-influenced 808 bassline loop, 4 bars, sliding and sparse',
+    'a jazzy walking bassline loop, 4 bars, loose and swung',
+  ],
+  chords: [
+    'a chord progression loop, lush warm chords, 4 bars',
+    'a moody minor chord-stab progression, 4 bars, dark and tense',
+    'a bright major arpeggiated chord progression, 4 bars, uplifting and open',
+    'a jazzy extended-7th chord progression, 4 bars, sophisticated and smooth',
+    'a staccato plucked chord progression, 4 bars, rhythmic and percussive',
+    'a slow ambient sustained-pad chord progression, 4 bars, spacious and dreamy',
+    'a gritty distorted chord-stab progression, 4 bars, aggressive and raw',
+  ],
+  drumloop: [
+    'a full drum loop, 4 bars, punchy and groovy',
+    'a four-on-the-floor house drum loop, 4 bars, driving and steady',
+    'a syncopated breakbeat drum loop, 4 bars, choppy and energetic',
+    'a fast drum-and-bass drum loop, 4 bars, rolling and intricate',
+    'a trap-style drum loop, 4 bars, sparse with rapid hi-hat rolls',
+    'a laid-back downtempo drum loop, 4 bars, loose and swung',
+    'a lo-fi boom-bap drum loop, 4 bars, dusty and swung',
+  ],
+}
+
+/** Same lookup as `genSubject`, but for phrase-tier ids with real musical variety, one entry of
+ * `PHRASE_VARIANTS` is drawn via `rng` — every gen batch for the same role gets a genuinely
+ * different genre/mood, not just a different production-texture adjective on the same one. Ids
+ * with no variants bank (one-shots) fall through to the plain `genSubject` behavior unchanged. */
+export function genSubjectVaried(id: string, rng: () => number): { id: string; subject: string; seconds: number } {
+  const base = genSubject(id)
+  const variants = PHRASE_VARIANTS[id]
+  if (!variants) return base
+  return { ...base, subject: variants[Math.floor(rng() * variants.length)]! }
+}
 const GEN_STYLES = [
   'analog warmth, tape saturation',
   'clean and modern, club-ready',
@@ -215,8 +275,9 @@ export function generateStyleContrasts(seed: number, count: number, stylesPer = 
   const out: StyleContrastSpec[] = []
   for (let i = 0; i < count; i++) {
     const s = subjects[i % subjects.length]!
+    const subject = genSubjectVaried(s.id, rng).subject
     const styles = [...GEN_STYLES].sort(() => rng() - 0.5).slice(0, stylesPer)
-    out.push({ id: `${s.id}sc${i + 1}`, subject: s.subject, seconds: s.seconds, prompts: styles.map((st) => `${s.subject}, ${st}`) })
+    out.push({ id: `${s.id}sc${i + 1}`, subject, seconds: s.seconds, prompts: styles.map((st) => `${subject}, ${st}`) })
   }
   return out
 }
@@ -228,8 +289,9 @@ export function generateGenPrompts(seed: number, count: number): GenPromptSpec[]
   const out: GenPromptSpec[] = []
   for (let i = 0; i < count; i++) {
     const s = subjects[i % subjects.length]!
+    const subject = genSubjectVaried(s.id, rng).subject
     const style = pick(rng, GEN_STYLES)
-    out.push({ id: `${s.id}${Math.floor(i / subjects.length) + 1}`, prompt: `${s.subject}, ${style}`, seconds: s.seconds })
+    out.push({ id: `${s.id}${Math.floor(i / subjects.length) + 1}`, prompt: `${subject}, ${style}`, seconds: s.seconds })
   }
   return out
 }
@@ -271,14 +333,15 @@ export function generateGenStyleBatches(seed: number, batchCount: number, varian
   const out: GenStyleBatchSpec[] = []
   for (let i = 0; i < batchCount; i++) {
     const s = subjects[i % subjects.length]!
+    const subject = genSubjectVaried(s.id, rng).subject
     const shuffledStyles = [...GEN_STYLES].sort(() => rng() - 0.5)
     const styles: string[] = []
     for (let v = 0; v < variants; v++) styles.push(shuffledStyles[v % shuffledStyles.length]!)
     out.push({
       id: `${s.id}${Math.floor(i / subjects.length) + 1}`,
-      label: s.subject,
+      label: subject,
       seconds: s.seconds,
-      prompts: styles.map((st) => `${s.subject}, ${st}`),
+      prompts: styles.map((st) => `${subject}, ${st}`),
     })
   }
   return out
