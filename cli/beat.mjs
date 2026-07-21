@@ -1709,6 +1709,9 @@ async function showdownCmd(argv) {
   const rng = mulberry32(metaSeed)
   let made = 0
   let failed = 0
+  // per-role archetypes already composed this session — threaded into the composer's exclude
+  // list so no two batches of one run share a figure (the un-blinding fix's session guarantee)
+  const usedFigures = new Map()
   for (let round = 0; round < rounds; round++) {
     for (const spec of roles) {
       const batchSeed = Math.floor(rng() * 100000)
@@ -1729,13 +1732,32 @@ async function showdownCmd(argv) {
       const seedPath = join(dir, seed.file)
       const outDir = join(dir, `showdown-${spec.role}-${batchSeed}`)
       const workDir = join(outDir, 'work')
-      process.stderr.write(`\n=== showdown ${spec.role}: ${seed.file} phrase — engine vs gen vs keymap${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
+      process.stderr.write(`\n=== showdown ${spec.role}: composed figure in ${seed.file}'s key — engine vs gen vs keymap${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
       try {
         mkdirSync(workDir, { recursive: true })
         const extended = showdown.extendToFourBars(seed.doc)
 
-        // engine clip: the role's phrase soloed through dotbeat's own synth engine
-        const engineDoc = showdown.soloForShowdown(extended, spec.seedTrack)
+        // per-batch composed figure (un-blinding fix, owner 2026-07-21: the seed's own phrases
+        // were narrow enough to fingerprint across batches). Engine and keymap share this ONE
+        // figure — same notes within the batch (the comparison is the sound source), a genuinely
+        // different archetype-bank figure across batches, diatonic in the seed's inferred key.
+        const exclude = usedFigures.get(spec.role) ?? []
+        let phrased
+        let figure
+        if (spec.role === 'drum-loop') {
+          const composed = showdown.composeDrumPhrase(batchSeed, { exclude })
+          phrased = showdown.applyComposedDrums(extended, spec.seedTrack, composed)
+          figure = composed.archetype
+        } else {
+          const composed = showdown.composePitchedPhrase(spec.role, showdown.inferSeedKey(seed.doc), batchSeed, { exclude })
+          phrased = showdown.applyComposedPhrase(extended, spec.seedTrack, composed)
+          figure = composed.archetype
+        }
+        usedFigures.set(spec.role, [...exclude, figure])
+        process.stderr.write(`composed figure: ${figure} (batch seed ${batchSeed})\n`)
+
+        // engine clip: the composed figure soloed through dotbeat's own synth engine
+        const engineDoc = showdown.soloForShowdown(phrased, spec.seedTrack)
 
         // keymap clip: generated one-shot(s) registered into a scratch host, then played as an
         // instrument through the engine's sampler lanes
@@ -1753,12 +1775,12 @@ async function showdownCmd(argv) {
           // an automated pipeline takes the best available root rather than refusing: detected
           // pitch, else the strongest-low-partial suggestion, else a4 — the root is recorded
           const rootMidi = pitch.midi ?? (pitch.suggestedRootNote ? noteToMidi(pitch.suggestedRootNote) : 69)
-          const phrase = showdown.phraseFromSeed(extended, spec.seedTrack)
+          const phrase = showdown.phraseFromSeed(phrased, spec.seedTrack)
           const built = showdown.buildPitchedKeymapPhrase(scratch, 'sdkm', rootMidi, phrase)
           kmDoc = built.doc
-          kmFrom = `keymap of "${kmPrompt}" (root ${midiToNote(Math.round(rootMidi))}, ${pitch.level ?? 'no'} confidence) playing ${seed.file} ${spec.seedTrack}`
+          kmFrom = `keymap of "${kmPrompt}" (root ${midiToNote(Math.round(rootMidi))}, ${pitch.level ?? 'no'} confidence) playing the composed ${figure} figure (${seed.file}'s key)`
         } else {
-          const drumsOnly = showdown.isolateTrack(extended, spec.seedTrack)
+          const drumsOnly = showdown.isolateTrack(phrased, spec.seedTrack)
           writeFileSync(kmBase, showdown.serializeChecked(drumsOnly))
           const samplesByLane = {}
           const promptsUsed = []
@@ -1770,7 +1792,7 @@ async function showdownCmd(argv) {
             promptsUsed.push(prompt)
           }
           kmDoc = showdown.buildKitPhrase(parse(readFileSync(kmBase, 'utf8')), spec.seedTrack, samplesByLane)
-          kmFrom = `sample-lane kit of generated one-shots ("${kmStyle}") playing ${seed.file} ${spec.seedTrack}`
+          kmFrom = `sample-lane kit of generated one-shots ("${kmStyle}") playing the composed ${figure} groove`
         }
 
         // render engine + keymap in ONE batch boot (offline by default; raw levels — the whole
@@ -1784,8 +1806,8 @@ async function showdownCmd(argv) {
           seed: batchSeed,
           outDir: workDir,
           variants: [
-            { doc: engineDoc, recipe: `engine ${spec.seedTrack} solo` },
-            { doc: kmDoc, recipe: 'keymap phrase' },
+            { doc: engineDoc, recipe: `engine ${spec.seedTrack} solo (composed ${figure})` },
+            { doc: kmDoc, recipe: `keymap phrase (composed ${figure})` },
           ],
         })
         renderVaryBatch(workDir, 2, { normalize: false })
@@ -1806,7 +1828,7 @@ async function showdownCmd(argv) {
         })
 
         const clips = [
-          { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
+          { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `composed ${figure} figure on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
           { kind: 'keymap', wav: join(workDir, 'v2.wav'), from: kmFrom },
           { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
         ]

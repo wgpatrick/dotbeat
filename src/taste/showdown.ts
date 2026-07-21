@@ -29,11 +29,12 @@ import {
   setLaneSample,
   type BeatDocument,
 } from '../core/index.js'
+import { NOTE_FIELD_DEFAULTS } from '../core/index.js'
 import { buildKeymap, midiToNote } from '../core/keymap.js'
 import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { shuffledOrder } from '../vary/audition.js'
 import { genSubject } from './seeds.js'
-import { SPLIT_SMOKE_MIN_BATCHES } from './eval.js'
+import { SPLIT_SMOKE_MIN_BATCHES, mulberry32 } from './eval.js'
 
 export type ShowdownSourceKind = 'engine' | 'gen' | 'keymap' | 'ref'
 
@@ -150,6 +151,465 @@ export function phraseFromSeed(doc: BeatDocument, trackId: string): PhraseNote[]
   if (!track || track.kind !== 'synth') throw new BeatBatchError(`showdown needs synth track "${trackId}" on the seed (have: ${doc.tracks.map((t) => `${t.id}(${t.kind})`).join(', ')})`)
   if (track.notes.length === 0) throw new BeatBatchError(`seed track "${trackId}" has no notes to phrase from`)
   return track.notes.map((n) => ({ pitch: n.pitch, start: n.start, velocity: n.velocity }))
+}
+
+// ---- composed phrase bank ----------------------------------------------------------------------
+// Un-blinding fix (owner, 2026-07-21, caught while rating showdown:bassline batches: "you gotta
+// change up the basslines from a notes POV — I know the ones that you're composing bc they are
+// almost all the same"). The engine and keymap clips used to play the taste-seed's OWN role
+// phrase, and generateSeedBeat draws those from a very narrow space (bass: chord roots in one of
+// two rhythms; chords: one sustained voicing per half bar; arp: chord-tone 8ths in one of three
+// orders; drums: three feels) — so the composed clips were fingerprintable across batches and the
+// blind leaked: the rater was judging "is this the phrase I've seen before", not the sound.
+//
+// Now every batch composes its figure from a per-batch-seeded ARCHETYPE bank. Within one batch the
+// engine and keymap clips still play the SAME figure (the comparison is the sound source — the
+// notes are deliberately held constant); across batches the figure genuinely changes (archetype ×
+// progression × register × rhythm × density, all deterministic in the batch seed), and the CLI
+// threads an exclude list so no two batches in one session even share an archetype. Figures stay
+// diatonic in the seed's inferred key — the point is a fair fight for the engine, so every
+// archetype is something a producer would actually play, not random notes.
+
+export interface PhraseKey {
+  /** midi root of the key, folded into 48..59 (the taste-seed generator's own range) */
+  root: number
+  minor: boolean
+}
+
+const MAJOR_SCALE: readonly number[] = [0, 2, 4, 5, 7, 9, 11]
+const NATURAL_MINOR_SCALE: readonly number[] = [0, 2, 3, 5, 7, 8, 10]
+
+export function scalePitchClasses(key: PhraseKey): readonly number[] {
+  return key.minor ? NATURAL_MINOR_SCALE : MAJOR_SCALE
+}
+
+/** Best-fit key of a seed doc: score every (root, mode) candidate by how many synth-note pitch
+ * classes fall inside its diatonic scale, with a small bonus for rooting on the bass's opening
+ * note (breaks the relative-major/minor pitch-class tie toward the pitch the loop actually
+ * centers on). Deterministic; tolerant of a borrowed chord or two. */
+export function inferSeedKey(doc: BeatDocument): PhraseKey {
+  const counts = new Array<number>(12).fill(0)
+  for (const t of doc.tracks) {
+    if (t.kind !== 'synth') continue
+    for (const n of t.notes) counts[((n.pitch % 12) + 12) % 12]! += 1
+  }
+  if (counts.every((c) => c === 0)) throw new BeatBatchError('cannot infer a key: the seed has no synth notes')
+  const bass = doc.tracks.find((t) => t.id === 'bass' && t.kind === 'synth')
+  const opening = bass && bass.kind === 'synth' ? [...bass.notes].sort((a, b) => a.start - b.start || a.pitch - b.pitch)[0] : undefined
+  const anchorPc = opening ? ((opening.pitch % 12) + 12) % 12 : -1
+  let best: { root: number; minor: boolean; score: number } | null = null
+  for (let root = 0; root < 12; root++) {
+    for (const minor of [false, true]) {
+      const scale = minor ? NATURAL_MINOR_SCALE : MAJOR_SCALE
+      let score = 0
+      for (let pc = 0; pc < 12; pc++) if (scale.includes((((pc - root) % 12) + 12) % 12)) score += counts[pc]!
+      if (root === anchorPc) score += 2
+      if (best === null || score > best.score) best = { root, minor, score }
+    }
+  }
+  return { root: 48 + best!.root, minor: best!.minor }
+}
+
+export interface ComposedNote {
+  pitch: number
+  start: number
+  duration: number
+  velocity: number
+}
+
+export interface ComposedPhrase {
+  archetype: string
+  notes: ComposedNote[]
+}
+
+export type ComposedDrumLane = 'kick' | 'snare' | 'hat'
+
+export interface ComposedDrumHit {
+  lane: ComposedDrumLane
+  start: number
+  velocity: number
+}
+
+export interface ComposedDrumPhrase {
+  archetype: string
+  hits: ComposedDrumHit[]
+}
+
+export const BASSLINE_ARCHETYPES = ['rolling-8ths', 'offbeat-stabs', 'pickup-sync', 'sparse-sub', 'walking', 'octave-bounce'] as const
+export const CHORDS_ARCHETYPES = ['sustained-pad', 'half-bar-hits', 'offbeat-house', 'pulse-8ths', 'charleston', 'anticipation'] as const
+export const LEAD_ARCHETYPES = ['arp-16ths', 'arp-8ths', 'motif-repeat', 'call-response', 'long-tones', 'offbeat-riff'] as const
+export const DRUM_ARCHETYPES = ['four-floor', 'half-time', 'breakbeat', 'shuffle-16', 'minimal-tech', 'boom-bap'] as const
+
+/** 4-bar progressions as scale-degree roots, one chord per bar — diatonic in either mode. */
+const PHRASE_PROGRESSIONS: readonly (readonly number[])[] = [
+  [0, 5, 3, 4],
+  [0, 3, 4, 4],
+  [5, 3, 0, 4],
+  [0, 2, 3, 4],
+  [0, 4, 5, 3],
+  [3, 4, 0, 5],
+  [0, 3, 5, 4],
+  [0, 5, 3, 2],
+]
+
+/** `degree` is any integer scale degree (0 = the key root; ±7 wraps an octave). */
+const degreePitch = (key: PhraseKey, degree: number, octaveShift: number): number => {
+  const scale = scalePitchClasses(key)
+  const idx = ((degree % 7) + 7) % 7
+  const oct = Math.floor(degree / 7)
+  return Math.min(127, Math.max(0, key.root + octaveShift + oct * 12 + scale[idx]!))
+}
+
+const rnd2 = (x: number) => Math.round(x * 100) / 100
+const vel = (rng: () => number, lo: number, hi: number) => rnd2(Math.min(0.95, lo + rng() * (hi - lo)))
+
+function seededShuffle<T>(rng: () => number, arr: readonly T[]): T[] {
+  const out = [...arr]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[out[i], out[j]] = [out[j]!, out[i]!]
+  }
+  return out
+}
+
+/** First archetype of a seeded shuffle not yet used this session; every archetype used → seeded
+ * pick anyway (a 7th batch may repeat an archetype, never a realization). */
+function chooseArchetype(rng: () => number, names: readonly string[], exclude: readonly string[]): string {
+  const shuffled = seededShuffle(rng, names)
+  return shuffled.find((n) => !exclude.includes(n)) ?? shuffled[0]!
+}
+
+function bassNotes(archetype: string, key: PhraseKey, prog: readonly number[], rng: () => number): ComposedNote[] {
+  const reg = rng() < 0.3 ? 0 : -12 // sub register most batches, upper bass sometimes
+  const notes: ComposedNote[] = []
+  const push = (degree: number, start: number, duration: number, v: number) => notes.push({ pitch: degreePitch(key, degree, reg), start, duration, velocity: v })
+  const next = (bar: number) => prog[(bar + 1) % prog.length]!
+  switch (archetype) {
+    case 'rolling-8ths': {
+      const dur = rng() < 0.35 ? 1 : 2 // staccato vs legato character, fixed per batch
+      prog.forEach((d, bar) => {
+        for (let s = 0; s < 16; s += 2) {
+          const pop = s === 14 && rng() < 0.5
+          push(pop ? d + (rng() < 0.5 ? 7 : 4) : d, bar * 16 + s, dur, vel(rng, 0.6, 0.9))
+        }
+      })
+      break
+    }
+    case 'offbeat-stabs': {
+      const useFifth = rng() < 0.5
+      prog.forEach((d, bar) => {
+        for (const s of [2, 6, 10, 14]) push(useFifth && s === 10 ? d + 4 : d, bar * 16 + s, rng() < 0.4 ? 1 : 2, vel(rng, 0.65, 0.9))
+        if (rng() < 0.3) push(next(bar), bar * 16 + 15, 1, vel(rng, 0.4, 0.6))
+      })
+      break
+    }
+    case 'pickup-sync': {
+      const approach = rng() < 0.5 ? -1 : 1 // pickup approaches the next root from below or above
+      prog.forEach((d, bar) => {
+        push(d, bar * 16, 3, vel(rng, 0.75, 0.9))
+        push(d, bar * 16 + 6, 2, vel(rng, 0.6, 0.8))
+        if (rng() < 0.6) push(d + (rng() < 0.3 ? 4 : 0), bar * 16 + 10, 2, vel(rng, 0.55, 0.8))
+        push(next(bar) + approach, bar * 16 + 14, 2, vel(rng, 0.5, 0.7))
+      })
+      break
+    }
+    case 'sparse-sub': {
+      prog.forEach((d, bar) => {
+        push(d, bar * 16, 4 + Math.floor(rng() * 5), vel(rng, 0.8, 0.95))
+        push(d, bar * 16 + 10, 3 + Math.floor(rng() * 2), vel(rng, 0.6, 0.8))
+        if (bar % 2 === 1 && rng() < 0.5) push(d + 4, bar * 16 + 14, 2, vel(rng, 0.5, 0.7))
+      })
+      break
+    }
+    case 'walking': {
+      const up = rng() < 0.5
+      prog.forEach((d, bar) => {
+        const quarters = up ? [d, d + 2, d + 4, next(bar) - 1] : [d + 7, d + 4, d + 2, next(bar) + 1]
+        quarters.forEach((deg, q) => push(deg, bar * 16 + q * 4, 3 + Math.floor(rng() * 2), vel(rng, 0.6, 0.85)))
+      })
+      break
+    }
+    default: {
+      // octave-bounce
+      prog.forEach((d, bar) => {
+        for (let s = 0; s < 16; s += 2) {
+          const high = (s / 2) % 2 === 1
+          const deg = s === 12 && rng() < 0.4 ? d + 4 : high ? d + 7 : d
+          push(deg, bar * 16 + s, 1, high ? vel(rng, 0.5, 0.7) : vel(rng, 0.7, 0.9))
+        }
+      })
+      break
+    }
+  }
+  return notes
+}
+
+/** Chord voicings as scale-degree offsets from the chord root degree. */
+const CHORD_VOICINGS: readonly (readonly number[])[] = [
+  [0, 2, 4], // close triad
+  [0, 4, 9], // open: root, fifth, tenth
+  [2, 4, 7], // first inversion, root on top
+  [0, 2, 4, 7], // triad + octave
+  [0, 4, 7, 9], // wide: root, fifth, octave, tenth
+]
+
+function chordNotes(archetype: string, key: PhraseKey, prog: readonly number[], rng: () => number): ComposedNote[] {
+  const voicing = CHORD_VOICINGS[Math.floor(rng() * CHORD_VOICINGS.length)]!
+  const reg = 12
+  const notes: ComposedNote[] = []
+  const stack = (degree: number, start: number, duration: number, v: number) => {
+    for (const off of voicing) notes.push({ pitch: degreePitch(key, degree + off, reg), start, duration, velocity: v })
+  }
+  const next = (bar: number) => prog[(bar + 1) % prog.length]!
+  switch (archetype) {
+    case 'sustained-pad':
+      prog.forEach((d, bar) => stack(d, bar * 16, rng() < 0.3 ? 14 : 16, vel(rng, 0.5, 0.7)))
+      break
+    case 'half-bar-hits': {
+      const dur = rng() < 0.5 ? 3 : 7 // stabs vs held halves, fixed per batch
+      const second = rng() < 0.6 ? 8 : 10 // on the half bar, or pushed onto the "and of 3"
+      prog.forEach((d, bar) => {
+        stack(d, bar * 16, dur, vel(rng, 0.55, 0.75))
+        stack(d, bar * 16 + second, Math.min(dur, 16 - second), vel(rng, 0.5, 0.7))
+        if (rng() < 0.25) stack(d, bar * 16 + 14, 2, vel(rng, 0.4, 0.55)) // pre-barline pickup stab
+      })
+      break
+    }
+    case 'offbeat-house':
+      prog.forEach((d, bar) => {
+        for (const s of [2, 6, 10, 14]) stack(d, bar * 16 + s, rng() < 0.5 ? 1 : 2, vel(rng, 0.5, 0.75))
+      })
+      break
+    case 'pulse-8ths':
+      prog.forEach((d, bar) => {
+        for (let s = 0; s < 16; s += 2) {
+          if (s === 14 && rng() < 0.3) continue // seeded breath before the barline
+          stack(d, bar * 16 + s, 1, s % 8 === 0 ? vel(rng, 0.65, 0.8) : vel(rng, 0.45, 0.6))
+        }
+      })
+      break
+    case 'charleston':
+      prog.forEach((d, bar) => {
+        stack(d, bar * 16, 3, vel(rng, 0.6, 0.8))
+        stack(d, bar * 16 + 6, 2, vel(rng, 0.5, 0.7))
+        if (rng() < 0.4) stack(d, bar * 16 + 12, 2, vel(rng, 0.45, 0.6))
+      })
+      break
+    default: {
+      // anticipation: held chord, the next bar's chord anticipated just before the barline
+      const held = 10 + 2 * Math.floor(rng() * 3) // 10, 12, or 14 steps of hold, fixed per batch
+      const pushAt = rng() < 0.5 ? 14 : 15
+      prog.forEach((d, bar) => {
+        if (rng() < 0.35) {
+          // seeded re-attack: split the hold in two for this bar
+          stack(d, bar * 16, 6, vel(rng, 0.55, 0.75))
+          stack(d, bar * 16 + 6, held - 6, vel(rng, 0.5, 0.7))
+        } else {
+          stack(d, bar * 16, held, vel(rng, 0.55, 0.75))
+        }
+        stack(next(bar), bar * 16 + pushAt, 16 - pushAt, vel(rng, 0.45, 0.65))
+      })
+      break
+    }
+  }
+  return notes
+}
+
+function leadNotes(archetype: string, key: PhraseKey, prog: readonly number[], rng: () => number): ComposedNote[] {
+  const reg = 24
+  const notes: ComposedNote[] = []
+  const push = (degree: number, start: number, duration: number, v: number) => notes.push({ pitch: degreePitch(key, degree, reg), start, duration, velocity: v })
+  switch (archetype) {
+    case 'arp-16ths': {
+      const orders: readonly (readonly number[])[] = [[0, 2, 4, 7], [0, 4, 2, 7], [7, 4, 2, 0], [0, 2, 4, 7, 4, 2], [0, 7, 4, 2]]
+      const order = orders[Math.floor(rng() * orders.length)]!
+      const restP = 0.08 + rng() * 0.17
+      prog.forEach((d, bar) => {
+        for (let s = 0; s < 16; s++) {
+          if (rng() < restP) continue
+          push(d + order[s % order.length]!, bar * 16 + s, 1, vel(rng, 0.35, 0.6))
+        }
+      })
+      break
+    }
+    case 'arp-8ths': {
+      const orders: readonly (readonly number[])[] = [[0, 4, 2, 7], [0, 2, 4, 2], [4, 2, 0, 2], [0, 7, 2, 4]]
+      const order = orders[Math.floor(rng() * orders.length)]!
+      const dur = rng() < 0.5 ? 1 : 2
+      prog.forEach((d, bar) => {
+        for (let s = 0; s < 16; s += 2) {
+          if (rng() < 0.1) continue
+          push(d + order[(s / 2) % order.length]!, bar * 16 + s, dur, vel(rng, 0.4, 0.65))
+        }
+      })
+      break
+    }
+    case 'motif-repeat':
+    case 'call-response': {
+      // a seeded one-bar motif replayed over each bar's chord; call-response answers the odd
+      // bars with the motif's contour inverted
+      const starts = seededShuffle(rng, [0, 2, 3, 4, 6, 8, 10, 11, 12, 14]).slice(0, 4 + Math.floor(rng() * 3)).sort((a, b) => a - b)
+      const offsetBank = [-3, -1, 0, 0, 2, 4, 5, 7]
+      const offsets = starts.map(() => offsetBank[Math.floor(rng() * offsetBank.length)]!)
+      prog.forEach((d, bar) => {
+        const invert = archetype === 'call-response' && bar % 2 === 1
+        starts.forEach((s, i) => {
+          const off = invert ? -offsets[i]! : offsets[i]!
+          const gap = (starts[i + 1] ?? 16) - s
+          push(d + off, bar * 16 + s, Math.max(1, Math.min(3, gap)), vel(rng, 0.45, 0.7))
+        })
+      })
+      break
+    }
+    case 'long-tones':
+      prog.forEach((d, bar) => {
+        const tone = d + [0, 2, 4][Math.floor(rng() * 3)]!
+        push(tone, bar * 16, 10 + Math.floor(rng() * 5), vel(rng, 0.5, 0.7))
+        if (rng() < 0.6) push(tone + 1, bar * 16 + 12, 2, vel(rng, 0.35, 0.55)) // upper-neighbour ornament
+        if (rng() < 0.4) push(tone, bar * 16 + 14, 2, vel(rng, 0.35, 0.5))
+      })
+      break
+    default: {
+      // offbeat-riff
+      const cells = [1, 3, 6, 9, 11, 14]
+      const tones = [0, 2, 4, 7]
+      prog.forEach((d, bar) => {
+        for (const s of cells) {
+          if (rng() < 0.25) continue
+          push(d + tones[Math.floor(rng() * tones.length)]!, bar * 16 + s, rng() < 0.5 ? 1 : 2, vel(rng, 0.4, 0.65))
+        }
+      })
+      break
+    }
+  }
+  return notes
+}
+
+const ROLE_SALTS = { bassline: 101, chords: 211, lead: 307 } as const
+const ROLE_BANKS = { bassline: BASSLINE_ARCHETYPES, chords: CHORDS_ARCHETYPES, lead: LEAD_ARCHETYPES } as const
+
+/** One 4-bar composed figure for a pitched role, deterministic in `seed`, diatonic in `key`.
+ * `opts.exclude` lists archetypes already used this session so consecutive batches never share a
+ * figure (the CLI threads it per role). */
+export function composePitchedPhrase(
+  role: 'bassline' | 'chords' | 'lead',
+  key: PhraseKey,
+  seed: number,
+  opts: { exclude?: readonly string[] } = {},
+): ComposedPhrase {
+  const rng = mulberry32(seed + ROLE_SALTS[role])
+  const archetype = chooseArchetype(rng, ROLE_BANKS[role], opts.exclude ?? [])
+  const prog = PHRASE_PROGRESSIONS[Math.floor(rng() * PHRASE_PROGRESSIONS.length)]!
+  const notes = role === 'bassline' ? bassNotes(archetype, key, prog, rng) : role === 'chords' ? chordNotes(archetype, key, prog, rng) : leadNotes(archetype, key, prog, rng)
+  if (notes.length === 0) notes.push({ pitch: degreePitch(key, prog[0]!, role === 'bassline' ? -12 : role === 'chords' ? 12 : 24), start: 0, duration: 8, velocity: 0.7 })
+  notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+  return { archetype, notes }
+}
+
+/** One 4-bar composed drum groove over the kick/snare/hat kit lanes, deterministic in `seed` —
+ * the drum-loop role's figure, same archetype-bank contract as the pitched roles. */
+export function composeDrumPhrase(seed: number, opts: { exclude?: readonly string[] } = {}): ComposedDrumPhrase {
+  const rng = mulberry32(seed + 401)
+  const archetype = chooseArchetype(rng, DRUM_ARCHETYPES, opts.exclude ?? [])
+  const hits: ComposedDrumHit[] = []
+  const hit = (lane: ComposedDrumLane, start: number, v: number) => hits.push({ lane, start, velocity: v })
+  switch (archetype) {
+    case 'four-floor': {
+      const openHatEvery8th = rng() < 0.4
+      for (let bar = 0; bar < 4; bar++) {
+        const o = bar * 16
+        for (let s = 0; s < 16; s += 4) hit('kick', o + s, vel(rng, 0.8, 0.95))
+        hit('snare', o + 4, vel(rng, 0.7, 0.85))
+        hit('snare', o + 12, vel(rng, 0.7, 0.85))
+        for (let s = 2; s < 16; s += openHatEvery8th ? 2 : 4) hit('hat', o + s, vel(rng, 0.35, 0.6))
+        if (rng() < 0.4) hit('hat', o + 15, vel(rng, 0.2, 0.35))
+      }
+      break
+    }
+    case 'half-time': {
+      for (let bar = 0; bar < 4; bar++) {
+        const o = bar * 16
+        hit('kick', o, vel(rng, 0.85, 0.95))
+        if (rng() < 0.7) hit('kick', o + 10, vel(rng, 0.55, 0.75))
+        hit('snare', o + 8, vel(rng, 0.75, 0.9))
+        for (let s = 0; s < 16; s += 2) hit('hat', o + s, vel(rng, 0.25, 0.5))
+      }
+      break
+    }
+    case 'breakbeat': {
+      for (let bar = 0; bar < 4; bar++) {
+        const o = bar * 16
+        hit('kick', o, vel(rng, 0.85, 0.95))
+        if (rng() < 0.8) hit('kick', o + 6, vel(rng, 0.6, 0.8))
+        if (rng() < 0.8) hit('kick', o + 10, vel(rng, 0.65, 0.85))
+        hit('snare', o + 4, vel(rng, 0.75, 0.9))
+        hit('snare', o + 12, vel(rng, 0.75, 0.9))
+        if (rng() < 0.5) hit('snare', o + (rng() < 0.5 ? 7 : 15), vel(rng, 0.2, 0.4)) // ghost
+        for (let s = 1; s < 16; s += 2) if (rng() < 0.7) hit('hat', o + s, vel(rng, 0.25, 0.5))
+      }
+      break
+    }
+    case 'shuffle-16': {
+      const kickGhostAt = rng() < 0.5 ? 7 : 11
+      for (let bar = 0; bar < 4; bar++) {
+        const o = bar * 16
+        for (let s = 0; s < 16; s++) hit('hat', o + s, s % 4 === 2 ? vel(rng, 0.45, 0.6) : vel(rng, 0.15, 0.35))
+        hit('kick', o, vel(rng, 0.85, 0.95))
+        if (rng() < 0.6) hit('kick', o + kickGhostAt, vel(rng, 0.5, 0.7))
+        hit('snare', o + 4, vel(rng, 0.7, 0.85))
+        hit('snare', o + 12, vel(rng, 0.7, 0.85))
+      }
+      break
+    }
+    case 'minimal-tech': {
+      const hatOffs = rng() < 0.5 ? [2, 10] : [6, 14]
+      for (let bar = 0; bar < 4; bar++) {
+        const o = bar * 16
+        for (let s = 0; s < 16; s += 4) hit('kick', o + s, vel(rng, 0.8, 0.9))
+        for (const s of hatOffs) hit('hat', o + s, vel(rng, 0.3, 0.5))
+        if (bar % 2 === 1) hit('snare', o + 12, vel(rng, 0.4, 0.6))
+        if (rng() < 0.3) hit('hat', o + 13, vel(rng, 0.15, 0.3))
+        if (rng() < 0.25) hit('kick', o + 14, vel(rng, 0.4, 0.6))
+      }
+      break
+    }
+    default: {
+      // boom-bap
+      for (let bar = 0; bar < 4; bar++) {
+        const o = bar * 16
+        hit('kick', o, vel(rng, 0.85, 0.95))
+        if (rng() < 0.7) hit('kick', o + 3, vel(rng, 0.5, 0.7))
+        hit('kick', o + 10, vel(rng, 0.7, 0.85))
+        hit('snare', o + 4, vel(rng, 0.75, 0.9))
+        hit('snare', o + 12, vel(rng, 0.75, 0.9))
+        for (let s = 0; s < 16; s += 2) if (rng() < 0.85) hit('hat', o + s, vel(rng, 0.3, 0.55))
+      }
+      break
+    }
+  }
+  hits.sort((a, b) => a.start - b.start || a.lane.localeCompare(b.lane))
+  return { archetype, hits }
+}
+
+/** Replace `trackId`'s notes with the composed figure (ids cp1.., v0.10 fields at canonical
+ * defaults). The engine clip solos this doc and the keymap clip reads the phrase back off it
+ * (phraseFromSeed), so same-batch note parity holds by construction. */
+export function applyComposedPhrase(doc: BeatDocument, trackId: string, phrase: ComposedPhrase): BeatDocument {
+  const track = doc.tracks.find((t) => t.id === trackId)
+  if (!track || track.kind !== 'synth') throw new BeatBatchError(`composed phrase needs synth track "${trackId}" (have: ${doc.tracks.map((t) => `${t.id}(${t.kind})`).join(', ')})`)
+  if (phrase.notes.length === 0) throw new BeatBatchError('a composed phrase needs at least one note')
+  const notes = phrase.notes.map((n, i) => ({ id: `cp${i + 1}`, pitch: n.pitch, start: n.start, duration: n.duration, velocity: n.velocity, ...NOTE_FIELD_DEFAULTS }))
+  return { ...doc, tracks: doc.tracks.map((t) => (t.id === trackId && t.kind === 'synth' ? { ...t, notes } : t)) }
+}
+
+/** Same contract for the drum-loop role: replace the drums track's hits with the composed groove
+ * (ids ch1..) — the engine clip and the kit clip both build from the result. */
+export function applyComposedDrums(doc: BeatDocument, trackId: string, phrase: ComposedDrumPhrase): BeatDocument {
+  const track = doc.tracks.find((t) => t.id === trackId)
+  if (!track || track.kind !== 'drums') throw new BeatBatchError(`composed drum phrase needs drums track "${trackId}" (have: ${doc.tracks.map((t) => `${t.id}(${t.kind})`).join(', ')})`)
+  if (phrase.hits.length === 0) throw new BeatBatchError('a composed drum phrase needs at least one hit')
+  const hits = phrase.hits.map((h, i) => ({ id: `ch${i + 1}`, lane: h.lane, start: h.start, velocity: h.velocity }))
+  return { ...doc, tracks: doc.tracks.map((t) => (t.id === trackId && t.kind === 'drums' ? { ...t, hits } : t)) }
 }
 
 /** Build the pitched keymap clip: chromatic keymap lanes over the phrase's (octave-recentred)
