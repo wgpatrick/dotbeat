@@ -1,0 +1,130 @@
+format_version 0.11
+bpm 90
+loop_bars 2
+selected_track chords
+
+track chords Chords #98c379 synth
+  synth
+    osc sawtooth
+    volume -15.1
+    cutoff 2416
+    resonance 0.24
+    attack 0.036
+    decay 0.26
+    sustain 0.71
+    release 0.49
+    pan 0
+  note u100 66 0 8 0.75
+  note u101 69 0 8 0.74
+  note u102 73 0 8 0.57
+  note u103 71 8 8 0.65
+  note u104 74 8 8 0.68
+  note u105 78 8 8 0.61
+  note u106 74 16 8 0.75
+  note u107 78 16 8 0.61
+  note u108 81 16 8 0.62
+  note u109 73 24 8 0.53
+  note u110 76 24 8 0.6
+  note u111 80 24 8 0.56
+
+track bass Bass #f7c948 synth
+  synth
+    osc square
+    volume -9.2
+    cutoff 406
+    resonance 0.96
+    attack 0.005
+    decay 0.14
+    sustain 0.46
+    release 0.16
+    pan 0
+  note u112 42 0 2 0.65
+  note u113 42 2 2 0.78
+  note u114 42 4 2 0.71
+  note u115 42 6 2 0.79
+  note u116 47 8 2 0.85
+  note u117 47 10 2 0.66
+  note u118 47 12 2 0.79
+  note u119 47 14 2 0.64
+  note u120 50 16 2 0.68
+  note u121 50 18 2 0.7
+  note u122 50 20 2 0.66
+  note u123 50 22 2 0.64
+  note u124 49 24 2 0.78
+  note u125 49 26 2 0.74
+  note u126 49 28 2 0.63
+  note u127 49 30 2 0.67
+
+track arp Arp #e06c75 synth
+  synth
+    osc square
+    volume -4
+    cutoff 5396
+    resonance 0.5
+    attack 0.003
+    decay 0.09
+    sustain 0.3
+    release 0.16
+    pan 0
+  note u128 85 0 1 0.58
+  note u129 81 1 1 0.58
+  note u130 78 2 1 0.58
+  note u131 81 5 1 0.42
+  note u132 78 6 1 0.48
+  note u133 81 7 1 0.53
+  note u134 90 8 1 0.52
+  note u135 86 9 1 0.38
+  note u136 83 10 1 0.39
+  note u137 86 11 1 0.38
+  note u138 90 12 1 0.43
+  note u139 86 13 1 0.48
+  note u140 83 14 1 0.37
+  note u141 86 15 1 0.56
+  note u142 93 16 1 0.39
+  note u143 90 17 1 0.57
+  note u144 86 18 1 0.39
+  note u145 90 19 1 0.49
+  note u146 93 20 1 0.38
+  note u147 90 23 1 0.52
+  note u148 92 24 1 0.38
+  note u149 88 25 1 0.48
+  note u150 85 26 1 0.55
+  note u151 88 27 1 0.6
+  note u152 92 28 1 0.57
+  note u153 85 30 1 0.36
+  note u154 88 31 1 0.43
+
+track drums Drums #56b6c2 drums
+  synth
+    osc sawtooth
+    volume -7.7
+    cutoff 8000
+    resonance 0.45
+    attack 0.001
+    decay 0.2
+    sustain 0.5
+    release 0.2
+    pan 0
+  hit h1 kick 0 0.94
+  hit h6 hat 1 0.35
+  hit h7 hat 3 0.32
+  hit h4 snare 4 0.78
+  hit h2 kick 6 0.76
+  hit h8 hat 7 0.48
+  hit h3 kick 10 0.81
+  hit h9 hat 11 0.42
+  hit h5 snare 12 0.76
+  hit h10 hat 13 0.35
+  hit h11 hat 15 0.3
+  hit h12 kick 16 0.88
+  hit h17 hat 17 0.26
+  hit h15 snare 20 0.77
+  hit h18 hat 21 0.31
+  hit h13 kick 22 0.79
+  hit h19 hat 23 0.46
+  hit h20 hat 25 0.47
+  hit h14 kick 26 0.84
+  hit h21 hat 27 0.36
+  hit h16 snare 28 0.8
+  hit h22 hat 29 0.34
+  hit h23 hat 31 0.38
