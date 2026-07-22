@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { FEATURE_KEYS, metricsToFeatures, computeBatchFeatures, type FeatureVector } from '../src/taste/features.js'
-import { standardizeBatch, pairsFromRanking, trainBT, scoreVector, describeWeights } from '../src/taste/ranker.js'
+import { standardizeBatch, pairsFromRanking, trainBT, scoreVector, describeWeights, trainBTEnsemble, scoreVectorEnsemble, pessimisticScore, type BTEnsemble, type BTModel } from '../src/taste/ranker.js'
 import { loadTasteBatches, evaluate, mulberry32, variantTypeOf, formatEvalReport } from '../src/taste/eval.js'
 import { stitchAudition, shuffledOrder } from '../src/vary/audition.js'
 import { scoreBatch, writeClipSetBatch, adoptVariant, formatScoreResult, BeatBatchError, type VaryBatchManifest } from '../src/vary/batch.js'
@@ -121,6 +121,84 @@ test('pairsFromRanking decomposes ranked picks over rejected variants', () => {
   const pairs = pairsFromRanking(['a', 'b'], ['c', 'd'], byFile)
   // a>b, a>c, a>d, b>c, b>d = 5 pairs
   assert.equal(pairs.length, 5)
+})
+
+// ---- C2: bootstrap-ensemble BT with pessimistic scoring (docs/research/117) -----------------------
+
+/** A planted "prefers darker" pair set: 4-variant batches with GENUINELY varied centroids and
+ * loudnesses (so the within-batch z-scores differ from pair to pair — a 2-variant batch would
+ * collapse every z-score to ±1 and make all pairs identical, which no bootstrap could resample
+ * apart), the darkest variant winning each. Enough variation that resampling changes the training
+ * set and members disagree. */
+function darkPairs(seed: number, count = 60) {
+  const rng = mulberry32(seed)
+  const pairs: { winner: number[]; loser: number[] }[] = []
+  while (pairs.length < count) {
+    const variants = Array.from({ length: 4 }, () => fakeFeatures(8 + rng() * 5, -22 + rng() * 6))
+    const std = standardizeBatch(variants)
+    let darkIdx = 0
+    for (let i = 1; i < variants.length; i++) if (variants[i]!.centroidLog2 < variants[darkIdx]!.centroidLog2) darkIdx = i
+    for (let i = 0; i < variants.length && pairs.length < count; i++) {
+      if (i !== darkIdx) pairs.push({ winner: std[darkIdx]!, loser: std[i]! })
+    }
+  }
+  return pairs
+}
+
+test('trainBTEnsemble is deterministic per seed and resamples differently across seeds', () => {
+  const pairs = darkPairs(3)
+  const e1 = trainBTEnsemble(pairs, { n: 12, seed: 42 })
+  const e2 = trainBTEnsemble(pairs, { n: 12, seed: 42 })
+  assert.equal(e1.members.length, 12)
+  assert.equal(e1.n, 12)
+  assert.equal(e1.seed, 42)
+  for (let i = 0; i < e1.members.length; i++) {
+    assert.deepEqual(e1.members[i]!.weights, e2.members[i]!.weights, `member ${i} identical for the same seed`)
+  }
+  // scoring is reproducible too
+  const vec = standardizeBatch([fakeFeatures(8, -20), fakeFeatures(12, -20)])[0]!
+  assert.deepEqual(scoreVectorEnsemble(e1, vec), scoreVectorEnsemble(e2, vec))
+  const e3 = trainBTEnsemble(pairs, { n: 12, seed: 99 })
+  const anyDiff = e1.members.some((m, i) => m.weights.some((w, d) => w !== e3.members[i]!.weights[d]))
+  assert.ok(anyDiff, 'a different seed draws different resamples, so at least one member differs')
+})
+
+test('the bootstrap actually varies its members: real training data yields nonzero ensemble std', () => {
+  const ensemble = trainBTEnsemble(darkPairs(5), { n: 20, seed: 7 })
+  // a vector along the planted taste axis: members agree on the DIRECTION but the resampling makes
+  // their magnitudes differ, so the ensemble reports genuine (nonzero) disagreement.
+  const vec = standardizeBatch([fakeFeatures(8, -20), fakeFeatures(12, -20)])[0]!
+  const { std } = scoreVectorEnsemble(ensemble, vec)
+  assert.ok(std > 0, `bootstrap members must disagree at least a little, got std ${std}`)
+  // and the mean still recovers the taste: the darker variant scores above the brighter one
+  const brightVec = standardizeBatch([fakeFeatures(8, -20), fakeFeatures(12, -20)])[1]!
+  assert.ok(scoreVectorEnsemble(ensemble, vec).mean > scoreVectorEnsemble(ensemble, brightVec).mean, 'ensemble mean keeps the planted taste')
+})
+
+test('empty pair set yields a zero-uncertainty ensemble (no data, no disagreement to report)', () => {
+  const ensemble = trainBTEnsemble([], { n: 8 })
+  assert.equal(ensemble.members.length, 8)
+  const { mean, std } = scoreVectorEnsemble(ensemble, [1, 2, 3])
+  assert.equal(mean, 0)
+  assert.equal(std, 0)
+  assert.equal(pessimisticScore(ensemble, [1, 2, 3], 5), 0)
+})
+
+test('pessimisticScore ranks a high-uncertainty vector below an equal-mean low-uncertainty one', () => {
+  // Two hand-built members that AGREE on dim 1 but DISAGREE on dim 0. Constructed so two test
+  // vectors have the SAME ensemble mean and differ ONLY in ensemble std — isolating pessimism.
+  const member = (weights: number[]): BTModel => ({ weights, finalLoss: 0, pairCount: 0 })
+  const ensemble: BTEnsemble = { members: [member([1, 1]), member([-1, 1])], seed: 0, n: 2 }
+  const lowUnc = [0, 1] // members score 1 and 1 -> mean 1, std 0
+  const highUnc = [1, 1] // members score 2 and 0 -> mean 1, std 1
+  const lo = scoreVectorEnsemble(ensemble, lowUnc)
+  const hi = scoreVectorEnsemble(ensemble, highUnc)
+  assert.ok(Math.abs(lo.mean - hi.mean) < 1e-12, `equal means by construction, got ${lo.mean} vs ${hi.mean}`)
+  assert.equal(lo.std, 0)
+  assert.ok(hi.std > 0.9, `high-uncertainty vector must have real std, got ${hi.std}`)
+  assert.ok(pessimisticScore(ensemble, lowUnc, 1) > pessimisticScore(ensemble, highUnc, 1), 'pessimism ranks the confident vector first')
+  // β=0 recovers the mean, so the two tie
+  assert.ok(Math.abs(pessimisticScore(ensemble, lowUnc, 0) - pessimisticScore(ensemble, highUnc, 0)) < 1e-12, 'β=0 is the plain mean — no pessimism')
 })
 
 // ---- eval harness ---------------------------------------------------------------------------------
@@ -382,6 +460,128 @@ test('taste-eval aesthetics: aes-bt learns a loudness taste on stub axes the DSP
   // second run hits the aes cache files written next to the wavs
   const sidecars = (await import('node:fs')).readdirSync(join(dir, 'vary-loud-0')).filter((f) => f.endsWith('.aesthetics.json'))
   assert.equal(sidecars.length, 3, 'aes axes cached next to each wav in their own cache file')
+})
+
+test('taste-eval C2: dsp+aes-bt-pess row + uncertainty landscape, existing scorers undisturbed', async (t) => {
+  // Reuse the loudness-taste shape (aes-stub CE tracks RMS): the pessimistic row must appear next
+  // to the existing scorers, an ensembleUncertainty block must report per-type std, and the plain
+  // scorers' numbers must be exactly what they were before the row existed.
+  const { evaluate: evalFn } = await import('../src/taste/eval.js')
+  const dir = mkdtempSync(join(tmpdir(), 'taste-c2-'))
+  const logPath = join(dir, 'beat-scores.jsonl')
+  const lines: string[] = []
+  // two round kinds so byType splits exist: vary (track-bearing) and gen (group gen:*, no track)
+  for (let b = 0; b < 8; b++) {
+    const isGen = b >= 5
+    const batchDir = join(dir, `${isGen ? 'gen' : 'vary'}-loud-${b}`)
+    mkdirSync(batchDir)
+    const gains = [0.15, 0.4, 0.8]
+    const files = ['v1.beat', 'v2.beat', 'v3.beat']
+    const rotate = b % 3
+    const rotated = [...gains.slice(rotate), ...gains.slice(0, rotate)]
+    rotated.forEach((g, i) => writeFileSync(join(batchDir, `v${i + 1}.wav`), toneWav(440 + b * 10, g)))
+    const loudest = rotated.indexOf(Math.max(...rotated))
+    const constantFeatures = Object.fromEntries(files.map((f) => [f, fakeFeatures(10, -20)]))
+    const entry: Record<string, unknown> = {
+      t: 'x', batch: batchDir, group: isGen ? 'gen:pad' : 'mix', seed: b, parentSha256: 'x',
+      picks: [{ rank: 1, variant: files[loudest]! }],
+      rejected: files.filter((_, i) => i !== loudest),
+      features: constantFeatures,
+    }
+    if (!isGen) entry.track = 'lead'
+    lines.push(JSON.stringify(entry))
+  }
+  writeFileSync(logPath, lines.join('\n') + '\n')
+  let report
+  try {
+    report = await evalFn(logPath, { seed: 41, embedBackend: 'off', aesBackend: 'aes-stub' })
+  } catch (err) {
+    t.skip(`no python3 for the stub sidecar here: ${err instanceof Error ? err.message : err}`)
+    return
+  }
+  assert.equal(report.aesthetics?.attached, 8)
+  const pess = report.scorers.find((s) => s.scorer === 'dsp+aes-bt-pess')
+  const plain = report.scorers.find((s) => s.scorer === 'dsp+aes-bt')
+  assert.ok(pess !== undefined, 'the pessimistic ablation row ran')
+  assert.ok(plain !== undefined, 'the plain dsp+aes-bt row still ran')
+  assert.equal(pess!.batches, plain!.batches, 'pess row covers the same folds as the plain row')
+  // the pessimistic row still recovers the planted loudness taste (pessimism narrows, not destroys)
+  assert.ok(pess!.pairwise > 0.6, `pess should still order most pairs, got ${pess!.pairwise}`)
+
+  // uncertainty landscape present, folds match the aes-bearing batch count, split by type
+  const u = report.ensembleUncertainty
+  assert.ok(u !== undefined, 'ensembleUncertainty reported')
+  assert.equal(u!.folds, plain!.batches, 'one uncertainty fold per aes-bearing batch')
+  assert.ok(u!.meanStd >= 0)
+  assert.ok(u!.byType !== undefined, 'per-type uncertainty split present for a mixed log')
+  assert.deepEqual(u!.byType!.map((x) => x.type).sort(), ['gen', 'vary'])
+  for (const t2 of u!.byType!) assert.ok(t2.meanStd >= 0, `${t2.type} std finite and nonnegative`)
+
+  // existing scorers are byte-for-byte what they were WITHOUT the new row: re-derive them by
+  // running the same folds through the pre-C2 scorer set is overkill — instead assert the plain
+  // rows carry their established planted-taste results unchanged.
+  const aesBt = report.scorers.find((s) => s.scorer === 'aes-bt')!
+  const dspBt = report.scorers.find((s) => s.scorer === 'dsp-bt')!
+  assert.ok(aesBt.pairwise > 0.8, `aes-bt unchanged (orders the loudness pairs), got ${aesBt.pairwise}`)
+  assert.ok(dspBt.pairwise <= 0.6, `dsp-bt unchanged (blind on constant features), got ${dspBt.pairwise}`)
+
+  // the text report surfaces both the row and the landscape
+  const text = formatEvalReport(report)
+  assert.match(text, /dsp\+aes-bt-pess/)
+  assert.match(text, /ensemble uncertainty/)
+})
+
+test('criticWithUncertainty returns a T5-pilot scorer closure over all usable dsp+aes pairs', async (t) => {
+  const { criticWithUncertainty } = await import('../src/taste/eval.js')
+  const dir = mkdtempSync(join(tmpdir(), 'taste-critic-'))
+  const logPath = join(dir, 'beat-scores.jsonl')
+  const lines: string[] = []
+  for (let b = 0; b < 6; b++) {
+    const batchDir = join(dir, `vary-loud-${b}`)
+    mkdirSync(batchDir)
+    const gains = [0.15, 0.4, 0.8]
+    const files = ['v1.beat', 'v2.beat', 'v3.beat']
+    gains.forEach((g, i) => writeFileSync(join(batchDir, `v${i + 1}.wav`), toneWav(440 + b * 10, g)))
+    const loudest = gains.indexOf(Math.max(...gains))
+    const constantFeatures = Object.fromEntries(files.map((f) => [f, fakeFeatures(10, -20)]))
+    lines.push(JSON.stringify({
+      t: 'x', batch: batchDir, track: 'lead', group: 'mix', seed: b, parentSha256: 'x',
+      picks: [{ rank: 1, variant: files[loudest]! }],
+      rejected: files.filter((_, i) => i !== loudest),
+      features: constantFeatures,
+    }))
+  }
+  writeFileSync(logPath, lines.join('\n') + '\n')
+  let critic
+  try {
+    critic = await criticWithUncertainty(logPath, { aesBackend: 'aes-stub', beta: 1 })
+  } catch (err) {
+    t.skip(`no python3 for the stub sidecar here: ${err instanceof Error ? err.message : err}`)
+    return
+  }
+  assert.equal(critic.trainedBatches, 6, 'trained on every aes-bearing batch')
+  assert.ok(critic.trainedPairs > 0, 'decomposed pairs from the log')
+  // score a population; the aes CE axis (RMS in the stub) should reward the loudest candidate
+  const zeroAxes = [0, 0, 0, 0]
+  const candidates = [
+    { dsp: fakeFeatures(10, -20), aes: zeroAxes }, // quiet
+    { dsp: fakeFeatures(10, -20), aes: zeroAxes }, // mid
+    { dsp: fakeFeatures(10, -20), aes: zeroAxes }, // loud (varied below)
+  ]
+  // give the three candidates distinct CE so within-population z-scoring has something to separate
+  candidates[0]!.aes = [0.1, 0, 0, 0]
+  candidates[1]!.aes = [0.4, 0, 0, 0]
+  candidates[2]!.aes = [0.9, 0, 0, 0]
+  const scored = critic.scorePopulation(candidates)
+  assert.equal(scored.length, 3)
+  for (const s of scored) {
+    assert.ok(Number.isFinite(s.mean) && Number.isFinite(s.std) && Number.isFinite(s.pessimistic))
+    assert.ok(Math.abs(s.pessimistic - (s.mean - critic.beta * s.std)) < 1e-12, 'pessimistic = mean - beta*std')
+  }
+  // the loudest candidate (highest CE) should carry the highest mean utility
+  assert.ok(scored[2]!.mean > scored[0]!.mean, 'louder candidate scores higher under the learned taste')
+  // empty population is handled
+  assert.deepEqual(critic.scorePopulation([]), [])
 })
 
 // ---- pilot 108 fixes ------------------------------------------------------------------------------
