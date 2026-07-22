@@ -1,0 +1,73 @@
+{
+  "parent": "",
+  "parentSha256": "",
+  "group": "prodtask:transform:bassline",
+  "count": 3,
+  "seed": 57283,
+  "createdAt": "2026-07-22T15:19:09.701Z",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "source": {
+        "kind": "tricked",
+        "from": "same figure + trick stack [sub-foundation, glue-saturation]: sub-foundation: set subLevel 0.5; glue-saturation: set saturatorCurve warm; glue-saturation: set saturatorDrive 0.25; glue-saturation: set saturatorMix 0.3",
+        "tricks": [
+          "sub-foundation",
+          "glue-saturation"
+        ],
+        "edits": [
+          "sub-foundation: set subLevel 0.5",
+          "glue-saturation: set saturatorCurve warm",
+          "glue-saturation: set saturatorDrive 0.25",
+          "glue-saturation: set saturatorMix 0.3"
+        ]
+      },
+      "loudness": {
+        "measuredLufs": -23.29,
+        "gainDb": -6.34,
+        "capped": false,
+        "truePeakDbtp": -9.82,
+        "wantedGainDb": -6.34
+      }
+    },
+    {
+      "file": "v2.wav",
+      "source": {
+        "kind": "random",
+        "from": "same figure + random-edit control (4 edits): bass.distortionAmount 0.1068; bass.osc2Detune 4.9872; bass.pan -0.5029; bass.eqHigh -2.7048",
+        "edits": [
+          "bass.distortionAmount 0.1068",
+          "bass.osc2Detune 4.9872",
+          "bass.pan -0.5029",
+          "bass.eqHigh -2.7048"
+        ]
+      },
+      "loudness": {
+        "measuredLufs": -29.63,
+        "gainDb": 0,
+        "capped": false,
+        "truePeakDbtp": -13.83,
+        "wantedGainDb": 0
+      }
+    },
+    {
+      "file": "v3.wav",
+      "source": {
+        "kind": "original",
+        "from": "composed offbeat-stabs on seed-004.beat bass solo (4 bars, dotbeat engine, raw)"
+      },
+      "loudness": {
+        "measuredLufs": -32.01,
+        "gainDb": 2.39,
+        "capped": false,
+        "truePeakDbtp": -18.51,
+        "wantedGainDb": 2.39
+      }
+    }
+  ],
+  "normalization": {
+    "targetLufs": -29.63,
+    "truePeakCeilingDbtp": -1,
+    "normalized": true
+  }
+}
