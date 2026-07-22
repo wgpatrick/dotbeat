@@ -47,6 +47,13 @@ import {
   pickSurgePatch,
   composedPhraseToSurgeNotes,
   SURGE_ROLE_CATEGORIES,
+  SURGEPLUS_TRACK_ID,
+  SURGEPLUS_PRODUCTION_ROLE,
+  surgeplusProductionRole,
+  surgeplusProfile,
+  surgeSampleHostText,
+  buildSurgeSampleHost,
+  applySurgeplusProduction,
   type PhraseKey,
   type SurgePatch,
   type ComposedPhrase,
@@ -467,6 +474,115 @@ test('an engineplus clip flows through batch -> score -> report as a fifth kind'
   assert.equal(overall.engineplus!.pairsWon, 3)
   const text = formatShowdownReport(report)
   assert.ok(text.match(/engineplus\s+win 100% \(1\/1\)/), `engineplus row present:\n${text}`)
+})
+
+// ---- surgeplus (the surge render THROUGH a production host) -------------------------------------
+
+test('surgeplusProductionRole / surgeplusProfile: pitched roles map to their produce.ts role; drum-loop and unknowns fall back to default', () => {
+  assert.equal(surgeplusProductionRole('bassline'), 'bass')
+  assert.equal(surgeplusProductionRole('chords'), 'chords')
+  assert.equal(surgeplusProductionRole('lead'), 'lead')
+  // drum-loop is out of surge scope; an unknown role degrades to the mild all-round profile
+  assert.equal(surgeplusProductionRole('drum-loop'), 'default')
+  assert.equal(surgeplusProductionRole('nonsense'), 'default')
+  assert.deepEqual(SURGEPLUS_PRODUCTION_ROLE, { bassline: 'bass', chords: 'chords', lead: 'lead' })
+  // the profile is the shared produce.ts profile for the mapped role
+  assert.equal(surgeplusProfile('lead').role, 'lead')
+  assert.equal(surgeplusProfile('bassline').role, 'bass')
+})
+
+test('surgeSampleHostText + buildSurgeSampleHost: a single-trigger sample voice on a drums-kind host, round-trips', () => {
+  let scratch = parse(surgeSampleHostText(124))
+  // the CLI registers the surge WAV as a media sample before buildSurgeSampleHost declares the lane
+  scratch = setMediaSample(scratch, 'sdsurge', 'b'.repeat(64), 'media/sdsurge.wav')
+  const doc = buildSurgeSampleHost(scratch, 'sdsurge')
+  const track = doc.tracks.find((t) => t.id === SURGEPLUS_TRACK_ID)!
+  assert.equal(track.kind, 'drums')
+  if (track.kind !== 'drums') return
+  // exactly one lane, sample-backed by the surge render, and exactly one hit at step 0
+  assert.equal(track.lanes.length, 1, 'a single clean voice plays the surge render')
+  assert.equal(track.lanes[0]!.backing.type, 'sample')
+  assert.equal(track.hits.length, 1)
+  assert.equal(track.hits[0]!.start, 0, 'one trigger at the top so the whole render plays once')
+  assert.equal(track.hits[0]!.lane, track.lanes[0]!.name)
+  // a flat, wide-open voice so the only colour is the production pass (decay 0 = no percussive gate)
+  assert.equal(track.synth.decay, 0)
+  serializeChecked(doc)
+})
+
+test('applySurgeplusProduction on a pitched role: the sample-voice EFFECT subset lands; synth-only width moves are skipped; the render is untouched', () => {
+  let scratch = parse(surgeSampleHostText(120))
+  scratch = setMediaSample(scratch, 'sdsurge', 'c'.repeat(64), 'media/sdsurge.wav')
+  const host = buildSurgeSampleHost(scratch, 'sdsurge')
+  const { doc, applied } = applySurgeplusProduction(host, 'lead')
+  const before = host.tracks.find((t) => t.id === SURGEPLUS_TRACK_ID)!
+  const after = doc.tracks.find((t) => t.id === SURGEPLUS_TRACK_ID)!
+  assert.equal(after.kind, 'drums')
+  if (before.kind !== 'drums' || after.kind !== 'drums') return
+  // the surge render (the hit + its sample lane) is held constant — only production varies
+  assert.deepEqual(after.hits, before.hits, 'the surge render is untouched')
+  assert.deepEqual(after.lanes, before.lanes, 'the sample lane is untouched')
+  // the EFFECT subset that renders on a sample voice: glue, chorus width, space (both sends), air
+  assert.ok(after.synth.saturatorDrive > 0 && after.synth.saturatorMix > 0, 'saturator glue')
+  assert.notEqual(after.synth.chorusMode, 'off')
+  assert.ok(after.synth.chorusMix > 0, 'chorus width')
+  assert.ok(after.synth.sendReverb > 0 && after.synth.sendDelay > 0, 'reverb + delay space')
+  assert.ok(after.synth.eqHigh > 0, 'eq3 high-shelf air')
+  assert.ok(after.effects.some((e) => e.type === 'eq3' && e.enabled), 'an enabled eq3 carries the air lift')
+  // the synth-VOICE-only width moves are dead weight on a sample voice — they must NOT be claimed
+  assert.equal(after.synth.osc2Level, before.synth.osc2Level, 'no osc bank on a sample voice')
+  assert.equal(after.synth.unisonVoices, before.synth.unisonVoices)
+  assert.ok(!applied.some((a) => a.includes('osc2') || a.includes('unison') || a.includes('utility')),
+    `no osc-bank / utility-width claims on a sample voice (${applied.join(', ')})`)
+  assert.ok(!after.effects.some((e) => e.type === 'utility'), 'no utility insert added on the drum bus')
+  serializeChecked(doc)
+  // deterministic — same input, same production
+  assert.deepEqual(applySurgeplusProduction(host, 'lead').applied, applied)
+})
+
+test('applySurgeplusProduction on bassline: mono-anchored glue only (no width, no sends — produce.ts §2.2)', () => {
+  let scratch = parse(surgeSampleHostText(100))
+  scratch = setMediaSample(scratch, 'sdsurge', 'd'.repeat(64), 'media/sdsurge.wav')
+  const host = buildSurgeSampleHost(scratch, 'sdsurge')
+  const { doc, applied } = applySurgeplusProduction(host, 'bassline')
+  const after = doc.tracks.find((t) => t.id === SURGEPLUS_TRACK_ID)!
+  if (after.kind !== 'drums') return
+  assert.ok(after.synth.saturatorDrive > 0 && after.synth.saturatorMix > 0, 'bass gets saturation glue')
+  // the bass profile carries NO width/space — a mono-anchored low end stays dry-center
+  assert.equal(after.synth.chorusMode, 'off')
+  assert.equal(after.synth.sendReverb, 0)
+  assert.ok(applied.every((a) => a.includes('saturator')), `bass surgeplus is glue only (${applied.join(', ')})`)
+  serializeChecked(doc)
+})
+
+test('a surgeplus clip flows through batch -> score -> report as its own kind', () => {
+  const container = mkdtempSync(join(tmpdir(), 'beat-showdown-surgeplus-'))
+  const dir = join(container, 'showdown-lead-9')
+  mkdirSync(dir)
+  writeFileSync(join(dir, 'v1.wav'), toneWav(220, 0.4))
+  writeFileSync(join(dir, 'v2.wav'), toneWav(440, 0.3))
+  writeFileSync(join(dir, 'v3.wav'), toneWav(880, 0.2))
+  writeFileSync(join(dir, 'v4.wav'), toneWav(330, 0.3))
+  writeShowdownBatch(dir, 'lead', [
+    { file: 'v1.wav', source: { kind: 'engine', from: 'composed arp-8ths figure on seed-002.beat arp solo' } },
+    { file: 'v2.wav', source: { kind: 'surge', from: 'Surge XT patch "Init Saw" (Leads) playing the arp-8ths figure' } },
+    { file: 'v3.wav', source: { kind: 'surgeplus', from: 'Surge XT patch "Init Saw" (Leads) ... + production pass: saturator drive 0.22 mix 0.28, chorus mix 0.22 (same surge render as the surge clip)' } },
+    { file: 'v4.wav', source: { kind: 'gen', from: '"a melodic synth lead" (stub)' } },
+  ], { seed: 9 })
+  // surge/surgeplus bearing batch is gated behind .gitignore (factory-patch content license)
+  assert.ok(existsSync(join(dir, '.gitignore')), 'a surgeplus clip gates the whole batch dir')
+  const result = scoreBatch(dir, ['3', '2', '1'])
+  assert.deepEqual(result.entry.sources, { 'v1.wav': 'engine', 'v2.wav': 'surge', 'v3.wav': 'surgeplus', 'v4.wav': 'gen' })
+  // the entry never carries the surge patch provenance — kinds only
+  assert.ok(!JSON.stringify(result.entry).includes('Init Saw'), 'surge provenance stays out of the log entry')
+  const report = computeShowdownReport(result.logPath)
+  const overall = Object.fromEntries(report.overall.map((s) => [s.kind, s]))
+  assert.equal(overall.surgeplus!.wins, 1, 'surgeplus counted as its own kind and won')
+  assert.equal(overall.surgeplus!.batches, 1)
+  assert.equal(overall.surgeplus!.pairsWon, 3, 'surgeplus beat surge, engine, and the rejected gen')
+  assert.equal(overall.surge!.wins, 0)
+  const text = formatShowdownReport(report)
+  assert.ok(text.match(/surgeplus\s+win 100% \(1\/1\)/), `surgeplus row present:\n${text}`)
 })
 
 test('writeShowdownBatch: a ref clip gates the whole batch dir behind .gitignore', () => {
