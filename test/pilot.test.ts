@@ -12,11 +12,12 @@ import { mkdtempSync, writeFileSync, appendFileSync, readFileSync } from 'node:f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { parse } from '../src/core/index.js'
+import { parse, serialize } from '../src/core/index.js'
 import { generateSeedBeat } from '../src/taste/seeds.js'
 import { FEATURE_KEYS, type FeatureVector } from '../src/taste/features.js'
 import { variantTypeOf } from '../src/taste/eval.js'
 import { scoreBatch } from '../src/vary/batch.js'
+import { makeRng } from '../src/vary/vary.js'
 import {
   fenceWidth,
   WIDTH_FENCE_VALUE,
@@ -33,6 +34,10 @@ import {
   computePilotReport,
   formatPilotReport,
   pilotRole,
+  makeInitialPopulation,
+  makeOffspring,
+  reconstructCheckpoint,
+  checkpointSteps,
   PILOT_ROLES,
   DEFAULT_PILOT_ROLES,
   type PilotGenome,
@@ -329,4 +334,36 @@ test('writePilotJournal emits one JSON line per generation across roles', async 
   assert.equal(first.role, 'bassline')
   assert.equal(first.generation, 0)
   assert.ok('nicheOccupancy' in first && 'meanEnsembleStd' in first && 'rendersSpent' in first)
+})
+
+test('trajectory: editSteps accumulate per mutation and reconstructCheckpoint replays exactly', () => {
+  const seeds = [1, 2, 3].map((n) => ({ file: `seed-00${n}.beat`, doc: parse(generateSeedBeat(n).text) }))
+  const rng = makeRng(9)
+  let n = 0
+  const nextId = () => `g${n++}`
+  const spec = pilotRole('bassline')
+  const pop = makeInitialPopulation(seeds, spec, 3, rng, nextId)
+  for (const g of pop) assert.deepEqual(g.editSteps, [g.edits.length], 'one step after initial mutation')
+  // breed one offspring chain and check cumulative steps
+  const zeroDsp = Object.fromEntries(FEATURE_KEYS.map((k) => [k, 0])) as FeatureVector
+  const elite = { genome: pop[0]!, niche: 0, score: { mean: 0, std: 0, pessimistic: 0 }, dsp: zeroDsp, aes: [0, 0, 0, 0] }
+  const kids = makeOffspring([elite], seeds, spec, 2, 0, 0.4, rng, nextId)
+  for (const k of kids) {
+    if (k.origin === 'immigrant') continue
+    assert.equal(k.editSteps.length, pop[0]!.editSteps.length + 1)
+    assert.equal(k.editSteps[k.editSteps.length - 1], k.edits.length)
+    // full-depth reconstruction rebuilds the genome's own doc exactly
+    const seedDoc = seeds.find((s) => s.file === k.seedFile)!.doc
+    const rebuilt = reconstructCheckpoint(seedDoc, k, k.editSteps.length)
+    assert.equal(serialize(rebuilt), serialize(k.doc), 'prefix replay at full depth = the genome doc')
+    // a mid-depth checkpoint differs from both ends when steps >= 2
+    if (k.editSteps.length >= 2) {
+      const mid = reconstructCheckpoint(seedDoc, k, 1)
+      assert.notEqual(serialize(mid), serialize(seedDoc))
+    }
+  }
+  assert.deepEqual(checkpointSteps(0), [])
+  assert.deepEqual(checkpointSteps(2), [1])
+  assert.deepEqual(checkpointSteps(6), [2, 4])
+  assert.deepEqual(checkpointSteps(3), [1, 2])
 })

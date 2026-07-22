@@ -21,7 +21,7 @@
 
 import { resolve } from 'node:path'
 import { existsSync, writeFileSync, readFileSync } from 'node:fs'
-import type { BeatDocument } from '../core/index.js'
+import { setValue, type BeatDocument } from '../core/index.js'
 import { type FeatureVector, type FeatureKey } from './features.js'
 import { varyTrack, legalGroupsForKind, makeRng, BeatVaryError } from '../vary/vary.js'
 import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
@@ -198,6 +198,10 @@ export interface PilotGenome {
   doc: BeatDocument
   /** "path value" edits from the seed to this genome, in order (replayable via `beat set`) */
   edits: string[]
+  /** cumulative edits.length after each MUTATION STEP — the checkpoint cut points for
+   * trajectory audits (owner, 2026-07-22: "add intermediate checkpoints and see if the last
+   * one is my preference"). editSteps[k]-1 is the last edit index of step k. */
+  editSteps: number[]
   origin: GenomeOrigin
   /** id of the elite this was mutated from (elite offspring and controls); absent for seed/immigrant */
   parentId?: string
@@ -288,7 +292,7 @@ export function makeInitialPopulation(
     const seed = roleSeeds[out.length % roleSeeds.length]!
     const m = mutateOnce(seed.doc, spec, rng, { spread: true })
     if (!m) continue
-    out.push({ id: nextId(), role: spec.role, seedFile: seed.file, trackId: spec.seedTrack, doc: m.doc, edits: m.edits, origin: 'seed' })
+    out.push({ id: nextId(), role: spec.role, seedFile: seed.file, trackId: spec.seedTrack, doc: m.doc, edits: m.edits, editSteps: [m.edits.length], origin: 'seed' })
   }
   return out
 }
@@ -326,6 +330,7 @@ export function makeOffspring(
       trackId: spec.seedTrack,
       doc: m.doc,
       edits: [...elite.genome.edits, ...m.edits],
+      editSteps: [...elite.genome.editSteps, elite.genome.edits.length + m.edits.length],
       origin: 'elite',
       parentId: elite.genome.id,
     })
@@ -339,7 +344,7 @@ export function makeOffspring(
     const seed = roleSeeds[Math.floor(rng() * roleSeeds.length)]!
     const m = mutateOnce(seed.doc, spec, rng, { spread: true })
     if (!m) continue
-    out.push({ id: nextId(), role: spec.role, seedFile: seed.file, trackId: spec.seedTrack, doc: m.doc, edits: m.edits, origin: 'immigrant' })
+    out.push({ id: nextId(), role: spec.role, seedFile: seed.file, trackId: spec.seedTrack, doc: m.doc, edits: m.edits, editSteps: [m.edits.length], origin: 'immigrant' })
   }
   return out
 }
@@ -349,6 +354,31 @@ export function makeOffspring(
  * applies ONE pure-random mutation (never scored, never selected) — "the same starting point, one
  * random move instead of a critic-guided move." If critic-guided elites don't beat these in the
  * owner's blind ratings, the critic isn't yet adding value over mutation + diversity alone. */
+/** Rebuild the genome's state after its first `steps` mutation steps by replaying the edit
+ * prefix onto the seed doc — the trajectory-audit reconstruction (owner, 2026-07-22). Edits are
+ * the same canonical "path value" pairs `beat set` applies, so replay goes through core setValue
+ * and is exact by construction (the vary test suite asserts replayability). steps=0 returns the
+ * seed doc itself (the "origin" arm). */
+export function reconstructCheckpoint(seedDoc: BeatDocument, genome: PilotGenome, steps: number): BeatDocument {
+  if (steps <= 0) return seedDoc
+  const upto = genome.editSteps[Math.min(steps, genome.editSteps.length) - 1] ?? genome.edits.length
+  let doc = seedDoc
+  for (const e of genome.edits.slice(0, upto)) {
+    const sp = e.indexOf(' ')
+    doc = setValue(doc, e.slice(0, sp), e.slice(sp + 1))
+  }
+  return doc
+}
+
+/** The checkpoint cut plan for a trajectory batch: origin (0), ~1/3, ~2/3 of the elite's
+ * mutation depth — deduplicated, strictly between 0 and the final step. An elite with <3 steps
+ * yields fewer cuts (honest: shallow lineages have no meaningful trajectory to audit). */
+export function checkpointSteps(totalSteps: number): number[] {
+  if (totalSteps < 3) return totalSteps === 2 ? [1] : []
+  const cuts = [Math.max(1, Math.floor(totalSteps / 3)), Math.min(totalSteps - 1, Math.floor((2 * totalSteps) / 3))]
+  return [...new Set(cuts)].sort((a, b) => a - b)
+}
+
 export function makeControls(
   archive: Elite[],
   spec: PilotRoleSpec,
@@ -373,6 +403,7 @@ export function makeControls(
       trackId: spec.seedTrack,
       doc: m.doc,
       edits: [...elite.genome.edits, ...m.edits],
+      editSteps: [...elite.genome.editSteps, elite.genome.edits.length + m.edits.length],
       origin: 'control',
       parentId: elite.genome.id,
     })

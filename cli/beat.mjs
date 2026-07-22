@@ -2704,8 +2704,23 @@ async function pilotCmd(argv) {
       lineageIdx++
       const outDir = join(dir, `pilot-${result.role}-${seed}-l${lineageIdx}`)
       try {
+      // trajectory arms (owner, 2026-07-22): the lineage's BEST elite also contributes its seed
+      // original and ~1/3 / ~2/3 mutation-depth checkpoints, so the blind ranking tests whether
+      // preference actually climbs along the optimization path — not just final-vs-control.
+      const best = [...g.elites].sort((a, b) => b.score.pessimistic - a.score.pessimistic)[0]
+      const seedDoc = parse(readFileSync(seedPathFor(best.genome.seedFile), 'utf8'))
+      const trajectory = [
+        { kind: 'origin', doc: seedDoc, from: `the untouched seed (${best.genome.seedFile}) — optimization step 0`, seedFile: best.genome.seedFile },
+        ...pilot.checkpointSteps(best.genome.editSteps.length).map((steps) => ({
+          kind: 'checkpoint',
+          doc: pilot.reconstructCheckpoint(seedDoc, best.genome, steps),
+          from: `optimization checkpoint: step ${steps} of ${best.genome.editSteps.length} on the best elite's lineage (${best.genome.seedFile})`,
+          seedFile: best.genome.seedFile,
+        })),
+      ]
       const items = [
-        ...g.elites.map((e) => ({ kind: 'elite', doc: e.genome.doc, from: `niche ${pilot.nicheLabel(result.grid, e.niche)}, ${e.genome.edits.length} edits from ${e.genome.seedFile} (pessimistic ${e.score.pessimistic})`, seedFile: e.genome.seedFile })),
+        ...trajectory,
+        ...g.elites.map((e) => ({ kind: 'elite', doc: e.genome.doc, from: `niche ${pilot.nicheLabel(result.grid, e.niche)}, ${e.genome.editSteps.length} optimization steps from ${e.genome.seedFile} (pessimistic ${e.score.pessimistic})`, seedFile: e.genome.seedFile })),
         ...g.controls.map((c) => ({ kind: 'control', doc: c.doc, from: `random-mutation control descended from elite ${c.parentId} (${c.seedFile})`, seedFile: c.seedFile })),
       ]
       if (items.length < 2) {
