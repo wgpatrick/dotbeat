@@ -14,7 +14,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { computeBatchFeatures, type FeatureVector } from './features.js'
-import { pairsFromRanking, standardizeBatch, zScoreColumns, trainBT, scoreVector, describeWeights, type TrainPair, type BTModel } from './ranker.js'
+import { pairsFromRanking, standardizeBatch, zScoreColumns, trainBT, scoreVector, describeWeights, trainBTEnsemble, scoreVectorEnsemble, pessimisticScore, type TrainPair, type BTModel, type BTEnsemble } from './ranker.js'
 import { embedAudioFile, BeatEmbedError, fitPCA, projectPCA, AES_AXES, type EmbedBackend, type AesBackend } from './embeddings.js'
 
 export interface TasteBatch {
@@ -300,6 +300,24 @@ function btScorerFor(kind: 'dsp' | 'embed' | 'both' | 'aes' | 'dsp+aes'): Scorer
   }
 }
 
+/** Default pessimism strength for the ablation row (T5 step-3, docs/research/117). β=1 means a
+ * candidate one ensemble-std more uncertain must beat a confident one by a full std of mean utility
+ * to outrank it. */
+export const PESS_BETA = 1
+
+/** The pessimistic twin of btScorerFor: trains a bootstrap ensemble on the training pairs and
+ * scores held-out variants as ensemble mean − β·std. Held-out accuracy of this row vs the plain
+ * dsp+aes-bt quantifies exactly what pessimism costs (rankings it flips by discounting uncertain
+ * variants) or buys on the current best feature set. */
+function btPessScorerFor(kind: 'dsp' | 'embed' | 'both' | 'aes' | 'dsp+aes', beta = PESS_BETA): Scorer {
+  return (heldOut, training) => {
+    const pairs: TrainPair[] = []
+    for (const b of training) pairs.push(...pairsFromRanking(b.picks, b.rejected, vectorsFor(b, kind)))
+    const ensemble = trainBTEnsemble(pairs)
+    return Object.fromEntries([...vectorsFor(heldOut, kind)].map(([f, vec]) => [f, pessimisticScore(ensemble, vec, beta)]))
+  }
+}
+
 export const SCORERS: Record<string, Scorer> = {
   random: (heldOut, _training, rng) => Object.fromEntries(Object.keys(heldOut.features).map((f) => [f, rng()])),
   'dsp-bt': btScorerFor('dsp'),
@@ -307,6 +325,7 @@ export const SCORERS: Record<string, Scorer> = {
   'both-bt': btScorerFor('both'),
   'aes-bt': btScorerFor('aes'),
   'dsp+aes-bt': btScorerFor('dsp+aes'),
+  'dsp+aes-bt-pess': btPessScorerFor('dsp+aes'),
 }
 
 /** T2 leftover (roadmap): which kind of round produced a batch. Ablation splits key on this —
@@ -370,6 +389,26 @@ export interface EvalReport {
    * explicit feature dims [CE, CU, PC, PQ]; `weights` is the aes-only BT model trained on every
    * aes-bearing batch, one signed number per NAMED axis (the interpretability payoff). */
   aesthetics?: { backend: string; attached: number; missing: number; note?: string; weights?: { axis: string; weight: number }[] }
+  /** C2 (docs/research/117): the uncertainty landscape the pessimistic scorer sees. Per held-out
+   * fold, the mean bootstrap-ensemble std over that batch's variants (on the dsp+aes feature
+   * composition), aggregated overall and by variant type. A HIGH per-type std is where pessimism
+   * bites hardest — the diagnostic that says whether the critic is more uncertain on gen batches
+   * (where it scores 0% top-1 and is effectively blind) than on the vary/showdown splits it has
+   * signal on. Present only when the dsp+aes scorers ran (>=2 aes-bearing batches). */
+  ensembleUncertainty?: EnsembleUncertainty
+}
+
+export interface EnsembleUncertainty {
+  /** pessimism strength the ablation row used (mean − β·std) */
+  beta: number
+  /** ensemble size (bootstrap members per fold) */
+  n: number
+  folds: number
+  /** mean per-variant ensemble std across every held-out fold (the overall uncertainty level) */
+  meanStd: number
+  /** same, split by the held-out batch's variant type — the "is gen the most uncertain?" answer.
+   * Present only when the aes-bearing batches span >1 type. */
+  byType?: { type: VariantType; folds: number; meanStd: number; smoke: boolean }[]
 }
 
 /** One held-out fold's raw outcome, attributed to its batch's variant type for the splits. */
@@ -445,6 +484,36 @@ function runScorer(name: string, scorer: Scorer, batches: TasteBatch[], rng: () 
   return report
 }
 
+/** The uncertainty landscape (C2): leave-one-batch-out, train a bootstrap ensemble on the other
+ * batches' dsp+aes pairs and record the mean ensemble std over the held-out batch's variants,
+ * attributed to that batch's type. Same folds and feature composition as the dsp+aes-bt-pess row,
+ * so the reported std is exactly the uncertainty that row's pessimism acts on. */
+function computeEnsembleUncertainty(batches: TasteBatch[], beta = PESS_BETA): EnsembleUncertainty {
+  const perFold: { type: VariantType; meanStd: number }[] = []
+  for (let i = 0; i < batches.length; i++) {
+    const heldOut = batches[i]!
+    const training = batches.filter((_, j) => j !== i)
+    const pairs: TrainPair[] = []
+    for (const b of training) pairs.push(...pairsFromRanking(b.picks, b.rejected, vectorsFor(b, 'dsp+aes')))
+    const ensemble = trainBTEnsemble(pairs)
+    const vecs = [...vectorsFor(heldOut, 'dsp+aes').values()]
+    if (vecs.length === 0) continue
+    const stds = vecs.map((v) => scoreVectorEnsemble(ensemble, v).std)
+    perFold.push({ type: variantTypeOf(heldOut), meanStd: stds.reduce((s, x) => s + x, 0) / stds.length })
+  }
+  const meanOf = (rows: { meanStd: number }[]) => (rows.length === 0 ? 0 : rows.reduce((s, r) => s + r.meanStd, 0) / rows.length)
+  const n = trainBTEnsemble([]).n // the default ensemble size, reported for reproducibility
+  const result: EnsembleUncertainty = { beta, n, folds: perFold.length, meanStd: meanOf(perFold) }
+  const types = [...new Set(perFold.map((f) => f.type))]
+  if (types.length > 1) {
+    result.byType = types.sort().map((type) => {
+      const rows = perFold.filter((f) => f.type === type)
+      return { type, folds: rows.length, meanStd: meanOf(rows), smoke: rows.length < SPLIT_SMOKE_MIN_BATCHES }
+    })
+  }
+  return result
+}
+
 export interface EvaluateOptions {
   seed?: number
   /** 'off' skips embeddings entirely; default 'clap' degrades to a note when the sidecar can't run */
@@ -486,9 +555,15 @@ export async function evaluate(logPath: string, opts: EvaluateOptions = {}): Pro
     reports.push(runScorer('embed-bt', SCORERS['embed-bt']!, embedBatches, rng))
     reports.push(runScorer('both-bt', SCORERS['both-bt']!, embedBatches, rng))
   }
+  let ensembleUncertainty: EnsembleUncertainty | undefined
   if (aesBatches.length >= 2) {
     reports.push(runScorer('aes-bt', SCORERS['aes-bt']!, aesBatches, rng))
     reports.push(runScorer('dsp+aes-bt', SCORERS['dsp+aes-bt']!, aesBatches, rng))
+    // C2 (docs/research/117): the pessimistic ablation row and the uncertainty landscape it acts
+    // on — dsp+aes is the current best feature set, so scoring it mean − β·std quantifies what
+    // Goodhart-containment pessimism costs/buys on held-out picks.
+    reports.push(runScorer('dsp+aes-bt-pess', SCORERS['dsp+aes-bt-pess']!, aesBatches, rng))
+    ensembleUncertainty = computeEnsembleUncertainty(aesBatches)
     // The interpretability payoff: an aes-only BT model over ALL aes-bearing batches gives one
     // signed weight per NAMED axis — "+PQ / -PC" reads as "prefers cleaner production over busier".
     if (aesthetics !== undefined) {
@@ -511,6 +586,7 @@ export async function evaluate(logPath: string, opts: EvaluateOptions = {}): Pro
     trainedPairCount: fullModel.pairCount,
     ...(embedding !== undefined ? { embedding } : {}),
     ...(aesthetics !== undefined ? { aesthetics } : {}),
+    ...(ensembleUncertainty !== undefined ? { ensembleUncertainty } : {}),
   }
 }
 
@@ -558,6 +634,91 @@ export function formatEvalReport(r: EvalReport): string {
     out += `aesthetic taste directions (aes-only BT weights; CE=content enjoyment, CU=content usefulness, PC=production complexity, PQ=production quality):\n`
     for (const w of r.aesthetics.weights) out += `  ${w.weight >= 0 ? '+' : ''}${w.weight.toFixed(2)}  ${w.axis}\n`
   }
+  if (r.ensembleUncertainty !== undefined) {
+    const u = r.ensembleUncertainty
+    out += `ensemble uncertainty (dsp+aes bootstrap, ${u.n} members; mean per-variant std the dsp+aes-bt-pess row discounts at β=${u.beta}):\n`
+    out += `  overall ${u.meanStd.toFixed(3)} over ${u.folds} fold${u.folds === 1 ? '' : 's'}\n`
+    for (const t of u.byType ?? []) {
+      out += `    ${t.type.padEnd(9)} (${t.folds} fold${t.folds === 1 ? '' : 's'}) std ${t.meanStd.toFixed(3)}${t.smoke ? '  [small split — smoke, not evidence]' : ''}\n`
+    }
+  }
   if (r.usable < 10) out += `note: ${r.usable} batches is far below the ~10-30 the research base expects for usable signal — treat these numbers as smoke, not evidence (docs/research/107-taste-model-program.md)\n`
   return out
+}
+
+// ---- C2: the T5-pilot critic interface (docs/research/117) ------------------------------------
+
+/** One candidate the T5 loop wants scored: its raw 13-dim DSP feature vector and its four
+ * Audiobox-Aesthetics axes [CE, CU, PC, PQ] — the exact two feature sources the trained critic
+ * composes (dsp⊕aes). */
+export interface UncertaintyCandidate {
+  dsp: FeatureVector
+  /** the four aes axes in AES_AXES order [CE, CU, PC, PQ] */
+  aes: number[]
+}
+
+/** The critic a T5 pilot loop consumes: a pessimistic scorer closure plus the ensemble and the
+ * data it was fit on.
+ *
+ * GEN-SUBSPACE BLINDNESS — a fence the caller MUST respect. The gen split is where the critic is
+ * WEAKEST: docs/research/117 §verdict measured 0% top-1 on gen, and at n=66 today it remains the
+ * lowest-pairwise (59% vs 67% vary) and HIGHEST-ensemble-std split (see taste-eval's
+ * ensembleUncertainty). Pessimism narrows but does not close that hole: an ensemble can be
+ * *confidently wrong* on gen-adjacent material it has no signal on, so a low `std` there is not
+ * evidence the mean is trustworthy — it only means the resamples agree, not that they agree with
+ * the owner. Per research/117's pilot spec, a T5 loop must **fence off the gen subspace**: search
+ * only synth-param / feel / drum genomes where the critic has measured signal, or route gen
+ * candidates straight to the morning audit UNSCORED.
+ * `scorePopulation` will happily score anything handed to it — the fence lives in what the caller
+ * chooses to feed it, and in reading the per-type `ensembleUncertainty` from taste-eval first to
+ * confirm the search region isn't the high-std blind one. */
+export interface UncertaintyCritic {
+  /** the bootstrap ensemble trained on ALL usable dsp+aes pairs in the log */
+  ensemble: BTEnsemble
+  /** pessimism strength baked into scorePopulation's `pessimistic` field */
+  beta: number
+  /** aes-bearing batches the critic trained on, and the implied pairwise comparisons */
+  trainedBatches: number
+  trainedPairs: number
+  /** Score a POPULATION of candidates — the T5 unit (the loop screens a whole generation against
+   * the critic at once). Candidates are z-scored WITHIN the population (exactly how the model was
+   * trained: within-batch standardization) then composed dsp⊕aes and scored. Returns mean, std,
+   * and pessimistic (mean − β·std) per candidate, in input order. A population of <2 can't be
+   * z-scored and every feature collapses to 0 → mean/std/pessimistic all 0 (honest: one candidate
+   * carries no within-population contrast to judge). */
+  scorePopulation(candidates: UncertaintyCandidate[]): { mean: number; std: number; pessimistic: number }[]
+}
+
+/** Build the T5-pilot critic (C2): load the log, attach Audiobox-Aesthetics axes, train a bootstrap
+ * ensemble on ALL usable dsp+aes pairs, and return the pessimistic scorer closure a T5 loop would
+ * consume. Async because aes axes come from the same render-sidecar plumbing taste-eval uses. See
+ * UncertaintyCritic's docstring for the gen-subspace fence the caller must respect. */
+export async function criticWithUncertainty(
+  logPath: string,
+  opts: { aesBackend?: AesBackend; beta?: number; n?: number; seed?: number } = {},
+): Promise<UncertaintyCritic> {
+  const beta = opts.beta ?? PESS_BETA
+  const { batches } = loadTasteBatches(logPath)
+  await attachAesthetics(batches, { backend: opts.aesBackend ?? 'aes' })
+  const aesBatches = batches.filter((b) => b.aes !== undefined)
+  const pairs: TrainPair[] = []
+  for (const b of aesBatches) pairs.push(...pairsFromRanking(b.picks, b.rejected, vectorsFor(b, 'dsp+aes')))
+  const ensembleOpts = { ...(opts.n !== undefined ? { n: opts.n } : {}), ...(opts.seed !== undefined ? { seed: opts.seed } : {}) }
+  const ensemble = trainBTEnsemble(pairs, ensembleOpts)
+  return {
+    ensemble,
+    beta,
+    trainedBatches: aesBatches.length,
+    trainedPairs: pairs.length,
+    scorePopulation(candidates) {
+      if (candidates.length === 0) return []
+      const dspZ = standardizeBatch(candidates.map((c) => c.dsp))
+      const aesZ = zScoreColumns(candidates.map((c) => c.aes))
+      return candidates.map((_, i) => {
+        const vec = [...dspZ[i]!, ...aesZ[i]!]
+        const { mean, std } = scoreVectorEnsemble(ensemble, vec)
+        return { mean, std, pessimistic: mean - beta * std }
+      })
+    },
+  }
 }
