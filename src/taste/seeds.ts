@@ -7,6 +7,8 @@
 // that doesn't parse is a bug, not a variant).
 
 import { mulberry32 } from './eval.js'
+import { parse, serialize } from '../core/index.js'
+import { productionRoleFor, productionProfileFor, applyProducedDefaults } from '../analysis/produce.js'
 
 interface SeedSpec {
   bpm: number
@@ -129,7 +131,26 @@ export function generateSeedBeat(seed: number): { text: string; description: str
   lines.push('')
 
   const description = `${spec.style} in ${spec.minor ? 'minor' : 'major'} @ ${spec.bpm}bpm, ${feel} drums${lines.some((l) => l.startsWith('track arp')) ? ', arp' : ''}`
-  return { text: lines.join('\n'), description }
+  return { text: applySeedProduction(lines.join('\n'), seed), description }
+}
+
+/** Produced defaults for seed patches (docs/research/115-production-layer-techniques.md, plan A1):
+ * every seed leaves the file with modest, role-appropriate production instead of the dry/mono/static
+ * init patch — so the taste loop searches FROM a produced starting point rather than asking vary to
+ * rediscover mixing practice. Seed tier is ~60% of the gen-kit profile with a small seeded jitter
+ * (seeds are variation fodder — keep headroom so vary batches can move width/air/sends in BOTH
+ * directions). Deterministic in `seed`: the jitter rng is derived from the seed, drawn in a fixed
+ * track order, and never disturbs generateSeedBeat's own rng, so the .beat stays byte-stable per
+ * seed. bass/sub stay mono-anchored (no width, no reverb — §2.2); the drums bus gets air + light
+ * glue only (it carries the kick). */
+function applySeedProduction(rawText: string, seed: number): string {
+  let doc = parse(rawText)
+  const prodRng = mulberry32((seed + 104729) >>> 0)
+  for (const t of doc.tracks) {
+    const profile = productionProfileFor(productionRoleFor(t.id), { tier: 'seed', rng: prodRng })
+    doc = applyProducedDefaults(doc, t.id, profile).doc
+  }
+  return serialize(doc)
 }
 
 // ---- Generation prompt bank -------------------------------------------------------------------
