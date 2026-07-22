@@ -2619,7 +2619,10 @@ async function pilotCmd(argv) {
     if (genomes.length === 0) return out
     const workDir = join(workRoot, `${role}-${workCounter++}`)
     mkdirSync(workDir, { recursive: true })
-    const variants = genomes.map((g) => ({ doc: g.doc, recipe: g.id }))
+    // SOLO the mutated track (owner, 2026-07-22, first frontier audit: param changes on a track
+    // buried in the mix are near-inaudible — the same finding that made every param-vary batch
+    // solo its target back on 07-18; the pilot renders what the owner will actually judge)
+    const variants = genomes.map((g) => ({ doc: showdown.soloForShowdown(g.doc, g.trackId), recipe: g.id }))
     writeVaryBatch({
       parentPath: seedPathFor(genomes[0].seedFile),
       parentText: readFileSync(seedPathFor(genomes[0].seedFile), 'utf8'),
@@ -2689,7 +2692,8 @@ async function pilotCmd(argv) {
       }
       const workDir = join(outDir, 'work')
       mkdirSync(workDir, { recursive: true })
-      const variants = items.map((it, i) => ({ doc: it.doc, recipe: `pilot ${result.role} ${it.kind} ${i + 1}` }))
+      // frontier clips solo the mutated track too — the audit must hear what the search optimized
+      const variants = items.map((it, i) => ({ doc: showdown.soloForShowdown(it.doc, result.spec.seedTrack), recipe: `pilot ${result.role} ${it.kind} ${i + 1}` }))
       writeVaryBatch({
         parentPath: seedPathFor(items[0].seedFile),
         parentText: readFileSync(seedPathFor(items[0].seedFile), 'utf8'),
