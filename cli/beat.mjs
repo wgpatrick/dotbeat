@@ -1650,7 +1650,7 @@ function flagValue(argv, flag) {
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
   const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--ref-dir', '--seconds', '--log']
-  const known = new Set([...valued, '--report', '--json', '--with-produced'])
+  const known = new Set([...valued, '--report', '--json', '--with-produced', '--shared-figure'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const dir = positional[0]
@@ -1688,6 +1688,7 @@ async function showdownCmd(argv) {
   // patch, plus a production pass as ordinary .beat edits — measuring how much of the engine's
   // blind-rating deficit is production (width/air/glue) rather than raw synth timbre
   const withProduced = argv.includes('--with-produced')
+  const sharedFigure = argv.includes('--shared-figure')
   const refDir = flagValue(argv, '--ref-dir')
   if (refDir !== undefined && !existsSync(refDir)) throw new BeatEditError(`no directory at --ref-dir ${refDir}`)
 
@@ -1792,32 +1793,50 @@ async function showdownCmd(argv) {
         }
         const extended = { ...showdown.extendToFourBars(seed.doc), bpm: batchBpm }
 
-        // per-batch composed figure (un-blinding fix, owner 2026-07-21: the seed's own phrases
-        // were narrow enough to fingerprint across batches). Engine and keymap share this ONE
-        // figure — same notes within the batch (the comparison is the sound source), a genuinely
-        // different archetype-bank figure across batches, diatonic in the seed's inferred key.
-        const exclude = usedFigures.get(spec.role) ?? []
-        let phrased
-        let figure
-        if (spec.role === 'drum-loop') {
-          const composed = showdown.composeDrumPhrase(batchSeed, { exclude })
-          phrased = showdown.applyComposedDrums(extended, spec.seedTrack, composed)
-          figure = composed.archetype
-        } else {
-          const composed = showdown.composePitchedPhrase(spec.role, showdown.inferSeedKey(seed.doc), batchSeed, { exclude })
-          phrased = showdown.applyComposedPhrase(extended, spec.seedTrack, composed)
-          figure = composed.archetype
+        // per-source composed figures (owner, 2026-07-21, SECOND un-blinding report: composed
+        // clips sharing one figure per batch made the dotbeat-rendered group identifiable as a
+        // same-melody cluster). Default: every composed source draws its OWN archetype figure,
+        // exclude-chained so no two clips in a batch — nor two batches in a run — repeat one.
+        // --shared-figure restores the controlled ablation (identical notes across engine/
+        // engineplus/keymap) for when isolating the sound-source variable matters more than
+        // blindness (that mode produced the 2026-07-21 production-vs-timbre split).
+        const runExclude = usedFigures.get(spec.role) ?? []
+        const drawnFigures = []
+        const drawComposed = (seedOffset) => {
+          const exclude = [...runExclude, ...drawnFigures]
+          const composed = spec.role === 'drum-loop'
+            ? showdown.composeDrumPhrase(batchSeed + seedOffset, { exclude })
+            : showdown.composePitchedPhrase(spec.role, showdown.inferSeedKey(seed.doc), batchSeed + seedOffset, { exclude })
+          drawnFigures.push(composed.archetype)
+          return composed
         }
-        usedFigures.set(spec.role, [...exclude, figure])
-        process.stderr.write(`composed figure: ${figure} (batch seed ${batchSeed})\n`)
+        const applyComposed = (composed) => (spec.role === 'drum-loop'
+          ? showdown.applyComposedDrums(extended, spec.seedTrack, composed)
+          : showdown.applyComposedPhrase(extended, spec.seedTrack, composed))
 
-        // engine clip: the composed figure soloed through dotbeat's own synth engine
+        const engineComposed = drawComposed(0)
+        const phrased = applyComposed(engineComposed)
+        const figure = engineComposed.archetype
+        const plusComposed = withProduced ? (sharedFigure ? engineComposed : drawComposed(101)) : null
+        const kmComposed = sharedFigure ? engineComposed : drawComposed(202)
+        usedFigures.set(spec.role, [...runExclude, ...drawnFigures])
+        process.stderr.write(`composed figure(s): ${drawnFigures.join(', ')}${sharedFigure ? ' (shared across composed sources)' : ''} (batch seed ${batchSeed})\n`)
+
+        // engine clip: its composed figure soloed through dotbeat's own synth engine
         const engineDoc = showdown.soloForShowdown(phrased, spec.seedTrack)
 
-        // engineplus clip (--with-produced): the SAME soloed doc — identical notes, identical
-        // patch — plus the production pass (width/air/glue as ordinary .beat edits)
+        // engineplus clip (--with-produced): the engine patch + the production pass (width/air/
+        // glue as ordinary .beat edits); its own figure by default, the engine's under
+        // --shared-figure (the controlled same-notes ablation)
         let produced = null
-        if (withProduced) produced = showdown.applyProductionTreatment(engineDoc, spec.seedTrack)
+        let plusFigure = null
+        if (withProduced && plusComposed !== null) {
+          const plusBase = plusComposed === engineComposed ? engineDoc : showdown.soloForShowdown(applyComposed(plusComposed), spec.seedTrack)
+          produced = showdown.applyProductionTreatment(plusBase, spec.seedTrack)
+          plusFigure = plusComposed.archetype
+        }
+        const kmPhrased = kmComposed === engineComposed ? phrased : applyComposed(kmComposed)
+        const kmFigure = kmComposed.archetype
 
         // keymap clip: generated one-shot(s) registered into a scratch host, then played as an
         // instrument through the engine's sampler lanes
@@ -1835,12 +1854,12 @@ async function showdownCmd(argv) {
           // an automated pipeline takes the best available root rather than refusing: detected
           // pitch, else the strongest-low-partial suggestion, else a4 — the root is recorded
           const rootMidi = pitch.midi ?? (pitch.suggestedRootNote ? noteToMidi(pitch.suggestedRootNote) : 69)
-          const phrase = showdown.phraseFromSeed(phrased, spec.seedTrack)
+          const phrase = showdown.phraseFromSeed(kmPhrased, spec.seedTrack)
           const built = showdown.buildPitchedKeymapPhrase(scratch, 'sdkm', rootMidi, phrase)
           kmDoc = built.doc
-          kmFrom = `keymap of "${kmPrompt}" (root ${midiToNote(Math.round(rootMidi))}, ${pitch.level ?? 'no'} confidence) playing the composed ${figure} figure (${seed.file}'s key)`
+          kmFrom = `keymap of "${kmPrompt}" (root ${midiToNote(Math.round(rootMidi))}, ${pitch.level ?? 'no'} confidence) playing the composed ${kmFigure} figure (${seed.file}'s key)`
         } else {
-          const drumsOnly = showdown.isolateTrack(phrased, spec.seedTrack)
+          const drumsOnly = showdown.isolateTrack(kmPhrased, spec.seedTrack)
           writeFileSync(kmBase, showdown.serializeChecked(drumsOnly))
           const samplesByLane = {}
           const promptsUsed = []
@@ -1852,15 +1871,15 @@ async function showdownCmd(argv) {
             promptsUsed.push(prompt)
           }
           kmDoc = showdown.buildKitPhrase(parse(readFileSync(kmBase, 'utf8')), spec.seedTrack, samplesByLane)
-          kmFrom = `sample-lane kit of generated one-shots ("${kmStyle}") playing the composed ${figure} groove`
+          kmFrom = `sample-lane kit of generated one-shots ("${kmStyle}") playing the composed ${kmFigure} groove`
         }
 
         // render engine (+ engineplus) + keymap in ONE batch boot (offline by default; raw
         // levels — the whole showdown batch is normalized together below, across sources)
         const workVariants = [
           { doc: engineDoc, recipe: `engine ${spec.seedTrack} solo (composed ${figure})` },
-          ...(produced ? [{ doc: produced.doc, recipe: `engine ${spec.seedTrack} solo + production pass (composed ${figure})` }] : []),
-          { doc: kmDoc, recipe: `keymap phrase (composed ${figure})` },
+          ...(produced ? [{ doc: produced.doc, recipe: `engine ${spec.seedTrack} solo + production pass (composed ${plusFigure})` }] : []),
+          { doc: kmDoc, recipe: `keymap phrase (composed ${kmFigure})` },
         ]
         writeVaryBatch({
           parentPath: seedPath,
@@ -1895,7 +1914,7 @@ async function showdownCmd(argv) {
         const clips = [
           { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `composed ${figure} figure on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
           ...(produced
-            ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: `same composed ${figure} figure and patch as the engine clip + production pass: ${produced.applied.join(', ')} (dotbeat engine)` }]
+            ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: `${sharedFigure ? `same composed ${plusFigure} figure and patch as the engine clip` : `composed ${plusFigure} figure through the engine patch`} + production pass: ${produced.applied.join(', ')} (dotbeat engine)` }]
             : []),
           { kind: 'keymap', wav: join(workDir, produced ? 'v3.wav' : 'v2.wav'), from: kmFrom },
           { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
@@ -3089,6 +3108,26 @@ async function genKitCmd(argv) {
     slots[role] = [{ clip: clipId, at: 0 }]
     process.stdout.write(`${role}: keymapped ${laneNames.length} lanes (${laneNames[0]}..${laneNames[laneNames.length - 1]}, ${scale} in ${pitchClassName(keyMidi)}) — root ${p.pick.rootSource} ${midiToNote(p.pick.rootMidi)}; starter phrase written (clip "${clipId}")\n`)
   }
+  // Produced defaults (docs/research/115-production-layer-techniques.md, plan A1): every registered
+  // track ships with role-appropriate production (width / air / glue / space) instead of the dry,
+  // mono, static init patch. Deterministic function of role — no rng — so the .beat stays
+  // byte-deterministic per --seed. kick/bass stay mono-anchored (no width, no reverb per research
+  // 115 §2.2); the drum bus (kit) gets an air shelf + light glue but no width (it carries the kick);
+  // lead/pad get the full width/air/space; and the bass ducks under the kit's kick (§4.2) — the
+  // genre-defining pump, wired only when the kit actually has a kick lane.
+  const producedIds = []
+  if (drumRoles.length > 0) producedIds.push('kit')
+  for (const p of picks.filter((x) => x.spec.kind === 'tonal')) producedIds.push(p.spec.role)
+  const kitHasKick = drumRoles.some((p) => p.spec.role === 'kick')
+  process.stdout.write('\n')
+  for (const id of producedIds) {
+    let profile = genkit.productionProfileFor(genkit.productionRoleFor(id))
+    if (id === 'bass' && kitHasKick) profile = { ...profile, duck: { source: 'kit', amount: 0.35 } }
+    const res = genkit.applyProducedDefaults(doc, id, profile)
+    doc = res.doc
+    if (res.applied.length > 0) process.stdout.write(`produced ${id}: ${res.applied.join('; ')}\n`)
+  }
+
   doc = removeTrack(doc, 'starter').doc // the scaffolding track — the kit's real tracks exist now
   doc = setScene(doc, 'main', slots)
   doc = setSong(doc, [{ scene: 'main', bars: SECTION_BARS }])
