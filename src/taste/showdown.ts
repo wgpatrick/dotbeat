@@ -10,6 +10,13 @@
 //   gen     — a fal/stub-generated phrase for the same role (the prompt bank's phrase tier)
 //   keymap  — a generated ONE-SHOT turned into an instrument (beat keymap / sample lanes) playing
 //             the SAME phrase through the engine's sampler — the hybrid the owner is curious about
+//   surge   — (opt-in, --with-surge) the SAME composed figure rendered through a Surge XT factory
+//             patch via the python sidecar (pitched roles only) — the "can a pro synth + patch
+//             library carry this part?" probe
+//   surgeplus — (opt-in, --with-surge AND --with-produced) the SAME surge render through a dotbeat
+//             production pass, hosted as a sample voice on a drums-kind scratch host and rendered
+//             offline (see the surgeplus section below) — isolates production for surge exactly as
+//             engineplus does for engine
 //   ref     — (opt-in, private) a clip referenced from an external directory of commercial-music
 //             chops; see the licensing stance in the design doc — the tool references files under
 //             the given path, and nothing identifying them ever enters anything shared
@@ -40,7 +47,7 @@ import { shuffledOrder } from '../vary/audition.js'
 import { genSubject } from './seeds.js'
 import { SPLIT_SMOKE_MIN_BATCHES, mulberry32 } from './eval.js'
 
-export type ShowdownSourceKind = 'engine' | 'engineplus' | 'gen' | 'keymap' | 'ref' | 'surge'
+export type ShowdownSourceKind = 'engine' | 'engineplus' | 'gen' | 'keymap' | 'ref' | 'surge' | 'surgeplus'
 
 /** Volume levels shared with taste-collect's solo logic (owner feedback 2026-07-18: a quiet
  * varied track in a full mix is unratable — the showdown compares the SOUND of one role, so the
@@ -1006,11 +1013,11 @@ export function assignClipOrder(count: number, seed: number): number[] {
 
 /** Write the showdown batch manifest over v1..vN.wav already sitting in outDir: the clip-set
  * shape (empty parent — score works, adopt refuses) with group `showdown:<role>` and per-variant
- * `source` records. When any clip is a ref OR a surge render, a `.gitignore` covering the whole
- * dir is written too: ref working copies are private derivatives of commercial music, and surge
- * renders carry Surge XT's still-unresolved factory-patch CONTENT license (research 114 §2.1,
- * surge issue #6741) — neither may land in git even when a collection dir sits inside a repo
- * (docs/source-showdown-eval.md, licensing stance). */
+ * `source` records. When any clip is a ref OR a surge/surgeplus render, a `.gitignore` covering the
+ * whole dir is written too: ref working copies are private derivatives of commercial music, and
+ * surge (and surgeplus, the same surge audio produced) renders carry Surge XT's still-unresolved
+ * factory-patch CONTENT license (research 114 §2.1, surge issue #6741) — neither may land in git
+ * even when a collection dir sits inside a repo (docs/source-showdown-eval.md, licensing stance). */
 export function writeShowdownBatch(
   outDir: string,
   role: string,
@@ -1033,10 +1040,11 @@ export function writeShowdownBatch(
   }
   writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
   // The gitignore gate (docs/source-showdown-eval.md licensing stances): ref working copies are
-  // private chops of commercial audio; surge renders carry the unresolved factory-patch content
-  // license; midi-figure batches render DERIVATIVES of MIDI transcriptions of copyrighted songs
-  // (and their manifests carry the midi path). None may ever land in git.
-  if (clips.some((c) => c.source.kind === 'ref' || c.source.kind === 'surge') || opts.figureSource === 'midi') {
+  // private chops of commercial audio; surge renders — and surgeplus, which is the SAME surge audio
+  // through a production pass — carry the unresolved factory-patch content license; midi-figure
+  // batches render DERIVATIVES of MIDI transcriptions of copyrighted songs (and their manifests
+  // carry the midi path). None may ever land in git.
+  if (clips.some((c) => c.source.kind === 'ref' || c.source.kind === 'surge' || c.source.kind === 'surgeplus') || opts.figureSource === 'midi') {
     writeFileSync(resolve(outDir, '.gitignore'), '# showdown batch containing private ref/surge/midi-derived clips — never committed (docs/source-showdown-eval.md)\n*\n')
   }
   return manifest

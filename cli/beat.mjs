@@ -711,7 +711,15 @@ const HELP = [
                                                           factory patch via surgepy — pitched roles only,
                                                           drum-loop skipped; its own distinct figure unless
                                                           --shared-figure; needs a source-built surgepy, see
-                                                          beat showdown --surge-doctor), and optionally ref
+                                                          beat showdown --surge-doctor). With --with-surge AND
+                                                          --with-produced together, a surgeplus clip is added: the
+                                                          SAME surge render through a dotbeat production pass
+                                                          (hosted as a sample voice on a drums-kind track — the
+                                                          audio-playback track the engine produces; 'audio'-kind
+                                                          tracks carry no effect chain — applying eqHigh air /
+                                                          saturation / chorus / reverb+delay sends), isolating
+                                                          production for surge as engineplus does for engine.
+                                                          Optionally ref
                                                           (--ref-dir). With --midi-dir the composed sources
                                                           (engine/engineplus/keymap/surge) draw their figures
                                                           from MIDI files of commercial tracks instead of the
@@ -736,8 +744,9 @@ const HELP = [
         behind a generated .gitignore, the manifest records the origin path as a reference only,
         and the shared scores log records the source KIND alone — never the path, title, or audio.
         --with-surge renders through Surge XT (GPLv3, a local dev-side tool — outputs carry no code
-        copyleft) but its factory-patch CONTENT license is unresolved upstream, so surge-bearing
-        batches get the same .gitignore treatment as ref batches; the scores log stays kind-only.
+        copyleft) but its factory-patch CONTENT license is unresolved upstream, so surge- and
+        surgeplus-bearing batches get the same .gitignore treatment as ref batches (surgeplus is the
+        same surge audio, produced); the scores log stays kind-only.
         surgepy has no PyPI wheel — beat showdown --surge-doctor reports the source-build steps.
         --midi-dir files are MIDI transcriptions of copyrighted songs (derivative works, PRIVATE —
         keep them outside any repo): the tool only ever READS them, midi-figure batches get the
@@ -2045,7 +2054,7 @@ async function showdownCmd(argv) {
       const outDir = join(dir, `showdown-${spec.role}-${batchSeed}`)
       const workDir = join(outDir, 'work')
       const surgeThisRole = surgePatches !== null && showdown.surgeRoleCategories(spec.role) !== null
-      process.stderr.write(`\n=== showdown ${spec.role}: composed figure in ${seed.file}'s key — engine vs ${withProduced ? 'engineplus vs ' : ''}gen vs keymap${surgeThisRole ? ' vs surge' : ''}${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
+      process.stderr.write(`\n=== showdown ${spec.role}: composed figure in ${seed.file}'s key — engine vs ${withProduced ? 'engineplus vs ' : ''}gen vs keymap${surgeThisRole ? ' vs surge' : ''}${surgeThisRole && withProduced ? ' vs surgeplus' : ''}${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
       try {
         mkdirSync(workDir, { recursive: true })
 
@@ -2318,6 +2327,48 @@ async function showdownCmd(argv) {
           }
         }
 
+        // surgeplus clip (--with-surge AND --with-produced, pitched roles only): the SAME surge
+        // render THROUGH a dotbeat production pass — isolates production for surge exactly as
+        // engineplus does for engine (same figure + patch audio, only production varies). The surge
+        // WAV can't take SYNTH_FIELDS edits (it's sidecar audio, not engine-synthesized), and an
+        // 'audio'-KIND track carries no effect chain by format design (the engine renders it dry),
+        // so the render is hosted the SAME way the keymap clip hosts its one-shot: a single-trigger
+        // sample voice on a drums-kind scratch host — the audio-playback track dotbeat's engine
+        // actually produces (sample -> filter -> drum bus + reverb/delay sends). Produced with the
+        // role's produce.ts profile (applyProducedDefaults, engineplus's own primitive; its synth-
+        // only width moves are auto-dropped on a sample voice), rendered offline like the work
+        // batch. Graceful skip on any failure — and whenever surge itself skipped.
+        let surgeplusClip = null
+        if (withProduced && surgeClip !== null) {
+          try {
+            const spDir = join(workDir, 'surgeplus')
+            mkdirSync(spDir, { recursive: true })
+            const spBase = join(spDir, 'sp-base.beat')
+            writeFileSync(spBase, showdown.surgeSampleHostText(batchBpm))
+            await lib.addLocalSource({ beatFile: spBase, id: 'sdsurge', audioFile: surgeClip.wav, license: 'surge-factory-render', note: 'surge factory-patch render (surgeplus production host)' })
+            const spHost = showdown.buildSurgeSampleHost(parse(readFileSync(spBase, 'utf8')), 'sdsurge')
+            const spProduced = showdown.applySurgeplusProduction(spHost, spec.role)
+            const spApplied = spProduced.applied.length > 0 ? spProduced.applied.join(', ') : 'no production moves landed'
+            writeVaryBatch({
+              parentPath: spBase,
+              parentText: readFileSync(spBase, 'utf8'),
+              track: showdown.SURGEPLUS_TRACK_ID,
+              group: 'surgeplus-work',
+              count: 1,
+              seed: batchSeed,
+              outDir: spDir,
+              variants: [{ doc: spProduced.doc, recipe: `surge render + production pass (${spApplied})` }],
+            })
+            renderVaryBatch(spDir, 1, { normalize: false })
+            const spWav = join(spDir, 'v1.wav')
+            if (!existsSync(spWav)) throw new Error('surgeplus render produced no wav')
+            surgeplusClip = { kind: 'surgeplus', wav: spWav, from: `${surgeClip.from} + production pass: ${spApplied} (same surge render as the surge clip, dotbeat production host)` }
+            process.stderr.write(`surgeplus: produced the surge render (${spApplied})\n`)
+          } catch (err) {
+            process.stderr.write(`surgeplus skipped (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+          }
+        }
+
         const clips = [
           { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `${figDesc(engineDrawn)} on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
           ...(produced
@@ -2326,6 +2377,7 @@ async function showdownCmd(argv) {
           { kind: 'keymap', wav: join(workDir, produced ? 'v3.wav' : 'v2.wav'), from: kmFrom },
           { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
           ...(surgeClip ? [surgeClip] : []),
+          ...(surgeplusClip ? [surgeplusClip] : []),
         ]
         if (refDir !== undefined) {
           if (refPathEarly === null) {
