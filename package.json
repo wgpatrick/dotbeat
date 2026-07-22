@@ -8,7 +8,7 @@
     "beat": "./cli/beat.mjs"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/test/fixtures dist/presets && cp test/fixtures/*.json dist/test/fixtures/ && cp presets/*.json dist/presets/",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/test/fixtures dist/presets && cp test/fixtures/*.json test/fixtures/*.mid dist/test/fixtures/ && cp presets/*.json dist/presets/",
     "test": "npm run build && node --test dist/test/*.test.js",
     "test:sidecars": "npm run build && node --test dist/test/*.owner.js",
     "beat": "node cli/beat.mjs",
