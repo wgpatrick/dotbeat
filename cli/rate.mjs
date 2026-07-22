@@ -68,7 +68,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>beat rate</title>
   <h1 id="title">loading…</h1><div class="prog" id="prog"></div>
   <div id="list"></div>
   <div class="bar"><button id="submit">save ranking</button><button id="clear">clear</button><button id="skip">skip batch</button></div>
-  <div class="hint">click "pick" in preference order (best first, up to 3) — letters are shuffled per batch, so listen, don't pattern-match. keys: 1-9 pick, enter save, s skip.</div>
+  <div class="hint">click "pick" in preference order (best first — rank as many as you can judge; a full ranking teaches the most, unranked clips just count as below every pick) — letters are shuffled per batch, so listen, don't pattern-match. keys: 1-9 pick, enter save, s skip.</div>
   <div class="hint" id="sinkrow">output: <select id="sink"><option value="">system default</option></select>
     <button id="sinkbtn" title="list this machine's outputs (asks a one-time permission so device names show)">find headphones…</button>
     — moves ONLY this page's audio; the rest of the system stays where it was.</div>
@@ -91,12 +91,13 @@ function show(){
 }
 function paint(){
   const b=queue[idx]
-  b.order.forEach((_,i)=>{const el=$('v'+i);el.className='v'+(picks.includes(i)?' r'+(picks.indexOf(i)+1):'');$('r'+i).textContent=picks.includes(i)?['best','2nd','3rd'][picks.indexOf(i)]:''})
+  const ord=n=>n===0?'best':(n+1)+(['th','st','nd','rd'][((n+1)%100>10&&(n+1)%100<14)?0:Math.min((n+1)%10,4)]||'th')
+  b.order.forEach((_,i)=>{const el=$('v'+i);el.className='v'+(picks.includes(i)?' r'+(picks.indexOf(i)+1):'');$('r'+i).textContent=picks.includes(i)?ord(picks.indexOf(i)):''})
 }
 function togglePick(i){
   const at=picks.indexOf(i)
   if(at!==-1)picks.splice(at,1)
-  else if(picks.length<3)picks.push(i)
+  else if(picks.length<Math.min(queue[idx].order.length,9))picks.push(i)
   paint()
 }
 async function submit(){
