@@ -126,3 +126,91 @@ export function describeWeights(model: BTModel, top = 5): { feature: string; wei
     .sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight))
     .slice(0, top)
 }
+
+// ---- Bootstrap-ensemble BT with pessimistic scoring (docs/research/117; T5 step-3) -----------
+//
+// The v0 logistic BT above is a POINT estimate — one weight vector, no notion of how much the
+// data actually pins it down. T5's designed pessimistic scoring ("mean − β·std", the one
+// Goodhart-containment safeguard research/117 rates load-bearing AND currently unbuildable) needs
+// a real uncertainty estimate: disagreement across an ensemble, per Coste et al. (ICLR 2024),
+// whose uncertainty-weighted objective "practically eliminates overoptimization". A bootstrap
+// ensemble supplies exactly that — N models each trained on a resample (with replacement) of the
+// pair set; where the pairs constrain the taste direction the members agree (low std), and where
+// they don't (the gen subspace the critic is blind on — 0% top-1) they scatter (high std), so
+// pessimism automatically discounts those regions.
+
+/** A deterministic bootstrap ensemble of BT heads. `members` are trained on independent
+ * with-replacement resamples of the pair set; `seed` and `n` are recorded so the ensemble is
+ * fully reproducible from the training pairs alone. */
+export interface BTEnsemble {
+  members: BTModel[]
+  seed: number
+  n: number
+}
+
+/** Local mulberry32 — the same generator eval.ts exports, duplicated here so the ranker stays a
+ * leaf module (eval.ts imports ranker.ts, not the reverse; importing back would cycle). */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** Train an N-member bootstrap ensemble of BT heads. Each member resamples the pair set WITH
+ * replacement (a bootstrap, not a subsample — same size, ~63% distinct pairs per member), seeded
+ * deterministically so the same pairs+opts always yield the same ensemble. Trainer opts (l2,
+ * iterations, learningRate) pass straight through to trainBT, so an ensemble member is exactly a
+ * v0 model fit on a resample. An empty pair set yields N zero-weight members (std 0 everywhere —
+ * honest: no data, no disagreement to report). */
+export function trainBTEnsemble(
+  pairs: TrainPair[],
+  opts: { n?: number; seed?: number; l2?: number; iterations?: number; learningRate?: number } = {},
+): BTEnsemble {
+  const n = opts.n ?? 20
+  const seed = opts.seed ?? 12345
+  const { l2, iterations, learningRate } = opts
+  const trainOpts = {
+    ...(l2 !== undefined ? { l2 } : {}),
+    ...(iterations !== undefined ? { iterations } : {}),
+    ...(learningRate !== undefined ? { learningRate } : {}),
+  }
+  const members: BTModel[] = []
+  // One RNG advanced across all members so member resamples never collide, yet the whole ensemble
+  // is a pure function of (pairs, n, seed).
+  const rng = mulberry32(seed)
+  const m = pairs.length
+  for (let i = 0; i < n; i++) {
+    if (m === 0) {
+      members.push(trainBT([], trainOpts))
+      continue
+    }
+    const resample: TrainPair[] = new Array<TrainPair>(m)
+    for (let k = 0; k < m; k++) resample[k] = pairs[Math.floor(rng() * m)]!
+    members.push(trainBT(resample, trainOpts))
+  }
+  return { members, seed, n }
+}
+
+/** Score one standardized vector under every ensemble member; return the mean utility and the
+ * population standard deviation of the members' scores (the uncertainty estimate). std is 0 when
+ * the members agree exactly (an empty ensemble, or a vector every member scores identically). */
+export function scoreVectorEnsemble(ensemble: BTEnsemble, vector: number[]): { mean: number; std: number } {
+  const scores = ensemble.members.map((mem) => scoreVector(mem, vector))
+  if (scores.length === 0) return { mean: 0, std: 0 }
+  const mean = scores.reduce((s, x) => s + x, 0) / scores.length
+  const variance = scores.reduce((s, x) => s + (x - mean) ** 2, 0) / scores.length
+  return { mean, std: Math.sqrt(variance) }
+}
+
+/** Pessimistic score: ensemble mean − β·std (Coste et al. uncertainty-weighted objective, T5
+ * step 3). β=0 recovers the plain ensemble mean; β>0 penalizes vectors the ensemble disagrees on,
+ * so a high-uncertainty candidate must have a clearly higher mean to outrank a confident one —
+ * "don't sprint into regions the critic knows nothing about" (docs/taste-loop-design.md L4). */
+export function pessimisticScore(ensemble: BTEnsemble, vector: number[], beta = 1): number {
+  const { mean, std } = scoreVectorEnsemble(ensemble, vector)
+  return mean - beta * std
+}
