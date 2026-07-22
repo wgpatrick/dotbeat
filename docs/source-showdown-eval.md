@@ -173,6 +173,72 @@ render (the mono-bass control was affected too). The sidecar now collects throug
 Full evidence chain, before/after `ringDb`, and a draft upstream Surge XT issue:
 `docs/research/surge-right-ear-ring-rootcause.md`. Diagnostic harness: `scripts/debug-surge-ring.py`.
 
+## The midi figure source (`--midi-dir`)
+
+The archetype bank fixed the un-blinding problem, but it left a CONFOUND in every composed
+source's rating: a batch entangles the seed's SOUND realization with the bank's COMPOSITION
+quality. When the engine loses to gen, that can mean "worse sound" or "the bank's figure is a
+worse piece of music than what gen invented" — and the whole point of the showdown is the first
+question. `--midi-dir <path>` breaks the entanglement by holding composition at **commercial
+quality**: the composed sources (engine / engineplus / keymap / surge) draw their figures from
+**MIDI transcriptions of well-known electronic tracks** instead of the bank.
+
+Mechanics, per pitched batch (bassline → `bass`, chords → `chords`, lead → `lead`;
+**drum-loop keeps the archetype bank** — GM-percussion-to-kit-lane mapping is its own project):
+
+1. Each composed source picks its own **distinct** midi file (seeded, exclude-chained per role
+   across the run — the same contract as the bank archetypes; `--shared-figure` shares one
+   figure across the composed sources as usual). A pool smaller than the number of composed
+   sources falls back to the bank for the overflow clips.
+2. `python/midi_extract.py` (mido; `pip install -r python/requirements-midi.txt`) classifies the
+   file's voices — track names + register + polyphony heuristics: bass = low monophonic-ish,
+   chords = polyphonic/sustained, lead = mid/high melodic — picks the best voice for the part,
+   and trims it to the densest contiguous 4-bar window, quantized to the 16th-step grid.
+   (`--scan` mode shows the full classification for any file.)
+3. `src/taste/midifig.ts` converts that into the same ComposedPhrase the bank produces,
+   **transposed into the seed's inferred key** so the batch stays diatonically coherent with the
+   gen prompt and any bank figures. The transposition is purely **chromatic** (one semitone shift
+   for every note — the commercial figure's intervals are exactly what this source imports, so
+   they are never rewritten) aimed by **relative-key alignment**: same mode → the figure's tonic
+   lands on the seed root; different mode → on the seed key's relative minor/major, so the
+   figure's diatonic notes land inside the seed's scale without a mode swap. Register is
+   recentred by whole octaves only. The batch manifest's `from` records the midi path and the
+   exact transposition honestly (e.g. `transposed +3 st (C major -> D# major, relative of the
+   seed's C minor)`).
+4. Without a ref clip pinning the tempo, the batch conforms to the **midi's own bpm** (folded to
+   range) — the figure plays at the tempo it was written for, and the gen prompt carries it.
+5. Unusable files (unparseable, no voice scoring as the part, too sparse) are skipped for the
+   next pick with a warning; a fully unusable pool falls back to the bank; a missing/empty dir or
+   missing mido warns once at startup. The flag degrades, never breaks.
+
+**Reading the results**: the `figureSource` split ('midi' vs 'bank') separates "our sound sources
+rendering commercial compositions" from "rendering our own". If engine/keymap ratings rise under
+midi figures, the bank's composition was dragging them; if the ordering doesn't move, the sound
+realization really is the differentiator and the bank was never the bottleneck.
+
+**Honesty note — what this does NOT control**: gen still invents its own musical content (the
+phrase confound above), and a transcription's fidelity to the record varies by whoever made it.
+The comparison this source cleans up is *between the composed sources and the ref/gen ceiling*,
+with composition quality no longer a plausible excuse.
+
+### The midi-dir licensing stance
+
+MIDI transcriptions of copyrighted songs are **derivative works** — they get the exact ref-chop
+treatment, enforced in the tool:
+
+- the `.mid` files live in the private dataset dir (`~/Documents/dotbeat/taste-dataset/midi/`,
+  with a local `sources.tsv` recording song/artist/url) **outside any repo, never committed**;
+  the tool only ever reads under `--midi-dir`.
+- every batch whose composed figures drew from midi gets the generated `.gitignore` (`*`) —
+  the rendered clips are derivatives of the transcription, and the manifest carries the midi
+  path — so nothing midi-derived can land in git even inside a repo (`writeShowdownBatch`,
+  `figureSource: 'midi'`).
+- the batch **manifest** records the midi path + transposition as a **local reference only**,
+  same as a ref clip's origin path.
+- the **shared scores log** records `figureSource: 'midi' | 'bank'` and nothing else — never a
+  song title, artist, filename, or path. The label is required for the analysis (it's the whole
+  split) and discloses nothing about which songs are in the private pool.
+
 ## The ref-dir licensing stance
 
 Ref clips are **private chops of commercial music** — the same private-data posture as the T3
@@ -201,6 +267,9 @@ beat showdown ~/showdown --with-produced     # same, plus an engineplus clip per
 beat showdown ~/showdown --with-surge        # same, plus a Surge XT factory-patch clip per pitched batch
 beat showdown --surge-doctor                 # is surgepy built? where is the factory content? (build steps if not)
 beat showdown ~/showdown --ref-dir ~/chops   # same, plus a private ref clip per batch
+beat showdown ~/showdown --midi-dir ~/Documents/dotbeat/taste-dataset/midi
+                                       # composed sources play COMMERCIAL figures (private midi
+                                       # transcriptions) — composition held at commercial quality
 beat rate ~/showdown                   # rate them blind in the browser, as usual
 beat showdown ~/showdown --report      # the scoreboard (add --json for scripts)
 ```

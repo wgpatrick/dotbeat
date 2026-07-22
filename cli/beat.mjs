@@ -666,7 +666,8 @@ const HELP = [
   {
     cmd: 'showdown',
     text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
-                [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--ref-dir <path>] [--seconds S]
+                [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--ref-dir <path>]
+                [--midi-dir <path>] [--seconds S]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
                                                           source — engine (the role's seed phrase, soloed, through
@@ -683,7 +684,16 @@ const HELP = [
                                                           drum-loop skipped; its own distinct figure unless
                                                           --shared-figure; needs a source-built surgepy, see
                                                           beat showdown --surge-doctor), and optionally ref
-                                                          (--ref-dir). Clips are duration-matched (trim/pad;
+                                                          (--ref-dir). With --midi-dir the composed sources
+                                                          (engine/engineplus/keymap/surge) draw their figures
+                                                          from MIDI files of commercial tracks instead of the
+                                                          archetype bank (bass/chords/lead parts extracted via
+                                                          python/midi_extract.py, transposed into the seed's
+                                                          key; drum-loop keeps the bank; per-source distinct
+                                                          files unless --shared-figure; unusable dir/files warn
+                                                          and fall back to the bank) — holds COMPOSITION at
+                                                          commercial quality so ratings compare sound
+                                                          realization. Clips are duration-matched (trim/pad;
                                                           --seconds overrides the shortest-clip default) and
                                                           loudness-normalized to a
                                                           common LUFS; sources are seeded-shuffled into v-numbers
@@ -700,7 +710,12 @@ const HELP = [
         --with-surge renders through Surge XT (GPLv3, a local dev-side tool — outputs carry no code
         copyleft) but its factory-patch CONTENT license is unresolved upstream, so surge-bearing
         batches get the same .gitignore treatment as ref batches; the scores log stays kind-only.
-        surgepy has no PyPI wheel — beat showdown --surge-doctor reports the source-build steps.`,
+        surgepy has no PyPI wheel — beat showdown --surge-doctor reports the source-build steps.
+        --midi-dir files are MIDI transcriptions of copyrighted songs (derivative works, PRIVATE —
+        keep them outside any repo): the tool only ever READS them, midi-figure batches get the
+        generated .gitignore gate, the manifest records the midi path/transposition as a local
+        reference only, and the shared scores log records only figureSource:'midi'|'bank' — never
+        a song title, artist, or path.`,
   },
   {
     cmd: 'rate',
@@ -1682,7 +1697,7 @@ function flagValue(argv, flag) {
 // varies the PIPELINE — different grammar (roles + sources, no --per-seed/--count), different
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
-  const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--ref-dir', '--seconds', '--log']
+  const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--ref-dir', '--midi-dir', '--seconds', '--log']
   const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
@@ -1745,6 +1760,31 @@ async function showdownCmd(argv) {
   const sharedFigure = argv.includes('--shared-figure')
   const refDir = flagValue(argv, '--ref-dir')
   if (refDir !== undefined && !existsSync(refDir)) throw new BeatEditError(`no directory at --ref-dir ${refDir}`)
+
+  // The midi figure source (docs/source-showdown-eval.md, "The midi figure source"): with
+  // --midi-dir the composed sources draw their figures from MIDI transcriptions of commercial
+  // tracks instead of the archetype bank — holding COMPOSITION at commercial quality so ratings
+  // compare sound realization. Resolved ONCE here: doctor probe + file enumeration; anything
+  // unusable warns once and the run falls back to the bank (the flag degrades, never breaks).
+  // The .mid files are private derivative works — see the licensing block in the help text.
+  const midiDir = flagValue(argv, '--midi-dir')
+  let midifig = null
+  let midiPool = []
+  if (midiDir !== undefined) {
+    if (!existsSync(midiDir)) throw new BeatEditError(`no directory at --midi-dir ${midiDir}`)
+    midifig = await import('../dist/src/taste/midifig.js')
+    const midiReport = await midifig.midiExtractDoctor()
+    if (!midifig.midiExtractAvailable(midiReport)) {
+      process.stderr.write(`warning: --midi-dir: midi_extract unavailable (${midiReport.error ?? 'mido not installed — pip install -r python/requirements-midi.txt'}) — composed figures fall back to the archetype bank\n`)
+    } else {
+      midiPool = midifig.listMidiFiles(midiDir)
+      if (midiPool.length === 0) {
+        process.stderr.write(`warning: no .mid files under ${midiDir} — composed figures fall back to the archetype bank\n`)
+      } else {
+        process.stderr.write(`midi figures: ${midiPool.length} file(s) under ${midiDir} — composed sources play commercial figures (midi batches are gitignore-gated, never committed)\n`)
+      }
+    }
+  }
 
   // Resolve surge availability + the factory patch catalogue ONCE (not per batch): a doctor probe,
   // then the patch listing. On any failure surge is disabled for the whole run with one warning —
@@ -1854,19 +1894,20 @@ async function showdownCmd(argv) {
           return resolve(pool[refPick % pool.length])
         })()
         let batchBpm = seed.doc.bpm
+        let bpmFromRef = false
         if (refPathEarly !== null && genBackend !== 'stub') {
           try {
             const { runAnalysis } = await import('../dist/src/analysis/sidecar.js')
             const { artifact } = await runAnalysis({ audioPath: refPathEarly, backend: 'beatthis' })
             if (typeof artifact.bpm === 'number' && artifact.bpm > 0) {
               batchBpm = showdown.foldBpmToRange(artifact.bpm)
+              bpmFromRef = true
               process.stderr.write(`bpm-matched to ref: ${batchBpm} BPM (detected ${artifact.bpm.toFixed(1)}, ${artifact.bpmMethod})\n`)
             }
           } catch (err) {
             process.stderr.write(`bpm match skipped (${err?.message?.split('\n')[0] ?? err}) — using seed bpm ${batchBpm}\n`)
           }
         }
-        const extended = { ...showdown.extendToFourBars(seed.doc), bpm: batchBpm }
 
         // per-source composed figures (owner, 2026-07-21, SECOND un-blinding report: composed
         // clips sharing one figure per batch made the dotbeat-rendered group identifiable as a
@@ -1879,6 +1920,7 @@ async function showdownCmd(argv) {
         const pitchedKey = spec.role === 'drum-loop' ? null : showdown.inferSeedKey(seed.doc)
         const runExclude = usedFigures.get(spec.role) ?? []
         const drawnFigures = []
+        let batchUsedMidi = false
         const drawComposed = (seedOffset) => {
           const exclude = [...runExclude, ...drawnFigures]
           const composed = spec.role === 'drum-loop'
@@ -1887,18 +1929,61 @@ async function showdownCmd(argv) {
           drawnFigures.push(composed.archetype)
           return composed
         }
+        // The midi figure source: when --midi-dir is live and this role maps to a midi part
+        // (bassline/chords/lead — drum-loop keeps the bank), each composed source draws a figure
+        // extracted from a DISTINCT midi file (same exclude-chain contract as the bank archetypes;
+        // bank names and midi labels share one list and can never collide). Unusable files are
+        // skipped for the next pick; a fully-unusable pool falls back to the bank with a warning.
+        const midiPart = midifig !== null ? midifig.roleMidiPart(spec.role) : null
+        const drawFigure = async (seedOffset) => {
+          if (midiPool.length > 0 && midiPart !== null && pitchedKey !== null) {
+            const tried = []
+            for (let attempt = 0; attempt < Math.min(4, midiPool.length); attempt++) {
+              const exclude = [...runExclude, ...drawnFigures, ...tried]
+              const file = midifig.pickMidiFile(midiPool, batchSeed + seedOffset + attempt * 7919, exclude)
+              if (file === null || exclude.includes(midifig.midiFigureLabel(file))) break // pool exhausted
+              try {
+                const figure = await midifig.runMidiExtract({ midiPath: file, part: midiPart, bars: 4 })
+                const conv = midifig.midiFigureToComposedPhrase(figure, pitchedKey)
+                drawnFigures.push(conv.phrase.archetype)
+                batchUsedMidi = true
+                return { composed: conv.phrase, midi: { file, figure, transposition: conv.transposition } }
+              } catch (err) {
+                tried.push(midifig.midiFigureLabel(file))
+                process.stderr.write(`midi figure unusable (${err instanceof Error ? err.message.split('\n')[0] : err}) — trying another file\n`)
+              }
+            }
+            process.stderr.write(`warning: no usable ${midiPart} midi figure — ${spec.role} falls back to the archetype bank\n`)
+          }
+          return { composed: drawComposed(seedOffset), midi: null }
+        }
+        // honest per-clip figure description for the manifest `from` (the midi path and the
+        // transposition are LOCAL provenance — the shared log only ever sees figureSource)
+        const figDesc = (drawn) => (drawn.midi !== null
+          ? `${drawn.composed.archetype} [${drawn.midi.file}] (${drawn.midi.transposition})`
+          : `composed ${drawn.composed.archetype} figure`)
         const applyComposed = (composed) => (spec.role === 'drum-loop'
           ? showdown.applyComposedDrums(extended, spec.seedTrack, composed)
           : showdown.applyComposedPhrase(extended, spec.seedTrack, composed))
 
-        const engineComposed = drawComposed(0)
+        const engineDrawn = await drawFigure(0)
+        const engineComposed = engineDrawn.composed
+        // a midi-figure batch without a ref to conform to conforms to the SOURCE TRACK's own
+        // tempo (the figure was written for it), which still pins gen via the prompt's bpm hint
+        if (!bpmFromRef && engineDrawn.midi !== null && engineDrawn.midi.figure.bpm !== null) {
+          batchBpm = showdown.foldBpmToRange(engineDrawn.midi.figure.bpm)
+          process.stderr.write(`bpm from the midi figure's own tempo: ${batchBpm} BPM\n`)
+        }
+        const extended = { ...showdown.extendToFourBars(seed.doc), bpm: batchBpm }
         const phrased = applyComposed(engineComposed)
         const figure = engineComposed.archetype
         // pitchedPhrase: the engine clip's ComposedPhrase for pitched roles — the surge render's
         // shared-figure source and its "this role composes" gate (null for drum-loop)
         const pitchedPhrase = spec.role === 'drum-loop' ? null : engineComposed
-        const plusComposed = withProduced ? (sharedFigure ? engineComposed : drawComposed(101)) : null
-        const kmComposed = sharedFigure ? engineComposed : drawComposed(202)
+        const plusDrawn = withProduced ? (sharedFigure ? engineDrawn : await drawFigure(101)) : null
+        const plusComposed = plusDrawn === null ? null : plusDrawn.composed
+        const kmDrawn = sharedFigure ? engineDrawn : await drawFigure(202)
+        const kmComposed = kmDrawn.composed
         usedFigures.set(spec.role, [...runExclude, ...drawnFigures])
         process.stderr.write(`composed figure(s): ${drawnFigures.join(', ')}${sharedFigure ? ' (shared across composed sources)' : ''} (batch seed ${batchSeed})\n`)
 
@@ -1937,7 +2022,7 @@ async function showdownCmd(argv) {
           const phrase = showdown.phraseFromSeed(kmPhrased, spec.seedTrack)
           const built = showdown.buildPitchedKeymapPhrase(scratch, 'sdkm', rootMidi, phrase)
           kmDoc = built.doc
-          kmFrom = `keymap of "${kmPrompt}" (root ${midiToNote(Math.round(rootMidi))}, ${pitch.level ?? 'no'} confidence) playing the composed ${kmFigure} figure (${seed.file}'s key)`
+          kmFrom = `keymap of "${kmPrompt}" (root ${midiToNote(Math.round(rootMidi))}, ${pitch.level ?? 'no'} confidence) playing the ${figDesc(kmDrawn)} (${seed.file}'s key)`
         } else {
           const drumsOnly = showdown.isolateTrack(kmPhrased, spec.seedTrack)
           writeFileSync(kmBase, showdown.serializeChecked(drumsOnly))
@@ -2005,14 +2090,13 @@ async function showdownCmd(argv) {
               // by default the surge clip draws its OWN distinct figure (exclude-chained off the
               // engine's, and recorded so the next batch avoids it too); --shared-figure holds the
               // engine's figure constant for the controlled "same notes, different source" ablation
-              let surgePhrase = pitchedPhrase
-              let surgeFigure = figure
+              let surgeDrawn = { composed: pitchedPhrase, midi: engineDrawn.midi }
               if (!sharedFigure) {
-                const surgeExclude = usedFigures.get(spec.role) ?? []
-                surgePhrase = showdown.composePitchedPhrase(spec.role, pitchedKey, batchSeed + 977, { exclude: surgeExclude })
-                surgeFigure = surgePhrase.archetype
-                usedFigures.set(spec.role, [...surgeExclude, surgeFigure])
+                surgeDrawn = await drawFigure(977)
+                usedFigures.set(spec.role, [...runExclude, ...drawnFigures])
               }
+              const surgePhrase = surgeDrawn.composed
+              const surgeFigure = surgePhrase.archetype
               const notes = showdown.composedPhraseToSurgeNotes(surgePhrase, batchBpm)
               const surgeWav = join(workDir, 'surge.wav')
               // ring screen (owner, 2026-07-21, blind rating: several factory patches carry a
@@ -2038,7 +2122,7 @@ async function showdownCmd(argv) {
               if (chosen === null) throw new Error('no surge patch available after ring screening')
               copyFileSync(chosen.wav, surgeWav)
               if (chosen.ring > RING_DB_MAX) process.stderr.write(`surge: every tried patch rings — keeping the least-ringy ("${chosen.patch.name}", ${chosen.ring} dB)\n`)
-              surgeClip = { kind: 'surge', wav: surgeWav, from: `Surge XT patch "${chosen.patch.name}" (${chosen.patch.category}) playing the composed ${surgeFigure} figure${sharedFigure ? ' (shared with the engine clip)' : ''}` }
+              surgeClip = { kind: 'surge', wav: surgeWav, from: `Surge XT patch "${chosen.patch.name}" (${chosen.patch.category}) playing the ${figDesc(surgeDrawn)}${sharedFigure ? ' (shared with the engine clip)' : ''}` }
               process.stderr.write(`surge: rendered "${chosen.patch.name}" (${chosen.patch.category}) on the ${surgeFigure} figure (ring ${chosen.ring} dB)\n`)
             }
           } catch (err) {
@@ -2047,9 +2131,9 @@ async function showdownCmd(argv) {
         }
 
         const clips = [
-          { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `composed ${figure} figure on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
+          { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `${figDesc(engineDrawn)} on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
           ...(produced
-            ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: `${sharedFigure ? `same composed ${plusFigure} figure and patch as the engine clip` : `composed ${plusFigure} figure through the engine patch`} + production pass: ${produced.applied.join(', ')} (dotbeat engine)` }]
+            ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: `${sharedFigure ? `same ${figDesc(plusDrawn)} and patch as the engine clip` : `${figDesc(plusDrawn)} through the engine patch`} + production pass: ${produced.applied.join(', ')} (dotbeat engine)` }]
             : []),
           { kind: 'keymap', wav: join(workDir, produced ? 'v3.wav' : 'v2.wav'), from: kmFrom },
           { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
@@ -2073,7 +2157,10 @@ async function showdownCmd(argv) {
           files[v] = { file: `v${v + 1}.wav`, source: { kind: clip.kind, from: clip.from } }
         }
         rmSync(workDir, { recursive: true }) // never leave a scoreable work batch for beat rate to find
-        showdown.writeShowdownBatch(outDir, spec.role, files, { seed: batchSeed })
+        // figureSource: 'midi' when ANY composed clip drew a midi figure (a partial bank
+        // fallback still taints the batch's composition provenance) — gitignore-gates the dir
+        // and puts the 'midi'/'bank' label (nothing else) in the scores log via scoreBatch
+        showdown.writeShowdownBatch(outDir, spec.role, files, { seed: batchSeed, figureSource: batchUsedMidi ? 'midi' : 'bank' })
         const match = showdown.matchClipDurations(outDir, files.map((f) => f.file), targetSeconds !== undefined ? { targetSeconds } : {})
         process.stdout.write(`${outDir}/: ${files.length} clips (${clips.map((c) => c.kind).sort().join(' vs ')}), duration-matched to ${match.targetSeconds}s`)
         const adjusted = match.clips.filter((c) => c.action !== 'kept')

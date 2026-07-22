@@ -109,6 +109,12 @@ export interface VaryBatchManifest {
   // absent as true (they were only ever written by the normalizing path). See VariantLoudness.
   normalization?: { targetLufs?: number; truePeakCeilingDbtp: number; normalized?: boolean }
   // ==== end loudness normalization ====
+  // Showdown midi-figure source (docs/source-showdown-eval.md, "The midi figure source"): where
+  // this batch's COMPOSED figures came from — 'midi' (extracted from private MIDI transcriptions
+  // of commercial tracks; the batch dir is gitignore-gated and each variant's `from` records the
+  // midi path as a local reference) or 'bank' (the internal archetype bank). scoreBatch copies
+  // THIS LABEL ONLY into the shared log — never a song title, artist, or path.
+  figureSource?: 'midi' | 'bank'
   // D21 strain (a): `file` is "vN.beat" for vary batches and "vN.wav" for gen batches — every
   // reader below resolves the variant through THIS field rather than re-deriving "vN.beat".
   // `source` (source-showdown eval, docs/source-showdown-eval.md): which PIPELINE produced this
@@ -610,6 +616,12 @@ export interface ScoreEntry {
    * into per-source win rates, durable after the batch dir is gone. Deliberately the kind ONLY:
    * a ref clip's origin path stays in the batch dir's manifest, never in the shared log. */
   sources?: Record<string, string>
+  /** Showdown batches only: where the composed figures came from — 'midi' (commercial MIDI
+   * transcriptions, private) or 'bank' (internal archetypes). The label is the ONLY midi-related
+   * fact that ever reaches this shared log (the licensing posture): song identity stays in the
+   * gitignore-gated batch dir's manifest. Lets the report separate "our sounds with commercial
+   * composition" from "our sounds with our composition". */
+  figureSource?: 'midi' | 'bank'
 }
 
 export interface ScoreBatchResult {
@@ -761,6 +773,9 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   // ScoreEntry field comment — kinds only, a ref clip's path never leaves the batch dir).
   const sources = Object.fromEntries(manifest.variants.filter((v) => v.source !== undefined).map((v) => [v.file, v.source!.kind]))
   if (Object.keys(sources).length > 0) entry.sources = sources
+  // Midi-figure showdown batches: carry the figure-source LABEL (see the ScoreEntry field
+  // comment — 'midi'/'bank' only, never what the midi transcribes).
+  if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
   // Pilot 108: detect a re-score of an already-scored batch BEFORE appending, so the summary can
   // say so — a fat-fingered duplicate otherwise silently contradicts the taste log's history.
   let previousPicks: string | undefined
