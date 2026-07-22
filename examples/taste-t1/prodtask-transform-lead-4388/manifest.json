@@ -1,0 +1,88 @@
+{
+  "parent": "",
+  "parentSha256": "",
+  "group": "prodtask:transform:lead",
+  "count": 3,
+  "seed": 4388,
+  "createdAt": "2026-07-22T15:18:59.509Z",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "source": {
+        "kind": "tricked",
+        "from": "same figure + trick stack [unison-spread, air-shelf, glue-saturation]: unison-spread: set unisonVoices 5; unison-spread: set unisonWidth 0.7; unison-spread: set osc2Level 0.4; unison-spread: set osc2Detune 12; air-shelf: effect-add eq7; air-shelf: set eq7HighShelfOn true; air-shelf: set eq7HighShelfFreq 11000; air-shelf: set eq7HighShelfGain 3; glue-saturation: set saturatorCurve warm; glue-saturation: set saturatorDrive 0.25; glue-saturation: set saturatorMix 0.3",
+        "tricks": [
+          "unison-spread",
+          "air-shelf",
+          "glue-saturation"
+        ],
+        "edits": [
+          "unison-spread: set unisonVoices 5",
+          "unison-spread: set unisonWidth 0.7",
+          "unison-spread: set osc2Level 0.4",
+          "unison-spread: set osc2Detune 12",
+          "air-shelf: effect-add eq7",
+          "air-shelf: set eq7HighShelfOn true",
+          "air-shelf: set eq7HighShelfFreq 11000",
+          "air-shelf: set eq7HighShelfGain 3",
+          "glue-saturation: set saturatorCurve warm",
+          "glue-saturation: set saturatorDrive 0.25",
+          "glue-saturation: set saturatorMix 0.3"
+        ]
+      },
+      "loudness": {
+        "measuredLufs": -20.9,
+        "gainDb": -7.4,
+        "capped": false,
+        "truePeakDbtp": -9.49,
+        "wantedGainDb": -7.4
+      }
+    },
+    {
+      "file": "v2.wav",
+      "source": {
+        "kind": "random",
+        "from": "same figure + random-edit control (11 edits): arp.subLevel 0.1992; arp.sendDelay 0.1848; arp.release 0.7669; arp.compRatio 6.4206; arp.saturatorMix 0.6015; arp.decay 0.1716; arp.resonance 0.9292; arp.sustain 0.3997; arp.cutoff 267.8308; arp.autoPanMix 0.0509; arp.eqLow 4.8144",
+        "edits": [
+          "arp.subLevel 0.1992",
+          "arp.sendDelay 0.1848",
+          "arp.release 0.7669",
+          "arp.compRatio 6.4206",
+          "arp.saturatorMix 0.6015",
+          "arp.decay 0.1716",
+          "arp.resonance 0.9292",
+          "arp.sustain 0.3997",
+          "arp.cutoff 267.8308",
+          "arp.autoPanMix 0.0509",
+          "arp.eqLow 4.8144"
+        ]
+      },
+      "loudness": {
+        "measuredLufs": -42.8,
+        "gainDb": 14.51,
+        "capped": false,
+        "truePeakDbtp": -20.09,
+        "wantedGainDb": 14.51
+      }
+    },
+    {
+      "file": "v3.wav",
+      "source": {
+        "kind": "original",
+        "from": "composed long-tones on seed-001.beat arp solo (4 bars, dotbeat engine, raw)"
+      },
+      "loudness": {
+        "measuredLufs": -28.29,
+        "gainDb": 0,
+        "capped": false,
+        "truePeakDbtp": -17,
+        "wantedGainDb": 0
+      }
+    }
+  ],
+  "normalization": {
+    "targetLufs": -28.29,
+    "truePeakCeilingDbtp": -1,
+    "normalized": true
+  }
+}

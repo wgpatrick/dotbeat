@@ -1138,7 +1138,23 @@ export interface ShowdownReport {
   smokeMinBatches: number
 }
 
-function tally(entries: ShowdownLogEntry[]): SourceStat[] {
+/** The minimal ranked-batch shape the per-arm tally needs — a set of ranked picks, the rejected
+ * variants, and a variant->kind map. `ShowdownLogEntry` satisfies it, and so does the
+ * prodtask-transform eval's own entry (src/taste/prodtask.ts reuses this tally + the formatters
+ * below rather than duplicating them — research 119's report is the showdown report with a
+ * different source axis). */
+export interface RankedArmEntry {
+  /** ranked pick files, best first */
+  picks: string[]
+  rejected: string[]
+  /** variant file -> arm/source kind */
+  sources: Record<string, string>
+}
+
+/** Per-kind win / top-half / pairwise tally over ranked batches — the shared scoreboard math for
+ * BOTH the source showdown (kind = source pipeline) and the prodtask-transform eval (kind = arm).
+ * Only reads picks/rejected/sources, so any RankedArmEntry works. */
+export function tally(entries: RankedArmEntry[]): SourceStat[] {
   const stats = new Map<string, SourceStat>()
   const stat = (kind: string): SourceStat => {
     if (!stats.has(kind)) stats.set(kind, { kind, batches: 0, wins: 0, topHalf: 0, pairsWon: 0, pairCount: 0 })
@@ -1234,9 +1250,11 @@ export function computeShowdownReport(logPath: string): ShowdownReport {
   }
 }
 
-const pct = (num: number, den: number) => (den === 0 ? '—' : `${Math.round((100 * num) / den)}%`)
+export const pct = (num: number, den: number) => (den === 0 ? '—' : `${Math.round((100 * num) / den)}%`)
 
-function statLine(s: SourceStat, indent: string): string {
+/** One scoreboard line for a kind's stats — shared by the showdown and prodtask reports (padded to
+ * the longest kind name so mixed-kind scoreboards stay column-aligned). */
+export function statLine(s: SourceStat, indent: string): string {
   // pad to the longest kind name ('engineplus') so mixed-kind scoreboards stay column-aligned
   return (
     `${indent}${s.kind.padEnd(10)} win ${pct(s.wins, s.batches)} (${s.wins}/${s.batches})` +

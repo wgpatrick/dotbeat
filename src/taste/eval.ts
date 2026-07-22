@@ -335,7 +335,7 @@ export const SCORERS: Record<string, Scorer> = {
  * per-role candidate batches — same media-variant shape, different label); track-bearing entries
  * are vary rounds; a trackless non-gen batch is a stitched clip-set (`beat audition <dir>`, any
  * group name). */
-export type VariantType = 'vary' | 'gen' | 'clip-set' | 'showdown'
+export type VariantType = 'vary' | 'gen' | 'clip-set' | 'showdown' | 'prodtask'
 export function variantTypeOf(b: { group: string; track?: string }): VariantType {
   if (b.group.startsWith('gen:') || b.group.startsWith('genkit:')) return 'gen'
   // Source-showdown rounds (`showdown:<role>` clip-set batches, docs/source-showdown-eval.md) are
@@ -343,6 +343,11 @@ export function variantTypeOf(b: { group: string; track?: string }): VariantType
   // ref), a different question from any vary/gen round, and pooling them into clip-set would hide
   // whether the taste model can predict cross-source picks at all.
   if (b.group.startsWith('showdown:')) return 'showdown'
+  // Production-task rounds (`prodtask:<task>:<role>` clip-set batches, docs/research/119 +
+  // docs/prodtask.md) are their own split too: their within-batch contrast is the PRODUCTION ARM
+  // (original vs tricked vs random-edit control), a different question again — "do the production
+  // tricks move the owner's blind ratings", not which source or which mutation.
+  if (b.group.startsWith('prodtask:')) return 'prodtask'
   if (b.track !== undefined) return 'vary'
   return 'clip-set'
 }

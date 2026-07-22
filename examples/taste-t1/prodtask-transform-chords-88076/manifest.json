@@ -1,0 +1,88 @@
+{
+  "parent": "",
+  "parentSha256": "",
+  "group": "prodtask:transform:chords",
+  "count": 3,
+  "seed": 88076,
+  "createdAt": "2026-07-22T15:18:47.572Z",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "source": {
+        "kind": "tricked",
+        "from": "same figure + trick stack [unison-spread, air-shelf, glue-saturation]: unison-spread: set unisonVoices 5; unison-spread: set unisonWidth 0.7; unison-spread: set osc2Level 0.4; unison-spread: set osc2Detune 12; air-shelf: effect-add eq7; air-shelf: set eq7HighShelfOn true; air-shelf: set eq7HighShelfFreq 11000; air-shelf: set eq7HighShelfGain 3; glue-saturation: set saturatorCurve warm; glue-saturation: set saturatorDrive 0.25; glue-saturation: set saturatorMix 0.3",
+        "tricks": [
+          "unison-spread",
+          "air-shelf",
+          "glue-saturation"
+        ],
+        "edits": [
+          "unison-spread: set unisonVoices 5",
+          "unison-spread: set unisonWidth 0.7",
+          "unison-spread: set osc2Level 0.4",
+          "unison-spread: set osc2Detune 12",
+          "air-shelf: effect-add eq7",
+          "air-shelf: set eq7HighShelfOn true",
+          "air-shelf: set eq7HighShelfFreq 11000",
+          "air-shelf: set eq7HighShelfGain 3",
+          "glue-saturation: set saturatorCurve warm",
+          "glue-saturation: set saturatorDrive 0.25",
+          "glue-saturation: set saturatorMix 0.3"
+        ]
+      },
+      "loudness": {
+        "measuredLufs": -14.81,
+        "gainDb": -5.95,
+        "capped": false,
+        "truePeakDbtp": -6.3,
+        "wantedGainDb": -5.95
+      }
+    },
+    {
+      "file": "v2.wav",
+      "source": {
+        "kind": "random",
+        "from": "same figure + random-edit control (11 edits): chords.eqLow -2.7731; chords.bitcrushMix 0.2209; chords.lfoDepth 0.6763; chords.wtPos 0.3858; chords.compThreshold -8.2545; chords.compMix 0.1978; chords.sendDelay 0.2736; chords.compRatio 4.6788; chords.autoFilterMix 0.3751; chords.decay 0.4132; chords.eqHigh -0.1951",
+        "edits": [
+          "chords.eqLow -2.7731",
+          "chords.bitcrushMix 0.2209",
+          "chords.lfoDepth 0.6763",
+          "chords.wtPos 0.3858",
+          "chords.compThreshold -8.2545",
+          "chords.compMix 0.1978",
+          "chords.sendDelay 0.2736",
+          "chords.compRatio 4.6788",
+          "chords.autoFilterMix 0.3751",
+          "chords.decay 0.4132",
+          "chords.eqHigh -0.1951"
+        ]
+      },
+      "loudness": {
+        "measuredLufs": -21.48,
+        "gainDb": 0.72,
+        "capped": false,
+        "truePeakDbtp": -9.93,
+        "wantedGainDb": 0.72
+      }
+    },
+    {
+      "file": "v3.wav",
+      "source": {
+        "kind": "original",
+        "from": "composed half-bar-hits on seed-006.beat chords solo (4 bars, dotbeat engine, raw)"
+      },
+      "loudness": {
+        "measuredLufs": -20.76,
+        "gainDb": 0,
+        "capped": false,
+        "truePeakDbtp": -9.1,
+        "wantedGainDb": 0
+      }
+    }
+  ],
+  "normalization": {
+    "targetLufs": -20.76,
+    "truePeakCeilingDbtp": -1,
+    "normalized": true
+  }
+}
