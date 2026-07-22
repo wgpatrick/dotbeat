@@ -2674,20 +2674,42 @@ async function pilotCmd(argv) {
     results.push(result)
   }
 
-  // assemble the blind morning frontier per role: elites (<=8) + controls, freshly rendered in one
-  // boot, seeded arm->v-number shuffle, duration-matched, loudness-normalized (the showdown/prodtask
-  // machinery). group pilot:<role>; per-variant source records elite-vs-control honestly.
+  // assemble the blind morning frontier per role, ONE BATCH PER SEED LINEAGE (owner, 2026-07-22,
+  // first frontier audit: a batch mixing lineages lets "nicer host song" masquerade as "better
+  // optimization" — a true comparison holds the seed/figure constant and varies only the mutated
+  // params). Each lineage batch = that seed's elites + their matched controls, freshly rendered in
+  // one boot, seeded arm->v-number shuffle, duration-matched, loudness-normalized. Lineages that
+  // lack an elite or a control are warn-skipped: without both, the batch can't feed the scaling
+  // gate. group pilot:<role>; per-variant source records elite-vs-control honestly.
   let batchesLanded = 0
   for (const result of results) {
-    const outDir = join(dir, `pilot-${result.role}-${seed}`)
-    try {
-      const elites = result.archive.slice(0, 8)
+    const elitesAll = result.archive.slice(0, 8)
+    const bySeed = new Map()
+    for (const e of elitesAll) {
+      const g = bySeed.get(e.genome.seedFile) ?? { elites: [], controls: [] }
+      g.elites.push(e)
+      bySeed.set(e.genome.seedFile, g)
+    }
+    for (const c of result.controls) {
+      const g = bySeed.get(c.seedFile) ?? { elites: [], controls: [] }
+      g.controls.push(c)
+      bySeed.set(c.seedFile, g)
+    }
+    let lineageIdx = 0
+    for (const [seedFile, g] of bySeed) {
+      if (g.elites.length === 0 || g.controls.length === 0) {
+        process.stderr.write(`note: ${result.role} lineage ${seedFile} has ${g.elites.length} elite(s)/${g.controls.length} control(s) — skipped (the gate needs both)\n`)
+        continue
+      }
+      lineageIdx++
+      const outDir = join(dir, `pilot-${result.role}-${seed}-l${lineageIdx}`)
+      try {
       const items = [
-        ...elites.map((e) => ({ kind: 'elite', doc: e.genome.doc, from: `niche ${pilot.nicheLabel(result.grid, e.niche)}, ${e.genome.edits.length} edits from ${e.genome.seedFile} (pessimistic ${e.score.pessimistic})`, seedFile: e.genome.seedFile })),
-        ...result.controls.map((c) => ({ kind: 'control', doc: c.doc, from: `random-mutation control descended from elite ${c.parentId} (${c.seedFile})`, seedFile: c.seedFile })),
+        ...g.elites.map((e) => ({ kind: 'elite', doc: e.genome.doc, from: `niche ${pilot.nicheLabel(result.grid, e.niche)}, ${e.genome.edits.length} edits from ${e.genome.seedFile} (pessimistic ${e.score.pessimistic})`, seedFile: e.genome.seedFile })),
+        ...g.controls.map((c) => ({ kind: 'control', doc: c.doc, from: `random-mutation control descended from elite ${c.parentId} (${c.seedFile})`, seedFile: c.seedFile })),
       ]
       if (items.length < 2) {
-        process.stderr.write(`warning: role ${result.role} produced <2 frontier items — skipping (need at least one elite and one control)\n`)
+        process.stderr.write(`warning: ${result.role} lineage ${seedFile} produced <2 frontier items — skipping\n`)
         continue
       }
       const workDir = join(outDir, 'work')
@@ -2719,11 +2741,12 @@ async function pilotCmd(argv) {
       const norm = normalizeBatchLoudness(outDir, files.length)
       if (norm) process.stdout.write(formatNormalizationResult(norm))
       batchesLanded += 1
-    } catch (err) {
-      process.stderr.write(`warning: frontier assembly for ${result.role} failed — ${err instanceof Error ? err.message.split('\n')[0] : err}\n`)
-      try {
-        if (existsSync(outDir) && !existsSync(join(outDir, 'manifest.json'))) rmSync(outDir, { recursive: true, force: true })
-      } catch { /* best-effort */ }
+      } catch (err) {
+        process.stderr.write(`warning: frontier assembly for ${result.role} lineage ${seedFile} failed — ${err instanceof Error ? err.message.split('\n')[0] : err}\n`)
+        try {
+          if (existsSync(outDir) && !existsSync(join(outDir, 'manifest.json'))) rmSync(outDir, { recursive: true, force: true })
+        } catch { /* best-effort */ }
+      }
     }
   }
   rmSync(workRoot, { recursive: true, force: true })
