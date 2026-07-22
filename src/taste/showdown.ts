@@ -33,7 +33,7 @@ import {
   type BeatDocument,
 } from '../core/index.js'
 import { NOTE_FIELD_DEFAULTS } from '../core/index.js'
-import { applyProducedDefaults, type ProductionProfile } from '../analysis/produce.js'
+import { applyProducedDefaults, productionProfileFor, type ProductionProfile, type ProductionRole, type ProducedResult } from '../analysis/produce.js'
 import { buildKeymap, midiToNote } from '../core/keymap.js'
 import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { shuffledOrder } from '../vary/audition.js'
@@ -875,7 +875,117 @@ export function composedPhraseToSurgeNotes(phrase: ComposedPhrase, bpm: number):
 
 const round4 = (x: number) => Math.round(x * 10000) / 10000
 
+// ---- surgeplus: the surge render THROUGH a production host (decisions.md D26/D27) --------------
+// The engineplus arm proved production-only edits move the engine 3%->29% blind pairwise; surge
+// sits at ~50% with ZERO production treatment. surgeplus isolates production for surge exactly as
+// engineplus does for engine: the SAME surge render (same patch + figure audio) through a dotbeat
+// production pass, deliberately same-figure.
+//
+// WHERE the production is applied — the honest audio-domain finding. A surge clip is a WAV from the
+// python sidecar, not engine-synthesized, so its production can't be expressed as SYNTH_FIELDS edits
+// on a synth track (engineplus's mechanism). It has to be applied to the AUDIO. dotbeat's 'audio'-
+// KIND track is the obvious host, but it carries NO effect chain BY FORMAT DESIGN: `addEffect`
+// refuses audio tracks (src/core/edit.ts — "effect chains only belong on synth/drums/instrument
+// tracks"), the serializer emits none for them, and the engine wires an audio voice as a bare
+// player -> muteGain -> master (ui/src/audio/engine.ts buildAudioTrackVoice) that never reads
+// `track.effects`. Hosting the surge WAV in an 'audio' track would therefore render it DRY — a
+// production no-op. So surgeplus hosts the render the SAME way the keymap clip hosts its one-shot:
+// as a single-trigger SAMPLE voice on a drums-KIND scratch host (keymapScratchText is itself a
+// drums-kind track), the audio-playback track dotbeat's engine actually PRODUCES — its sample voice
+// routes player -> filter -> the drum bus (EQ/comp/distortion/bitcrush + saturator + reverb/delay
+// sends) and the reorderable insert chain, all rendered offline like the other work clips.
+//
+// The production pass is the shared produce.ts profile for the role (applyProducedDefaults, the same
+// primitive engineplus wraps). On a drums-kind sample voice its synth-VOICE-only moves are dropped
+// by applyProducedDefaults' own `isSynth` guards: the osc-bank width stack (osc2 layer / unison /
+// noise wash — a sample has no osc bank) and the utility mid/side widener (a synth-chain insert the
+// drum bus's fixed tail doesn't carry). What ACTUALLY renders on the surge audio — and what the
+// clip's `from` records as `applied` — is the sample-voice EFFECT subset: eq3 high-shelf air
+// (eqHigh), saturator glue (drive/mix), chorus width, and the reverb + delay sends. That subset is
+// the honest answer to "the audio-track production chain actually supported"; the two width moves
+// above are the documented skips.
+
+/** The drums-kind scratch host's track id — the CLI registers the surge WAV as a sample lane on it
+ * (beat source add -> media/) before buildSurgeSampleHost declares the lane and the single hit. */
+export const SURGEPLUS_TRACK_ID = 'surge'
+
+/** showdown role -> produce.ts ProductionRole for the surgeplus host. Pitched roles only (surge —
+ * and therefore surgeplus — skips drum-loop, see SURGE_ROLE_CATEGORIES); an unmapped role falls
+ * back to the mild all-round 'default' profile rather than throwing (degrade, never break). */
+export const SURGEPLUS_PRODUCTION_ROLE: Record<string, ProductionRole> = {
+  bassline: 'bass',
+  chords: 'chords',
+  lead: 'lead',
+}
+
+export function surgeplusProductionRole(role: string): ProductionRole {
+  return SURGEPLUS_PRODUCTION_ROLE[role] ?? 'default'
+}
+
+/** The role's production profile for the surgeplus host — the shared produce.ts genkit-tier profile
+ * (the EFFECT subset that survives applyProducedDefaults' isSynth guards on a sample voice is what
+ * lands; see the section note). Deterministic function of role, no rng. */
+export function surgeplusProfile(role: string): ProductionProfile {
+  return productionProfileFor(surgeplusProductionRole(role))
+}
+
+/** Minimal drums-kind host for the surge render: one track ("surge") the CLI registers the surge WAV
+ * into as a sample lane (beat source add -> media/) before buildSurgeSampleHost declares the lane
+ * and writes one hit at step 0. The voice is deliberately NEUTRAL — a wide-open filter and a FLAT
+ * amp envelope (decay 0 = no percussive ramp, so the full multi-second render plays through, gated
+ * only by the buffer end, not a drum-hit envelope) — so the only colour the production pass adds is
+ * its own. Emitted as text and parse-validated by the caller, same discipline as keymapScratchText. */
+export function surgeSampleHostText(bpm: number): string {
+  return [
+    'format_version 0.11',
+    `bpm ${Math.round(bpm)}`,
+    'loop_bars 4',
+    'selected_track surge',
+    '',
+    'track surge Surge #61afef drums',
+    '  synth',
+    '    osc triangle',
+    `    volume ${SHOWDOWN_PROMINENT_DB}`,
+    '    cutoff 18000',
+    '    resonance 0',
+    '    attack 0.001',
+    '    decay 0',
+    '    sustain 1',
+    '    release 0.05',
+    '    pan 0',
+    '',
+  ].join('\n')
+}
+
+/** Build the surgeplus host from the parsed surgeSampleHostText scratch (AFTER the CLI registered
+ * the surge WAV as `sampleId` in its media block): materialize the host's default lanes, keep ONE,
+ * re-back it with the surge sample, and add a single hit at step 0 so the render plays once through
+ * the drum bus. Notes/hits are held constant against the plain surge clip by construction — only the
+ * production (added by applySurgeplusProduction) varies. */
+export function buildSurgeSampleHost(scratchDoc: BeatDocument, sampleId: string): BeatDocument {
+  const trackId = SURGEPLUS_TRACK_ID
+  let doc = materializeLanes(scratchDoc, trackId).doc
+  const track = doc.tracks.find((t) => t.id === trackId)
+  if (!track || track.kind !== 'drums') throw new BeatBatchError(`surgeplus host needs drums track "${trackId}" on the scratch`)
+  const laneName = track.lanes[0]?.name
+  if (laneName === undefined) throw new BeatBatchError(`surgeplus host track "${trackId}" materialized no lanes`)
+  // drop every other default lane so the host is a single clean voice playing the surge render
+  for (const l of track.lanes.slice(1)) doc = removeLane(doc, trackId, l.name).doc
+  doc = setLaneSample(doc, trackId, laneName, { sample: sampleId, gainDb: 0, tune: 0 })
+  doc = addHit(doc, trackId, { lane: laneName, start: 0, velocity: 0.9 }).doc
+  return doc
+}
+
+/** Apply the surgeplus production pass to the built host — the role's produce.ts profile through the
+ * shared applyProducedDefaults primitive (the same one engineplus wraps). Returns the produced doc
+ * and the honest `applied` list (only the moves that actually landed on the drums-kind sample voice
+ * — the sample-voice EFFECT subset; the synth-only width moves are silently dropped, see the note). */
+export function applySurgeplusProduction(doc: BeatDocument, role: string): ProducedResult {
+  return applyProducedDefaults(doc, SURGEPLUS_TRACK_ID, surgeplusProfile(role))
+}
+
 // ---- batch assembly ----------------------------------------------------------------------------
+
 
 export interface ShowdownClip {
   kind: ShowdownSourceKind
