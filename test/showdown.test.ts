@@ -671,6 +671,8 @@ test('refPools: ref rows split by origin pool from local manifests; the log itse
   assert.ok(!readFileSync(result.logPath, 'utf8').includes('refs-familiar'), 'pool paths stay out of the shared log')
   // classifier corner: unknown origins fold to ref:other
   assert.equal(classifyRefPool('/somewhere/else/chop.wav'), 'ref:other')
+  assert.equal(classifyRefPool('/x/taste-dataset/refs-packs/bassline/loop.wav'), 'ref:packs')
+  assert.equal(classifyRefPool('/x/taste-dataset/refs-cc0/lead/loop.wav'), 'ref:cc0')
   // the human report prints the section
   assert.match(formatShowdownReport(report), /ref by pool/)
 })

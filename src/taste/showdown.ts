@@ -1177,9 +1177,14 @@ function tally(entries: ShowdownLogEntry[]): SourceStat[] {
  * refs) can see it. Pools are the taste-dataset convention: refs-familiar/ = chops of songs the
  * owner loves, refs-unfamiliar/ = competent-but-unknown tracks — "my taste is unreachable" and
  * "any commercial track is unreachable" are different findings. */
-export function classifyRefPool(fromPath: string): 'ref:familiar' | 'ref:unfamiliar' | 'ref:other' {
+export function classifyRefPool(fromPath: string): 'ref:familiar' | 'ref:unfamiliar' | 'ref:packs' | 'ref:cc0' | 'ref:other' {
   if (/refs-familiar\b/.test(fromPath)) return 'ref:familiar'
   if (/refs-unfamiliar\b/.test(fromPath)) return 'ref:unfamiliar'
+  // D25 pools: refs-packs = purchased pro sample-pack loops (eval bar; EXCLUDED from critic
+  // training until the vendor's ML clause is verified clean); refs-cc0 = curated Freesound CC0
+  // loops (training-safe by construction — CC0 has no use restrictions)
+  if (/refs-packs\b/.test(fromPath)) return 'ref:packs'
+  if (/refs-cc0\b/.test(fromPath)) return 'ref:cc0'
   return 'ref:other'
 }
 
