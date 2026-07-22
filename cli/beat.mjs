@@ -1979,8 +1979,11 @@ async function showdownCmd(argv) {
   // the other four sources still collect. surgeMod stays null when --with-surge is off.
   let surgeMod = null
   let surgePatches = null
+  let curatedFile = null // loaded presets/surge-curated.json (D26) — narrows each role's draw to
+  // the curated top quartile; absent → blind draw from the full pool (CI-safe, unchanged behavior)
   if (withSurge) {
     surgeMod = await import('../dist/src/analysis/surge.js')
+    const curationMod = await import('../dist/src/taste/surgeCuration.js')
     try {
       const doc = await surgeMod.surgeDoctor()
       if (!surgeMod.surgeAvailable(doc)) {
@@ -1988,6 +1991,14 @@ async function showdownCmd(argv) {
       } else {
         surgePatches = await surgeMod.listSurgePatches()
         process.stderr.write(`surge: ${surgePatches.length} factory patches at ${doc.patchesRoot ?? doc.factoryPath ?? '?'}\n`)
+        // Curated pool (scripts/curate-surge-patches.mjs writes presets/surge-curated.json). When
+        // present, the surge clip draws from the curated per-role list; when absent, the full pool.
+        const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', 'surge-curated.json')
+        curatedFile = curationMod.loadCuratedFile(curatedPath)
+        if (curatedFile !== null) {
+          const sizes = Object.entries(curatedFile.roles ?? {}).map(([r, v]) => `${r} ${v.kept?.length ?? 0}/${v.pool ?? '?'}`).join(', ')
+          process.stderr.write(`surge: curated pool loaded (${sizes || 'no roles'}) from presets/surge-curated.json\n`)
+        }
       }
     } catch (err) {
       process.stderr.write(`warning: --with-surge: ${err instanceof Error ? err.message.split('\n')[0] : err} — skipping surge clips\n`)
@@ -2271,7 +2282,11 @@ async function showdownCmd(argv) {
         let surgeClip = null
         if (surgeThisRole && pitchedPhrase !== null) {
           try {
-            const patch = showdown.pickSurgePatch(surgePatches, spec.role, batchSeed)
+            // curated draw (D26): the role's curated patch-key Set from presets/surge-curated.json,
+            // or null → full role pool (blind, unchanged). Threaded into every pick + ring redraw.
+            const curationMod = await import('../dist/src/taste/surgeCuration.js')
+            const curatedKeys = curationMod.curatedKeysForRole(curatedFile, spec.role)
+            const patch = showdown.pickSurgePatch(surgePatches, spec.role, batchSeed, { curatedKeys })
             if (patch === null) {
               process.stderr.write(`surge: no factory patch in ${showdown.surgeRoleCategories(spec.role).join('/')} for ${spec.role} — skipping surge clip\n`)
             } else {
@@ -2297,7 +2312,7 @@ async function showdownCmd(argv) {
               const tried = new Set()
               for (let attempt = 0; attempt < 3; attempt++) {
                 const pool = surgePatches.filter((p) => !tried.has(p.path))
-                const candidate = attempt === 0 ? patch : showdown.pickSurgePatch(pool, spec.role, batchSeed + attempt * 7919)
+                const candidate = attempt === 0 ? patch : showdown.pickSurgePatch(pool, spec.role, batchSeed + attempt * 7919, { curatedKeys })
                 if (candidate === null) break
                 tried.add(candidate.path)
                 const attemptWav = join(workDir, `surge-try${attempt}.wav`)
