@@ -905,7 +905,7 @@ export function writeShowdownBatch(
   outDir: string,
   role: string,
   clips: { file: string; source: { kind: ShowdownSourceKind; from?: string } }[],
-  opts: { seed?: number } = {},
+  opts: { seed?: number; figureSource?: 'midi' | 'bank' } = {},
 ): VaryBatchManifest {
   if (clips.length < 2) throw new BeatBatchError('a showdown batch needs at least two source clips')
   for (const c of clips) {
@@ -918,11 +918,16 @@ export function writeShowdownBatch(
     count: clips.length,
     seed: opts.seed ?? 41,
     createdAt: new Date().toISOString(),
+    ...(opts.figureSource !== undefined ? { figureSource: opts.figureSource } : {}),
     variants: clips.map((c) => ({ file: c.file, source: c.source })),
   }
   writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
-  if (clips.some((c) => c.source.kind === 'ref' || c.source.kind === 'surge')) {
-    writeFileSync(resolve(outDir, '.gitignore'), '# showdown batch containing private ref/surge clips — never committed (docs/source-showdown-eval.md)\n*\n')
+  // The gitignore gate (docs/source-showdown-eval.md licensing stances): ref working copies are
+  // private chops of commercial audio; surge renders carry the unresolved factory-patch content
+  // license; midi-figure batches render DERIVATIVES of MIDI transcriptions of copyrighted songs
+  // (and their manifests carry the midi path). None may ever land in git.
+  if (clips.some((c) => c.source.kind === 'ref' || c.source.kind === 'surge') || opts.figureSource === 'midi') {
+    writeFileSync(resolve(outDir, '.gitignore'), '# showdown batch containing private ref/surge/midi-derived clips — never committed (docs/source-showdown-eval.md)\n*\n')
   }
   return manifest
 }
