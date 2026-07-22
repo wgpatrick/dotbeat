@@ -215,15 +215,30 @@ const PHRASE_VARIANTS: Record<string, string[]> = {
   ],
 }
 
+/** Isolation clause per phrase-tier id (owner, 2026-07-21, mid-rating: "the generated basslines
+ * always have other instruments in them" — fal renders a mix unless told not to, and a showdown
+ * clip is supposed to be ONE role). Appended to every phrase prompt by genSubjectVaried, so all
+ * consumers inherit it. If prompts prove insufficient by ear, v2 is Demucs stem-extraction on
+ * gen clips (the T3 pipeline already runs Demucs). */
+const PHRASE_ISOLATION: Record<string, string> = {
+  melody: 'solo lead melody only, no drums, no other instruments',
+  bassline: 'solo bassline only, no drums, no other instruments',
+  chords: 'chords only, no drums, no bass, no other instruments',
+  drumloop: 'drums only, no melodic instruments',
+}
+
 /** Same lookup as `genSubject`, but for phrase-tier ids with real musical variety, one entry of
  * `PHRASE_VARIANTS` is drawn via `rng` — every gen batch for the same role gets a genuinely
- * different genre/mood, not just a different production-texture adjective on the same one. Ids
- * with no variants bank (one-shots) fall through to the plain `genSubject` behavior unchanged. */
+ * different genre/mood, not just a different production-texture adjective on the same one — and
+ * the role's isolation clause is appended. Ids with no variants bank (one-shots) fall through to
+ * the plain `genSubject` behavior unchanged. */
 export function genSubjectVaried(id: string, rng: () => number): { id: string; subject: string; seconds: number } {
   const base = genSubject(id)
   const variants = PHRASE_VARIANTS[id]
   if (!variants) return base
-  return { ...base, subject: variants[Math.floor(rng() * variants.length)]! }
+  const subject = variants[Math.floor(rng() * variants.length)]!
+  const isolation = PHRASE_ISOLATION[id]
+  return { ...base, subject: isolation !== undefined ? `${subject}, ${isolation}` : subject }
 }
 const GEN_STYLES = [
   'analog warmth, tape saturation',

@@ -1755,7 +1755,27 @@ async function showdownCmd(argv) {
         const refPathEarly = (() => {
           if (refDir === undefined) return null
           const pool = refPool(spec.role)
-          return pool.length > 0 ? resolve(pool[refPick % pool.length]) : null
+          if (pool.length === 0) return null
+          // audibility guard (owner, 2026-07-21): a mostly-silent chop (e.g. a bass stem where
+          // the bass is tacet) survives loudness normalization as a near-inaudible clip — scan
+          // deterministically forward from the seeded pick until a chop is actually ACTIVE,
+          // falling back to the original pick (with a warning) if the whole pool is sparse.
+          for (let offset = 0; offset < pool.length; offset++) {
+            const candidate = resolve(pool[(refPick + offset) % pool.length])
+            try {
+              const { channels, sampleRate } = decodeWav(readFileSync(candidate))
+              const active = showdown.activeFraction(channels, sampleRate)
+              if (active >= 0.5) {
+                if (offset > 0) process.stderr.write(`ref pick advanced ${offset} (skipped mostly-silent chop${offset === 1 ? '' : 's'})\n`)
+                return candidate
+              }
+              process.stderr.write(`ref candidate mostly silent (${Math.round(active * 100)}% active) — trying next: ${basename(candidate)}\n`)
+            } catch {
+              process.stderr.write(`ref candidate unreadable — trying next: ${basename(candidate)}\n`)
+            }
+          }
+          process.stderr.write(`warning: every ${spec.role} ref chop is mostly silent — using the seeded pick anyway\n`)
+          return resolve(pool[refPick % pool.length])
         })()
         let batchBpm = seed.doc.bpm
         if (refPathEarly !== null && genBackend !== 'stub') {

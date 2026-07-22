@@ -198,6 +198,35 @@ export function applyProductionTreatment(doc: BeatDocument, trackId: string): Pr
   return { doc: out, applied }
 }
 
+/** Fraction of ~100 ms windows whose RMS exceeds `floorDb` dBFS — the ref-chop AUDIBILITY guard
+ * (owner, 2026-07-21, mid-rating: a picked bass-stem chop was "not really audible"). Loudness
+ * normalization can't fix this class: gated LUFS normalizes a SPARSE chop by its few loud
+ * moments, and matched integrated loudness can't make missing content audible. The guard runs at
+ * pick time instead: a chop that is mostly silence (low active fraction) is skipped for the next
+ * pool candidate. Mono-mixes whatever channels it's given. */
+export function activeFraction(channels: Float32Array[] | number[][], sampleRate: number, floorDb = -40): number {
+  if (channels.length === 0 || sampleRate <= 0) return 0
+  const n = channels[0]!.length
+  if (n === 0) return 0
+  const win = Math.max(1, Math.round(sampleRate * 0.1))
+  const floorRms = Math.pow(10, floorDb / 20)
+  let active = 0
+  let windows = 0
+  for (let start = 0; start < n; start += win) {
+    const end = Math.min(start + win, n)
+    let sumSq = 0
+    for (let i = start; i < end; i++) {
+      let s = 0
+      for (const ch of channels) s += ch[i] ?? 0
+      s /= channels.length
+      sumSq += s * s
+    }
+    windows += 1
+    if (Math.sqrt(sumSq / (end - start)) > floorRms) active += 1
+  }
+  return windows === 0 ? 0 : active / windows
+}
+
 /** Fold a detected tempo into the plausible showdown range by octave-doubling/halving — beat
  * trackers on short chops routinely report half- or double-time (a 61 BPM reading of a 122 BPM
  * house chop). [70, 180] covers the taste-seed space (90-160) with headroom on both sides; the

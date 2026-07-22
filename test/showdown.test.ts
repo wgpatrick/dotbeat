@@ -17,6 +17,7 @@ import {
   showdownRole,
   extendToFourBars,
   soloForShowdown,
+  activeFraction,
   applyProductionTreatment,
   foldBpmToRange,
   keymapScratchText,
@@ -665,4 +666,31 @@ test('refPools: ref rows split by origin pool from local manifests; the log itse
   assert.equal(classifyRefPool('/somewhere/else/chop.wav'), 'ref:other')
   // the human report prints the section
   assert.match(formatShowdownReport(report), /ref by pool/)
+})
+
+test('activeFraction: steady tone ~1.0, mostly-silence low, silence 0 — the ref audibility guard', () => {
+  const sr = 44100
+  const tone = new Float32Array(sr) // 1s sine at healthy level
+  for (let i = 0; i < sr; i++) tone[i] = 0.5 * Math.sin((2 * Math.PI * 220 * i) / sr)
+  assert.ok(activeFraction([tone], sr) > 0.95, 'steady tone is fully active')
+
+  const sparse = new Float32Array(sr * 2) // 2s: only the first 200ms has signal
+  for (let i = 0; i < sr * 0.2; i++) sparse[i] = 0.5 * Math.sin((2 * Math.PI * 220 * i) / sr)
+  const sparseActive = activeFraction([sparse], sr)
+  assert.ok(sparseActive < 0.2, `sparse chop reads mostly silent (${sparseActive})`)
+
+  assert.equal(activeFraction([new Float32Array(sr)], sr), 0, 'digital silence is 0% active')
+  assert.equal(activeFraction([], sr), 0, 'no channels -> 0')
+})
+
+test('genSubjectVaried appends the role isolation clause to every phrase prompt', async () => {
+  const { genSubjectVaried } = await import('../src/taste/seeds.js')
+  const { mulberry32 } = await import('../src/taste/eval.js')
+  for (const id of ['bassline', 'melody', 'chords', 'drumloop']) {
+    const s = genSubjectVaried(id, mulberry32(7))
+    assert.match(s.subject, /only, no /, `${id} prompt carries an isolation clause: ${s.subject}`)
+  }
+  // one-shots pass through untouched
+  const kick = genSubjectVaried('kick', mulberry32(7))
+  assert.ok(!kick.subject.includes('only, no'), 'one-shot subjects unchanged')
 })
