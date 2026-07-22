@@ -101,6 +101,22 @@ export {
 } from './genkit.js'
 // ==== gen-kit end ====
 
+// ==== produced defaults (plan A1) begin ====
+// The shared, role-aware production layer applied by gen-kit and the taste seeds so every generated
+// project ships with basic production (width / air / glue / space / motion) instead of a dry, mono,
+// static init patch. See docs/research/115-production-layer-techniques.md and produce.ts.
+export {
+  productionRoleFor,
+  productionProfileFor,
+  applyProducedDefaults,
+  BeatProduceError,
+  type ProductionRole,
+  type ProductionProfile,
+  type ProfileOptions,
+  type ProducedResult,
+} from './produce.js'
+// ==== produced defaults end ====
+
 // ==== Phase 40 Stream VA begin ====
 // Pitch detection for one-shots — pure TS, zero deps, no Python (decisions.md D20). Reuses
 // src/metrics/'s FFT and WAV decoder, so the dependency direction stays analysis -> metrics.

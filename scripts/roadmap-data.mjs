@@ -1332,6 +1332,12 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: 'gen-kit-pipeline.md',
   },
+  {
+    area: 'Taste loop', feature: 'Produced defaults: generated projects ship with role-aware production, not a dry/mono init patch (plan A1)',
+    description: 'The blind source-showdown found the engine\'s synth loses to commercial chops on production RICHNESS, not cleanliness (mono output ≈ -52 dB stereo width vs ≈ -11 dB for real records, near-zero air-band energy, lowest production-COMPLEXITY scores while production-QUALITY was flat). An ablation adding ONLY production edits — same notes, same picked samples — moved the engine from 3% to 29% of blind pairwise wins (63% on lead). The format already owned all the DSP; nothing in the generation path had ever touched it. New shared module src/analysis/produce.ts (productionRoleFor -> productionProfileFor -> applyProducedDefaults, grounded in research/115 P1 width / P2 air / P3 motion) applies a role-appropriate width/air/glue/space/motion layer to every registered track: the drum bus (kit) gets air shelf + light glue only (it carries the kick — §2.2 withholds width/reverb/auto-pan at the bus); bass gets saturation + a sidechain duck under the kit\'s kick (§4.2) but NO width and NO reverb send (mono-anchored low end); lead gets the full chorus/saturation/reverb+delay-sends/air-shelf stack; hats/perc get air + reverb + auto-pan when they stand alone. Two invariants keep it safe on-by-default: intensify-only (Math.max against the patch\'s own value — never quiets an already-produced patch, re-applying is a no-op, so the taste loop searches FROM a produced start) and deterministic (pure function of role, no rng — preserves gen-kit\'s byte-identical-per-seed recipe property). Wired into gen-kit (cli/beat.mjs genKitCmd) and the taste seeds (src/taste/seeds.ts, at a scaled-down seed tier with seed-derived jitter so vary keeps headroom both ways); the showdown\'s engineplus ablation clip delegates to the same primitive (frozen constants). Stub gen-kit before/after (seed 7): stereo width -19.1 -> -16.9 dB, centroid 560 -> 713 Hz, -18.9 -> -13.8 LUFS. Unit-tested in test/produce.test.ts (role differences, intensify-only, bass mono invariant, determinism, applied-list honesty); full suite green.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: null, plan: 'gen-kit-pipeline.md',
+  },
 
   // ── Render / export ──────────────────────────────────────────────────────
   {

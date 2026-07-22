@@ -59,6 +59,47 @@ registration machinery, only the loop:
    content — the Phase 39 silent-render trap — so gen-kit never leaves a populated track
    unplaced (`unplacedContentTracks` is asserted empty in its tests).
 
+## Produced defaults (plan A1)
+
+Before the document is written, every registered track gets a **role-appropriate production layer**
+— width, air, glue, space, motion — instead of the dry, mono, static init patch. This is the fix
+for a measured eval gap, not a cosmetic default: in the blind source-showdown the engine's synth
+lost to commercial chops on production *richness*, not cleanliness (mono output ≈ −52 dB stereo
+width vs ≈ −11 dB for real records, near-zero air-band energy, the lowest production-*complexity*
+scores while production-*quality* was flat). An ablation that added **only** production edits — same
+notes, same picked samples — moved the engine from **3% → 29%** of blind pairwise wins (63% on
+lead). The format already owned all the DSP; nothing in the generation path had ever touched it.
+
+The moves come from `src/analysis/produce.ts` (`productionProfileFor` → `applyProducedDefaults`),
+grounded in **docs/research/115-production-layer-techniques.md** (P1 width / P2 air / P3 motion),
+and are **role-aware** — `productionRoleFor(id)` maps each track onto a profile:
+
+- **kit** (the drum bus — one dotbeat track carries kick+snare+hats+perc as lanes, so the bus
+  *contains* the kick): air shelf + light glue **only**. No width, no reverb, no auto-pan — anything
+  that would widen or wet the kick is withheld at the bus level (§2.2).
+- **bass**: saturation for the mid/top harmonics that let it read on small speakers, **plus a
+  sidechain duck under the kit's kick** (§4.2, the genre-defining pump) — but **no width, no reverb
+  send** (mono-anchored low end, §2.2). The duck is wired only when the kit actually has a kick lane.
+- **lead**: the full width stack — chorus + saturation + reverb/delay sends + an air shelf (§3.3).
+  (gen-kit's tonal tracks are sample-backed keymaps, i.e. `drums`-kind, so the osc-bank moves
+  osc2/unison/utility are synth-only no-ops here; width comes from the chorus insert + the stereo
+  reverb bus, and the applied list stays honest about it.)
+- **hats/perc** (only when they stand as their own track): air shelf + a little reverb + auto-pan
+  motion. On the shared kit bus they are covered by the conservative kit profile instead.
+
+Two invariants make this safe to ship on by default:
+
+- **Intensify-only.** Every numeric move is `Math.max` against the patch's own value, so a patch
+  that already carries production keeps its richer setting — the layer never quiets anything, and
+  re-applying it is a no-op. The taste loop therefore searches *from* a produced starting point
+  instead of asking `beat vary`/CMA-ES to rediscover mixing practice.
+- **Deterministic.** A profile is a pure function of role (no rng), so produced defaults preserve
+  the byte-identical-per-`--seed` recipe property below. (The taste **seeds** — `src/taste/seeds.ts`
+  — apply the same module at a scaled-down *seed tier* with a seed-derived jitter, so seed batches
+  keep headroom for vary to move width/air in both directions.)
+
+The one-line-per-track `produced <id>: …` output names exactly what changed.
+
 ## How it feeds the taste loop
 
 Each role's candidates land as an **ordinary rateable batch dir** — the one D21 manifest shape,
@@ -110,7 +151,10 @@ one-shot on CPU).
 
 - `src/analysis/genkit.ts` — the pure half: role specs, style prompts, pick heuristics, keymap
   span, seeded pattern plans (all unit-tested without audio).
-- `cli/beat.mjs` `genKitCmd` — the loop: genSourceBatch → measure → adopt → build document.
+- `cli/beat.mjs` `genKitCmd` — the loop: genSourceBatch → measure → adopt → build document → apply
+  produced defaults.
+- `src/analysis/produce.ts` — the shared produced-defaults layer (role profiles, intensify-only
+  `applyProducedDefaults`), unit-tested in `test/produce.test.ts`; cited: research 115.
 - `test/genkit.test.ts` — pure tests + the full stub pipeline (project shape, deferred
   registration, scene coverage, determinism, `regen --verify`).
 - `examples/recipe-song/` — the hand-built original this automates; `docs/phase-40-plan.md` — the

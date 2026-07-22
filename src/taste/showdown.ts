@@ -25,7 +25,6 @@ import { join, resolve } from 'node:path'
 import {
   parse,
   serialize,
-  addEffect,
   addHit,
   addLane,
   removeLane,
@@ -34,6 +33,7 @@ import {
   type BeatDocument,
 } from '../core/index.js'
 import { NOTE_FIELD_DEFAULTS } from '../core/index.js'
+import { applyProducedDefaults, type ProductionProfile } from '../analysis/produce.js'
 import { buildKeymap, midiToNote } from '../core/keymap.js'
 import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { shuffledOrder } from '../vary/audition.js'
@@ -141,61 +141,46 @@ export interface ProductionTreatment {
   applied: string[]
 }
 
+/** The engineplus ablation's FROZEN profile, expressed against the shared produced-defaults
+ * primitive (src/analysis/produce.ts). These constants are the frozen science — the exact width /
+ * glue / space / air targets whose blind-rating effect was measured — so they live HERE, spelled
+ * out, rather than being drawn from `productionProfileFor` (whose role profiles are free to evolve).
+ * Synth roles get the osc-bank width stack + delay glue; drums get the lighter chorus and no delay
+ * (it would re-write the groove), and no osc-bank claims (drum voices ignore the osc bank). */
+function engineplusProfile(kind: 'synth' | 'drums'): ProductionProfile {
+  if (kind === 'synth') {
+    return {
+      role: 'default',
+      osc2Layer: { level: 0.35, detuneCents: 10 },
+      unison: { voices: 5, width: 0.6 },
+      chorusMix: 0.25,
+      saturator: { drive: 0.25, mix: 0.3 },
+      sendReverb: 0.18,
+      sendDelay: 0.08,
+      eqHigh: 2.5,
+    }
+  }
+  return {
+    role: 'default',
+    chorusMix: 0.15, // lighter on drums — keep the kick's mono punch
+    saturator: { drive: 0.25, mix: 0.3 },
+    sendReverb: 0.18,
+    eqHigh: 2.5,
+  }
+}
+
 /** Apply the engineplus production pass to `trackId` (synth or drums — the four showdown roles).
  * Notes/hits are untouched by construction: the comparison against the plain engine clip holds
- * the figure and patch constant and varies ONLY production. */
+ * the figure and patch constant and varies ONLY production. A thin wrapper over the shared
+ * `applyProducedDefaults` primitive (plan A1) with the frozen engineplus profile — the ablation
+ * semantics are unchanged (its tests pass unmodified). */
 export function applyProductionTreatment(doc: BeatDocument, trackId: string): ProductionTreatment {
   const track = doc.tracks.find((t) => t.id === trackId)
   if (!track) throw new BeatBatchError(`no track "${trackId}" to produce (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
   if (track.kind !== 'synth' && track.kind !== 'drums') {
     throw new BeatBatchError(`production treatment covers synth/drums tracks, and "${trackId}" is ${track.kind}`)
   }
-  const applied: string[] = []
-  const s = { ...track.synth }
-  // width — synth tracks use the osc bank's unison stack (osc3 + outer pairs only sound when
-  // unisonVoices >= 3 AND osc2Level > 0, engine applyParams); drum voices don't read the osc
-  // bank, so a drums track's width comes from the chorus insert + the stereo reverb return.
-  if (track.kind === 'synth') {
-    if (s.osc2Level <= 0) {
-      s.osc2Type = s.osc // a detuned layer of the same voice — thickness, not a new timbre
-      s.osc2Level = 0.35
-      s.osc2Detune = 10 // cents: audible width/thickening, not a second pitch
-      applied.push('osc2 layer (same osc, +10c, level 0.35)')
-    }
-    if (s.unisonVoices < 5 || s.unisonWidth < 0.6) {
-      s.unisonVoices = Math.max(s.unisonVoices, 5)
-      s.unisonWidth = Math.max(s.unisonWidth, 0.6)
-      applied.push(`unison ${s.unisonVoices} voices width ${rnd2(s.unisonWidth)}`)
-    }
-  }
-  const chorusTarget = track.kind === 'drums' ? 0.15 : 0.25 // lighter on drums — keep the kick's mono punch
-  if (s.chorusMode === 'off' || s.chorusMix < chorusTarget) {
-    if (s.chorusMode === 'off') s.chorusMode = 'chorus'
-    s.chorusMix = Math.max(s.chorusMix, chorusTarget)
-    applied.push(`chorus mix ${rnd2(s.chorusMix)}`)
-  }
-  if (s.saturatorDrive < 0.25 || s.saturatorMix < 0.3) {
-    s.saturatorDrive = Math.max(s.saturatorDrive, 0.25)
-    s.saturatorMix = Math.max(s.saturatorMix, 0.3)
-    applied.push(`saturator drive ${rnd2(s.saturatorDrive)} mix ${rnd2(s.saturatorMix)}`)
-  }
-  if (s.sendReverb < 0.18) {
-    s.sendReverb = 0.18
-    applied.push('sendReverb 0.18')
-  }
-  if (track.kind === 'synth' && s.sendDelay < 0.08) {
-    s.sendDelay = 0.08 // a touch of delay glue on pitched roles; skipped on drums (it re-writes the groove)
-    applied.push('sendDelay 0.08')
-  }
-  if (s.eqHigh < 2.5) {
-    s.eqHigh = 2.5
-    applied.push('eqHigh +2.5 dB air')
-  }
-  let out: BeatDocument = { ...doc, tracks: doc.tracks.map((t) => (t.id === trackId ? { ...t, synth: s } : t)) }
-  // eqHigh only sounds through an eq3 insert; every migrated track has one by default, but a
-  // chain explicitly emptied with `effects none` would not — re-add rather than silently no-op.
-  if (!track.effects.some((e) => e.type === 'eq3' && e.enabled)) out = addEffect(out, trackId, 'eq3').doc
-  return { doc: out, applied }
+  return applyProducedDefaults(doc, trackId, engineplusProfile(track.kind))
 }
 
 /** Fraction of ~100 ms windows whose RMS exceeds `floorDb` dBFS — the ref-chop AUDIBILITY guard
