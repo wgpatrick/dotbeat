@@ -147,16 +147,24 @@ loudness-normalized by default so "louder" can't masquerade as "better." The dat
 (`taste-seeds` → `taste-collect` → a blind web rating UI) was hardened by ear — six classes of
 silent no-op batches found and closed.
 
-**Beyond the critic, the pivot toward "the generator is the bottleneck"** (owner, after hearing
-eval batches) is now backed by blind data, not just impression: `beat showdown` (blind per-role
-engine-vs-gen-vs-keymap-vs-reference-chop comparisons) shows dotbeat's own synth engine has won
-**zero** of 15 pairwise comparisons across 8 rated rounds — fal-generated sounds are a clear
-second to real commercial reference chops, engine and keymap-repitched one-shots trail badly.
-`beat gen-kit` (compose a whole playable beat from generated sounds) and `beat match` (T6:
-CMA-ES sound-matching against a reference chop, self-match verified) are both built. T4
-(`beat suggest --taste` pre-ranking and next-round proposals) is live; T5 (overnight
-critic-guided quality-diversity search) is still not started — the critical path remains rated
-batches, not code.
+**The generator question, decomposed by blind data (2026-07-21/22 eval arc — decisions D24-D27).**
+`beat showdown` (blind per-role source comparisons, now 60+ rated batches) split the engine's
+deficit into two measured axes: *production* (width/air/motion — a production-only ablation moved
+the engine from 3% to 29% pairwise; the format had the DSP all along, nothing set it) and
+*timbre* (the T6 ceiling study: envelope solved, spectrum unreachable). The response, all built
+and blind-verified: **produced defaults** (`src/analysis/produce.ts` — gen-kit and taste-seeds
+ship with role-appropriate production), the **`beat trick` catalog** (15 named production moves
+with preconditions and measurable receipts — verified by ear via `beat prodtask transform`:
+tricked beat a random-edit control 90% vs 33% pairwise), **Surge XT as an out-of-process sound
+factory** (`--with-surge`; 639 factory patches; a surgepy channel-corruption bug was root-caused
+and fixed — upstream issue drafted), and **commercial-MIDI figures** (`--midi-dir`, private) that
+hold composition at commercial quality. Current standings with commercial figures: refs ~93%
+pairwise, gen 52% ≈ surge 50% ≈ keymap 45%, raw engine 0% — the chosen path (D26) is making
+engine/surge sound commercial, and the program's north star (D27) is the first blind batch where
+the owner genuinely ranks a dotbeat-rendered clip above the reference. T4 (`beat suggest
+--taste`) is live; the critic now carries bootstrap-ensemble uncertainty (pessimistic scoring
+that auto-discounts its measured blind spots) — the stated prerequisite for the first constrained
+T5 overnight pilot.
 
 **How it's kept honest.** 890 tests plus Playwright-driven verify scripts assert known-correct
 behavior; exploratory usability pilots — an agent driving the real app or CLI with no checklist

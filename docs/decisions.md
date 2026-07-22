@@ -61,6 +61,68 @@ sits in a `finally` so a throwing tick callback can never leave the native rende
 forever. Disposal margin is 1s past `_stopTime` (which already includes the fade-out), covering
 the exponential-tail allowance.
 
+## D27 — the taste program's north-star metric: a genuine blind win over a ref (2026-07-22)
+
+**The decision (owner, verbatim intent).** "Eventually I want to genuinely pick an engine/surge
+created clip. I think that's the goal in the eval and we'll know we've raised the bar on what we
+can create." The showdown eval's success condition is therefore the first blind-rated batch where
+the owner ranks a dotbeat-rendered clip (engine/engineplus/surge/keymap) above the reference
+clip — not any aggregate percentage. Everything else (critic accuracy, production tricks, patch
+curation) is instrumentation toward that event. **Revisit when:** it happens — then the bar moves
+(win rate, then winning against pack-quality refs consistently).
+
+## D26 — the path is synthesis-toward-commercial, informed by the 2026-07-21/22 eval arc (2026-07-22)
+
+**The decision (owner).** After the blind evidence run — engine 0-4% pairwise vs refs; production
+alone tripling it; the T6 ceiling study showing envelope solved but spectrum unreachable; honest
+Surge landing mid-pack (45-50%); and commercial-MIDI figures lifting the whole synthesis family
+(surge 50% ≈ gen 52%, keymap 17→45%) — the chosen direction is **making engine/surge sound as
+good as commercial stems**, not leaning further into hosted generation. Unexploited levers, in
+rough order: patch curation over the 639-preset factory pool, a production pass on surge clips,
+webdx7 (Apache/MIT) for reachable timbres, engine extensions per research/114's evidence order
+(parametric EQ first). Gen keeps its lane where it leads (drum loops). **Revisit when:** two more
+clean-methodology rounds contradict the surge≈gen reading, or the D27 event stays out of reach
+after the lever list above is exhausted.
+
+## D25 — eval references move from Demucs stems to professionally-produced loops; commercial MIDI figures are eval-only private data (2026-07-22)
+
+**The decision (owner).** Demucs-separated stems are retired as the eval's quality bar: separation
+artifacts make them noisy ("just sound noisy and not quite right"), unfairly recognizable, and an
+unfair comparison target (mix-extracted vs authored parts). The reference pool moves to
+role-isolated professional sample-pack loops (research/120: Splice Creator month → ~200 curated
+loops, or Loopmasters Ultimate Deep House), landing in `taste-dataset/refs-packs/<role>/` as a
+third pool alongside familiar/unfamiliar — weighted toward NON-favorite material (recognition
+bias measured at ~5 pts by the pool split). Two standing constraints: (1) Splice ToU prohibits
+AI-training use → pack-pool variants must be EXCLUDED from critic training pairs before pack refs
+enter rated batches (rateable, never trained on — not yet implemented, required before ingestion);
+(2) commercial MIDI transcriptions (`taste-dataset/midi/`, `--midi-dir`) are derivative works and
+keep the full ref posture: private, never committed, gitignore-gated batches, kind-only in the
+shared log. **Revisit when:** the packs' licensing is re-verified for any use beyond private eval.
+
+## D24 — blindness outranks the controlled ablation: per-source figures by default (2026-07-22)
+
+**The decision (owner, after catching four un-blinding channels by ear).** Every composed
+showdown source draws its own distinct figure (archetype bank or commercial MIDI) by default;
+`--shared-figure` restores the same-notes controlled comparison when isolating the sound-source
+variable matters more than blindness (that mode produced the production-vs-timbre split and stays
+available as a listening tool, esp. with `--midi-dir`). The general principle worth keeping: the
+blind eval is a living instrument, un-blinding is a hydra (seed phrases, gen prompts, tempo
+mismatch, shared figures — all found by the owner mid-rating), and owner listening IS the audit.
+**Revisit when:** a batch design needs both blindness and same-figure control simultaneously
+(e.g. rate two shared-figure batches with disjoint figure draws).
+
+## D23 — GPL synths may run as out-of-process sound factories; the live-engine GPL ban stands (2026-07-22)
+
+**The decision.** The MIT-license decision closed the GPL engine tier for *ported/linked* code.
+Surge XT (GPLv3) is now used WITHOUT reopening that: it runs as a local out-of-process tool
+(source-built surgepy behind the `python/surge_render.py` sidecar, same posture as the Python ML
+sidecars) whose rendered outputs feed the private eval only — factory-patch renders are
+gitignore-gated (upstream factory-content licensing is unresolved) and nothing GPL links into the
+shipped engine. webdx7/msfa (Apache/MIT) remains the only license-clean LIVE-device candidate
+(research/114). Found and fixed along the way: surgepy's `getOutput()` stride bug (upstream issue
+draft in `docs/research/surge-right-ear-ring-rootcause.md`). **Revisit when:** factory-patch
+content licensing resolves upstream, or a surge-derived asset would ship beyond the private eval.
+
 ## D22 — offline render is opt-in (`--offline`), exact but not unconditionally fast; live capture stays the default (2026-07-17)
 
 **The decision.** D15's closing note ("if a faster-than-realtime batch render path is needed
