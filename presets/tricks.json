@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "tricks": [
+    {
+      "name": "unison-spread",
+      "axis": "width",
+      "slots": { "track": { "kind": "synth", "roles": ["lead", "pad", "chords", "arp"] } },
+      "when": [
+        { "metric": "stereoWidthDb", "op": "<", "value": -30 },
+        { "field": "unisonVoices", "op": "==", "value": 1 }
+      ],
+      "recipe": [
+        { "set": "$track.unisonVoices", "value": 5 },
+        { "set": "$track.unisonWidth", "value": 0.7 },
+        { "set": "$track.osc2Level", "value": 0.4 },
+        { "set": "$track.osc2Detune", "value": 12 }
+      ],
+      "expect": [
+        { "metric": "stereoWidthDb", "dir": "up", "min": 10 },
+        { "metric": "stereoCorrelation", "dir": "down" }
+      ],
+      "counter": [
+        { "note": "never on bass/sub tracks — the low end stays mono for club mono-sum delivery (115 §2.2)" },
+        { "note": "chorus/unison smears attacks; skip on percussive transient-critical parts" }
+      ],
+      "why": "Five detuned unison voices spread across the stereo field turn a mono synth wide while summing mono-safe (detuned voices barely comb). The single biggest lever on the measured -52 dB-vs--11 dB width gap. (research 115 §2.1, high confidence)"
+    },
+    {
+      "name": "detune-double",
+      "axis": "width",
+      "slots": { "track": { "kind": "synth", "notRoles": ["bass", "sub"] } },
+      "when": [
+        { "field": "osc2Level", "op": "==", "value": 0 }
+      ],
+      "recipe": [
+        { "set": "$track.osc2Level", "value": 0.5 },
+        { "set": "$track.osc2Detune", "value": 7 }
+      ],
+      "expect": [
+        { "metric": "stereoWidthDb", "dir": "up" },
+        { "metric": "bandPresencePct", "dir": "up" }
+      ],
+      "counter": [
+        { "note": "on bass keep osc2Detune <= 5 and re-check the mono sum — this trick's notRoles already exclude bass/sub, so --force is required there" }
+      ],
+      "why": "A second oscillator detuned +7 cents (the just-audible zone) layers a slightly-altered copy for thickness and spectral density — layering slightly-altered copies is the oldest width move in the book. (research 115 §1.1, high confidence)"
+    },
+    {
+      "name": "pad-chorus",
+      "axis": "width",
+      "slots": { "track": { "kind": "synth", "roles": ["pad", "chords"] } },
+      "when": [
+        { "field": "chorusMix", "op": "==", "value": 0 }
+      ],
+      "recipe": [
+        { "set": "$track.chorusMode", "value": "ensemble" },
+        { "set": "$track.chorusMix", "value": 0.25 }
+      ],
+      "expect": [
+        { "metric": "stereoWidthDb", "dir": "up" }
+      ],
+      "counter": [
+        { "note": "chorus smears transient attacks — not on percussive or pluck-attack parts" }
+      ],
+      "why": "An ensemble-mode chorus insert (3-voice, wider) is the classic pad-widener — mild, always-on stereo motion under sustained chords. (research 115 §2.1, high confidence)"
+    },
+    {
+      "name": "utility-widen",
+      "axis": "width",
+      "slots": { "track": { "kind": "synth", "notRoles": ["bass", "sub"] }, "knobs": [{ "name": "width", "default": 0.65 }] },
+      "when": [
+        { "metric": "stereoWidthDb", "op": "<", "value": -25 }
+      ],
+      "recipe": [
+        { "effectAdd": "$track", "type": "utility" },
+        { "set": "$track.utilityWidth", "value": "$width" }
+      ],
+      "expect": [
+        { "metric": "stereoWidthDb", "dir": "up" }
+      ],
+      "counter": [
+        { "note": "a mid/side widener does nothing to a source with zero side content — run unison-spread / pad-chorus / detune-double FIRST to create side signal, then this scales it" },
+        { "note": "keep width <= 0.75 — side-heavy mixes collapse on a club's mono subs" }
+      ],
+      "why": "The Utility insert's mid/side width control is the mono-sum-safe final widener (M/S scaling, 115 §2.1 table). Best applied after the osc-bank width tricks have created side content for it to scale. (research 115 §2.1, high confidence)"
+    },
+    {
+      "name": "reverb-bed",
+      "axis": "width",
+      "slots": { "track": { "kind": "synth", "notRoles": ["bass", "sub"] }, "knobs": [{ "name": "amount", "default": 0.2 }] },
+      "when": [
+        { "field": "sendReverb", "op": "==", "value": 0 }
+      ],
+      "recipe": [
+        { "set": "$track.sendReverb", "value": "$amount" }
+      ],
+      "expect": [
+        { "metric": "stereoWidthDb", "dir": "up" },
+        { "metric": "bandAirPct", "dir": "up" },
+        { "metric": "crestDb", "dir": "down" }
+      ],
+      "counter": [
+        { "note": "bass and kick stay dry — reverb on the low end is mud (115 §2.2); this trick's notRoles exclude bass/sub" }
+      ],
+      "why": "A modest reverb send is the passive width bed under everything in produced tracks: the shared stereo reverb bus is decorrelated L/R, so any dry mono source picks up width and a little air just by feeding it. (research 115 §2.1, high confidence)"
+    }
+  ]
+}
