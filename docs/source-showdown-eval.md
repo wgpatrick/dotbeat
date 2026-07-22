@@ -136,6 +136,36 @@ engine renders audio offline; dotbeat plays the bytes) rather than as a live dev
 live-device path research 114 gates behind this result (webdx7 first, being permissively licensed)
 earns its complexity. A loss says the engine's own sound isn't the bottleneck.
 
+### Curating the patch pool (`presets/surge-curated.json`, D26)
+
+The blind seeded pick above draws from the *whole* ~639-preset factory pool — as likely to land a
+thin or piercing patch as a great one. D26's first lever curates that pool per role so the surge
+clip draws only from patches that actually sound good on their part.
+
+`node scripts/curate-surge-patches.mjs` renders every role-appropriate patch on a short
+**deterministic probe** (bass = a sustained low note + its octave; chords = one held triad; lead =
+a 4-note motif), then scores each render:
+
+- **ringDb** (the sidecar's worst narrow tonal peak) — a patch that *rings* (> −32 dB) is **gated
+  out**, same screen the live surge clip applies per batch;
+- **activeFraction** (`src/taste/showdown.ts`) — a mostly-silent probe render (< 0.5) is **gated out**;
+- **CE / CU / PC / PQ** — the four Audiobox-Aesthetics axes (`embedAudioFile --backend aes`);
+  **CE + PQ** is the aesthetic-quality term;
+- **critic pessimistic** — the ensemble critic's `mean − β·std` (`criticWithUncertainty` over the
+  owner's rated dataset `examples/taste-t1/beat-scores.jsonl`, **read-only**).
+
+Survivors are ranked by a documented **aesthetics-weighted z-score blend** (frozen in
+`src/taste/surgeCuration.ts`): `0.45·z(CE+PQ) + 0.30·z(criticPess) + 0.15·z(ringHeadroom) +
+0.10·z(activeFraction)` — the two aesthetics-derived terms carry 0.75. The **top quartile** per
+role is written to `presets/surge-curated.json` (`{name, category, relPath, scores}`, deterministic
+order). `beat showdown --with-surge` loads it and restricts each role's draw to the curated pool
+(stderr-noting the pool size), and falls back to the full factory pool when the file is absent — so
+CI and fresh checkouts behave exactly as before. Renders and scores cache under
+`~/Documents/dotbeat/tools/surge-curation-cache` (outside the repo; keyed by `relPath` + probe
+version) so re-runs are incremental. The curated file is itself gitignore-safe to commit: it records
+only patch *names/categories* and numeric scores, never patch bytes (the factory-content license is
+still unresolved upstream).
+
 **Setup — `surgepy` is a source build, not a pip install.** Confirmed 2026-07-21: `pip install
 surgepy` fails ("No matching distribution found") — there is **no PyPI wheel**. surgepy ships only
 as a compiled artifact of Surge XT's own CMake build (`-DSURGE_BUILD_PYTHON_BINDINGS=TRUE`, target
