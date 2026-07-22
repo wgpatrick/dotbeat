@@ -16,6 +16,7 @@ per **source pipeline**, blind, loudness-matched, duration-matched:
 | `engineplus` | (opt-in, `--with-produced`) the **same figure and patch** as the engine clip plus a production pass applied as ordinary `.beat` edits | the engine's deficit is production, not timbre — see "The engineplus ablation" below |
 | `gen`    | a hosted-generation phrase (fal, Stable Audio; the prompt bank's phrase tier — bassline / chords / melody / drumloop subjects, 4 bars) | raw generation beats everything the engine does |
 | `keymap` | a generated **one-shot** turned into an instrument (`beat keymap` for pitched roles, sample-backed drum lanes for the drum-loop role) playing the **same seed phrase** through the engine's sampler | the hybrid wins: generated *timbre* + engine *notes* |
+| `surge`  | (opt-in, `--with-surge`, **pitched roles only**) a composed figure rendered through a **Surge XT factory patch** via the `surgepy` sidecar — see "The surge source" below | a serious open-source synth + patch library closes the timbre gap dotbeat's own engine can't |
 | `ref`    | (opt-in, off by default) a clip from a private directory of commercial-music chops | the private ceiling — how far every pipeline still is from records the owner loves |
 
 The rating is the owner's ears through the **unchanged** blind `beat rate` flow; the scoreboard is
@@ -108,6 +109,57 @@ scores log records the kind only, like every other source.
 production defaults (width/air/sends out of the box), not a new synth. engineplus ≈ engine means
 the deficit really is timbre, and the synth itself is the work.
 
+## The surge source (`--with-surge`)
+
+The engine measured a hard timbre ceiling in the showdown (research 114: ~3% blind pairwise vs
+real records, a measured 2.4–3.4× timbre gap over its own self-match floor). Research 114's
+cheapest first experiment is to ask whether a **serious open-source synth**, driven by its own
+**pro-grade factory patch library**, closes that gap — in the "sound factory" shape (an external
+engine renders audio offline; dotbeat plays the bytes) rather than as a live device.
+
+`--with-surge` adds one `surge` clip per **pitched-role** batch (bassline / chords / lead;
+**drum-loop is skipped** — a kit through a synth patch is a different question). The clip is:
+
+1. **its own composed figure** — drawn from the same archetype bank as the other composed sources,
+   with the batch's exclude-chain so it's a *distinct* figure (the un-blinding fix: a batch where
+   every dotbeat-composed clip shares one melody reveals the composed cluster). With
+   `--shared-figure` the surge clip instead reuses the batch's shared figure, restoring the
+   controlled "same notes, different sound-source" ablation.
+2. rendered through a **Surge XT factory patch** picked deterministically per batch seed from the
+   role's patch categories (bassline → *Basses*; chords → *Pads* / *Keys*; lead → *Leads* /
+   *Plucks*), via `python/surge_render.py` (the `surgepy` bindings). The chosen patch name +
+   category is recorded in the batch manifest's `from` (local info); the shared scores log stays
+   kind-only (`"surge"`), same as every other source.
+3. then the **same duration-match + loudness-normalize** pipeline every other source rides.
+
+**What a win means**: a pro synth + patch library beats dotbeat's engine on raw timbre, and the
+live-device path research 114 gates behind this result (webdx7 first, being permissively licensed)
+earns its complexity. A loss says the engine's own sound isn't the bottleneck.
+
+**Setup — `surgepy` is a source build, not a pip install.** Confirmed 2026-07-21: `pip install
+surgepy` fails ("No matching distribution found") — there is **no PyPI wheel**. surgepy ships only
+as a compiled artifact of Surge XT's own CMake build (`-DSURGE_BUILD_PYTHON_BINDINGS=TRUE`, target
+`surgepy`). `beat showdown --surge-doctor` reports surgepy availability, the Surge factory-content
+path, and the factory patch count — and, when surgepy is absent, the exact build steps. Full build
+instructions are in `python/README.md`. In any environment without surgepy built (CI, a fresh
+machine), `--with-surge` prints one warning and collects the other four sources — it never breaks a
+batch.
+
+### The surge licensing posture
+
+Surge XT is **GPLv3**. That is fine here because surge runs as an **out-of-process render tool**
+(mere aggregation; the rendered audio carries no code copyleft — research 114 §2.1), never linked
+into a shippable dotbeat build. But the **factory-patch _content_ license is unresolved upstream**
+(surge issue #6741 proposed CC-BY-SA for patches/wavetables; still open at last check). So until
+that resolves, surge renders are treated **exactly like the private ref chops**:
+
+- every batch containing a `surge` clip gets a generated `.gitignore` (`*`) so rendered factory-
+  patch audio can never land in git even inside a repo (`writeShowdownBatch`).
+- the batch manifest records the patch name/category as local provenance only; the shared scores
+  log records the source **kind** (`"surge"`) and nothing else.
+
+Re-check surge issue #6741 before ever publishing a Surge-rendered clip.
+
 ## The ref-dir licensing stance
 
 Ref clips are **private chops of commercial music** — the same private-data posture as the T3
@@ -133,6 +185,8 @@ dataset (`docs/taste-loop-design.md`, "Licensing note"), enforced in the tool, n
 beat taste-seeds ~/showdown            # once — seed songs (any existing collection dir works too)
 beat showdown ~/showdown               # 4 batches (one per role) via fal; add --rounds 2 for 8
 beat showdown ~/showdown --with-produced     # same, plus an engineplus clip per batch (the production ablation)
+beat showdown ~/showdown --with-surge        # same, plus a Surge XT factory-patch clip per pitched batch
+beat showdown --surge-doctor                 # is surgepy built? where is the factory content? (build steps if not)
 beat showdown ~/showdown --ref-dir ~/chops   # same, plus a private ref clip per batch
 beat rate ~/showdown                   # rate them blind in the browser, as usual
 beat showdown ~/showdown --report      # the scoreboard (add --json for scripts)

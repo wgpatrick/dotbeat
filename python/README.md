@@ -131,6 +131,56 @@ generated one-shots into a public `.beat` project's `media/` folder is clean (re
 > **Powered by Stability AI.** dotbeat carries this attribution as the tool-integration obligation
 > for wrapping Stable Audio Open; the per-output files themselves need no attribution.
 
+## Surge XT render sidecar (`beat showdown --with-surge`)
+
+`surge_render.py` is the fourth sibling on this template (source-showdown probe B1, research 114
+§7 "Surge-as-sound-factory"). It renders a note sequence through a **Surge XT factory patch** via
+the `surgepy` bindings and writes a WAV — the `surge` showdown source. Same conventions as the
+others: stdlib-only top level with a lazy `surgepy` import, chatter on stderr, exit codes
+`0/2/3/4`, a `--doctor` mode that probes with `importlib.util.find_spec` (no import), and the same
+`$BEAT_PYTHON` → `python/.venv` → `python3` interpreter resolution (via `src/analysis/surge.ts`).
+
+Modes: `--doctor` (surgepy availability + Surge factory-content path + factory patch count),
+`--list-patches` (the factory catalogue as JSON, for the TS-side seeded pick), and the default
+**render** mode — the request JSON `{patch, notes, sampleRate, output}` comes in on **stdin**, the
+WAV is written to `output`, and a small metadata doc is printed on stdout.
+
+### surgepy is NOT pip-installable — it's a Surge XT source build
+
+Confirmed owner-side **2026-07-21**: `pip install surgepy` → *"ERROR: No matching distribution
+found for surgepy"*. There is **no PyPI wheel** (nor under `surge-synthesizer`, `surge-python`,
+etc.). `surgepy` exists only as a compiled module produced by building **Surge XT itself** from
+source with its Python bindings enabled. The honest build path (macOS; needs `cmake` + a C++
+toolchain — both present on the owner machine):
+
+```sh
+git clone --recurse-submodules https://github.com/surge-synthesizer/surge
+cd surge
+cmake -Bbuild -DSURGE_BUILD_PYTHON_BINDINGS=TRUE
+cmake --build build --config Release --target surgepy
+# the built surgepy module lands under build/ — put it on PYTHONPATH, e.g. copy it into
+#   python/.venv/lib/python3.10/site-packages/   (or export PYTHONPATH=<...>/surge/build)
+```
+
+This is a full C++ build of a complete synthesizer (tens of minutes, hundreds of MB of submodules
+including JUCE) and it installs Surge's factory content (patches + wavetables). It was **not**
+completed in the B1 probe — the probe ships with `--surge-doctor` honest about what's missing so
+the feature is usable the moment someone does the build. Validate afterwards:
+
+```sh
+beat showdown --surge-doctor          # expect surgepy: available, a factory path, a patch count (~2,779)
+beat showdown ~/showdown --with-surge # add a Surge factory-patch clip per pitched-role batch
+```
+
+### License (Surge XT)
+
+Surge XT is **GPLv3** — fine as a **local dev-side render tool** (mere aggregation; rendered audio
+carries no code copyleft), never linked into a shippable dotbeat build. The **factory-patch
+_content_ license is unresolved upstream** (surge issue #6741), so surge renders stay eval-private:
+the showdown gitignore-gates any batch that contains a surge clip, the shared scores log records
+the source kind only, and nothing derived from a surge render is ever registered or redistributed.
+Re-check #6741 before publishing any Surge-rendered clip.
+
 ## Contract summary (for anyone editing `analyze.py`)
 
 ```
