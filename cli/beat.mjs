@@ -99,6 +99,20 @@ import { validateAnalysisArtifact, buildSkeleton, formatSkeletonReport } from '.
 // ==== Phase 38 Stream SB begin ====
 import { runAnalysis, sidecarDoctor, defaultAnalysisPath } from '../dist/src/analysis/index.js'
 // ==== Phase 38 Stream SB end ====
+// ==== production tricks (research 118) ====
+import {
+  parseTrickLibrary,
+  applyTrick,
+  suggestForDocument,
+  siblingRenderFeatures,
+  failingPreconditions,
+  firingCounters,
+  formatTrickList,
+  formatTrickCard,
+  TRICK_AXES,
+  BeatTrickError,
+} from '../dist/src/analysis/index.js'
+// ==== production tricks end ====
 // ==== Phase 40 Stream VA ====
 // Pitch-aware sampling: detection (pure TS, no Python — decisions.md D20) and the tune arithmetic
 // that turns a root into a keymap. keymap.js is deep-imported rather than routed through
@@ -256,6 +270,18 @@ const HELP = [
     text: `  beat macro list [--json]                                 list the factory macro library (a knob -> N target params)
   beat macro apply <file> <track> <name> <value>           apply a macro to a track at knob position 0..100
                                                           (resolves to literal set edits, same discipline as presets)`,
+  },
+  {
+    cmd: 'trick',
+    text: `  beat trick list [--json] [--axis width|air|motion|glue]  list the production-trick catalog (research 118)
+  beat trick show <name>                                   full card: when/recipe/expect/counter/why
+  beat trick apply <file> <track> <name> [--clip c] [--knob k] [--force] [--dry-run]
+                                                          apply a trick's recipe as ordinary edits (prints the
+                                                          honest applied list; refuses on counter-indications
+                                                          unless --force; --dry-run previews without writing)
+  beat trick suggest <file> [<track>] [--json]             rank the tricks whose preconditions pass (reads a
+                                                          sibling <file>.wav render for metrics if present, else
+                                                          document state only — renders nothing itself)`,
   },
   { cmd: 'drum-kits', text: `  beat drum-kits [--json]                                  list the factory drum-kit library (kit-808/kit-909/kit-acoustic)` },
   { cmd: 'drum-kit', text: `  beat drum-kit <file> <track> <name>                      apply a drum kit to a track (replaces its whole lane list)` },
@@ -1491,6 +1517,112 @@ function macroCmd(argv) {
     return
   }
   throw new BeatEditError('macro needs a subcommand: `beat macro list` or `beat macro apply <file> <track> <name> <value>`')
+}
+
+// Production tricks (docs/research/118-production-bag-of-tricks.md): a validated catalog of named
+// production MOVES over the measured width/air/motion/glue gaps. Loads the macro library first (the
+// validation context for `macro`-step tricks — a trick can call a factory macro), then eagerly
+// validates the trick library against the live format vocabulary. BEAT_TRICKS overrides the path,
+// same convention as BEAT_PRESETS/BEAT_MACROS/BEAT_DRUM_KITS.
+function loadTricks() {
+  const dir = resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets')
+  const macros = parseMacroLibrary(readFileSync(resolve(dir, 'macros.json'), 'utf8'))
+  const path = process.env.BEAT_TRICKS ?? resolve(dir, 'tricks.json')
+  return { tricks: parseTrickLibrary(readFileSync(path, 'utf8'), macros), macros }
+}
+
+function trickListCmd(argv) {
+  const { tricks } = loadTricks()
+  const axis = flagValue(argv, '--axis')
+  if (axis !== undefined && !(TRICK_AXES ?? []).includes(axis)) {
+    throw new BeatEditError(`--axis must be one of ${TRICK_AXES.join('|')}, got "${axis}"`)
+  }
+  const filtered = axis ? tricks.filter((t) => t.axis === axis) : tricks
+  process.stdout.write(argv.includes('--json') ? JSON.stringify(filtered, null, 2) + '\n' : formatTrickList(filtered))
+}
+
+function trickShowCmd(argv) {
+  const name = argv.find((a) => !a.startsWith('--'))
+  if (!name) throw new BeatEditError('trick show needs a trick name (see `beat trick list`)')
+  const { tricks } = loadTricks()
+  const trick = tricks.find((t) => t.name === name)
+  if (!trick) throw new BeatEditError(`no trick "${name}" (have: ${tricks.map((t) => t.name).join(', ')})`)
+  process.stdout.write(argv.includes('--json') ? JSON.stringify(trick, null, 2) + '\n' : formatTrickCard(trick))
+}
+
+function trickApplyCmd(argv) {
+  const known = new Set(['--clip', '--knob'])
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !known.has(argv[i - 1]))
+  const [file, track, name] = positional
+  if (!file || !track || !name) throw new BeatEditError('trick apply needs <file> <track> <trick-name> [--clip c] [--knob k] [--force] [--dry-run] (see `beat trick list`)')
+  const force = argv.includes('--force')
+  const dryRun = argv.includes('--dry-run')
+  const clipId = flagValue(argv, '--clip')
+  const knobStr = flagValue(argv, '--knob')
+  const { tricks, macros } = loadTricks()
+  const trick = tricks.find((t) => t.name === name)
+  if (!trick) throw new BeatEditError(`no trick "${name}" (have: ${tricks.map((t) => t.name).join(', ')})`)
+  // --knob fills the trick's (single) declared knob slot
+  const knobs = {}
+  if (knobStr !== undefined) {
+    const v = Number(knobStr)
+    if (!Number.isFinite(v)) throw new BeatEditError(`--knob must be a number, got "${knobStr}"`)
+    const slot = (trick.slots.knobs ?? [])[0]
+    if (!slot) throw new BeatEditError(`trick "${name}" has no knob slot to fill with --knob`)
+    knobs[slot.name] = v
+  }
+  const before = readDoc(file)
+  const features = siblingRenderFeatures(file) // sibling <file>.wav metrics if present, else null
+  const result = applyTrick(trick, { doc: before, trackId: track, features }, { ...(clipId ? { clipId } : {}), knobs, macros, force })
+  for (const w of result.warnings) process.stderr.write(`warning: ${w}\n`)
+  if (result.overridden.length) process.stderr.write(`--force overrode: ${result.overridden.join('; ')}\n`)
+  if (dryRun) {
+    process.stdout.write(`dry-run — ${name} on "${track}" would apply:\n`)
+    process.stdout.write(formatDiff(diffDocuments(before, result.doc)))
+    return
+  }
+  writeDoc(file, before, result.doc)
+}
+
+function trickSuggestCmd(argv) {
+  const json = argv.includes('--json')
+  const positional = argv.filter((a) => !a.startsWith('--'))
+  const [file, track] = positional
+  if (!file) throw new BeatEditError('trick suggest needs a <file> [<track>]')
+  const { tricks } = loadTricks()
+  const doc = readDoc(file)
+  if (track && !doc.tracks.some((t) => t.id === track)) {
+    throw new BeatEditError(`no track "${track}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
+  }
+  const wav = file.replace(/\.beat$/, '.wav')
+  const hasWav = existsSync(wav)
+  const suggestions = suggestForDocument(tricks, doc, hasWav ? wav : null, track)
+  if (json) {
+    process.stdout.write(JSON.stringify({ render: hasWav ? wav : null, suggestions: suggestions.map((s) => ({ trick: s.trick.name, track: s.trackId, axis: s.trick.axis, gap: s.gap, unverified: s.unverified })) }, null, 2) + '\n')
+    return
+  }
+  const src = hasWav ? `metrics from ${basename(wav)}` : 'document state only (no sibling render — metric preconditions unverified)'
+  process.stdout.write(`suggested tricks for ${basename(file)} — ${src}:\n`)
+  if (suggestions.length === 0) {
+    process.stdout.write('  (nothing applicable — every trick either fails a precondition, is counter-indicated, or is already applied)\n')
+    return
+  }
+  const nameW = Math.max(...suggestions.map((s) => s.trick.name.length))
+  const trackW = Math.max(...suggestions.map((s) => s.trackId.length))
+  for (const s of suggestions) {
+    const flag = s.unverified ? '  (needs a render to confirm)' : s.gap > 0 ? `  (gap ${s.gap.toFixed(1)})` : ''
+    process.stdout.write(`  ${s.trackId.padEnd(trackW)}  ${s.trick.name.padEnd(nameW)}  [${s.trick.axis}]${flag}\n`)
+  }
+  process.stdout.write(`then: beat trick show <name>, then beat trick apply ${basename(file)} <track> <name>\n`)
+}
+
+function trickCmd(argv) {
+  const [sub, ...rest] = argv
+  if (sub === 'list') return trickListCmd(rest)
+  if (sub === 'show') return trickShowCmd(rest)
+  if (sub === 'apply') return trickApplyCmd(rest)
+  if (sub === 'suggest') return trickSuggestCmd(rest)
+  throw new BeatEditError('trick needs a subcommand: `beat trick list|show|apply|suggest` (see `beat trick --help`)')
 }
 
 // Phase 22 Stream AB: drum kits (kit-808/kit-909/kit-acoustic) — a separate small library from
@@ -4409,6 +4541,9 @@ async function main() {
     case 'macro':
       macroCmd(rest)
       break
+    case 'trick':
+      trickCmd(rest)
+      break
     case 'drum-kits':
       drumKitsCmd(rest)
       break
@@ -4484,6 +4619,7 @@ main().catch((err) => {
     err instanceof BeatParseError ||
     err instanceof BeatPresetError ||
     err instanceof BeatMacroError ||
+    err instanceof BeatTrickError ||
     err instanceof BeatPitchTimeError ||
     err instanceof BeatHumanizeError ||
     err instanceof BeatProfileError ||

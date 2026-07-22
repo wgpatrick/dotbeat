@@ -117,6 +117,45 @@ export {
 } from './produce.js'
 // ==== produced defaults end ====
 
+// ==== production tricks (research 118) begin ====
+// The rung above produced-defaults: a validated catalog of named production MOVES with
+// machine-readable preconditions (over FEATURE_KEYS + document state), closed-vocabulary recipes
+// (every step an existing edit primitive), and declared metric deltas. Eager validation against the
+// live format tables at load (parseTrickLibrary). See src/analysis/trick.ts and docs/tricks.md.
+export {
+  parseTrickLibrary,
+  applyTrick,
+  suggestForTrack,
+  suggestForDocument,
+  siblingRenderFeatures,
+  firingCounters,
+  failingPreconditions,
+  evalClause,
+  formatTrickList,
+  formatTrickCard,
+  describeClause,
+  TRICK_AXES,
+  STEP_PATTERNS,
+  PRODUCED_RANGES,
+  BeatTrickError,
+  type TrickAxis,
+  type WhenClause,
+  type RecipeStep,
+  type ExpectClause,
+  type CounterEntry,
+  type TrackSlot,
+  type KnobSlot,
+  type TrickSlots,
+  type BeatTrick,
+  type CompareOp,
+  type ClauseResult,
+  type TrickContext,
+  type ApplyOptions,
+  type TrickApplyResult,
+  type Suggestion,
+} from './trick.js'
+// ==== production tricks end ====
+
 // ==== Phase 40 Stream VA begin ====
 // Pitch detection for one-shots — pure TS, zero deps, no Python (decisions.md D20). Reuses
 // src/metrics/'s FFT and WAV decoder, so the dependency direction stays analysis -> metrics.
