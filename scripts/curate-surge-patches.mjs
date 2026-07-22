@@ -36,6 +36,30 @@ const PROBE_VERSION = 1 // bump when a role probe changes → cache entries re-r
 
 // ---- CLI args ----------------------------------------------------------------------------------
 const argv = process.argv.slice(2)
+
+const USAGE = `curate-surge-patches — score & curate the Surge factory-patch pool per role (D26)
+
+  node scripts/curate-surge-patches.mjs [options]
+
+Options:
+  --roles r1,r2   roles to curate (default: bassline,chords,lead)
+  --limit N       score only the first N patches per role (smoke; cache still fills)
+  --top F         top fraction to keep per role (default: 0.25)
+  --out PATH      output file (default: presets/surge-curated.json)
+  --force         ignore cached renders/scores and re-render every patch
+  -h, --help      print this help and exit
+
+Environment (REQUIRED — verify first with: node cli/beat.mjs showdown --surge-doctor):
+  SURGE_DATA_HOME  $HOME/Documents/dotbeat/tools/surge/resources/data
+  BEAT_PYTHON      a surgepy-bearing interpreter (or python/.venv)
+
+Renders/scores cache under ~/Documents/dotbeat/tools/surge-curation-cache (outside the repo).`
+
+if (argv.includes('--help') || argv.includes('-h')) {
+  process.stdout.write(USAGE + '\n')
+  process.exit(0)
+}
+
 const flag = (name) => {
   const i = argv.indexOf(name)
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined
@@ -140,6 +164,10 @@ async function main() {
   }
   const allPatches = await surge.listSurgePatches()
   log(`factory catalogue: ${allPatches.length} patches at ${doctor.patchesRoot ?? '?'}`)
+  if (allPatches.length === 0) {
+    log('FATAL: the factory catalogue is empty — surgepy loaded but found no patches. This almost always means SURGE_DATA_HOME is unset or wrong. Set it to $HOME/Documents/dotbeat/tools/surge/resources/data and verify with: node cli/beat.mjs showdown --surge-doctor')
+    process.exit(3)
+  }
 
   // the ensemble critic, trained once over the owner's rated dataset (READ-ONLY)
   log(`building ensemble critic over ${beatScores} (aes backend)...`)
