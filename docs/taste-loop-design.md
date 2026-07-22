@@ -344,6 +344,45 @@ never used embeddings (DSP-only from the start), so no live-tool fix is needed.
   resurrect a faster-than-realtime offline render on dotbeat's own engine (decisions.md D15's
   closing note anticipated exactly this need).
 
+#### C2 — Pessimistic scoring is now implementable (bootstrap-ensemble critic)
+
+research/117 rated pessimistic scoring (step 3, `mean − β·std`) **load-bearing but currently
+unbuildable**: the v0 logistic BT is a point estimate with no posterior, so there is no `std` to
+subtract. Coste et al. (ICLR 2024) is explicit that the penalty needs a *real* uncertainty estimate
+— disagreement across an ensemble — not a decoration on a single point model. C2 supplies exactly
+that without waiting for the GP v1:
+
+- **`trainBTEnsemble(pairs, {n=20, seed})`** (`src/taste/ranker.ts`) — N bootstrap resamples of the
+  pair set (with replacement, seeded/deterministic), each trained with the existing `trainBT`.
+  `scoreVectorEnsemble` returns `{mean, std}`; `pessimisticScore(ensemble, vec, β)` returns
+  `mean − β·std`. The ensemble is a pure function of `(pairs, n, seed)`, so a night's scoring is
+  reproducible and auditable.
+- **`taste-eval` ablation row `dsp+aes-bt-pess`** (β=1, the current best feature set scored
+  pessimistically) sits next to `dsp+aes-bt`, so held-out accuracy quantifies what pessimism
+  costs/buys before it is ever wired into search. The report also carries the **uncertainty
+  landscape**: mean ensemble std per variant type — the diagnostic for whether the critic is more
+  uncertain on gen batches than on the vary/showdown splits it has more signal on.
+- **Measured, owner-side at n=66** (`examples/taste-t1`, `--aes-backend aes`): pessimism costs a
+  little overall — `dsp+aes-bt` 36% top-1 / 65% pairwise → `dsp+aes-bt-pess` 33% / 64% — and the
+  cost is **concentrated exactly where it should be**. Per-type held-out top-1 is *unchanged* on the
+  splits the critic has signal on (vary 38%→38%, showdown 38%→38%) and drops only on gen (33%→22%),
+  which is also the **highest-ensemble-std split** (gen 0.245 > showdown 0.238 > vary 0.226). So the
+  ensemble's disagreement lands on the same subspace where held-out accuracy is weakest — pessimism
+  automatically discounts the region the critic is blindest on, which is the whole point.
+- **`criticWithUncertainty(logPath, opts)`** (`src/taste/eval.ts`) is the interface a T5 pilot loop
+  consumes: it trains the ensemble on ALL usable dsp+aes pairs and returns a `scorePopulation`
+  closure (mean/std/pessimistic per candidate, within-population z-scored exactly as trained). Its
+  docstring documents the **gen-subspace fence** research/117 requires: the gen split is where the
+  critic is weakest (117 measured 0% top-1; it remains the lowest-pairwise, highest-std split at
+  n=66), and pessimism narrows but does not close that hole — an ensemble can be *confidently wrong*
+  where it has no signal, so the loop must search only synth-param/feel/drum genomes with measured
+  signal, or route gen candidates to the morning audit unscored. Low std in the gen subspace is
+  agreement among resamples, not agreement with the owner.
+
+Still deferred to T5 proper (this is the *prerequisite*, not the loop): choosing β against the
+owner's self-consistency ceiling, and the bounded-pressure/best-of-n cadence research/117 Part 4
+specifies.
+
 ### T6 — Sound matching / expressiveness ceiling (agent; owner picks targets)
 - **Owner:** choose 5-10 target stem chops from loved records ("I want sounds like THIS").
 - Agent: **CMA-ES** per target (the method the closest published analogue, INSTRUMENTAL, proved

@@ -660,13 +660,15 @@ export interface UncertaintyCandidate {
 /** The critic a T5 pilot loop consumes: a pessimistic scorer closure plus the ensemble and the
  * data it was fit on.
  *
- * GEN-SUBSPACE BLINDNESS — a fence the caller MUST respect. The trained critic scores **0% top-1
- * on gen splits** (docs/research/117 §verdict; the current dsp+aes-bt critic). Pessimism narrows
- * but does not close that hole: an ensemble can be *confidently wrong* on gen-adjacent material it
- * has no signal on, so a low `std` there is not evidence the mean is trustworthy — it only means
- * the resamples agree, not that they agree with the owner. Per research/117's pilot spec, a T5
- * loop must **fence off the gen subspace**: search only synth-param / feel / drum genomes where the
- * critic has measured signal, or route gen candidates straight to the morning audit UNSCORED.
+ * GEN-SUBSPACE BLINDNESS — a fence the caller MUST respect. The gen split is where the critic is
+ * WEAKEST: docs/research/117 §verdict measured 0% top-1 on gen, and at n=66 today it remains the
+ * lowest-pairwise (59% vs 67% vary) and HIGHEST-ensemble-std split (see taste-eval's
+ * ensembleUncertainty). Pessimism narrows but does not close that hole: an ensemble can be
+ * *confidently wrong* on gen-adjacent material it has no signal on, so a low `std` there is not
+ * evidence the mean is trustworthy — it only means the resamples agree, not that they agree with
+ * the owner. Per research/117's pilot spec, a T5 loop must **fence off the gen subspace**: search
+ * only synth-param / feel / drum genomes where the critic has measured signal, or route gen
+ * candidates straight to the morning audit UNSCORED.
  * `scorePopulation` will happily score anything handed to it — the fence lives in what the caller
  * chooses to feed it, and in reading the per-type `ensembleUncertainty` from taste-eval first to
  * confirm the search region isn't the high-std blind one. */
