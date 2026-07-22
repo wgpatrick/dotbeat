@@ -335,9 +335,13 @@ export const SCORERS: Record<string, Scorer> = {
  * per-role candidate batches — same media-variant shape, different label); track-bearing entries
  * are vary rounds; a trackless non-gen batch is a stitched clip-set (`beat audition <dir>`, any
  * group name). */
-export type VariantType = 'vary' | 'gen' | 'clip-set' | 'showdown' | 'prodtask'
+export type VariantType = 'vary' | 'gen' | 'clip-set' | 'showdown' | 'prodtask' | 'pilot'
 export function variantTypeOf(b: { group: string; track?: string }): VariantType {
   if (b.group.startsWith('gen:') || b.group.startsWith('genkit:')) return 'gen'
+  // T5-pilot frontier batches (`pilot:<role>` clip-set batches, docs/pilot.md + docs/research/117):
+  // their own split, like showdown/prodtask — the within-batch contrast is the ARM (critic-guided
+  // elite vs random-mutation control), the SCALING GATE's question, not any vary/gen/source one.
+  if (b.group.startsWith('pilot:')) return 'pilot'
   // Source-showdown rounds (`showdown:<role>` clip-set batches, docs/source-showdown-eval.md) are
   // their own split: their within-batch contrast is SOURCE PIPELINE (engine vs gen vs keymap vs
   // ref), a different question from any vary/gen round, and pooling them into clip-set would hide

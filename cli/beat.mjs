@@ -134,8 +134,9 @@ const PATHS_NOTE = `paths for set: bpm | loop_bars | selected_track | <track>.<s
 // command belongs to is half of understanding it (vary is meaningless without score/suggest).
 const HELP_FAMILIES = [
   ['vary', 'audition', 'score', 'adopt', 'suggest', 'taste-eval', 'match'], // the taste loop (docs/taste-loop-design.md)
-  ['taste-seeds', 'taste-collect', 'showdown', 'prodtask', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval; showdown = per-role source comparison; prodtask = per-role production-task eval)
+  ['taste-seeds', 'taste-collect', 'showdown', 'prodtask', 'pilot', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval; showdown = per-role source comparison; prodtask = per-role production-task eval; pilot = the T5 critic-guided QD search)
   ['trick', 'prodtask', 'rate'], // production tricks + the blind eval that validates them (docs/prodtask.md)
+  ['pilot', 'taste-eval', 'rate', 'score'], // the T5 overnight critic-guided QD search (docs/pilot.md, research/117)
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
@@ -773,6 +774,30 @@ const HELP = [
                                                           result to the mechanical one. Chance: tricked-vs-original
                                                           pairwise 50% = tricks don't move the ear; tricked must
                                                           ALSO beat random. See docs/prodtask.md.`,
+  },
+  {
+    cmd: 'pilot',
+    text: `  beat pilot run <dir> [--budget 80] [--generations 6] [--niches 4]
+                [--roles bassline,chords] [--seed N] [--controls 3] [--aes-backend aes]
+                                                          the constrained T5 overnight pilot (plan C3,
+                                                          docs/research/117): the owner's "circular process" —
+                                                          seeded quality-diversity search over the synth-param VARY
+                                                          space (NEVER gen — the critic is blind there), scored by
+                                                          the PESSIMISTIC ensemble critic (mean − β·std) with the #1
+                                                          hack vector STEREO WIDTH fenced out. Per generation: mutate
+                                                          the best-per-niche elites (niches = brightness×density DSP
+                                                          buckets) + ε random immigrants, render offline (budget-
+                                                          bounded, one boot/gen), keep best per niche. Ships a blind
+                                                          morning frontier per role: critic-guided ELITES plus
+                                                          random-mutation CONTROLS (never critic-scored), as ordinary
+                                                          rateable clip-set batches (group pilot:<role>, loudness-
+                                                          normalized, seeded-shuffle). SCALING GATE: elites must beat
+                                                          controls in your blind ratings before any scale-up. Needs
+                                                          a scored log (the critic trains on it) + the aes sidecar
+                                                          (BEAT_PYTHON at the venv). Rate with beat rate as usual.
+  beat pilot --report <dir> [--json] (or --log f)         the scoreboard: elite-vs-control win / top-half / pairwise
+                                                          over every scored pilot batch, overall and per role, with
+                                                          the SCALING GATE verdict. See docs/pilot.md.`,
   },
   {
     cmd: 'rate',
@@ -2511,6 +2536,197 @@ async function prodtaskCmd(argv) {
   }
   process.stdout.write(`\n${made} prodtask batch(es)${failed > 0 ? ` (${failed} failed)` : ''} — arms are blind: the manifest is the answer key, don't peek before rating\n`)
   process.stdout.write(`next: beat rate ${dir} — then beat prodtask --report ${dir} for the per-arm scoreboard\n`)
+}
+
+// The constrained T5 overnight pilot (plan item C3, docs/pilot.md, docs/research/117): the owner's
+// "circular process" — make variations -> the pessimistic critic scores them -> the best breed the
+// next round -> repeat a handful of generations -> ship a blind morning frontier of critic-guided
+// ELITES plus random-mutation CONTROLS. Deliberately small (best-of-n-per-niche, ensemble pessimism,
+// gen subspace fenced, width fence, control gate). Pure logic in src/taste/pilot.ts; this owns the
+// offline renders and the aes/critic calls, reusing the prodtask/showdown assembly conventions.
+async function pilotCmd(argv) {
+  const valued = ['--budget', '--generations', '--niches', '--roles', '--seed', '--controls', '--epsilon', '--amount', '--log', '--aes-backend']
+  const known = new Set([...valued, '--report', '--json'])
+  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const sub = positional[0]
+  const dir = positional[1] ?? (sub && sub !== 'run' ? sub : undefined)
+  const pilot = await import('../dist/src/taste/pilot.js')
+
+  // ---- the scoreboard (`beat pilot --report`) --------------------------------------------------
+  if (argv.includes('--report')) {
+    const logPath = flagValue(argv, '--log') ?? (dir ? join(dir, 'beat-scores.jsonl') : null)
+    if (!logPath || !existsSync(logPath)) {
+      throw new BeatEditError('pilot --report needs a scored collection: beat pilot --report <dir> (beat-scores.jsonl at the dir root) or --log <path>')
+    }
+    const report = pilot.computePilotReport(logPath)
+    process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : pilot.formatPilotReport(report))
+    return
+  }
+  if (argv.includes('--json')) throw new BeatEditError('--json only applies to pilot --report')
+
+  // ---- the run (`beat pilot run <dir>`) --------------------------------------------------------
+  if (sub !== 'run') throw new BeatEditError('pilot needs a subcommand: beat pilot run <dir> [--budget 80] [--generations 6] [--niches 4] [--roles bassline,chords] [--seed N] [--controls 3]  (or --report <dir>)')
+  if (!dir) throw new BeatEditError('pilot run needs the taste-seeds directory: beat pilot run <dir>')
+
+  const { criticWithUncertainty } = await import('../dist/src/taste/eval.js')
+  const { embedAudioFile } = await import('../dist/src/taste/embeddings.js')
+  const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
+  const showdown = await import('../dist/src/taste/showdown.js')
+  const { copyFileSync } = await import('node:fs')
+
+  const num = (flag, def) => (flagValue(argv, flag) !== undefined ? Number(flagValue(argv, flag)) : def)
+  const budget = num('--budget', 80)
+  const generations = num('--generations', 6)
+  const niches = num('--niches', 4)
+  const controls = num('--controls', 3)
+  const seed = num('--seed', 71)
+  const epsilon = flagValue(argv, '--epsilon') !== undefined ? Number(flagValue(argv, '--epsilon')) : undefined
+  const amount = flagValue(argv, '--amount') !== undefined ? Number(flagValue(argv, '--amount')) : undefined
+  const aesBackend = flagValue(argv, '--aes-backend') ?? 'aes'
+  const logPath = flagValue(argv, '--log') ?? join(dir, 'beat-scores.jsonl')
+  const roles = (flagValue(argv, '--roles') ?? pilot.DEFAULT_PILOT_ROLES.join(','))
+    .split(',')
+    .filter(Boolean)
+    .map((r) => pilot.pilotRole(r).role) // throws with the legal list on a typo
+
+  const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
+  if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
+  const seeds = seedFiles.map((f) => ({ file: f, doc: parse(readFileSync(join(dir, f), 'utf8')) }))
+  const seedPathFor = (f) => join(dir, f)
+  if (!existsSync(logPath)) {
+    throw new BeatEditError(`no scores log at ${logPath} — the pilot critic trains on your rated batches; rate some first (beat rate ${dir}) or point --log at your log`)
+  }
+
+  process.stderr.write(`\n=== pilot run: budget ${budget} renders, ${generations} generations, ${niches} niches, roles [${roles.join(', ')}], seed ${seed} ===\n`)
+  process.stderr.write(`training the pessimistic critic on ${logPath} (aes backend ${aesBackend})...\n`)
+  const critic = await criticWithUncertainty(logPath, { aesBackend, beta: pilot.PILOT_BETA })
+  process.stderr.write(`critic: bootstrap ensemble over ${critic.trainedPairs} pairs from ${critic.trainedBatches} dsp+aes batch(es) (β=${critic.beta})\n`)
+  if (critic.trainedPairs === 0) {
+    throw new BeatEditError('the critic trained on 0 pairs — no dsp+aes-scored batches in the log (is the aes sidecar available? point BEAT_PYTHON at the venv, or --aes-backend aes-stub for a dry wiring run)')
+  }
+
+  const budgetPerRole = Math.max(niches, Math.floor(budget / roles.length))
+  const workRoot = join(dir, `pilot-work-${seed}`)
+  let workCounter = 0
+
+  // the injected slow step: render a whole generation offline in ONE engine boot, extract dsp + aes.
+  // The width fence is NOT applied here — the loop applies it to the dsp before calling `score`; the
+  // features stored here are the honest measured ones (the journal/selection see real widths).
+  const makeEvaluate = (role) => async (genomes) => {
+    const out = new Map()
+    if (genomes.length === 0) return out
+    const workDir = join(workRoot, `${role}-${workCounter++}`)
+    mkdirSync(workDir, { recursive: true })
+    const variants = genomes.map((g) => ({ doc: g.doc, recipe: g.id }))
+    writeVaryBatch({
+      parentPath: seedPathFor(genomes[0].seedFile),
+      parentText: readFileSync(seedPathFor(genomes[0].seedFile), 'utf8'),
+      track: genomes[0].trackId,
+      group: `pilot-work:${role}`,
+      count: variants.length,
+      seed,
+      outDir: workDir,
+      variants,
+    })
+    renderVaryBatch(workDir, variants.length, { mode: 'offline', normalize: true })
+    const dsp = computeBatchFeatures(workDir, genomes.map((_, i) => `v${i + 1}.beat`))
+    for (let i = 0; i < genomes.length; i++) {
+      const beatFile = `v${i + 1}.beat`
+      const wav = join(workDir, `v${i + 1}.wav`)
+      const d = dsp[beatFile]
+      if (!d || !existsSync(wav)) continue
+      let aes
+      try {
+        aes = (await embedAudioFile(wav, { backend: aesBackend })).embedding
+      } catch (err) {
+        throw new BeatEditError(`aes sidecar failed on a pilot render (${err instanceof Error ? err.message.split('\n')[0] : err}) — set BEAT_PYTHON to the venv python, or --aes-backend aes-stub for a dry run`)
+      }
+      out.set(genomes[i].id, { dsp: d, aes })
+    }
+    rmSync(workDir, { recursive: true, force: true }) // never leave a scoreable work batch for beat rate
+    return out
+  }
+
+  const score = (candidates) => critic.scorePopulation(candidates)
+
+  const results = []
+  for (const role of roles) {
+    process.stderr.write(`\n--- role ${role} (budget ${budgetPerRole} renders) ---\n`)
+    const result = await pilot.runPilotRole({
+      role,
+      seeds,
+      budget: budgetPerRole,
+      generations,
+      niches,
+      controls,
+      ...(epsilon !== undefined ? { epsilon } : {}),
+      ...(amount !== undefined ? { amount } : {}),
+      seed,
+      evaluate: makeEvaluate(role),
+      score,
+    })
+    process.stderr.write(`  ${result.rendersSpent} renders, ${result.archive.length} elite(s) across ${new Set(result.archive.map((e) => e.niche)).size} niche(s), ${result.controls.length} control(s)\n`)
+    results.push(result)
+  }
+
+  // assemble the blind morning frontier per role: elites (<=8) + controls, freshly rendered in one
+  // boot, seeded arm->v-number shuffle, duration-matched, loudness-normalized (the showdown/prodtask
+  // machinery). group pilot:<role>; per-variant source records elite-vs-control honestly.
+  let batchesLanded = 0
+  for (const result of results) {
+    const outDir = join(dir, `pilot-${result.role}-${seed}`)
+    try {
+      const elites = result.archive.slice(0, 8)
+      const items = [
+        ...elites.map((e) => ({ kind: 'elite', doc: e.genome.doc, from: `niche ${pilot.nicheLabel(result.grid, e.niche)}, ${e.genome.edits.length} edits from ${e.genome.seedFile} (pessimistic ${e.score.pessimistic})`, seedFile: e.genome.seedFile })),
+        ...result.controls.map((c) => ({ kind: 'control', doc: c.doc, from: `random-mutation control descended from elite ${c.parentId} (${c.seedFile})`, seedFile: c.seedFile })),
+      ]
+      if (items.length < 2) {
+        process.stderr.write(`warning: role ${result.role} produced <2 frontier items — skipping (need at least one elite and one control)\n`)
+        continue
+      }
+      const workDir = join(outDir, 'work')
+      mkdirSync(workDir, { recursive: true })
+      const variants = items.map((it, i) => ({ doc: it.doc, recipe: `pilot ${result.role} ${it.kind} ${i + 1}` }))
+      writeVaryBatch({
+        parentPath: seedPathFor(items[0].seedFile),
+        parentText: readFileSync(seedPathFor(items[0].seedFile), 'utf8'),
+        track: result.spec.seedTrack,
+        group: `pilot-frontier-work:${result.role}`,
+        count: variants.length,
+        seed,
+        outDir: workDir,
+        variants,
+      })
+      renderVaryBatch(workDir, variants.length, { mode: 'offline', normalize: false })
+      const order = showdown.assignClipOrder(items.length, seed)
+      const files = new Array(items.length)
+      for (let v = 0; v < items.length; v++) {
+        const it = items[order[v]]
+        copyFileSync(join(workDir, `v${order[v] + 1}.wav`), join(outDir, `v${v + 1}.wav`))
+        files[v] = { file: `v${v + 1}.wav`, source: { kind: it.kind, from: it.from } }
+      }
+      rmSync(workDir, { recursive: true, force: true })
+      pilot.writePilotBatch(outDir, result.role, files, { seed })
+      const match = showdown.matchClipDurations(outDir, files.map((f) => f.file))
+      process.stdout.write(`${outDir}/: ${files.length} clips (${elites.length} elite vs ${result.controls.length} control), duration-matched to ${match.targetSeconds}s\n`)
+      const norm = normalizeBatchLoudness(outDir, files.length)
+      if (norm) process.stdout.write(formatNormalizationResult(norm))
+      batchesLanded += 1
+    } catch (err) {
+      process.stderr.write(`warning: frontier assembly for ${result.role} failed — ${err instanceof Error ? err.message.split('\n')[0] : err}\n`)
+      try {
+        if (existsSync(outDir) && !existsSync(join(outDir, 'manifest.json'))) rmSync(outDir, { recursive: true, force: true })
+      } catch { /* best-effort */ }
+    }
+  }
+  rmSync(workRoot, { recursive: true, force: true })
+
+  const journalPath = join(dir, `pilot-journal-${seed}.jsonl`)
+  pilot.writePilotJournal(journalPath, results)
+  process.stdout.write(pilot.formatPilotRunSummary(results, { batchesLanded, journalPath, beta: critic.beta }))
 }
 
 async function varyCmd(argv) {
@@ -4720,6 +4936,9 @@ async function main() {
       break
     case 'prodtask':
       await prodtaskCmd(rest)
+      break
+    case 'pilot':
+      await pilotCmd(rest)
       break
     case 'rate': {
       const { rateCommand } = await import('./rate.mjs')
