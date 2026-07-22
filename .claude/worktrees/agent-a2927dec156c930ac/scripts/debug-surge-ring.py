@@ -68,8 +68,9 @@ def find_named_param(surge, predicate):
 
 
 def set_fx_bypass_all_off(surge):
-    """Set the global fx_bypass param to its 'All FX Off' value. Returns (found, display)."""
-    p = find_named_param(surge, lambda n: n.strip().lower() in ("fx bypass", "fx_bypass", "bypass"))
+    """Set the global 'FX Chain Bypass' param to its 'All FX Off' value (max=3). Returns
+    (found, display). The param is literally named 'FX Chain Bypass' in this build."""
+    p = find_named_param(surge, lambda n: "chain bypass" in n.strip().lower())
     if p is None:
         return False, None
     mx = surge.getParamMax(p)
