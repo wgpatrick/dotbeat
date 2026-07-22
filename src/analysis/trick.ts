@@ -688,7 +688,12 @@ export function formatTrickList(tricks: BeatTrick[]): string {
   if (tricks.length === 0) return 'no tricks\n'
   const nameW = Math.max(...tricks.map((t) => t.name.length))
   const axisW = Math.max(...tricks.map((t) => t.axis.length))
-  return tricks.map((t) => `${t.name.padEnd(nameW)}  ${t.axis.padEnd(axisW)}  ${t.recipe.length} steps  ${t.why.split('.')[0]}`).join('\n') + '\n'
+  // first sentence (split on period-then-whitespace, so "§2.1" isn't a boundary), capped for scan.
+  const gist = (why: string): string => {
+    const first = why.split(/\.\s/)[0]!
+    return first.length > 96 ? first.slice(0, 93) + '...' : first
+  }
+  return tricks.map((t) => `${t.name.padEnd(nameW)}  ${t.axis.padEnd(axisW)}  ${String(t.recipe.length).padStart(2)} steps  ${gist(t.why)}`).join('\n') + '\n'
 }
 
 /** The full card — what `beat trick show <name>` prints. */
