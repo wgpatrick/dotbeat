@@ -40,7 +40,7 @@ import { shuffledOrder } from '../vary/audition.js'
 import { genSubject } from './seeds.js'
 import { SPLIT_SMOKE_MIN_BATCHES, mulberry32 } from './eval.js'
 
-export type ShowdownSourceKind = 'engine' | 'engineplus' | 'gen' | 'keymap' | 'ref'
+export type ShowdownSourceKind = 'engine' | 'engineplus' | 'gen' | 'keymap' | 'ref' | 'surge'
 
 /** Volume levels shared with taste-collect's solo logic (owner feedback 2026-07-18: a quiet
  * varied track in a full mix is unratable — the showdown compares the SOUND of one role, so the
@@ -802,6 +802,94 @@ export function serializeChecked(doc: BeatDocument): string {
   return text
 }
 
+// ---- surge probe (the Surge-as-sound-factory source, research 114 §7) --------------------------
+// A `surge` clip renders the batch's OWN composed figure — same notes as the engine/engineplus
+// clips, so the comparison holds composition constant and isolates timbre — through a Surge XT
+// factory patch via the python/surge_render.py sidecar. The pure logic lives here (role->patch-
+// category mapping, note-list conversion, the deterministic seeded patch pick); the spawn and the
+// render pipeline live in src/analysis/surge.ts + the CLI, same split as gen (showdown.ts is
+// render-free by construction).
+//
+// LICENSING: Surge XT is GPLv3 (fine for a local dev-side render tool — outputs carry no code
+// copyleft), but the factory-PATCH content license is unresolved upstream (surge issue #6741), so
+// every batch that contains a surge clip is gitignore-gated exactly like a ref-bearing batch
+// (writeShowdownBatch below). drum-loop is intentionally OUT of scope for v1 — driving a kit
+// through a synth patch is a different question than the pitched-timbre one this probe asks.
+
+/** One factory patch as the sidecar's --list-patches reports it. */
+export interface SurgePatch {
+  name: string
+  /** Surge's top-level patch category (the dir under patches_factory: Basses / Leads / Pads / …) */
+  category: string
+  /** absolute path to the .fxp */
+  path: string
+}
+
+/** The sidecar's note-list format: absolute-time events, MIDI velocity 1..127. */
+export interface SurgeNote {
+  midi: number
+  startSeconds: number
+  durationSeconds: number
+  velocity: number
+}
+
+/** Role -> Surge factory patch-categories to draw a patch from. Pitched roles only; drum-loop
+ * maps to null (skipped for v1 — see the section note). Matching is case-insensitive and by
+ * substring so "Basses" also catches sub-categories like "Basses/Acid". */
+export const SURGE_ROLE_CATEGORIES: Record<string, readonly string[] | null> = {
+  bassline: ['Basses'],
+  chords: ['Pads', 'Keys'],
+  lead: ['Leads', 'Plucks'],
+  'drum-loop': null,
+}
+
+/** The role's patch-categories, or null when surge is skipped for the role (drum-loop). Unknown
+ * roles also return null (no surge clip) rather than throwing — the flag degrades, never breaks. */
+export function surgeRoleCategories(role: string): readonly string[] | null {
+  return role in SURGE_ROLE_CATEGORIES ? SURGE_ROLE_CATEGORIES[role]! : null
+}
+
+/** Whether `patch`'s category matches any of `categories` (case-insensitive substring). */
+export function patchInCategories(patch: SurgePatch, categories: readonly string[]): boolean {
+  const cat = patch.category.toLowerCase()
+  return categories.some((c) => cat.includes(c.toLowerCase()))
+}
+
+/** Deterministically pick one patch for a role from `patches`, filtered to the role's categories
+ * and seeded by the batch seed — the manifest records the chosen name+category so a round is
+ * reproducible. Returns null when the role skips surge, or when no factory patch matches the
+ * role's categories (the CLI then warns and drops the surge clip for that batch). The candidate
+ * list is sorted by (category, name) first so the pick is stable across machines with the same
+ * factory content regardless of the sidecar's enumeration order. */
+export function pickSurgePatch(patches: readonly SurgePatch[], role: string, seed: number): SurgePatch | null {
+  const categories = surgeRoleCategories(role)
+  if (categories === null) return null
+  const candidates = patches
+    .filter((p) => patchInCategories(p, categories))
+    .sort((a, b) => a.category.toLowerCase().localeCompare(b.category.toLowerCase()) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+  if (candidates.length === 0) return null
+  const rng = mulberry32(seed + 613) // surge salt, distinct from the phrase/archetype salts
+  return candidates[Math.floor(rng() * candidates.length)]!
+}
+
+/** Convert a composed pitched figure to the sidecar's absolute-time note list at `bpm`. Composed
+ * starts/durations are in 16th-note STEPS (16 per bar, the .beat grid); one quarter = 4 steps, so
+ * secondsPerStep = (60/bpm)/4. Velocity is the composer's 0..~0.95 float scaled to MIDI 1..127.
+ * A zero/negative-duration note is clamped to a single step so the sidecar always gets an audible
+ * event. Same notes the engine plays — the surge/engine comparison varies only the sound source. */
+export function composedPhraseToSurgeNotes(phrase: ComposedPhrase, bpm: number): SurgeNote[] {
+  if (!(bpm > 0)) throw new BeatBatchError(`surge note conversion needs a positive bpm, got ${bpm}`)
+  const secondsPerStep = 60 / bpm / 4
+  return phrase.notes.map((n) => ({
+    midi: n.pitch,
+    startSeconds: round4(n.start * secondsPerStep),
+    durationSeconds: round4(Math.max(1, n.duration) * secondsPerStep),
+    velocity: Math.min(127, Math.max(1, Math.round(n.velocity * 127))),
+  }))
+}
+
+const round4 = (x: number) => Math.round(x * 10000) / 10000
+
 // ---- batch assembly ----------------------------------------------------------------------------
 
 export interface ShowdownClip {
@@ -823,9 +911,11 @@ export function assignClipOrder(count: number, seed: number): number[] {
 
 /** Write the showdown batch manifest over v1..vN.wav already sitting in outDir: the clip-set
  * shape (empty parent — score works, adopt refuses) with group `showdown:<role>` and per-variant
- * `source` records. When any clip is a ref, a `.gitignore` covering the whole dir is written too:
- * ref working copies are private derivatives of commercial music and must never land in git even
- * when a collection dir sits inside a repo (docs/source-showdown-eval.md, licensing stance). */
+ * `source` records. When any clip is a ref OR a surge render, a `.gitignore` covering the whole
+ * dir is written too: ref working copies are private derivatives of commercial music, and surge
+ * renders carry Surge XT's still-unresolved factory-patch CONTENT license (research 114 §2.1,
+ * surge issue #6741) — neither may land in git even when a collection dir sits inside a repo
+ * (docs/source-showdown-eval.md, licensing stance). */
 export function writeShowdownBatch(
   outDir: string,
   role: string,
@@ -846,8 +936,8 @@ export function writeShowdownBatch(
     variants: clips.map((c) => ({ file: c.file, source: c.source })),
   }
   writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
-  if (clips.some((c) => c.source.kind === 'ref')) {
-    writeFileSync(resolve(outDir, '.gitignore'), '# showdown batch containing private ref clips — never committed (docs/source-showdown-eval.md)\n*\n')
+  if (clips.some((c) => c.source.kind === 'ref' || c.source.kind === 'surge')) {
+    writeFileSync(resolve(outDir, '.gitignore'), '# showdown batch containing private ref/surge clips — never committed (docs/source-showdown-eval.md)\n*\n')
   }
   return manifest
 }

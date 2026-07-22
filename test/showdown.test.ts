@@ -42,7 +42,14 @@ import {
   applyComposedPhrase,
   applyComposedDrums,
   BASSLINE_ARCHETYPES,
+  surgeRoleCategories,
+  patchInCategories,
+  pickSurgePatch,
+  composedPhraseToSurgeNotes,
+  SURGE_ROLE_CATEGORIES,
   type PhraseKey,
+  type SurgePatch,
+  type ComposedPhrase,
 } from '../src/taste/showdown.js'
 import { variantTypeOf } from '../src/taste/eval.js'
 import { scoreBatch, adoptVariant, normalizeBatchLoudness, readBatchManifest, BeatBatchError } from '../src/vary/batch.js'
@@ -693,4 +700,92 @@ test('genSubjectVaried appends the role isolation clause to every phrase prompt'
   // one-shots pass through untouched
   const kick = genSubjectVaried('kick', mulberry32(7))
   assert.ok(!kick.subject.includes('only, no'), 'one-shot subjects unchanged')
+})
+
+// ---- surge probe (research 114 §7 "Surge-as-sound-factory") ------------------------------------
+
+test('surgeRoleCategories: pitched roles map to patch categories, drum-loop skips', () => {
+  assert.deepEqual(surgeRoleCategories('bassline'), ['Basses'])
+  assert.deepEqual(surgeRoleCategories('chords'), ['Pads', 'Keys'])
+  assert.deepEqual(surgeRoleCategories('lead'), ['Leads', 'Plucks'])
+  assert.equal(surgeRoleCategories('drum-loop'), null, 'drum-loop is out of scope for v1')
+  assert.equal(surgeRoleCategories('nope'), null, 'an unknown role degrades to no surge clip, never throws')
+  // every showdown role has an explicit entry (a new role must decide its surge posture)
+  for (const spec of SHOWDOWN_ROLES) assert.ok(spec.role in SURGE_ROLE_CATEGORIES, `${spec.role} has a SURGE_ROLE_CATEGORIES entry`)
+})
+
+const patch = (name: string, category: string): SurgePatch => ({ name, category, path: `/f/patches_factory/${category}/${name}.fxp` })
+
+test('patchInCategories: case-insensitive substring match (so Basses also catches Basses/Acid)', () => {
+  assert.ok(patchInCategories(patch('Sub', 'Basses'), ['Basses']))
+  assert.ok(patchInCategories(patch('Sub', 'basses'), ['Basses']), 'case-insensitive')
+  assert.ok(patchInCategories(patch('Acid', 'Basses/Acid'), ['Basses']), 'substring matches a sub-category')
+  assert.ok(!patchInCategories(patch('Warm', 'Pads'), ['Basses']))
+})
+
+test('pickSurgePatch: deterministic seeded pick, category-filtered, null on skip/empty', () => {
+  const patches: SurgePatch[] = [
+    patch('Deep Sub', 'Basses'),
+    patch('Acid Line', 'Basses'),
+    patch('Warm Pad', 'Pads'),
+    patch('E Piano', 'Keys'),
+    patch('Screamer', 'Leads'),
+  ]
+  // drum-loop always skips → null regardless of the pool
+  assert.equal(pickSurgePatch(patches, 'drum-loop', 123), null)
+  // no patch in the role's categories → null (the CLI then drops the surge clip)
+  assert.equal(pickSurgePatch([patch('Warm Pad', 'Pads')], 'bassline', 1), null)
+  // a bassline pick is always in Basses, and is stable for a fixed seed
+  const a = pickSurgePatch(patches, 'bassline', 777)
+  const b = pickSurgePatch(patches, 'bassline', 777)
+  assert.ok(a && b && a.name === b.name, 'same seed → same patch')
+  assert.equal(a!.category, 'Basses', 'the pick respects the role category')
+  // the pick is stable regardless of the incoming enumeration order (it sorts first)
+  const shuffled = [...patches].reverse()
+  assert.equal(pickSurgePatch(shuffled, 'bassline', 777)!.name, a!.name, 'enumeration order does not change the pick')
+  // chords draws from Pads OR Keys
+  const c = pickSurgePatch(patches, 'chords', 42)
+  assert.ok(c && (c.category === 'Pads' || c.category === 'Keys'), `chords picks a Pads/Keys patch, got ${c?.category}`)
+})
+
+test('composedPhraseToSurgeNotes: 16th-step figure → absolute-time MIDI notes at bpm', () => {
+  const phrase: ComposedPhrase = {
+    archetype: 'test',
+    notes: [
+      { pitch: 48, start: 0, duration: 2, velocity: 0.8 },   // step 0, an 8th long
+      { pitch: 55, start: 4, duration: 4, velocity: 0.5 },   // beat 2, a quarter long
+      { pitch: 60, start: 8, duration: 0, velocity: 0.001 }, // zero-duration clamps to one step; tiny vel (rounds to 0) clamps to >=1
+    ],
+  }
+  const notes = composedPhraseToSurgeNotes(phrase, 120) // 120 BPM → secondsPerStep = 0.125
+  assert.equal(notes.length, 3)
+  assert.deepEqual(notes[0], { midi: 48, startSeconds: 0, durationSeconds: 0.25, velocity: Math.round(0.8 * 127) })
+  assert.deepEqual(notes[1], { midi: 55, startSeconds: 0.5, durationSeconds: 0.5, velocity: Math.round(0.5 * 127) })
+  assert.equal(notes[2]!.startSeconds, 1)
+  assert.equal(notes[2]!.durationSeconds, 0.125, 'zero duration clamps to one step')
+  assert.equal(notes[2]!.velocity, 1, 'velocity floors at 1, never 0')
+  // velocity never exceeds MIDI 127
+  const loud = composedPhraseToSurgeNotes({ archetype: 't', notes: [{ pitch: 60, start: 0, duration: 1, velocity: 1.5 }] }, 120)
+  assert.equal(loud[0]!.velocity, 127)
+  assert.throws(() => composedPhraseToSurgeNotes(phrase, 0), /positive bpm/)
+})
+
+test('composedPhraseToSurgeNotes: bpm scales time inversely (same figure, half the tempo → double the seconds)', () => {
+  const phrase: ComposedPhrase = { archetype: 't', notes: [{ pitch: 50, start: 16, duration: 4, velocity: 0.7 }] }
+  const fast = composedPhraseToSurgeNotes(phrase, 120)
+  const slow = composedPhraseToSurgeNotes(phrase, 60)
+  assert.equal(slow[0]!.startSeconds, fast[0]!.startSeconds * 2)
+  assert.equal(slow[0]!.durationSeconds, fast[0]!.durationSeconds * 2)
+})
+
+test('writeShowdownBatch: a surge clip gates the whole batch dir behind .gitignore (unresolved patch-content license)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-showdown-surge-'))
+  writeFileSync(join(dir, 'v1.wav'), toneWav(220, 0.4))
+  writeFileSync(join(dir, 'v2.wav'), toneWav(330, 0.3))
+  writeShowdownBatch(dir, 'bassline', [
+    { file: 'v1.wav', source: { kind: 'engine', from: 'seed-001.beat bass solo' } },
+    { file: 'v2.wav', source: { kind: 'surge', from: 'Surge XT patch "Deep Sub" (Basses)' } },
+  ])
+  assert.ok(existsSync(join(dir, '.gitignore')), 'a surge clip forces a .gitignore')
+  assert.ok(readFileSync(join(dir, '.gitignore'), 'utf8').includes('*'), 'everything in a surge-bearing batch dir is ignored')
 })

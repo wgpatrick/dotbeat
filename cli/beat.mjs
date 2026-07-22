@@ -666,7 +666,7 @@ const HELP = [
   {
     cmd: 'showdown',
     text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
-                [--gen-backend fal|stub|stableaudio] [--with-produced] [--ref-dir <path>] [--seconds S]
+                [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--ref-dir <path>] [--seconds S]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
                                                           source — engine (the role's seed phrase, soloed, through
@@ -677,7 +677,12 @@ const HELP = [
                                                           the SAME figure and patch as the engine clip plus a
                                                           production pass — unison/chorus width, saturation,
                                                           reverb/delay sends, eqHigh air — the "is it the synth
-                                                          or the production?" ablation), and optionally ref
+                                                          or the production?" ablation), optionally surge
+                                                          (--with-surge: a composed figure through a Surge XT
+                                                          factory patch via surgepy — pitched roles only,
+                                                          drum-loop skipped; its own distinct figure unless
+                                                          --shared-figure; needs a source-built surgepy, see
+                                                          beat showdown --surge-doctor), and optionally ref
                                                           (--ref-dir). Clips are duration-matched (trim/pad;
                                                           --seconds overrides the shortest-clip default) and
                                                           loudness-normalized to a
@@ -691,7 +696,11 @@ const HELP = [
         --ref-dir clips are PRIVATE chops of commercial music: the tool only ever READS under that
         path (originals untouched), the trimmed/level-matched working copies live in the batch dir
         behind a generated .gitignore, the manifest records the origin path as a reference only,
-        and the shared scores log records the source KIND alone — never the path, title, or audio.`,
+        and the shared scores log records the source KIND alone — never the path, title, or audio.
+        --with-surge renders through Surge XT (GPLv3, a local dev-side tool — outputs carry no code
+        copyleft) but its factory-patch CONTENT license is unresolved upstream, so surge-bearing
+        batches get the same .gitignore treatment as ref batches; the scores log stays kind-only.
+        surgepy has no PyPI wheel — beat showdown --surge-doctor reports the source-build steps.`,
   },
   {
     cmd: 'rate',
@@ -1068,6 +1077,30 @@ function formatDoctorReport(report) {
     if (!b) continue
     const missing = Array.isArray(b.missing) && b.missing.length > 0 ? `missing: ${b.missing.join(', ')}` : 'ok'
     lines.push(`  ${name.padEnd(9)} ${b.ok ? 'ok' : missing}`)
+  }
+  return lines.join('\n') + '\n'
+}
+
+/** Human-readable `beat showdown --surge-doctor`: interpreter, surgepy availability, factory patch
+ * path + count, and (when surgepy is missing) the exact source-build steps — surgepy has no wheel. */
+function formatSurgeDoctor(report) {
+  const lines = []
+  lines.push(`interpreter: ${report.interpreter ?? '(unknown)'}`)
+  if (report.pythonFound === false) {
+    lines.push('python3: NOT FOUND')
+    if (report.error) lines.push(report.error)
+    return lines.join('\n') + '\n'
+  }
+  const surgepy = report.surgepy ?? {}
+  if (surgepy.available) {
+    lines.push('surgepy: available')
+    lines.push(`factory content: ${report.patchesRoot ?? report.factoryPath ?? '(unknown)'}`)
+    lines.push(`factory patches: ${report.patchCount ?? '(unknown)'}`)
+    if (surgepy.constructError) lines.push(`note: surge constructed with an error — ${surgepy.constructError}`)
+  } else {
+    lines.push('surgepy: NOT AVAILABLE (surge clips are skipped)')
+    if (report.error) lines.push(`error: ${report.error}`)
+    if (surgepy.fix) lines.push(`fix: ${surgepy.fix}`)
   }
   return lines.join('\n') + '\n'
 }
@@ -1650,11 +1683,21 @@ function flagValue(argv, flag) {
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
   const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--ref-dir', '--seconds', '--log']
-  const known = new Set([...valued, '--report', '--json', '--with-produced', '--shared-figure'])
+  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const dir = positional[0]
   const showdown = await import('../dist/src/taste/showdown.js')
+
+  // ---- surge diagnostics -----------------------------------------------------------------------
+  // surgepy is a source-build artifact of Surge XT (no PyPI wheel); this surfaces exactly what's
+  // missing / where the factory content is, same spirit as `beat analyze --doctor`.
+  if (argv.includes('--surge-doctor')) {
+    const { surgeDoctor } = await import('../dist/src/analysis/surge.js')
+    const report = await surgeDoctor()
+    process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : formatSurgeDoctor(report))
+    return
+  }
 
   // ---- the scoreboard --------------------------------------------------------------------------
   if (argv.includes('--report')) {
@@ -1688,9 +1731,40 @@ async function showdownCmd(argv) {
   // patch, plus a production pass as ordinary .beat edits — measuring how much of the engine's
   // blind-rating deficit is production (width/air/glue) rather than raw synth timbre
   const withProduced = argv.includes('--with-produced')
+  // the Surge-as-sound-factory probe (research 114 §7): a clip that renders the SAME composed
+  // figure through a Surge XT factory patch via python/surge_render.py — does a pro-grade synth +
+  // patch library close the timbre gap the engine can't? Pitched roles only; drum-loop is skipped
+  // (a kit through a synth patch is a different question). Degrades to warn-and-skip when surgepy
+  // isn't built (CI/stub), never breaking the batch.
+  const withSurge = argv.includes('--with-surge')
+  // Un-blinding fix (owner, 2026-07-21, mid-rating): a batch where every composed source shares one
+  // figure reveals the dotbeat-rendered cluster by its repeated melody. By default EVERY composed
+  // source (engine, engineplus, keymap, surge) draws its OWN distinct archetype figure
+  // (exclude-chained within the batch and across the run); --shared-figure restores the controlled
+  // ablation (same notes across composed sources, only the sound-source varies).
   const sharedFigure = argv.includes('--shared-figure')
   const refDir = flagValue(argv, '--ref-dir')
   if (refDir !== undefined && !existsSync(refDir)) throw new BeatEditError(`no directory at --ref-dir ${refDir}`)
+
+  // Resolve surge availability + the factory patch catalogue ONCE (not per batch): a doctor probe,
+  // then the patch listing. On any failure surge is disabled for the whole run with one warning —
+  // the other four sources still collect. surgeMod stays null when --with-surge is off.
+  let surgeMod = null
+  let surgePatches = null
+  if (withSurge) {
+    surgeMod = await import('../dist/src/analysis/surge.js')
+    try {
+      const doc = await surgeMod.surgeDoctor()
+      if (!surgeMod.surgeAvailable(doc)) {
+        process.stderr.write(`warning: --with-surge: surgepy unavailable (${doc.error ?? doc.surgepy?.fix ?? 'not built'}) — skipping surge clips (beat showdown --surge-doctor for the build steps)\n`)
+      } else {
+        surgePatches = await surgeMod.listSurgePatches()
+        process.stderr.write(`surge: ${surgePatches.length} factory patches at ${doc.patchesRoot ?? doc.factoryPath ?? '?'}\n`)
+      }
+    } catch (err) {
+      process.stderr.write(`warning: --with-surge: ${err instanceof Error ? err.message.split('\n')[0] : err} — skipping surge clips\n`)
+    }
+  }
 
   const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
   if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
@@ -1742,7 +1816,8 @@ async function showdownCmd(argv) {
       const seedPath = join(dir, seed.file)
       const outDir = join(dir, `showdown-${spec.role}-${batchSeed}`)
       const workDir = join(outDir, 'work')
-      process.stderr.write(`\n=== showdown ${spec.role}: composed figure in ${seed.file}'s key — engine vs ${withProduced ? 'engineplus vs ' : ''}gen vs keymap${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
+      const surgeThisRole = surgePatches !== null && showdown.surgeRoleCategories(spec.role) !== null
+      process.stderr.write(`\n=== showdown ${spec.role}: composed figure in ${seed.file}'s key — engine vs ${withProduced ? 'engineplus vs ' : ''}gen vs keymap${surgeThisRole ? ' vs surge' : ''}${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
       try {
         mkdirSync(workDir, { recursive: true })
 
@@ -1795,18 +1870,20 @@ async function showdownCmd(argv) {
 
         // per-source composed figures (owner, 2026-07-21, SECOND un-blinding report: composed
         // clips sharing one figure per batch made the dotbeat-rendered group identifiable as a
-        // same-melody cluster). Default: every composed source draws its OWN archetype figure,
-        // exclude-chained so no two clips in a batch — nor two batches in a run — repeat one.
-        // --shared-figure restores the controlled ablation (identical notes across engine/
-        // engineplus/keymap) for when isolating the sound-source variable matters more than
-        // blindness (that mode produced the 2026-07-21 production-vs-timbre split).
+        // same-melody cluster). Default: every composed source (engine, engineplus, keymap, and
+        // surge below) draws its OWN archetype figure, exclude-chained so no two clips in a
+        // batch — nor two batches in a run — repeat one. --shared-figure restores the controlled
+        // ablation (identical notes across composed sources) for when isolating the sound-source
+        // variable matters more than blindness (that mode produced the 2026-07-21
+        // production-vs-timbre split).
+        const pitchedKey = spec.role === 'drum-loop' ? null : showdown.inferSeedKey(seed.doc)
         const runExclude = usedFigures.get(spec.role) ?? []
         const drawnFigures = []
         const drawComposed = (seedOffset) => {
           const exclude = [...runExclude, ...drawnFigures]
           const composed = spec.role === 'drum-loop'
             ? showdown.composeDrumPhrase(batchSeed + seedOffset, { exclude })
-            : showdown.composePitchedPhrase(spec.role, showdown.inferSeedKey(seed.doc), batchSeed + seedOffset, { exclude })
+            : showdown.composePitchedPhrase(spec.role, pitchedKey, batchSeed + seedOffset, { exclude })
           drawnFigures.push(composed.archetype)
           return composed
         }
@@ -1817,6 +1894,9 @@ async function showdownCmd(argv) {
         const engineComposed = drawComposed(0)
         const phrased = applyComposed(engineComposed)
         const figure = engineComposed.archetype
+        // pitchedPhrase: the engine clip's ComposedPhrase for pitched roles — the surge render's
+        // shared-figure source and its "this role composes" gate (null for drum-loop)
+        const pitchedPhrase = spec.role === 'drum-loop' ? null : engineComposed
         const plusComposed = withProduced ? (sharedFigure ? engineComposed : drawComposed(101)) : null
         const kmComposed = sharedFigure ? engineComposed : drawComposed(202)
         usedFigures.set(spec.role, [...runExclude, ...drawnFigures])
@@ -1911,6 +1991,39 @@ async function showdownCmd(argv) {
           outDir: genDir,
         })
 
+        // surge clip (--with-surge, pitched roles only): the SAME composed figure rendered through
+        // a Surge XT factory patch — timbre comparison, composition held constant. The patch is a
+        // deterministic seeded pick from the role's category listing (recorded in the manifest for
+        // reproducibility). Any failure warns and drops the surge clip; the batch still ships.
+        let surgeClip = null
+        if (surgeThisRole && pitchedPhrase !== null) {
+          try {
+            const patch = showdown.pickSurgePatch(surgePatches, spec.role, batchSeed)
+            if (patch === null) {
+              process.stderr.write(`surge: no factory patch in ${showdown.surgeRoleCategories(spec.role).join('/')} for ${spec.role} — skipping surge clip\n`)
+            } else {
+              // by default the surge clip draws its OWN distinct figure (exclude-chained off the
+              // engine's, and recorded so the next batch avoids it too); --shared-figure holds the
+              // engine's figure constant for the controlled "same notes, different source" ablation
+              let surgePhrase = pitchedPhrase
+              let surgeFigure = figure
+              if (!sharedFigure) {
+                const surgeExclude = usedFigures.get(spec.role) ?? []
+                surgePhrase = showdown.composePitchedPhrase(spec.role, pitchedKey, batchSeed + 977, { exclude: surgeExclude })
+                surgeFigure = surgePhrase.archetype
+                usedFigures.set(spec.role, [...surgeExclude, surgeFigure])
+              }
+              const notes = showdown.composedPhraseToSurgeNotes(surgePhrase, batchBpm)
+              const surgeWav = join(workDir, 'surge.wav')
+              await surgeMod.runSurgeRender({ patch: patch.path, notes, sampleRate: 44100, outPath: surgeWav })
+              surgeClip = { kind: 'surge', wav: surgeWav, from: `Surge XT patch "${patch.name}" (${patch.category}) playing the composed ${surgeFigure} figure${sharedFigure ? ' (shared with the engine clip)' : ''}` }
+              process.stderr.write(`surge: rendered "${patch.name}" (${patch.category}) on the ${surgeFigure} figure\n`)
+            }
+          } catch (err) {
+            process.stderr.write(`surge render skipped (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+          }
+        }
+
         const clips = [
           { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `composed ${figure} figure on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
           ...(produced
@@ -1918,6 +2031,7 @@ async function showdownCmd(argv) {
             : []),
           { kind: 'keymap', wav: join(workDir, produced ? 'v3.wav' : 'v2.wav'), from: kmFrom },
           { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
+          ...(surgeClip ? [surgeClip] : []),
         ]
         if (refDir !== undefined) {
           if (refPathEarly === null) {
