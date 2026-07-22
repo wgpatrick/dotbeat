@@ -1,0 +1,735 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-22T21:49:37.724Z",
+  "note": "Surge factory-patch curation per role (decisions.md D26). Loaded by beat showdown --with-surge; absent → blind draw from the full factory pool.",
+  "probeVersion": 1,
+  "probe": {
+    "bassline": "sustained low C2 (midi 36, 1.6s) then its octave C3 (midi 48, 1.6s)",
+    "chords": "one held C-major triad (midi 60/64/67, 2.5s)",
+    "lead": "4-note ascending motif C5-E5-G5-C6 (midi 72/76/79/84), last note held"
+  },
+  "blend": {
+    "aesQuality": 0.45,
+    "critic": 0.3,
+    "ringHeadroom": 0.15,
+    "active": 0.1
+  },
+  "gates": {
+    "ringDbMax": -32,
+    "activeFractionMin": 0.5
+  },
+  "dataset": "examples/taste-t1/beat-scores.jsonl",
+  "roles": {
+    "bassline": {
+      "pool": 59,
+      "scored": 59,
+      "survivors": 53,
+      "kept": [
+        {
+          "name": "Theme",
+          "category": "Basses",
+          "relPath": "Basses/Theme.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7021276595744681,
+            "ce": 4.162688732147217,
+            "cu": 7.368933200836182,
+            "pc": 2.484307289123535,
+            "pq": 7.639665126800537,
+            "criticPessimistic": 1.188818007847564
+          },
+          "composite": 1.8525705146488851
+        },
+        {
+          "name": "FM Slap",
+          "category": "Basses",
+          "relPath": "Basses/FM Slap.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7021276595744681,
+            "ce": 3.9480128288269043,
+            "cu": 6.734378337860107,
+            "pc": 2.1243534088134766,
+            "pq": 7.286627769470215,
+            "criticPessimistic": 1.0047614693187061
+          },
+          "composite": 1.4474256982229845
+        },
+        {
+          "name": "FM Combo",
+          "category": "Basses",
+          "relPath": "Basses/FM Combo.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7021276595744681,
+            "ce": 3.800391674041748,
+            "cu": 7.0487565994262695,
+            "pc": 2.1198019981384277,
+            "pq": 7.0831499099731445,
+            "criticPessimistic": 1.2384627122563736
+          },
+          "composite": 1.3545993562359215
+        },
+        {
+          "name": "Behemoth",
+          "category": "Basses",
+          "relPath": "Basses/Behemoth.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 1,
+            "ce": 3.1168341636657715,
+            "cu": 6.047059535980225,
+            "pc": 1.9787676334381104,
+            "pq": 6.399387836456299,
+            "criticPessimistic": 0.6097521254695268
+          },
+          "composite": 0.8781407852127245
+        },
+        {
+          "name": "E-Bass",
+          "category": "Basses",
+          "relPath": "Basses/E-Bass.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7021276595744681,
+            "ce": 3.4917635917663574,
+            "cu": 6.440944671630859,
+            "pc": 2.0129714012145996,
+            "pq": 7.058629989624023,
+            "criticPessimistic": 0.1563316040424329
+          },
+          "composite": 0.6747263870951108
+        },
+        {
+          "name": "FM Bass 3",
+          "category": "Basses",
+          "relPath": "Basses/FM Bass 3.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.851063829787234,
+            "ce": 3.110861301422119,
+            "cu": 6.014516830444336,
+            "pc": 2.4490888118743896,
+            "pq": 5.933483600616455,
+            "criticPessimistic": 1.365739034584015
+          },
+          "composite": 0.662206188053391
+        },
+        {
+          "name": "Digibass",
+          "category": "Basses",
+          "relPath": "Basses/Digibass.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7021276595744681,
+            "ce": 3.154168128967285,
+            "cu": 6.7578816413879395,
+            "pc": 2.3091776371002197,
+            "pq": 6.8651933670043945,
+            "criticPessimistic": 0.7865913216877453
+          },
+          "composite": 0.6599543880195269
+        },
+        {
+          "name": "Dist Bass 2",
+          "category": "Basses",
+          "relPath": "Basses/Dist Bass 2.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7021276595744681,
+            "ce": 3.499420166015625,
+            "cu": 6.741058826446533,
+            "pc": 1.9473885297775269,
+            "pq": 7.144624710083008,
+            "criticPessimistic": -0.030084858660193114
+          },
+          "composite": 0.6431707647470744
+        },
+        {
+          "name": "FM Bass 2",
+          "category": "Basses",
+          "relPath": "Basses/FM Bass 2.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7021276595744681,
+            "ce": 3.2537710666656494,
+            "cu": 6.3262481689453125,
+            "pc": 2.1614627838134766,
+            "pq": 6.75791072845459,
+            "criticPessimistic": 0.6727657065535223
+          },
+          "composite": 0.6039419261728147
+        },
+        {
+          "name": "Metal Square",
+          "category": "Basses",
+          "relPath": "Basses/Metal Square.fxp",
+          "scores": {
+            "ringDb": -68.2,
+            "activeFraction": 0.7021276595744681,
+            "ce": 3.7424697875976562,
+            "cu": 6.8505940437316895,
+            "pc": 2.0980939865112305,
+            "pq": 7.252920627593994,
+            "criticPessimistic": 0.017031898660548106
+          },
+          "composite": 0.5701064032809737
+        },
+        {
+          "name": "Bass 5",
+          "category": "Basses",
+          "relPath": "Basses/Bass 5.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7021276595744681,
+            "ce": 3.202342987060547,
+            "cu": 6.496770858764648,
+            "pc": 2.083922863006592,
+            "pq": 6.949184417724609,
+            "criticPessimistic": 0.2951283346147566
+          },
+          "composite": 0.5117659079180039
+        },
+        {
+          "name": "Wide Bassline",
+          "category": "Basses",
+          "relPath": "Basses/Wide Bassline.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7872340425531915,
+            "ce": 3.1636738777160645,
+            "cu": 6.178764820098877,
+            "pc": 1.9884514808654785,
+            "pq": 7.309343338012695,
+            "criticPessimistic": -0.47904373848255033
+          },
+          "composite": 0.5092227458124567
+        },
+        {
+          "name": "Dist Bass 1",
+          "category": "Basses",
+          "relPath": "Basses/Dist Bass 1.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7021276595744681,
+            "ce": 3.5287270545959473,
+            "cu": 6.599041938781738,
+            "pc": 1.9187946319580078,
+            "pq": 6.4635090827941895,
+            "criticPessimistic": 0.39990048390867206
+          },
+          "composite": 0.46908091591018836
+        },
+        {
+          "name": "Square Bass",
+          "category": "Basses",
+          "relPath": "Basses/Square Bass.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7021276595744681,
+            "ce": 3.1714344024658203,
+            "cu": 6.702674865722656,
+            "pc": 1.917831540107727,
+            "pq": 7.271220684051514,
+            "criticPessimistic": -0.1712152335666755
+          },
+          "composite": 0.4650295471326816
+        }
+      ]
+    },
+    "chords": {
+      "pool": 81,
+      "scored": 81,
+      "survivors": 64,
+      "kept": [
+        {
+          "name": "Bright",
+          "category": "Pads",
+          "relPath": "Pads/Bright.fxp",
+          "scores": {
+            "ringDb": -32.5,
+            "activeFraction": 1,
+            "ce": 6.216772556304932,
+            "cu": 8.029791831970215,
+            "pc": 2.6380553245544434,
+            "pq": 7.891745090484619,
+            "criticPessimistic": 1.4218533504941258
+          },
+          "composite": 1.0717494699578456
+        },
+        {
+          "name": "Verb Pad",
+          "category": "Pads",
+          "relPath": "Pads/Verb Pad.fxp",
+          "scores": {
+            "ringDb": -36.4,
+            "activeFraction": 0.9,
+            "ce": 6.504941940307617,
+            "cu": 8.163961410522461,
+            "pc": 3.073784112930298,
+            "pq": 8.002612113952637,
+            "criticPessimistic": 1.2328842169693786
+          },
+          "composite": 1.0518342504614575
+        },
+        {
+          "name": "Death To Gator",
+          "category": "Pads",
+          "relPath": "Pads/Death To Gator.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.9,
+            "ce": 6.045945167541504,
+            "cu": 7.755050182342529,
+            "pc": 3.4405267238616943,
+            "pq": 7.7069549560546875,
+            "criticPessimistic": 0.5572586107937251
+          },
+          "composite": 0.9637454191504794
+        },
+        {
+          "name": "Assymetry",
+          "category": "Pads",
+          "relPath": "Pads/Assymetry.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 1,
+            "ce": 5.128083229064941,
+            "cu": 7.671404838562012,
+            "pc": 2.8464016914367676,
+            "pq": 7.527334213256836,
+            "criticPessimistic": 1.1098864509695885
+          },
+          "composite": 0.9285054125275781
+        },
+        {
+          "name": "Sawteeth",
+          "category": "Pads",
+          "relPath": "Pads/Sawteeth.fxp",
+          "scores": {
+            "ringDb": -38.1,
+            "activeFraction": 0.925,
+            "ce": 5.986701965332031,
+            "cu": 7.9558892250061035,
+            "pc": 2.6659657955169678,
+            "pq": 7.719597816467285,
+            "criticPessimistic": 1.371732355638189
+          },
+          "composite": 0.9008783209571231
+        },
+        {
+          "name": "Sparkly",
+          "category": "Pads",
+          "relPath": "Pads/Sparkly.fxp",
+          "scores": {
+            "ringDb": -43.5,
+            "activeFraction": 0.95,
+            "ce": 6.1405487060546875,
+            "cu": 7.778082370758057,
+            "pc": 3.228437900543213,
+            "pq": 7.892035961151123,
+            "criticPessimistic": 0.8445815745733266
+          },
+          "composite": 0.854719464394686
+        },
+        {
+          "name": "Legacy",
+          "category": "Pads",
+          "relPath": "Pads/Legacy.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.85,
+            "ce": 5.679208755493164,
+            "cu": 7.949131011962891,
+            "pc": 2.1774163246154785,
+            "pq": 7.842218399047852,
+            "criticPessimistic": 0.5186454934939779
+          },
+          "composite": 0.8423079631107888
+        },
+        {
+          "name": "Safety",
+          "category": "Pads",
+          "relPath": "Pads/Safety.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.925,
+            "ce": 5.740427494049072,
+            "cu": 7.999591827392578,
+            "pc": 2.6418285369873047,
+            "pq": 7.871846675872803,
+            "criticPessimistic": 0.2570421086370972
+          },
+          "composite": 0.8404809119232983
+        },
+        {
+          "name": "Subtle Comb Strings",
+          "category": "Pads",
+          "relPath": "Pads/Subtle Comb Strings.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.75,
+            "ce": 5.789725303649902,
+            "cu": 8.03530502319336,
+            "pc": 2.3359694480895996,
+            "pq": 7.852606296539307,
+            "criticPessimistic": 0.5139394863366992
+          },
+          "composite": 0.7905788112918073
+        },
+        {
+          "name": "Sprinkly",
+          "category": "Pads",
+          "relPath": "Pads/Sprinkly.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.95,
+            "ce": 5.48843240737915,
+            "cu": 7.604434013366699,
+            "pc": 2.5585641860961914,
+            "pq": 7.469790935516357,
+            "criticPessimistic": 0.4869413123715256
+          },
+          "composite": 0.7556773870053474
+        },
+        {
+          "name": "Distant",
+          "category": "Pads",
+          "relPath": "Pads/Distant.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.95,
+            "ce": 5.730440139770508,
+            "cu": 8.00929069519043,
+            "pc": 2.5445034503936768,
+            "pq": 7.793130397796631,
+            "criticPessimistic": 0.015954398045802037
+          },
+          "composite": 0.7525367298670809
+        },
+        {
+          "name": "Harsh Saw",
+          "category": "Pads",
+          "relPath": "Pads/Harsh Saw.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.925,
+            "ce": 5.3607988357543945,
+            "cu": 8.005529403686523,
+            "pc": 2.455206871032715,
+            "pq": 7.730328559875488,
+            "criticPessimistic": 0.05756860715061493
+          },
+          "composite": 0.623001344635359
+        },
+        {
+          "name": "Bell Pad",
+          "category": "Pads",
+          "relPath": "Pads/Bell Pad.fxp",
+          "scores": {
+            "ringDb": -33.5,
+            "activeFraction": 0.85,
+            "ce": 5.869459629058838,
+            "cu": 7.85210657119751,
+            "pc": 2.2767791748046875,
+            "pq": 7.97330379486084,
+            "criticPessimistic": 0.6097482633518216
+          },
+          "composite": 0.5914248030628577
+        },
+        {
+          "name": "Endgame",
+          "category": "Pads",
+          "relPath": "Pads/Endgame.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.95,
+            "ce": 5.003475666046143,
+            "cu": 7.907164573669434,
+            "pc": 2.6568617820739746,
+            "pq": 7.265293598175049,
+            "criticPessimistic": 0.5185443671073333
+          },
+          "composite": 0.5707335978659313
+        },
+        {
+          "name": "Pad 4",
+          "category": "Pads",
+          "relPath": "Pads/Pad 4.fxp",
+          "scores": {
+            "ringDb": -60.1,
+            "activeFraction": 0.825,
+            "ce": 5.185122966766357,
+            "cu": 7.756991863250732,
+            "pc": 2.618844747543335,
+            "pq": 7.771291732788086,
+            "criticPessimistic": 0.8288103266782362
+          },
+          "composite": 0.5095857141258164
+        },
+        {
+          "name": "MW Pulsating",
+          "category": "Pads",
+          "relPath": "Pads/MW Pulsating.fxp",
+          "scores": {
+            "ringDb": -38.9,
+            "activeFraction": 0.875,
+            "ce": 6.240207672119141,
+            "cu": 8.063568115234375,
+            "pc": 2.2844858169555664,
+            "pq": 7.9331374168396,
+            "criticPessimistic": -0.0707368665915098
+          },
+          "composite": 0.4931584187611355
+        }
+      ]
+    },
+    "lead": {
+      "pool": 242,
+      "scored": 242,
+      "survivors": 62,
+      "kept": [
+        {
+          "name": "The 1980s",
+          "category": "Plucks",
+          "relPath": "Plucks/The 1980s.fxp",
+          "scores": {
+            "ringDb": -34.8,
+            "activeFraction": 1,
+            "ce": 5.800016403198242,
+            "cu": 8.132710456848145,
+            "pc": 1.9893262386322021,
+            "pq": 8.244701385498047,
+            "criticPessimistic": 0.701163068945318
+          },
+          "composite": 1.1947455915311231
+        },
+        {
+          "name": "Frog",
+          "category": "Plucks",
+          "relPath": "Plucks/Frog.fxp",
+          "scores": {
+            "ringDb": -38,
+            "activeFraction": 0.6410256410256411,
+            "ce": 6.376445770263672,
+            "cu": 8.306047439575195,
+            "pc": 2.075969696044922,
+            "pq": 8.28651237487793,
+            "criticPessimistic": 0.42398695738057435
+          },
+          "composite": 0.9610008640336763
+        },
+        {
+          "name": "Bell 2",
+          "category": "Plucks",
+          "relPath": "Plucks/Bell 2.fxp",
+          "scores": {
+            "ringDb": -32.8,
+            "activeFraction": 0.6666666666666666,
+            "ce": 5.629967212677002,
+            "cu": 8.11807632446289,
+            "pc": 1.8094402551651,
+            "pq": 8.3588228225708,
+            "criticPessimistic": 0.6357171459357056
+          },
+          "composite": 0.8696963216399944
+        },
+        {
+          "name": "DNA Sequencer",
+          "category": "Leads",
+          "relPath": "Leads/DNA Sequencer.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.6923076923076923,
+            "ce": 5.105543613433838,
+            "cu": 7.907322883605957,
+            "pc": 2.1404733657836914,
+            "pq": 8.074593544006348,
+            "criticPessimistic": 0.3466552594715556
+          },
+          "composite": 0.844996315456629
+        },
+        {
+          "name": "MW Morph",
+          "category": "Plucks",
+          "relPath": "Plucks/MW Morph.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.6153846153846154,
+            "ce": 5.868395805358887,
+            "cu": 8.098173141479492,
+            "pc": 1.7855805158615112,
+            "pq": 8.158483505249023,
+            "criticPessimistic": -0.027656503047887193
+          },
+          "composite": 0.8431800482719465
+        },
+        {
+          "name": "Enhanced Forest",
+          "category": "Plucks",
+          "relPath": "Plucks/Enhanced Forest.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7692307692307693,
+            "ce": 5.170130729675293,
+            "cu": 8.120321273803711,
+            "pc": 1.9611691236495972,
+            "pq": 7.9968976974487305,
+            "criticPessimistic": 0.1836740287159791
+          },
+          "composite": 0.8199792265723446
+        },
+        {
+          "name": "Legoland",
+          "category": "Leads",
+          "relPath": "Leads/Legoland.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.7948717948717948,
+            "ce": 4.818307876586914,
+            "cu": 7.68158483505249,
+            "pc": 2.146803379058838,
+            "pq": 7.640486717224121,
+            "criticPessimistic": 0.5345413825332739
+          },
+          "composite": 0.8096594064859747
+        },
+        {
+          "name": "Battered Beauty",
+          "category": "Plucks",
+          "relPath": "Plucks/Battered Beauty.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.8205128205128205,
+            "ce": 4.862652778625488,
+            "cu": 7.969707489013672,
+            "pc": 1.9769258499145508,
+            "pq": 7.7869744300842285,
+            "criticPessimistic": 0.2215247192145141
+          },
+          "composite": 0.7274816486412008
+        },
+        {
+          "name": "Convex",
+          "category": "Plucks",
+          "relPath": "Plucks/Convex.fxp",
+          "scores": {
+            "ringDb": -42.4,
+            "activeFraction": 0.6923076923076923,
+            "ce": 5.526141166687012,
+            "cu": 7.818333148956299,
+            "pc": 2.109161376953125,
+            "pq": 8.176301002502441,
+            "criticPessimistic": 0.36362987702552224
+          },
+          "composite": 0.704827603967206
+        },
+        {
+          "name": "Friendly",
+          "category": "Plucks",
+          "relPath": "Plucks/Friendly.fxp",
+          "scores": {
+            "ringDb": -64.3,
+            "activeFraction": 0.5641025641025641,
+            "ce": 6.0309038162231445,
+            "cu": 8.069896697998047,
+            "pc": 1.950076937675476,
+            "pq": 7.695673942565918,
+            "criticPessimistic": 0.315341935598642
+          },
+          "composite": 0.6700980605974001
+        },
+        {
+          "name": "Mystic",
+          "category": "Plucks",
+          "relPath": "Plucks/Mystic.fxp",
+          "scores": {
+            "ringDb": -33.5,
+            "activeFraction": 1,
+            "ce": 4.935206413269043,
+            "cu": 7.764439582824707,
+            "pc": 2.3340935707092285,
+            "pq": 7.8725996017456055,
+            "criticPessimistic": 0.35996835969075497
+          },
+          "composite": 0.650712021452917
+        },
+        {
+          "name": "Soift",
+          "category": "Plucks",
+          "relPath": "Plucks/Soift.fxp",
+          "scores": {
+            "ringDb": -35.3,
+            "activeFraction": 1,
+            "ce": 4.493192672729492,
+            "cu": 7.656765460968018,
+            "pc": 2.0441083908081055,
+            "pq": 7.775457382202148,
+            "criticPessimistic": 0.5034317630590837
+          },
+          "composite": 0.5713671161744498
+        },
+        {
+          "name": "Cray",
+          "category": "Leads",
+          "relPath": "Leads/Cray.fxp",
+          "scores": {
+            "ringDb": -32.3,
+            "activeFraction": 0.717948717948718,
+            "ce": 5.356011390686035,
+            "cu": 7.936548233032227,
+            "pc": 1.8134374618530273,
+            "pq": 7.8588643074035645,
+            "criticPessimistic": 0.3688756977127676
+          },
+          "composite": 0.5445431175669763
+        },
+        {
+          "name": "Fantasy Bell",
+          "category": "Plucks",
+          "relPath": "Plucks/Fantasy Bell.fxp",
+          "scores": {
+            "ringDb": -34.1,
+            "activeFraction": 0.7948717948717948,
+            "ce": 5.520057678222656,
+            "cu": 7.98581600189209,
+            "pc": 1.7614113092422485,
+            "pq": 8.271422386169434,
+            "criticPessimistic": -0.20338480536159018
+          },
+          "composite": 0.49273134708059985
+        },
+        {
+          "name": "Serial",
+          "category": "Leads",
+          "relPath": "Leads/Serial.fxp",
+          "scores": {
+            "ringDb": -47,
+            "activeFraction": 0.7948717948717948,
+            "ce": 3.9969370365142822,
+            "cu": 7.509629249572754,
+            "pc": 1.8742092847824097,
+            "pq": 8.146052360534668,
+            "criticPessimistic": 0.48932848974036275
+          },
+          "composite": 0.40819312433813704
+        },
+        {
+          "name": "Duck and Cover",
+          "category": "Leads",
+          "relPath": "Leads/Duck and Cover.fxp",
+          "scores": {
+            "ringDb": -120,
+            "activeFraction": 0.8205128205128205,
+            "ce": 4.455026626586914,
+            "cu": 7.331996440887451,
+            "pc": 2.166593074798584,
+            "pq": 6.684327602386475,
+            "criticPessimistic": 0.4444894859028211
+          },
+          "composite": 0.39457172431055165
+        }
+      ]
+    }
+  }
+}
