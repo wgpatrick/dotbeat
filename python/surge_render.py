@@ -269,10 +269,18 @@ def render(request):
     events.sort(key=lambda e: (e[0], e[1]))  # at a tie, note-offs before note-ons
 
     total_samples = int(round((last_off + tail_seconds) * sample_rate))
-    frames = []
+    # Collection goes through processMultiBlock, NOT process()+getOutput(): getOutput() builds its
+    # pybind11 array with interleaved strides instead of channel-major, so its "right channel" is
+    # the LEFT channel delayed 2 samples with a splice at every block boundary — a comb filter
+    # that read as a hard-panned-right 4-8 kHz ring in blind rating (root-caused 2026-07-22;
+    # upstream surgepy bug, issue draft in the findings doc). processMultiBlock memcpys the true
+    # stereo output. Events stay block-quantized exactly as before: dispatch everything due at
+    # the block boundary, then render that one block into its slot of the shared buffer.
+    n_blocks = (total_samples + block - 1) // block
+    buf = surge.createMultiBlock(n_blocks)  # shape (2, n_blocks*block), float32
     ei = 0
-    pos = 0
-    while pos < total_samples:
+    for b in range(n_blocks):
+        pos = b * block
         while ei < len(events) and events[ei][0] <= pos:
             _, kind, midi, vel = events[ei]
             if kind == 1:
@@ -280,15 +288,11 @@ def render(request):
             else:
                 surge.releaseNote(0, midi, 0)
             ei += 1
-        surge.process()
-        out = np.asarray(surge.getOutput())  # shape (2, block)
-        left = out[0]
-        right = out[1] if out.shape[0] > 1 else out[0]
-        for i in range(block):
-            frames.append((float(left[i]), float(right[i])))
-        pos += block
-
-    frames = frames[:total_samples]
+        surge.processMultiBlock(buf, b, 1)
+    arr = np.asarray(buf)
+    left = arr[0][:total_samples]
+    right = (arr[1] if arr.shape[0] > 1 else arr[0])[:total_samples]
+    frames = [(float(left[i]), float(right[i])) for i in range(total_samples)]
     _write_wav_pcm16(output, frames, sample_rate)
     return {
         "backend": "surge",
