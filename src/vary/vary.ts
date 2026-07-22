@@ -266,6 +266,19 @@ export function makeRng(seed: number): () => number {
 const toSpace = (v: number, d: VaryRangeDef) => (d.scale === 'log' ? Math.log(Math.max(v, d.min > 0 ? d.min : 1e-4)) : v)
 const fromSpace = (s: number, d: VaryRangeDef) => (d.scale === 'log' ? Math.exp(s) : s)
 
+/** A single seeded, legal, full-range draw of one param — uniform across [min,max] in the def's
+ * scale space (integer-rounded when the def is integer). The prodtask-transform eval's random-edit
+ * control (research 119 / src/taste/prodtask.ts) uses THIS as its "seeded random legal value on the
+ * same parameter kind" — the same mutation-range discipline as vary's own operators, so the control
+ * jitters within the musically-useful region rather than the merely-legal one. */
+export function sampleValueInRange(def: VaryRangeDef, rng: () => number): number {
+  const lo = toSpace(def.min, def)
+  const hi = toSpace(def.max, def)
+  let next = fromSpace(lo + rng() * (hi - lo), def)
+  if (def.integer) next = Math.round(next)
+  return next
+}
+
 /** Spread-mode value: uniform draw inside quantile band `band` of [min,max] in scale space —
  * variant i's band assignment comes from a per-param shuffle, so a batch tiles the whole range. */
 function spreadValue(def: VaryRangeDef, band: number, count: number, rng: () => number): number {

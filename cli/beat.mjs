@@ -134,7 +134,8 @@ const PATHS_NOTE = `paths for set: bpm | loop_bars | selected_track | <track>.<s
 // command belongs to is half of understanding it (vary is meaningless without score/suggest).
 const HELP_FAMILIES = [
   ['vary', 'audition', 'score', 'adopt', 'suggest', 'taste-eval', 'match'], // the taste loop (docs/taste-loop-design.md)
-  ['taste-seeds', 'taste-collect', 'showdown', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval; showdown = the per-role source comparison)
+  ['taste-seeds', 'taste-collect', 'showdown', 'prodtask', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval; showdown = per-role source comparison; prodtask = per-role production-task eval)
+  ['trick', 'prodtask', 'rate'], // production tricks + the blind eval that validates them (docs/prodtask.md)
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
@@ -742,6 +743,36 @@ const HELP = [
         generated .gitignore gate, the manifest records the midi path/transposition as a local
         reference only, and the shared scores log records only figureSource:'midi'|'bank' — never
         a song title, artist, or path.`,
+  },
+  {
+    cmd: 'prodtask',
+    text: `  beat prodtask transform <dir> [--rounds 1] [--seed 61] [--arms original,tricked,random]
+                [--tricks name,name] [--roles bassline,chords,lead,drum-loop] [--seconds S]
+                                                          build blind PRODUCTION-TRANSFORM batches (research 119
+                                                          §T-C): each batch is ONE composed figure in N arms —
+                                                          original (raw engine solo, the documented mono/dry/static
+                                                          loss mode), tricked (the SAME figure + patch plus a
+                                                          sensible per-role trick stack via the real beat trick
+                                                          apply path — width/air/glue), and random (the SAME figure
+                                                          + a magnitude-matched RANDOM-EDIT control: the same number
+                                                          of edits the stack made, on random legal params at random
+                                                          legal values — the control that separates "the RIGHT
+                                                          production moves" from "any change sounds different").
+                                                          Notes/patch are identical across arms; only production
+                                                          varies. Assembled as an ordinary clip-set batch: arms
+                                                          seeded-shuffled into v-numbers, duration-matched, and —
+                                                          load-bearing — loudness-normalized so tricks win on
+                                                          width/air/glue, never on level. Renders are local-engine
+                                                          only (no fal). --tricks overrides the per-role stack (for
+                                                          ablations: width-only vs width+air vs full). Rate with
+                                                          beat rate as usual.
+  beat prodtask --report <dir> [--json] (or --log f)      the scoreboard: per-arm win / top-half / pairwise from
+                                                          every scored prodtask batch, overall and per task/role,
+                                                          small-n splits labeled smoke, PLUS per-arm mean DSP
+                                                          receipts (stereoWidthDb, bandAirPct) tying the blind
+                                                          result to the mechanical one. Chance: tricked-vs-original
+                                                          pairwise 50% = tricks don't move the ear; tricked must
+                                                          ALSO beat random. See docs/prodtask.md.`,
   },
   {
     cmd: 'rate',
@@ -2312,6 +2343,174 @@ async function showdownCmd(argv) {
   }
   process.stdout.write(`\n${made} showdown batch(es)${failed > 0 ? ` (${failed} failed)` : ''} — sources are blind: the manifest is the answer key, don't peek before rating\n`)
   process.stdout.write(`next: beat rate ${dir} — then beat showdown ${dir} --report for the per-source scoreboard\n`)
+}
+
+// Production-task eval — production-transform (docs/research/119-production-task-evals.md §T-C,
+// docs/prodtask.md): does the research-118 trick catalog move the OWNER'S blind ratings, not just
+// the width/air METRICS? Each batch is ONE composed figure in N arms — original (raw engine),
+// tricked (a per-role trick stack via the real `beat trick apply` path), and a random-edit control
+// (same edit count, random legal params/values) — assembled as an ordinary clip-set batch and
+// rated through the unchanged blind `beat rate` flow. A sibling of `beat showdown` that reuses its
+// batch machinery wholesale (compose figure, solo, shuffle, duration-match, LUFS-normalize); the
+// new source axis is the production ARM, not the source pipeline. Renders are local-engine only
+// (no fal), same one-boot offline render as the showdown work batch.
+async function prodtaskCmd(argv) {
+  const valued = ['--rounds', '--seed', '--arms', '--tricks', '--roles', '--seconds', '--log']
+  const known = new Set([...valued, '--report', '--json'])
+  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const sub = positional[0]
+  const dir = positional[1] ?? (sub && sub !== 'transform' ? sub : undefined)
+  const prodtask = await import('../dist/src/taste/prodtask.js')
+
+  // ---- the scoreboard --------------------------------------------------------------------------
+  if (argv.includes('--report')) {
+    const logPath = flagValue(argv, '--log') ?? (dir ? join(dir, 'beat-scores.jsonl') : null)
+    if (!logPath || !existsSync(logPath)) {
+      throw new BeatEditError('prodtask --report needs a scored collection: beat prodtask --report <dir> (beat-scores.jsonl at the dir root) or --log <path>')
+    }
+    const report = prodtask.computeProdtaskReport(logPath)
+    process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : prodtask.formatProdtaskReport(report))
+    return
+  }
+  if (argv.includes('--json')) throw new BeatEditError('--json only applies to prodtask --report')
+
+  // ---- collection: `beat prodtask transform <dir>` ---------------------------------------------
+  if (sub !== 'transform') throw new BeatEditError('prodtask needs a task: beat prodtask transform <dir> [--rounds N] [--seed S] [--arms original,tricked,random] [--tricks names] [--roles bassline,chords,lead,drum-loop] (or --report <dir>)')
+  if (!dir) throw new BeatEditError('prodtask transform needs the taste-seeds directory: beat prodtask transform <dir>')
+
+  const showdown = await import('../dist/src/taste/showdown.js')
+  const { mulberry32 } = await import('../dist/src/taste/eval.js')
+  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
+  const { mkdirSync, copyFileSync } = await import('node:fs')
+  const { tricks, macros } = loadTricks()
+
+  const roles = (flagValue(argv, '--roles') ?? prodtask.PRODTASK_ROLES.map((r) => r.role).join(','))
+    .split(',')
+    .filter(Boolean)
+    .map((r) => prodtask.prodtaskRole(r)) // throws with the legal list on a typo
+  const rounds = flagValue(argv, '--rounds') ? Number(flagValue(argv, '--rounds')) : 1
+  const metaSeed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 61
+  const targetSeconds = flagValue(argv, '--seconds') !== undefined ? Number(flagValue(argv, '--seconds')) : undefined
+  const trickOverride = flagValue(argv, '--tricks') !== undefined ? flagValue(argv, '--tricks').split(',').filter(Boolean) : undefined
+  const ARM_ORDER = ['original', 'tricked', 'random']
+  const requestedArms = (flagValue(argv, '--arms') ?? ARM_ORDER.join(',')).split(',').filter(Boolean)
+  for (const a of requestedArms) if (!ARM_ORDER.includes(a)) throw new BeatEditError(`unknown arm "${a}" (have: ${ARM_ORDER.join(', ')})`)
+  if (!requestedArms.includes('original')) throw new BeatEditError('the "original" arm is the baseline every prodtask batch is rated against — it cannot be dropped')
+  const arms = ARM_ORDER.filter((a) => requestedArms.includes(a))
+  if (arms.length < 2) throw new BeatEditError('a prodtask batch needs at least two arms (e.g. --arms original,tricked)')
+
+  const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
+  if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
+  const seeds = seedFiles.map((f) => ({ file: f, doc: parse(readFileSync(join(dir, f), 'utf8')) }))
+
+  const rng = mulberry32(metaSeed)
+  let made = 0
+  let failed = 0
+  // per-role archetypes already composed this session — threaded into the composer's exclude list
+  // so consecutive batches of one run never share a figure (the showdown's un-blinding guarantee)
+  const usedFigures = new Map()
+  for (let round = 0; round < rounds; round++) {
+    for (const spec of roles) {
+      const batchSeed = Math.floor(rng() * 100000)
+      const candidates = seeds.filter((s) => s.doc.tracks.some((t) => t.id === spec.seedTrack))
+      if (candidates.length === 0) {
+        failed += 1
+        process.stderr.write(`warning: no seed song has a "${spec.seedTrack}" track for role ${spec.role} — skipping (generate more seeds: beat taste-seeds ${dir})\n`)
+        continue
+      }
+      const seed = candidates[Math.floor(rng() * candidates.length)]
+      const seedPath = join(dir, seed.file)
+      const outDir = join(dir, `prodtask-transform-${spec.role}-${batchSeed}`)
+      const workDir = join(outDir, 'work')
+      process.stderr.write(`\n=== prodtask transform ${spec.role}: composed figure in ${seed.file}'s key — ${arms.join(' vs ')} (seed ${batchSeed}) ===\n`)
+      try {
+        mkdirSync(workDir, { recursive: true })
+
+        // compose ONE figure (the archetype bank, exclude-chained so recognition can't un-blind),
+        // apply it, extend to 4 bars, solo the role track — the ORIGINAL arm's document. Every arm
+        // shares this figure and patch to the note: the only thing that varies is production.
+        const exclude = usedFigures.get(spec.role) ?? []
+        let composed
+        let phrased
+        if (spec.role === 'drum-loop') {
+          composed = showdown.composeDrumPhrase(batchSeed, { exclude })
+          phrased = showdown.applyComposedDrums(showdown.extendToFourBars(seed.doc), spec.seedTrack, composed)
+        } else {
+          const key = showdown.inferSeedKey(seed.doc)
+          composed = showdown.composePitchedPhrase(spec.role, key, batchSeed, { exclude })
+          phrased = showdown.applyComposedPhrase(showdown.extendToFourBars(seed.doc), spec.seedTrack, composed)
+        }
+        usedFigures.set(spec.role, [...exclude, composed.archetype])
+        const originalDoc = showdown.soloForShowdown(phrased, spec.seedTrack)
+        process.stderr.write(`composed figure: ${composed.archetype} (batch seed ${batchSeed})\n`)
+
+        // tricked arm: the per-role stack via the real applyTrick path. Always computed (even when
+        // the tricked arm itself isn't requested) because the random control matches its edit count.
+        const stack = prodtask.resolveTrickStack(spec.role, tricks, trickOverride)
+        const trickedRes = prodtask.applyTrickStack(originalDoc, spec.seedTrack, stack, macros)
+        for (const w of trickedRes.warnings) process.stderr.write(`  trick precondition: ${w}\n`)
+        process.stderr.write(`trick stack [${trickedRes.tricks.join(', ')}]: ${trickedRes.editCount} edit(s)\n`)
+
+        // random-edit control: the same edit count, random legal params/values (seeded, distinct
+        // from the batch seed so it doesn't track the figure)
+        const randomRes = prodtask.randomEditControl(originalDoc, spec.seedTrack, trickedRes.editCount, batchSeed + 31)
+        process.stderr.write(`random-edit control: ${randomRes.edits.join(', ')}\n`)
+
+        // build the requested arms in fixed order, then render them all in ONE batch boot (offline;
+        // raw levels — the whole batch is loudness-normalized together below so tricks win on
+        // width/air/glue, never on level)
+        const armSpec = {
+          original: { doc: originalDoc, from: `composed ${composed.archetype} on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine, raw)` },
+          tricked: { doc: trickedRes.doc, from: `same figure + trick stack [${trickedRes.tricks.join(', ')}]: ${trickedRes.applied.join('; ')}`, tricks: trickedRes.tricks, edits: trickedRes.applied },
+          random: { doc: randomRes.doc, from: `same figure + random-edit control (${randomRes.edits.length} edits): ${randomRes.edits.join('; ')}`, edits: randomRes.edits },
+        }
+        const built = arms.map((kind) => ({ kind, ...armSpec[kind] }))
+        const workVariants = built.map((b) => ({ doc: b.doc, recipe: `prodtask ${spec.role} ${b.kind}` }))
+        writeVaryBatch({
+          parentPath: seedPath,
+          parentText: readFileSync(seedPath, 'utf8'),
+          track: spec.seedTrack,
+          group: 'prodtask-work',
+          count: workVariants.length,
+          seed: batchSeed,
+          outDir: workDir,
+          variants: workVariants,
+        })
+        renderVaryBatch(workDir, workVariants.length, { normalize: false })
+
+        // assemble: seeded arm->v-number shuffle (first blinding layer; beat rate shuffles again),
+        // then manifest + duration match + loudness normalization
+        const clips = built.map((b, i) => ({
+          kind: b.kind,
+          wav: join(workDir, `v${i + 1}.wav`),
+          source: { kind: b.kind, from: b.from, ...(b.tricks ? { tricks: b.tricks } : {}), ...(b.edits ? { edits: b.edits } : {}) },
+        }))
+        const order = showdown.assignClipOrder(clips.length, batchSeed)
+        const files = new Array(clips.length)
+        for (let v = 0; v < clips.length; v++) {
+          const clip = clips[order[v]]
+          copyFileSync(clip.wav, join(outDir, `v${v + 1}.wav`))
+          files[v] = { file: `v${v + 1}.wav`, source: clip.source }
+        }
+        rmSync(workDir, { recursive: true }) // never leave a scoreable work batch for beat rate to find
+        prodtask.writeProdtaskBatch(outDir, spec.role, files, { seed: batchSeed, task: 'transform' })
+        const match = showdown.matchClipDurations(outDir, files.map((f) => f.file), targetSeconds !== undefined ? { targetSeconds } : {})
+        process.stdout.write(`${outDir}/: ${files.length} arms (${built.map((b) => b.kind).sort().join(' vs ')}), duration-matched to ${match.targetSeconds}s\n`)
+        const norm = normalizeBatchLoudness(outDir, files.length)
+        if (norm) process.stdout.write(formatNormalizationResult(norm))
+        made += 1
+      } catch (err) {
+        failed += 1
+        process.stderr.write(`warning: prodtask transform ${spec.role} failed — skipping (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+        try {
+          if (existsSync(outDir) && !existsSync(join(outDir, 'manifest.json'))) rmSync(outDir, { recursive: true })
+        } catch { /* best-effort cleanup */ }
+      }
+    }
+  }
+  process.stdout.write(`\n${made} prodtask batch(es)${failed > 0 ? ` (${failed} failed)` : ''} — arms are blind: the manifest is the answer key, don't peek before rating\n`)
+  process.stdout.write(`next: beat rate ${dir} — then beat prodtask --report ${dir} for the per-arm scoreboard\n`)
 }
 
 async function varyCmd(argv) {
@@ -4518,6 +4717,9 @@ async function main() {
       break
     case 'showdown':
       await showdownCmd(rest)
+      break
+    case 'prodtask':
+      await prodtaskCmd(rest)
       break
     case 'rate': {
       const { rateCommand } = await import('./rate.mjs')
