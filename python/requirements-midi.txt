@@ -1,0 +1,3 @@
+# MIDI extraction sidecar (python/midi_extract.py) — the showdown midi-figure source
+# (docs/source-showdown-eval.md "The midi figure source"). Pure-python, tiny, no audio deps.
+mido>=1.3
