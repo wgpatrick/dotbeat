@@ -39,7 +39,10 @@ function synthBlock(rng: () => number, opts: { osc?: string; volume: number; cut
     `    osc ${opts.osc ?? pick(rng, OSCS)}`,
     `    volume ${round(opts.volume, 1)}`,
     `    cutoff ${Math.round(opts.cutoff)}`,
-    `    resonance ${round(opts.resonance ?? range(rng, 0.2, 1.2))}`,
+    // resonance capped at 0.85 (was 1.2): >1 pushes the engine's lowpass into a self-oscillation
+    // whine at cutoff — the "high pitchy ringy noise" the owner flagged in blind rating
+    // (2026-07-21); narrow 5-7 kHz peaks measured on every hot-resonance seed patch.
+    `    resonance ${round(opts.resonance ?? range(rng, 0.2, 0.85))}`,
     `    attack ${round(opts.attack, 3)}`,
     `    decay ${round(opts.decay, 2)}`,
     `    sustain ${round(opts.sustain, 2)}`,

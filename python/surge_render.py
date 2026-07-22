@@ -165,6 +165,41 @@ def doctor():
     return report
 
 
+def _ring_db(frames_lr, sample_rate):
+    """Worst narrow high-frequency tonal peak across channels, in dB relative to the spectrum
+    max — the "ringy noise" screen (owner, 2026-07-21: several factory patches carry a piercing
+    4-8 kHz resonance, often hard-panned). A bin counts as a ring when it towers over its
+    ±300 Hz neighborhood by >6x in the 4-14 kHz band. Returns ~-120 when nothing rings; the
+    showdown CLI redraws the patch when this exceeds its threshold."""
+    try:
+        import numpy as np  # noqa: PLC0415
+    except Exception:
+        return None
+    arr = np.asarray(frames_lr, dtype=np.float64)
+    if arr.ndim != 2 or arr.shape[0] < 8192:
+        return None
+    worst = -120.0
+    n_fft = 8192
+    window = np.hanning(n_fft)
+    freqs = np.fft.rfftfreq(n_fft, 1.0 / sample_rate)
+    hi = (freqs > 4000) & (freqs < 14000)
+    for ch in range(arr.shape[1]):
+        y = arr[:, ch]
+        mags = [np.abs(np.fft.rfft(y[s:s + n_fft] * window)) for s in range(0, len(y) - n_fft, n_fft)]
+        if not mags:
+            continue
+        spectrum = np.mean(mags, axis=0)
+        smax = spectrum.max() + 1e-12
+        shi = spectrum[hi]
+        for i in range(len(shi)):
+            neighborhood = np.median(shi[max(0, i - 56):min(len(shi), i + 56)]) + 1e-15
+            if shi[i] > 6 * neighborhood:
+                db = 20 * np.log10(shi[i] / smax)
+                if db > worst:
+                    worst = db
+    return round(worst, 1)
+
+
 def _write_wav_pcm16(path, frames_lr, sample_rate):
     """Write interleaved stereo float frames (list/array of [L, R] in [-1, 1]) as 16-bit PCM WAV
     using stdlib `wave` — the encoding src/taste/showdown.ts's readWavData and the loudness/
@@ -263,6 +298,7 @@ def render(request):
         "notes": len(notes),
         "sampleRate": sample_rate,
         "seconds": round(total_samples / sample_rate, 4),
+        "ringDb": _ring_db(frames, sample_rate),
         "output": os.path.abspath(output),
     }
 

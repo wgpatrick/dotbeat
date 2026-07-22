@@ -2015,9 +2015,31 @@ async function showdownCmd(argv) {
               }
               const notes = showdown.composedPhraseToSurgeNotes(surgePhrase, batchBpm)
               const surgeWav = join(workDir, 'surge.wav')
-              await surgeMod.runSurgeRender({ patch: patch.path, notes, sampleRate: 44100, outPath: surgeWav })
-              surgeClip = { kind: 'surge', wav: surgeWav, from: `Surge XT patch "${patch.name}" (${patch.category}) playing the composed ${surgeFigure} figure${sharedFigure ? ' (shared with the engine clip)' : ''}` }
-              process.stderr.write(`surge: rendered "${patch.name}" (${patch.category}) on the ${surgeFigure} figure\n`)
+              // ring screen (owner, 2026-07-21, blind rating: several factory patches carry a
+              // piercing narrow 4-8 kHz resonance, often hard-panned right — "Robochoir 2",
+              // "Magic Music Box"). The sidecar reports its render's worst narrow tonal peak
+              // (ringDb); a patch above the threshold is redrawn (deterministically, excluding
+              // tried patches) up to 3 times, keeping the least-ringy render if none pass.
+              const RING_DB_MAX = -32
+              let chosen = null
+              const tried = new Set()
+              for (let attempt = 0; attempt < 3; attempt++) {
+                const pool = surgePatches.filter((p) => !tried.has(p.path))
+                const candidate = attempt === 0 ? patch : showdown.pickSurgePatch(pool, spec.role, batchSeed + attempt * 7919)
+                if (candidate === null) break
+                tried.add(candidate.path)
+                const attemptWav = join(workDir, `surge-try${attempt}.wav`)
+                const res = await surgeMod.runSurgeRender({ patch: candidate.path, notes, sampleRate: 44100, outPath: attemptWav })
+                const ring = typeof res.ringDb === 'number' ? res.ringDb : -120
+                if (chosen === null || ring < chosen.ring) chosen = { patch: candidate, ring, wav: attemptWav }
+                if (ring <= RING_DB_MAX) break
+                process.stderr.write(`surge: "${candidate.name}" rings (narrow peak ${ring} dB) — redrawing patch\n`)
+              }
+              if (chosen === null) throw new Error('no surge patch available after ring screening')
+              copyFileSync(chosen.wav, surgeWav)
+              if (chosen.ring > RING_DB_MAX) process.stderr.write(`surge: every tried patch rings — keeping the least-ringy ("${chosen.patch.name}", ${chosen.ring} dB)\n`)
+              surgeClip = { kind: 'surge', wav: surgeWav, from: `Surge XT patch "${chosen.patch.name}" (${chosen.patch.category}) playing the composed ${surgeFigure} figure${sharedFigure ? ' (shared with the engine clip)' : ''}` }
+              process.stderr.write(`surge: rendered "${chosen.patch.name}" (${chosen.patch.category}) on the ${surgeFigure} figure (ring ${chosen.ring} dB)\n`)
             }
           } catch (err) {
             process.stderr.write(`surge render skipped (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
