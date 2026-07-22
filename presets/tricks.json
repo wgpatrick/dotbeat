@@ -103,6 +103,109 @@
         { "note": "bass and kick stay dry — reverb on the low end is mud (115 §2.2); this trick's notRoles exclude bass/sub" }
       ],
       "why": "A modest reverb send is the passive width bed under everything in produced tracks: the shared stereo reverb bus is decorrelated L/R, so any dry mono source picks up width and a little air just by feeding it. (research 115 §2.1, high confidence)"
+    },
+    {
+      "name": "bass-mono-anchor",
+      "axis": "width",
+      "slots": { "track": { "kind": "synth", "roles": ["bass", "sub"] } },
+      "when": [],
+      "recipe": [
+        { "set": "$track.unisonWidth", "value": 0 },
+        { "set": "$track.chorusMix", "value": 0 },
+        { "set": "$track.utilityWidth", "value": 0.5 },
+        { "set": "$track.sendReverb", "value": 0 },
+        { "set": "$track.pan", "value": 0 }
+      ],
+      "expect": [
+        { "metric": "stereoWidthDb", "dir": "down" },
+        { "metric": "stereoCorrelation", "dir": "up" }
+      ],
+      "counter": [
+        { "note": "no counter-indications — this IS the discipline that lets every other width trick run safely; apply it to the bass after any project-wide width pass" }
+      ],
+      "why": "The guard-rail: assert the bass/sub back to mono-center (no unison spread, no chorus, neutral utility, no reverb, centered pan) so the low end sums cleanly on a club's mono subs. Club delivery sums lows — a widened sub is the one mistake that never survives the room. (research 115 §2.2, high confidence)"
+    },
+    {
+      "name": "autopan-hats",
+      "axis": "width",
+      "slots": { "track": { "kind": "drums" } },
+      "when": [
+        { "field": "autoPanMix", "op": "==", "value": 0 }
+      ],
+      "recipe": [
+        { "effectAdd": "$track", "type": "autoPan" },
+        { "set": "$track.autoPanRate", "value": 0.15 },
+        { "set": "$track.autoPanDepth", "value": 0.5 },
+        { "set": "$track.autoPanMix", "value": 1 }
+      ],
+      "expect": [
+        { "metric": "stereoWidthDb", "dir": "up" }
+      ],
+      "counter": [
+        { "note": "keep the rate slow and depth shallow — fast, deep autopan on the timekeeper reads as seasickness, not width" }
+      ],
+      "why": "A slow, shallow auto-pan gives the hats width via motion (time-variance) rather than static stereo spread — mono-safe, and it lifts the production-complexity score the showdown found lowest. (research 115 §2.1 / §4.1, high confidence)"
+    },
+    {
+      "name": "air-shelf",
+      "axis": "air",
+      "slots": { "track": { "kind": "any", "roles": ["hats", "perc", "lead", "pad", "chords", "arp"] } },
+      "when": [
+        { "metric": "bandAirPct", "op": "<", "value": 1 }
+      ],
+      "recipe": [
+        { "effectAdd": "$track", "type": "eq7" },
+        { "set": "$track.eq7HighShelfOn", "value": true },
+        { "set": "$track.eq7HighShelfFreq", "value": 11000 },
+        { "set": "$track.eq7HighShelfGain", "value": 3 }
+      ],
+      "expect": [
+        { "metric": "bandAirPct", "dir": "up" },
+        { "metric": "centroidLog2", "dir": "up" }
+      ],
+      "counter": [
+        { "note": "a shelf amplifies what already exists — if the patch has no top end (cutoff below ~6 kHz), run bright-cutoff or noise-wash first, or the shelf boosts silence" }
+      ],
+      "why": "An 11 kHz high shelf is the direct fix for the near-zero-vs-1.9% air-band gap the showdown measured — the genre's default sheen. (research 115 §3.3, high confidence)"
+    },
+    {
+      "name": "noise-wash",
+      "axis": "air",
+      "slots": { "track": { "kind": "synth", "roles": ["pad", "lead", "chords", "arp"] } },
+      "when": [
+        { "field": "noiseLevel", "op": "==", "value": 0 }
+      ],
+      "recipe": [
+        { "set": "$track.noiseLevel", "value": 0.12 }
+      ],
+      "expect": [
+        { "metric": "bandAirPct", "dir": "up" },
+        { "metric": "bandPresencePct", "dir": "up" }
+      ],
+      "counter": [
+        { "note": "keep noiseLevel <= 0.15 — above that it reads as a broken patch, not a washy one" }
+      ],
+      "why": "A low-level filtered-noise wash under a pad or lead adds air and sizzle that a pure oscillator can't produce — the texture carrier for the top octave. (research 115 §3.2, high confidence)"
+    },
+    {
+      "name": "open-hat-air",
+      "axis": "air",
+      "slots": { "track": { "kind": "drums" } },
+      "when": [
+        { "state": "laneHitCount", "lane": "openhat", "op": "==", "value": 0 }
+      ],
+      "recipe": [
+        { "addHits": "$track", "lane": "openhat", "steps": "offbeat-8ths", "velocity": 0.5 },
+        { "set": "$track.hatTone", "value": 6500 },
+        { "set": "$track.openHatDecay", "value": 0.5 }
+      ],
+      "expect": [
+        { "metric": "bandAirPct", "dir": "up" }
+      ],
+      "counter": [
+        { "note": "clashes with a ride-heavy pattern; halve the velocities if the air band was already above ~1.5%" }
+      ],
+      "why": "Sustained open-hat hits on the 8th-note offbeats are the genre's default air carrier — sustained >8 kHz content that lifts the air band and the onset density at once. (research 115 §3.1, high confidence)"
     }
   ]
 }
