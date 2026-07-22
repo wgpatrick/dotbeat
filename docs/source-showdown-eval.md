@@ -160,6 +160,19 @@ that resolves, surge renders are treated **exactly like the private ref chops**:
 
 Re-check surge issue #6741 before ever publishing a Surge-rendered clip.
 
+### The right-ear ring bug (root-caused + fixed 2026-07-22)
+
+Blind raters heard "a high, pitchy, ringy noise... in the right ear" on several surge clips. Root
+cause was **not** patch character but an **upstream `surgepy` bug**: `getOutput()` builds its
+`(2, BLOCK_SIZE)` numpy array with interleaved strides (`{2*sizeof(float), sizeof(float)}`) against a
+channel-major `output[2][BLOCK_SIZE]` engine buffer, so pybind11 copies the *right* row starting two
+floats in — the returned right channel is the **left channel delayed 2 samples**, spliced at every
+32-sample block boundary. That comb-filters into a hard-panned-right 4-8 kHz ring on *every* surge
+render (the mono-bass control was affected too). The sidecar now collects through `processMultiBlock`
+(a correct per-channel `memcpy` path) instead; `ringDb` in the render metadata stays as a safety net.
+Full evidence chain, before/after `ringDb`, and a draft upstream Surge XT issue:
+`docs/research/surge-right-ear-ring-rootcause.md`. Diagnostic harness: `scripts/debug-surge-ring.py`.
+
 ## The ref-dir licensing stance
 
 Ref clips are **private chops of commercial music** — the same private-data posture as the T3
