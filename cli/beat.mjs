@@ -2752,7 +2752,7 @@ async function pilotCmd(argv) {
       rmSync(workDir, { recursive: true, force: true })
       pilot.writePilotBatch(outDir, result.role, files, { seed })
       const match = showdown.matchClipDurations(outDir, files.map((f) => f.file))
-      process.stdout.write(`${outDir}/: ${files.length} clips (${elites.length} elite vs ${result.controls.length} control), duration-matched to ${match.targetSeconds}s\n`)
+      process.stdout.write(`${outDir}/: ${files.length} clips (${g.elites.length} elite vs ${g.controls.length} control + trajectory arms), duration-matched to ${match.targetSeconds}s\n`)
       const norm = normalizeBatchLoudness(outDir, files.length)
       if (norm) process.stdout.write(formatNormalizationResult(norm))
       batchesLanded += 1
