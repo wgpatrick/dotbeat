@@ -17,6 +17,7 @@ per **source pipeline**, blind, loudness-matched, duration-matched:
 | `gen`    | a hosted-generation phrase (fal, Stable Audio; the prompt bank's phrase tier — bassline / chords / melody / drumloop subjects, 4 bars) | raw generation beats everything the engine does |
 | `keymap` | a generated **one-shot** turned into an instrument (`beat keymap` for pitched roles, sample-backed drum lanes for the drum-loop role) playing the **same seed phrase** through the engine's sampler | the hybrid wins: generated *timbre* + engine *notes* |
 | `surge`  | (opt-in, `--with-surge`, **pitched roles only**) a composed figure rendered through a **Surge XT factory patch** via the `surgepy` sidecar — see "The surge source" below | a serious open-source synth + patch library closes the timbre gap dotbeat's own engine can't |
+| `surgeplus` | (opt-in, `--with-surge` **and** `--with-produced`) the **same surge render** through a dotbeat production pass — see "The surgeplus arm" below | surge's deficit is production, not (only) timbre — the surge analog of `engineplus` |
 | `ref`    | (opt-in, off by default) a clip from a private directory of commercial-music chops | the private ceiling — how far every pipeline still is from records the owner loves |
 
 The rating is the owner's ears through the **unchanged** blind `beat rate` flow; the scoreboard is
@@ -173,6 +174,58 @@ render (the mono-bass control was affected too). The sidecar now collects throug
 Full evidence chain, before/after `ringDb`, and a draft upstream Surge XT issue:
 `docs/research/surge-right-ear-ring-rootcause.md`. Diagnostic harness: `scripts/debug-surge-ring.py`.
 
+## The surgeplus arm (`--with-surge` **and** `--with-produced`)
+
+`engineplus` proved production-only edits move the engine 3%→29% blind pairwise; `surge` sits at
+~50% pairwise with **zero** production treatment. `surgeplus` closes that gap the same way: the
+**same surge render** — same factory patch, same figure audio — through a dotbeat production pass,
+so a `surgeplus` win over `surge` is production, isolated (decisions.md D26/D27 name this the top
+lever toward the first blind win over a ref). The clip is added only when **both** flags are set,
+and is gracefully dropped whenever surge itself skips (no `surgepy`, no matching patch, a ring-out).
+
+**Where the production is applied — the audio-domain finding.** A surge clip is a WAV from the
+sidecar, not engine-synthesized, so its production can't be SYNTH_FIELDS edits on a synth track
+(engineplus's mechanism) — it has to be applied to the **audio**. dotbeat's `'audio'`-**kind** track
+is the obvious host, but it carries **no effect chain by format design**: `beat effect-add` refuses
+audio tracks (`src/core/edit.ts` — "effect chains only belong on synth/drums/instrument tracks"),
+the serializer emits none for them, and the engine wires an audio voice as a bare
+`player → muteGain → master` (`ui/src/audio/engine.ts` `buildAudioTrackVoice`) that never reads
+`track.effects`. Hosting the surge WAV in an `'audio'` track would therefore render it **dry** — a
+production no-op. So `surgeplus` hosts the render the **same way the keymap clip hosts its one-shot**:
+a single-trigger **sample voice on a drums-kind scratch host** (`surgeSampleHostText` — a wide-open,
+flat-envelope voice so the whole multi-second render plays through, coloured only by the production).
+That is the audio-playback track dotbeat's engine actually **produces**: its sample voice routes
+`player → filter → the drum bus` (EQ / comp / saturator / reverb + delay sends) plus the reorderable
+insert chain, rendered offline in its own one-boot work batch like every other work clip.
+
+**The production chain actually supported (and the skips).** The pass is the shared `produce.ts`
+profile for the role, through the same `applyProducedDefaults` primitive engineplus wraps
+(`applySurgeplusProduction`). On a drums-kind **sample** voice, the primitive's own `isSynth` guards
+drop the synth-voice-only moves — the **osc-bank width stack** (osc2 layer / unison / noise wash: a
+sample has no osc bank) and the **utility** mid/side widener (a synth-chain insert the drum bus's
+fixed tail doesn't carry). What **actually renders on the surge audio** — and what the clip's `from`
+records as `applied` — is the sample-voice **EFFECT subset**, role-aware from `produce.ts`:
+
+| move | renders on the sample voice? | source |
+|------|------------------------------|--------|
+| eq3 high-shelf **air** (`eqHigh`) | ✅ | drum-bus eq3 insert |
+| **saturator** glue (drive / mix) | ✅ | drum-bus saturator |
+| **chorus** width (mix) | ✅ | drum-bus chorus insert |
+| **reverb** + **delay** sends | ✅ | shared return buses |
+| osc-bank width (osc2 / unison / noise) | ⛔ skipped | synth voices only — no osc bank on a sample |
+| **utility** mid/side width | ⛔ skipped | synth-chain insert; the drum bus doesn't carry it |
+
+Role-aware exactly as `produce.ts` is: `bassline` gets **glue only** (mono-anchored low end — no
+width, no sends, research 115 §2.2); `chords`/`lead` get the full renderable subset (chorus width +
+saturation + reverb/delay space + air). Verified offline on a synthetic surge render: the produced
+clip's stereo correlation drops from **1.00 (dead mono) to ~0.90** and its `applied` list is exactly
+`[chorus, saturator, sendReverb, sendDelay, eqHigh air]` — the arm is not a no-op, and it targets the
+same dead-mono / no-air deficit the whole showdown effort is chasing.
+
+**Licensing.** A `surgeplus` clip is the same surge factory-patch audio, produced — it carries the
+same still-unresolved Surge XT factory-**content** license as `surge`, so a `surgeplus`-bearing batch
+gets the identical `.gitignore` (`*`) gate and the scores log stays kind-only (`"surgeplus"`).
+
 ## The midi figure source (`--midi-dir`)
 
 The archetype bank fixed the un-blinding problem, but it left a CONFOUND in every composed
@@ -265,6 +318,7 @@ beat taste-seeds ~/showdown            # once — seed songs (any existing colle
 beat showdown ~/showdown               # 4 batches (one per role) via fal; add --rounds 2 for 8
 beat showdown ~/showdown --with-produced     # same, plus an engineplus clip per batch (the production ablation)
 beat showdown ~/showdown --with-surge        # same, plus a Surge XT factory-patch clip per pitched batch
+beat showdown ~/showdown --with-surge --with-produced  # ...and a surgeplus clip: the same surge render, produced
 beat showdown --surge-doctor                 # is surgepy built? where is the factory content? (build steps if not)
 beat showdown ~/showdown --ref-dir ~/chops   # same, plus a private ref clip per batch
 beat showdown ~/showdown --midi-dir ~/Documents/dotbeat/taste-dataset/midi
