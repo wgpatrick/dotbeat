@@ -46,6 +46,7 @@ import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { shuffledOrder } from '../vary/audition.js'
 import { genSubject } from './seeds.js'
 import { SPLIT_SMOKE_MIN_BATCHES, mulberry32 } from './eval.js'
+import { curatedKey } from './surgeCuration.js'
 
 export type ShowdownSourceKind = 'engine' | 'engineplus' | 'gen' | 'keymap' | 'ref' | 'surge' | 'surgeplus'
 
@@ -852,13 +853,30 @@ export function patchInCategories(patch: SurgePatch, categories: readonly string
  * reproducible. Returns null when the role skips surge, or when no factory patch matches the
  * role's categories (the CLI then warns and drops the surge clip for that batch). The candidate
  * list is sorted by (category, name) first so the pick is stable across machines with the same
- * factory content regardless of the sidecar's enumeration order. */
-export function pickSurgePatch(patches: readonly SurgePatch[], role: string, seed: number): SurgePatch | null {
+ * factory content regardless of the sidecar's enumeration order.
+ *
+ * CURATION (decisions.md D26): pass `opts.curatedKeys` — the role's curated patch-key Set from a
+ * loaded presets/surge-curated.json (surgeCuration.curatedKeysForRole) — to draw only from the
+ * curated top quartile instead of the full ~639-patch pool. Falls back to the full role pool when
+ * the Set is null/empty, or when NONE of the role's category patches are in it (a curated file
+ * built against different factory content), so the pick never degrades to null just because
+ * curation is on. */
+export function pickSurgePatch(
+  patches: readonly SurgePatch[],
+  role: string,
+  seed: number,
+  opts: { curatedKeys?: ReadonlySet<string> | null } = {},
+): SurgePatch | null {
   const categories = surgeRoleCategories(role)
   if (categories === null) return null
-  const candidates = patches
+  let candidates = patches
     .filter((p) => patchInCategories(p, categories))
     .sort((a, b) => a.category.toLowerCase().localeCompare(b.category.toLowerCase()) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+  const keys = opts.curatedKeys
+  if (keys && keys.size > 0) {
+    const curated = candidates.filter((p) => keys.has(curatedKey(p.category, p.name)))
+    if (curated.length > 0) candidates = curated // else: curated file doesn't match this factory content — full pool
+  }
   if (candidates.length === 0) return null
   const rng = mulberry32(seed + 613) // surge salt, distinct from the phrase/archetype salts
   return candidates[Math.floor(rng() * candidates.length)]!
