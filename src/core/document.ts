@@ -11,7 +11,7 @@
 // this value leaks there (no second wtTable2/wtPos2 field exists to drive them).
 export type OscType = 'sine' | 'triangle' | 'sawtooth' | 'square' | 'wavetable'
 
-export type TrackKind = 'synth' | 'drums' | 'instrument' | 'audio'
+export type TrackKind = 'synth' | 'drums' | 'instrument' | 'audio' | 'surge'
 
 /** Phase 18 Stream R: an LFO rate expressed as a tempo-synced note division instead of free Hz —
  * Ableton's convention (Synced / Triplet / Dotted). `t` = triplet (2/3 the plain division's
@@ -792,6 +792,34 @@ export interface BeatInstrument {
   pan: number // -1..1
 }
 
+/** Track 1a (surge sidecar-instrument track, decisions.md D23): one normalized parameter override
+ * applied to the Surge patch at render time via surgepy's `setParamVal`. `param` is a
+ * surgepy-addressable parameter name (case-insensitive; a small friendly-alias table plus a
+ * substring match against Surge's own param names — resolution happens AT RENDER, not parse, so a
+ * file loads on a machine without surgepy). `value` is normalized 0..1 (surgepy's own param space,
+ * NOT natural Hz/dB) — the same space Surge's automation/modulation lanes use. */
+export interface BeatSurgeOverride {
+  param: string
+  value: number // normalized 0..1
+}
+
+/** Track 1a: a `surge` track's sound source — a Surge XT factory patch rendered out-of-process by
+ * the python/surge_render.py sidecar (GPLv3 stays out-of-process per D23; nothing links). A surge
+ * track ALSO carries the standard `synth` production block (volume/sends/eq/... apply to the hosted
+ * playback; the osc-bank/filter/envelope params are honest no-ops — the timbre comes from Surge).
+ * Notes/clips are ordinary pitched-track grammar. At render the notes are converted to the sidecar
+ * note-list, rendered to a content-hash-keyed cached WAV under media/, and played through the
+ * track's sample-playback path with the synth block's effects/sends applied (the surgeplus hosting
+ * mechanism, promoted from eval trick to engine feature). See docs/surge-track.md. */
+export interface BeatSurge {
+  patch: string // factory patch name, e.g. "Formant Pulse" (resolved via the catalogue at render)
+  sampleRate: number // Hz; SURGE_DEFAULT_SAMPLE_RATE (44100) is the elided canonical default
+  overrides: BeatSurgeOverride[] // canonical order: by param name ascending; duplicate param = parse error
+}
+
+/** The elided canonical default for a surge block's `sampleRate` line (44.1 kHz). */
+export const SURGE_DEFAULT_SAMPLE_RATE = 44100
+
 // v0.10 (Phase 22 Stream AA): the per-track insert-effect chain, promoted out of
 // DELIBERATELY_UNMODELED's 'insertOrder' entry (src/core/convert.ts) now that it has a real
 // grammar. Replaces the old hardcoded EQ3->compressor->distortion->bitcrush order
@@ -930,6 +958,7 @@ export interface BeatTrack {
   kind: TrackKind
   synth: BeatSynth // drum tracks carry these too — in BeatLab they're the real drum bus/voice params
   instrument?: BeatInstrument // v0.6; present iff kind === 'instrument' (synth block absent)
+  surge?: BeatSurge // Track 1a; present iff kind === 'surge' (the synth block is ALSO present, as production)
   laneSamples: Partial<Record<DrumLane, BeatLaneSample>> // v0.5; drum tracks only, {} when none
   /** Phase 22 Stream AB (research 19 Part VI Option B): the OPEN, per-track ordered lane
    * declaration list. Drum tracks only; [] for synth/instrument tracks and for legacy/migrated
@@ -1247,7 +1276,7 @@ export function defaultSynthFields(): Omit<BeatSynth, (typeof SYNTH_PARAM_ORDER)
   return out as Omit<BeatSynth, (typeof SYNTH_PARAM_ORDER)[number]>
 }
 
-export const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument', 'audio']
+export const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument', 'audio', 'surge']
 
 /** The format's standard init patch for a newly-created track (`beat init` / `beat add-track`).
  * A format-level default, not a copy of any host app's: a mellow filtered saw that sounds

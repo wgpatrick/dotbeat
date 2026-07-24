@@ -1,5 +1,5 @@
-import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatTrack } from './document.js'
-import { AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_KEYS, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain, sortPlacements } from './document.js'
+import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatSurge, BeatTrack } from './document.js'
+import { AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_KEYS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
 
 // v0.10: the effect chain serializes iff it differs from the canonical default (isDefaultEffectChain)
@@ -136,6 +136,21 @@ function grooveLine(t: BeatTrack): string[] {
   return t.shuffleAmount !== 0 ? [`  groove ${formatNumber(t.shuffleAmount)} ${formatNumber(t.shuffleGrid)}`] : []
 }
 
+// Track 1a: a surge track's sound-source block — the factory `patch`, an optional `sampleRate`
+// (elided at 44100), and any normalized `override <param> <value>` lines. Emitted right after the
+// track line and before the standard `synth` production block a surge track ALSO carries. patch is
+// double-quoted (factory names have spaces — the format's one quoted string, stripped on parse);
+// overrides serialize sorted by param name so the canonical form is order-independent (a duplicate
+// param is a parse error, so one line per param).
+function serializeSurgeBlock(surge: BeatSurge): string[] {
+  const lines = ['  surge', `    patch "${surge.patch}"`]
+  if (surge.sampleRate !== SURGE_DEFAULT_SAMPLE_RATE) lines.push(`    sampleRate ${formatNumber(surge.sampleRate)}`)
+  for (const o of [...surge.overrides].sort((a, b) => a.param.localeCompare(b.param))) {
+    lines.push(`    override ${o.param} ${formatNumber(o.value)}`)
+  }
+  return lines
+}
+
 // v0.10: clip-level loop range + time signature, emitted iff set (canonical elision — no line =
 // no override, see BeatClip.loop/.signature). Ordered first, as Ableton's Clip View orders "Main
 // Clip Properties" before the note/hit content.
@@ -207,6 +222,9 @@ function serializeTrack(t: BeatTrack): string[] {
     lines.push(...sortedNoteLines(t.notes, '  '))
     return lines
   }
+  // Track 1a: a surge track carries its sound-source block first, THEN the standard synth
+  // production block (below) — the timbre is Surge's, the production is dotbeat's.
+  if (t.kind === 'surge') lines.push(...serializeSurgeBlock(t.surge!))
   lines.push(`  synth`)
   for (const key of SYNTH_PARAM_ORDER) {
     const value = t.synth[key]
@@ -226,7 +244,7 @@ function serializeTrack(t: BeatTrack): string[] {
   // eq3->comp->distortion->bitcrush bus insert into this same reorderable list — see
   // BeatTrack.effects's comment — so drums now serializes it exactly like synth. (Instrument
   // tracks reach serializeEffectLines from their own branch above, before this generic one.)
-  if (t.kind === 'synth' || t.kind === 'drums') lines.push(...serializeEffectLines(t.effects, '  '))
+  if (t.kind === 'synth' || t.kind === 'drums' || t.kind === 'surge') lines.push(...serializeEffectLines(t.effects, '  '))
   lines.push(...grooveLine(t))
   // Phase 22 Stream AB: the OPEN lane list, declared order, one line per lane — only for tracks
   // that opted in (t.lanes.length > 0); a legacy/migrated track (t.lanes === []) emits none of
