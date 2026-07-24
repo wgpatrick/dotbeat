@@ -727,12 +727,17 @@ const HELP = [
   {
     cmd: 'showdown',
     text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
-                [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--ref-dir <path>]
-                [--midi-dir <path>] [--seconds S]
+                [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--random-patches]
+                [--ref-dir <path>] [--midi-dir <path>] [--seconds S]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
                                                           source — engine (the role's seed phrase, soloed, through
-                                                          dotbeat's own synth), gen (a fal-generated phrase from
+                                                          dotbeat's own synth, playing a role-mapped factory/curated
+                                                          preset — docs/engine-presets.md; --random-patches keeps the
+                                                          seed's historical random patch for era comparison, and the
+                                                          engine/engineplus manifest from-strings record the patch
+                                                          source [patch: random-seed-patch|factory:<name>|curated:<id>]),
+                                                          gen (a fal-generated phrase from
                                                           the prompt bank's phrase tier), keymap (a generated
                                                           one-shot played as an instrument through the engine's
                                                           sampler lanes), optionally engineplus (--with-produced:
@@ -1868,11 +1873,18 @@ async function tasteSeedsCmd(argv) {
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 8
   const seed0 = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 1
   const { generateSeedBeat } = await import('../dist/src/taste/seeds.js')
+  const { loadEngineCuratedFile } = await import('../dist/src/taste/enginePresets.js')
   const { mkdirSync } = await import('node:fs')
   mkdirSync(outDir, { recursive: true })
+  // Curated engine bank (docs/engine-presets.md E2): when present, each synth track's base patch is
+  // drawn from the bank + seeded jitter (seeds stay byte-deterministic per seed); absent → the
+  // historical random-roll patch. The pilot reads these seed files, so it inherits curated material.
+  const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', 'engine-curated.json')
+  const seedCurated = loadEngineCuratedFile(curatedPath)
+  if (seedCurated) process.stdout.write(`engine-curated.json present — synth seed patches drawn from the curated bank + seeded jitter\n`)
   for (let i = 0; i < count; i++) {
     const seed = seed0 + i
-    const { text, description } = generateSeedBeat(seed)
+    const { text, description } = generateSeedBeat(seed, { curated: seedCurated })
     parse(text) // a seed that doesn't parse is a generator bug — fail loudly, write nothing bad
     const file = join(outDir, `seed-${String(seed).padStart(3, '0')}.beat`)
     writeFileSync(file, text + '\n')
@@ -2034,7 +2046,7 @@ function flagValue(argv, flag) {
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
   const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--ref-dir', '--midi-dir', '--seconds', '--log']
-  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure'])
+  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure', '--random-patches'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const dir = positional[0]
@@ -2069,6 +2081,8 @@ async function showdownCmd(argv) {
   const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
   const { mkdirSync, copyFileSync } = await import('node:fs')
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
+  // Engine preset provenance + role-mapped draw (docs/engine-presets.md E0/E1/E2).
+  const { RANDOM_SEED_PATCH, withPatchProvenance, pickEnginePreset, loadEngineCuratedFile } = await import('../dist/src/taste/enginePresets.js')
 
   const roles = (flagValue(argv, '--roles') ?? showdown.SHOWDOWN_ROLES.map((r) => r.role).join(','))
     .split(',')
@@ -2094,6 +2108,12 @@ async function showdownCmd(argv) {
   // (exclude-chained within the batch and across the run); --shared-figure restores the controlled
   // ablation (same notes across composed sources, only the sound-source varies).
   const sharedFigure = argv.includes('--shared-figure')
+  // Engine preset draw (docs/engine-presets.md E1/E2): by DEFAULT the engine (and engineplus) clip
+  // draws a role-mapped factory preset — the curated bank when presets/engine-curated.json exists,
+  // factory.json / drum-kits.json otherwise — applied to the seed track as an ordinary preset edit,
+  // instead of the seed's randomly rolled patch. --random-patches restores the historical behavior
+  // (the seed's own random synthBlock) so the two patch eras stay directly comparable in one report.
+  const randomPatches = argv.includes('--random-patches')
   const refDir = flagValue(argv, '--ref-dir')
   if (refDir !== undefined && !existsSync(refDir)) throw new BeatEditError(`no directory at --ref-dir ${refDir}`)
 
@@ -2177,12 +2197,31 @@ async function showdownCmd(argv) {
     return out.sort()
   }
 
+  // Engine preset pool (E1/E2), loaded ONCE. When --random-patches is set it stays unused (the seed
+  // keeps its random patch). The curated bank is preferred when present, factory next.
+  let enginePresets = []
+  let engineCurated = null
+  if (!randomPatches) {
+    try {
+      enginePresets = loadPresets()
+      const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', 'engine-curated.json')
+      engineCurated = loadEngineCuratedFile(curatedPath)
+      const bankSize = Object.entries(engineCurated?.roles ?? {}).map(([r, v]) => `${r} ${v.kept?.length ?? 0}`).join(', ')
+      process.stderr.write(`engine patches: factory (${enginePresets.length} presets)${engineCurated ? ` + curated bank (${bankSize || 'no roles'})` : ''} — engine/engineplus draw a role-mapped voicing (--random-patches for the historical random-seed-patch era)\n`)
+    } catch (err) {
+      process.stderr.write(`warning: engine preset pool failed to load (${err instanceof Error ? err.message.split('\n')[0] : err}) — falling back to random-seed-patch\n`)
+    }
+  }
+
   const rng = mulberry32(metaSeed)
   let made = 0
   let failed = 0
   // per-role archetypes already composed this session — threaded into the composer's exclude
   // list so no two batches of one run share a figure (the un-blinding fix's session guarantee)
   const usedFigures = new Map()
+  // per-role preset names already drawn this run — exclude-chained so a run doesn't repeat a
+  // voicing while the pool has alternatives (the archetype-figure convention, E1)
+  const usedPresets = new Map()
   for (let round = 0; round < rounds; round++) {
     for (const spec of roles) {
       const batchSeed = Math.floor(rng() * 100000)
@@ -2321,7 +2360,36 @@ async function showdownCmd(argv) {
           batchBpm = showdown.foldBpmToRange(engineDrawn.midi.figure.bpm)
           process.stderr.write(`bpm from the midi figure's own tempo: ${batchBpm} BPM\n`)
         }
-        const extended = { ...showdown.extendToFourBars(seed.doc), bpm: batchBpm }
+        let extended = { ...showdown.extendToFourBars(seed.doc), bpm: batchBpm }
+        // patch provenance (docs/engine-presets.md E0): the engine/engineplus clips carry a tag
+        // recording which patch era produced them. Default is the seed's random-seed-patch; E1/E2
+        // swap in a role-mapped factory/curated voicing (and record factory:/curated:).
+        let enginePatchProvenance = RANDOM_SEED_PATCH
+        // E1/E2: replace the seed's random patch with a role-mapped preset (applied to the seed
+        // track as an ordinary preset edit, BEFORE the figure composes, so the engineplus clip —
+        // which produces whatever patch the engine clip carries — inherits it for free). Seeded by
+        // the batch seed, exclude-chained across the run. Degrades to the random patch on any miss.
+        if (!randomPatches && enginePresets.length > 0) {
+          try {
+            const pick = pickEnginePreset({
+              role: spec.role,
+              seed: batchSeed,
+              presets: enginePresets,
+              curated: engineCurated,
+              exclude: usedPresets.get(spec.role) ?? [],
+            })
+            if (pick !== null) {
+              extended = { ...pick.apply(extended, spec.seedTrack), bpm: batchBpm }
+              enginePatchProvenance = pick.provenance
+              usedPresets.set(spec.role, [...(usedPresets.get(spec.role) ?? []), pick.name])
+              process.stderr.write(`engine patch: ${pick.provenance} (${spec.role})\n`)
+            } else {
+              process.stderr.write(`engine patch: no ${spec.role} preset in the pool — keeping random-seed-patch\n`)
+            }
+          } catch (err) {
+            process.stderr.write(`engine patch draw skipped (${err instanceof Error ? err.message.split('\n')[0] : err}) — keeping random-seed-patch\n`)
+          }
+        }
         const phrased = applyComposed(engineComposed)
         const figure = engineComposed.archetype
         // pitchedPhrase: the engine clip's ComposedPhrase for pitched roles — the surge render's
@@ -2389,8 +2457,8 @@ async function showdownCmd(argv) {
         // render engine (+ engineplus) + keymap in ONE batch boot (offline by default; raw
         // levels — the whole showdown batch is normalized together below, across sources)
         const workVariants = [
-          { doc: engineDoc, recipe: `engine ${spec.seedTrack} solo (composed ${figure})` },
-          ...(produced ? [{ doc: produced.doc, recipe: `engine ${spec.seedTrack} solo + production pass (composed ${plusFigure})` }] : []),
+          { doc: engineDoc, recipe: withPatchProvenance(`engine ${spec.seedTrack} solo (composed ${figure})`, enginePatchProvenance) },
+          ...(produced ? [{ doc: produced.doc, recipe: withPatchProvenance(`engine ${spec.seedTrack} solo + production pass (composed ${plusFigure})`, enginePatchProvenance) }] : []),
           { doc: kmDoc, recipe: `keymap phrase (composed ${kmFigure})` },
         ]
         writeVaryBatch({
@@ -2524,9 +2592,9 @@ async function showdownCmd(argv) {
         }
 
         const clips = [
-          { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `${figDesc(engineDrawn)} on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
+          { kind: 'engine', wav: join(workDir, 'v1.wav'), from: withPatchProvenance(`${figDesc(engineDrawn)} on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)`, enginePatchProvenance) },
           ...(produced
-            ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: `${sharedFigure ? `same ${figDesc(plusDrawn)} and patch as the engine clip` : `${figDesc(plusDrawn)} through the engine patch`} + production pass: ${produced.applied.join(', ')} (dotbeat engine)` }]
+            ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: withPatchProvenance(`${sharedFigure ? `same ${figDesc(plusDrawn)} and patch as the engine clip` : `${figDesc(plusDrawn)} through the engine patch`} + production pass: ${produced.applied.join(', ')} (dotbeat engine)`, enginePatchProvenance) }]
             : []),
           { kind: 'keymap', wav: join(workDir, produced ? 'v3.wav' : 'v2.wav'), from: kmFrom },
           { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
