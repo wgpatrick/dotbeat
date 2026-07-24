@@ -15,20 +15,18 @@ import {
   withPatchProvenance,
   readPatchProvenance,
   engineRolePresetCategories,
-  engineRoleUsesKit,
+  engineRoleUsesDrums,
   pickEnginePreset,
   loadEngineCuratedFile,
   engineCuratedForRole,
 } from '../src/taste/enginePresets.js'
 import { parsePresetLibrary } from '../src/core/preset.js'
-import { parseDrumKitLibrary } from '../src/core/drumkit.js'
 import { parse, serialize } from '../src/core/index.js'
 import { writeShowdownBatch } from '../src/taste/showdown.js'
 import { readBatchManifest } from '../src/vary/batch.js'
 import { generateSeedBeat } from '../src/taste/seeds.js'
 
 const FACTORY = parsePresetLibrary(readFileSync(new URL('../presets/factory.json', import.meta.url), 'utf8'))
-const KITS = parseDrumKitLibrary(readFileSync(new URL('../presets/drum-kits.json', import.meta.url), 'utf8'))
 
 // tiny WAV so the manifest writer has real files to hash
 function toneWav(freq: number, seconds: number): Buffer {
@@ -82,13 +80,13 @@ test('E1 role mapping: pitched roles -> synth categories, drum-loop -> kit, unkn
   assert.deepEqual(engineRolePresetCategories('lead'), ['lead', 'pluck', 'arp'])
   assert.equal(engineRolePresetCategories('drum-loop'), null)
   assert.equal(engineRolePresetCategories('nonsense'), null)
-  assert.equal(engineRoleUsesKit('drum-loop'), true)
-  assert.equal(engineRoleUsesKit('bassline'), false)
+  assert.equal(engineRoleUsesDrums('drum-loop'), true)
+  assert.equal(engineRoleUsesDrums('bassline'), false)
 })
 
 test('E1 pick: a pitched role draws a role-category synth preset, deterministic in the seed', () => {
-  const a = pickEnginePreset({ role: 'bassline', seed: 41, presets: FACTORY, kits: KITS })
-  const b = pickEnginePreset({ role: 'bassline', seed: 41, presets: FACTORY, kits: KITS })
+  const a = pickEnginePreset({ role: 'bassline', seed: 41, presets: FACTORY })
+  const b = pickEnginePreset({ role: 'bassline', seed: 41, presets: FACTORY })
   assert.ok(a && b)
   assert.equal(a!.name, b!.name, 'same seed -> same pick')
   assert.equal(a!.provenance, `factory:${a!.name}`)
@@ -97,17 +95,21 @@ test('E1 pick: a pitched role draws a role-category synth preset, deterministic 
   assert.equal(chosen.category, 'bass', 'bassline draws from the bass category')
 
   // chords may be pad OR keys; lead may be lead/pluck/arp
-  const chords = pickEnginePreset({ role: 'chords', seed: 3, presets: FACTORY, kits: KITS })!
+  const chords = pickEnginePreset({ role: 'chords', seed: 3, presets: FACTORY })!
   assert.ok(['pad', 'keys'].includes(FACTORY.find((p) => p.name === chords.name)!.category))
-  const lead = pickEnginePreset({ role: 'lead', seed: 9, presets: FACTORY, kits: KITS })!
+  const lead = pickEnginePreset({ role: 'lead', seed: 9, presets: FACTORY })!
   assert.ok(['lead', 'pluck', 'arp'].includes(FACTORY.find((p) => p.name === lead.name)!.category))
 })
 
-test('E1 pick: drum-loop draws a factory drum kit; provenance is factory:<kit>', () => {
-  const pick = pickEnginePreset({ role: 'drum-loop', seed: 41, presets: FACTORY, kits: KITS })!
+test('E1 pick: drum-loop draws a factory drums preset (applied as an ordinary edit); provenance factory:<name>', () => {
+  const pick = pickEnginePreset({ role: 'drum-loop', seed: 41, presets: FACTORY })!
   assert.ok(pick)
-  assert.ok(KITS.some((k) => k.name === pick.name), 'name is a real kit')
+  const preset = FACTORY.find((p) => p.name === pick.name)!
+  assert.equal(preset.kind, 'drums', 'drum-loop draws a drums-kind preset')
   assert.equal(pick.provenance, `factory:${pick.name}`)
+  // it applies cleanly to a seed drums track (no media dependency), and round-trips
+  const seed = parse(generateSeedBeat(3).text)
+  assert.doesNotThrow(() => parse(serialize(pick.apply(seed, 'drums'))))
 })
 
 test('E1 pick: exclude-chains within a run so a run does not repeat a voicing while alternatives exist', () => {
@@ -115,19 +117,19 @@ test('E1 pick: exclude-chains within a run so a run does not repeat a voicing wh
   let seed = 100
   // bass category has 6 presets — draw 6 with growing exclude, expect 6 distinct
   for (let i = 0; i < 6; i++) {
-    const pick = pickEnginePreset({ role: 'bassline', seed: seed++, presets: FACTORY, kits: KITS, exclude: [...seen] })!
+    const pick = pickEnginePreset({ role: 'bassline', seed: seed++, presets: FACTORY, exclude: [...seen] })!
     assert.ok(!seen.has(pick.name), `pick ${pick.name} not repeated (draw ${i})`)
     seen.add(pick.name)
   }
   assert.equal(seen.size, 6, 'all six bass presets used before any repeat')
   // a 7th draw (pool exhausted) reuses rather than returning null
-  const seventh = pickEnginePreset({ role: 'bassline', seed: seed, presets: FACTORY, kits: KITS, exclude: [...seen] })
+  const seventh = pickEnginePreset({ role: 'bassline', seed: seed, presets: FACTORY, exclude: [...seen] })
   assert.ok(seventh, 'pool exhausted -> reuse, never null')
 })
 
 test('E1 pick applies as an ordinary preset edit: the seed patch is replaced and the doc round-trips', () => {
   const seed = parse(generateSeedBeat(3).text)
-  const pick = pickEnginePreset({ role: 'bassline', seed: 41, presets: FACTORY, kits: KITS })!
+  const pick = pickEnginePreset({ role: 'bassline', seed: 41, presets: FACTORY })!
   const applied = pick.apply(seed, 'bass')
   const preset = FACTORY.find((p) => p.name === pick.name)!
   const bass = applied.tracks.find((t) => t.id === 'bass')!
@@ -161,7 +163,7 @@ test('E2 curated bank: pick prefers a curated patch when the role has one; prove
   assert.equal(engineCuratedForRole(curated, 'bassline').length, 2)
   assert.equal(engineCuratedForRole(curated, 'chords').length, 0)
 
-  const pick = pickEnginePreset({ role: 'bassline', seed: 41, presets: FACTORY, kits: KITS, curated })!
+  const pick = pickEnginePreset({ role: 'bassline', seed: 41, presets: FACTORY, curated })!
   assert.ok(pick.provenance.startsWith('curated:'), `curated preferred: ${pick.provenance}`)
   assert.ok(['roll-abc', 'roll-def'].includes(pick.name))
 })
@@ -176,7 +178,7 @@ test('E2 fallback chain: curated file absent -> factory; role missing from curat
     roles: { bassline: { pool: 1, survivors: 1, kept: [{ id: 'roll-1', source: 'random-roll', category: 'bass', params: { cutoff: 500 }, composite: 1 }] } },
   }))
   const curated = loadEngineCuratedFile(path)
-  const chords = pickEnginePreset({ role: 'chords', seed: 5, presets: FACTORY, kits: KITS, curated })!
+  const chords = pickEnginePreset({ role: 'chords', seed: 5, presets: FACTORY, curated })!
   assert.ok(chords.provenance.startsWith('factory:'), 'chords not in curated -> factory draw')
 })
 

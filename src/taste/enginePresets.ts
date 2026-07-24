@@ -20,7 +20,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import type { BeatDocument } from '../core/document.js'
 import { applyPreset, type BeatPreset } from '../core/preset.js'
-import { applyDrumKit, type BeatDrumKit } from '../core/drumkit.js'
 import { mulberry32 } from './eval.js'
 
 // ---- E0: patch provenance ----------------------------------------------------------------------
@@ -56,9 +55,10 @@ export function readPatchProvenance(from: string): string | null {
 
 // ---- E1/E2: the role -> preset draw ------------------------------------------------------------
 
-/** Role -> factory.json synth-preset categories. Pitched roles only; drum-loop draws a KIT (below),
- * not a synth voicing, so it maps to null here — the same shape surgeRoleCategories uses. The
- * categories mirror docs/engine-presets.md E1: bassline→bass, chords→pad|keys, lead→lead|pluck|arp. */
+/** Role -> factory.json SYNTH-preset categories (docs/engine-presets.md E1): bassline→bass,
+ * chords→pad|keys, lead→lead|pluck|arp. drum-loop is not here — it draws a `drums`-kind preset (the
+ * six factory drum voicings), which have their own genre-named category taxonomy; see engineRoleUsesDrums.
+ * Unknown roles map to null so the pick returns null and the CLI keeps random-seed-patch. */
 export const ENGINE_ROLE_PRESET_CATEGORIES: Record<string, readonly string[] | null> = {
   bassline: ['bass'],
   chords: ['pad', 'keys'],
@@ -66,14 +66,18 @@ export const ENGINE_ROLE_PRESET_CATEGORIES: Record<string, readonly string[] | n
   'drum-loop': null,
 }
 
-/** The role's synth-preset categories, or null when the role draws a kit / is unknown (the pick
- * then routes to a drum kit for drum-loop, or returns null so the CLI keeps random-seed-patch). */
+/** The role's synth-preset categories, or null when the role draws a drums preset / is unknown. */
 export function engineRolePresetCategories(role: string): readonly string[] | null {
   return role in ENGINE_ROLE_PRESET_CATEGORIES ? ENGINE_ROLE_PRESET_CATEGORIES[role]! : null
 }
 
-/** True iff the role draws a drum kit (drum-kits.json) rather than a synth preset. */
-export function engineRoleUsesKit(role: string): boolean {
+/** True iff the role draws a `drums`-KIND factory preset (the six kit voicings in factory.json)
+ * rather than a synth preset. Those are param-bag edits (kickPunch/hatTone/… on the drum bus), so
+ * they apply through the SAME ordinary-preset-edit path as the pitched roles — unlike drum-kits.json,
+ * whose kits REPLACE the lane list and (kit-acoustic) reference unregistered samples, so they can't
+ * apply cleanly to a bare seed. The plan's principle is "curated voicings applied as ordinary edits";
+ * the factory drum presets are exactly that, so drum-loop uses them. */
+export function engineRoleUsesDrums(role: string): boolean {
   return role === 'drum-loop'
 }
 
@@ -161,11 +165,10 @@ export function pickEnginePreset(opts: {
   role: string
   seed: number
   presets: readonly BeatPreset[]
-  kits: readonly BeatDrumKit[]
   curated?: EngineCuratedFile | null
   exclude?: readonly string[]
 }): EnginePick | null {
-  const { role, seed, presets, kits } = opts
+  const { role, seed, presets } = opts
   const exclude = new Set(opts.exclude ?? [])
   const rng = mulberry32((seed >>> 0) + PRESET_SALT)
   const drawFrom = <T extends { name: string }>(pool: readonly T[]): T | null => {
@@ -176,12 +179,12 @@ export function pickEnginePreset(opts: {
     return candidates[Math.floor(rng() * candidates.length)]!
   }
 
-  // drum-loop: a factory drum kit (drum-kits.json). No curated bank for kits (E2 curates the synth
-  // param space, not kit voicings — the surge-curation precedent).
-  if (engineRoleUsesKit(role)) {
-    const kit = drawFrom(kits)
-    if (!kit) return null
-    return { provenance: factoryProvenance(kit.name), name: kit.name, apply: (doc, trackId) => applyDrumKit(doc, trackId, kit) }
+  // drum-loop: a factory `drums`-kind preset (applied as an ordinary preset edit). No curated bank
+  // for drums (E2 curates the synth param space; the surge-curation precedent — pitched roles only).
+  if (engineRoleUsesDrums(role)) {
+    const preset = drawFrom(presets.filter((p) => p.kind === 'drums'))
+    if (!preset) return null
+    return { provenance: factoryProvenance(preset.name), name: preset.name, apply: (doc, trackId) => applyPreset(doc, trackId, preset) }
   }
 
   const categories = engineRolePresetCategories(role)
