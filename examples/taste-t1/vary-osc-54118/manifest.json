@@ -1,0 +1,71 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "f3287acb49ffb12a50db262f983000dc4ce394879abcb1ed0eaab183f44efc18",
+  "track": "arp",
+  "group": "osc",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 54118,
+  "createdAt": "2026-07-18T07:27:45.014Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "arp.osc2Level 0.706",
+        "arp.osc2Detune 5.9364",
+        "arp.subLevel 0.067",
+        "arp.noiseLevel 0.202",
+        "arp.unisonVoices 4",
+        "arp.unisonWidth 0.8731",
+        "arp.wtPos 0.8833"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "arp.osc2Level 0.5898",
+        "arp.osc2Detune 3.2766",
+        "arp.subLevel 0.6851",
+        "arp.noiseLevel 0.3753",
+        "arp.unisonVoices 5",
+        "arp.unisonWidth 0.0329",
+        "arp.wtPos 0.6077"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "arp.osc2Level 0.0819",
+        "arp.osc2Detune 19.4752",
+        "arp.subLevel 0.53",
+        "arp.noiseLevel 0.0808",
+        "arp.unisonVoices 7",
+        "arp.unisonWidth 0.2014",
+        "arp.wtPos 0.4162"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "arp.osc2Level 0.2429",
+        "arp.osc2Detune 8.4925",
+        "arp.subLevel 0.3498",
+        "arp.noiseLevel 0.0588",
+        "arp.unisonVoices 3",
+        "arp.unisonWidth 0.6865",
+        "arp.wtPos 0.2771"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "arp.osc2Level 0.3893",
+        "arp.osc2Detune 14.3496",
+        "arp.subLevel 0.1743",
+        "arp.noiseLevel 0.3013",
+        "arp.unisonWidth 0.5517",
+        "arp.wtPos 0.1432"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "967fe8fd2306abf0e667e0ee222a7beb7d812a9c1fa1a7c6e387f42f88312957",
+  "group": "gen:impact1",
+  "count": 5,
+  "seed": 63441,
+  "createdAt": "2026-07-17T23:41:24.016Z",
+  "prompt": "a cinematic impact hit with a tail",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "impact1",
+        "sha256": "23798ba223e546a48b2b4f5bbcb826dc9b2f7796303554ce19b1492ca48fe1f1",
+        "durationSeconds": 2.5704,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 63441,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a cinematic impact hit with a tail, dark and cavernous, heavy reverb",
+          "sha256": "23798ba223e546a48b2b4f5bbcb826dc9b2f7796303554ce19b1492ca48fe1f1",
+          "preparedAt": "2026-07-17T23:41:14.929Z",
+          "durationSeconds": 2.5704,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a cinematic impact hit with a tail, dark and cavernous, heavy reverb",
+            "seconds": 3,
+            "seed": 63441,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "impact1",
+        "sha256": "ca8df13e382484c41f352e6d683b106a99b247d772cd5239d514bf95faae8b51",
+        "durationSeconds": 2.654,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 63442,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a cinematic impact hit with a tail, analog warmth, tape saturation",
+          "sha256": "ca8df13e382484c41f352e6d683b106a99b247d772cd5239d514bf95faae8b51",
+          "preparedAt": "2026-07-17T23:41:17.051Z",
+          "durationSeconds": 2.654,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a cinematic impact hit with a tail, analog warmth, tape saturation",
+            "seconds": 3,
+            "seed": 63442,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "impact1",
+        "sha256": "6635f834b449444a6c59d52821148c6056c7475dd3300c3462dccb6c153935af",
+        "durationSeconds": 2.7876,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 63443,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a cinematic impact hit with a tail, soft, intimate, close-mic feel",
+          "sha256": "6635f834b449444a6c59d52821148c6056c7475dd3300c3462dccb6c153935af",
+          "preparedAt": "2026-07-17T23:41:19.272Z",
+          "durationSeconds": 2.7876,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a cinematic impact hit with a tail, soft, intimate, close-mic feel",
+            "seconds": 3,
+            "seed": 63443,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "impact1",
+        "sha256": "0356d6fbe8592673fab50e1989b438f7b26a511a8b16ea13f4d88da26892f450",
+        "durationSeconds": 2.7997,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 63444,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a cinematic impact hit with a tail, clean and modern, club-ready",
+          "sha256": "0356d6fbe8592673fab50e1989b438f7b26a511a8b16ea13f4d88da26892f450",
+          "preparedAt": "2026-07-17T23:41:21.814Z",
+          "durationSeconds": 2.7997,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a cinematic impact hit with a tail, clean and modern, club-ready",
+            "seconds": 3,
+            "seed": 63444,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "impact1",
+        "sha256": "792c390246a462966b37b8d62f38129cf820c670ae3638d3960a66074657fda1",
+        "durationSeconds": 2.8183,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 63445,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a cinematic impact hit with a tail, lo-fi, dusty, vinyl character",
+          "sha256": "792c390246a462966b37b8d62f38129cf820c670ae3638d3960a66074657fda1",
+          "preparedAt": "2026-07-17T23:41:24.015Z",
+          "durationSeconds": 2.8183,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a cinematic impact hit with a tail, lo-fi, dusty, vinyl character",
+            "seconds": 3,
+            "seed": 63445,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

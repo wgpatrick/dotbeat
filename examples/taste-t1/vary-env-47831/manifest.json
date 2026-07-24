@@ -1,0 +1,57 @@
+{
+  "parent": "examples/taste-t1/seed-005.beat",
+  "parentSha256": "8048b55238dc95fa311b4cbf97961020fa2803fdcc5677b33e9fa7b1659d9f5e",
+  "track": "chords",
+  "group": "env",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 47831,
+  "createdAt": "2026-07-18T07:29:32.593Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "chords.attack 0.3699",
+        "chords.decay 0.0938",
+        "chords.sustain 0.8684",
+        "chords.release 0.1841"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "chords.attack 0.0529",
+        "chords.decay 0.6596",
+        "chords.sustain 0.2298",
+        "chords.release 0.0243"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "chords.attack 0.2017",
+        "chords.decay 0.4263",
+        "chords.sustain 0.7569",
+        "chords.release 0.8062"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "chords.attack 0.0049",
+        "chords.decay 0.0218",
+        "chords.sustain 0.0528",
+        "chords.release 0.5658"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "chords.attack 0.0094",
+        "chords.decay 0.1109",
+        "chords.sustain 0.4731",
+        "chords.release 0.0854"
+      ]
+    }
+  ]
+}

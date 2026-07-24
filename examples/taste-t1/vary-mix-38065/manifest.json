@@ -1,0 +1,67 @@
+{
+  "parent": "examples/taste-t1/seed-004.beat",
+  "parentSha256": "fad57f156861a380529d4da92b8506b100d2eb9568b296dcbdfd2f2b551c659c",
+  "track": "chords",
+  "group": "mix",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 38065,
+  "createdAt": "2026-07-18T07:18:48.986Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "chords.volume -16.7618",
+        "chords.pan 0.6922",
+        "chords.eqLow -1.3929",
+        "chords.eqMid -0.714",
+        "chords.eqHigh 1.5841",
+        "chords.duckAmount 0.6249"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "chords.volume 1.0898",
+        "chords.pan 0.2129",
+        "chords.eqLow -4.0538",
+        "chords.eqMid 1.1369",
+        "chords.eqHigh -4.3523",
+        "chords.duckAmount 0.4189"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "chords.volume -3.2383",
+        "chords.pan -0.4009",
+        "chords.eqLow 2.8771",
+        "chords.eqMid -2.5402",
+        "chords.eqHigh 0.502",
+        "chords.duckAmount 0.0438"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "chords.volume -5.763",
+        "chords.pan -0.6336",
+        "chords.eqLow 4.4224",
+        "chords.eqMid 4.1859",
+        "chords.eqHigh -2.8147",
+        "chords.duckAmount 0.5316"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "chords.volume -12.1722",
+        "chords.pan 0.1229",
+        "chords.eqLow 0.6243",
+        "chords.eqMid -4.0802",
+        "chords.eqHigh 4.4172",
+        "chords.duckAmount 0.2765"
+      ]
+    }
+  ]
+}

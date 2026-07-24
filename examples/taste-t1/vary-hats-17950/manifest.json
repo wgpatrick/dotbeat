@@ -1,0 +1,52 @@
+{
+  "parent": "examples/taste-t1/seed-005.beat",
+  "parentSha256": "eacfe2e206273c7455a64f0878662fd839b454b6e5983e65076198c040202dfd",
+  "track": "drums",
+  "group": "hats",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 17950,
+  "createdAt": "2026-07-18T07:29:47.024Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "drums.hatTone 2889.0031",
+        "drums.hatDecay 0.0745",
+        "drums.openHatDecay 0.1466"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "drums.hatTone 9094.4713",
+        "drums.hatDecay 0.0379",
+        "drums.openHatDecay 0.2522"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "drums.hatTone 4230.6605",
+        "drums.hatDecay 0.0303",
+        "drums.openHatDecay 0.5799"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "drums.hatTone 5178.0464",
+        "drums.hatDecay 0.1088",
+        "drums.openHatDecay 0.4435"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "drums.hatTone 6243.7393",
+        "drums.hatDecay 0.0184",
+        "drums.openHatDecay 0.2032"
+      ]
+    }
+  ]
+}

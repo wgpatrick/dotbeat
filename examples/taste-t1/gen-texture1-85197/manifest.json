@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "967fe8fd2306abf0e667e0ee222a7beb7d812a9c1fa1a7c6e387f42f88312957",
+  "group": "gen:texture1",
+  "count": 5,
+  "seed": 85197,
+  "createdAt": "2026-07-17T23:41:51.297Z",
+  "prompt": "an atmospheric noise texture loop",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "texture1",
+        "sha256": "813630752178496f0b2ca7b50915071fcdc890487091982e554cdba35d51ebd6",
+        "durationSeconds": 4,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 85197,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "an atmospheric noise texture loop, clean and modern, club-ready",
+          "sha256": "813630752178496f0b2ca7b50915071fcdc890487091982e554cdba35d51ebd6",
+          "preparedAt": "2026-07-17T23:41:42.197Z",
+          "durationSeconds": 4,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "an atmospheric noise texture loop, clean and modern, club-ready",
+            "seconds": 4,
+            "seed": 85197,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "texture1",
+        "sha256": "bfdf170598c93046812aa27a826f1764dcbcc4f40933df34832c196819b65d87",
+        "durationSeconds": 3.7746,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 85198,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "an atmospheric noise texture loop, dark and cavernous, heavy reverb",
+          "sha256": "bfdf170598c93046812aa27a826f1764dcbcc4f40933df34832c196819b65d87",
+          "preparedAt": "2026-07-17T23:41:44.283Z",
+          "durationSeconds": 3.7746,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "an atmospheric noise texture loop, dark and cavernous, heavy reverb",
+            "seconds": 4,
+            "seed": 85198,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "texture1",
+        "sha256": "dd84f9e7b166596bb7c60aa581f0bb1196a63085cb625b6f40183499a52950ea",
+        "durationSeconds": 3.952,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 85199,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "an atmospheric noise texture loop, lo-fi, dusty, vinyl character",
+          "sha256": "dd84f9e7b166596bb7c60aa581f0bb1196a63085cb625b6f40183499a52950ea",
+          "preparedAt": "2026-07-17T23:41:46.849Z",
+          "durationSeconds": 3.952,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "an atmospheric noise texture loop, lo-fi, dusty, vinyl character",
+            "seconds": 4,
+            "seed": 85199,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "texture1",
+        "sha256": "bb72b68ecadfc79594dd190b381a00e0bc71e81404811354ceeafc609818b7cf",
+        "durationSeconds": 4,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 85200,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "an atmospheric noise texture loop, bright and glassy, digital sheen",
+          "sha256": "bb72b68ecadfc79594dd190b381a00e0bc71e81404811354ceeafc609818b7cf",
+          "preparedAt": "2026-07-17T23:41:49.377Z",
+          "durationSeconds": 4,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "an atmospheric noise texture loop, bright and glassy, digital sheen",
+            "seconds": 4,
+            "seed": 85200,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "texture1",
+        "sha256": "056d175032f8e0a8aca3e3b4e5b911c14d3b8b342c81c9c389568e74194dc788",
+        "durationSeconds": 3.6177,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 85201,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "an atmospheric noise texture loop, soft, intimate, close-mic feel",
+          "sha256": "056d175032f8e0a8aca3e3b4e5b911c14d3b8b342c81c9c389568e74194dc788",
+          "preparedAt": "2026-07-17T23:41:51.297Z",
+          "durationSeconds": 3.6177,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "an atmospheric noise texture loop, soft, intimate, close-mic feel",
+            "seconds": 4,
+            "seed": 85201,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

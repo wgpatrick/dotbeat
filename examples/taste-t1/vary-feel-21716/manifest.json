@@ -1,0 +1,31 @@
+{
+  "parent": "examples/taste-t1/seed-006.beat",
+  "parentSha256": "ebb8235b0cef3d731476c4140a3360dcf21d699d3c9a326032e3a3782e51ffa0",
+  "track": "bass",
+  "group": "feel",
+  "count": 5,
+  "seed": 21716,
+  "createdAt": "2026-07-18T07:12:17.959Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "recipe": "humanize seed=21716 timing=0.02 velocity=0.02  # tight"
+    },
+    {
+      "file": "v2.beat",
+      "recipe": "humanize seed=21717 timing=0.06 velocity=0.05 swing=0.22  # light-swing"
+    },
+    {
+      "file": "v3.beat",
+      "recipe": "humanize seed=21718 timing=0.08 velocity=0.08 push-late=0.04 swing=0.55  # heavy-swing"
+    },
+    {
+      "file": "v4.beat",
+      "recipe": "humanize seed=21719 timing=0.06 velocity=0.06 push-late=0.22 swing=0.12  # laid-back"
+    },
+    {
+      "file": "v5.beat",
+      "recipe": "humanize seed=21720 timing=0.32 velocity=0.18 push-late=0.08 swing=0.3  # loose"
+    }
+  ]
+}

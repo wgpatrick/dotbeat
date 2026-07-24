@@ -1,0 +1,56 @@
+{
+  "parent": "examples/taste-t1/seed-008.beat",
+  "parentSha256": "f715368a56708be3f444dc2b31880a1b0f3f6d6908e2b438f3da41196db4ce3e",
+  "track": "arp",
+  "group": "env",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 26431,
+  "createdAt": "2026-07-18T07:30:47.702Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "arp.attack 0.3834",
+        "arp.decay 0.045",
+        "arp.sustain 0.2426",
+        "arp.release 0.3605"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "arp.attack 0.1582",
+        "arp.decay 0.0415",
+        "arp.sustain 0.8236",
+        "arp.release 1.4358"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "arp.attack 0.048",
+        "arp.decay 0.3652",
+        "arp.sustain 0.5285",
+        "arp.release 0.0751"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "arp.decay 0.9793",
+        "arp.sustain 0.6781",
+        "arp.release 0.0418"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "arp.attack 0.0202",
+        "arp.decay 0.1392",
+        "arp.sustain 0.0964",
+        "arp.release 0.2082"
+      ]
+    }
+  ]
+}

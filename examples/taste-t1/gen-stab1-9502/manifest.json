@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "4f3890853582b63d57bceaf139538335b82bbaf66712b4bee33b331fbfa324b5",
+  "group": "gen:stab1",
+  "count": 5,
+  "seed": 9502,
+  "createdAt": "2026-07-18T21:53:14.342Z",
+  "prompt": "a wide chord stab one-shot",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "stab1",
+        "sha256": "da8ba5fa364e3eee7b4afe8a62b30d06c7ef04f39f55f84bebf3ae2389fab3fd",
+        "durationSeconds": 2,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 9502,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a wide chord stab one-shot, dark and cavernous, heavy reverb",
+          "sha256": "da8ba5fa364e3eee7b4afe8a62b30d06c7ef04f39f55f84bebf3ae2389fab3fd",
+          "preparedAt": "2026-07-18T21:52:50.772Z",
+          "durationSeconds": 2,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a wide chord stab one-shot, dark and cavernous, heavy reverb",
+            "seconds": 2,
+            "seed": 9502,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "stab1",
+        "sha256": "72637193ff2cd2590cd29fdf6ef2a79436bf639c06874c5096a9376b7367cec7",
+        "durationSeconds": 1.3474,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 9503,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a wide chord stab one-shot, lo-fi, dusty, vinyl character",
+          "sha256": "72637193ff2cd2590cd29fdf6ef2a79436bf639c06874c5096a9376b7367cec7",
+          "preparedAt": "2026-07-18T21:52:56.129Z",
+          "durationSeconds": 1.3474,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a wide chord stab one-shot, lo-fi, dusty, vinyl character",
+            "seconds": 2,
+            "seed": 9503,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "stab1",
+        "sha256": "e5464087033cad995c94904083dff45e34748cf229e58f9c4423be7324578384",
+        "durationSeconds": 1.0475,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 9504,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a wide chord stab one-shot, soft, intimate, close-mic feel",
+          "sha256": "e5464087033cad995c94904083dff45e34748cf229e58f9c4423be7324578384",
+          "preparedAt": "2026-07-18T21:53:02.163Z",
+          "durationSeconds": 1.0475,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a wide chord stab one-shot, soft, intimate, close-mic feel",
+            "seconds": 2,
+            "seed": 9504,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "stab1",
+        "sha256": "8193251b7f47dde50590e15dd36a0db823d9397a221cdd62504a809c7be8b797",
+        "durationSeconds": 1.8318,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 9505,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a wide chord stab one-shot, bright and glassy, digital sheen",
+          "sha256": "8193251b7f47dde50590e15dd36a0db823d9397a221cdd62504a809c7be8b797",
+          "preparedAt": "2026-07-18T21:53:07.715Z",
+          "durationSeconds": 1.8318,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a wide chord stab one-shot, bright and glassy, digital sheen",
+            "seconds": 2,
+            "seed": 9505,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "stab1",
+        "sha256": "c4658e50249d7934f24e2d78987567f01db3eb973d25da19f88dfd2e8a58178b",
+        "durationSeconds": 2,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 9506,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a wide chord stab one-shot, organic and acoustic-leaning",
+          "sha256": "c4658e50249d7934f24e2d78987567f01db3eb973d25da19f88dfd2e8a58178b",
+          "preparedAt": "2026-07-18T21:53:14.341Z",
+          "durationSeconds": 2,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a wide chord stab one-shot, organic and acoustic-leaning",
+            "seconds": 2,
+            "seed": 9506,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

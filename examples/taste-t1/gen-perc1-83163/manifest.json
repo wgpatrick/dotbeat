@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "967fe8fd2306abf0e667e0ee222a7beb7d812a9c1fa1a7c6e387f42f88312957",
+  "group": "gen:perc1",
+  "count": 5,
+  "seed": 83163,
+  "createdAt": "2026-07-17T23:42:56.120Z",
+  "prompt": "a resonant percussion hit",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "perc1",
+        "sha256": "1eb5c642beb5936008aa8c04ee5e673f2ce0e9a4e04ec17766ff466a277071f5",
+        "durationSeconds": 0.4507,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 83163,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a resonant percussion hit, soft, intimate, close-mic feel",
+          "sha256": "1eb5c642beb5936008aa8c04ee5e673f2ce0e9a4e04ec17766ff466a277071f5",
+          "preparedAt": "2026-07-17T23:42:47.741Z",
+          "durationSeconds": 0.4507,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a resonant percussion hit, soft, intimate, close-mic feel",
+            "seconds": 1,
+            "seed": 83163,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "perc1",
+        "sha256": "4aab5132b994d5aa518a88fd116e2fc912738778f2b9a47847cf0dc7972f68db",
+        "durationSeconds": 0.4814,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 83164,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a resonant percussion hit, analog warmth, tape saturation",
+          "sha256": "4aab5132b994d5aa518a88fd116e2fc912738778f2b9a47847cf0dc7972f68db",
+          "preparedAt": "2026-07-17T23:42:49.712Z",
+          "durationSeconds": 0.4814,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a resonant percussion hit, analog warmth, tape saturation",
+            "seconds": 1,
+            "seed": 83164,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "perc1",
+        "sha256": "cd55bd71e882df6ba40ad62bb8fe8936e050778fe3131ef1136b396aa2cad082",
+        "durationSeconds": 0.9749,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 83165,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a resonant percussion hit, dark and cavernous, heavy reverb",
+          "sha256": "cd55bd71e882df6ba40ad62bb8fe8936e050778fe3131ef1136b396aa2cad082",
+          "preparedAt": "2026-07-17T23:42:51.795Z",
+          "durationSeconds": 0.9749,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a resonant percussion hit, dark and cavernous, heavy reverb",
+            "seconds": 1,
+            "seed": 83165,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "perc1",
+        "sha256": "501b457036dbc7b1727cc20b1c14f8dd978ac6de06ed8c7aa15fc6a5a4790ae8",
+        "durationSeconds": 0.4184,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 83166,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a resonant percussion hit, clean and modern, club-ready",
+          "sha256": "501b457036dbc7b1727cc20b1c14f8dd978ac6de06ed8c7aa15fc6a5a4790ae8",
+          "preparedAt": "2026-07-17T23:42:53.935Z",
+          "durationSeconds": 0.4184,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a resonant percussion hit, clean and modern, club-ready",
+            "seconds": 1,
+            "seed": 83166,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "perc1",
+        "sha256": "b5192de2554d0da8251ce7706d882fbe227a183de7a153bcb5b09d8ab6ca4f63",
+        "durationSeconds": 0.7819,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 83167,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a resonant percussion hit, bright and glassy, digital sheen",
+          "sha256": "b5192de2554d0da8251ce7706d882fbe227a183de7a153bcb5b09d8ab6ca4f63",
+          "preparedAt": "2026-07-17T23:42:56.119Z",
+          "durationSeconds": 0.7819,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a resonant percussion hit, bright and glassy, digital sheen",
+            "seconds": 1,
+            "seed": 83167,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

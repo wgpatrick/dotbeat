@@ -1,0 +1,72 @@
+{
+  "parent": "examples/taste-t1/seed-005.beat",
+  "parentSha256": "353887e6a22eebee393972cd53041797fbdf36ffaf65444030f5aec1ef068142",
+  "track": "bass",
+  "group": "osc",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 82268,
+  "createdAt": "2026-07-18T21:45:20.433Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "bass.osc2Level 0.0828",
+        "bass.osc2Detune 28.0536",
+        "bass.subLevel 0.6257",
+        "bass.noiseLevel 0.1595",
+        "bass.unisonVoices 2",
+        "bass.unisonWidth 0.59",
+        "bass.wtPos 0.3244"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "bass.osc2Level 0.4893",
+        "bass.osc2Detune 18.2159",
+        "bass.subLevel 0.4051",
+        "bass.noiseLevel 0.2723",
+        "bass.unisonVoices 3",
+        "bass.unisonWidth 0.7636",
+        "bass.wtPos 0.1106"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "bass.osc2Level 0.3216",
+        "bass.osc2Detune 10.0946",
+        "bass.subLevel 0.7648",
+        "bass.noiseLevel 0.3423",
+        "bass.unisonVoices 2",
+        "bass.unisonWidth 0.3299",
+        "bass.wtPos 0.9324"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "bass.osc2Level 0.7509",
+        "bass.osc2Detune 5.4187",
+        "bass.subLevel 0.2869",
+        "bass.noiseLevel 0.2084",
+        "bass.unisonVoices 6",
+        "bass.unisonWidth 0.0877",
+        "bass.wtPos 0.766"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "bass.osc2Level 0.2531",
+        "bass.osc2Detune 4.3741",
+        "bass.subLevel 0.089",
+        "bass.noiseLevel 0.0623",
+        "bass.unisonVoices 7",
+        "bass.unisonWidth 0.8269",
+        "bass.wtPos 0.4093"
+      ]
+    }
+  ]
+}

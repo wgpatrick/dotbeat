@@ -1,0 +1,52 @@
+{
+  "parent": "examples/taste-t1/seed-002.beat",
+  "parentSha256": "14b976cc338882bd98dec882ca48c6bd0ea04bed5acb82dbd003dcca2d5716bc",
+  "track": "drums",
+  "group": "kick",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 33079,
+  "createdAt": "2026-07-18T07:17:49.113Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "drums.kickTune 43.2015",
+        "drums.kickPunch 0.0593",
+        "drums.kickDecay 0.7625"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "drums.kickTune 70.9023",
+        "drums.kickPunch 0.24",
+        "drums.kickDecay 0.3634"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "drums.kickTune 36.7546",
+        "drums.kickPunch 0.1454",
+        "drums.kickDecay 0.5077"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "drums.kickTune 28.9302",
+        "drums.kickPunch 0.1678",
+        "drums.kickDecay 0.1535"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "drums.kickTune 60.3273",
+        "drums.kickPunch 0.0178",
+        "drums.kickDecay 0.3091"
+      ]
+    }
+  ]
+}

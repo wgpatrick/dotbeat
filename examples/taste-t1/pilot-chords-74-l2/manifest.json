@@ -1,0 +1,99 @@
+{
+  "parent": "",
+  "parentSha256": "",
+  "group": "pilot:chords",
+  "count": 6,
+  "seed": 74,
+  "createdAt": "2026-07-23T02:52:15.234Z",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "source": {
+        "kind": "checkpoint",
+        "from": "optimization checkpoint: step 1 of 4 on the best elite's lineage (seed-001.beat)"
+      },
+      "loudness": {
+        "measuredLufs": -20.45,
+        "gainDb": 0,
+        "capped": false,
+        "truePeakDbtp": -9.79,
+        "wantedGainDb": 0
+      }
+    },
+    {
+      "file": "v2.wav",
+      "source": {
+        "kind": "control",
+        "from": "random-mutation control descended from elite chords-g6-31 (seed-001.beat)"
+      },
+      "loudness": {
+        "measuredLufs": -17.65,
+        "gainDb": -2.79,
+        "capped": false,
+        "truePeakDbtp": -3.33,
+        "wantedGainDb": -2.79
+      }
+    },
+    {
+      "file": "v3.wav",
+      "source": {
+        "kind": "origin",
+        "from": "the untouched seed (seed-001.beat) — optimization step 0"
+      },
+      "loudness": {
+        "measuredLufs": -21.57,
+        "gainDb": 1.12,
+        "capped": false,
+        "truePeakDbtp": -12.6,
+        "wantedGainDb": 1.12
+      }
+    },
+    {
+      "file": "v4.wav",
+      "source": {
+        "kind": "elite",
+        "from": "niche sparse·dark, 4 optimization steps from seed-001.beat (pessimistic 0.5240183257697169)"
+      },
+      "loudness": {
+        "measuredLufs": -18.75,
+        "gainDb": -1.69,
+        "capped": false,
+        "truePeakDbtp": -6.62,
+        "wantedGainDb": -1.69
+      }
+    },
+    {
+      "file": "v5.wav",
+      "source": {
+        "kind": "checkpoint",
+        "from": "optimization checkpoint: step 2 of 4 on the best elite's lineage (seed-001.beat)"
+      },
+      "loudness": {
+        "measuredLufs": -20.45,
+        "gainDb": 0,
+        "capped": false,
+        "truePeakDbtp": -9.77,
+        "wantedGainDb": 0
+      }
+    },
+    {
+      "file": "v6.wav",
+      "source": {
+        "kind": "elite",
+        "from": "niche busy·bright, 3 optimization steps from seed-001.beat (pessimistic -0.6823453873368874)"
+      },
+      "loudness": {
+        "measuredLufs": -19.79,
+        "gainDb": -0.66,
+        "capped": false,
+        "truePeakDbtp": -9.08,
+        "wantedGainDb": -0.66
+      }
+    }
+  ],
+  "normalization": {
+    "targetLufs": -20.45,
+    "truePeakCeilingDbtp": -1,
+    "normalized": true
+  }
+}

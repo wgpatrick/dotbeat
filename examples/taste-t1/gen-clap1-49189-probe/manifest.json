@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "967fe8fd2306abf0e667e0ee222a7beb7d812a9c1fa1a7c6e387f42f88312957",
+  "group": "gen:clap1",
+  "count": 5,
+  "seed": 49189,
+  "createdAt": "2026-07-17T23:42:02.406Z",
+  "prompt": "a layered hand clap one-shot",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "clap1",
+        "sha256": "220438030d5abfa88e75edd74bc8c76bdb7a86e0b3faa891573b0236227dc6a4",
+        "durationSeconds": 0.433,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 49189,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a layered hand clap one-shot, analog warmth, tape saturation",
+          "sha256": "220438030d5abfa88e75edd74bc8c76bdb7a86e0b3faa891573b0236227dc6a4",
+          "preparedAt": "2026-07-17T23:41:53.289Z",
+          "durationSeconds": 0.433,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a layered hand clap one-shot, analog warmth, tape saturation",
+            "seconds": 1,
+            "seed": 49189,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "clap1",
+        "sha256": "1d5a3d3b4da3707decbff38a6dfd63fe0f3323734da3058e0f32dc5a5da623a1",
+        "durationSeconds": 0.3371,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 49190,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a layered hand clap one-shot, organic and acoustic-leaning",
+          "sha256": "1d5a3d3b4da3707decbff38a6dfd63fe0f3323734da3058e0f32dc5a5da623a1",
+          "preparedAt": "2026-07-17T23:41:55.184Z",
+          "durationSeconds": 0.3371,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a layered hand clap one-shot, organic and acoustic-leaning",
+            "seconds": 1,
+            "seed": 49190,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "clap1",
+        "sha256": "2909b31256f0b5e2be6993bba5ba7c168cfb6135acdbfda0c058eb3c76d85a32",
+        "durationSeconds": 0.2244,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 49191,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a layered hand clap one-shot, clean and modern, club-ready",
+          "sha256": "2909b31256f0b5e2be6993bba5ba7c168cfb6135acdbfda0c058eb3c76d85a32",
+          "preparedAt": "2026-07-17T23:41:56.838Z",
+          "durationSeconds": 0.2244,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a layered hand clap one-shot, clean and modern, club-ready",
+            "seconds": 1,
+            "seed": 49191,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "clap1",
+        "sha256": "f61b87e34dbbbe760b856e967fd6b60324c34b3456b1332399307645d0f91dce",
+        "durationSeconds": 0.503,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 49192,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a layered hand clap one-shot, dark and cavernous, heavy reverb",
+          "sha256": "f61b87e34dbbbe760b856e967fd6b60324c34b3456b1332399307645d0f91dce",
+          "preparedAt": "2026-07-17T23:41:58.941Z",
+          "durationSeconds": 0.503,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a layered hand clap one-shot, dark and cavernous, heavy reverb",
+            "seconds": 1,
+            "seed": 49192,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "clap1",
+        "sha256": "8f165cf14129fbb8e2417382a5972645ed30e4cf0ccdb29f14b51cc5d577f951",
+        "durationSeconds": 0.4391,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 49193,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a layered hand clap one-shot, gritty distorted electronic",
+          "sha256": "8f165cf14129fbb8e2417382a5972645ed30e4cf0ccdb29f14b51cc5d577f951",
+          "preparedAt": "2026-07-17T23:42:02.405Z",
+          "durationSeconds": 0.4391,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a layered hand clap one-shot, gritty distorted electronic",
+            "seconds": 1,
+            "seed": 49193,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "parent": "examples/taste-t1/seed-008.beat",
+  "parentSha256": "a0c604b9cf0fc69a46be43ff8377c394e4b83bd625adaa6e1972ed5c0ade4ea7",
+  "track": "chords",
+  "group": "motion",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 3782,
+  "createdAt": "2026-07-18T07:31:05.641Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "chords.lfoRate 1.8702",
+        "chords.lfoDepth 0.3136",
+        "chords.glide 0.0559",
+        "chords.lfoDest pitch"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "chords.lfoRate 0.0845",
+        "chords.lfoDepth 0.1285",
+        "chords.glide 0.0807",
+        "chords.lfoDest cutoff"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "chords.lfoRate 6.5569",
+        "chords.lfoDepth 0.6194",
+        "chords.glide 0.009",
+        "chords.lfoDest amp"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "chords.lfoRate 0.2341",
+        "chords.lfoDepth 0.1597",
+        "chords.glide 0.1203",
+        "chords.lfoDest pitch"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "chords.lfoRate 0.6561",
+        "chords.lfoDepth 0.4849",
+        "chords.glide 0.1076",
+        "chords.lfoDest cutoff"
+      ]
+    }
+  ]
+}

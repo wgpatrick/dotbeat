@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "4f3890853582b63d57bceaf139538335b82bbaf66712b4bee33b331fbfa324b5",
+  "group": "gen:kick1",
+  "count": 5,
+  "seed": 53499,
+  "createdAt": "2026-07-18T21:50:59.244Z",
+  "prompt": "a punchy kick drum one-shot",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "kick1",
+        "sha256": "ebed8a79cdce363b02d9cd593f5ddf17fb275bb9b9cfc3725e359685fc93afae",
+        "durationSeconds": 0.5107,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 53499,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a punchy kick drum one-shot, analog warmth, tape saturation",
+          "sha256": "ebed8a79cdce363b02d9cd593f5ddf17fb275bb9b9cfc3725e359685fc93afae",
+          "preparedAt": "2026-07-18T21:50:35.493Z",
+          "durationSeconds": 0.5107,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a punchy kick drum one-shot, analog warmth, tape saturation",
+            "seconds": 1,
+            "seed": 53499,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "kick1",
+        "sha256": "22edf5d4bd6a5dac68fd0812fd252c1f79ae8dbfda46e833f76b5a9808f1e64e",
+        "durationSeconds": 0.3062,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 53500,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a punchy kick drum one-shot, gritty distorted electronic",
+          "sha256": "22edf5d4bd6a5dac68fd0812fd252c1f79ae8dbfda46e833f76b5a9808f1e64e",
+          "preparedAt": "2026-07-18T21:50:41.765Z",
+          "durationSeconds": 0.3062,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a punchy kick drum one-shot, gritty distorted electronic",
+            "seconds": 1,
+            "seed": 53500,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "kick1",
+        "sha256": "ce9451ff40a69cf57f0d71aefa4b5b3669287a28c7df56aba26f584f7682f7ce",
+        "durationSeconds": 0.4186,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 53501,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a punchy kick drum one-shot, organic and acoustic-leaning",
+          "sha256": "ce9451ff40a69cf57f0d71aefa4b5b3669287a28c7df56aba26f584f7682f7ce",
+          "preparedAt": "2026-07-18T21:50:48.166Z",
+          "durationSeconds": 0.4186,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a punchy kick drum one-shot, organic and acoustic-leaning",
+            "seconds": 1,
+            "seed": 53501,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "kick1",
+        "sha256": "f39a30cb9df9311533096601186ec60dd24d99aa6122565527249fa03e309e6c",
+        "durationSeconds": 0.4178,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 53502,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a punchy kick drum one-shot, clean and modern, club-ready",
+          "sha256": "f39a30cb9df9311533096601186ec60dd24d99aa6122565527249fa03e309e6c",
+          "preparedAt": "2026-07-18T21:50:53.823Z",
+          "durationSeconds": 0.4178,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a punchy kick drum one-shot, clean and modern, club-ready",
+            "seconds": 1,
+            "seed": 53502,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "kick1",
+        "sha256": "653f61551db5e7c85aaa34ca9a438fa315ef81be6d8ec622b8691216515ea086",
+        "durationSeconds": 0.3365,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 53503,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a punchy kick drum one-shot, lo-fi, dusty, vinyl character",
+          "sha256": "653f61551db5e7c85aaa34ca9a438fa315ef81be6d8ec622b8691216515ea086",
+          "preparedAt": "2026-07-18T21:50:59.243Z",
+          "durationSeconds": 0.3365,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a punchy kick drum one-shot, lo-fi, dusty, vinyl character",
+            "seconds": 1,
+            "seed": 53503,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

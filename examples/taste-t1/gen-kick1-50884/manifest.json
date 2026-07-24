@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "967fe8fd2306abf0e667e0ee222a7beb7d812a9c1fa1a7c6e387f42f88312957",
+  "group": "gen:kick1",
+  "count": 5,
+  "seed": 50884,
+  "createdAt": "2026-07-17T23:41:12.732Z",
+  "prompt": "a punchy kick drum one-shot",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "kick1",
+        "sha256": "ffb8eca2265fc29350db3c11799762d161a9ddee3057acd704374fcb71384645",
+        "durationSeconds": 0.4184,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 50884,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a punchy kick drum one-shot, gritty distorted electronic",
+          "sha256": "ffb8eca2265fc29350db3c11799762d161a9ddee3057acd704374fcb71384645",
+          "preparedAt": "2026-07-17T23:41:04.773Z",
+          "durationSeconds": 0.4184,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a punchy kick drum one-shot, gritty distorted electronic",
+            "seconds": 1,
+            "seed": 50884,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "kick1",
+        "sha256": "24776af61cc043e0c2a45d914f229d4bada5d2adf9e6b28d3d98663f560ac35f",
+        "durationSeconds": 0.4475,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 50885,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a punchy kick drum one-shot, soft, intimate, close-mic feel",
+          "sha256": "24776af61cc043e0c2a45d914f229d4bada5d2adf9e6b28d3d98663f560ac35f",
+          "preparedAt": "2026-07-17T23:41:06.996Z",
+          "durationSeconds": 0.4475,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a punchy kick drum one-shot, soft, intimate, close-mic feel",
+            "seconds": 1,
+            "seed": 50885,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "kick1",
+        "sha256": "690877894ea0e414a311b8aa66e700953c7cc8a26af23774390c4165e10c401d",
+        "durationSeconds": 0.6789,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 50886,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a punchy kick drum one-shot, organic and acoustic-leaning",
+          "sha256": "690877894ea0e414a311b8aa66e700953c7cc8a26af23774390c4165e10c401d",
+          "preparedAt": "2026-07-17T23:41:08.753Z",
+          "durationSeconds": 0.6789,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a punchy kick drum one-shot, organic and acoustic-leaning",
+            "seconds": 1,
+            "seed": 50886,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "kick1",
+        "sha256": "d53a6126a319c260a54f0feff0b290ffa22a73412fa4ec9e1a57299fcfc2184d",
+        "durationSeconds": 0.3046,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 50887,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a punchy kick drum one-shot, bright and glassy, digital sheen",
+          "sha256": "d53a6126a319c260a54f0feff0b290ffa22a73412fa4ec9e1a57299fcfc2184d",
+          "preparedAt": "2026-07-17T23:41:10.735Z",
+          "durationSeconds": 0.3046,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a punchy kick drum one-shot, bright and glassy, digital sheen",
+            "seconds": 1,
+            "seed": 50887,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "kick1",
+        "sha256": "ed51286e6a31ea9b1a22ba11fb020b203392972637e00a35f478082e55550616",
+        "durationSeconds": 0.5844,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 50888,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a punchy kick drum one-shot, dark and cavernous, heavy reverb",
+          "sha256": "ed51286e6a31ea9b1a22ba11fb020b203392972637e00a35f478082e55550616",
+          "preparedAt": "2026-07-17T23:41:12.731Z",
+          "durationSeconds": 0.5844,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a punchy kick drum one-shot, dark and cavernous, heavy reverb",
+            "seconds": 1,
+            "seed": 50888,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "4f3890853582b63d57bceaf139538335b82bbaf66712b4bee33b331fbfa324b5",
+  "group": "gen:chords1",
+  "count": 5,
+  "seed": 88273,
+  "createdAt": "2026-07-18T21:51:45.122Z",
+  "prompt": "a chord progression loop, lush warm chords, 8 bars",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "chords1",
+        "sha256": "1a9f108bc301be2e40ebba36415fe95340470b83ca941818d98e213a4e607275",
+        "durationSeconds": 15,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 88273,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a chord progression loop, lush warm chords, 8 bars, organic and acoustic-leaning",
+          "sha256": "1a9f108bc301be2e40ebba36415fe95340470b83ca941818d98e213a4e607275",
+          "preparedAt": "2026-07-18T21:51:12.608Z",
+          "durationSeconds": 15,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a chord progression loop, lush warm chords, 8 bars, organic and acoustic-leaning",
+            "seconds": 15,
+            "seed": 88273,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "chords1",
+        "sha256": "2bc65f26215a2957726148aa5d256bb8da3bea766ecc031bb01bdc40531a4453",
+        "durationSeconds": 15,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 88274,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a chord progression loop, lush warm chords, 8 bars, soft, intimate, close-mic feel",
+          "sha256": "2bc65f26215a2957726148aa5d256bb8da3bea766ecc031bb01bdc40531a4453",
+          "preparedAt": "2026-07-18T21:51:21.884Z",
+          "durationSeconds": 15,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a chord progression loop, lush warm chords, 8 bars, soft, intimate, close-mic feel",
+            "seconds": 15,
+            "seed": 88274,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "chords1",
+        "sha256": "7811bd75819671367b20a2b47db05a2463e1f24a62090ad26db6a2d0ef6b0af3",
+        "durationSeconds": 15,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 88275,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a chord progression loop, lush warm chords, 8 bars, bright and glassy, digital sheen",
+          "sha256": "7811bd75819671367b20a2b47db05a2463e1f24a62090ad26db6a2d0ef6b0af3",
+          "preparedAt": "2026-07-18T21:51:29.620Z",
+          "durationSeconds": 15,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a chord progression loop, lush warm chords, 8 bars, bright and glassy, digital sheen",
+            "seconds": 15,
+            "seed": 88275,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "chords1",
+        "sha256": "2c339b3b949cd1235e2e62cd48602404f19a893c4786bf38581fc342e8a790d7",
+        "durationSeconds": 14.3059,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 88276,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a chord progression loop, lush warm chords, 8 bars, gritty distorted electronic",
+          "sha256": "2c339b3b949cd1235e2e62cd48602404f19a893c4786bf38581fc342e8a790d7",
+          "preparedAt": "2026-07-18T21:51:38.048Z",
+          "durationSeconds": 14.3059,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a chord progression loop, lush warm chords, 8 bars, gritty distorted electronic",
+            "seconds": 15,
+            "seed": 88276,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "chords1",
+        "sha256": "78d0dee4214585f26742c8722e072f2f09ee0bed418673a4065df992a879b2d4",
+        "durationSeconds": 15,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 88277,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a chord progression loop, lush warm chords, 8 bars, dark and cavernous, heavy reverb",
+          "sha256": "78d0dee4214585f26742c8722e072f2f09ee0bed418673a4065df992a879b2d4",
+          "preparedAt": "2026-07-18T21:51:45.122Z",
+          "durationSeconds": 15,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a chord progression loop, lush warm chords, 8 bars, dark and cavernous, heavy reverb",
+            "seconds": 15,
+            "seed": 88277,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

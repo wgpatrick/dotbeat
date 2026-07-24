@@ -1,0 +1,116 @@
+format_version 0.11
+bpm 114
+loop_bars 2
+selected_track chords
+
+track chords Chords #98c379 synth
+  synth
+    osc square
+    volume -60
+    cutoff 2207
+    resonance 0.55
+    attack 0.201
+    decay 0.39
+    sustain 0.77
+    release 1.18
+    pan 0
+  note u100 62 0 8 0.52
+  note u101 65 0 8 0.56
+  note u102 69 0 8 0.63
+  note u103 72 8 8 0.52
+  note u104 76 8 8 0.74
+  note u105 79 8 8 0.66
+  note u106 70 16 8 0.67
+  note u107 74 16 8 0.69
+  note u108 77 16 8 0.59
+  note u109 72 24 8 0.68
+  note u110 76 24 8 0.72
+  note u111 79 24 8 0.63
+
+track bass Bass #f7c948 synth
+  synth
+    osc sawtooth
+    volume -4
+    cutoff 816.8541
+    resonance 1.8257
+    attack 0.005
+    decay 0.17
+    sustain 0.38
+    release 0.05
+    pan 0
+  note u112 38 0 4 0.81
+  note u113 38 4 3 0.69
+  note u114 48 8 4 0.72
+  note u115 48 12 3 0.7
+  note u116 46 16 4 0.78
+  note u117 46 20 3 0.58
+  note u118 48 24 4 0.81
+  note u119 48 28 3 0.52
+
+track arp Arp #e06c75 synth
+  synth
+    osc triangle
+    volume -60
+    cutoff 4006
+    resonance 0.55
+    attack 0.003
+    decay 0.07
+    sustain 0.29
+    release 0.18
+    pan 0
+  note u120 74 0 1 0.47
+  note u121 81 2 1 0.59
+  note u122 74 4 1 0.58
+  note u123 77 5 1 0.49
+  note u124 81 6 1 0.42
+  note u125 77 7 1 0.44
+  note u126 84 8 1 0.53
+  note u127 91 10 1 0.48
+  note u128 88 11 1 0.56
+  note u129 88 13 1 0.51
+  note u130 91 14 1 0.5
+  note u131 88 15 1 0.53
+  note u132 82 16 1 0.43
+  note u133 86 17 1 0.54
+  note u134 89 18 1 0.6
+  note u135 86 19 1 0.59
+  note u136 82 20 1 0.46
+  note u137 88 25 1 0.38
+  note u138 91 26 1 0.58
+  note u139 88 27 1 0.44
+  note u140 84 28 1 0.52
+  note u141 88 29 1 0.41
+  note u142 91 30 1 0.53
+  note u143 88 31 1 0.57
+
+track drums Drums #56b6c2 drums
+  synth
+    osc sawtooth
+    volume -60
+    cutoff 8000
+    resonance 0.86
+    attack 0.001
+    decay 0.2
+    sustain 0.5
+    release 0.2
+    pan 0
+  hit h1 kick 0 0.93
+  hit h4 snare 4 0.86
+  hit h6 hat 5 0.44
+  hit h2 kick 6 0.63
+  hit h7 hat 7 0.48
+  hit h8 hat 9 0.26
+  hit h3 kick 10 0.71
+  hit h9 hat 11 0.26
+  hit h5 snare 12 0.81
+  hit h10 hat 15 0.39
+  hit h11 kick 16 0.89
+  hit h16 hat 19 0.27
+  hit h14 snare 20 0.79
+  hit h12 kick 22 0.76
+  hit h17 hat 23 0.46
+  hit h18 hat 25 0.36
+  hit h13 kick 26 0.73
+  hit h19 hat 27 0.29
+  hit h15 snare 28 0.89
+  hit h20 hat 31 0.47

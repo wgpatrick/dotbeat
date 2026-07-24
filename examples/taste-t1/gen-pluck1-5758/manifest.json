@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "967fe8fd2306abf0e667e0ee222a7beb7d812a9c1fa1a7c6e387f42f88312957",
+  "group": "gen:pluck1",
+  "count": 5,
+  "seed": 5758,
+  "createdAt": "2026-07-17T23:42:34.618Z",
+  "prompt": "a melodic synth pluck one-shot",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "pluck1",
+        "sha256": "cc16c42796bcec04d928eb2da74365171bf5762aadf605e0a55bde8332994a0c",
+        "durationSeconds": 1.4396,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 5758,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a melodic synth pluck one-shot, lo-fi, dusty, vinyl character",
+          "sha256": "cc16c42796bcec04d928eb2da74365171bf5762aadf605e0a55bde8332994a0c",
+          "preparedAt": "2026-07-17T23:42:26.393Z",
+          "durationSeconds": 1.4396,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a melodic synth pluck one-shot, lo-fi, dusty, vinyl character",
+            "seconds": 2,
+            "seed": 5758,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "pluck1",
+        "sha256": "8ca77416c4c0a5f78011c983f64ae655988315a6ce3df7cff9f0e857f98b79bb",
+        "durationSeconds": 1.8577,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 5759,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a melodic synth pluck one-shot, clean and modern, club-ready",
+          "sha256": "8ca77416c4c0a5f78011c983f64ae655988315a6ce3df7cff9f0e857f98b79bb",
+          "preparedAt": "2026-07-17T23:42:28.476Z",
+          "durationSeconds": 1.8577,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a melodic synth pluck one-shot, clean and modern, club-ready",
+            "seconds": 2,
+            "seed": 5759,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "pluck1",
+        "sha256": "5480543f1fab037221c3e5beabada151fe524738bcce26e08da711e9efa71440",
+        "durationSeconds": 1.2778,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 5760,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a melodic synth pluck one-shot, soft, intimate, close-mic feel",
+          "sha256": "5480543f1fab037221c3e5beabada151fe524738bcce26e08da711e9efa71440",
+          "preparedAt": "2026-07-17T23:42:30.387Z",
+          "durationSeconds": 1.2778,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a melodic synth pluck one-shot, soft, intimate, close-mic feel",
+            "seconds": 2,
+            "seed": 5760,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "pluck1",
+        "sha256": "218e8bac175490e107e8b50ccc0a708908156d2e3920cd1f56b743faebd5b8a4",
+        "durationSeconds": 1.1059,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 5761,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a melodic synth pluck one-shot, analog warmth, tape saturation",
+          "sha256": "218e8bac175490e107e8b50ccc0a708908156d2e3920cd1f56b743faebd5b8a4",
+          "preparedAt": "2026-07-17T23:42:32.466Z",
+          "durationSeconds": 1.1059,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a melodic synth pluck one-shot, analog warmth, tape saturation",
+            "seconds": 2,
+            "seed": 5761,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "pluck1",
+        "sha256": "661e13eb3b4fc24062aa9adc1da1b9d65edf6425ba3eeb9ae598692b41a4a881",
+        "durationSeconds": 1.705,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 5762,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a melodic synth pluck one-shot, dark and cavernous, heavy reverb",
+          "sha256": "661e13eb3b4fc24062aa9adc1da1b9d65edf6425ba3eeb9ae598692b41a4a881",
+          "preparedAt": "2026-07-17T23:42:34.618Z",
+          "durationSeconds": 1.705,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a melodic synth pluck one-shot, dark and cavernous, heavy reverb",
+            "seconds": 2,
+            "seed": 5762,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

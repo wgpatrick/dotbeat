@@ -1,0 +1,57 @@
+{
+  "parent": "examples/taste-t1/seed-006.beat",
+  "parentSha256": "261e50ae4ababc37a3aeb8d21373591a06d41856a7d7b665485abaa0df2a7359",
+  "track": "bass",
+  "group": "env",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 49821,
+  "createdAt": "2026-07-18T07:12:08.658Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "bass.attack 0.0146",
+        "bass.decay 0.6196",
+        "bass.sustain 0.9477",
+        "bass.release 0.1779"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "bass.attack 0.0382",
+        "bass.decay 0.3355",
+        "bass.sustain 0.5412",
+        "bass.release 0.0274"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "bass.attack 0.0063",
+        "bass.decay 0.052",
+        "bass.sustain 0.6789",
+        "bass.release 0.1022"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "bass.attack 0.5264",
+        "bass.decay 0.0243",
+        "bass.sustain 0.1451",
+        "bass.release 1.4866"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "bass.attack 0.2041",
+        "bass.decay 0.1459",
+        "bass.sustain 0.3792",
+        "bass.release 0.514"
+      ]
+    }
+  ]
+}

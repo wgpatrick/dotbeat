@@ -1,0 +1,67 @@
+{
+  "parent": "examples/taste-t1/seed-003.beat",
+  "parentSha256": "21543d0e2cf3e9f2266f6594d84b23372210dbab3a5bc8159c96d76985a15051",
+  "track": "arp",
+  "group": "mix",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 26051,
+  "createdAt": "2026-07-18T21:44:49.497Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "arp.volume -9.0901",
+        "arp.pan -0.1861",
+        "arp.eqLow -3.0414",
+        "arp.eqMid 3.9345",
+        "arp.eqHigh 1.6973",
+        "arp.duckAmount 0.1656"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "arp.volume -11.9783",
+        "arp.pan -0.7682",
+        "arp.eqLow -0.1227",
+        "arp.eqMid 0.6365",
+        "arp.eqHigh -4.2873",
+        "arp.duckAmount 0.4182"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "arp.volume -3.2182",
+        "arp.pan 0.4423",
+        "arp.eqLow -2.0521",
+        "arp.eqMid -3.9893",
+        "arp.eqHigh -1.5436",
+        "arp.duckAmount 0.6239"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "arp.volume -19.0476",
+        "arp.pan -0.0103",
+        "arp.eqLow 2.756",
+        "arp.eqMid -2.8445",
+        "arp.eqHigh -0.4559",
+        "arp.duckAmount 0.4264"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "arp.volume -0.2567",
+        "arp.pan 0.7681",
+        "arp.eqLow 4.8917",
+        "arp.eqMid 2.0828",
+        "arp.eqHigh 4.2268",
+        "arp.duckAmount 0.0811"
+      ]
+    }
+  ]
+}

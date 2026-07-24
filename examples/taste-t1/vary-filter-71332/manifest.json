@@ -1,0 +1,47 @@
+{
+  "parent": "examples/taste-t1/seed-003.beat",
+  "parentSha256": "8b4f1890bffd3f1c257e86f0fe143dc7e8276ef209734ba8f039327e68896758",
+  "track": "bass",
+  "group": "filter",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 71332,
+  "createdAt": "2026-07-18T07:28:53.009Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "bass.cutoff 2227.7257",
+        "bass.resonance 0.2198"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "bass.cutoff 1485.9327",
+        "bass.resonance 0.618"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "bass.cutoff 9024.9017",
+        "bass.resonance 2.0786"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "bass.cutoff 438.0093",
+        "bass.resonance 0.7335"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "bass.cutoff 282.8592",
+        "bass.resonance 1.5311"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "967fe8fd2306abf0e667e0ee222a7beb7d812a9c1fa1a7c6e387f42f88312957",
+  "group": "gen:riser1",
+  "count": 5,
+  "seed": 85101,
+  "createdAt": "2026-07-17T23:40:55.528Z",
+  "prompt": "a rising sweep transition effect",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "riser1",
+        "sha256": "34477c3dff138cde45b47617eb10dc85ab889825f9040744be870448bd064f00",
+        "durationSeconds": 2.673,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 85101,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a rising sweep transition effect, lo-fi, dusty, vinyl character",
+          "sha256": "34477c3dff138cde45b47617eb10dc85ab889825f9040744be870448bd064f00",
+          "preparedAt": "2026-07-17T23:40:45.761Z",
+          "durationSeconds": 2.673,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a rising sweep transition effect, lo-fi, dusty, vinyl character",
+            "seconds": 3,
+            "seed": 85101,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "riser1",
+        "sha256": "63d5a7a83be58f39368926fd1966f1d4af7a4cf8cb37103e8ff90ba1a85453a2",
+        "durationSeconds": 2.1857,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 85102,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a rising sweep transition effect, clean and modern, club-ready",
+          "sha256": "63d5a7a83be58f39368926fd1966f1d4af7a4cf8cb37103e8ff90ba1a85453a2",
+          "preparedAt": "2026-07-17T23:40:48.368Z",
+          "durationSeconds": 2.1857,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a rising sweep transition effect, clean and modern, club-ready",
+            "seconds": 3,
+            "seed": 85102,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "riser1",
+        "sha256": "314a411537dd72212121a12b8bca479a97c7b9765a70287695027a666407ae6a",
+        "durationSeconds": 2.9695,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 85103,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a rising sweep transition effect, dark and cavernous, heavy reverb",
+          "sha256": "314a411537dd72212121a12b8bca479a97c7b9765a70287695027a666407ae6a",
+          "preparedAt": "2026-07-17T23:40:50.606Z",
+          "durationSeconds": 2.9695,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a rising sweep transition effect, dark and cavernous, heavy reverb",
+            "seconds": 3,
+            "seed": 85103,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "riser1",
+        "sha256": "2dac3476ea91b3f3cd5d605651b3a2ee0f384dd236c66cf5e85c540692533796",
+        "durationSeconds": 2.6322,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 85104,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a rising sweep transition effect, soft, intimate, close-mic feel",
+          "sha256": "2dac3476ea91b3f3cd5d605651b3a2ee0f384dd236c66cf5e85c540692533796",
+          "preparedAt": "2026-07-17T23:40:52.922Z",
+          "durationSeconds": 2.6322,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a rising sweep transition effect, soft, intimate, close-mic feel",
+            "seconds": 3,
+            "seed": 85104,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "riser1",
+        "sha256": "350b48509e294be4f22198eb1fff9e15523424475d28793c2fb56b278af1e0c2",
+        "durationSeconds": 2.198,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 85105,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a rising sweep transition effect, organic and acoustic-leaning",
+          "sha256": "350b48509e294be4f22198eb1fff9e15523424475d28793c2fb56b278af1e0c2",
+          "preparedAt": "2026-07-17T23:40:55.528Z",
+          "durationSeconds": 2.198,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a rising sweep transition effect, organic and acoustic-leaning",
+            "seconds": 3,
+            "seed": 85105,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}
