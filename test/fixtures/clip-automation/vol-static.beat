@@ -1,0 +1,24 @@
+format_version 0.11
+bpm 120
+loop_bars 1
+selected_track lead
+
+track lead Lead #c678dd synth
+  synth
+    osc sawtooth
+    volume 0
+    cutoff 12000
+    resonance 0.7
+    attack 0.005
+    decay 0.1
+    sustain 1
+    release 0.05
+    pan 0
+  clip drone
+    note n1 40 0 16 1
+
+scene s1
+  slot lead drone
+
+song
+  section s1 1

@@ -819,23 +819,30 @@ function buildEffectRuntimeCore(id: string, type: EffectType, trackId: string): 
 // effects list happens to be empty.
 const EFFECTS_SIG_UNSET = ' '
 
-function applyEffectParams(e: EffectRuntime, p: EngineSynth): void {
+// `automated` (optional): clip-automation lane params this track drives this tick — the
+// eq/comp/distortion/bitcrush MIX destinations here are re-asserted every tick unless automated,
+// exactly like the direct chain params in applyParams (see its doc comment). Only the synth-chain
+// caller passes it; drum bus / instrument / preview callers leave it undefined (all params
+// applied), unchanged.
+function applyEffectParams(e: EffectRuntime, p: EngineSynth, automated?: Set<string>): void {
   if (e.eq3) {
-    e.eq3.low.value = p.eqLow
-    e.eq3.mid.value = p.eqMid
-    e.eq3.high.value = p.eqHigh
+    if (!automated?.has('eqLow')) e.eq3.low.value = p.eqLow
+    if (!automated?.has('eqMid')) e.eq3.mid.value = p.eqMid
+    if (!automated?.has('eqHigh')) e.eq3.high.value = p.eqHigh
   }
   if (e.compressor) {
     e.compressor.threshold.value = p.compThreshold
     e.compressor.ratio.value = p.compRatio
     e.compressor.attack.value = p.compAttack
     e.compressor.release.value = p.compRelease
-    e.compDry!.gain.value = 1 - p.compMix
-    e.compWet!.gain.value = p.compMix
+    if (!automated?.has('compMix')) {
+      e.compDry!.gain.value = 1 - p.compMix
+      e.compWet!.gain.value = p.compMix
+    }
   }
   if (e.distortion) {
     e.distortion.distortion = p.distortionAmount
-    e.distortion.wet.value = p.distortionMix
+    if (!automated?.has('distortionMix')) e.distortion.wet.value = p.distortionMix
   }
   if (e.bitcrush) {
     e.bitcrush.bits.value = Math.round(p.bitcrushBits)
@@ -843,7 +850,7 @@ function applyEffectParams(e: EffectRuntime, p: EngineSynth): void {
     // Shared dry/wet for the whole bitcrush device (bit depth + Redux's sample-rate reduction) —
     // see buildEffectRuntime's 'bitcrush' case for why this is an OUTER pair, not bitcrush.wet
     // (forced to 1 there) directly.
-    if (e.bitcrushDry && e.bitcrushWet) {
+    if (e.bitcrushDry && e.bitcrushWet && !automated?.has('bitcrushMix')) {
       e.bitcrushDry.gain.value = 1 - p.bitcrushMix
       e.bitcrushWet.gain.value = p.bitcrushMix
     }
@@ -2738,7 +2745,20 @@ export class Engine {
     host.effectsSig = sig
   }
 
-  private applyParams(chain: SynthChain, p: EngineSynth, effects: BeatEffect[], trackId: string): void {
+  // `automated` (optional): the set of clip-automation lane params (by lane key — 'volume',
+  // 'cutoff', 'resonance', 'pan', 'sendReverb', 'sendDelay', 'eqLow'/'eqMid'/'eqHigh', 'compMix',
+  // 'distortionMix', 'bitcrushMix') the currently-playing clip drives on THIS track this tick.
+  // sync() runs applyParams every 16th tick to reflect live knob edits, but for an automated
+  // param that per-tick re-assert of the STATIC patch value was clobbering the drawn curve: the
+  // static ramp/`.value =` here lands at (or before) the current time and the tick's later
+  // automation pass only ramps to the automated value by the NEXT step, so the value spent almost
+  // the whole step pinned back at the patch default — a -60dB volume lane rendered at only ~-4.6dB
+  // of attenuation, an automated 150Hz cutoff measured ~10dB louder than the identical static
+  // 150Hz control. Skipping the static re-assert for exactly the automated params (and no others)
+  // hands each automated AudioParam to the automation pass in tick(), which owns it for the tick;
+  // non-automated params re-assert every tick exactly as before. This runs on the live and the
+  // offline render path alike (one engine, one tick()).
+  private applyParams(chain: SynthChain, p: EngineSynth, effects: BeatEffect[], trackId: string, automated?: Set<string>): void {
     const env = { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release }
     chain.synth.set({ envelope: env, portamento: p.glide })
     if (p.osc === 'wavetable') {
@@ -2774,15 +2794,18 @@ export class Engine {
     chain.noiseGain.gain.value = p.noiseLevel
     chain.fmGain.gain.value = p.fmLevel
     chain.filter.type = p.filterType
-    chain.filter.frequency.rampTo(p.cutoff, 0.02)
-    chain.filter.Q.value = p.resonance
-    chain.panner.pan.value = p.pan
+    // Each automatable param below is re-asserted every tick UNLESS the clip automates it this
+    // tick (see the `automated` doc comment above) — an automated param is owned by tick()'s
+    // automation pass instead, so the static value here doesn't clobber the drawn curve.
+    if (!automated?.has('cutoff')) chain.filter.frequency.rampTo(p.cutoff, 0.02)
+    if (!automated?.has('resonance')) chain.filter.Q.value = p.resonance
+    if (!automated?.has('pan')) chain.panner.pan.value = p.pan
     // Ramped, not an instant jump — same anti-click reasoning as applyDrumBusParams's bus.vol above.
-    chain.vol.volume.linearRampTo(p.volume, 0.02)
-    chain.reverbSend.gain.value = p.sendReverb
-    chain.delaySend.gain.value = p.sendDelay
+    if (!automated?.has('volume')) chain.vol.volume.linearRampTo(p.volume, 0.02)
+    if (!automated?.has('sendReverb')) chain.reverbSend.gain.value = p.sendReverb
+    if (!automated?.has('sendDelay')) chain.delaySend.gain.value = p.sendDelay
     this.reconcileEffectChain(chain, chain.headroom, chain.saturator.in, effects, trackId)
-    for (const runtime of chain.effects.values()) applyEffectParams(runtime, p)
+    for (const runtime of chain.effects.values()) applyEffectParams(runtime, p, automated)
     applySaturator(chain.saturator, p.saturatorCurve, p.saturatorDrive, p.saturatorMix)
     // See applyDrumBusParams for the chorusMode 'off'/'vibrato' special-casing rationale.
     chain.chorus.wet.value = p.chorusMode === 'off' ? 0 : p.chorusMode === 'vibrato' ? 1 : p.chorusMix
@@ -2812,7 +2835,7 @@ export class Engine {
 
   /** Reconcile live voices with the document: build chains for new synth tracks, update params on
    * existing ones, dispose vanished ones; apply the drums track's bus + voice params. */
-  private sync(doc: BeatDocument): void {
+  private sync(doc: BeatDocument, automated: Map<string, Set<string>> = new Map()): void {
     const synthTracks = doc.tracks.filter((t) => t.kind === 'synth')
     const wanted = new Set(synthTracks.map((t) => t.id))
     for (const [id, chain] of [...this.chains]) {
@@ -2827,7 +2850,7 @@ export class Engine {
         chain = this.buildSynthChain()
         this.chains.set(track.id, chain)
       }
-      this.applyParams(chain, coerce(track.synth), track.effects ?? [], track.id)
+      this.applyParams(chain, coerce(track.synth), track.effects ?? [], track.id, automated.get(track.id))
     }
     this.syncDrumTracks(doc)
     // Per-tick read of the mixer's mute/solo state -> real audio gating. sync() already runs every
@@ -3839,8 +3862,6 @@ export class Engine {
   private tick(time: number): void {
     const doc = useStore.getState().doc
     if (!doc) return
-    // Re-sync each tick so live knob/step edits are heard on the next step (BeatLab does the same).
-    this.sync(doc)
     const transport = this.transportRef // NOT Tone.getTransport() — see boundContext's doc comment
     const song = doc.song && doc.song.length > 0 ? (doc.song as { scene: string; bars: number }[]) : null
     const songBars = song ? song.reduce((sum, s) => sum + s.bars, 0) : doc.loopBars
@@ -3864,6 +3885,28 @@ export class Engine {
     // re-evaluated fresh every time the loop comes back around rather than a single fixed draw.
     const pass = Math.floor((rawStep - wrapStartStep) / wrapSteps)
     const stepSeconds = this.stepSecondsNow() // NOT Tone.Time('16n') — see boundContext's doc comment
+
+    // Which clip-automation lanes each synth track drives at THIS step — resolved BEFORE sync()
+    // so applyParams can skip re-asserting the static patch value for exactly those params (the
+    // tick's automation pass below owns them instead). Without this the per-tick static re-assert
+    // clobbered every automation lane on both the live and the offline render path (a -60dB volume
+    // lane rendered at only ~-4.6dB). Needs `step`/`bar`, hence after the transport read above —
+    // sync() no longer runs at the very top of tick(). Empty while auditioning (audition content
+    // carries no clip automation) and for any track whose active clip automates nothing, so those
+    // tracks re-assert every param exactly as before.
+    const automatedByTrack = new Map<string, Set<string>>()
+    if (!this.auditionTrackId) {
+      for (const track of doc.tracks) {
+        if (track.kind !== 'synth') continue
+        const content = this.contentOf(track, step, doc.loopBars, song, doc.scenes, bar)
+        if (!content) continue
+        const keys = new Set<string>()
+        for (const [param, points] of content.automation) if (points.length) keys.add(param)
+        if (keys.size) automatedByTrack.set(track.id, keys)
+      }
+    }
+    // Re-sync each tick so live knob/step edits are heard on the next step (BeatLab does the same).
+    this.sync(doc, automatedByTrack)
 
     for (const track of doc.tracks) {
       // Phase 24 Stream CH: while auditioning, ONLY the auditioned track plays — its own top-level
