@@ -160,10 +160,16 @@ const HELP = [
   { cmd: 'init', text: `  beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track` },
   {
     cmd: 'add-track',
-    text: `  beat add-track <file> <id> <synth|drums|instrument|audio> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--legacy-lanes]
+    text: `  beat add-track <file> <id> <synth|drums|instrument|audio|surge> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--patch "<name>" --sample-rate N] [--legacy-lanes]
                                                           (a fresh drums track defaults to the 12-lane kit; --legacy-lanes opts back into the old implicit 5;
                                                           a fresh synth or drums track also starts with a real, already-populated default effect chain —
-                                                          eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat effect-add)`,
+                                                          eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat effect-add;
+                                                          a surge track needs --patch "<factory patch name>" — see docs/surge-track.md, list names with beat surge patches)`,
+  },
+  {
+    cmd: 'surge',
+    text: `  beat surge patches [--role lead|bassline|chords]      list Surge XT factory patch names (render-side; needs surgepy + SURGE_DATA_HOME)
+  beat surge doctor                                     probe surgepy availability + factory patch count`,
   },
   { cmd: 'rm-track', text: `  beat rm-track <file> <id>` },
   {
@@ -989,11 +995,18 @@ function initCmd(argv) {
 
 function addTrackCmd(argv) {
   const [file, id, kind, ...rest] = argv
-  if (!file || !id || !kind) throw new BeatEditError('add-track needs <file> <id> <synth|drums|instrument|audio>')
+  if (!file || !id || !kind) throw new BeatEditError('add-track needs <file> <id> <synth|drums|instrument|audio|surge>')
   const nameIdx = rest.indexOf('--name')
   const colorIdx = rest.indexOf('--color')
   const sfIdx = rest.indexOf('--soundfont')
   const progIdx = rest.indexOf('--program')
+  // Track 1a: a surge track needs a factory --patch name (spaces -> quote it on the shell);
+  // --sample-rate is optional (default 44100). The patch is resolved to a .fxp AT RENDER, not here.
+  const patchIdx = rest.indexOf('--patch')
+  const srIdx = rest.indexOf('--sample-rate')
+  if (kind === 'surge' && patchIdx === -1) {
+    throw new BeatEditError('surge tracks need a patch: pass --patch "<factory patch name>" (list names with beat surge patches)')
+  }
   // Phase 22 Stream AB: a fresh drum track defaults to the 12-lane GM-aligned kit going forward
   // (research 19 Part VII) — --legacy-lanes opts back into the old implicit-5, empty-lanes[] shape
   // for a caller/script that specifically wants pre-v0.10 behavior.
@@ -1013,9 +1026,45 @@ function addTrackCmd(argv) {
     ...(nameIdx !== -1 ? { name: rest[nameIdx + 1] } : {}),
     ...(colorIdx !== -1 ? { color: rest[colorIdx + 1] } : {}),
     ...(sfIdx !== -1 ? { soundfont: { sample: rest[sfIdx + 1], program: progIdx !== -1 ? Number(rest[progIdx + 1]) : 0 } } : {}),
+    ...(kind === 'surge' ? { surge: { patch: rest[patchIdx + 1], ...(srIdx !== -1 ? { sampleRate: Number(rest[srIdx + 1]) } : {}) } } : {}),
     ...(kind === 'drums' && !legacyLanes ? { lanes: defaultDrumKitLanes() } : {}),
   })
   writeDoc(file, before, doc)
+}
+
+// Track 1a: `beat surge <patches|doctor>` — the render-side catalogue/probe for surge tracks. Needs
+// a real surgepy build + SURGE_DATA_HOME (see docs/surge-track.md); a missing build degrades to an
+// actionable message, never a stack trace.
+async function surgeCmd(argv) {
+  const [sub, ...rest] = argv
+  const surge = await import('../dist/src/analysis/surge.js')
+  if (sub === 'doctor' || sub === undefined) {
+    const report = await surge.surgeDoctor()
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n')
+    if (!surge.surgeAvailable(report)) process.exitCode = 3
+    return
+  }
+  if (sub === 'patches') {
+    const roleIdx = rest.indexOf('--role')
+    const role = roleIdx !== -1 ? rest[roleIdx + 1] : null
+    let patches
+    try {
+      patches = await surge.listSurgePatches()
+    } catch (err) {
+      throw new BeatEditError(err && err.message ? err.message : String(err))
+    }
+    let filtered = patches
+    if (role) {
+      const { surgeRoleCategories, patchInCategories } = await import('../dist/src/taste/showdown.js')
+      const cats = surgeRoleCategories(role)
+      if (cats === null) throw new BeatEditError(`no surge patch categories for role "${role}" (pitched roles: lead, bassline, chords)`)
+      filtered = patches.filter((p) => patchInCategories(p, cats))
+    }
+    for (const p of filtered) process.stdout.write(`${p.name}\t${p.category}\n`)
+    process.stderr.write(`${filtered.length} patch(es)${role ? ` for role "${role}"` : ''}\n`)
+    return
+  }
+  throw new BeatEditError(`unknown surge subcommand "${sub}" (expected: patches, doctor)`)
 }
 
 function rmTrackCmd(argv) {
@@ -4843,6 +4892,9 @@ async function main() {
       break
     case 'add-track':
       addTrackCmd(rest)
+      break
+    case 'surge':
+      await surgeCmd(rest)
       break
     case 'rm-track':
       rmTrackCmd(rest)
