@@ -391,3 +391,147 @@ export function composeTheoryBass(archetype: string, track: ChordTrack, seed: nu
   guarded.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
   return guarded
 }
+
+// ---- theory-aware chord generator: voice-leading + register separation (§C.4) ------------------
+// Voicing is chosen by a minimal-total-semitone-motion cost function over inversions/octaves (keep
+// common tones in the same voice, move the rest stepwise) instead of a uniform draw over root-
+// position shapes. The pad is register-separated from the sub bass (voiced an octave-plus above the
+// key root, so it never doubles the sub's root at its bottom). Style voicings — m7/m9 colour and the
+// omit-5 Chandler house voicing — are options chosen per figure.
+
+export const THEORY_CHORD_ARCHETYPES = ['lush-pad', 'offbeat-stabs', 'house-pulse', 'charleston'] as const
+export type ChordVoicingStyle = 'triad' | 'm7' | 'm9' | 'omit5'
+
+/** Base octave the pad is voiced in — an octave above the key root, keeping the whole pad clear of
+ * the sub bass at key.root-12 (register separation, §C.4). */
+const PAD_REGISTER = 12
+
+/** Diatonic scale-degree -> semitone offset above the key root, stacking within the mode. */
+function degToOffset(key: PhraseKey, n: number): number {
+  const scale = scalePitchClasses(key)
+  const idx = ((n % 7) + 7) % 7
+  const oct = Math.floor(n / 7)
+  return oct * 12 + scale[idx]!
+}
+
+/** The chord's tone content (semitone offsets above the key root) for a given voicing style —
+ * preserving any cadential leading-tone alteration held in `chord.tones`. Planed stabs keep their
+ * fixed m7 shape regardless of style (parallel planing is the point). */
+function styleToneOffsets(key: PhraseKey, chord: ChordTrackChord, style: ChordVoicingStyle): number[] {
+  if (chord.planed || chord.rootDegree === null) return chord.tones
+  const d = chord.rootDegree
+  const [root, third, fifth] = [chord.tones[0]!, chord.tones[1]!, chord.tones[2]!]
+  const seventh = degToOffset(key, d + 6)
+  const ninth = degToOffset(key, d + 7 + 1) // a ninth above the root (octave + a second)
+  switch (style) {
+    case 'm7':
+      return [root, third, fifth, seventh]
+    case 'm9':
+      return [root, third, fifth, seventh, ninth]
+    case 'omit5':
+      return [root, third, seventh, ninth] // Chandler house: drop the 5th, add colour
+    default:
+      return [root, third, fifth]
+  }
+}
+
+/** Candidate voicings of one chord: every inversion, each also tried an octave down/up, filtered to
+ * the pad register window so the search never drifts into the sub or the lead's octave. */
+function candidateVoicings(offsets: readonly number[], keyRoot: number): number[][] {
+  const base = offsets.map((o) => keyRoot + PAD_REGISTER + o).sort((a, b) => a - b)
+  const inversions: number[][] = []
+  let v = [...base]
+  for (let i = 0; i < offsets.length; i++) {
+    inversions.push([...v].sort((a, b) => a - b))
+    v = [...v.slice(1), v[0]! + 12] // move the lowest voice up an octave
+  }
+  const floor = keyRoot + PAD_REGISTER - 3
+  const ceil = keyRoot + PAD_REGISTER + 28
+  const out: number[][] = []
+  for (const c of inversions) {
+    for (const shift of [0, -12, 12]) {
+      const s = c.map((p) => p + shift)
+      if (Math.min(...s) >= floor && Math.max(...s) <= ceil) out.push(s.sort((a, b) => a - b))
+    }
+  }
+  return out.length > 0 ? out : [base]
+}
+
+/** Total minimal semitone motion from `prev` to `cand` (each candidate voice to its nearest previous
+ * voice) — the voice-leading cost. With no previous voicing, prefer the most compact spread so the
+ * first chord opens in a tidy close position. */
+export function voiceLeadingCost(cand: readonly number[], prev: readonly number[] | null): number {
+  if (prev === null) return Math.max(...cand) - Math.min(...cand)
+  let cost = 0
+  for (const p of cand) {
+    let best = Infinity
+    for (const q of prev) best = Math.min(best, Math.abs(p - q))
+    cost += best
+  }
+  // a light bonus for holding the top voice stationary (the pad "hovers", §C.4)
+  const topMove = Math.abs(Math.max(...cand) - Math.max(...prev))
+  return cost + topMove * 0.25
+}
+
+/** Pick the minimal-motion voicing of `chord` given the previous voicing (deterministic; ties to the
+ * first candidate, which is the lowest inversion). */
+export function chooseVoicing(key: PhraseKey, chord: ChordTrackChord, style: ChordVoicingStyle, prev: number[] | null): number[] {
+  const cands = candidateVoicings(styleToneOffsets(key, chord, style), key.root)
+  let best = cands[0]!
+  let bestCost = voiceLeadingCost(best, prev)
+  for (const c of cands) {
+    const cost = voiceLeadingCost(c, prev)
+    if (cost < bestCost) {
+      best = c
+      bestCost = cost
+    }
+  }
+  return best
+}
+
+const CHORD_STYLES: readonly ChordVoicingStyle[] = ['triad', 'm7', 'm9', 'omit5']
+
+/** One theory-aware chord figure over a chord track: a per-chord voicing chosen by minimal-motion
+ * voice-leading, rendered with the archetype's rhythm and honouring the track's harmonic rhythm (the
+ * voicing changes only at chord boundaries, never re-drawn per bar). Deterministic in `seed`. */
+export function composeTheoryChords(archetype: string, track: ChordTrack, seed: number): ComposedNote[] {
+  const rng = mulberry32(seed + 1487)
+  const style = CHORD_STYLES[Math.floor(rng() * CHORD_STYLES.length)]!
+  const notes: ComposedNote[] = []
+  let prev: number[] | null = null
+  for (const chord of track.chords) {
+    const voicing = chooseVoicing(track.key, chord, style, prev)
+    prev = voicing
+    const o = chord.startBar * 16
+    const len = chord.bars * 16
+    const stack = (start: number, duration: number, v: number): void => {
+      for (const pitch of voicing) notes.push({ pitch, start, duration, velocity: clampVel(v) })
+    }
+    switch (archetype) {
+      case 'lush-pad':
+        stack(o, len - (rng() < 0.3 ? 2 : 0), 0.6)
+        break
+      case 'offbeat-stabs':
+        for (let s = 2; s < len; s += 4) stack(o + s, rng() < 0.5 ? 1 : 2, 0.62)
+        break
+      case 'house-pulse':
+        for (let s = 0; s < len; s += 2) {
+          if (s % 16 === 14 && rng() < 0.3) continue // seeded breath before a barline
+          stack(o + s, 1, s % 8 === 0 ? 0.7 : 0.52)
+        }
+        break
+      default: {
+        // charleston: a downbeat hit + a syncopated "and", per bar of the chord's span
+        for (let b = 0; b < chord.bars; b++) {
+          const bo = o + b * 16
+          stack(bo, 3, 0.66)
+          stack(bo + 6, 2, 0.55)
+          if (rng() < 0.4) stack(bo + 12, 2, 0.5)
+        }
+        break
+      }
+    }
+  }
+  notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+  return notes
+}
