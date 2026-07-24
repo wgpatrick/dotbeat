@@ -759,6 +759,85 @@ export function composeTheoryLead(archetype: string, track: ChordTrack, seed: nu
   return notes
 }
 
+// ---- pre-render lint: gross-error gates only (§B.7 / §C.7) -------------------------------------
+// Cheap MusPy-style checks in the research/121 "metrics catch gross errors, ears decide quality"
+// division of labour: they FLAG, they never SCORE. A flagged figure is still rendered and rated —
+// the flag is a warning that something is grossly wrong (out-of-key notes, a register-rule
+// violation, adjacent bars with no shared groove), not a quality verdict.
+
+export interface LintReport {
+  /** fraction of notes whose pitch class is in the key's scale (MusPy scale consistency) */
+  scaleConsistency: number
+  /** sub-register notes that are not root/5th/octave of their chord (register-rule violations) */
+  registerViolations: { pitch: number; start: number }[]
+  /** 1 - mean Hamming distance of adjacent bars' 16-slot onset vectors (MusPy groove consistency) */
+  grooveConsistency: number
+  /** human-readable gross-error flags (empty when the figure is clean) */
+  flags: string[]
+}
+
+/** Fraction of notes whose pitch class falls in the key's scale (MusPy scale consistency, computed
+ * against the KNOWN key rather than searched). */
+export function scaleConsistency(notes: readonly ComposedNote[], key: PhraseKey): number {
+  if (notes.length === 0) return 1
+  const scale = scalePitchClasses(key)
+  const rootPc = ((key.root % 12) + 12) % 12
+  let inScale = 0
+  for (const n of notes) if (scale.includes((((n.pitch - rootPc) % 12) + 12) % 12)) inScale += 1
+  return inScale / notes.length
+}
+
+/** Register-rule violations over a chord track: sub-register notes that are not the root/octave or
+ * fifth of the chord sounding under them. Empty for a clean sub bass (and for chords/lead, which sit
+ * above the register floor). */
+export function registerRuleViolations(notes: readonly ComposedNote[], track: ChordTrack): { pitch: number; start: number }[] {
+  const out: { pitch: number; start: number }[] = []
+  for (const n of notes) {
+    const chord = chordAtStep(track, Math.floor(n.start))
+    const root = track.key.root - 12 + chord.rootOffset
+    if (violatesRegisterRule(n.pitch, root)) out.push({ pitch: n.pitch, start: n.start })
+  }
+  return out
+}
+
+/** Groove consistency: 1 - mean Hamming distance between adjacent bars' 16-slot onset vectors
+ * (MusPy). 1 = every bar hits the same slots, 0 = adjacent bars share no onsets. */
+export function grooveConsistency(notes: readonly ComposedNote[], bars: number): number {
+  if (bars < 2) return 1
+  const vecs: boolean[][] = []
+  for (let b = 0; b < bars; b++) {
+    const v = new Array<boolean>(16).fill(false)
+    for (const n of notes) {
+      const s = Math.round(n.start)
+      if (s >= b * 16 && s < (b + 1) * 16) v[s - b * 16] = true
+    }
+    vecs.push(v)
+  }
+  let sum = 0
+  let cnt = 0
+  for (let i = 1; i < vecs.length; i++) {
+    let ham = 0
+    for (let j = 0; j < 16; j++) if (vecs[i]![j] !== vecs[i - 1]![j]) ham += 1
+    sum += ham / 16
+    cnt += 1
+  }
+  return cnt === 0 ? 1 : 1 - sum / cnt
+}
+
+/** Run the three gross-error gates over a figure and its chord track. Thresholds are deliberately
+ * loose — only a GROSSLY wrong figure flags (a handful of out-of-key notes is fine, real EDM has
+ * chromatic passing tones). Flags, never scores. */
+export function lintFigure(notes: readonly ComposedNote[], track: ChordTrack): LintReport {
+  const sc = scaleConsistency(notes, track.key)
+  const rv = registerRuleViolations(notes, track)
+  const gc = grooveConsistency(notes, track.bars)
+  const flags: string[] = []
+  if (sc < 0.8) flags.push(`scale-consistency ${sc.toFixed(2)} (<0.80: many out-of-key notes)`)
+  if (rv.length > 0) flags.push(`register-rule: ${rv.length} sub-register non-root/5th/octave note(s)`)
+  if (gc < 0.15) flags.push(`groove-consistency ${gc.toFixed(2)} (<0.15: adjacent bars share almost no onsets)`)
+  return { scaleConsistency: sc, registerViolations: rv, grooveConsistency: gc, flags }
+}
+
 // ---- public entry point: one theory figure per role -------------------------------------------
 // Mirrors showdown.composePitchedPhrase's contract (role, key, seed, exclude) and returns the same
 // ComposedPhrase shape, so `theory` slots into the showdown figure-draw machinery beside the
@@ -799,7 +878,7 @@ export function composeTheoryPhrase(
   key: PhraseKey,
   seed: number,
   opts: { exclude?: readonly string[]; chordTrack?: ChordTrackOptions } = {},
-): ComposedPhrase {
+): ComposedPhrase & { lint: LintReport; chordTrack: ChordTrack } {
   const rng = mulberry32(seed + THEORY_ROLE_SALTS[role])
   const archetype = chooseTheoryArchetype(rng, THEORY_ROLE_BANKS[role], opts.exclude ?? [])
   const track = buildChordTrack(key, seed, opts.chordTrack)
@@ -820,5 +899,5 @@ export function composeTheoryPhrase(
     notes.push({ pitch: degreePitch(key, track.chords[0]!.rootDegree ?? 0, reg), start: 0, duration: 8, velocity: 0.7 })
   }
   notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
-  return { archetype: `theory:${archetype}`, notes }
+  return { archetype: `theory:${archetype}`, notes, lint: lintFigure(notes, track), chordTrack: track }
 }

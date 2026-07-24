@@ -2339,6 +2339,9 @@ async function showdownCmd(argv) {
           if (theoryMod !== null && spec.role !== 'drum-loop' && pitchedKey !== null) {
             composed = theoryMod.composeTheoryPhrase(spec.role, pitchedKey, batchSeed + seedOffset, { exclude })
             batchUsedTheory = true
+            // pre-render lint (gross-error gates only — flag, never score): warn if the theory
+            // figure trips scale-consistency / register-rule / groove-consistency
+            if (composed.lint?.flags?.length) process.stderr.write(`lint [${spec.role} ${composed.archetype}]: ${composed.lint.flags.join('; ')}\n`)
           } else {
             composed = spec.role === 'drum-loop'
               ? showdown.composeDrumPhrase(batchSeed + seedOffset, { exclude })
