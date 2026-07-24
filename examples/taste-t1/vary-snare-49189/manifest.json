@@ -1,0 +1,47 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "445a7ed331687d0345fe15968e7bdb342e9c231b602bc51b041da7edf67b7501",
+  "track": "drums",
+  "group": "snare",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 49189,
+  "createdAt": "2026-07-18T07:17:21.990Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "drums.snareTone 0.1775",
+        "drums.snareDecay 0.089"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "drums.snareTone 0.8954",
+        "drums.snareDecay 0.1846"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "drums.snareTone 0.3968",
+        "drums.snareDecay 0.1654"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "drums.snareTone 0.7397",
+        "drums.snareDecay 0.2746"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "drums.snareTone 0.4959",
+        "drums.snareDecay 0.06"
+      ]
+    }
+  ]
+}

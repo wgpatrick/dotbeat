@@ -91,6 +91,56 @@ export function analyzeSections(channels: Float64Array[], sampleRate: number, bp
   })
 }
 
+// ---- arrangement lint -----------------------------------------------------------------------
+
+// docs/research/122 §4.2 (the one "ship regardless" item): the flatness detector. The measured
+// evidence pair (research/121 §1, the Sandstorm cover): the arrangement the owner called flat
+// moved only 1-2 dB between adjacent sections everywhere; the commercial reference's build→drop
+// spans 11.8 dB. Nominal thresholds sit between those poles and are padded by the render-run
+// variance like every other lint rule, so re-rendering an unchanged .beat can't flip the finding.
+export const SECTION_FLAT_ADJACENT_LU = 2
+export const SECTION_FLAT_SPAN_LU = 6
+
+/** The arrangement-flatness rule over an already-analyzed section arc: fires when NO adjacent
+ * pair moves more than SECTION_FLAT_ADJACENT_LU (padded) AND the whole arrangement's
+ * quietest→loudest span stays under SECTION_FLAT_SPAN_LU (padded). Both conditions together —
+ * a slow 8-section crescendo has small steps but a real span, and a single drop has a big step;
+ * neither is flat. A silent section (-Infinity LUFS) counts as real contrast, not a bail-out.
+ * Level 'info' by the lint discipline: flatness is a taste defect, not a playback-safety one. */
+export function arrangementFindings(sections: SectionMetrics[]): LintFinding[] {
+  if (sections.length < 2) return []
+  const lufs = sections.map((s) => s.metrics.integratedLufs)
+  if (lufs.some(Number.isNaN)) return [] // an unmeasurable section: no honest verdict either way
+
+  let maxAdjacent = 0
+  for (let i = 1; i < lufs.length; i++) maxAdjacent = Math.max(maxAdjacent, Math.abs(lufs[i]! - lufs[i - 1]!))
+  const loudest = sections[lufs.indexOf(Math.max(...lufs))]!
+  const quietest = sections[lufs.indexOf(Math.min(...lufs))]!
+  const span = loudest.metrics.integratedLufs - quietest.metrics.integratedLufs
+
+  const adjacentThreshold = SECTION_FLAT_ADJACENT_LU + RENDER_RUN_VARIANCE_LU
+  const spanThreshold = SECTION_FLAT_SPAN_LU + RENDER_RUN_VARIANCE_LU
+  if (maxAdjacent > adjacentThreshold || span >= spanThreshold) return []
+
+  return [
+    {
+      rule: 'arrangement-flat',
+      level: 'info',
+      measured: span,
+      threshold: spanThreshold,
+      message:
+        `the energy arc is flat: across ${sections.length} sections no adjacent pair moves more than ` +
+        `${fmt(maxAdjacent)} LU and the whole arrangement spans only ${fmt(span)} LU ` +
+        `(loudest "${loudest.label}" ${fmt(loudest.metrics.integratedLufs)} LUFS, quietest "${quietest.label}" ` +
+        `${fmt(quietest.metrics.integratedLufs)} LUFS) — a commercial build→drop typically spans well over ${SECTION_FLAT_SPAN_LU} LU`,
+      suggestion:
+        `create contrast at the arc level: thin the sections meant to sit low (drop tracks from their scenes, ` +
+        `close filters, lower velocities) and stack the section meant to hit (add layers, open filters) until ` +
+        `the quietest→loudest span clears ${SECTION_FLAT_SPAN_LU} LU`,
+    },
+  ]
+}
+
 // ---- formatting -----------------------------------------------------------------------------
 
 const fmt = (x: number, d = 1) => (Number.isFinite(x) ? x.toFixed(d) : x > 0 ? '+inf' : x < 0 ? '-inf' : 'nan')
@@ -181,6 +231,18 @@ export function formatSectionFeedback(sections: SectionMetrics[], ref?: MixProfi
     lines.push('')
     lines.push('section-to-section movement (flagged only when the change clears the render-run variance floor):')
     for (let i = 1; i < sections.length; i++) lines.push(movementLine(sections[i - 1]!, sections[i]!))
+  }
+
+  // arrangement lint (research/122 §4.2): the one arc-level verdict this report can measure
+  const arc = arrangementFindings(sections)
+  if (arc.length > 0) {
+    lines.push('')
+    lines.push('arrangement lint:')
+    for (const f of arc) lines.push(`  ${f.level.toUpperCase()} [${f.rule}] ${f.message}${f.suggestion ? `\n     fix: ${f.suggestion}` : ''}`)
+  } else if (sections.length >= 2 && !sections.some((s) => Number.isNaN(s.metrics.integratedLufs))) {
+    const lufs = sections.map((s) => s.metrics.integratedLufs)
+    lines.push('')
+    lines.push(`arrangement lint: pass — quietest→loudest span ${fmt(Math.max(...lufs) - Math.min(...lufs))} LU (flat is under ${SECTION_FLAT_SPAN_LU} LU with no adjacent step over ${SECTION_FLAT_ADJACENT_LU} LU)`)
   }
 
   // optional per-section reference comparison

@@ -1,0 +1,1 @@
+{"sha256": "66e5e856a4682a7b852a7aa1e27e3eda5ebf84b1265c9cc4a6a3cc7bcacaacda", "backend": "aes", "model": "facebook/audiobox-aesthetics", "dims": 4, "axes": ["CE", "CU", "PC", "PQ"], "embedding": [5.800532817840576, 7.93204402923584, 3.537693977355957, 7.806951522827148]}

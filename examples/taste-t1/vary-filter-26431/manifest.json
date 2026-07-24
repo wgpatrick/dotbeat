@@ -1,0 +1,47 @@
+{
+  "parent": "examples/taste-t1/seed-008.beat",
+  "parentSha256": "f715368a56708be3f444dc2b31880a1b0f3f6d6908e2b438f3da41196db4ce3e",
+  "track": "arp",
+  "group": "filter",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 26431,
+  "createdAt": "2026-07-18T07:20:00.648Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "arp.cutoff 5252.0298",
+        "arp.resonance 0.6194"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "arp.cutoff 3702.2052",
+        "arp.resonance 0.2447"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "arp.cutoff 1353.8439",
+        "arp.resonance 1.143"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "arp.cutoff 227.4239",
+        "arp.resonance 2.8342"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "arp.cutoff 493.4597",
+        "arp.resonance 0.6421"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "967fe8fd2306abf0e667e0ee222a7beb7d812a9c1fa1a7c6e387f42f88312957",
+  "group": "gen:pad1",
+  "count": 5,
+  "seed": 91418,
+  "createdAt": "2026-07-17T23:42:13.821Z",
+  "prompt": "an evolving ambient pad texture",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "pad1",
+        "sha256": "e66ff78cf12b2a88a6632c6fc1a1e82f17983824c58f6724470a2184d0747053",
+        "durationSeconds": 3.9724,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 91418,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "an evolving ambient pad texture, dark and cavernous, heavy reverb",
+          "sha256": "e66ff78cf12b2a88a6632c6fc1a1e82f17983824c58f6724470a2184d0747053",
+          "preparedAt": "2026-07-17T23:42:04.718Z",
+          "durationSeconds": 3.9724,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "an evolving ambient pad texture, dark and cavernous, heavy reverb",
+            "seconds": 4,
+            "seed": 91418,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "pad1",
+        "sha256": "a7c0507f732610b5ff0e9b26796b0cc3403391b4ee4178628ff6d0f4e71077bb",
+        "durationSeconds": 4,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 91419,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "an evolving ambient pad texture, bright and glassy, digital sheen",
+          "sha256": "a7c0507f732610b5ff0e9b26796b0cc3403391b4ee4178628ff6d0f4e71077bb",
+          "preparedAt": "2026-07-17T23:42:07.023Z",
+          "durationSeconds": 4,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "an evolving ambient pad texture, bright and glassy, digital sheen",
+            "seconds": 4,
+            "seed": 91419,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "pad1",
+        "sha256": "f05dfdf1240a978ccc2f66f4603cc8a983e2baa1a869514ab91720486e52c748",
+        "durationSeconds": 3.8544,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 91420,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "an evolving ambient pad texture, lo-fi, dusty, vinyl character",
+          "sha256": "f05dfdf1240a978ccc2f66f4603cc8a983e2baa1a869514ab91720486e52c748",
+          "preparedAt": "2026-07-17T23:42:09.070Z",
+          "durationSeconds": 3.8544,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "an evolving ambient pad texture, lo-fi, dusty, vinyl character",
+            "seconds": 4,
+            "seed": 91420,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "pad1",
+        "sha256": "6ca940d74d0067abfca1d8dc202aaa0c8601fe7fdeec81d0c83c5cda00d1afdb",
+        "durationSeconds": 3.7645,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 91421,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "an evolving ambient pad texture, clean and modern, club-ready",
+          "sha256": "6ca940d74d0067abfca1d8dc202aaa0c8601fe7fdeec81d0c83c5cda00d1afdb",
+          "preparedAt": "2026-07-17T23:42:11.172Z",
+          "durationSeconds": 3.7645,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "an evolving ambient pad texture, clean and modern, club-ready",
+            "seconds": 4,
+            "seed": 91421,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "pad1",
+        "sha256": "8a953d39a9b304ccc78462849c29c1051666d457bed85213e2d37bd1ee8edee1",
+        "durationSeconds": 3.875,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 91422,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "an evolving ambient pad texture, organic and acoustic-leaning",
+          "sha256": "8a953d39a9b304ccc78462849c29c1051666d457bed85213e2d37bd1ee8edee1",
+          "preparedAt": "2026-07-17T23:42:13.821Z",
+          "durationSeconds": 3.875,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "an evolving ambient pad texture, organic and acoustic-leaning",
+            "seconds": 4,
+            "seed": 91422,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

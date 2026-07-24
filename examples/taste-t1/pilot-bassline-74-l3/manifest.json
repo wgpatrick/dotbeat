@@ -1,0 +1,85 @@
+{
+  "parent": "",
+  "parentSha256": "",
+  "group": "pilot:bassline",
+  "count": 5,
+  "seed": 74,
+  "createdAt": "2026-07-23T02:51:54.173Z",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "source": {
+        "kind": "control",
+        "from": "random-mutation control descended from elite bassline-g6-33 (seed-008.beat)"
+      },
+      "loudness": {
+        "measuredLufs": -21.22,
+        "gainDb": -8.46,
+        "capped": false,
+        "truePeakDbtp": -5.5,
+        "wantedGainDb": -8.46
+      }
+    },
+    {
+      "file": "v2.wav",
+      "source": {
+        "kind": "origin",
+        "from": "the untouched seed (seed-008.beat) — optimization step 0"
+      },
+      "loudness": {
+        "measuredLufs": -29.68,
+        "gainDb": 0,
+        "capped": false,
+        "truePeakDbtp": -16.48,
+        "wantedGainDb": 0
+      }
+    },
+    {
+      "file": "v3.wav",
+      "source": {
+        "kind": "checkpoint",
+        "from": "optimization checkpoint: step 3 of 5 on the best elite's lineage (seed-008.beat)"
+      },
+      "loudness": {
+        "measuredLufs": -32.34,
+        "gainDb": 2.66,
+        "capped": false,
+        "truePeakDbtp": -18.61,
+        "wantedGainDb": 2.66
+      }
+    },
+    {
+      "file": "v4.wav",
+      "source": {
+        "kind": "checkpoint",
+        "from": "optimization checkpoint: step 1 of 5 on the best elite's lineage (seed-008.beat)"
+      },
+      "loudness": {
+        "measuredLufs": -29.63,
+        "gainDb": -0.06,
+        "capped": false,
+        "truePeakDbtp": -16.48,
+        "wantedGainDb": -0.06
+      }
+    },
+    {
+      "file": "v5.wav",
+      "source": {
+        "kind": "elite",
+        "from": "niche sparse·bright, 5 optimization steps from seed-008.beat (pessimistic -0.1941532318490784)"
+      },
+      "loudness": {
+        "measuredLufs": -32.43,
+        "gainDb": 2.74,
+        "capped": false,
+        "truePeakDbtp": -17.59,
+        "wantedGainDb": 2.74
+      }
+    }
+  ],
+  "normalization": {
+    "targetLufs": -29.68,
+    "truePeakCeilingDbtp": -1,
+    "normalized": true
+  }
+}

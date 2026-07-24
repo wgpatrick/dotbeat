@@ -1,0 +1,57 @@
+{
+  "parent": "examples/taste-t1/seed-003.beat",
+  "parentSha256": "8b4f1890bffd3f1c257e86f0fe143dc7e8276ef209734ba8f039327e68896758",
+  "track": "bass",
+  "group": "motion",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 21265,
+  "createdAt": "2026-07-18T07:28:42.300Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "bass.lfoRate 0.3268",
+        "bass.lfoDepth 0.139",
+        "bass.glide 0.0008",
+        "bass.lfoDest pitch"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "bass.lfoRate 1.1982",
+        "bass.lfoDepth 0.3227",
+        "bass.glide 0.12",
+        "bass.lfoDest cutoff"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "bass.lfoRate 0.1077",
+        "bass.lfoDepth 0.6772",
+        "bass.glide 0.0805",
+        "bass.lfoDest amp"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "bass.lfoRate 7.4966",
+        "bass.lfoDepth 0.1443",
+        "bass.glide 0.049",
+        "bass.lfoDest pitch"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "bass.lfoRate 1.4029",
+        "bass.lfoDepth 0.4519",
+        "bass.glide 0.1195",
+        "bass.lfoDest cutoff"
+      ]
+    }
+  ]
+}

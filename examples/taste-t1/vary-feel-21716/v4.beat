@@ -1,0 +1,82 @@
+format_version 0.11
+bpm 90
+loop_bars 2
+selected_track chords
+
+track chords Chords #98c379 synth
+  synth
+    osc triangle
+    volume -11.3
+    cutoff 2857
+    resonance 0.47
+    attack 0.198
+    decay 0.26
+    sustain 0.48
+    release 1.19
+    pan 0
+  note u100 67 0 8 0.55
+  note u101 70 0 8 0.64
+  note u102 74 0 8 0.52
+  note u103 72 8 8 0.5
+  note u104 75 8 8 0.73
+  note u105 79 8 8 0.74
+  note u106 75 16 8 0.55
+  note u107 79 16 8 0.73
+  note u108 82 16 8 0.6
+  note u109 74 24 8 0.51
+  note u110 77 24 8 0.51
+  note u111 81 24 8 0.61
+
+track bass Bass #f7c948 synth
+  synth
+    osc square
+    volume -4
+    cutoff 689
+    resonance 0.42
+    attack 0.005
+    decay 0.29
+    sustain 0.58
+    release 0.24
+    pan 0
+  note u112 43 0.1757 4 0.8078
+  note u113 43 4.3234 3 0.607
+  note u114 48 8.1919 4 0.7845
+  note u115 48 12.1217 3 0.622
+  note u116 51 16.2409 4 0.7841
+  note u117 51 20.2637 3 0.7069
+  note u118 50 24.2995 4 0.8056
+  note u119 50 28.1743 3 0.5958
+
+track drums Drums #56b6c2 drums
+  synth
+    osc triangle
+    volume -7.6
+    cutoff 8000
+    resonance 0.77
+    attack 0.001
+    decay 0.2
+    sustain 0.5
+    release 0.2
+    pan 0
+  hit h1 kick 0 0.88
+  hit h4 hat 0 0.3
+  hit h5 hat 2 0.35
+  hit h6 hat 4 0.34
+  hit h7 hat 6 0.41
+  hit h3 snare 8 0.87
+  hit h8 hat 8 0.26
+  hit h2 kick 10 0.77
+  hit h9 hat 10 0.33
+  hit h10 hat 12 0.32
+  hit h11 hat 14 0.31
+  hit h12 kick 16 0.88
+  hit h15 hat 16 0.27
+  hit h16 hat 18 0.34
+  hit h17 hat 20 0.27
+  hit h18 hat 22 0.48
+  hit h14 snare 24 0.81
+  hit h19 hat 24 0.38
+  hit h13 kick 26 0.65
+  hit h20 hat 26 0.28
+  hit h21 hat 28 0.37
+  hit h22 hat 30 0.37

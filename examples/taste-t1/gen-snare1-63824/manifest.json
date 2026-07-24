@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "4f3890853582b63d57bceaf139538335b82bbaf66712b4bee33b331fbfa324b5",
+  "group": "gen:snare1",
+  "count": 5,
+  "seed": 63824,
+  "createdAt": "2026-07-18T21:52:16.760Z",
+  "prompt": "a tight snare drum one-shot",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "snare1",
+        "sha256": "f9467ef9c537d04cc51bd78c43ddb6aef10f2037376c6e0d9a98e94047e8cbbe",
+        "durationSeconds": 0.4202,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 63824,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a tight snare drum one-shot, soft, intimate, close-mic feel",
+          "sha256": "f9467ef9c537d04cc51bd78c43ddb6aef10f2037376c6e0d9a98e94047e8cbbe",
+          "preparedAt": "2026-07-18T21:51:52.346Z",
+          "durationSeconds": 0.4202,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a tight snare drum one-shot, soft, intimate, close-mic feel",
+            "seconds": 1,
+            "seed": 63824,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "snare1",
+        "sha256": "792780bd9ae1e7083f162abe4422201b53cd2b7ec11ba1bd6df6cf419a890fdb",
+        "durationSeconds": 0.4184,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 63825,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a tight snare drum one-shot, gritty distorted electronic",
+          "sha256": "792780bd9ae1e7083f162abe4422201b53cd2b7ec11ba1bd6df6cf419a890fdb",
+          "preparedAt": "2026-07-18T21:51:57.587Z",
+          "durationSeconds": 0.4184,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a tight snare drum one-shot, gritty distorted electronic",
+            "seconds": 1,
+            "seed": 63825,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "snare1",
+        "sha256": "24ca8ae30ec93276c723f86b39b7b49a8484260745d0f23167539cffccd17fff",
+        "durationSeconds": 0.1495,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 63826,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a tight snare drum one-shot, clean and modern, club-ready",
+          "sha256": "24ca8ae30ec93276c723f86b39b7b49a8484260745d0f23167539cffccd17fff",
+          "preparedAt": "2026-07-18T21:52:03.720Z",
+          "durationSeconds": 0.1495,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a tight snare drum one-shot, clean and modern, club-ready",
+            "seconds": 1,
+            "seed": 63826,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "snare1",
+        "sha256": "f0064f71df0ef98eb0491a43c6c0ba15d034e0e7e48b95f3659d44477fc73667",
+        "durationSeconds": 0.5229,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 63827,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a tight snare drum one-shot, dark and cavernous, heavy reverb",
+          "sha256": "f0064f71df0ef98eb0491a43c6c0ba15d034e0e7e48b95f3659d44477fc73667",
+          "preparedAt": "2026-07-18T21:52:10.170Z",
+          "durationSeconds": 0.5229,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a tight snare drum one-shot, dark and cavernous, heavy reverb",
+            "seconds": 1,
+            "seed": 63827,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "snare1",
+        "sha256": "65aad787d5f227b6af762e78967a33256d734655c686ab04ea9492929f2ce4a4",
+        "durationSeconds": 0.418,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 63828,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a tight snare drum one-shot, analog warmth, tape saturation",
+          "sha256": "65aad787d5f227b6af762e78967a33256d734655c686ab04ea9492929f2ce4a4",
+          "preparedAt": "2026-07-18T21:52:16.760Z",
+          "durationSeconds": 0.418,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a tight snare drum one-shot, analog warmth, tape saturation",
+            "seconds": 1,
+            "seed": 63828,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

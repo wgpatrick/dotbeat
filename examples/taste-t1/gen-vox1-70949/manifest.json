@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "967fe8fd2306abf0e667e0ee222a7beb7d812a9c1fa1a7c6e387f42f88312957",
+  "group": "gen:vox1",
+  "count": 5,
+  "seed": 70949,
+  "createdAt": "2026-07-17T23:42:45.570Z",
+  "prompt": "a short wordless vocal chop, sung vowel",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "vox1",
+        "sha256": "bee262af25783dc78ffbe318571d6ee0324a6f901acf7c23e40e3bd5ef0f1f47",
+        "durationSeconds": 1.8085,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 70949,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a short wordless vocal chop, sung vowel, bright and glassy, digital sheen",
+          "sha256": "bee262af25783dc78ffbe318571d6ee0324a6f901acf7c23e40e3bd5ef0f1f47",
+          "preparedAt": "2026-07-17T23:42:36.880Z",
+          "durationSeconds": 1.8085,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a short wordless vocal chop, sung vowel, bright and glassy, digital sheen",
+            "seconds": 2,
+            "seed": 70949,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "vox1",
+        "sha256": "1fc0576e975348d508a616b3c2e1a805485c6bebba71cf4f33c5eb0fcc0f6c79",
+        "durationSeconds": 1.1298,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 70950,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a short wordless vocal chop, sung vowel, soft, intimate, close-mic feel",
+          "sha256": "1fc0576e975348d508a616b3c2e1a805485c6bebba71cf4f33c5eb0fcc0f6c79",
+          "preparedAt": "2026-07-17T23:42:39.326Z",
+          "durationSeconds": 1.1298,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a short wordless vocal chop, sung vowel, soft, intimate, close-mic feel",
+            "seconds": 2,
+            "seed": 70950,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "vox1",
+        "sha256": "977705b93b920c79772ae9fa1fe1fdafc70fda07cf325be143b950173a792a04",
+        "durationSeconds": 2,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 70951,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a short wordless vocal chop, sung vowel, organic and acoustic-leaning",
+          "sha256": "977705b93b920c79772ae9fa1fe1fdafc70fda07cf325be143b950173a792a04",
+          "preparedAt": "2026-07-17T23:42:41.733Z",
+          "durationSeconds": 2,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a short wordless vocal chop, sung vowel, organic and acoustic-leaning",
+            "seconds": 2,
+            "seed": 70951,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "vox1",
+        "sha256": "6af6f01643e538f99f30d0dcb35abd1351cafd1e1786bf40257e509abb22cfd9",
+        "durationSeconds": 1.7037,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 70952,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a short wordless vocal chop, sung vowel, dark and cavernous, heavy reverb",
+          "sha256": "6af6f01643e538f99f30d0dcb35abd1351cafd1e1786bf40257e509abb22cfd9",
+          "preparedAt": "2026-07-17T23:42:43.523Z",
+          "durationSeconds": 1.7037,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a short wordless vocal chop, sung vowel, dark and cavernous, heavy reverb",
+            "seconds": 2,
+            "seed": 70952,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "vox1",
+        "sha256": "4fa96c8642d0bff46267f22ced2cbdd66dcbaf9c5a74f83282db63f65e1ea4ab",
+        "durationSeconds": 1.7055,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 70953,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a short wordless vocal chop, sung vowel, lo-fi, dusty, vinyl character",
+          "sha256": "4fa96c8642d0bff46267f22ced2cbdd66dcbaf9c5a74f83282db63f65e1ea4ab",
+          "preparedAt": "2026-07-17T23:42:45.570Z",
+          "durationSeconds": 1.7055,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a short wordless vocal chop, sung vowel, lo-fi, dusty, vinyl character",
+            "seconds": 2,
+            "seed": 70953,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

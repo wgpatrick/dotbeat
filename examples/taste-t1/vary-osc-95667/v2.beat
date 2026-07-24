@@ -1,0 +1,135 @@
+format_version 0.11
+bpm 92
+loop_bars 2
+selected_track chords
+
+track chords Chords #98c379 synth
+  synth
+    osc triangle
+    volume -60
+    cutoff 1903
+    resonance 0.74
+    attack 0.279
+    decay 0.21
+    sustain 0.67
+    release 0.73
+    pan 0
+  note u100 65 0 8 0.52
+  note u101 69 0 8 0.69
+  note u102 72 0 8 0.62
+  note u103 69 8 8 0.62
+  note u104 72 8 8 0.54
+  note u105 76 8 8 0.57
+  note u106 70 16 8 0.64
+  note u107 74 16 8 0.55
+  note u108 77 16 8 0.52
+  note u109 70 24 8 0.68
+  note u110 73 24 8 0.62
+  note u111 77 24 8 0.7
+
+track bass Bass #f7c948 synth
+  synth
+    osc square
+    volume -4
+    cutoff 856
+    resonance 0.35
+    attack 0.005
+    decay 0.25
+    sustain 0.37
+    release 0.19
+    pan 0
+    wtPos 0.7376
+    osc2Level 0.1509
+    osc2Detune 21.8115
+    subLevel 0.3244
+    noiseLevel 0.1839
+    unisonVoices 3
+    unisonWidth 0.8908
+  note u112 41 0 2 0.69
+  note u113 41 2 2 0.78
+  note u114 41 4 2 0.6
+  note u115 41 6 2 0.6
+  note u116 45 8 2 0.72
+  note u117 45 10 2 0.82
+  note u118 45 12 2 0.75
+  note u119 45 14 2 0.77
+  note u120 46 16 2 0.8
+  note u121 46 18 2 0.75
+  note u122 46 20 2 0.75
+  note u123 46 22 2 0.62
+  note u124 46 24 2 0.69
+  note u125 46 26 2 0.73
+  note u126 46 28 2 0.81
+  note u127 46 30 2 0.7
+
+track arp Arp #e06c75 synth
+  synth
+    osc square
+    volume -60
+    cutoff 4069
+    resonance 0.89
+    attack 0.003
+    decay 0.17
+    sustain 0.26
+    release 0.15
+    pan 0
+  note u128 84 0 1 0.59
+  note u129 81 1 1 0.53
+  note u130 77 2 1 0.59
+  note u131 81 3 1 0.36
+  note u132 81 5 1 0.57
+  note u133 77 6 1 0.49
+  note u134 81 7 1 0.47
+  note u135 88 8 1 0.49
+  note u136 84 9 1 0.54
+  note u137 81 10 1 0.59
+  note u138 84 11 1 0.54
+  note u139 88 12 1 0.37
+  note u140 84 13 1 0.39
+  note u141 81 14 1 0.54
+  note u142 84 15 1 0.6
+  note u143 89 16 1 0.6
+  note u144 86 17 1 0.57
+  note u145 82 18 1 0.55
+  note u146 86 19 1 0.51
+  note u147 89 20 1 0.45
+  note u148 86 21 1 0.39
+  note u149 82 22 1 0.49
+  note u150 86 23 1 0.57
+  note u151 85 25 1 0.37
+  note u152 82 26 1 0.57
+  note u153 89 28 1 0.38
+  note u154 85 29 1 0.6
+  note u155 82 30 1 0.39
+
+track drums Drums #56b6c2 drums
+  synth
+    osc square
+    volume -60
+    cutoff 8000
+    resonance 1.03
+    attack 0.001
+    decay 0.2
+    sustain 0.5
+    release 0.2
+    pan 0
+  hit h1 kick 0 0.9
+  hit h7 hat 2 0.47
+  hit h2 kick 4 0.92
+  hit h5 snare 4 0.72
+  hit h8 hat 6 0.44
+  hit h3 kick 8 0.82
+  hit h9 hat 10 0.48
+  hit h4 kick 12 0.83
+  hit h6 snare 12 0.79
+  hit h10 hat 14 0.38
+  hit h11 kick 16 0.94
+  hit h17 hat 18 0.41
+  hit h12 kick 20 0.81
+  hit h15 snare 20 0.76
+  hit h18 hat 22 0.44
+  hit h13 kick 24 0.94
+  hit h19 hat 26 0.37
+  hit h14 kick 28 0.83
+  hit h16 snare 28 0.77
+  hit h20 hat 30 0.47

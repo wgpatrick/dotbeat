@@ -1,0 +1,31 @@
+{
+  "parent": "examples/taste-t1/seed-002.beat",
+  "parentSha256": "f48bb5343bbc0c2cde7e20fb2d2ad441a5b5aa4c9fe30d01f3cdb9168edbc989",
+  "track": "drums",
+  "group": "feel",
+  "count": 5,
+  "seed": 68356,
+  "createdAt": "2026-07-18T21:44:21.637Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "recipe": "humanize seed=68356 timing=0.02 velocity=0.02  # tight"
+    },
+    {
+      "file": "v2.beat",
+      "recipe": "humanize seed=68357 timing=0.06 velocity=0.05 swing=0.22  # light-swing"
+    },
+    {
+      "file": "v3.beat",
+      "recipe": "humanize seed=68358 timing=0.08 velocity=0.08 push-late=0.04 swing=0.55  # heavy-swing"
+    },
+    {
+      "file": "v4.beat",
+      "recipe": "humanize seed=68359 timing=0.06 velocity=0.06 push-late=0.22 swing=0.12  # laid-back"
+    },
+    {
+      "file": "v5.beat",
+      "recipe": "humanize seed=68360 timing=0.32 velocity=0.18 push-late=0.08 swing=0.3  # loose"
+    }
+  ]
+}

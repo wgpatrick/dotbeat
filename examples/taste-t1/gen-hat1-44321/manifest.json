@@ -1,0 +1,151 @@
+{
+  "parent": "examples/taste-t1/seed-001.beat",
+  "parentSha256": "967fe8fd2306abf0e667e0ee222a7beb7d812a9c1fa1a7c6e387f42f88312957",
+  "group": "gen:hat1",
+  "count": 5,
+  "seed": 44321,
+  "createdAt": "2026-07-17T23:42:24.037Z",
+  "prompt": "a crisp closed hi-hat one-shot",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "media": {
+        "id": "hat1",
+        "sha256": "3e538abd2092a3f2a613bd1a7dd75214b9cb9250d32181a2191e38360e1076b2",
+        "durationSeconds": 0.2407,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 44321,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a crisp closed hi-hat one-shot, soft, intimate, close-mic feel",
+          "sha256": "3e538abd2092a3f2a613bd1a7dd75214b9cb9250d32181a2191e38360e1076b2",
+          "preparedAt": "2026-07-17T23:42:15.799Z",
+          "durationSeconds": 0.2407,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a crisp closed hi-hat one-shot, soft, intimate, close-mic feel",
+            "seconds": 1,
+            "seed": 44321,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v2.wav",
+      "media": {
+        "id": "hat1",
+        "sha256": "bf06d9d019ddc08f0d4d21c602c6fc73a36ef50ccd27de3aeb578ab4754a68fc",
+        "durationSeconds": 0.2357,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 44322,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a crisp closed hi-hat one-shot, clean and modern, club-ready",
+          "sha256": "bf06d9d019ddc08f0d4d21c602c6fc73a36ef50ccd27de3aeb578ab4754a68fc",
+          "preparedAt": "2026-07-17T23:42:17.751Z",
+          "durationSeconds": 0.2357,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a crisp closed hi-hat one-shot, clean and modern, club-ready",
+            "seconds": 1,
+            "seed": 44322,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v3.wav",
+      "media": {
+        "id": "hat1",
+        "sha256": "0a55b6e13891e71d81b6de8ba01cb5b961bbc695626700c4973ea4d87b85fcaf",
+        "durationSeconds": 0.2443,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 44323,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a crisp closed hi-hat one-shot, analog warmth, tape saturation",
+          "sha256": "0a55b6e13891e71d81b6de8ba01cb5b961bbc695626700c4973ea4d87b85fcaf",
+          "preparedAt": "2026-07-17T23:42:19.791Z",
+          "durationSeconds": 0.2443,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a crisp closed hi-hat one-shot, analog warmth, tape saturation",
+            "seconds": 1,
+            "seed": 44323,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v4.wav",
+      "media": {
+        "id": "hat1",
+        "sha256": "bec8cbb33e86f9f205062af0b8799cb57f641a9730023a5f676e9655994b651d",
+        "durationSeconds": 0.2445,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 44324,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a crisp closed hi-hat one-shot, organic and acoustic-leaning",
+          "sha256": "bec8cbb33e86f9f205062af0b8799cb57f641a9730023a5f676e9655994b651d",
+          "preparedAt": "2026-07-17T23:42:21.931Z",
+          "durationSeconds": 0.2445,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a crisp closed hi-hat one-shot, organic and acoustic-leaning",
+            "seconds": 1,
+            "seed": 44324,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    },
+    {
+      "file": "v5.wav",
+      "media": {
+        "id": "hat1",
+        "sha256": "535e35fefda2fbc2e14b341b5fd62436641c59934c2fe0bae24abcb11da193bb",
+        "durationSeconds": 0.3674,
+        "license": "Stability-AI-Community",
+        "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+        "seed": 44325,
+        "sidecar": {
+          "source": "generated:fal-ai/stable-audio-3/medium/text-to-audio",
+          "license": "Stability-AI-Community",
+          "query": "a crisp closed hi-hat one-shot, gritty distorted electronic",
+          "sha256": "535e35fefda2fbc2e14b341b5fd62436641c59934c2fe0bae24abcb11da193bb",
+          "preparedAt": "2026-07-17T23:42:24.036Z",
+          "durationSeconds": 0.3674,
+          "generated": {
+            "provider": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "model": "fal-ai/stable-audio-3/medium/text-to-audio",
+            "backend": "fal",
+            "prompt": "a crisp closed hi-hat one-shot, gritty distorted electronic",
+            "seconds": 1,
+            "seed": 44325,
+            "licenseUrl": "https://stability.ai/community-license-agreement"
+          }
+        }
+      }
+    }
+  ]
+}

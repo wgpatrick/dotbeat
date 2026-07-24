@@ -1,0 +1,57 @@
+{
+  "parent": "",
+  "parentSha256": "",
+  "group": "pilot:bassline",
+  "count": 3,
+  "seed": 74,
+  "createdAt": "2026-07-23T02:51:33.667Z",
+  "variants": [
+    {
+      "file": "v1.wav",
+      "source": {
+        "kind": "elite",
+        "from": "niche sparse·dark, 1 optimization steps from seed-004.beat (pessimistic 0.8724246829602067)"
+      },
+      "loudness": {
+        "measuredLufs": -27.84,
+        "gainDb": 0,
+        "capped": false,
+        "truePeakDbtp": -11.79,
+        "wantedGainDb": 0
+      }
+    },
+    {
+      "file": "v2.wav",
+      "source": {
+        "kind": "origin",
+        "from": "the untouched seed (seed-004.beat) — optimization step 0"
+      },
+      "loudness": {
+        "measuredLufs": -29.94,
+        "gainDb": 2.11,
+        "capped": false,
+        "truePeakDbtp": -16.87,
+        "wantedGainDb": 2.11
+      }
+    },
+    {
+      "file": "v3.wav",
+      "source": {
+        "kind": "control",
+        "from": "random-mutation control descended from elite bassline-g5-29 (seed-004.beat)"
+      },
+      "loudness": {
+        "measuredLufs": -22.22,
+        "gainDb": -5.62,
+        "capped": false,
+        "truePeakDbtp": -7.93,
+        "wantedGainDb": -5.62
+      }
+    }
+  ],
+  "normalization": {
+    "targetLufs": -27.84,
+    "truePeakCeilingDbtp": -1,
+    "normalized": true
+  }
+}

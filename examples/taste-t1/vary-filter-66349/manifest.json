@@ -1,0 +1,47 @@
+{
+  "parent": "examples/taste-t1/seed-006.beat",
+  "parentSha256": "688546452ab3cd1bdebbde9548191e50d3068cdf933ead113a70912f16bc9990",
+  "track": "chords",
+  "group": "filter",
+  "count": 5,
+  "amount": 0.25,
+  "seed": 66349,
+  "createdAt": "2026-07-18T07:29:54.227Z",
+  "variants": [
+    {
+      "file": "v1.beat",
+      "edits": [
+        "chords.cutoff 652.8304",
+        "chords.resonance 0.2795"
+      ]
+    },
+    {
+      "file": "v2.beat",
+      "edits": [
+        "chords.cutoff 1636.3051",
+        "chords.resonance 2.2163"
+      ]
+    },
+    {
+      "file": "v3.beat",
+      "edits": [
+        "chords.cutoff 8502.4272",
+        "chords.resonance 0.7037"
+      ]
+    },
+    {
+      "file": "v4.beat",
+      "edits": [
+        "chords.cutoff 4389.3504",
+        "chords.resonance 1.4877"
+      ]
+    },
+    {
+      "file": "v5.beat",
+      "edits": [
+        "chords.cutoff 342.4592",
+        "chords.resonance 0.3623"
+      ]
+    }
+  ]
+}
