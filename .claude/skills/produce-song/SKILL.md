@@ -72,8 +72,8 @@ not a failure) happened because no plan said what contrast *should* be.
 ## Phase 4 — Per-stem build
 
 Instruments: `beat add-track --produced` / `beat produce` · `beat trick suggest|apply` ·
-`beat render --stems` · `beat metrics` · surge tracks (`beat track add <id> surge --patch`,
-`beat surge patches|doctor`) · `beat source gen` for one-shots/FX.
+`beat render --stems` · `beat metrics` · surge tracks (`beat add-track <file> <id> surge
+--patch "<name>"`, `beat surge patches|doctor`) · `beat source gen` for one-shots/FX.
 
 - One engine patch / surge patch / sample per role, from the phase-2 table.
 - `add-track --produced` (or `beat produce` on existing tracks) is the default production
