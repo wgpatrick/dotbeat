@@ -3,8 +3,8 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatPlacement, BeatSongSection, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
+import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatPlacement, BeatSongSection, BeatSurgeOverride, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
 import { automationShapePoints, type AutomationShape } from './automation-shape.js'
 
@@ -272,6 +272,35 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     const grid = parseNum(value, 'shuffleGrid')
     if (grid <= 0) throw new BeatEditError(`shuffleGrid must be > 0, got ${grid}`)
     return replaceTrack(doc, { ...track, shuffleGrid: canon(grid) })
+  }
+
+  // Track 1a surge tracks: the sound-source block's addressable fields. patch/sampleRate live on
+  // track.surge; override.<param> is an upsert (empty value removes). Any of these edits changes
+  // the render cache key, so the next render re-renders through the sidecar (see docs/surge-track.md).
+  // The synth PRODUCTION fields (volume, sendReverb, cutoff, ...) fall through to the standard
+  // synth handling below — a surge track carries a real synth block, so `<track>.volume` works.
+  if (rest === 'surge.patch') {
+    if (track.kind !== 'surge') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — it has no surge block`)
+    const name = value.trim().replace(/^"(.*)"$/, '$1')
+    if (name === '') throw new BeatEditError('surge.patch needs a factory patch name (e.g. beat set lead.surge.patch "Formant Pulse")')
+    if (name.includes('"')) throw new BeatEditError('surge patch name must not contain a double-quote')
+    return replaceTrack(doc, { ...track, surge: { ...track.surge!, patch: name } })
+  }
+  if (rest === 'surge.sampleRate') {
+    if (track.kind !== 'surge') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — it has no surge block`)
+    const sr = parseNum(value, 'surge.sampleRate')
+    if (!Number.isInteger(sr) || sr < 8000 || sr > 192000) throw new BeatEditError(`surge.sampleRate must be an integer 8000..192000, got ${value}`)
+    return replaceTrack(doc, { ...track, surge: { ...track.surge!, sampleRate: sr } })
+  }
+  const surgeOverrideMatch = rest.match(/^surge\.override\.([A-Za-z0-9_./-]+)$/)
+  if (surgeOverrideMatch) {
+    if (track.kind !== 'surge') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — it has no surge block`)
+    const param = surgeOverrideMatch[1]!
+    const others = track.surge!.overrides.filter((o) => o.param !== param)
+    if (value.trim() === '') return replaceTrack(doc, { ...track, surge: { ...track.surge!, overrides: others } })
+    const v = parseNum(value, `surge.override.${param}`)
+    if (v < 0 || v > 1) throw new BeatEditError(`surge override value must be normalized 0..1, got ${v}`)
+    return replaceTrack(doc, { ...track, surge: { ...track.surge!, overrides: [...others, { param, value: canon(v) }] } })
   }
 
   // v0.6 instrument tracks: their small field set, validated in place
@@ -652,7 +681,7 @@ function validateTrackIdentity(id: string, name: string, color: string) {
  * so the low-level primitive stays backward compatible. */
 export function addTrack(
   doc: BeatDocument,
-  opts: { id: string; kind: TrackKind; name?: string; color?: string; soundfont?: { sample: string; program: number }; lanes?: BeatDrumLaneDecl[] },
+  opts: { id: string; kind: TrackKind; name?: string; color?: string; soundfont?: { sample: string; program: number }; surge?: { patch: string; sampleRate?: number; overrides?: BeatSurgeOverride[] }; lanes?: BeatDrumLaneDecl[] },
 ): { doc: BeatDocument; track: BeatTrack } {
   const { id, kind } = opts
   if (!(TRACK_KINDS as readonly string[]).includes(kind)) throw new BeatEditError(`track kind must be one of ${TRACK_KINDS.join('|')}, got "${kind}"`)
@@ -661,6 +690,13 @@ export function addTrack(
     if (!opts.soundfont) throw new BeatEditError('instrument tracks need a soundfont: pass --soundfont <sample-id> [--program N] (register the .sf2 with beat sample first)')
     if (!doc.media.some((m) => m.id === opts.soundfont!.sample)) throw new BeatEditError(`no sample "${opts.soundfont.sample}" in the media block — register it with beat sample first`)
     if (!Number.isInteger(opts.soundfont.program) || opts.soundfont.program < 0 || opts.soundfont.program > 127) throw new BeatEditError(`program must be an integer 0-127, got ${opts.soundfont.program}`)
+  }
+  // Track 1a: a surge track needs a factory patch name (resolved at RENDER, not here — a .beat
+  // file with a surge track must be creatable/loadable on a machine with no Surge build).
+  if (kind === 'surge') {
+    if (!opts.surge || !opts.surge.patch || opts.surge.patch.trim() === '') throw new BeatEditError('surge tracks need a patch: pass --patch "<factory patch name>" (list names with beat surge patches)')
+    const sr = opts.surge.sampleRate ?? SURGE_DEFAULT_SAMPLE_RATE
+    if (!Number.isInteger(sr) || sr < 8000 || sr > 192000) throw new BeatEditError(`surge sampleRate must be an integer 8000..192000, got ${sr}`)
   }
   const name = opts.name ?? id
   const color = opts.color ?? TRACK_COLORS[doc.tracks.length % TRACK_COLORS.length]!
@@ -675,6 +711,7 @@ export function addTrack(
     // a lead-synth default that silently swallows hats/cymbals (found via a silent-hat render).
     synth: kind === 'drums' ? { ...INIT_SYNTH, cutoff: 12000, resonance: 0.1 } : { ...INIT_SYNTH },
     ...(kind === 'instrument' ? { instrument: { sample: opts.soundfont!.sample, program: opts.soundfont!.program, volume: -10, pan: 0 } } : {}),
+    ...(kind === 'surge' ? { surge: { patch: opts.surge!.patch.trim().replace(/^"(.*)"$/, '$1'), sampleRate: opts.surge!.sampleRate ?? SURGE_DEFAULT_SAMPLE_RATE, overrides: opts.surge!.overrides ?? [] } } : {}),
     laneSamples: {},
     lanes: kind === 'drums' ? (opts.lanes ?? []) : [],
     clips: [],
@@ -685,7 +722,7 @@ export function addTrack(
     // synth here now that the old fixed bus insert is folded into this same reorderable list (see
     // BeatTrack.effects). A fresh instrument track carries none — it never had a fixed insert to
     // preserve backward compatibility with.
-    effects: kind === 'synth' || kind === 'drums' ? defaultEffectChain() : [],
+    effects: kind === 'synth' || kind === 'drums' || kind === 'surge' ? defaultEffectChain() : [],
     shuffleAmount: 0,
     shuffleGrid: 1,
   }
