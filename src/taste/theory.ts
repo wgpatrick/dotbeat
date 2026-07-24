@@ -189,14 +189,17 @@ export function buildChordTrack(key: PhraseKey, seed: number, opts: ChordTrackOp
   }
 
   // position-conditional cadence substitution (§C.1: the v->V move belongs at phrase-final
-  // positions). At the LAST chord, borrow the harmonic-minor V — raise the chord's third to the
-  // leading tone — turning a weak minor v into the strongest possible pull home. If the final
-  // diatonic chord is not already the v, substitute one in (root = degree 4, raised third).
+  // positions, NOT mid-phrase). At the LAST chord only, borrow the harmonic-minor V — raise the
+  // chord's third to the leading tone — the strongest possible pull home. Always when the final
+  // chord is already the v (turning a weak minor v into a real V); otherwise a seeded ~50% chance,
+  // so the substitution is a genuine sometimes-move and progression endings keep some variety.
   if (cadence && !planing && chords.length > 0) {
     const last = chords[chords.length - 1]!
-    const vTones = diatonicTones(trackKey, 4, sevenths)
-    vTones[1] = vTones[1]! + 1 // raise the third: b7 (subtonic) -> leading tone
-    chords[chords.length - 1] = { ...last, rootDegree: 4, rootOffset: vTones[0]!, tones: vTones, cadential: true }
+    if (last.rootDegree === 4 || rng() < 0.5) {
+      const vTones = diatonicTones(trackKey, 4, sevenths)
+      vTones[1] = vTones[1]! + 1 // raise the third: b7 (subtonic) -> leading tone
+      chords[chords.length - 1] = { ...last, rootDegree: 4, rootOffset: vTones[0]!, tones: vTones, cadential: true }
+    }
   }
 
   return { key: trackKey, bars, progressionName: entry.name, fn: entry.fn, barsPerChord, planing, chords }
@@ -832,7 +835,9 @@ export function lintFigure(notes: readonly ComposedNote[], track: ChordTrack): L
   const rv = registerRuleViolations(notes, track)
   const gc = grooveConsistency(notes, track.bars)
   const flags: string[] = []
-  if (sc < 0.8) flags.push(`scale-consistency ${sc.toFixed(2)} (<0.80: many out-of-key notes)`)
+  // 0.70 tolerates intentional chromaticism (a harmonic-minor cadential leading tone is chromatic
+  // in natural minor, and real EDM leans on passing tones) — only a GROSSLY out-of-key figure flags
+  if (sc < 0.7) flags.push(`scale-consistency ${sc.toFixed(2)} (<0.70: many out-of-key notes)`)
   if (rv.length > 0) flags.push(`register-rule: ${rv.length} sub-register non-root/5th/octave note(s)`)
   if (gc < 0.15) flags.push(`groove-consistency ${gc.toFixed(2)} (<0.15: adjacent bars share almost no onsets)`)
   return { scaleConsistency: sc, registerViolations: rv, grooveConsistency: gc, flags }
