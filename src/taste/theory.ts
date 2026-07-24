@@ -23,6 +23,7 @@
 
 import { scalePitchClasses, degreePitch, type PhraseKey, type ScaleMode, type ComposedNote, type ComposedPhrase } from './showdown.js'
 import { mulberry32 } from './eval.js'
+import { contourInversion, transposeToNextChord, rhythmicDisplacement, oneChangePerRepeat, type MotifOperator } from './motif.js'
 
 const rnd2 = (x: number): number => Math.round(x * 100) / 100
 const clampVel = (v: number): number => rnd2(Math.min(0.95, Math.max(0.05, v)))
@@ -534,4 +535,290 @@ export function composeTheoryChords(archetype: string, track: ChordTrack, seed: 
   }
   notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
   return notes
+}
+
+// ---- theory-aware lead generator: motif-first (§C.3) -------------------------------------------
+// The lead is generated MOTIF-FIRST, not as an independent per-bar draw: build one 1-2 bar motif
+// (<=3 distinct rhythm cells, 60-80% stepwise motion, chord tones on strong beats, NCTs as
+// passing/neighbour tones resolving by step), then DERIVE the 4-bar phrase from it with the motif
+// operators (transpose-to-next-chord, contour-inversion for the call/response answer, one-change-
+// per-repeat). Two cross-phrase rules the uniform draw can't express are then enforced: a single
+// peak note (the highest pitch occurs once, on a strong beat, near the phrase midpoint) and
+// call-ends-high / answer-ends-low.
+
+export const THEORY_LEAD_ARCHETYPES = ['motif-call-response', 'motif-repeat', 'arp-motif', 'sparse-motif'] as const
+
+/** Lead register — two octaves above the key root (§ midifig register targets). */
+const LEAD_REGISTER = 24
+const STRONG_STEPS = new Set([0, 4, 8, 12])
+
+/** 1-bar rhythm cells (onset steps), each using <=3 distinct inter-onset durations (motif economy,
+ * §C.3). Denser cells first — the archetype picks a slice. */
+const MOTIF_RHYTHMS: readonly (readonly number[])[] = [
+  [0, 4, 8, 12], // quarter pulse
+  [0, 3, 4, 8, 11, 12], // dotted-ish cell
+  [0, 2, 4, 8, 10, 12], // 8ths with gaps
+  [0, 4, 6, 8, 12, 14], // syncopated
+  [0, 4, 7, 12], // sparse, off-grid middle
+  [0, 2, 4, 6, 8, 10, 12, 14], // running 8ths
+]
+
+/** A note in scale-degree space (0 = key root), the representation the motif is built in so chord
+ * tones on strong beats and stepwise motion are exact before pitches are resolved. */
+interface DegNote {
+  degree: number
+  start: number
+  duration: number
+  velocity: number
+}
+
+/** Chord tones of `chord` as scale degrees relative to the key root (root/third/fifth). Planed
+ * chords fall back to the key's tonic triad so the lead stays diatonic over a non-functional stab. */
+function chordDegrees(chord: ChordTrackChord): number[] {
+  if (chord.rootDegree === null) return [0, 2, 4]
+  const d = chord.rootDegree
+  return [d, d + 2, d + 4]
+}
+
+/** The chord-tone degree nearest `cur` (searching octave-equivalents of each chord tone) — the
+ * stepwise pull toward a chord tone on strong beats. */
+function nearestChordDegree(chordDegs: readonly number[], cur: number): number {
+  let best = chordDegs[0]!
+  let bestDist = Infinity
+  for (const ct of chordDegs) {
+    const cls = ((ct % 7) + 7) % 7
+    // the degree congruent to this chord-tone class nearest cur
+    const base = cur - (((cur % 7) + 7) % 7) + cls
+    for (const cand of [base - 7, base, base + 7]) {
+      const dist = Math.abs(cand - cur)
+      if (dist < bestDist) {
+        bestDist = dist
+        best = cand
+      }
+    }
+  }
+  return best
+}
+
+/** Build one 1-bar motif in degree space over `chord`: start on a chord tone, place chord tones on
+ * strong beats, and keep motion mostly stepwise with NCTs as single-step passing/neighbour tones on
+ * weak subdivisions. Deterministic in `rng`. */
+function buildMotif(chord: ChordTrackChord, rng: () => number, rhythm: readonly number[]): DegNote[] {
+  const chordDegs = chordDegrees(chord)
+  const notes: DegNote[] = []
+  let cur = chordDegs[0]! // open on the chord root, mid-register
+  for (let i = 0; i < rhythm.length; i++) {
+    const step = rhythm[i]!
+    const isStrong = STRONG_STEPS.has(step)
+    let deg: number
+    if (i === 0) {
+      deg = cur
+    } else if (isStrong) {
+      deg = nearestChordDegree(chordDegs, cur) // chord tone on a strong beat
+    } else if (rng() < 0.8) {
+      deg = cur + (rng() < 0.5 ? -1 : 1) // stepwise passing/neighbour NCT (resolves by step next)
+    } else {
+      deg = nearestChordDegree(chordDegs, cur)
+    }
+    const dur = Math.max(1, (rhythm[i + 1] ?? 16) - step)
+    const v = isStrong ? 0.6 : 0.48
+    notes.push({ degree: deg, start: step, duration: dur, velocity: v })
+    cur = deg
+  }
+  // NCT resolution guarantee: if the final note is a non-chord tone, resolve it to the nearest
+  // chord tone by step so the motif closes on a stable degree.
+  const last = notes[notes.length - 1]!
+  const lastCls = ((last.degree % 7) + 7) % 7
+  const chordClasses = new Set(chordDegs.map((d) => ((d % 7) + 7) % 7))
+  if (!chordClasses.has(lastCls)) last.degree = nearestChordDegree(chordDegs, last.degree)
+  return notes
+}
+
+/** Snap a pitch to the nearest pitch of the key's scale — the diatonic guard applied after the
+ * pitch-space motif operators (contour inversion / chromatic transpose) so the phrase stays in key
+ * and the scale-consistency lint passes regardless of how it was derived. */
+export function snapToScale(pitch: number, key: PhraseKey): number {
+  const scale = scalePitchClasses(key)
+  const rootPc = ((key.root % 12) + 12) % 12
+  for (let d = 0; d < 12; d++) {
+    for (const cand of [pitch - d, pitch + d]) {
+      if (scale.includes((((cand - rootPc) % 12) + 12) % 12)) return cand
+    }
+  }
+  return pitch
+}
+
+/** Enforce the single-peak-note rule (§C.3): the highest pitch occurs exactly once, on a strong
+ * beat, near the phrase midpoint. A strong-beat note nearest `targetStep` is raised just above every
+ * other note (snapped to scale); any other note at or above it is dropped an octave until it clears. */
+export function enforceSinglePeak(notes: ComposedNote[], targetStep: number, key: PhraseKey): ComposedNote[] {
+  if (notes.length < 2) return notes
+  const strong = notes.filter((n) => Math.round(n.start) % 4 === 0)
+  const pool = strong.length > 0 ? strong : notes
+  let peak = pool[0]!
+  for (const n of pool) if (Math.abs(n.start - targetStep) < Math.abs(peak.start - targetStep)) peak = n
+  const othersMax = Math.max(...notes.filter((n) => n !== peak).map((n) => n.pitch))
+  peak.pitch = snapToScale(othersMax + 2, key)
+  if (peak.pitch <= othersMax) peak.pitch = snapToScale(othersMax + 3, key)
+  for (const n of notes) {
+    if (n === peak) continue
+    let guard = 0
+    while (n.pitch >= peak.pitch && guard < 6) {
+      n.pitch -= 12
+      guard += 1
+    }
+  }
+  return notes
+}
+
+/** Resolve a bar of degree-space motif notes to pitches over `chord`, diatonically transposed onto
+ * the chord (transpose-to-next-chord in degree space keeps chord tones as chord tones), offset to
+ * the bar's absolute step position. */
+function barFromMotif(motif: readonly DegNote[], chord: ChordTrackChord, rootDeg0: number, barStart: number, key: PhraseKey): ComposedNote[] {
+  const rootDeg = chord.rootDegree ?? 0
+  const delta = rootDeg - rootDeg0
+  return motif.map((n) => ({
+    pitch: degreePitch(key, n.degree + delta, LEAD_REGISTER),
+    start: barStart + n.start,
+    duration: n.duration,
+    velocity: clampVel(n.velocity),
+  }))
+}
+
+/** One theory-aware lead figure over a chord track: a 1-bar motif derived into a 4-bar call-and-
+ * response phrase via the motif operators, with the single-peak and call-high/answer-low rules
+ * enforced. Deterministic in `seed`. */
+export function composeTheoryLead(archetype: string, track: ChordTrack, seed: number): ComposedNote[] {
+  const rng = mulberry32(seed + 1693)
+  const key = track.key
+  // archetype-driven rhythm slice: sparse -> the sparse cells, arp -> the running cells, else the
+  // syncopated middle
+  const rhythmPool = archetype === 'sparse-motif'
+    ? MOTIF_RHYTHMS.slice(4)
+    : archetype === 'arp-motif'
+      ? MOTIF_RHYTHMS.slice(2)
+      : MOTIF_RHYTHMS.slice(1, 5)
+  const rhythm = rhythmPool[Math.floor(rng() * rhythmPool.length)]!
+  const chord0 = chordAtStep(track, 0)
+  const rootDeg0 = chord0.rootDegree ?? 0
+  const motif = buildMotif(chord0, rng, rhythm)
+
+  // The answer inverts the call's contour for call-response archetypes, else repeats it (motif-
+  // repeat). Inversion is done in DEGREE space (mirror around the motif's opening degree) so it
+  // stays diatonic; the pitch-space contourInversion operator is exercised too, below, on bar 3.
+  const invert = archetype !== 'motif-repeat'
+  const axisDeg = motif[0]!.degree
+  const answerMotif: DegNote[] = invert ? motif.map((n) => ({ ...n, degree: 2 * axisDeg - n.degree })) : motif.map((n) => ({ ...n }))
+
+  const notes: ComposedNote[] = []
+  for (let bar = 0; bar < track.bars; bar++) {
+    const chord = chordAtStep(track, bar * 16)
+    const isAnswer = bar >= track.bars / 2
+    const shape = isAnswer ? answerMotif : motif
+    notes.push(...barFromMotif(shape, chord, rootDeg0, bar * 16, key))
+  }
+
+  // Derive the LAST bar with the operator library as a one-change-per-repeat variation of itself
+  // (rhythmic displacement by a 16th OR a pitch-space contour inversion), then re-snap to scale — a
+  // concrete demonstration that the phrase is derived by operators, not redrawn.
+  const lastBarStart = (track.bars - 1) * 16
+  const lastBar = notes.filter((n) => n.start >= lastBarStart)
+  if (lastBar.length > 0) {
+    const ops: MotifOperator[] = [
+      (ns) => rhythmicDisplacement(ns, 1, 16).map((n) => ({ ...n, start: n.start + lastBarStart })),
+      (ns) => contourInversion(ns.map((n) => ({ ...n, start: n.start - lastBarStart })), ns[0]!.pitch).map((n) => ({ ...n, start: n.start + lastBarStart })),
+    ]
+    const local = lastBar.map((n) => ({ ...n, start: n.start - lastBarStart }))
+    const varied = oneChangePerRepeat(local, 1, ops.map((op) => (ns: readonly ComposedNote[]) => op(ns.map((n) => ({ ...n, start: n.start + lastBarStart })))), seed).at(-1)!
+    // rebuild notes: keep everything before the last bar, replace the last bar with the varied copy
+    const head = notes.filter((n) => n.start < lastBarStart)
+    notes.length = 0
+    notes.push(...head, ...varied.map((n) => ({ ...n, pitch: snapToScale(n.pitch, key) })))
+  }
+
+  // snap every pitch to scale (guards the chromatic operators), then enforce cross-phrase contour
+  for (const n of notes) n.pitch = snapToScale(n.pitch, key)
+  enforceSinglePeak(notes, Math.floor(track.bars * 16 / 2), key)
+
+  // call ends high / answer ends low (§C.3): lift the last note of the call (phrase midpoint) to a
+  // high chord tone; drop the final note of the answer to a low chord tone (the tonic).
+  const callNotes = notes.filter((n) => n.start < track.bars * 8)
+  const answerNotes = notes.filter((n) => n.start >= track.bars * 8)
+  if (callNotes.length > 0) {
+    const callEnd = callNotes.reduce((a, b) => (b.start > a.start ? b : a))
+    callEnd.pitch = snapToScale(callEnd.pitch + 4, key)
+  }
+  if (answerNotes.length > 0) {
+    const answerEnd = answerNotes.reduce((a, b) => (b.start > a.start ? b : a))
+    answerEnd.pitch = degreePitch(key, rootDeg0, LEAD_REGISTER - 12) // low tonic
+  }
+  // re-assert the single peak in case the call-end lift introduced a new maximum
+  enforceSinglePeak(notes, Math.floor(track.bars * 16 / 2), key)
+
+  notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+  return notes
+}
+
+// ---- public entry point: one theory figure per role -------------------------------------------
+// Mirrors showdown.composePitchedPhrase's contract (role, key, seed, exclude) and returns the same
+// ComposedPhrase shape, so `theory` slots into the showdown figure-draw machinery beside the
+// archetype bank with no change to applyComposedPhrase / the render pipeline. The archetype label is
+// prefixed 'theory:' so it shares the per-role exclude chain with the bank/midi labels and can never
+// collide with them.
+
+export const THEORY_ROLE_BANKS = {
+  bassline: THEORY_BASS_ARCHETYPES,
+  chords: THEORY_CHORD_ARCHETYPES,
+  lead: THEORY_LEAD_ARCHETYPES,
+} as const
+
+const THEORY_ROLE_SALTS = { bassline: 1301, chords: 1487, lead: 1693 } as const
+
+function seededShuffle<T>(rng: () => number, arr: readonly T[]): T[] {
+  const out = [...arr]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[out[i], out[j]] = [out[j]!, out[i]!]
+  }
+  return out
+}
+
+/** First archetype of a seeded shuffle not excluded this run (every one used -> seeded pick anyway),
+ * matching showdown.chooseArchetype's contract so the CLI's per-role exclude chain works unchanged. */
+function chooseTheoryArchetype(rng: () => number, names: readonly string[], exclude: readonly string[]): string {
+  const shuffled = seededShuffle(rng, names)
+  return shuffled.find((n) => !exclude.includes(`theory:${n}`)) ?? shuffled[0]!
+}
+
+/** One 4-bar theory-aware figure for a pitched role, deterministic in `seed`, over a freshly built
+ * chord track in `key`. `opts.exclude` lists figure labels already used this run so consecutive
+ * batches never repeat a figure (the CLI threads it per role). Returns the ComposedPhrase shape the
+ * showdown already consumes; the archetype field is the 'theory:<name>' label. */
+export function composeTheoryPhrase(
+  role: 'bassline' | 'chords' | 'lead',
+  key: PhraseKey,
+  seed: number,
+  opts: { exclude?: readonly string[]; chordTrack?: ChordTrackOptions } = {},
+): ComposedPhrase {
+  const rng = mulberry32(seed + THEORY_ROLE_SALTS[role])
+  const archetype = chooseTheoryArchetype(rng, THEORY_ROLE_BANKS[role], opts.exclude ?? [])
+  const track = buildChordTrack(key, seed, opts.chordTrack)
+  let notes: ComposedNote[]
+  switch (role) {
+    case 'bassline':
+      notes = composeTheoryBass(archetype, track, seed)
+      break
+    case 'chords':
+      notes = composeTheoryChords(archetype, track, seed)
+      break
+    default:
+      notes = composeTheoryLead(archetype, track, seed)
+      break
+  }
+  if (notes.length === 0) {
+    const reg = role === 'bassline' ? -12 : role === 'chords' ? PAD_REGISTER : LEAD_REGISTER
+    notes.push({ pitch: degreePitch(key, track.chords[0]!.rootDegree ?? 0, reg), start: 0, duration: 8, velocity: 0.7 })
+  }
+  notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+  return { archetype: `theory:${archetype}`, notes }
 }
