@@ -4734,7 +4734,14 @@ async function lintCmd(argv) {
     process.stdout.write(JSON.stringify(wantScreens ? { findings, screens: screenFindings } : findings, null, 2) + '\n')
   } else {
     process.stdout.write(formatLint(findings))
-    if (wantScreens) process.stdout.write('\n' + formatScreens(screenFindings, basename(file)))
+    if (wantScreens) {
+      process.stdout.write('\n' + formatScreens(screenFindings, basename(file)))
+      // don't let "all screens pass" overclaim: the arrangement-flatness screen only runs with a
+      // section map, so say when it (and section-located dead air) were NOT evaluated.
+      if (sectionsPath === undefined) {
+        process.stdout.write('  note: arrangement-flatness was NOT checked — it needs the song section map. Add --sections <file.beat> to include it.\n')
+      }
+    }
   }
   // exit non-zero on any lint WARN or any severity>=3 pathology (a real defect worth blocking on)
   process.exitCode = findings.some((f) => f.level === 'warn') || screenFindings.some((f) => f.severity >= 3) ? 1 : 0
