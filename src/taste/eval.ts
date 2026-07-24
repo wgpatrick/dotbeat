@@ -12,7 +12,7 @@
 // dropped.
 
 import { readFileSync, existsSync } from 'node:fs'
-import { basename, dirname, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { computeBatchFeatures, type FeatureVector } from './features.js'
 import { pairsFromRanking, standardizeBatch, zScoreColumns, trainBT, scoreVector, describeWeights, trainBTEnsemble, scoreVectorEnsemble, pessimisticScore, type TrainPair, type BTModel, type BTEnsemble } from './ranker.js'
 import { embedAudioFile, BeatEmbedError, fitPCA, projectPCA, AES_AXES, type EmbedBackend, type AesBackend } from './embeddings.js'
@@ -29,6 +29,11 @@ export interface TasteBatch {
   features: Record<string, FeatureVector>
   /** true when features came from the log entry itself rather than a lazy backfill */
   featuresStored: boolean
+  /** variant files EXCLUDED from training pairs (still evaluated/ranked held-out): ref clips
+   * from the refs-packs pool, whose vendor terms (Splice ToU) prohibit ML-training use — D25.
+   * Populated from the batch dir's local manifest at load time; empty when the dir is gone
+   * (historical batches predate the packs pool, so nothing is silently missed). */
+  trainingExcluded: Set<string>
   /** T2: raw audio embeddings keyed by variant file (attachEmbeddings; only for batches whose
    * renders still exist — embeddings are cached next to the wavs, not in the log). */
   embeddings?: Record<string, number[]>
@@ -62,6 +67,36 @@ interface RawEntry {
 /** Parse the scores log and resolve per-variant features (stored, else lazily derived from the
  * batch dir's renders). Tolerant of the log's other entry shapes — anything without picks is
  * ignored, matching parseScoresLog's stance. */
+/** Variant files in this batch dir whose manifest marks them as refs-packs ref clips — the
+ * D25 training holdout (Splice ToU prohibits ML-training use; pack refs stay fully rateable and
+ * are ranked held-out, they just never become training pairs). Local-manifest read, kind-only
+ * log posture preserved. */
+function packRefFiles(batchDir: string): Set<string> {
+  const out = new Set<string>()
+  const manifestPath = join(batchDir, 'manifest.json')
+  if (!existsSync(manifestPath)) return out
+  try {
+    const man = JSON.parse(readFileSync(manifestPath, 'utf8')) as { variants?: { file?: string; source?: { kind?: string; from?: string } }[] }
+    for (const v of man.variants ?? []) {
+      if (v.source?.kind === 'ref' && typeof v.source.from === 'string' && /refs-packs\b/.test(v.source.from) && typeof v.file === 'string') {
+        out.add(v.file.replace(/\.beat$/, '.wav'))
+        out.add(v.file)
+      }
+    }
+  } catch { /* unreadable manifest -> nothing excluded */ }
+  return out
+}
+
+/** The training view of a batch: picks/rejected minus the D25-excluded files. Every
+ * pairsFromRanking call that builds TRAINING pairs must go through this. */
+export function trainable(b: TasteBatch): { picks: string[]; rejected: string[] } {
+  if (b.trainingExcluded.size === 0) return { picks: b.picks, rejected: b.rejected }
+  return {
+    picks: b.picks.filter((f) => !b.trainingExcluded.has(f)),
+    rejected: b.rejected.filter((f) => !b.trainingExcluded.has(f)),
+  }
+}
+
 export function loadTasteBatches(logPath: string): LoadResult {
   const batches: TasteBatch[] = []
   const skipped: LoadResult['skipped'] = []
@@ -101,8 +136,10 @@ export function loadTasteBatches(logPath: string): LoadResult {
       features = existsSync(batchDir) ? computeBatchFeatures(batchDir, allFiles) : {}
     }
     const featured = allFiles.filter((f) => features![f] !== undefined)
+    const trainingExcluded = packRefFiles(batchDir)
     const batch: TasteBatch = {
       dir: batchDir,
+      trainingExcluded,
       group: raw.group ?? '?',
       ...(raw.track !== undefined ? { track: raw.track } : {}),
       picks,
@@ -147,7 +184,7 @@ function standardizedByFile(batch: TasteBatch): Map<string, number[]> {
 
 function trainingPairs(batches: TasteBatch[]): TrainPair[] {
   const pairs: TrainPair[] = []
-  for (const b of batches) pairs.push(...pairsFromRanking(b.picks, b.rejected, standardizedByFile(b)))
+  for (const b of batches) pairs.push(...pairsFromRanking(trainable(b).picks, trainable(b).rejected, standardizedByFile(b)))
   return pairs
 }
 
@@ -294,7 +331,7 @@ function vectorsFor(batch: TasteBatch, kind: 'dsp' | 'embed' | 'both' | 'aes' | 
 function btScorerFor(kind: 'dsp' | 'embed' | 'both' | 'aes' | 'dsp+aes'): Scorer {
   return (heldOut, training) => {
     const pairs: TrainPair[] = []
-    for (const b of training) pairs.push(...pairsFromRanking(b.picks, b.rejected, vectorsFor(b, kind)))
+    for (const b of training) pairs.push(...pairsFromRanking(trainable(b).picks, trainable(b).rejected, vectorsFor(b, kind)))
     const model = trainBT(pairs)
     return Object.fromEntries([...vectorsFor(heldOut, kind)].map(([f, vec]) => [f, scoreVector(model, vec)]))
   }
@@ -312,7 +349,7 @@ export const PESS_BETA = 1
 function btPessScorerFor(kind: 'dsp' | 'embed' | 'both' | 'aes' | 'dsp+aes', beta = PESS_BETA): Scorer {
   return (heldOut, training) => {
     const pairs: TrainPair[] = []
-    for (const b of training) pairs.push(...pairsFromRanking(b.picks, b.rejected, vectorsFor(b, kind)))
+    for (const b of training) pairs.push(...pairsFromRanking(trainable(b).picks, trainable(b).rejected, vectorsFor(b, kind)))
     const ensemble = trainBTEnsemble(pairs)
     return Object.fromEntries([...vectorsFor(heldOut, kind)].map(([f, vec]) => [f, pessimisticScore(ensemble, vec, beta)]))
   }
@@ -503,7 +540,7 @@ function computeEnsembleUncertainty(batches: TasteBatch[], beta = PESS_BETA): En
     const heldOut = batches[i]!
     const training = batches.filter((_, j) => j !== i)
     const pairs: TrainPair[] = []
-    for (const b of training) pairs.push(...pairsFromRanking(b.picks, b.rejected, vectorsFor(b, 'dsp+aes')))
+    for (const b of training) pairs.push(...pairsFromRanking(trainable(b).picks, trainable(b).rejected, vectorsFor(b, 'dsp+aes')))
     const ensemble = trainBTEnsemble(pairs)
     const vecs = [...vectorsFor(heldOut, 'dsp+aes').values()]
     if (vecs.length === 0) continue
@@ -577,7 +614,7 @@ export async function evaluate(logPath: string, opts: EvaluateOptions = {}): Pro
     // signed weight per NAMED axis — "+PQ / -PC" reads as "prefers cleaner production over busier".
     if (aesthetics !== undefined) {
       const pairs: TrainPair[] = []
-      for (const b of aesBatches) pairs.push(...pairsFromRanking(b.picks, b.rejected, vectorsFor(b, 'aes')))
+      for (const b of aesBatches) pairs.push(...pairsFromRanking(trainable(b).picks, trainable(b).rejected, vectorsFor(b, 'aes')))
       const aesModel = trainBT(pairs)
       aesthetics.weights = AES_AXES.map((axis, i) => ({ axis, weight: aesModel.weights[i] ?? 0 })).sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight))
     }
@@ -711,7 +748,7 @@ export async function criticWithUncertainty(
   await attachAesthetics(batches, { backend: opts.aesBackend ?? 'aes' })
   const aesBatches = batches.filter((b) => b.aes !== undefined)
   const pairs: TrainPair[] = []
-  for (const b of aesBatches) pairs.push(...pairsFromRanking(b.picks, b.rejected, vectorsFor(b, 'dsp+aes')))
+  for (const b of aesBatches) pairs.push(...pairsFromRanking(trainable(b).picks, trainable(b).rejected, vectorsFor(b, 'dsp+aes')))
   const ensembleOpts = { ...(opts.n !== undefined ? { n: opts.n } : {}), ...(opts.seed !== undefined ? { seed: opts.seed } : {}) }
   const ensemble = trainBTEnsemble(pairs, ensembleOpts)
   return {

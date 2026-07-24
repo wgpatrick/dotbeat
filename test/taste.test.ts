@@ -645,3 +645,32 @@ test('clip-set batch: audition + score work, adopt refuses', () => {
   assert.throws(() => adoptVariant(batchDir, '1'), BeatBatchError)
   assert.throws(() => adoptVariant(batchDir, '1'), /nothing to adopt into/)
 })
+
+test('D25 training holdout: refs-packs ref variants never become training pairs, stay rankable', async () => {
+  const { mkdtempSync: mkd, writeFileSync: wf, mkdirSync: mkdir } = await import('node:fs')
+  const { tmpdir: tmp } = await import('node:os')
+  const { join: j } = await import('node:path')
+  const { loadTasteBatches, trainable } = await import('../src/taste/eval.js')
+  const container = mkd(j(tmp(), 'beat-packs-holdout-'))
+  const dir = j(container, 'showdown-bassline-9')
+  mkdir(dir)
+  wf(j(dir, 'manifest.json'), JSON.stringify({ parent: '', parentSha256: '', group: 'showdown:bassline', count: 3, seed: 9, variants: [
+    { file: 'v1.wav', source: { kind: 'engine', from: 'composed figure' } },
+    { file: 'v2.wav', source: { kind: 'ref', from: '/x/taste-dataset/refs-packs/bassline/loop.wav' } },
+    { file: 'v3.wav', source: { kind: 'ref', from: '/x/taste-dataset/refs-unfamiliar/bassline/chop.wav' } },
+  ] }))
+  const feats = Object.fromEntries(['v1.wav','v2.wav','v3.wav'].map((f, i) => [f, Object.fromEntries(FEATURE_KEYS.map((k) => [k, i]))]))
+  const log = j(container, 'beat-scores.jsonl')
+  wf(log, JSON.stringify({ batch: dir, group: 'showdown:bassline', picks: [{ rank: 1, variant: 'v2.wav' }, { rank: 2, variant: 'v1.wav' }], rejected: ['v3.wav'], features: feats, sources: { 'v1.wav': 'engine', 'v2.wav': 'ref', 'v3.wav': 'ref' } }) + '\n')
+  const { batches } = loadTasteBatches(log)
+  assert.equal(batches.length, 1)
+  const b = batches[0]!
+  // the packs ref is excluded from training...
+  assert.ok(b.trainingExcluded.has('v2.wav'), 'packs ref flagged')
+  const t = trainable(b)
+  assert.deepEqual(t.picks, ['v1.wav'], 'packs ref dropped from training picks')
+  // ...but the unfamiliar-pool ref is NOT excluded (only packs carries the ToU restriction)
+  assert.deepEqual(t.rejected, ['v3.wav'])
+  // and the batch still ranks the packs ref held-out (picks untouched for evaluation)
+  assert.deepEqual(b.picks, ['v2.wav', 'v1.wav'])
+})
