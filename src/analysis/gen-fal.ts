@@ -16,11 +16,79 @@
 // HTTPS_PROXY/CA-bundle env everywhere this runs (proxied agent containers AND the owner's
 // machine), and tests inject a mock instead of the network.
 
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { BeatGenError, type GenMeta } from './gen.js'
+import { decodeWav } from '../metrics/wav.js'
+import { downbeatAlignedTrim, encodeWav16 } from './gen-trim.js'
 
 export const FAL_DEFAULT_PROVIDER = 'fal-ai/stable-audio-3/medium/text-to-audio'
+
+// ---- Per-provider request/response adapter table (research/127 §4.2) --------------------------
+// The stable-audio family speaks {prompt, duration|seconds_total, seed, output_format}. The three
+// bake-off backends each want a DIFFERENT body — a leaderboard-model integration is a body mapping,
+// not a new transport. Each adapter also carries the doc's rights verdict (watermark + whether the
+// ToS bans training on outputs), which flows into GenMeta → the provenance sidecar → the taste
+// holdout. `extractAudioUrl` already handles every response shape these return, so adapters only
+// shape the REQUEST. Bodies use the EXACT fields documented in research/127; unknown fields 422 on
+// fal, so we send only what each model's schema accepts.
+
+interface ProviderAdapter {
+  id: string
+  match: (provider: string) => boolean
+  /** Build the POST body. `durationField` is only consulted by the stable-audio adapter (the one
+   * backend with a duration param whose field name varies + needs the 422 alias retry). */
+  body: (o: { prompt: string; seconds: number; seed: number; negativePrompt?: string }, durationField: 'seconds_total' | 'duration') => Record<string, unknown>
+  /** stable-audio only: retry once swapping duration↔seconds_total on a 422 schema rejection. */
+  durationAliasRetry: boolean
+  /** inaudible-but-mandatory mark documented for this provider (Google Lyria = SynthID). */
+  watermark?: string
+  /** provider ToS bans using outputs to train ML models → the taste-training holdout marker.
+   * ElevenLabs categorical; MiniMax unknown-treat-as-banned (research/127 §3). */
+  trainingExcluded?: boolean
+}
+
+/** research/127 §4.2 request shapes. Order matters: the stable-audio fallback matches last. */
+const PROVIDER_ADAPTERS: ProviderAdapter[] = [
+  {
+    id: 'lyria2',
+    match: (p) => /(^|\/)lyria2(\/|$)/.test(p),
+    // Instrumental-by-design, native 48 kHz WAV, fixed ~30 s (no duration param). seed + optional
+    // negative_prompt only. SynthID-watermarked (mandatory), trainable per the doc.
+    body: (o) => ({ prompt: o.prompt, seed: o.seed, ...(o.negativePrompt ? { negative_prompt: o.negativePrompt } : {}) }),
+    durationAliasRetry: false,
+    watermark: 'synthid',
+  },
+  {
+    id: 'minimax-music',
+    match: (p) => /minimax-music/.test(p),
+    // is_instrumental drops the lyrics requirement; audio_setting requests 44.1 kHz WAV. No
+    // duration/seed param — output is a full track we downbeat-trim. API-tier ToS unverifiable →
+    // treat training as banned (holdout tag) until read.
+    body: (o) => ({ prompt: o.prompt, is_instrumental: true, audio_setting: { format: 'wav', sample_rate: 44100 } }),
+    durationAliasRetry: false,
+    trainingExcluded: true,
+  },
+  {
+    id: 'elevenlabs-music',
+    match: (p) => /elevenlabs\/music/.test(p),
+    // The only native short-duration control in the field: music_length_ms with a 3000 ms FLOOR.
+    // force_instrumental drops vocals. Categorical training ban → holdout tag mandatory.
+    body: (o) => ({ prompt: o.prompt, music_length_ms: Math.max(3000, Math.round(o.seconds * 1000)), force_instrumental: true }),
+    durationAliasRetry: false,
+    trainingExcluded: true,
+  },
+  {
+    id: 'stable-audio',
+    match: () => true, // the incumbent + fallback: any unrecognized fal model path
+    body: (o, durationField) => ({ prompt: o.prompt, [durationField]: o.seconds, seed: o.seed, output_format: 'wav' }),
+    durationAliasRetry: true,
+  },
+]
+
+export function providerAdapter(provider: string): ProviderAdapter {
+  return PROVIDER_ADAPTERS.find((a) => a.match(provider))!
+}
 
 const FAL_KEY_HINT =
   'the fal backend needs an API key: export FAL_KEY=... (create one at https://fal.ai/dashboard/keys). ' +
@@ -82,6 +150,15 @@ export interface RunGenFalOptions {
   transport?: FalTransport
   /** test hook — defaults to process.env.FAL_KEY / FAL_API_KEY */
   apiKey?: string
+  /** lyria2 negative_prompt (ignored by the other adapters) */
+  negativePrompt?: string
+  /** When set with `bars`, and the download decodes as WAV, downbeat-align-trim the generation to
+   * `bars` bars at this BPM (research/127 §4.2). The trimmed clip lands at outPath; the raw
+   * untrimmed download is preserved at `rawOutPath` (or `<outPath>.raw.wav`). Off by default so
+   * the existing one-shot/gen-batch callers are byte-unchanged — prep does its own duration match. */
+  bpm?: number
+  bars?: number
+  rawOutPath?: string
 }
 
 /** Generate one audio file via fal.ai into outPath and return the same GenMeta shape the local
@@ -95,6 +172,10 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
     throw new BeatGenError(`--provider must be a fal model path like "${FAL_DEFAULT_PROVIDER}" or "fal-ai/stable-audio-25/text-to-audio", got "${provider}"`)
   }
 
+  // Pick the provider adapter (research/127 §4.2). Its `body()` shapes the request; only the
+  // stable-audio adapter carries a duration field (whose name varies) + the 422 alias retry.
+  const adapter = providerAdapter(provider)
+  //
   // Duration field names vary across the stable-audio family's fal endpoints: Open-era and 2.5
   // (fal-ai/stable-audio, fal-ai/stable-audio-25/...) take `seconds_total`; stable-audio-3/medium
   // takes `duration`. Critically, 3/medium SILENTLY IGNORES an unknown `seconds_total` (returns 200,
@@ -102,17 +183,14 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
   // logic never corrected it and every 3/medium one-shot came out ~30s (a 1s "kick" was 28s).
   // So choose the primary field by provider, and keep the 422 retry with the alias as a safety net
   // for any endpoint whose shape we guessed wrong.
+  //
+  // output_format: "wav" — the stable-audio adapter requests WAV explicitly (its endpoint defaults
+  // to mp3, and dotbeat's zero-dep decoder only reads WAV). lyria2 emits WAV natively; minimax asks
+  // for WAV via audio_setting; elevenlabs returns its default container (prep decodes it downstream).
   const primaryField: 'seconds_total' | 'duration' = /stable-audio-3/.test(provider) ? 'duration' : 'seconds_total'
   const aliasField: 'seconds_total' | 'duration' = primaryField === 'duration' ? 'seconds_total' : 'duration'
-  //
-  // output_format: "wav" — REQUEST WAV EXPLICITLY. The stable-audio-3/medium endpoint defaults to
-  // mp3 (output_format accepts mp3/wav/flac/ogg/opus/m4a/aac), and dotbeat's prep pipeline only has
-  // a zero-dep decoder for WAV (MP3 needs the native node-web-audio-api, absent in some checkouts).
-  // WAV is lossless and universally decodable here, and prep normalizes to 16-bit WAV anyway, so we
-  // always ask the source for WAV rather than round-tripping through a compressed container.
-  // Endpoints that don't accept output_format ignore an unknown field (or 422, caught below).
-  const postBody = (durationField: 'seconds_total' | 'duration') =>
-    JSON.stringify({ prompt: opts.prompt, [durationField]: opts.seconds, seed: opts.seed, output_format: 'wav' })
+  const buildBody = (durationField: 'seconds_total' | 'duration') =>
+    JSON.stringify(adapter.body({ prompt: opts.prompt, seconds: opts.seconds, seed: opts.seed, ...(opts.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}) }, durationField))
   const postOnce = (body: string) =>
     transport({
       method: 'POST',
@@ -120,9 +198,9 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
       headers: { Authorization: `Key ${apiKey}`, 'Content-Type': 'application/json' },
       body,
     })
-  let post = await postOnce(postBody(primaryField))
-  if (post.status === 422) {
-    const retry = await postOnce(postBody(aliasField))
+  let post = await postOnce(buildBody(primaryField))
+  if (post.status === 422 && adapter.durationAliasRetry) {
+    const retry = await postOnce(buildBody(aliasField))
     if (retry.status !== 422) post = retry
   }
   if (post.status === 401 || post.status === 403) {
@@ -155,7 +233,30 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
   // else, report the 44.1kHz rate prep normalizes every registered one-shot to.
   const head = readFileSync(opts.outPath).subarray(0, 12)
   const isWav = head.length >= 12 && head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE'
-  const sampleRate = isWav ? readFileSync(opts.outPath).readUInt32LE(24) : 44100
+  let sampleRate = isWav ? readFileSync(opts.outPath).readUInt32LE(24) : 44100
+
+  // Downbeat-aligned trim (research/127 §4.2, Part A2): when the caller asked for a bar-count trim
+  // and the download is decodable WAV, cut it to `bars` bars at the prompted BPM starting on a
+  // detected downbeat — Lyria's fixed 30 s and MiniMax's multi-minute track become a 4-bar loop
+  // that begins on a strong beat, not a head-trimmed intro. The RAW download is preserved so the
+  // decision is auditable and reversible. Non-WAV downloads (e.g. an mp3) skip trimming and fall
+  // through to prep's own duration match, exactly as before.
+  const trim: Pick<GenMeta, 'rawOutPath' | 'trimOffsetSeconds' | 'trimmedSeconds'> = {}
+  if (isWav && opts.bpm !== undefined && opts.bars !== undefined) {
+    try {
+      const decoded = decodeWav(readFileSync(opts.outPath))
+      const trimmed = downbeatAlignedTrim({ channels: decoded.channels, sampleRate: decoded.sampleRate }, { bpm: opts.bpm, bars: opts.bars })
+      const rawOutPath = opts.rawOutPath ?? `${opts.outPath}.raw.wav`
+      writeFileSync(rawOutPath, readFileSync(opts.outPath))
+      writeFileSync(opts.outPath, encodeWav16(trimmed.channels, decoded.sampleRate))
+      sampleRate = decoded.sampleRate
+      trim.rawOutPath = rawOutPath
+      trim.trimOffsetSeconds = Number(trimmed.offsetSeconds.toFixed(4))
+      trim.trimmedSeconds = Number(trimmed.lengthSeconds.toFixed(4))
+    } catch {
+      /* undecodable / unexpected shape → leave the raw download in place, prep will handle it */
+    }
+  }
 
   return {
     backend: 'fal',
@@ -164,6 +265,9 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
     seconds: opts.seconds,
     seed: opts.seed,
     sampleRate,
+    ...(adapter.watermark !== undefined ? { watermark: adapter.watermark } : {}),
+    ...(adapter.trainingExcluded ? { trainingExcluded: true } : {}),
+    ...trim,
   }
 }
 

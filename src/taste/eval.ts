@@ -67,21 +67,32 @@ interface RawEntry {
 /** Parse the scores log and resolve per-variant features (stored, else lazily derived from the
  * batch dir's renders). Tolerant of the log's other entry shapes — anything without picks is
  * ignored, matching parseScoresLog's stance. */
-/** Variant files in this batch dir whose manifest marks them as refs-packs ref clips — the
- * D25 training holdout (Splice ToU prohibits ML-training use; pack refs stay fully rateable and
- * are ranked held-out, they just never become training pairs). Local-manifest read, kind-only
- * log posture preserved. */
+/** Variant files in this batch dir the training holdout must exclude — still fully rateable and
+ * ranked held-out, they just never become training PAIRS. Two sources, both read from the local
+ * manifest (the shared log stays kind-only):
+ *   - refs-packs ref clips (D25): Splice ToU prohibits ML-training use.
+ *   - generated clips whose provider ToS bans training on outputs (research/127 §4.2): ElevenLabs
+ *     (categorical) and MiniMax (unknown-treat-as-banned). The marker rides either the showdown
+ *     source (`source.trainingExcluded`) or a gen candidate's enforced provenance sidecar
+ *     (`media.sidecar.generated.trainingExcluded`) — Lyria/stable-audio stay trainable, unmarked. */
 function packRefFiles(batchDir: string): Set<string> {
   const out = new Set<string>()
   const manifestPath = join(batchDir, 'manifest.json')
   if (!existsSync(manifestPath)) return out
+  const add = (file: string) => { out.add(file.replace(/\.beat$/, '.wav')); out.add(file) }
   try {
-    const man = JSON.parse(readFileSync(manifestPath, 'utf8')) as { variants?: { file?: string; source?: { kind?: string; from?: string } }[] }
+    const man = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      variants?: {
+        file?: string
+        source?: { kind?: string; from?: string; trainingExcluded?: boolean }
+        media?: { sidecar?: { generated?: { trainingExcluded?: boolean } } }
+      }[]
+    }
     for (const v of man.variants ?? []) {
-      if (v.source?.kind === 'ref' && typeof v.source.from === 'string' && /refs-packs\b/.test(v.source.from) && typeof v.file === 'string') {
-        out.add(v.file.replace(/\.beat$/, '.wav'))
-        out.add(v.file)
-      }
+      if (typeof v.file !== 'string') continue
+      const refsPack = v.source?.kind === 'ref' && typeof v.source.from === 'string' && /refs-packs\b/.test(v.source.from)
+      const genBanned = v.source?.trainingExcluded === true || v.media?.sidecar?.generated?.trainingExcluded === true
+      if (refsPack || genBanned) add(v.file)
     }
   } catch { /* unreadable manifest -> nothing excluded */ }
   return out

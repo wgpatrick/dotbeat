@@ -255,9 +255,17 @@ async function generateRaw({ prompt, seconds, seed, backend, provider, model, li
   // the sidecar never claims a license the audio doesn't have. fal's default provider is Stable
   // Audio OPEN (the same model the local backend runs), which keeps the Community License.
   const isPlatformModel = typeof resolvedProvider === 'string' && resolvedProvider.includes('stable-audio-25')
+  // Rights/provenance tags from the fal adapter table (research/127 §4.2): a `watermark` (Google
+  // Lyria = SynthID, inaudible+mandatory) and `trainingExcluded` (the provider's ToS bans training
+  // ML models on outputs — ElevenLabs categorical, MiniMax unknown-treat-as-banned). The latter is
+  // the taste-training holdout marker: src/taste/eval.ts drops these clips from training pairs the
+  // same way it drops refs-packs ref clips, while they stay fully rateable.
+  const watermark = typeof meta?.watermark === 'string' ? meta.watermark : null
+  const trainingExcluded = meta?.trainingExcluded === true
   return {
     license: license ?? (isStub ? 'stub-placeholder' : isPlatformModel ? 'Stability-Platform-Terms' : 'Stability-AI-Community'),
     source: `generated:${resolvedProvider}`,
+    trainingExcluded,
     extra: {
       generated: {
         provider: resolvedProvider,
@@ -266,6 +274,8 @@ async function generateRaw({ prompt, seconds, seed, backend, provider, model, li
         prompt,
         seconds,
         seed,
+        watermark,
+        trainingExcluded,
         licenseUrl: isStub ? null : isPlatformModel ? 'https://stability.ai/terms-of-use' : 'https://stability.ai/community-license-agreement',
       },
     },
