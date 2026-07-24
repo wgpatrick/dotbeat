@@ -127,3 +127,8 @@ gen-kit output and taste seed ships produced instead of dry/mono/static). `beat 
 catches what generation and hand-editing left mono/dry/static **afterwards**. Where they overlap
 (width via unison/chorus/utility, air via shelf, glue via saturation) the trick recipes deliberately
 mirror produce.ts's intensities rather than re-deriving them.
+
+That baseline is also directly composable as an authoring move: **`beat add-track --produced`**
+creates a track already produced, and **`beat produce <file> <track>`** retrofits an existing one
+with its whole role profile (intensify-only) — the rung *below* a named trick (a whole profile vs one
+move). See `docs/producing.md`. A trick is the scalpel; `beat produce` is the role default.
