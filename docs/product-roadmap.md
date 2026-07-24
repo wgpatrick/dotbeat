@@ -24,9 +24,9 @@ data file, not this file directly, so it stays in sync with the matching artifac
 A feature with links in both columns but status "Not started" means: fully scoped, ready for a
 stream to pick up — not guesswork, a decision away from being built.
 
-## Snapshot — 352 features tracked
+## Snapshot — 353 features tracked
 
-**160** Done · **9** In progress · **183** Not started
+**161** Done · **9** In progress · **183** Not started
 
 ---
 
@@ -349,6 +349,7 @@ stream to pick up — not guesswork, a decision away from being built.
 | LUFS / spectral / crest / stereo metrics + lint | Agent-facing per decisions.md D2 ("LLM narrates, never judges alone") — no GUI meter display planned, not a gap. | ✅ done | ✅ done | — | ✅ Done | — | [`decisions.md`](decisions.md) |
 | GUI spectrum / level visualization | A real-time FFT/level display reusing the exact spectral data `beat metrics` already computes server-side — a visualization of existing data, not a new judgment surface, so it doesn't reopen D2's "LLM narrates, never judges alone" decision. | — | — | ❌ missing | ⬜ Not started | [`24-opendaw-roadmap-positioning.md`](research/24-opendaw-roadmap-positioning.md) | — |
 | Reference mix profile (critique against a track you love) | Phase 35 Stream OD: `beat metrics ref.wav --save-profile ref.json` saves the full metric set with provenance; `beat lint mix.wav --ref ref.json` reports LUFS/band/width/crest DELTAS from the reference (padded by the Phase-34 render-variance constants so findings can't flip between identical renders), each finding naming reference value, measured value, and the .beat edit to try. Reference-distance findings are info (taste), safety rules (true-peak clipping, phase cancellation) stay absolute warns. MCP parity via the same src/metrics/profile.ts. Honest limits in the help text: full-mix statics — a profile can't hear arrangement, sections, or masking. | ✅ done | ✅ done | — | ✅ Done | — | [`phase-35-plan.md`](phase-35-plan.md) |
+| Arrangement-flatness lint (the energy-arc verdict) | Research/122 §4.2's one "ship regardless" item, re-detecting the owner-caught Sandstorm flatness with a standing rule instead of hindsight: `arrangementFindings` over the `beat feedback --sections` arc fires INFO [arrangement-flat] when no adjacent section moves more than 2 LU AND the quietest→loudest span stays under 6 LU (both variance-padded; thresholds sit between the measured flat cover — 1-2 dB adjacent everywhere — and the commercial reference's 11.8 dB build→drop). Both conditions together, so a slow crescendo with a real span and a single hard drop both pass; a silent section counts as contrast, not a bail-out. The text report prints the finding (or an explicit pass line with the measured span); --json carries the findings array. Verified end-to-end on real renders both ways. | ✅ done | ✅ done | — | ✅ Done | [`122-machine-listening-for-production.md`](research/122-machine-listening-for-production.md) | — |
 
 ## Selection protocol
 

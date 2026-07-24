@@ -114,7 +114,7 @@ export interface VaryBatchManifest {
   // of commercial tracks; the batch dir is gitignore-gated and each variant's `from` records the
   // midi path as a local reference) or 'bank' (the internal archetype bank). scoreBatch copies
   // THIS LABEL ONLY into the shared log — never a song title, artist, or path.
-  figureSource?: 'midi' | 'bank'
+  figureSource?: 'midi' | 'bank' | 'theory'
   // D21 strain (a): `file` is "vN.beat" for vary batches and "vN.wav" for gen batches — every
   // reader below resolves the variant through THIS field rather than re-deriving "vN.beat".
   // `source` (source-showdown eval, docs/source-showdown-eval.md): which PIPELINE produced this
@@ -621,7 +621,7 @@ export interface ScoreEntry {
    * fact that ever reaches this shared log (the licensing posture): song identity stays in the
    * gitignore-gated batch dir's manifest. Lets the report separate "our sounds with commercial
    * composition" from "our sounds with our composition". */
-  figureSource?: 'midi' | 'bank'
+  figureSource?: 'midi' | 'bank' | 'theory'
 }
 
 export interface ScoreBatchResult {

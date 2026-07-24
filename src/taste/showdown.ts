@@ -291,17 +291,38 @@ export function phraseFromSeed(doc: BeatDocument, trackId: string): PhraseNote[]
 // diatonic in the seed's inferred key — the point is a fair fight for the engine, so every
 // archetype is something a producer would actually play, not random notes.
 
+/** Genre-palette modes (research 124 §C.4): the base major/natural-minor pair plus Phrygian
+ * (melodic techno / psytrance, featured b2) and Dorian (house / deep house). `minor` stays the
+ * coarse tonality flag every existing caller sets; `mode`, when present, is the precise scale and
+ * overrides `minor`. Absent `mode` keeps the historical major/natural-minor behavior byte-for-byte. */
+export type ScaleMode = 'major' | 'natural-minor' | 'phrygian' | 'dorian'
+
 export interface PhraseKey {
   /** midi root of the key, folded into 48..59 (the taste-seed generator's own range) */
   root: number
   minor: boolean
+  /** optional precise mode; overrides `minor` when set (natural-minor/major mirror the flag) */
+  mode?: ScaleMode
 }
 
 const MAJOR_SCALE: readonly number[] = [0, 2, 4, 5, 7, 9, 11]
 const NATURAL_MINOR_SCALE: readonly number[] = [0, 2, 3, 5, 7, 8, 10]
+const PHRYGIAN_SCALE: readonly number[] = [0, 1, 3, 5, 7, 8, 10] // natural minor with a b2
+const DORIAN_SCALE: readonly number[] = [0, 2, 3, 5, 7, 9, 10] // natural minor with a natural 6
 
 export function scalePitchClasses(key: PhraseKey): readonly number[] {
-  return key.minor ? NATURAL_MINOR_SCALE : MAJOR_SCALE
+  switch (key.mode) {
+    case 'phrygian':
+      return PHRYGIAN_SCALE
+    case 'dorian':
+      return DORIAN_SCALE
+    case 'major':
+      return MAJOR_SCALE
+    case 'natural-minor':
+      return NATURAL_MINOR_SCALE
+    default:
+      return key.minor ? NATURAL_MINOR_SCALE : MAJOR_SCALE
+  }
 }
 
 /** Best-fit key of a seed doc: score every (root, mode) candidate by how many synth-note pitch
@@ -373,8 +394,9 @@ const PHRASE_PROGRESSIONS: readonly (readonly number[])[] = [
   [0, 5, 3, 2],
 ]
 
-/** `degree` is any integer scale degree (0 = the key root; ±7 wraps an octave). */
-const degreePitch = (key: PhraseKey, degree: number, octaveShift: number): number => {
+/** `degree` is any integer scale degree (0 = the key root; ±7 wraps an octave). Exported so the
+ * theory-aware composition layer (src/taste/theory.ts) resolves scale degrees the same way. */
+export const degreePitch = (key: PhraseKey, degree: number, octaveShift: number): number => {
   const scale = scalePitchClasses(key)
   const idx = ((degree % 7) + 7) % 7
   const oct = Math.floor(degree / 7)
@@ -402,6 +424,12 @@ function chooseArchetype(rng: () => number, names: readonly string[], exclude: r
 
 function bassNotes(archetype: string, key: PhraseKey, prog: readonly number[], rng: () => number): ComposedNote[] {
   const reg = rng() < 0.3 ? 0 : -12 // sub register most batches, upper bass sometimes
+  // Register-rule fix (research 124 §C.2, "below ~100 Hz stick to root/5th/octave; colour tones go
+  // an octave up"): in the sub register, a chord's upper colour tone is voiced as the OCTAVE
+  // (degree+7), never the mid-chord tone (degree+4) the doc flags on sparse-sub/pickup-sync — so the
+  // sub carries only root/5th/octave. Above the sub floor (reg === 0), the fifth stays.
+  const subReg = reg < 0
+  const colorDegree = (base: number) => base + (subReg ? 7 : 4)
   const notes: ComposedNote[] = []
   const push = (degree: number, start: number, duration: number, v: number) => notes.push({ pitch: degreePitch(key, degree, reg), start, duration, velocity: v })
   const next = (bar: number) => prog[(bar + 1) % prog.length]!
@@ -429,7 +457,7 @@ function bassNotes(archetype: string, key: PhraseKey, prog: readonly number[], r
       prog.forEach((d, bar) => {
         push(d, bar * 16, 3, vel(rng, 0.75, 0.9))
         push(d, bar * 16 + 6, 2, vel(rng, 0.6, 0.8))
-        if (rng() < 0.6) push(d + (rng() < 0.3 ? 4 : 0), bar * 16 + 10, 2, vel(rng, 0.55, 0.8))
+        if (rng() < 0.6) push(rng() < 0.3 ? colorDegree(d) : d, bar * 16 + 10, 2, vel(rng, 0.55, 0.8))
         push(next(bar) + approach, bar * 16 + 14, 2, vel(rng, 0.5, 0.7))
       })
       break
@@ -438,7 +466,7 @@ function bassNotes(archetype: string, key: PhraseKey, prog: readonly number[], r
       prog.forEach((d, bar) => {
         push(d, bar * 16, 4 + Math.floor(rng() * 5), vel(rng, 0.8, 0.95))
         push(d, bar * 16 + 10, 3 + Math.floor(rng() * 2), vel(rng, 0.6, 0.8))
-        if (bar % 2 === 1 && rng() < 0.5) push(d + 4, bar * 16 + 14, 2, vel(rng, 0.5, 0.7))
+        if (bar % 2 === 1 && rng() < 0.5) push(colorDegree(d), bar * 16 + 14, 2, vel(rng, 0.5, 0.7))
       })
       break
     }
@@ -1040,7 +1068,7 @@ export function writeShowdownBatch(
   outDir: string,
   role: string,
   clips: { file: string; source: { kind: ShowdownSourceKind; from?: string } }[],
-  opts: { seed?: number; figureSource?: 'midi' | 'bank' } = {},
+  opts: { seed?: number; figureSource?: 'midi' | 'bank' | 'theory' } = {},
 ): VaryBatchManifest {
   if (clips.length < 2) throw new BeatBatchError('a showdown batch needs at least two source clips')
   for (const c of clips) {
