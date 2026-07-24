@@ -728,7 +728,7 @@ const HELP = [
     cmd: 'showdown',
     text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
                 [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--random-patches]
-                [--ref-dir <path>] [--midi-dir <path>] [--seconds S]
+                [--ref-dir <path>] [--midi-dir <path>] [--theory] [--seconds S]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
                                                           source — engine (the role's seed phrase, soloed, through
@@ -767,7 +767,15 @@ const HELP = [
                                                           files unless --shared-figure; unusable dir/files warn
                                                           and fall back to the bank) — holds COMPOSITION at
                                                           commercial quality so ratings compare sound
-                                                          realization. Clips are duration-matched (trim/pad;
+                                                          realization. With --theory the composed pitched
+                                                          sources draw figures from the deterministic theory-
+                                                          aware layer instead (weighted/function-tagged chord
+                                                          track, register-ruled kick-relationship bass, minimal-
+                                                          motion voice-leading, motif-first leads; drum-loop
+                                                          keeps the bank) — the figureSource:'theory' arm that
+                                                          blind-compares theory vs bank vs midi composition with
+                                                          the sound source held constant (research 124 §C.7).
+                                                          Clips are duration-matched (trim/pad;
                                                           --seconds overrides the shortest-clip default) and
                                                           loudness-normalized to a
                                                           common LUFS; sources are seeded-shuffled into v-numbers
@@ -2048,7 +2056,7 @@ function flagValue(argv, flag) {
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
   const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--ref-dir', '--midi-dir', '--seconds', '--log']
-  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure', '--random-patches'])
+  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure', '--random-patches', '--theory'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const dir = positional[0]
@@ -2143,6 +2151,19 @@ async function showdownCmd(argv) {
       }
     }
   }
+
+  // The theory figure source (research 124 §C.7, src/taste/theory.js): with --theory the composed
+  // pitched sources (bassline/chords/lead) draw their figures from the deterministic, theory-aware
+  // composition layer — a weighted/function-tagged chord track, kick-relationship bass with the
+  // register rule enforced, minimal-motion voice-leading, motif-first leads — instead of the uniform
+  // archetype bank, so batches blind-compare theory vs bank vs midi with the SOUND source held
+  // constant. drum-loop has no theory generator and keeps the bank (like --midi-dir). Theory figures
+  // are internally composed (no third-party content), so theory batches are NOT gitignore-gated.
+  // --theory and --midi-dir together: midi wins per role where a usable figure is found, theory is
+  // the fallback (both are just a different figure SOURCE feeding the same composed sources).
+  const theoryOn = argv.includes('--theory')
+  const theoryMod = theoryOn ? await import('../dist/src/taste/theory.js') : null
+  if (theoryOn) process.stderr.write(`theory figures: composed pitched sources draw from the theory-aware layer (bank fallback for drum-loop)\n`)
 
   // Resolve surge availability + the factory patch catalogue ONCE (not per batch): a doctor probe,
   // then the patch listing. On any failure surge is disabled for the whole run with one warning —
@@ -2309,11 +2330,20 @@ async function showdownCmd(argv) {
         const runExclude = usedFigures.get(spec.role) ?? []
         const drawnFigures = []
         let batchUsedMidi = false
+        let batchUsedTheory = false
         const drawComposed = (seedOffset) => {
           const exclude = [...runExclude, ...drawnFigures]
-          const composed = spec.role === 'drum-loop'
-            ? showdown.composeDrumPhrase(batchSeed + seedOffset, { exclude })
-            : showdown.composePitchedPhrase(spec.role, pitchedKey, batchSeed + seedOffset, { exclude })
+          // --theory: pitched roles draw from the theory-aware layer; drum-loop has no theory
+          // generator, so it keeps the archetype bank (same posture as --midi-dir's drum-loop).
+          let composed
+          if (theoryMod !== null && spec.role !== 'drum-loop' && pitchedKey !== null) {
+            composed = theoryMod.composeTheoryPhrase(spec.role, pitchedKey, batchSeed + seedOffset, { exclude })
+            batchUsedTheory = true
+          } else {
+            composed = spec.role === 'drum-loop'
+              ? showdown.composeDrumPhrase(batchSeed + seedOffset, { exclude })
+              : showdown.composePitchedPhrase(spec.role, pitchedKey, batchSeed + seedOffset, { exclude })
+          }
           drawnFigures.push(composed.archetype)
           return composed
         }
@@ -2623,8 +2653,12 @@ async function showdownCmd(argv) {
         rmSync(workDir, { recursive: true }) // never leave a scoreable work batch for beat rate to find
         // figureSource: 'midi' when ANY composed clip drew a midi figure (a partial bank
         // fallback still taints the batch's composition provenance) — gitignore-gates the dir
-        // and puts the 'midi'/'bank' label (nothing else) in the scores log via scoreBatch
-        showdown.writeShowdownBatch(outDir, spec.role, files, { seed: batchSeed, figureSource: batchUsedMidi ? 'midi' : 'bank' })
+        // and puts the label (nothing else) in the scores log via scoreBatch. 'theory' when the
+        // theory-aware layer supplied the figures (internally composed — no gitignore gate);
+        // 'bank' otherwise. midi outranks theory when both are live (midi's provenance is the
+        // stricter constraint the gate exists for).
+        const figureSource = batchUsedMidi ? 'midi' : batchUsedTheory ? 'theory' : 'bank'
+        showdown.writeShowdownBatch(outDir, spec.role, files, { seed: batchSeed, figureSource })
         const match = showdown.matchClipDurations(outDir, files.map((f) => f.file), targetSeconds !== undefined ? { targetSeconds } : {})
         process.stdout.write(`${outDir}/: ${files.length} clips (${clips.map((c) => c.kind).sort().join(' vs ')}), duration-matched to ${match.targetSeconds}s`)
         const adjusted = match.clips.filter((c) => c.action !== 'kept')
