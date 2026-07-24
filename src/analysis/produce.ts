@@ -331,3 +331,52 @@ export function applyProducedDefaults(doc: BeatDocument, trackId: string, profil
   }
   return { doc: out, applied }
 }
+
+// ---- authoring helpers: the shared role/profile resolution the `beat add-track --produced` and
+// `beat produce` authoring commands (and their MCP twins) use, so the two surfaces resolve a role
+// and augment the one caller-supplied move (the sidechain duck) identically. Every width/air/glue
+// VALUE still comes from baseProfile via productionProfileFor — these helpers only pick the role and
+// point the duck at a real source; they invent no intensities. ------------------------------------
+
+/** The sidechain-duck depth a produced bass/sub gets under the kit's kick (research 115 §4.2) — the
+ * genre-defining pump. Matches the amount gen-kit wires (cli/beat.mjs genKitCmd); a caller-supplied
+ * value, never on a base profile (a profile can't know the source track id). */
+export const PRODUCED_DUCK_AMOUNT = 0.35
+
+/** A drums track that carries a kick lane, to wire a bass/sub sidechain duck against. A drums track
+ * with an explicit `lanes` list is checked for a lane literally named "kick"; a legacy/empty-lanes
+ * drums track implicitly carries the 5 DRUM_LANES (which include kick), so it counts. Skips `exclude`
+ * (never duck a track against itself) and returns the first match's id, or null. */
+export function kickSourceTrack(doc: BeatDocument, exclude?: string): string | null {
+  const t = doc.tracks.find(
+    (t) => t.kind === 'drums' && t.id !== exclude && (t.lanes.length === 0 || t.lanes.some((l) => l.name === 'kick')),
+  )
+  return t?.id ?? null
+}
+
+export interface ResolvedProducedProfile {
+  /** the production role this track resolved to (echoed in the receipt so the mapping is honest). */
+  role: ProductionRole
+  /** the profile to hand `applyProducedDefaults` — the role's base profile, plus a duck for bass/sub
+   * when a kick source exists. */
+  profile: ProductionProfile
+}
+
+/** Resolve the produced-defaults profile an authoring caller gets for a track. Role selection: an
+ * explicit `override` (mapped through the same productionRoleFor synonym table, so user-facing
+ * aliases like `keys` -> chords and `drums` -> kit resolve), else inferred from the track id; an
+ * un-inferrable drums track (id that maps to `default`) falls back to the kit-bus profile rather
+ * than the mild all-round default, since a drums track's bus carries the kick. Then a bass/sub
+ * profile is augmented with a sidechain duck against a kick-carrying drums track when one exists —
+ * the one genre-defining move a base profile can't set itself. */
+export function resolveProducedProfile(doc: BeatDocument, trackId: string, override?: string): ResolvedProducedProfile {
+  const kind = doc.tracks.find((t) => t.id === trackId)?.kind
+  let role = productionRoleFor(override ?? trackId)
+  if (role === 'default' && kind === 'drums') role = 'kit'
+  let profile = productionProfileFor(role)
+  if (role === 'bass' || role === 'sub') {
+    const src = kickSourceTrack(doc, trackId)
+    if (src) profile = { ...profile, duck: { source: src, amount: PRODUCED_DUCK_AMOUNT } }
+  }
+  return { role, profile }
+}

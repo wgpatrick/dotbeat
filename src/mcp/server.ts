@@ -96,6 +96,9 @@ import { runAnalysis, sidecarDoctor } from '../analysis/index.js'
 // ==== Phase 40 Stream VA ====
 // Pitch-aware sampling (docs/phase-40-plan.md §VA). Pure TS, no Python (decisions.md D20).
 import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM, type PitchDetection } from '../analysis/index.js'
+// Track 1b: produced-track authoring — the same produce.ts primitives the CLI's `add-track
+// --produced` / `beat produce` and gen-kit use, so the MCP surface composes from identical values.
+import { applyProducedDefaults, resolveProducedProfile } from '../analysis/index.js'
 import { buildKeymap, noteToMidi, midiToNote, rateForPitch } from '../core/keymap.js'
 // ==== end Phase 40 Stream VA ====
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
@@ -306,7 +309,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_add_track',
     description:
-      'Add a new track (synth, drums, instrument, or audio) to a .beat file with the format init patch — the way an agent builds a project up from beat_init. A fresh drums track defaults to the full 12-lane GM-aligned kit (kick/snare/rimshot/clap/hat/openhat/tom_lo/tom_mid/tom_hi/crash/ride/cowbell), matching the CLI\'s own `beat add-track ... drums` default (there is no legacy-5-lane opt-out over MCP). A fresh synth or drums track also starts with a real, already-populated default effect chain — eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat_effect_add/beat_effect_rm to change it. An instrument track is a sampled SF2 voice: pass soundfont_sample (a media id already registered via beat_sample) and optionally soundfont_program (the SF2 program number, default 0) — see beat_inspect on an instrument track for the bank\'s full preset list. An audio track (format v0.10, Phase 22 Stream AE) starts with no clips — add audio-region clips afterward with beat_audio_clip. Returns the edit list.',
+      'Add a new track (synth, drums, instrument, or audio) to a .beat file with the format init patch — the way an agent builds a project up from beat_init. A fresh drums track defaults to the full 12-lane GM-aligned kit (kick/snare/rimshot/clap/hat/openhat/tom_lo/tom_mid/tom_hi/crash/ride/cowbell), matching the CLI\'s own `beat add-track ... drums` default (there is no legacy-5-lane opt-out over MCP). A fresh synth or drums track also starts with a real, already-populated default effect chain — eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat_effect_add/beat_effect_rm to change it. An instrument track is a sampled SF2 voice: pass soundfont_sample (a media id already registered via beat_sample) and optionally soundfont_program (the SF2 program number, default 0) — see beat_inspect on an instrument track for the bank\'s full preset list. An audio track (format v0.10, Phase 22 Stream AE) starts with no clips — add audio-region clips afterward with beat_audio_clip. Pass produced true (synth/drums only) to also apply the track\'s role-aware PRODUCTION profile the moment it\'s created — width/air/glue/space, the same layer gen-kit ships and beat_produce retrofits, instead of the dry/mono init patch that measured 0% in the blind eval; the role is inferred from the id (bass/lead/pad/keys/drums and synonyms) unless produced_role overrides it, a bass/sub gets a sidechain duck under a kick-carrying drums track when one already exists, and the applied production moves are appended to the returned edit list. Returns the edit list.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -317,6 +320,8 @@ const TOOLS: ToolDef[] = [
         color: { type: 'string', description: 'lowercase #rrggbb; defaults to a palette cycle' },
         soundfont_sample: { type: 'string', description: 'instrument tracks only: a media id (register the .sf2 with beat_sample first)' },
         soundfont_program: { type: 'number', description: 'instrument tracks only: SF2 program number 0-127, default 0' },
+        produced: { type: 'boolean', description: 'synth/drums only: apply the role\'s produced-defaults profile (width/air/glue/space) on creation instead of the dry init patch' },
+        produced_role: { type: 'string', description: 'with produced: override the id-inferred production role (bass|lead|pad|keys|drums and produce.ts synonyms)' },
       },
       required: ['file', 'id', 'kind'],
     },
@@ -324,8 +329,9 @@ const TOOLS: ToolDef[] = [
       const file = str(args, 'file')
       const before = parse(readFileSync(file, 'utf8'))
       const kind = str(args, 'kind') as 'synth' | 'drums' | 'instrument' | 'audio'
-      const { doc } = addTrack(before, {
-        id: str(args, 'id'),
+      const id = str(args, 'id')
+      let { doc } = addTrack(before, {
+        id,
         kind,
         ...(typeof args.name === 'string' ? { name: args.name } : {}),
         ...(typeof args.color === 'string' ? { color: args.color } : {}),
@@ -337,8 +343,45 @@ const TOOLS: ToolDef[] = [
         // legacy-lanes escape hatch, since nothing over MCP asked for the old behavior.
         ...(kind === 'drums' ? { lanes: defaultDrumKitLanes() } : {}),
       })
+      // Track 1b: --produced twin — compose the new track with its role production profile through
+      // the shared produce.ts primitives (zero duplicated values with the CLI/gen-kit).
+      let producedLine = ''
+      if (args.produced === true) {
+        if (kind !== 'synth' && kind !== 'drums') throw new Error(`produced covers synth/drums tracks, and "${id}" is ${kind}`)
+        const { role, profile } = resolveProducedProfile(doc, id, typeof args.produced_role === 'string' ? args.produced_role : undefined)
+        const res = applyProducedDefaults(doc, id, profile)
+        doc = res.doc
+        producedLine = `\nproduced ${id} (role: ${role}): ${res.applied.length ? res.applied.join('; ') : 'nothing to intensify — the init patch already meets this profile'}`
+      }
       writeFileSync(file, serialize(doc))
-      return formatDiff(diffDocuments(before, doc))
+      return formatDiff(diffDocuments(before, doc)) + producedLine
+    },
+  },
+  {
+    name: 'beat_produce',
+    description:
+      'Retrofit an EXISTING synth/drums track with its role\'s PRODUCTION profile — "make this track engineplus" as one step. Applies the same role-aware width/air/glue/space/motion layer gen-kit ships and beat_add_track\'s produced flag applies (src/analysis/produce.ts, research/115): lead/pad/keys get the full osc2-detune + unison + chorus + utility-width + reverb/delay sends + air shelf stack; bass/sub get saturation + a sidechain duck under a kick-carrying drums track (mono-anchored — NO width, NO reverb); the drum bus (drums) gets an air shelf + light glue but no width (it carries the kick); hats/perc get air + reverb + auto-pan. INTENSIFY-ONLY: every move is a Math.max against the patch\'s own value, so it never weakens a track that already carries production and re-running is a no-op — safe to apply repeatedly. The role is inferred from the track id unless role overrides it (bass|lead|pad|keys|drums and produce.ts synonyms). Refuses on instrument/audio tracks (production reads the synth patch / drum bus). Returns the edit list plus an honest applied-moves receipt. Composes with beat_trick (a named single move) and the vary->score taste loop.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string', description: 'the track id to produce (must be a synth or drums track)' },
+        role: { type: 'string', description: 'override the id-inferred production role (bass|lead|pad|keys|drums and produce.ts synonyms)' },
+      },
+      required: ['file', 'track'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const track = str(args, 'track')
+      const before = parse(readFileSync(file, 'utf8'))
+      const t = before.tracks.find((x) => x.id === track)
+      if (!t) throw new Error(`no track "${track}" (have: ${before.tracks.map((x) => x.id).join(', ')})`)
+      if (t.kind !== 'synth' && t.kind !== 'drums') throw new Error(`produce covers synth/drums tracks, and "${track}" is ${t.kind} (production reads the synth patch / drum bus)`)
+      const { role, profile } = resolveProducedProfile(before, track, typeof args.role === 'string' ? args.role : undefined)
+      const res = applyProducedDefaults(before, track, profile)
+      writeFileSync(file, serialize(res.doc))
+      const receipt = `produced ${track} (role: ${role}): ${res.applied.length ? res.applied.join('; ') : 'nothing to intensify — the patch already meets this profile'}`
+      return formatDiff(diffDocuments(before, res.doc)) + '\n' + receipt
     },
   },
   {

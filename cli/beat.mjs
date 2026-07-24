@@ -113,6 +113,17 @@ import {
   BeatTrickError,
 } from '../dist/src/analysis/index.js'
 // ==== production tricks end ====
+// ==== produced-track templates (Track 1b) ====
+// The authoring face of the produced-defaults layer (src/analysis/produce.ts): `add-track --produced`
+// composes a new track that ships with its role's width/air/glue/space profile, and `beat produce`
+// retrofits an existing one (intensify-only). Both resolve the role + profile through the SAME
+// produce.ts primitives gen-kit/taste-seeds use — zero duplicated production values.
+import {
+  applyProducedDefaults,
+  resolveProducedProfile,
+  BeatProduceError,
+} from '../dist/src/analysis/index.js'
+// ==== produced-track templates end ====
 // ==== Phase 40 Stream VA ====
 // Pitch-aware sampling: detection (pure TS, no Python — decisions.md D20) and the tune arithmetic
 // that turns a root into a keymap. keymap.js is deep-imported rather than routed through
@@ -135,7 +146,8 @@ const PATHS_NOTE = `paths for set: bpm | loop_bars | selected_track | <track>.<s
 const HELP_FAMILIES = [
   ['vary', 'audition', 'score', 'adopt', 'suggest', 'taste-eval', 'match'], // the taste loop (docs/taste-loop-design.md)
   ['taste-seeds', 'taste-collect', 'showdown', 'prodtask', 'pilot', 'rate', 'taste-eval'], // the data-collection pipeline (seeds -> batches -> rate -> eval; showdown = per-role source comparison; prodtask = per-role production-task eval; pilot = the T5 critic-guided QD search)
-  ['trick', 'prodtask', 'rate'], // production tricks + the blind eval that validates them (docs/prodtask.md)
+  ['trick', 'produce', 'prodtask', 'rate'], // production tricks + the produced-track authoring commands + the blind eval that validates them (docs/prodtask.md)
+  ['produce', 'add-track', 'trick', 'gen-kit'], // composing produced: retrofit a track / create one produced / pull a named move / generate a whole produced kit (docs/producing.md)
   ['pilot', 'taste-eval', 'rate', 'score'], // the T5 overnight critic-guided QD search (docs/pilot.md, research/117)
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
@@ -161,9 +173,12 @@ const HELP = [
   {
     cmd: 'add-track',
     text: `  beat add-track <file> <id> <synth|drums|instrument|audio> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--legacy-lanes]
+                     [--produced [--role bass|lead|pad|keys|drums]]
                                                           (a fresh drums track defaults to the 12-lane kit; --legacy-lanes opts back into the old implicit 5;
                                                           a fresh synth or drums track also starts with a real, already-populated default effect chain —
-                                                          eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat effect-add)`,
+                                                          eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat effect-add.
+                                                          --produced applies the track's role production profile — width/air/glue/space, the same layer
+                                                          gen-kit ships (docs/producing.md); role is inferred from the id unless --role is given)`,
   },
   { cmd: 'rm-track', text: `  beat rm-track <file> <id>` },
   {
@@ -284,6 +299,18 @@ const HELP = [
   beat trick suggest <file> [<track>] [--json]             rank the tricks whose preconditions pass (reads a
                                                           sibling <file>.wav render for metrics if present, else
                                                           document state only — renders nothing itself)`,
+  },
+  {
+    cmd: 'produce',
+    text: `  beat produce <file> <track> [--role bass|lead|pad|keys|drums] [--dry-run]
+                                                          retrofit an existing track with its role's produced-
+                                                          defaults profile — width/air/glue/space, the same layer
+                                                          gen-kit ships and add-track --produced applies (docs/
+                                                          producing.md). Intensify-only: never weakens a patch that
+                                                          already carries production (re-running is a no-op). Role
+                                                          is inferred from the track id unless --role is given;
+                                                          --dry-run previews the diff without writing. Prints the
+                                                          honest applied list; refuses on non-synth/drums tracks`,
   },
   { cmd: 'drum-kits', text: `  beat drum-kits [--json]                                  list the factory drum-kit library (kit-808/kit-909/kit-acoustic)` },
   { cmd: 'drum-kit', text: `  beat drum-kit <file> <track> <name>                      apply a drum kit to a track (replaces its whole lane list)` },
@@ -1006,8 +1033,17 @@ function addTrackCmd(argv) {
       'instrument tracks need a soundfont: pass --soundfont <sample-id> [--program N] (register the .sf2 with beat sample first) — or use a synth track for a quick part with no sample',
     )
   }
+  // Track 1b: --produced applies the track's role production profile the moment it's created, so an
+  // ordinary `add-track` can yield a produced (width/air/glue/space) track instead of the dry/mono
+  // init patch — the same layer gen-kit ships, through the shared produce.ts primitives. --role
+  // overrides the id-inferred role (bass|lead|pad|keys|drums and the produce.ts synonyms).
+  const produced = rest.includes('--produced')
+  const roleFlag = flagValue(rest, '--role')
+  if (roleFlag !== undefined && !produced) {
+    throw new BeatEditError('--role only applies with --produced (it selects the produced-defaults profile)')
+  }
   const before = readDoc(file)
-  const { doc } = addTrack(before, {
+  let { doc } = addTrack(before, {
     id,
     kind,
     ...(nameIdx !== -1 ? { name: rest[nameIdx + 1] } : {}),
@@ -1015,7 +1051,24 @@ function addTrackCmd(argv) {
     ...(sfIdx !== -1 ? { soundfont: { sample: rest[sfIdx + 1], program: progIdx !== -1 ? Number(rest[progIdx + 1]) : 0 } } : {}),
     ...(kind === 'drums' && !legacyLanes ? { lanes: defaultDrumKitLanes() } : {}),
   })
+  let producedReceipt = null
+  if (produced) {
+    if (kind !== 'synth' && kind !== 'drums') {
+      throw new BeatEditError(`--produced covers synth/drums tracks, and "${id}" is ${kind} (production reads the synth patch / drum bus)`)
+    }
+    const { role, profile } = resolveProducedProfile(doc, id, roleFlag)
+    const res = applyProducedDefaults(doc, id, profile)
+    doc = res.doc
+    producedReceipt = { role, applied: res.applied }
+  }
   writeDoc(file, before, doc)
+  if (producedReceipt) {
+    process.stdout.write(
+      producedReceipt.applied.length > 0
+        ? `produced ${id} (role: ${producedReceipt.role}): ${producedReceipt.applied.join('; ')}\n`
+        : `produced ${id} (role: ${producedReceipt.role}): nothing to intensify — the init patch already meets this profile\n`,
+    )
+  }
 }
 
 function rmTrackCmd(argv) {
@@ -1688,6 +1741,43 @@ function trickCmd(argv) {
   if (sub === 'apply') return trickApplyCmd(rest)
   if (sub === 'suggest') return trickSuggestCmd(rest)
   throw new BeatEditError('trick needs a subcommand: `beat trick list|show|apply|suggest` (see `beat trick --help`)')
+}
+
+// Track 1b: retrofit an EXISTING track with its role's produced-defaults profile — "make this track
+// engineplus" as one command. Flows through the SAME produce.ts primitives (resolveProducedProfile ->
+// applyProducedDefaults) that add-track --produced, gen-kit, and the taste seeds use: zero duplicated
+// production values. Intensify-only by construction (never weakens an already-produced patch); a
+// receipt of exactly what changed, the trick-apply house style; --dry-run previews without writing.
+function produceCmd(argv) {
+  const known = new Set(['--role'])
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !known.has(argv[i - 1]))
+  const [file, track] = positional
+  if (!file || !track) throw new BeatEditError('produce needs <file> <track> [--role bass|lead|pad|keys|drums] [--dry-run] (see `beat produce --help`)')
+  const roleFlag = flagValue(argv, '--role')
+  const dryRun = argv.includes('--dry-run')
+  const before = readDoc(file)
+  const t = before.tracks.find((x) => x.id === track)
+  if (!t) throw new BeatEditError(`no track "${track}" (have: ${before.tracks.map((x) => x.id).join(', ')})`)
+  if (t.kind !== 'synth' && t.kind !== 'drums') {
+    throw new BeatEditError(`produce covers synth/drums tracks, and "${track}" is ${t.kind} (production reads the synth patch / drum bus) — nothing to produce`)
+  }
+  const { role, profile } = resolveProducedProfile(before, track, roleFlag)
+  const res = applyProducedDefaults(before, track, profile) // BeatProduceError bubbles to main()'s catch
+  if (dryRun) {
+    process.stdout.write(`dry-run — produce "${track}" (role: ${role}) would apply:\n`)
+    if (res.applied.length === 0) {
+      process.stdout.write('  nothing to intensify — the patch already meets this profile\n')
+    } else {
+      process.stdout.write(formatDiff(diffDocuments(before, res.doc)))
+    }
+    return
+  }
+  writeDoc(file, before, res.doc)
+  process.stdout.write(
+    res.applied.length > 0
+      ? `produced ${track} (role: ${role}): ${res.applied.join('; ')}\n`
+      : `produced ${track} (role: ${role}): nothing to intensify — the patch already meets this profile\n`,
+  )
 }
 
 // Phase 22 Stream AB: drum kits (kit-808/kit-909/kit-acoustic) — a separate small library from
@@ -5074,6 +5164,9 @@ async function main() {
     case 'trick':
       trickCmd(rest)
       break
+    case 'produce':
+      produceCmd(rest)
+      break
     case 'drum-kits':
       drumKitsCmd(rest)
       break
@@ -5150,6 +5243,7 @@ main().catch((err) => {
     err instanceof BeatPresetError ||
     err instanceof BeatMacroError ||
     err instanceof BeatTrickError ||
+    err instanceof BeatProduceError ||
     err instanceof BeatPitchTimeError ||
     err instanceof BeatHumanizeError ||
     err instanceof BeatProfileError ||

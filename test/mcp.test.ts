@@ -93,6 +93,7 @@ test('beat mcp speaks the MCP handshake and serves the tool suite', async () => 
       'beat_lane',
       'beat_source_search',
       'beat_source_add',
+      'beat_produce',
     ]) {
       assert.ok(names.includes(expected), `missing tool ${expected}`)
     }
@@ -167,6 +168,49 @@ test('tools/call: beat_group folds tracks, beat_group_set edits it, beat_rm_grou
     const dup = await mcp.request('tools/call', { name: 'beat_group', arguments: { file, id: 'g2', track_ids: ['bass', 'lead'] } })
     assert.equal(dup.isError, true)
     assert.match(dup.content[0].text, /already in group/)
+  } finally {
+    mcp.close()
+  }
+})
+
+// Track 1b: produced-track authoring over MCP — beat_add_track's `produced` flag composes a new
+// track with its role profile, and beat_produce retrofits an existing one (intensify-only), both
+// through the shared produce.ts primitives the CLI/gen-kit use.
+test('tools/call: beat_add_track produced + beat_produce apply the role production profile', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-mcp-produce-test-'))
+  const file = join(dir, 'song.beat')
+  execFileSync(process.execPath, [join(repoRoot, 'cli', 'beat.mjs'), 'init', file, '--bars', '1'])
+
+  const mcp = startMcp()
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+
+    // create a produced pad track: the receipt names the width stack, and the patch on disk carries it
+    const added = await mcp.request('tools/call', {
+      name: 'beat_add_track',
+      arguments: { file, id: 'pad', kind: 'synth', produced: true },
+    })
+    assert.match(added.content[0].text, /produced pad \(role: pad\):/)
+    assert.match(added.content[0].text, /unison/)
+    assert.match(readFileSync(file, 'utf8'), /^ {4}unisonVoices 5$/m)
+
+    // retrofit the (dry) starter "lead" track with beat_produce; role keys maps to the chords profile
+    const produced = await mcp.request('tools/call', {
+      name: 'beat_produce',
+      arguments: { file, track: 'lead', role: 'keys' },
+    })
+    assert.match(produced.content[0].text, /produced lead \(role: chords\):/)
+
+    // intensify-only: producing the already-produced pad again is a no-op receipt
+    const again = await mcp.request('tools/call', { name: 'beat_produce', arguments: { file, track: 'pad' } })
+    assert.match(again.content[0].text, /nothing to intensify/)
+
+    // refuses on an audio track (no synth patch to produce), surfaced as an agent-visible isError
+    await mcp.request('tools/call', { name: 'beat_add_track', arguments: { file, id: 'aud', kind: 'audio' } })
+    const bad = await mcp.request('tools/call', { name: 'beat_produce', arguments: { file, track: 'aud' } })
+    assert.equal(bad.isError, true)
+    assert.match(bad.content[0].text, /produce covers synth\/drums tracks/)
   } finally {
     mcp.close()
   }

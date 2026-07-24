@@ -109,11 +109,17 @@ export {
   productionRoleFor,
   productionProfileFor,
   applyProducedDefaults,
+  // authoring helpers (Track 1b): the shared role/profile resolution `beat add-track --produced`
+  // and `beat produce` (+ MCP twins) use so both compose FROM the same primitives.
+  resolveProducedProfile,
+  kickSourceTrack,
+  PRODUCED_DUCK_AMOUNT,
   BeatProduceError,
   type ProductionRole,
   type ProductionProfile,
   type ProfileOptions,
   type ProducedResult,
+  type ResolvedProducedProfile,
 } from './produce.js'
 // ==== produced defaults end ====
 
