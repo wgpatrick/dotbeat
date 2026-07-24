@@ -72,6 +72,10 @@ export type DiffEntry =
   | { kind: 'lane-decl'; trackId: string; lane: string; before: string | null; after: string | null }
   // v0.6 instrument tracks
   | { kind: 'instrument-param'; trackId: string; param: 'soundfont' | 'program' | 'volume' | 'pan'; before: string | number; after: string | number }
+  // Track 1a surge tracks: the sound-source block (patch/sampleRate) and its normalized overrides
+  // (before/after null = the override was absent — added/removed reads as a single semantic line).
+  | { kind: 'surge-param'; trackId: string; param: 'patch' | 'sampleRate'; before: string | number; after: string | number }
+  | { kind: 'surge-override'; trackId: string; param: string; before: number | null; after: number | null }
   // v0.9 clip automation (matched by (clipId, param, pointId) — points are stable ids, like notes/hits)
   | { kind: 'automation-point-added'; trackId: string; clipId: string; param: string; point: { id: string; time: number; value: number } }
   | { kind: 'automation-point-removed'; trackId: string; clipId: string; param: string; point: { id: string; time: number; value: number } }
@@ -260,6 +264,19 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
       if (ta.instrument.program !== tb.instrument.program) out.push({ kind: 'instrument-param', trackId: id, param: 'program', before: ta.instrument.program, after: tb.instrument.program })
       if (ta.instrument.volume !== tb.instrument.volume) out.push({ kind: 'instrument-param', trackId: id, param: 'volume', before: ta.instrument.volume, after: tb.instrument.volume })
       if (ta.instrument.pan !== tb.instrument.pan) out.push({ kind: 'instrument-param', trackId: id, param: 'pan', before: ta.instrument.pan, after: tb.instrument.pan })
+    }
+    // Track 1a: the surge sound-source block. patch/sampleRate are single-value fields; overrides
+    // are matched by param name (added/removed/changed), the same by-id discipline notes/effects use.
+    if (ta.kind === 'surge' && tb.kind === 'surge' && ta.surge && tb.surge) {
+      if (ta.surge.patch !== tb.surge.patch) out.push({ kind: 'surge-param', trackId: id, param: 'patch', before: ta.surge.patch, after: tb.surge.patch })
+      if (ta.surge.sampleRate !== tb.surge.sampleRate) out.push({ kind: 'surge-param', trackId: id, param: 'sampleRate', before: ta.surge.sampleRate, after: tb.surge.sampleRate })
+      const aOv = new Map(ta.surge.overrides.map((o) => [o.param, o.value]))
+      const bOv = new Map(tb.surge.overrides.map((o) => [o.param, o.value]))
+      for (const [p, v] of aOv) if (!bOv.has(p)) out.push({ kind: 'surge-override', trackId: id, param: p, before: v, after: null })
+      for (const [p, v] of bOv) {
+        const before = aOv.has(p) ? aOv.get(p)! : null
+        if (before !== v) out.push({ kind: 'surge-override', trackId: id, param: p, before, after: v })
+      }
     }
     // Phase 26 Stream DC: instrument tracks used to be skipped entirely here (their `synth` object
     // was a pure unused placeholder — no field on it was ever settable). Now that instrument
@@ -583,6 +600,12 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'instrument-param':
         lines.push(`${e.trackId}: ${e.param} ${fmtVal(e.before)} -> ${fmtVal(e.after)}`)
+        break
+      case 'surge-param':
+        lines.push(`${e.trackId}: surge.${e.param} ${fmtVal(e.before)} -> ${fmtVal(e.after)}`)
+        break
+      case 'surge-override':
+        lines.push(`${e.trackId}: surge.override.${e.param} ${e.before === null ? '(none)' : formatNumber(e.before)} -> ${e.after === null ? '(none)' : formatNumber(e.after)}`)
         break
       case 'automation-point-added':
         lines.push(`${e.trackId}: clip "${e.clipId}" ${e.param} automation point added ${e.point.id} (step ${formatNumber(e.point.time)}, value ${formatNumber(e.point.value)})`)

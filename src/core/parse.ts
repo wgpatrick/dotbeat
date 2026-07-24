@@ -1,5 +1,5 @@
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -86,6 +86,9 @@ export function parse(text: string): BeatDocument {
   let currentScene: BeatScene | null = null
   let inSynth = false
   let inSong = false
+  // Track 1a: the currently-open `surge` sound-source block (level 1), if any — its `patch`/
+  // `sampleRate`/`override` children are level 2, collected until a lower/sibling line closes it.
+  let inSurge = false
   let synthSeen = new Set<keyof BeatSynth>()
   // v0.9: the currently-open `auto <track>.<param>` lane within a clip, if any — `point` lines
   // (level 3) append to it until the next level <= 2 line closes it.
@@ -130,6 +133,19 @@ export function parse(text: string): BeatDocument {
     inSynth = false
   }
 
+  // Track 1a: close an open surge block — a surge block MUST carry a patch line (the sound source
+  // is meaningless without one), the same fail-loudly stance the synth block and instrument
+  // soundfont line take. sampleRate/override are optional. Validation is structural (patch
+  // present); whether the patch/surgepy actually EXIST is a render-time check, not a parse-time one
+  // — a .beat with a surge track must load on a machine that has no Surge build at all.
+  function closeSurgeIfOpen(lineNo: number) {
+    if (!inSurge) return
+    if (!currentTrack || !currentTrack.surge || currentTrack.surge.patch === '') {
+      throw new BeatParseError(`surge block on track "${currentTrack?.id ?? '?'}" is missing its patch line`, lineNo)
+    }
+    inSurge = false
+  }
+
   // A drum pattern (track-level or clip-level) must arrive complete: all five lanes, equal step
   // counts — the same fail-loudly stance the synth block takes.
   function checkDrumPattern(pattern: Partial<BeatDrumPattern> | undefined, what: string, lineNo: number) {
@@ -172,6 +188,12 @@ export function parse(text: string): BeatDocument {
     if (currentTrack.kind === 'instrument' && !currentTrack.instrument) {
       throw new BeatParseError(`instrument track "${currentTrack.id}" is missing its soundfont line`, lineNo)
     }
+    // Track 1a: a surge track without its `surge` block has no sound source at all — fail loudly,
+    // same as an instrument track missing its soundfont line. (The synth production block is
+    // optional on input — a missing one keeps the INIT_SYNTH defaults, always re-emitted on output.)
+    if (currentTrack.kind === 'surge' && !currentTrack.surge) {
+      throw new BeatParseError(`surge track "${currentTrack.id}" is missing its surge block (a "surge" block with a patch line)`, lineNo)
+    }
     // v0.10: no explicit effect declaration at all -> the canonical default chain (see above).
     // Phase 26 Stream DC: drum tracks migrate to the SAME default (eq3->comp->distortion->
     // bitcrush, all enabled) — this is what makes a pre-Stream-DC file's drum bus (previously a
@@ -180,7 +202,7 @@ export function parse(text: string): BeatDocument {
     // lines (or `effects none`) departs from it. Instrument tracks are NOT included here — they
     // never had a chain before, so the correct migration target is [], not a chain built for a
     // fixed insert order they never actually had.
-    if ((currentTrack.kind === 'synth' || currentTrack.kind === 'drums') && !effectsSeen.has(currentTrack)) {
+    if ((currentTrack.kind === 'synth' || currentTrack.kind === 'drums' || currentTrack.kind === 'surge') && !effectsSeen.has(currentTrack)) {
       currentTrack.effects = defaultEffectChain()
     }
   }
@@ -472,6 +494,7 @@ export function parse(text: string): BeatDocument {
 
     if (level === 0) {
       closeSynthIfOpen(lineNo)
+      closeSurgeIfOpen(lineNo)
       if (keyword === 'format_version') {
         if (tokens.length !== 2) throw new BeatParseError('format_version expects exactly 1 value', lineNo)
         formatVersion = tokens[1]!
@@ -508,7 +531,11 @@ export function parse(text: string): BeatDocument {
           // optional fields start at their canonical defaults (elision contract). Instrument and
           // audio tracks never serialize a synth block — they carry the canonical INIT copy so
           // parse(serialize(x)) deep-equals documents built via addTrack.
-          synth: kind === 'instrument' || kind === 'audio'
+          // Track 1a: a surge track's synth block is OPTIONAL production (it carries the standard
+          // INIT_SYNTH defaults until a `synth` block overrides them), so — like instrument/audio —
+          // it starts from the sensible INIT copy rather than the all-zero placeholder synth/drums
+          // use to force a full synth block. A surge track's REQUIRED block is the `surge` block.
+          synth: kind === 'instrument' || kind === 'audio' || kind === 'surge'
             ? { ...INIT_SYNTH }
             : ({ osc: 'sawtooth', volume: 0, cutoff: 0, resonance: 0, attack: 0, decay: 0, sustain: 0, release: 0, pan: 0, ...defaultSynthFields() } as BeatSynth),
           laneSamples: {},
@@ -631,10 +658,23 @@ export function parse(text: string): BeatDocument {
         if (currentTrack.kind === 'instrument') throw new BeatParseError(`instrument tracks have no synth block; "${currentTrack.id}" uses a soundfont line`, lineNo)
         if (currentTrack.kind === 'audio') throw new BeatParseError(`audio tracks have no synth block; "${currentTrack.id}" carries audio-region clips instead`, lineNo)
         closeSynthIfOpen(lineNo)
+        closeSurgeIfOpen(lineNo)
         closeClipIfOpen(lineNo)
         if (tokens.length !== 1) throw new BeatParseError('synth takes no values on its own line', lineNo)
         inSynth = true
         synthSeen = new Set()
+        continue
+      }
+      // Track 1a: `surge` opens the sound-source block on a surge track — patch/sampleRate/override
+      // children are level 2 (handled below). One per track; only on surge tracks.
+      if (keyword === 'surge') {
+        if (currentTrack.kind !== 'surge') throw new BeatParseError(`surge blocks only belong in surge tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+        if (currentTrack.surge) throw new BeatParseError(`duplicate surge block on track "${currentTrack.id}"`, lineNo)
+        closeSynthIfOpen(lineNo)
+        closeClipIfOpen(lineNo)
+        if (tokens.length !== 1) throw new BeatParseError('surge takes no values on its own line', lineNo)
+        currentTrack.surge = { patch: '', sampleRate: SURGE_DEFAULT_SAMPLE_RATE, overrides: [] }
+        inSurge = true
         continue
       }
       if (keyword === 'soundfont') {
@@ -687,6 +727,7 @@ export function parse(text: string): BeatDocument {
         continue
       }
       closeSynthIfOpen(lineNo)
+      closeSurgeIfOpen(lineNo)
       // v0.10: `effect <id> <type> [bypassed]` — one insert-chain entry, in file order (order IS
       // chain order). `effects none` is the explicit-empty-chain sentinel (distinguishes "the
       // user emptied the chain" from "the file never mentions effects" — see defaultEffectChain's
@@ -866,6 +907,40 @@ export function parse(text: string): BeatDocument {
         throw new BeatParseError(`unexpected keyword "${keyword}" inside a clip`, lineNo)
       }
 
+      // Track 1a: level-2 lines inside an open `surge` block — patch (rest-of-line, optionally
+      // double-quoted since factory names have spaces), sampleRate, override <param> <0..1>.
+      if (inSurge) {
+        if (!currentTrack || !currentTrack.surge) throw new BeatParseError(`"${keyword}" outside of a surge block`, lineNo)
+        const surge = currentTrack.surge
+        if (keyword === 'patch') {
+          const rest = trimmedStart.trim().slice('patch'.length).trim()
+          const name = rest.length >= 2 && rest.startsWith('"') && rest.endsWith('"') ? rest.slice(1, -1) : rest
+          if (name === '') throw new BeatParseError('patch expects a factory patch name', lineNo)
+          if (name.includes('"')) throw new BeatParseError(`patch name must not contain a double-quote, got ${rest}`, lineNo)
+          if (surge.patch !== '') throw new BeatParseError('duplicate patch line in surge block', lineNo)
+          surge.patch = name
+          continue
+        }
+        if (keyword === 'sampleRate') {
+          if (tokens.length !== 2) throw new BeatParseError('sampleRate expects exactly 1 value', lineNo)
+          const sr = parseIntStrict(tokens[1]!, lineNo, 'sampleRate')
+          if (sr < 8000 || sr > 192000) throw new BeatParseError(`sampleRate must be 8000..192000 Hz, got ${sr}`, lineNo)
+          surge.sampleRate = sr
+          continue
+        }
+        if (keyword === 'override') {
+          if (tokens.length !== 3) throw new BeatParseError('override expects exactly 2 values: <param> <value 0..1>', lineNo)
+          const param = tokens[1]!
+          if (!/^[A-Za-z0-9_./-]+$/.test(param)) throw new BeatParseError(`override param must be an alphanumeric/_/-/./ token, got "${param}"`, lineNo)
+          const val = parseFloatStrict(tokens[2]!, lineNo, 'override value')
+          if (val < 0 || val > 1) throw new BeatParseError(`override value must be normalized 0..1, got ${val}`, lineNo)
+          if (surge.overrides.some((o) => o.param === param)) throw new BeatParseError(`duplicate override for param "${param}" in surge block`, lineNo)
+          surge.overrides.push({ param, value: val })
+          continue
+        }
+        throw new BeatParseError(`unexpected keyword "${keyword}" inside a surge block (expected patch/sampleRate/override)`, lineNo)
+      }
+
       if (!currentTrack || !inSynth) throw new BeatParseError(`"${keyword}" outside of a synth block`, lineNo)
       if (tokens.length !== 2) throw new BeatParseError(`"${keyword}" expects exactly 1 value`, lineNo)
       const value = tokens[1]!
@@ -924,6 +999,7 @@ export function parse(text: string): BeatDocument {
   }
 
   closeSynthIfOpen(rawLines.length + 1)
+  closeSurgeIfOpen(rawLines.length + 1)
   closeTrackIfOpen(rawLines.length + 1)
   const eof = rawLines.length + 1
 

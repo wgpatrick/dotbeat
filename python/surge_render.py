@@ -24,10 +24,11 @@ stderr, exit codes 0/2/3/4, `--doctor` probing deps with importlib only):
   render stdin JSON:  {"patch": "<abs .fxp path>",
                        "notes": [{"midi": 48, "startSeconds": 0.0,
                                   "durationSeconds": 0.5, "velocity": 100}, ...],
+                       "overrides": [{"param": "cutoff", "value": 0.62}, ...],  # optional, 0..1
                        "sampleRate": 44100,
                        "output": "<abs .wav path>"}
-  render stdout JSON: {"backend":"surge","patch","patchName","category","notes","sampleRate",
-                       "seconds","output"}
+  render stdout JSON: {"backend":"surge","patch","patchName","category","notes","overrides",
+                       "sampleRate","seconds","output"}
   exit:  0 ok · 2 usage/bad input · 3 surgepy missing · 4 render/patch failure.
          On exit 3 the LAST stderr line names how to get surgepy (there is NO PyPI wheel — it is a
          source-build artifact of Surge XT itself; see the SURGEPY_BUILD_HINT below and
@@ -200,6 +201,90 @@ def _ring_db(frames_lr, sample_rate):
     return round(worst, 1)
 
 
+# Friendly aliases (dotbeat Track 1a `override <param>` lines) -> the exact Surge parameter name
+# `SurgeNamedParam.getName()` reports. Scene A is the default target (a single-scene patch). Keep
+# this tiny and honest: an override name that isn't here still resolves by exact/substring match
+# against the live patch's own param names, and an unresolved name is a loud render error.
+_SURGE_OVERRIDE_ALIASES = {
+    "cutoff": "a filter 1 cutoff",
+    "resonance": "a filter 1 resonance",
+    "filter1cutoff": "a filter 1 cutoff",
+    "filter1resonance": "a filter 1 resonance",
+    "filter2cutoff": "a filter 2 cutoff",
+    "filter2resonance": "a filter 2 resonance",
+    "volume": "global volume",
+}
+
+
+def _index_patch_params(surge):
+    """Walk `surge.getPatch()` and return {lowercased param name -> param object} for every leaf
+    parameter (a SurgeNamedParam, identified by its `getName` method). The structure is nested
+    dicts and lists of these leaves; recurse over both."""
+    index = {}
+
+    def visit(node):
+        if hasattr(node, "getName") and callable(getattr(node, "getName")):
+            try:
+                index[str(node.getName()).lower()] = node
+            except Exception:  # pragma: no cover - build-specific
+                pass
+            return
+        if isinstance(node, dict):
+            for v in node.values():
+                visit(v)
+        elif isinstance(node, (list, tuple)):
+            for v in node:
+                visit(v)
+
+    visit(surge.getPatch())
+    return index
+
+
+def _resolve_override_param(name, index):
+    """Resolve a dotbeat override name to a Surge param object. Order: exact name match, then the
+    friendly-alias table, then a UNIQUE substring match against the patch's own param names.
+    Raises RenderError (exit 4) when nothing resolves or a substring match is ambiguous — the
+    fail-loudly stance Track 1a requires at render time."""
+    key = str(name).lower().strip()
+    if key in index:
+        return index[key]
+    alias = _SURGE_OVERRIDE_ALIASES.get(key.replace(" ", ""))
+    if alias and alias in index:
+        return index[alias]
+    matches = [k for k in index if key in k]
+    if len(matches) == 1:
+        return index[matches[0]]
+    if len(matches) > 1:
+        raise RenderError(
+            f"override param '{name}' is ambiguous — matches {len(matches)} Surge params "
+            f"(e.g. {', '.join(sorted(matches)[:4])}); use a more specific name"
+        )
+    raise RenderError(f"override param '{name}' did not resolve to any Surge parameter in this patch")
+
+
+def _apply_overrides(surge, overrides):
+    """Apply each {param, value} override to the loaded patch via setParamVal (value is normalized
+    0..1, Surge's own param space). Returns the list of resolved Surge param names (for metadata).
+    A bad param or out-of-range value is a loud render error, never a silent no-op."""
+    if not overrides:
+        return []
+    index = _index_patch_params(surge)
+    applied = []
+    for ov in overrides:
+        if not isinstance(ov, dict) or "param" not in ov or "value" not in ov:
+            raise UsageError(f"each override needs 'param' and 'value', got {ov!r}")
+        value = float(ov["value"])
+        if not (0.0 <= value <= 1.0):
+            raise UsageError(f"override value for '{ov['param']}' must be normalized 0..1, got {value}")
+        param = _resolve_override_param(ov["param"], index)
+        try:
+            surge.setParamVal(param, value)
+        except Exception as e:  # pragma: no cover - needs a real surgepy build
+            raise RenderError(f"could not set override '{ov['param']}' = {value}: {e}")
+        applied.append(param.getName())
+    return applied
+
+
 def _write_wav_pcm16(path, frames_lr, sample_rate):
     """Write interleaved stereo float frames (list/array of [L, R] in [-1, 1]) as 16-bit PCM WAV
     using stdlib `wave` — the encoding src/taste/showdown.ts's readWavData and the loudness/
@@ -229,6 +314,7 @@ def render(request):
     off so releases/reverb decay aren't clipped."""
     patch = request.get("patch")
     notes = request.get("notes")
+    overrides = request.get("overrides") or []
     sample_rate = int(request.get("sampleRate") or 44100)
     output = request.get("output")
     if not patch or not isinstance(patch, str):
@@ -237,6 +323,8 @@ def render(request):
         raise UsageError("render request needs an 'output' wav path")
     if not isinstance(notes, list) or not notes:
         raise UsageError("render request needs a non-empty 'notes' list")
+    if not isinstance(overrides, list):
+        raise UsageError("render request 'overrides' must be a list of {param, value}")
     if not os.path.isfile(patch):
         raise RenderError(f"patch not found: {patch}")
 
@@ -245,6 +333,9 @@ def render(request):
         surge.loadPatch(patch)
     except Exception as e:  # pragma: no cover - needs a real surgepy build
         raise RenderError(f"could not load patch {patch}: {e}")
+
+    # Track 1a: normalized param overrides, applied after the patch loads and before any notes play.
+    applied_overrides = _apply_overrides(surge, overrides)
 
     try:
         import numpy as np  # noqa: PLC0415
@@ -300,6 +391,7 @@ def render(request):
         "patchName": os.path.splitext(os.path.basename(patch))[0],
         "category": os.path.basename(os.path.dirname(patch)),
         "notes": len(notes),
+        "overrides": applied_overrides,
         "sampleRate": sample_rate,
         "seconds": round(total_samples / sample_rate, 4),
         "ringDb": _ring_db(frames, sample_rate),

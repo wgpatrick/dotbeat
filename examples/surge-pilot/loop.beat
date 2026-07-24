@@ -1,0 +1,38 @@
+format_version 0.11
+bpm 120
+loop_bars 2
+selected_track lead
+
+track lead Lead #e06c75 surge
+  surge
+    patch "Acidofil"
+    override cutoff 0.62
+  synth
+    osc sawtooth
+    volume -8
+    cutoff 2000
+    resonance 0.8
+    attack 0.01
+    decay 0.2
+    sustain 0.6
+    release 0.3
+    pan 0
+    sendReverb 0.2
+  note u1 72 0 4 0.8
+  note u2 76 4 4 0.8
+  note u3 79 8 4 0.8
+  note u4 84 12 4 0.9
+
+track bass Bass #61afef synth
+  synth
+    osc square
+    volume -10
+    cutoff 1200
+    resonance 0.5
+    attack 0.01
+    decay 0.2
+    sustain 0.5
+    release 0.2
+    pan 0
+  note b1 36 0 8 0.9
+  note b2 43 8 8 0.85
