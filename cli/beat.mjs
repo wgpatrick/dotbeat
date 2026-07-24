@@ -4698,7 +4698,7 @@ async function lintCmd(argv) {
  * compares each section (or the whole song) against a saved reference profile. Honest limits:
  * per-section STATIC metrics only — no masking, arrangement, or transition awareness. */
 async function feedbackCmd(argv) {
-  const { analyzeSections, formatSectionFeedback, formatWholeSongFeedback } = await import('../dist/src/metrics/index.js')
+  const { analyzeSections, formatSectionFeedback, formatWholeSongFeedback, arrangementFindings } = await import('../dist/src/metrics/index.js')
   const { renderToBuffer } = await import('./render.mjs')
 
   const json = argv.includes('--json')
@@ -4724,7 +4724,8 @@ async function feedbackCmd(argv) {
     }
     const specs = doc.song.map((s) => ({ bars: s.bars, scene: s.scene, name: doc.scenes.find((sc) => sc.id === s.scene)?.name }))
     const secMetrics = analyzeSections(channels, sampleRate, doc.bpm, specs)
-    process.stdout.write(json ? JSON.stringify({ sections: secMetrics, ...(ref ? { ref: ref.source } : {}) }, null, 2) + '\n' : formatSectionFeedback(secMetrics, ref))
+    const arcFindings = arrangementFindings(secMetrics) // research/122 §4.2: the flatness detector
+    process.stdout.write(json ? JSON.stringify({ sections: secMetrics, findings: arcFindings, ...(ref ? { ref: ref.source } : {}) }, null, 2) + '\n' : formatSectionFeedback(secMetrics, ref))
   } else {
     const m = analyze(channels, sampleRate)
     const findings = lint(m, { beatPath: file, ...(ref ? { ref } : {}) })

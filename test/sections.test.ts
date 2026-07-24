@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { sliceSections, analyzeSections, samplesPerBar, formatSectionFeedback, formatWholeSongFeedback, type SectionSpec } from '../src/metrics/sections.js'
+import { sliceSections, analyzeSections, samplesPerBar, formatSectionFeedback, formatWholeSongFeedback, arrangementFindings, type SectionSpec } from '../src/metrics/sections.js'
 import { analyze } from '../src/metrics/analyze.js'
 import { lint } from '../src/metrics/lint.js'
 
@@ -151,4 +151,78 @@ test('formatWholeSongFeedback: metrics block + lint findings, mentions loudness 
   assert.match(out, /whole-song feedback/)
   assert.match(out, /loudness/)
   assert.match(out, /lint:/)
+})
+
+// ---- arrangement lint (research/122 §4.2: the flatness detector) ----------------------------
+
+test('arrangementFindings: a same-amplitude arc everywhere fires arrangement-flat', () => {
+  const spb = samplesPerBar(SR, BPM)
+  const ch = new Float64Array(3 * spb)
+  for (let i = 0; i < 3; i++) ch.set(tone(220, spb, 0.3), i * spb) // three identical sections
+  const secs = analyzeSections([ch], SR, BPM, [
+    { bars: 1, scene: 'a' },
+    { bars: 1, scene: 'b' },
+    { bars: 1, scene: 'c' },
+  ])
+  const findings = arrangementFindings(secs)
+  assert.equal(findings.length, 1)
+  assert.equal(findings[0]!.rule, 'arrangement-flat')
+  assert.equal(findings[0]!.level, 'info') // taste defect, not a playback-safety one
+  assert.ok(findings[0]!.measured < 1, `span should be ~0 LU, got ${findings[0]!.measured}`)
+  assert.match(findings[0]!.message, /flat/)
+  assert.ok(findings[0]!.suggestion, 'the finding should carry a concrete fix')
+})
+
+test('arrangementFindings: a real quiet->drop contrast does not fire', () => {
+  const spb = samplesPerBar(SR, BPM)
+  const ch = new Float64Array(2 * spb)
+  ch.set(tone(220, spb, 0.05), 0) // quiet intro
+  ch.set(tone(220, spb, 0.9), spb) // ~25 dB louder drop
+  const secs = analyzeSections([ch], SR, BPM, [
+    { bars: 1, scene: 'intro' },
+    { bars: 1, scene: 'drop' },
+  ])
+  assert.equal(arrangementFindings(secs).length, 0)
+})
+
+test('arrangementFindings: a slow crescendo with small steps but a real span does not fire', () => {
+  const spb = samplesPerBar(SR, BPM)
+  // 6 sections stepping ~2 dB each: adjacent steps sit near the 2 LU nominal, but the SPAN
+  // (~10 dB) alone must clear the rule — flat requires BOTH small steps AND a small span.
+  const amps = [0.05, 0.063, 0.08, 0.1, 0.126, 0.16]
+  const ch = new Float64Array(amps.length * spb)
+  amps.forEach((a, i) => ch.set(tone(220, spb, a), i * spb))
+  const secs = analyzeSections([ch], SR, BPM, amps.map(() => ({ bars: 1 })))
+  assert.equal(arrangementFindings(secs).length, 0)
+})
+
+test('arrangementFindings: a silent section counts as contrast (-inf LUFS), not a bail-out', () => {
+  const spb = samplesPerBar(SR, BPM)
+  const ch = new Float64Array(2 * spb) // section 1 stays all-zero (silent)
+  ch.set(tone(220, spb, 0.3), spb)
+  const secs = analyzeSections([ch], SR, BPM, [{ bars: 1 }, { bars: 1 }])
+  assert.equal(arrangementFindings(secs).length, 0)
+})
+
+test('arrangementFindings: fewer than two sections has no arrangement to judge', () => {
+  const spb = samplesPerBar(SR, BPM)
+  const secs = analyzeSections([tone(220, spb, 0.3)], SR, BPM, [{ bars: 1 }])
+  assert.equal(arrangementFindings(secs).length, 0)
+})
+
+test('formatSectionFeedback: flat arc prints the arrangement-flat finding; contrasted arc prints pass', () => {
+  const spb = samplesPerBar(SR, BPM)
+  const flat = new Float64Array(2 * spb)
+  flat.set(tone(220, spb, 0.3), 0)
+  flat.set(tone(220, spb, 0.3), spb)
+  const flatOut = formatSectionFeedback(analyzeSections([flat], SR, BPM, [{ bars: 1 }, { bars: 1 }]))
+  assert.match(flatOut, /arrangement lint:/)
+  assert.match(flatOut, /INFO \[arrangement-flat\]/)
+
+  const arc = new Float64Array(2 * spb)
+  arc.set(tone(220, spb, 0.05), 0)
+  arc.set(tone(220, spb, 0.9), spb)
+  const arcOut = formatSectionFeedback(analyzeSections([arc], SR, BPM, [{ bars: 1 }, { bars: 1 }]))
+  assert.match(arcOut, /arrangement lint: pass/)
+  assert.doesNotMatch(arcOut, /arrangement-flat/)
 })
