@@ -1938,6 +1938,12 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: 'phase-35-plan.md',
   },
+  {
+    area: 'Metrics / critique loop', feature: 'Arrangement-flatness lint (the energy-arc verdict)',
+    description: 'Research/122 §4.2\'s one "ship regardless" item, re-detecting the owner-caught Sandstorm flatness with a standing rule instead of hindsight: `arrangementFindings` over the `beat feedback --sections` arc fires INFO [arrangement-flat] when no adjacent section moves more than 2 LU AND the quietest→loudest span stays under 6 LU (both variance-padded; thresholds sit between the measured flat cover — 1-2 dB adjacent everywhere — and the commercial reference\'s 11.8 dB build→drop). Both conditions together, so a slow crescendo with a real span and a single hard drop both pass; a silent section counts as contrast, not a bail-out. The text report prints the finding (or an explicit pass line with the measured span); --json carries the findings array. Verified end-to-end on real renders both ways.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/122-machine-listening-for-production.md', plan: null,
+  },
 
   // ── Feedback, generation & sound sources (Phase 37) ──────────────────────
   {

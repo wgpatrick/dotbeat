@@ -935,7 +935,9 @@ const HELP = [
                                                           boundaries and report the per-section energy arc
                                                           (LUFS / spectral balance / width / crest per section
                                                           + section-to-section movement, flagged only when it
-                                                          clears the render-run variance floor). --ref compares
+                                                          clears the render-run variance floor, + arrangement
+                                                          lint: INFO [arrangement-flat] when no adjacent section
+                                                          moves >2 LU and the whole arc spans <6 LU). --ref compares
                                                           each section (or the whole song) against a saved
                                                           reference profile (beat metrics --save-profile).
                                                           Honest limits: per-section STATIC metrics only — this
