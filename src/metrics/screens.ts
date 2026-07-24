@@ -121,8 +121,8 @@ const FLAT_ARC_STEP_DB = 4.0 // a real section-to-section drop/breakdown; seriou
 // 2. clicks/pops: an isolated inter-sample discontinuity — a single-sample jump far above the
 //    signal's own p99.9 jump AND audibly large in absolute terms.
 const CLICK_ABS_MIN = 0.08 // ignore tiny glitches below ~ -22 dB step
-const CLICK_RATIO = 14 // worst jump this many × the 99.9th-percentile jump = a splice/click, not program
-// (a hard drum-transient loop peaked at ratio 8.8 in the ref pool → 14 clears it with margin)
+const CLICK_RATIO = 20 // worst jump this many × the 99.9th-percentile jump = a splice/click, not program
+// (a drum-transient loop peaked at curvature-ratio 15 in the ref pool → 20 clears it)
 
 // 3. DC offset — ref-pool max |mean| 0.0086, dotbeat renders carry a benign ~0.015 (-36 dBFS) DC;
 const DC_ABS = 0.02
@@ -213,27 +213,28 @@ function screenFlatness(channels: Float64Array[], sampleRate: number, opts: Scre
 function screenClicks(mono: Float64Array, sampleRate: number): PathologyFinding[] {
   const n = mono.length
   if (n < 8) return []
-  // first-difference magnitude and its worst value + location
+  // Second difference (curvature) |x[i-1] - 2x[i] + x[i+1]| isolates single-sample impulses: a
+  // click/splice spikes it, while smooth program material and steady slew stay low. This sidesteps
+  // the first-difference trap where a spike creates a symmetric PAIR of large jumps (up then down).
   let worst = 0
   let worstIdx = 0
-  const diffs = new Float64Array(n - 1)
-  for (let i = 1; i < n; i++) {
-    const d = Math.abs(mono[i]! - mono[i - 1]!)
-    diffs[i - 1] = d
-    if (d > worst) {
-      worst = d
+  const d2 = new Float64Array(n - 2)
+  for (let i = 1; i < n - 1; i++) {
+    const c = Math.abs(mono[i - 1]! - 2 * mono[i]! + mono[i + 1]!)
+    d2[i - 1] = c
+    if (c > worst) {
+      worst = c
       worstIdx = i
     }
   }
-  if (worst < CLICK_ABS_MIN) return []
-  // p99.9 of the jump distribution — program material's legitimate slew ceiling
-  const sorted = Float64Array.prototype.slice.call(diffs).sort((a, b) => a - b)
+  // absolute floor: the raw sample excursion at the spike must be audible
+  const rawJump = Math.max(Math.abs(mono[worstIdx]! - mono[worstIdx - 1]!), Math.abs(mono[worstIdx + 1]! - mono[worstIdx]!))
+  if (rawJump < CLICK_ABS_MIN) return []
+  // p99.9 of the curvature distribution — program material's legitimate ceiling
+  const sorted = Float64Array.prototype.slice.call(d2).sort((a, b) => a - b)
   const p999 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.999))]! + 1e-9
   const ratio = worst / p999
-  // isolation: a click is a single-sample spike — its immediate neighbors are ordinary jumps
-  const neighbor = Math.max(worstIdx >= 2 ? diffs[worstIdx - 2]! : 0, worstIdx < diffs.length ? diffs[worstIdx]! : 0)
-  const isolated = worst > 3 * (neighbor + 1e-9)
-  if (ratio >= CLICK_RATIO && isolated) {
+  if (ratio >= CLICK_RATIO) {
     const t = worstIdx / sampleRate
     const severity = severityFrom(ratio, CLICK_RATIO, CLICK_RATIO * 4)
     return [
@@ -241,7 +242,7 @@ function screenClicks(mono: Float64Array, sampleRate: number): PathologyFinding[
         kind: 'click',
         severity,
         source: 'clicks-screen',
-        detail: `inter-sample discontinuity: a ${worst.toFixed(3)} single-sample jump, ${ratio.toFixed(1)}× the program's 99.9th-percentile slew — a click/pop (often a clip or section splice). Crossfade the boundary or check for a truncated one-shot.`,
+        detail: `inter-sample discontinuity: a ${rawJump.toFixed(3)} single-sample jump, curvature ${ratio.toFixed(1)}× the program's 99.9th-percentile — a click/pop (often a clip or section splice). Crossfade the boundary or check for a truncated one-shot.`,
         start: t,
         end: t,
         measured: ratio,
