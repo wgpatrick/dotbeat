@@ -75,8 +75,14 @@ async function main() {
     for (const s of SLOTS) {
       const outPath = join(dir, `${s.slot}.wav`)
       const rawOutPath = join(dir, `${s.slot}.raw.wav`)
-      if (existsSync(outPath) && manifest.clips[s.slot] && !manifest.clips[s.slot].error) {
-        console.log(`skip ${backend.slug}/${s.slot} (exists)`); grand.push({ backend: backend.slug, ...manifest.clips[s.slot] }); continue
+      // Resume: skip any slot whose trimmed wav is already ON DISK — that clip was already paid for,
+      // never re-call fal for it (a manifest record may be missing if a prior run died between the
+      // download and the manifest write; the file's existence is the money-spent truth). Only a
+      // recorded error with NO file re-generates.
+      if (existsSync(outPath)) {
+        console.log(`skip ${backend.slug}/${s.slot} (wav on disk — already paid)`)
+        if (manifest.clips[s.slot] && !manifest.clips[s.slot].error) grand.push({ backend: backend.slug, ...manifest.clips[s.slot] })
+        continue
       }
       const t0 = Date.now()
       const rec = { slot: s.slot, role: s.role, prompt: s.prompt, bpm: s.bpm, seed: s.seed, seconds: s.seconds, cost: backend.price }
