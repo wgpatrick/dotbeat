@@ -191,3 +191,36 @@ test('E2 loader: malformed / non-object curated files degrade to null (CI-safe f
   writeFileSync(noRoles, JSON.stringify({ version: 1 }))
   assert.equal(loadEngineCuratedFile(noRoles), null)
 })
+
+// ==== E2 taste-seeds consumer: curated base patch + seeded jitter, byte-determinism preserved =====
+
+const SYNTH_CURATED = {
+  version: 1, generatedAt: 'x',
+  roles: {
+    bassline: { pool: 1, survivors: 1, kept: [{ id: 'b1', source: 'random-roll', category: 'bass', params: { osc: 'square', cutoff: 640, resonance: 0.5, attack: 0.006, decay: 0.22, sustain: 0.4, release: 0.18 }, composite: 1 }] },
+    chords: { pool: 1, survivors: 1, kept: [{ id: 'c1', source: 'random-roll', category: 'chords', params: { osc: 'triangle', cutoff: 2200, resonance: 0.35, attack: 0.05, decay: 0.4, sustain: 0.6, release: 0.6 }, composite: 1 }] },
+    lead: { pool: 1, survivors: 1, kept: [{ id: 'l1', source: 'random-roll', category: 'lead', params: { osc: 'sawtooth', cutoff: 3800, resonance: 0.3, attack: 0.004, decay: 0.12, sustain: 0.2, release: 0.15 }, composite: 1 }] },
+  },
+}
+
+test('taste-seeds: absent curated bank is byte-identical run to run (historical random-patch path)', () => {
+  for (const s of [1, 7, 42]) {
+    assert.equal(generateSeedBeat(s).text, generateSeedBeat(s).text, `seed ${s} byte-stable`)
+    assert.equal(generateSeedBeat(s).text, generateSeedBeat(s, { curated: null }).text, 'curated:null == default')
+  }
+})
+
+test('taste-seeds: with a curated bank, output is deterministic per seed and differs from the random-patch version', () => {
+  for (const s of [1, 7, 42]) {
+    const a = generateSeedBeat(s, { curated: SYNTH_CURATED as never }).text
+    const b = generateSeedBeat(s, { curated: SYNTH_CURATED as never }).text
+    assert.equal(a, b, `seed ${s} byte-stable with the bank`)
+    assert.notEqual(a, generateSeedBeat(s).text, `seed ${s} bank patch differs from the random roll`)
+    assert.doesNotThrow(() => parse(a), 'curated seed round-trips')
+  }
+  // the bass track's cutoff should sit near the curated base (640) ± the ±10% jitter, not the
+  // random-roll range — proof the bank actually drove the patch
+  const doc = parse(generateSeedBeat(3, { curated: SYNTH_CURATED as never }).text)
+  const bass = doc.tracks.find((t) => t.id === 'bass')!
+  assert.ok(bass.synth!.cutoff >= 640 * 0.9 - 1 && bass.synth!.cutoff <= 640 * 1.1 + 1, `bass cutoff ${bass.synth!.cutoff} near curated 640`)
+})

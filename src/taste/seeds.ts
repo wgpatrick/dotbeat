@@ -7,8 +7,9 @@
 // that doesn't parse is a bug, not a variant).
 
 import { mulberry32 } from './eval.js'
-import { parse, serialize } from '../core/index.js'
+import { parse, serialize, setValue } from '../core/index.js'
 import { productionRoleFor, productionProfileFor, applyProducedDefaults } from '../analysis/produce.js'
+import { engineCuratedForRole, type EngineCuratedFile } from './enginePresets.js'
 
 interface SeedSpec {
   bpm: number
@@ -51,8 +52,15 @@ function synthBlock(rng: () => number, opts: { osc?: string; volume: number; cut
   ].join('\n')
 }
 
-/** One synthetic seed project as .beat text. Deterministic in (seed). 2 bars, 3-5 tracks. */
-export function generateSeedBeat(seed: number): { text: string; description: string } {
+/** One synthetic seed project as .beat text. Deterministic in (seed). 2 bars, 3-5 tracks.
+ *
+ * When `opts.curated` (the loaded presets/engine-curated.json, docs/engine-presets.md E2) is given,
+ * each SYNTH track's base patch is redrawn from the curated bank for the track's role + a seeded
+ * jitter (finalizeSeed → applyCuratedSeedPatches) so the taste loop — and the T5 pilot, which reads
+ * these seed files — searches FROM curated material instead of a random roll. Absent/empty bank →
+ * byte-identical to the historical random-patch generator (the jitter rng derives from the seed and
+ * never touches generateSeedBeat's own rng, so a seed stays byte-stable per seed either way). */
+export function generateSeedBeat(seed: number, opts: { curated?: EngineCuratedFile | null } = {}): { text: string; description: string } {
   const rng = mulberry32(seed)
   const prog = pick(rng, PROGRESSIONS)
   const spec: SeedSpec = {
@@ -134,20 +142,54 @@ export function generateSeedBeat(seed: number): { text: string; description: str
   lines.push('')
 
   const description = `${spec.style} in ${spec.minor ? 'minor' : 'major'} @ ${spec.bpm}bpm, ${feel} drums${lines.some((l) => l.startsWith('track arp')) ? ', arp' : ''}`
-  return { text: applySeedProduction(lines.join('\n'), seed), description }
+  return { text: finalizeSeed(lines.join('\n'), seed, opts.curated ?? null), description }
 }
 
-/** Produced defaults for seed patches (docs/research/115-production-layer-techniques.md, plan A1):
- * every seed leaves the file with modest, role-appropriate production instead of the dry/mono/static
- * init patch — so the taste loop searches FROM a produced starting point rather than asking vary to
- * rediscover mixing practice. Seed tier is ~60% of the gen-kit profile with a small seeded jitter
- * (seeds are variation fodder — keep headroom so vary batches can move width/air/sends in BOTH
- * directions). Deterministic in `seed`: the jitter rng is derived from the seed, drawn in a fixed
- * track order, and never disturbs generateSeedBeat's own rng, so the .beat stays byte-stable per
- * seed. bass/sub stay mono-anchored (no width, no reverb — §2.2); the drums bus gets air + light
- * glue only (it carries the kick). */
-function applySeedProduction(rawText: string, seed: number): string {
+/** seed synth-track id -> showdown role, for drawing a curated base patch (bass→bassline,
+ * chords→chords, arp→lead). The drums track has no curated bank (E2 curates the synth space only). */
+const SEED_ROLE_BY_TRACK: Record<string, string> = { bass: 'bassline', chords: 'chords', arp: 'lead' }
+
+/** A curated numeric param with a small seeded jitter (±10%), so seeds drawing the same bank patch
+ * still differ and vary keeps headroom in both directions. resonance stays ≤ 0.85 (the whine guard).
+ * Non-numbers pass through unchanged. */
+function jitterSeedParam(key: string, value: number | string | boolean, rng: () => number): number | string | boolean {
+  if (typeof value !== 'number') return value
+  let v = value * (0.9 + rng() * 0.2)
+  if (key === 'resonance') v = Math.min(0.85, Math.max(0.1, v))
+  return Number(v.toFixed(4))
+}
+
+/** Redraw each synth track's base patch from the curated bank + seeded jitter. Deterministic in
+ * `seed`: a dedicated rng (distinct salt from the production rng), drawn in fixed track then
+ * param order, never disturbing generateSeedBeat's own rng. An out-of-range jitter falls back to the
+ * un-jittered base value, then skips — never throwing mid-generation. */
+function applyCuratedSeedPatches(doc: ReturnType<typeof parse>, seed: number, curated: EngineCuratedFile): ReturnType<typeof parse> {
+  const rng = mulberry32((seed + 40503) >>> 0)
+  let next = doc
+  for (const t of doc.tracks) {
+    const role = SEED_ROLE_BY_TRACK[t.id]
+    if (!role || t.kind !== 'synth') continue
+    const kept = engineCuratedForRole(curated, role)
+    if (kept.length === 0) continue
+    const base = kept[Math.floor(rng() * kept.length)]!
+    for (const [key, value] of Object.entries(base.params)) {
+      const jittered = jitterSeedParam(key, value, rng)
+      try {
+        next = setValue(next, `${t.id}.${key}`, String(jittered))
+      } catch {
+        try { next = setValue(next, `${t.id}.${key}`, String(value)) } catch { /* skip an unsettable param */ }
+      }
+    }
+  }
+  return next
+}
+
+/** Parse the raw seed text, optionally redraw synth patches from the curated bank, then apply the
+ * seed-tier produced defaults — the finalize step generateSeedBeat returns. Curated-null keeps the
+ * exact historical applySeedProduction behavior (byte-stable per seed). */
+function finalizeSeed(rawText: string, seed: number, curated: EngineCuratedFile | null): string {
   let doc = parse(rawText)
+  if (curated) doc = applyCuratedSeedPatches(doc, seed, curated)
   const prodRng = mulberry32((seed + 104729) >>> 0)
   for (const t of doc.tracks) {
     const profile = productionProfileFor(productionRoleFor(t.id), { tier: 'seed', rng: prodRng })
@@ -155,6 +197,13 @@ function applySeedProduction(rawText: string, seed: number): string {
   }
   return serialize(doc)
 }
+
+// Produced defaults for seed patches (docs/research/115-production-layer-techniques.md, plan A1):
+// every seed leaves the file with modest, role-appropriate production instead of the dry/mono/static
+// init patch — so the taste loop searches FROM a produced starting point rather than asking vary to
+// rediscover mixing practice (applied by finalizeSeed above, ~60% of the gen-kit profile with a small
+// seeded jitter — seeds are variation fodder, keep headroom so vary can move width/air/sends BOTH
+// ways; bass/sub stay mono-anchored per §2.2; the drums bus gets air + light glue only).
 
 // ---- Generation prompt bank -------------------------------------------------------------------
 // Owner call (2026-07-17): "a lot of generation using fal as part of it — those generated sounds

@@ -1734,11 +1734,18 @@ async function tasteSeedsCmd(argv) {
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 8
   const seed0 = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 1
   const { generateSeedBeat } = await import('../dist/src/taste/seeds.js')
+  const { loadEngineCuratedFile } = await import('../dist/src/taste/enginePresets.js')
   const { mkdirSync } = await import('node:fs')
   mkdirSync(outDir, { recursive: true })
+  // Curated engine bank (docs/engine-presets.md E2): when present, each synth track's base patch is
+  // drawn from the bank + seeded jitter (seeds stay byte-deterministic per seed); absent → the
+  // historical random-roll patch. The pilot reads these seed files, so it inherits curated material.
+  const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', 'engine-curated.json')
+  const seedCurated = loadEngineCuratedFile(curatedPath)
+  if (seedCurated) process.stdout.write(`engine-curated.json present — synth seed patches drawn from the curated bank + seeded jitter\n`)
   for (let i = 0; i < count; i++) {
     const seed = seed0 + i
-    const { text, description } = generateSeedBeat(seed)
+    const { text, description } = generateSeedBeat(seed, { curated: seedCurated })
     parse(text) // a seed that doesn't parse is a generator bug — fail loudly, write nothing bad
     const file = join(outDir, `seed-${String(seed).padStart(3, '0')}.beat`)
     writeFileSync(file, text + '\n')
