@@ -1930,6 +1930,8 @@ async function showdownCmd(argv) {
   const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
   const { mkdirSync, copyFileSync } = await import('node:fs')
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
+  // Engine preset provenance + role-mapped draw (docs/engine-presets.md E0/E1/E2).
+  const { RANDOM_SEED_PATCH, withPatchProvenance, pickEnginePreset, loadEngineCuratedFile } = await import('../dist/src/taste/enginePresets.js')
 
   const roles = (flagValue(argv, '--roles') ?? showdown.SHOWDOWN_ROLES.map((r) => r.role).join(','))
     .split(',')
@@ -2182,7 +2184,11 @@ async function showdownCmd(argv) {
           batchBpm = showdown.foldBpmToRange(engineDrawn.midi.figure.bpm)
           process.stderr.write(`bpm from the midi figure's own tempo: ${batchBpm} BPM\n`)
         }
-        const extended = { ...showdown.extendToFourBars(seed.doc), bpm: batchBpm }
+        let extended = { ...showdown.extendToFourBars(seed.doc), bpm: batchBpm }
+        // patch provenance (docs/engine-presets.md E0): the engine/engineplus clips carry a tag
+        // recording which patch era produced them. Default is the seed's random-seed-patch; E1
+        // below swaps in a role-mapped factory/curated voicing (and records factory:/curated:).
+        let enginePatchProvenance = RANDOM_SEED_PATCH
         const phrased = applyComposed(engineComposed)
         const figure = engineComposed.archetype
         // pitchedPhrase: the engine clip's ComposedPhrase for pitched roles — the surge render's
@@ -2250,8 +2256,8 @@ async function showdownCmd(argv) {
         // render engine (+ engineplus) + keymap in ONE batch boot (offline by default; raw
         // levels — the whole showdown batch is normalized together below, across sources)
         const workVariants = [
-          { doc: engineDoc, recipe: `engine ${spec.seedTrack} solo (composed ${figure})` },
-          ...(produced ? [{ doc: produced.doc, recipe: `engine ${spec.seedTrack} solo + production pass (composed ${plusFigure})` }] : []),
+          { doc: engineDoc, recipe: withPatchProvenance(`engine ${spec.seedTrack} solo (composed ${figure})`, enginePatchProvenance) },
+          ...(produced ? [{ doc: produced.doc, recipe: withPatchProvenance(`engine ${spec.seedTrack} solo + production pass (composed ${plusFigure})`, enginePatchProvenance) }] : []),
           { doc: kmDoc, recipe: `keymap phrase (composed ${kmFigure})` },
         ]
         writeVaryBatch({
@@ -2385,9 +2391,9 @@ async function showdownCmd(argv) {
         }
 
         const clips = [
-          { kind: 'engine', wav: join(workDir, 'v1.wav'), from: `${figDesc(engineDrawn)} on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)` },
+          { kind: 'engine', wav: join(workDir, 'v1.wav'), from: withPatchProvenance(`${figDesc(engineDrawn)} on ${seed.file} ${spec.seedTrack} solo (4 bars, dotbeat engine)`, enginePatchProvenance) },
           ...(produced
-            ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: `${sharedFigure ? `same ${figDesc(plusDrawn)} and patch as the engine clip` : `${figDesc(plusDrawn)} through the engine patch`} + production pass: ${produced.applied.join(', ')} (dotbeat engine)` }]
+            ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: withPatchProvenance(`${sharedFigure ? `same ${figDesc(plusDrawn)} and patch as the engine clip` : `${figDesc(plusDrawn)} through the engine patch`} + production pass: ${produced.applied.join(', ')} (dotbeat engine)`, enginePatchProvenance) }]
             : []),
           { kind: 'keymap', wav: join(workDir, produced ? 'v3.wav' : 'v2.wav'), from: kmFrom },
           { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
