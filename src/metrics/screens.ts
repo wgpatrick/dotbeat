@@ -121,36 +121,46 @@ const FLAT_ARC_STEP_DB = 4.0 // a real section-to-section drop/breakdown; seriou
 // 2. clicks/pops: an isolated inter-sample discontinuity — a single-sample jump far above the
 //    signal's own p99.9 jump AND audibly large in absolute terms.
 const CLICK_ABS_MIN = 0.08 // ignore tiny glitches below ~ -22 dB step
-const CLICK_RATIO = 8 // worst jump this many × the 99.9th-percentile jump = a splice/click, not program
+const CLICK_RATIO = 14 // worst jump this many × the 99.9th-percentile jump = a splice/click, not program
+// (a hard drum-transient loop peaked at ratio 8.8 in the ref pool → 14 clears it with margin)
 
-// 3. DC offset
-const DC_ABS = 0.003 // ≈ -50 dBFS mean; real content sits far below
+// 3. DC offset — ref-pool max |mean| 0.0086, dotbeat renders carry a benign ~0.015 (-36 dBFS) DC;
+const DC_ABS = 0.02
 
-// 4. mono-collapse / phase cancellation
-const NEG_CORR = -0.2 // strongly negative correlation — parts cancel on mono fold-down
+// 4. mono-collapse / phase cancellation. Ref pool floors at correlation -0.785 (a genuinely
+//    anti-phase wide loop); -0.6 keeps only that real mono-fold-down risk.
+const NEG_CORR = -0.6
 
-// 5. sustained narrow resonance 2–5 kHz (ring.ts generalized to a wider, lower band)
+// 5. sustained narrow resonance 2–5 kHz (ring.ts generalized to a wider, lower band). This band
+//    is full of legitimate musical fundamentals on solo leads/chords, so two guards beyond ring.ts:
+//    a higher ratio, and the peak must be a SECONDARY spike (>= RES_MIN_UNDER dB below the spectrum
+//    max) — a parasitic ring under the content, not the note itself.
 const RES_LO_HZ = 2000
 const RES_HI_HZ = 5500
-const RES_RATIO = 12 // a bin > 12× its ±~300 Hz neighborhood median = a narrow tonal spike
-const RES_DB_OVER = -18 // and within 18 dB of the spectrum max (a real, present resonance)
+const RES_RATIO = 20 // a bin > 15× its ±~300 Hz neighborhood median = a narrow tonal spike
+const RES_MIN_UNDER = 6 // must sit at least 6 dB below the spectrum peak (else it's the fundamental)
+const RES_MAX_UNDER = 22 // ...but within 22 dB (a resonance that inaudible-quiet isn't worth a flag)
 
-// 6. mud: 250–500 Hz low-mid dominance
-const MUD_SHARE = 0.55 // > 55% of energy in one octave of low-mid = boxy/muddy
+// 6. mud: 250–500 Hz low-mid dominance. Guarded to a full-mix context (needs a real top end) so a
+//    solo bass/sine that simply lives in that octave isn't miscalled muddy.
+const MUD_SHARE = 0.72 // > 60% of energy in one low-mid octave
+const MUD_MIN_HIGH = 0.03 // ...only when >2 kHz carries ≥3% (i.e. a broadband mix, not a lone tone)
 
-// 7. crest collapse / over-compression
-const CREST_MILD = 6.0 - RENDER_RUN_VARIANCE_LU
-const CREST_SEVERE = 3.0
+// 7. crest collapse / over-compression. Ref stems floor at crest 4.10; 4.0 flags only genuinely
+//    squashed material (the milder crest<5 taste nudge stays in lint.ts's `over-compressed`).
+const CREST_MILD = 4.0
+const CREST_SEVERE = 2.0
 
 // 8. dropouts / dead air mid-song
 const DEAD_WIN_S = 0.3 // window for the RMS envelope
 const DEAD_FLOOR_DBFS = -60 // near-silent
-const DEAD_MIN_S = 0.35 // shortest interior gap worth flagging
-const DEAD_SURROUND_DB = 30 // gap must be this far below the surrounding program level
+const DEAD_MIN_S = 0.7 // shortest interior gap worth flagging
+const DEAD_SURROUND_DB = 35 // gap must be this far below the surrounding program level
 
-// 9. sub rumble: energy below ~30 Hz
+// 9. sub rumble: energy below ~30 Hz. A designed deep-sub loop reached 15.6% below 30 Hz; 0.20
+//    flags only clearly-infrasonic buildup.
 const RUMBLE_HI_HZ = 30
-const RUMBLE_SHARE = 0.06 // > 6% of energy below 30 Hz = infrasonic rumble wasting headroom
+const RUMBLE_SHARE = 0.2
 
 // ---- individual screens ---------------------------------------------------------------------
 
@@ -243,23 +253,32 @@ function screenClicks(mono: Float64Array, sampleRate: number): PathologyFinding[
 }
 
 function screenDc(channels: Float64Array[]): PathologyFinding[] {
-  const out: PathologyFinding[] = []
+  // one finding for the mix, on the worst-offending channel (per-channel lines were just noise)
+  let worst = 0
+  let worstCh = 0
   channels.forEach((ch, c) => {
     let sum = 0
     for (let i = 0; i < ch.length; i++) sum += ch[i]!
     const mean = ch.length ? sum / ch.length : 0
-    if (Math.abs(mean) > DC_ABS) {
-      out.push({
-        kind: 'dc-offset',
-        severity: severityFrom(Math.abs(mean), DC_ABS, 0.05),
-        source: 'dc-screen',
-        detail: `channel ${c} has a ${mean.toFixed(4)} DC offset (${dbfs(Math.abs(mean)).toFixed(1)} dBFS) — wastes headroom and can click on edits. High-pass the offending track or add a DC blocker.`,
-        measured: mean,
-        threshold: DC_ABS,
-      })
+    if (Math.abs(mean) > Math.abs(worst)) {
+      worst = mean
+      worstCh = c
     }
   })
-  return out
+  if (Math.abs(worst) > DC_ABS) {
+    const chLabel = channels.length > 1 ? ` (worst on channel ${worstCh})` : ''
+    return [
+      {
+        kind: 'dc-offset',
+        severity: severityFrom(Math.abs(worst), DC_ABS, 0.05),
+        source: 'dc-screen',
+        detail: `a ${worst.toFixed(4)} DC offset${chLabel} (${dbfs(Math.abs(worst)).toFixed(1)} dBFS) — wastes headroom and can click on edits. High-pass the offending track or add a DC blocker.`,
+        measured: worst,
+        threshold: DC_ABS,
+      },
+    ]
+  }
+  return []
 }
 
 function screenPhase(metrics: MixMetrics): PathologyFinding[] {
@@ -308,22 +327,24 @@ function screenResonance(spec: { power: Float64Array; binHz: number } | null): P
     const neigh = median(band, Math.max(0, i - neighBins), Math.min(band.length, i + neighBins)) + 1e-15
     if (band[i]! > RES_RATIO * neigh) {
       const dbv = 20 * Math.log10(band[i]! / smax)
-      if (dbv > worstDb) {
+      // a resonance is a parasitic secondary spike: below the peak by RES_MIN_UNDER but not so far
+      // down it's inaudible. worstHz tracks the strongest qualifying spike in that window.
+      if (dbv <= -RES_MIN_UNDER && dbv >= -RES_MAX_UNDER && dbv > worstDb) {
         worstDb = dbv
         worstHz = (loBin + i) * binHz
       }
     }
   }
-  if (worstDb > RES_DB_OVER) {
+  if (Number.isFinite(worstDb) && worstDb >= -RES_MAX_UNDER) {
     return [
       {
         kind: 'resonance',
-        severity: severityFrom(worstDb, RES_DB_OVER, -3),
+        severity: severityFrom(worstDb, -RES_MAX_UNDER, -RES_MIN_UNDER),
         source: 'resonance-screen',
         detail: `a narrow sustained resonance near ${Math.round(worstHz)} Hz sits ${worstDb.toFixed(1)} dB under the spectrum peak and towers over its neighbourhood — a ringing/harsh tone. Notch it (a narrow EQ cut) or lower the offending track's resonance.`,
         band: `${Math.round(worstHz)} Hz`,
         measured: worstDb,
-        threshold: RES_DB_OVER,
+        threshold: -RES_MIN_UNDER,
       },
     ]
   }
@@ -333,7 +354,8 @@ function screenResonance(spec: { power: Float64Array; binHz: number } | null): P
 function screenMud(spec: { power: Float64Array; binHz: number } | null): PathologyFinding[] {
   if (!spec) return []
   const share = bandShare(spec, 250, 500)
-  if (share > MUD_SHARE) {
+  const highShare = bandShare(spec, 2000, Infinity)
+  if (share > MUD_SHARE && highShare >= MUD_MIN_HIGH) {
     return [
       {
         kind: 'mud',
