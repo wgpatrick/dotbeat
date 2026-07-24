@@ -9,6 +9,17 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D28 — full-song production runs follow the `produce-song` skill, not ad-hoc prompts (2026-07-24)
+
+**The decision.** Any agent asked to produce a complete song/cover uses the stage-gated workflow
+in `.claude/skills/produce-song/SKILL.md`: six phases with named instruments and exit gates, the
+checkpoint-listen protocol, and the capability-truth notes. **Why.** Research 121's process mining
+of the Sandstorm-cover sessions showed the craftsman process worked but lived only in transcripts
+(folklore), and that every miss traced to un-named tools — agents use exactly the tools their
+prompt names, so the skill names every instrument per phase (`feedback --sections`,
+`render --stems`, `produce`/`trick`, lint gates incl. ≤ −1 dBTP) instead of describing quality in
+the abstract. The skill is 121 §3.7's change #1+#2 (both rated S-effort, highest ROI).
+
 ## D23 — offline renders build on a raw NATIVE OfflineAudioContext, rendered in windows with dispose-behind-the-frontier (2026-07-17)
 
 **The decision.** The offline renderer's context is now a raw native `OfflineAudioContext` handed
