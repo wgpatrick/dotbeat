@@ -86,9 +86,13 @@ export function downbeatAlignedTrim(input: TrimInput, opts: TrimOptions): TrimRe
   let fluxSum = 0
   for (let h = 0; h < searchHops; h++) { fluxSum += flux[h]!; if (flux[h]! > bestFlux) { bestFlux = flux[h]!; bestHop = h } }
   const meanFlux = fluxSum / Math.max(1, searchHops)
-  // require the peak to stand clearly above the window's mean flux, else there's no real transient
-  // (ambient/texture) and a head trim is the honest choice.
-  const snapped = bestFlux > 0 && bestFlux > meanFlux * 3 && bestFlux > 1e-4
+  let maxRms = 0
+  for (let h = 0; h < hops; h++) if (rms[h]! > maxRms) maxRms = rms[h]!
+  // A real downbeat is a transient: the onset must (a) stand clearly above the window's mean flux
+  // AND (b) be a MEANINGFUL fraction of the clip's peak level — the second test rejects the tiny
+  // hop-to-hop RMS wobble of a sustained pad/texture (which has no true onset), where a head trim
+  // is the honest choice. A kick/pluck attack clears both easily.
+  const snapped = bestFlux > meanFlux * 3 && bestFlux > 0.2 * maxRms && bestFlux > 1e-4
   let start = snapped ? bestHop * HOP : 0
   // never overrun: if the chosen downbeat leaves less than the target, back off to fit the whole
   // window (a downbeat near the end would otherwise return a stub).
