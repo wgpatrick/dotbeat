@@ -98,7 +98,7 @@ missing.
 
 ## CLI
 
-- `beat track add <file> <id> surge --patch "<name>" [--sample-rate N]` — add a surge track.
+- `beat add-track <file> <id> surge --patch "<name>" [--sample-rate N]` — add a surge track.
 - `beat set <file> <track>.surge.patch "<name>"` — swap the patch (invalidates the render cache).
 - `beat set <file> <track>.surge.sampleRate <hz>`.
 - `beat set <file> <track>.surge.override.<param> <0..1>` — set an override; an **empty value clears**
