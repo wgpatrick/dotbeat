@@ -44,6 +44,8 @@ export interface SurgeRenderRequest {
   notes: SurgeNote[]
   sampleRate: number
   outPath: string
+  /** Track 1a: normalized (0..1) param overrides applied to the patch before notes play. */
+  overrides?: { param: string; value: number }[]
 }
 
 export interface SurgeRenderMeta {
@@ -52,6 +54,8 @@ export interface SurgeRenderMeta {
   patchName: string
   category: string
   notes: number
+  /** the resolved Surge param names the overrides landed on (sidecar echoes these back). */
+  overrides: string[]
   sampleRate: number
   seconds: number
   output: string
@@ -161,7 +165,7 @@ export async function runSurgeRender(req: SurgeRenderRequest): Promise<{ meta: S
   if (!(req.sampleRate > 0)) throw new BeatSurgeError(`surge render: sampleRate must be positive, got ${req.sampleRate}`)
 
   const python = resolvePython()
-  const stdin = JSON.stringify({ patch: req.patch, notes: req.notes, sampleRate: req.sampleRate, output: req.outPath })
+  const stdin = JSON.stringify({ patch: req.patch, notes: req.notes, overrides: req.overrides ?? [], sampleRate: req.sampleRate, output: req.outPath })
   const res = await spawnPython(python, [SURGE_PY], stdin)
 
   if (res.enoent) throw new BeatSurgeError(`${SURGE_SETUP_HINT} (tried "${python}")`)
@@ -185,6 +189,7 @@ export async function runSurgeRender(req: SurgeRenderRequest): Promise<{ meta: S
     patchName: typeof meta.patchName === 'string' ? meta.patchName : '',
     category: typeof meta.category === 'string' ? meta.category : '',
     notes: typeof meta.notes === 'number' ? meta.notes : req.notes.length,
+    overrides: Array.isArray(meta.overrides) ? (meta.overrides as unknown[]).filter((x): x is string => typeof x === 'string') : [],
     sampleRate: typeof meta.sampleRate === 'number' ? meta.sampleRate : req.sampleRate,
     seconds: typeof meta.seconds === 'number' ? meta.seconds : 0,
     output: typeof meta.output === 'string' ? meta.output : req.outPath,
