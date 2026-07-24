@@ -1,0 +1,3001 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-24T05:53:40.988Z",
+  "note": "Engine patch curation per role (docs/engine-presets.md E2). Preferred by beat showdown/taste-seeds/gen-kit; absent → factory pool (E1), then random-seed-patch.",
+  "probeVersion": 1,
+  "seed": 7,
+  "rollsPerRole": 666,
+  "probe": {
+    "bassline": "sustained low C2 (midi 36) then its octave C3 (midi 48), ~1.65s each",
+    "chords": "one held C-major triad (midi 60/64/67, ~2.55s)",
+    "lead": "4-note ascending motif C5-E5-G5-C6 (midi 72/76/79/84), last held"
+  },
+  "blend": {
+    "aesQuality": 0.45,
+    "critic": 0.3,
+    "ringHeadroom": 0.15,
+    "active": 0.1
+  },
+  "gates": {
+    "ringDbMax": -32,
+    "activeFractionMin": 0.5
+  },
+  "dataset": "examples/taste-t1/beat-scores.jsonl",
+  "roles": {
+    "bassline": {
+      "pool": 672,
+      "scored": 672,
+      "survivors": 464,
+      "kept": [
+        {
+          "id": "roll-bassline-349",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.2,
+            "cutoff": 1288,
+            "resonance": 0.765,
+            "attack": 0.003,
+            "decay": 0.035,
+            "sustain": 0.52,
+            "release": 1.245
+          },
+          "composite": 1.6397
+        },
+        {
+          "id": "roll-bassline-93",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.1,
+            "cutoff": 851,
+            "resonance": 0.256,
+            "attack": 0.014,
+            "decay": 0.243,
+            "sustain": 0.75,
+            "release": 0.874
+          },
+          "composite": 1.6143
+        },
+        {
+          "id": "roll-bassline-214",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -10.7,
+            "cutoff": 501,
+            "resonance": 0.341,
+            "attack": 0.007,
+            "decay": 0.156,
+            "sustain": 1,
+            "release": 1.49
+          },
+          "composite": 1.5875
+        },
+        {
+          "id": "roll-bassline-657",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9.1,
+            "cutoff": 988,
+            "resonance": 0.223,
+            "attack": 0.003,
+            "decay": 0.57,
+            "sustain": 0.56,
+            "release": 0.566
+          },
+          "composite": 1.5786
+        },
+        {
+          "id": "roll-bassline-324",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.2,
+            "cutoff": 1238,
+            "resonance": 0.375,
+            "attack": 0.021,
+            "decay": 0.022,
+            "sustain": 0.98,
+            "release": 1.507
+          },
+          "composite": 1.5664
+        },
+        {
+          "id": "roll-bassline-652",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.4,
+            "cutoff": 639,
+            "resonance": 0.294,
+            "attack": 0.006,
+            "decay": 0.892,
+            "sustain": 0.41,
+            "release": 0.583
+          },
+          "composite": 1.5147
+        },
+        {
+          "id": "roll-bassline-284",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9.5,
+            "cutoff": 678,
+            "resonance": 0.705,
+            "attack": 0.015,
+            "decay": 0.314,
+            "sustain": 0.84,
+            "release": 0.912
+          },
+          "composite": 1.5139
+        },
+        {
+          "id": "wobble-bass",
+          "source": "factory:wobble-bass",
+          "category": "bass",
+          "params": {
+            "osc": "square",
+            "cutoff": 500,
+            "resonance": 3,
+            "filterEnvAmount": 0.1,
+            "lfoDest": "cutoff",
+            "lfoRate": 4,
+            "lfoDepth": 0.7,
+            "fmLevel": 0.2,
+            "fmHarmonicity": 2,
+            "fmModIndex": 8,
+            "distortionAmount": 0.35,
+            "distortionMix": 0.4,
+            "bitcrushBits": 7,
+            "bitcrushMix": 0.15,
+            "eqLow": 2
+          },
+          "composite": 1.5114
+        },
+        {
+          "id": "roll-bassline-387",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9.3,
+            "cutoff": 945,
+            "resonance": 0.461,
+            "attack": 0.414,
+            "decay": 0.028,
+            "sustain": 0.76,
+            "release": 1.755
+          },
+          "composite": 1.5053
+        },
+        {
+          "id": "roll-bassline-225",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7.7,
+            "cutoff": 454,
+            "resonance": 0.211,
+            "attack": 0.002,
+            "decay": 0.645,
+            "sustain": 0.67,
+            "release": 1.355
+          },
+          "composite": 1.48
+        },
+        {
+          "id": "roll-bassline-598",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.8,
+            "cutoff": 661,
+            "resonance": 0.25,
+            "attack": 0.051,
+            "decay": 0.049,
+            "sustain": 0.99,
+            "release": 1.264
+          },
+          "composite": 1.4756
+        },
+        {
+          "id": "roll-bassline-236",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -11.2,
+            "cutoff": 558,
+            "resonance": 0.447,
+            "attack": 0.004,
+            "decay": 0.072,
+            "sustain": 0.96,
+            "release": 0.71
+          },
+          "composite": 1.4062
+        },
+        {
+          "id": "roll-bassline-66",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7.5,
+            "cutoff": 1121,
+            "resonance": 0.309,
+            "attack": 0.319,
+            "decay": 0.466,
+            "sustain": 0.75,
+            "release": 1.151
+          },
+          "composite": 1.3836
+        },
+        {
+          "id": "acid-bass",
+          "source": "factory:acid-bass",
+          "category": "bass",
+          "params": {
+            "osc": "sawtooth",
+            "cutoff": 400,
+            "resonance": 9,
+            "decay": 0.3,
+            "sustain": 0.4,
+            "filterEnvAmount": 0.6,
+            "filterEnvAttack": 0.001,
+            "filterEnvDecay": 0.25,
+            "filterEnvSustain": 0.05,
+            "filterEnvRelease": 0.1,
+            "glide": 0.06,
+            "distortionAmount": 0.15,
+            "distortionMix": 0.2,
+            "eqLow": 1
+          },
+          "composite": 1.3343
+        },
+        {
+          "id": "roll-bassline-84",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7.9,
+            "cutoff": 1879,
+            "resonance": 0.44,
+            "attack": 0.008,
+            "decay": 0.51,
+            "sustain": 0.29,
+            "release": 1.008
+          },
+          "composite": 1.2669
+        },
+        {
+          "id": "roll-bassline-570",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.6,
+            "cutoff": 1233,
+            "resonance": 0.469,
+            "attack": 0.129,
+            "decay": 0.613,
+            "sustain": 0.54,
+            "release": 1.348
+          },
+          "composite": 1.2546
+        },
+        {
+          "id": "roll-bassline-633",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -12.1,
+            "cutoff": 1006,
+            "resonance": 0.525,
+            "attack": 0.003,
+            "decay": 0.526,
+            "sustain": 0.32,
+            "release": 0.366
+          },
+          "composite": 1.2504
+        },
+        {
+          "id": "roll-bassline-365",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9.4,
+            "cutoff": 637,
+            "resonance": 0.587,
+            "attack": 0.109,
+            "decay": 0.103,
+            "sustain": 0.84,
+            "release": 0.103
+          },
+          "composite": 1.2073
+        },
+        {
+          "id": "roll-bassline-73",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -6.3,
+            "cutoff": 298,
+            "resonance": 0.651,
+            "attack": 0.495,
+            "decay": 0.052,
+            "sustain": 0.79,
+            "release": 0.922
+          },
+          "composite": 1.189
+        },
+        {
+          "id": "roll-bassline-396",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -13,
+            "cutoff": 829,
+            "resonance": 0.283,
+            "attack": 0.355,
+            "decay": 0.032,
+            "sustain": 0.94,
+            "release": 0.667
+          },
+          "composite": 1.1727
+        },
+        {
+          "id": "roll-bassline-487",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7.9,
+            "cutoff": 1157,
+            "resonance": 0.409,
+            "attack": 0.005,
+            "decay": 0.151,
+            "sustain": 0.38,
+            "release": 0.028
+          },
+          "composite": 1.1481
+        },
+        {
+          "id": "roll-bassline-532",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -13.4,
+            "cutoff": 841,
+            "resonance": 0.441,
+            "attack": 0.311,
+            "decay": 0.079,
+            "sustain": 0.66,
+            "release": 0.035
+          },
+          "composite": 1.1336
+        },
+        {
+          "id": "roll-bassline-246",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -10,
+            "cutoff": 1294,
+            "resonance": 0.345,
+            "attack": 0.035,
+            "decay": 0.067,
+            "sustain": 0.66,
+            "release": 0.895
+          },
+          "composite": 1.1034
+        },
+        {
+          "id": "roll-bassline-488",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -12.9,
+            "cutoff": 919,
+            "resonance": 0.664,
+            "attack": 0.159,
+            "decay": 0.73,
+            "sustain": 0.98,
+            "release": 0.095
+          },
+          "composite": 1.1001
+        },
+        {
+          "id": "roll-bassline-32",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -11.6,
+            "cutoff": 728,
+            "resonance": 0.313,
+            "attack": 0.311,
+            "decay": 0.654,
+            "sustain": 0.44,
+            "release": 0.79
+          },
+          "composite": 1.0798
+        },
+        {
+          "id": "roll-bassline-473",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.1,
+            "cutoff": 1060,
+            "resonance": 0.534,
+            "attack": 0.013,
+            "decay": 0.026,
+            "sustain": 0.28,
+            "release": 0.271
+          },
+          "composite": 1.0793
+        },
+        {
+          "id": "roll-bassline-530",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -13.6,
+            "cutoff": 592,
+            "resonance": 0.582,
+            "attack": 0.002,
+            "decay": 0.808,
+            "sustain": 0.28,
+            "release": 0.594
+          },
+          "composite": 1.0679
+        },
+        {
+          "id": "roll-bassline-434",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.2,
+            "cutoff": 1557,
+            "resonance": 0.539,
+            "attack": 0.019,
+            "decay": 0.629,
+            "sustain": 0.77,
+            "release": 1.373
+          },
+          "composite": 1.0647
+        },
+        {
+          "id": "roll-bassline-159",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9,
+            "cutoff": 1699,
+            "resonance": 0.376,
+            "attack": 0.006,
+            "decay": 0.075,
+            "sustain": 0.43,
+            "release": 0.914
+          },
+          "composite": 1.0643
+        },
+        {
+          "id": "roll-bassline-398",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.2,
+            "cutoff": 1130,
+            "resonance": 0.528,
+            "attack": 0.449,
+            "decay": 0.049,
+            "sustain": 0.76,
+            "release": 0.249
+          },
+          "composite": 1.038
+        },
+        {
+          "id": "roll-bassline-496",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -13,
+            "cutoff": 663,
+            "resonance": 0.217,
+            "attack": 0.147,
+            "decay": 0.051,
+            "sustain": 0.59,
+            "release": 1.783
+          },
+          "composite": 1.0275
+        },
+        {
+          "id": "roll-bassline-291",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.6,
+            "cutoff": 858,
+            "resonance": 0.602,
+            "attack": 0.062,
+            "decay": 0.065,
+            "sustain": 0.56,
+            "release": 0.66
+          },
+          "composite": 1.0158
+        },
+        {
+          "id": "roll-bassline-269",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -12.3,
+            "cutoff": 569,
+            "resonance": 0.277,
+            "attack": 0.126,
+            "decay": 0.026,
+            "sustain": 0.89,
+            "release": 0.034
+          },
+          "composite": 1.011
+        },
+        {
+          "id": "roll-bassline-197",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -10.6,
+            "cutoff": 504,
+            "resonance": 0.377,
+            "attack": 0.083,
+            "decay": 0.287,
+            "sustain": 0.65,
+            "release": 0.031
+          },
+          "composite": 0.9855
+        },
+        {
+          "id": "roll-bassline-78",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9,
+            "cutoff": 1231,
+            "resonance": 0.322,
+            "attack": 0.011,
+            "decay": 0.26,
+            "sustain": 0.48,
+            "release": 0.114
+          },
+          "composite": 0.9605
+        },
+        {
+          "id": "roll-bassline-457",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -12,
+            "cutoff": 1136,
+            "resonance": 0.346,
+            "attack": 0.003,
+            "decay": 0.235,
+            "sustain": 0.57,
+            "release": 0.161
+          },
+          "composite": 0.9531
+        },
+        {
+          "id": "roll-bassline-408",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -13,
+            "cutoff": 847,
+            "resonance": 0.384,
+            "attack": 0.658,
+            "decay": 0.036,
+            "sustain": 0.53,
+            "release": 0.062
+          },
+          "composite": 0.9386
+        },
+        {
+          "id": "roll-bassline-44",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.7,
+            "cutoff": 590,
+            "resonance": 0.323,
+            "attack": 0.01,
+            "decay": 0.078,
+            "sustain": 0.2,
+            "release": 0.7
+          },
+          "composite": 0.9328
+        },
+        {
+          "id": "roll-bassline-470",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7,
+            "cutoff": 1861,
+            "resonance": 0.371,
+            "attack": 0.004,
+            "decay": 0.753,
+            "sustain": 0.11,
+            "release": 0.168
+          },
+          "composite": 0.9209
+        },
+        {
+          "id": "reese-bass",
+          "source": "factory:reese-bass",
+          "category": "bass",
+          "params": {
+            "osc": "sawtooth",
+            "osc2Type": "sawtooth",
+            "osc2Level": 0.7,
+            "osc2Detune": 25,
+            "unisonVoices": 3,
+            "unisonWidth": 0.6,
+            "cutoff": 900,
+            "resonance": 1.5,
+            "filterEnvAmount": 0.2,
+            "lfoDest": "cutoff",
+            "lfoRate": 0.6,
+            "lfoDepth": 0.15,
+            "eqLow": 2,
+            "compMix": 0.4,
+            "distortionAmount": 0.1,
+            "distortionMix": 0.15
+          },
+          "composite": 0.9136
+        },
+        {
+          "id": "roll-bassline-300",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9,
+            "cutoff": 389,
+            "resonance": 0.699,
+            "attack": 0.108,
+            "decay": 0.343,
+            "sustain": 0.82,
+            "release": 0.218
+          },
+          "composite": 0.8964
+        },
+        {
+          "id": "roll-bassline-415",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.9,
+            "cutoff": 325,
+            "resonance": 0.783,
+            "attack": 0.683,
+            "decay": 0.764,
+            "sustain": 0.96,
+            "release": 0.781
+          },
+          "composite": 0.884
+        },
+        {
+          "id": "roll-bassline-528",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -12.4,
+            "cutoff": 618,
+            "resonance": 0.249,
+            "attack": 0.278,
+            "decay": 0.268,
+            "sustain": 0.72,
+            "release": 0.12
+          },
+          "composite": 0.8673
+        },
+        {
+          "id": "roll-bassline-596",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.4,
+            "cutoff": 445,
+            "resonance": 0.262,
+            "attack": 0.009,
+            "decay": 0.627,
+            "sustain": 0.33,
+            "release": 0.184
+          },
+          "composite": 0.8613
+        },
+        {
+          "id": "roll-bassline-102",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -11.5,
+            "cutoff": 456,
+            "resonance": 0.59,
+            "attack": 0.004,
+            "decay": 0.17,
+            "sustain": 0.7,
+            "release": 0.038
+          },
+          "composite": 0.842
+        },
+        {
+          "id": "fm-bass",
+          "source": "factory:fm-bass",
+          "category": "bass",
+          "params": {
+            "osc": "sine",
+            "fmLevel": 0.8,
+            "fmHarmonicity": 1,
+            "fmModIndex": 12,
+            "cutoff": 1200,
+            "resonance": 0.3,
+            "attack": 0.002,
+            "decay": 0.25,
+            "sustain": 0.5,
+            "release": 0.2,
+            "eqLow": 1.5,
+            "eqMid": 1
+          },
+          "composite": 0.8182
+        },
+        {
+          "id": "roll-bassline-135",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -7.1,
+            "cutoff": 7268,
+            "resonance": 0.261,
+            "attack": 0.019,
+            "decay": 0.058,
+            "sustain": 0.87,
+            "release": 1.404
+          },
+          "composite": 0.816
+        },
+        {
+          "id": "roll-bassline-613",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9.1,
+            "cutoff": 544,
+            "resonance": 0.202,
+            "attack": 0.013,
+            "decay": 0.032,
+            "sustain": 0.95,
+            "release": 0.067
+          },
+          "composite": 0.8097
+        },
+        {
+          "id": "roll-bassline-569",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -12.1,
+            "cutoff": 1485,
+            "resonance": 0.615,
+            "attack": 0.01,
+            "decay": 0.028,
+            "sustain": 0.78,
+            "release": 0.131
+          },
+          "composite": 0.8047
+        },
+        {
+          "id": "roll-bassline-169",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -9.7,
+            "cutoff": 590,
+            "resonance": 0.599,
+            "attack": 0.465,
+            "decay": 0.067,
+            "sustain": 0.97,
+            "release": 1.25
+          },
+          "composite": 0.8004
+        },
+        {
+          "id": "roll-bassline-540",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.6,
+            "cutoff": 425,
+            "resonance": 0.394,
+            "attack": 0.003,
+            "decay": 0.039,
+            "sustain": 0.51,
+            "release": 0.174
+          },
+          "composite": 0.7878
+        },
+        {
+          "id": "roll-bassline-110",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7,
+            "cutoff": 1084,
+            "resonance": 0.38,
+            "attack": 0.03,
+            "decay": 0.825,
+            "sustain": 0.7,
+            "release": 0.099
+          },
+          "composite": 0.7832
+        },
+        {
+          "id": "roll-bassline-234",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -10.3,
+            "cutoff": 530,
+            "resonance": 0.817,
+            "attack": 0.058,
+            "decay": 0.043,
+            "sustain": 0.93,
+            "release": 1.774
+          },
+          "composite": 0.7826
+        },
+        {
+          "id": "roll-bassline-17",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.2,
+            "cutoff": 347,
+            "resonance": 0.65,
+            "attack": 0.006,
+            "decay": 0.719,
+            "sustain": 0.6,
+            "release": 0.322
+          },
+          "composite": 0.7732
+        },
+        {
+          "id": "roll-bassline-9",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -11.3,
+            "cutoff": 549,
+            "resonance": 0.433,
+            "attack": 0.209,
+            "decay": 0.156,
+            "sustain": 0.62,
+            "release": 1.309
+          },
+          "composite": 0.7597
+        },
+        {
+          "id": "roll-bassline-436",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -7.3,
+            "cutoff": 220,
+            "resonance": 0.359,
+            "attack": 0.258,
+            "decay": 0.044,
+            "sustain": 0.86,
+            "release": 1.509
+          },
+          "composite": 0.7586
+        },
+        {
+          "id": "roll-bassline-645",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7.4,
+            "cutoff": 390,
+            "resonance": 0.385,
+            "attack": 0.006,
+            "decay": 0.212,
+            "sustain": 0.48,
+            "release": 0.17
+          },
+          "composite": 0.7575
+        },
+        {
+          "id": "roll-bassline-466",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -7.1,
+            "cutoff": 5182,
+            "resonance": 0.412,
+            "attack": 0.262,
+            "decay": 0.586,
+            "sustain": 0.88,
+            "release": 1.187
+          },
+          "composite": 0.7499
+        },
+        {
+          "id": "deep-sub-bass",
+          "source": "factory:deep-sub-bass",
+          "category": "bass",
+          "params": {
+            "osc": "sawtooth",
+            "cutoff": 700,
+            "subLevel": 0.6,
+            "osc2Type": "square",
+            "osc2Level": 0.25,
+            "osc2Detune": 1203,
+            "filterEnvAmount": 0.35,
+            "filterEnvDecay": 0.18,
+            "filterEnvSustain": 0.15,
+            "glide": 0.02,
+            "compMix": 0.5,
+            "distortionAmount": 0.15,
+            "distortionMix": 0.2,
+            "eqLow": 1.5
+          },
+          "composite": 0.7475
+        },
+        {
+          "id": "roll-bassline-378",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -11.1,
+            "cutoff": 1905,
+            "resonance": 0.396,
+            "attack": 0.006,
+            "decay": 0.47,
+            "sustain": 0.44,
+            "release": 0.326
+          },
+          "composite": 0.7468
+        },
+        {
+          "id": "roll-bassline-606",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -8,
+            "cutoff": 469,
+            "resonance": 0.548,
+            "attack": 0.614,
+            "decay": 0.121,
+            "sustain": 0.99,
+            "release": 0.543
+          },
+          "composite": 0.7438
+        },
+        {
+          "id": "roll-bassline-101",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -11.5,
+            "cutoff": 1480,
+            "resonance": 0.261,
+            "attack": 0.014,
+            "decay": 0.633,
+            "sustain": 0.49,
+            "release": 0.216
+          },
+          "composite": 0.7374
+        },
+        {
+          "id": "roll-bassline-492",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -13.6,
+            "cutoff": 979,
+            "resonance": 0.227,
+            "attack": 0.135,
+            "decay": 0.974,
+            "sustain": 0.2,
+            "release": 1.421
+          },
+          "composite": 0.722
+        },
+        {
+          "id": "roll-bassline-565",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -7.4,
+            "cutoff": 701,
+            "resonance": 0.563,
+            "attack": 0.544,
+            "decay": 0.303,
+            "sustain": 0.76,
+            "release": 0.631
+          },
+          "composite": 0.7127
+        },
+        {
+          "id": "roll-bassline-285",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -6.2,
+            "cutoff": 377,
+            "resonance": 0.33,
+            "attack": 0.005,
+            "decay": 0.786,
+            "sustain": 0.55,
+            "release": 0.624
+          },
+          "composite": 0.7117
+        },
+        {
+          "id": "roll-bassline-495",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -10.7,
+            "cutoff": 2823,
+            "resonance": 0.687,
+            "attack": 0.003,
+            "decay": 0.021,
+            "sustain": 0.93,
+            "release": 1.604
+          },
+          "composite": 0.7003
+        },
+        {
+          "id": "roll-bassline-142",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -13.9,
+            "cutoff": 771,
+            "resonance": 0.265,
+            "attack": 0.043,
+            "decay": 0.098,
+            "sustain": 0.51,
+            "release": 0.734
+          },
+          "composite": 0.6898
+        },
+        {
+          "id": "roll-bassline-605",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -12.5,
+            "cutoff": 394,
+            "resonance": 0.55,
+            "attack": 0.014,
+            "decay": 0.065,
+            "sustain": 0.32,
+            "release": 0.444
+          },
+          "composite": 0.689
+        },
+        {
+          "id": "roll-bassline-402",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.5,
+            "cutoff": 1246,
+            "resonance": 0.625,
+            "attack": 0.166,
+            "decay": 0.079,
+            "sustain": 0.23,
+            "release": 0.925
+          },
+          "composite": 0.6828
+        },
+        {
+          "id": "roll-bassline-397",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -10.6,
+            "cutoff": 1363,
+            "resonance": 0.262,
+            "attack": 0.02,
+            "decay": 0.059,
+            "sustain": 0.91,
+            "release": 1.262
+          },
+          "composite": 0.6793
+        },
+        {
+          "id": "roll-bassline-181",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -6.9,
+            "cutoff": 803,
+            "resonance": 0.424,
+            "attack": 0.516,
+            "decay": 0.275,
+            "sustain": 0.49,
+            "release": 1.054
+          },
+          "composite": 0.6634
+        },
+        {
+          "id": "roll-bassline-186",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -11.3,
+            "cutoff": 518,
+            "resonance": 0.292,
+            "attack": 0.111,
+            "decay": 0.83,
+            "sustain": 0.44,
+            "release": 1.053
+          },
+          "composite": 0.6577
+        },
+        {
+          "id": "roll-bassline-536",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -11.3,
+            "cutoff": 1304,
+            "resonance": 0.369,
+            "attack": 0.123,
+            "decay": 0.177,
+            "sustain": 0.86,
+            "release": 0.046
+          },
+          "composite": 0.6537
+        },
+        {
+          "id": "roll-bassline-410",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -8.9,
+            "cutoff": 716,
+            "resonance": 0.818,
+            "attack": 0.505,
+            "decay": 0.03,
+            "sustain": 0.55,
+            "release": 1.218
+          },
+          "composite": 0.6534
+        },
+        {
+          "id": "roll-bassline-357",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.3,
+            "cutoff": 1250,
+            "resonance": 0.326,
+            "attack": 0.016,
+            "decay": 0.328,
+            "sustain": 0.27,
+            "release": 0.098
+          },
+          "composite": 0.6517
+        },
+        {
+          "id": "roll-bassline-217",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -11.6,
+            "cutoff": 1516,
+            "resonance": 0.342,
+            "attack": 0.272,
+            "decay": 0.828,
+            "sustain": 0.38,
+            "release": 0.346
+          },
+          "composite": 0.6419
+        },
+        {
+          "id": "roll-bassline-3",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -6.7,
+            "cutoff": 7141,
+            "resonance": 0.237,
+            "attack": 0.003,
+            "decay": 0.052,
+            "sustain": 0.8,
+            "release": 1.237
+          },
+          "composite": 0.6359
+        },
+        {
+          "id": "roll-bassline-27",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -8.5,
+            "cutoff": 832,
+            "resonance": 0.256,
+            "attack": 0.003,
+            "decay": 0.533,
+            "sustain": 0.71,
+            "release": 0.93
+          },
+          "composite": 0.6345
+        },
+        {
+          "id": "roll-bassline-635",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -8.8,
+            "cutoff": 1093,
+            "resonance": 0.586,
+            "attack": 0.541,
+            "decay": 0.568,
+            "sustain": 0.55,
+            "release": 0.622
+          },
+          "composite": 0.6087
+        },
+        {
+          "id": "roll-bassline-162",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -8.4,
+            "cutoff": 5321,
+            "resonance": 0.477,
+            "attack": 0.003,
+            "decay": 0.037,
+            "sustain": 0.77,
+            "release": 0.944
+          },
+          "composite": 0.602
+        },
+        {
+          "id": "roll-bassline-43",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -6.2,
+            "cutoff": 2736,
+            "resonance": 0.437,
+            "attack": 0.002,
+            "decay": 0.131,
+            "sustain": 0.68,
+            "release": 0.571
+          },
+          "composite": 0.6012
+        },
+        {
+          "id": "roll-bassline-591",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.1,
+            "cutoff": 156,
+            "resonance": 0.498,
+            "attack": 0.002,
+            "decay": 0.063,
+            "sustain": 0.19,
+            "release": 0.518
+          },
+          "composite": 0.5972
+        },
+        {
+          "id": "roll-bassline-251",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -10.7,
+            "cutoff": 523,
+            "resonance": 0.277,
+            "attack": 0.002,
+            "decay": 0.206,
+            "sustain": 0.71,
+            "release": 0.081
+          },
+          "composite": 0.5904
+        },
+        {
+          "id": "roll-bassline-463",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -10.5,
+            "cutoff": 462,
+            "resonance": 0.637,
+            "attack": 0.045,
+            "decay": 0.023,
+            "sustain": 0.54,
+            "release": 1.127
+          },
+          "composite": 0.5842
+        },
+        {
+          "id": "roll-bassline-556",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -9.4,
+            "cutoff": 456,
+            "resonance": 0.201,
+            "attack": 0.153,
+            "decay": 0.253,
+            "sustain": 0.7,
+            "release": 0.525
+          },
+          "composite": 0.5812
+        },
+        {
+          "id": "roll-bassline-507",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -13.3,
+            "cutoff": 541,
+            "resonance": 0.351,
+            "attack": 0.059,
+            "decay": 0.677,
+            "sustain": 0.69,
+            "release": 1.433
+          },
+          "composite": 0.5761
+        },
+        {
+          "id": "roll-bassline-439",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -8.8,
+            "cutoff": 1996,
+            "resonance": 0.334,
+            "attack": 0.008,
+            "decay": 0.033,
+            "sustain": 0.85,
+            "release": 0.653
+          },
+          "composite": 0.5637
+        },
+        {
+          "id": "roll-bassline-322",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -7.4,
+            "cutoff": 303,
+            "resonance": 0.335,
+            "attack": 0.572,
+            "decay": 0.031,
+            "sustain": 0.74,
+            "release": 1.716
+          },
+          "composite": 0.5621
+        },
+        {
+          "id": "roll-bassline-88",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -13.2,
+            "cutoff": 183,
+            "resonance": 0.497,
+            "attack": 0.556,
+            "decay": 0.035,
+            "sustain": 0.2,
+            "release": 0.795
+          },
+          "composite": 0.5545
+        },
+        {
+          "id": "roll-bassline-661",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -9.7,
+            "cutoff": 933,
+            "resonance": 0.242,
+            "attack": 0.003,
+            "decay": 0.649,
+            "sustain": 0.56,
+            "release": 1.611
+          },
+          "composite": 0.5511
+        },
+        {
+          "id": "roll-bassline-223",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.8,
+            "cutoff": 678,
+            "resonance": 0.33,
+            "attack": 0.009,
+            "decay": 0.052,
+            "sustain": 0.1,
+            "release": 0.475
+          },
+          "composite": 0.5466
+        },
+        {
+          "id": "roll-bassline-280",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -9,
+            "cutoff": 402,
+            "resonance": 0.705,
+            "attack": 0.503,
+            "decay": 0.031,
+            "sustain": 0.91,
+            "release": 0.029
+          },
+          "composite": 0.54
+        },
+        {
+          "id": "roll-bassline-286",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -8.3,
+            "cutoff": 208,
+            "resonance": 0.459,
+            "attack": 0.379,
+            "decay": 0.093,
+            "sustain": 0.86,
+            "release": 0.716
+          },
+          "composite": 0.5369
+        },
+        {
+          "id": "roll-bassline-409",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -6.2,
+            "cutoff": 524,
+            "resonance": 0.762,
+            "attack": 0.014,
+            "decay": 0.905,
+            "sustain": 0.54,
+            "release": 0.375
+          },
+          "composite": 0.5247
+        },
+        {
+          "id": "roll-bassline-242",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.1,
+            "cutoff": 1560,
+            "resonance": 0.433,
+            "attack": 0.016,
+            "decay": 0.033,
+            "sustain": 0.64,
+            "release": 0.19
+          },
+          "composite": 0.5192
+        },
+        {
+          "id": "roll-bassline-170",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7.4,
+            "cutoff": 289,
+            "resonance": 0.48,
+            "attack": 0.007,
+            "decay": 0.327,
+            "sustain": 0.72,
+            "release": 1.043
+          },
+          "composite": 0.5178
+        },
+        {
+          "id": "roll-bassline-331",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -7.8,
+            "cutoff": 3900,
+            "resonance": 0.323,
+            "attack": 0.011,
+            "decay": 0.378,
+            "sustain": 0.63,
+            "release": 0.824
+          },
+          "composite": 0.5173
+        },
+        {
+          "id": "roll-bassline-505",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -12.6,
+            "cutoff": 300,
+            "resonance": 0.627,
+            "attack": 0.018,
+            "decay": 0.09,
+            "sustain": 0.81,
+            "release": 0.861
+          },
+          "composite": 0.5134
+        },
+        {
+          "id": "roll-bassline-643",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -7.3,
+            "cutoff": 236,
+            "resonance": 0.753,
+            "attack": 0.42,
+            "decay": 0.68,
+            "sustain": 0.67,
+            "release": 0.035
+          },
+          "composite": 0.5121
+        },
+        {
+          "id": "roll-bassline-317",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -7,
+            "cutoff": 636,
+            "resonance": 0.259,
+            "attack": 0.004,
+            "decay": 0.093,
+            "sustain": 0.81,
+            "release": 0.239
+          },
+          "composite": 0.5021
+        },
+        {
+          "id": "roll-bassline-646",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.8,
+            "cutoff": 524,
+            "resonance": 0.452,
+            "attack": 0.136,
+            "decay": 0.032,
+            "sustain": 0.4,
+            "release": 0.026
+          },
+          "composite": 0.4893
+        },
+        {
+          "id": "roll-bassline-4",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -9.3,
+            "cutoff": 557,
+            "resonance": 0.228,
+            "attack": 0.01,
+            "decay": 0.091,
+            "sustain": 0.96,
+            "release": 0.465
+          },
+          "composite": 0.4853
+        },
+        {
+          "id": "roll-bassline-455",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -11.2,
+            "cutoff": 185,
+            "resonance": 0.374,
+            "attack": 0.288,
+            "decay": 0.121,
+            "sustain": 0.83,
+            "release": 1.005
+          },
+          "composite": 0.4782
+        },
+        {
+          "id": "roll-bassline-60",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.8,
+            "cutoff": 681,
+            "resonance": 0.591,
+            "attack": 0.013,
+            "decay": 0.038,
+            "sustain": 0.38,
+            "release": 0.122
+          },
+          "composite": 0.4748
+        },
+        {
+          "id": "roll-bassline-48",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -7.4,
+            "cutoff": 188,
+            "resonance": 0.356,
+            "attack": 0.741,
+            "decay": 0.268,
+            "sustain": 0.83,
+            "release": 1.511
+          },
+          "composite": 0.4725
+        },
+        {
+          "id": "roll-bassline-72",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -10.3,
+            "cutoff": 3701,
+            "resonance": 0.313,
+            "attack": 0.458,
+            "decay": 0.11,
+            "sustain": 0.63,
+            "release": 1.116
+          },
+          "composite": 0.4719
+        },
+        {
+          "id": "roll-bassline-33",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -11.3,
+            "cutoff": 367,
+            "resonance": 0.412,
+            "attack": 0.006,
+            "decay": 0.057,
+            "sustain": 0.58,
+            "release": 0.241
+          },
+          "composite": 0.471
+        },
+        {
+          "id": "roll-bassline-270",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -11.1,
+            "cutoff": 1469,
+            "resonance": 0.288,
+            "attack": 0.195,
+            "decay": 0.049,
+            "sustain": 1,
+            "release": 0.141
+          },
+          "composite": 0.4676
+        },
+        {
+          "id": "roll-bassline-287",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9.3,
+            "cutoff": 1818,
+            "resonance": 0.356,
+            "attack": 0.781,
+            "decay": 0.174,
+            "sustain": 0.13,
+            "release": 1.312
+          },
+          "composite": 0.4634
+        },
+        {
+          "id": "roll-bassline-500",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -11.1,
+            "cutoff": 378,
+            "resonance": 0.46,
+            "attack": 0.132,
+            "decay": 0.059,
+            "sustain": 0.92,
+            "release": 0.026
+          },
+          "composite": 0.4618
+        },
+        {
+          "id": "roll-bassline-341",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -10.2,
+            "cutoff": 216,
+            "resonance": 0.313,
+            "attack": 0.005,
+            "decay": 0.234,
+            "sustain": 0.29,
+            "release": 0.305
+          },
+          "composite": 0.4561
+        },
+        {
+          "id": "roll-bassline-450",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -12.8,
+            "cutoff": 257,
+            "resonance": 0.448,
+            "attack": 0.741,
+            "decay": 0.078,
+            "sustain": 0.66,
+            "release": 0.477
+          },
+          "composite": 0.4511
+        },
+        {
+          "id": "roll-bassline-493",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -11.1,
+            "cutoff": 5642,
+            "resonance": 0.312,
+            "attack": 0.454,
+            "decay": 0.055,
+            "sustain": 0.8,
+            "release": 0.878
+          },
+          "composite": 0.4497
+        },
+        {
+          "id": "roll-bassline-447",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7.5,
+            "cutoff": 151,
+            "resonance": 0.357,
+            "attack": 0.003,
+            "decay": 0.229,
+            "sustain": 0.27,
+            "release": 0.442
+          },
+          "composite": 0.4474
+        },
+        {
+          "id": "roll-bassline-523",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -13.3,
+            "cutoff": 773,
+            "resonance": 0.379,
+            "attack": 0.007,
+            "decay": 0.048,
+            "sustain": 0.97,
+            "release": 1.104
+          },
+          "composite": 0.4434
+        },
+        {
+          "id": "roll-bassline-498",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -10.7,
+            "cutoff": 4825,
+            "resonance": 0.822,
+            "attack": 0.339,
+            "decay": 0.049,
+            "sustain": 0.84,
+            "release": 0.952
+          },
+          "composite": 0.4415
+        }
+      ]
+    },
+    "chords": {
+      "pool": 675,
+      "scored": 675,
+      "survivors": 189,
+      "kept": [
+        {
+          "id": "warm-pad",
+          "source": "factory:warm-pad",
+          "category": "pad",
+          "params": {
+            "osc": "triangle",
+            "cutoff": 1400,
+            "attack": 0.6,
+            "release": 1.8,
+            "sustain": 0.85,
+            "osc2Type": "triangle",
+            "osc2Level": 0.4,
+            "osc2Detune": 7,
+            "lfoDest": "cutoff",
+            "lfoRate": 0.15,
+            "lfoDepth": 0.12,
+            "sendReverb": 0.4,
+            "eqLow": 1,
+            "eqHigh": -1.5
+          },
+          "composite": 2.0204
+        },
+        {
+          "id": "roll-chords-560",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6,
+            "cutoff": 428,
+            "resonance": 0.267,
+            "attack": 0.005,
+            "decay": 0.666,
+            "sustain": 0.98,
+            "release": 1.794
+          },
+          "composite": 1.3794
+        },
+        {
+          "id": "dark-pad",
+          "source": "factory:dark-pad",
+          "category": "pad",
+          "params": {
+            "osc": "sawtooth",
+            "cutoff": 900,
+            "attack": 0.7,
+            "release": 2,
+            "sustain": 0.7,
+            "resonance": 1.2,
+            "filterEnvAmount": 0.15,
+            "filterEnvAttack": 0.5,
+            "filterEnvDecay": 1,
+            "lfoDest": "cutoff",
+            "lfoRate": 0.1,
+            "lfoDepth": 0.2,
+            "sendReverb": 0.6,
+            "eqLow": 0.5,
+            "eqHigh": -3
+          },
+          "composite": 1.2527
+        },
+        {
+          "id": "roll-chords-642",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -8,
+            "cutoff": 746,
+            "resonance": 0.795,
+            "attack": 0.499,
+            "decay": 0.225,
+            "sustain": 0.91,
+            "release": 0.897
+          },
+          "composite": 1.1624
+        },
+        {
+          "id": "roll-chords-485",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -13.5,
+            "cutoff": 415,
+            "resonance": 0.391,
+            "attack": 0.029,
+            "decay": 0.255,
+            "sustain": 0.64,
+            "release": 1.494
+          },
+          "composite": 1.1327
+        },
+        {
+          "id": "roll-chords-582",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -7,
+            "cutoff": 390,
+            "resonance": 0.492,
+            "attack": 0.011,
+            "decay": 0.107,
+            "sustain": 0.67,
+            "release": 1.197
+          },
+          "composite": 1.12
+        },
+        {
+          "id": "organ-keys",
+          "source": "factory:organ-keys",
+          "category": "keys",
+          "params": {
+            "osc": "sine",
+            "attack": 0.005,
+            "decay": 0.05,
+            "sustain": 1,
+            "release": 0.05,
+            "osc2Type": "sine",
+            "osc2Level": 0.35,
+            "osc2Detune": 1907,
+            "cutoff": 6000,
+            "chorusMode": "ensemble",
+            "chorusMix": 0.4
+          },
+          "composite": 0.9638
+        },
+        {
+          "id": "roll-chords-477",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -6.2,
+            "cutoff": 1662,
+            "resonance": 0.433,
+            "attack": 0.034,
+            "decay": 0.075,
+            "sustain": 0.65,
+            "release": 1.176
+          },
+          "composite": 0.9466
+        },
+        {
+          "id": "roll-chords-562",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -7.8,
+            "cutoff": 458,
+            "resonance": 0.211,
+            "attack": 0.279,
+            "decay": 0.023,
+            "sustain": 0.65,
+            "release": 1.414
+          },
+          "composite": 0.9399
+        },
+        {
+          "id": "roll-chords-603",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -7.4,
+            "cutoff": 618,
+            "resonance": 0.377,
+            "attack": 0.008,
+            "decay": 0.078,
+            "sustain": 0.77,
+            "release": 1.426
+          },
+          "composite": 0.901
+        },
+        {
+          "id": "roll-chords-301",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9.2,
+            "cutoff": 411,
+            "resonance": 0.59,
+            "attack": 0.014,
+            "decay": 0.133,
+            "sustain": 0.78,
+            "release": 1.401
+          },
+          "composite": 0.8748
+        },
+        {
+          "id": "glass-pad",
+          "source": "factory:glass-pad",
+          "category": "pad",
+          "params": {
+            "osc": "sine",
+            "fmLevel": 0.4,
+            "fmHarmonicity": 4,
+            "fmModIndex": 6,
+            "attack": 0.3,
+            "release": 1.5,
+            "sustain": 0.6,
+            "cutoff": 9000,
+            "lfoDest": "amp",
+            "lfoRate": 3,
+            "lfoDepth": 0.1,
+            "sendReverb": 0.6,
+            "sendDelay": 0.3,
+            "eqHigh": 2
+          },
+          "composite": 0.859
+        },
+        {
+          "id": "roll-chords-641",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -13.7,
+            "cutoff": 801,
+            "resonance": 0.492,
+            "attack": 0.023,
+            "decay": 0.17,
+            "sustain": 0.86,
+            "release": 0.86
+          },
+          "composite": 0.8222
+        },
+        {
+          "id": "roll-chords-116",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -12.8,
+            "cutoff": 992,
+            "resonance": 0.217,
+            "attack": 0.023,
+            "decay": 0.18,
+            "sustain": 0.97,
+            "release": 0.58
+          },
+          "composite": 0.8008
+        },
+        {
+          "id": "roll-chords-416",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -11.1,
+            "cutoff": 1464,
+            "resonance": 0.737,
+            "attack": 0.033,
+            "decay": 0.636,
+            "sustain": 0.6,
+            "release": 1.681
+          },
+          "composite": 0.7948
+        },
+        {
+          "id": "roll-chords-658",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.8,
+            "cutoff": 342,
+            "resonance": 0.328,
+            "attack": 0.009,
+            "decay": 0.274,
+            "sustain": 0.71,
+            "release": 1.302
+          },
+          "composite": 0.7517
+        },
+        {
+          "id": "roll-chords-596",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -11.7,
+            "cutoff": 295,
+            "resonance": 0.426,
+            "attack": 0.003,
+            "decay": 0.286,
+            "sustain": 0.86,
+            "release": 1.675
+          },
+          "composite": 0.7163
+        },
+        {
+          "id": "roll-chords-539",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -9.8,
+            "cutoff": 297,
+            "resonance": 0.354,
+            "attack": 0.223,
+            "decay": 0.095,
+            "sustain": 0.47,
+            "release": 0.841
+          },
+          "composite": 0.711
+        },
+        {
+          "id": "roll-chords-48",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7.1,
+            "cutoff": 706,
+            "resonance": 0.428,
+            "attack": 0.348,
+            "decay": 0.025,
+            "sustain": 0.31,
+            "release": 0.466
+          },
+          "composite": 0.6953
+        },
+        {
+          "id": "roll-chords-382",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -11.3,
+            "cutoff": 732,
+            "resonance": 0.217,
+            "attack": 0.003,
+            "decay": 0.708,
+            "sustain": 0.59,
+            "release": 0.796
+          },
+          "composite": 0.6628
+        },
+        {
+          "id": "roll-chords-428",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.8,
+            "cutoff": 547,
+            "resonance": 0.625,
+            "attack": 0.071,
+            "decay": 0.119,
+            "sustain": 0.36,
+            "release": 0.237
+          },
+          "composite": 0.6496
+        },
+        {
+          "id": "roll-chords-77",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7,
+            "cutoff": 301,
+            "resonance": 0.618,
+            "attack": 0.452,
+            "decay": 0.021,
+            "sustain": 0.3,
+            "release": 0.415
+          },
+          "composite": 0.6434
+        },
+        {
+          "id": "warm-keys",
+          "source": "factory:warm-keys",
+          "category": "keys",
+          "params": {
+            "osc": "triangle",
+            "cutoff": 2600,
+            "attack": 0.005,
+            "decay": 0.8,
+            "sustain": 0.4,
+            "release": 0.3,
+            "filterEnvAmount": 0.2,
+            "filterEnvDecay": 0.4,
+            "osc2Type": "sine",
+            "osc2Level": 0.3,
+            "osc2Detune": 12,
+            "sendReverb": 0.15,
+            "eqLow": 0.5
+          },
+          "composite": 0.6375
+        },
+        {
+          "id": "roll-chords-98",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -10.2,
+            "cutoff": 640,
+            "resonance": 0.251,
+            "attack": 0.026,
+            "decay": 0.064,
+            "sustain": 0.69,
+            "release": 0.392
+          },
+          "composite": 0.6281
+        },
+        {
+          "id": "roll-chords-192",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -9.2,
+            "cutoff": 5986,
+            "resonance": 0.438,
+            "attack": 0.047,
+            "decay": 0.625,
+            "sustain": 0.5,
+            "release": 0.603
+          },
+          "composite": 0.6199
+        },
+        {
+          "id": "roll-chords-590",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -9.2,
+            "cutoff": 888,
+            "resonance": 0.706,
+            "attack": 0.031,
+            "decay": 0.066,
+            "sustain": 0.47,
+            "release": 0.329
+          },
+          "composite": 0.6189
+        },
+        {
+          "id": "roll-chords-652",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -11.6,
+            "cutoff": 3115,
+            "resonance": 0.226,
+            "attack": 0.15,
+            "decay": 0.076,
+            "sustain": 0.9,
+            "release": 0.986
+          },
+          "composite": 0.6106
+        },
+        {
+          "id": "roll-chords-154",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -7,
+            "cutoff": 485,
+            "resonance": 0.74,
+            "attack": 0.05,
+            "decay": 0.368,
+            "sustain": 0.32,
+            "release": 0.249
+          },
+          "composite": 0.6014
+        },
+        {
+          "id": "roll-chords-184",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -6.6,
+            "cutoff": 1315,
+            "resonance": 0.514,
+            "attack": 0.022,
+            "decay": 0.043,
+            "sustain": 0.39,
+            "release": 0.632
+          },
+          "composite": 0.5639
+        },
+        {
+          "id": "roll-chords-420",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -7.5,
+            "cutoff": 465,
+            "resonance": 0.249,
+            "attack": 0.014,
+            "decay": 0.547,
+            "sustain": 0.85,
+            "release": 0.494
+          },
+          "composite": 0.5579
+        },
+        {
+          "id": "roll-chords-450",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -9.9,
+            "cutoff": 838,
+            "resonance": 0.507,
+            "attack": 0.431,
+            "decay": 0.465,
+            "sustain": 0.51,
+            "release": 1.661
+          },
+          "composite": 0.5574
+        },
+        {
+          "id": "roll-chords-615",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -7.2,
+            "cutoff": 1138,
+            "resonance": 0.365,
+            "attack": 0.051,
+            "decay": 0.036,
+            "sustain": 0.61,
+            "release": 0.775
+          },
+          "composite": 0.5556
+        },
+        {
+          "id": "roll-chords-473",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -6.6,
+            "cutoff": 437,
+            "resonance": 0.467,
+            "attack": 0.119,
+            "decay": 0.921,
+            "sustain": 0.47,
+            "release": 0.65
+          },
+          "composite": 0.5398
+        },
+        {
+          "id": "roll-chords-260",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -11.1,
+            "cutoff": 1949,
+            "resonance": 0.493,
+            "attack": 0.033,
+            "decay": 0.376,
+            "sustain": 0.8,
+            "release": 0.609
+          },
+          "composite": 0.532
+        },
+        {
+          "id": "roll-chords-305",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -6.7,
+            "cutoff": 741,
+            "resonance": 0.389,
+            "attack": 0.002,
+            "decay": 0.384,
+            "sustain": 0.74,
+            "release": 0.874
+          },
+          "composite": 0.5253
+        },
+        {
+          "id": "roll-chords-29",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9.1,
+            "cutoff": 333,
+            "resonance": 0.436,
+            "attack": 0.163,
+            "decay": 0.617,
+            "sustain": 0.18,
+            "release": 1.568
+          },
+          "composite": 0.5218
+        },
+        {
+          "id": "roll-chords-161",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -8.9,
+            "cutoff": 1336,
+            "resonance": 0.261,
+            "attack": 0.147,
+            "decay": 0.073,
+            "sustain": 0.96,
+            "release": 0.437
+          },
+          "composite": 0.5198
+        },
+        {
+          "id": "roll-chords-3",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.9,
+            "cutoff": 680,
+            "resonance": 0.544,
+            "attack": 0.011,
+            "decay": 0.619,
+            "sustain": 0.39,
+            "release": 0.865
+          },
+          "composite": 0.49
+        },
+        {
+          "id": "roll-chords-643",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -6.3,
+            "cutoff": 2665,
+            "resonance": 0.216,
+            "attack": 0.014,
+            "decay": 0.752,
+            "sustain": 0.51,
+            "release": 0.573
+          },
+          "composite": 0.4851
+        },
+        {
+          "id": "roll-chords-579",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -9.1,
+            "cutoff": 820,
+            "resonance": 0.401,
+            "attack": 0.269,
+            "decay": 0.033,
+            "sustain": 0.94,
+            "release": 1.111
+          },
+          "composite": 0.4824
+        },
+        {
+          "id": "roll-chords-526",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -13.7,
+            "cutoff": 517,
+            "resonance": 0.247,
+            "attack": 0.004,
+            "decay": 0.361,
+            "sustain": 0.87,
+            "release": 0.386
+          },
+          "composite": 0.4707
+        },
+        {
+          "id": "roll-chords-587",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -13,
+            "cutoff": 1329,
+            "resonance": 0.429,
+            "attack": 0.259,
+            "decay": 0.463,
+            "sustain": 0.9,
+            "release": 1.74
+          },
+          "composite": 0.4557
+        },
+        {
+          "id": "roll-chords-222",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -13.9,
+            "cutoff": 234,
+            "resonance": 0.545,
+            "attack": 0.061,
+            "decay": 0.135,
+            "sustain": 0.87,
+            "release": 1.219
+          },
+          "composite": 0.4508
+        },
+        {
+          "id": "roll-chords-387",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -6.3,
+            "cutoff": 2664,
+            "resonance": 0.502,
+            "attack": 0.538,
+            "decay": 0.127,
+            "sustain": 0.68,
+            "release": 0.963
+          },
+          "composite": 0.4504
+        },
+        {
+          "id": "roll-chords-81",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -6.9,
+            "cutoff": 1301,
+            "resonance": 0.596,
+            "attack": 0.039,
+            "decay": 0.024,
+            "sustain": 0.48,
+            "release": 0.152
+          },
+          "composite": 0.4432
+        },
+        {
+          "id": "roll-chords-63",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -8.5,
+            "cutoff": 1301,
+            "resonance": 0.774,
+            "attack": 0.003,
+            "decay": 0.939,
+            "sustain": 0.51,
+            "release": 0.235
+          },
+          "composite": 0.4281
+        },
+        {
+          "id": "roll-chords-601",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -13.7,
+            "cutoff": 5722,
+            "resonance": 0.266,
+            "attack": 0.036,
+            "decay": 0.033,
+            "sustain": 0.47,
+            "release": 1.018
+          },
+          "composite": 0.4267
+        },
+        {
+          "id": "roll-chords-438",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -7.6,
+            "cutoff": 1433,
+            "resonance": 0.734,
+            "attack": 0.008,
+            "decay": 0.332,
+            "sustain": 0.84,
+            "release": 0.484
+          },
+          "composite": 0.4202
+        }
+      ]
+    },
+    "lead": {
+      "pool": 678,
+      "scored": 678,
+      "survivors": 67,
+      "kept": [
+        {
+          "id": "roll-lead-224",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.9,
+            "cutoff": 1273,
+            "resonance": 0.631,
+            "attack": 0.017,
+            "decay": 0.372,
+            "sustain": 0.67,
+            "release": 1.627
+          },
+          "composite": 1.4694
+        },
+        {
+          "id": "roll-lead-2",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -6.4,
+            "cutoff": 947,
+            "resonance": 0.429,
+            "attack": 0.013,
+            "decay": 0.314,
+            "sustain": 0.5,
+            "release": 1.178
+          },
+          "composite": 1.3851
+        },
+        {
+          "id": "roll-lead-392",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6.3,
+            "cutoff": 1118,
+            "resonance": 0.211,
+            "attack": 0.009,
+            "decay": 0.176,
+            "sustain": 0.97,
+            "release": 1.454
+          },
+          "composite": 1.1949
+        },
+        {
+          "id": "roll-lead-121",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -7.5,
+            "cutoff": 2034,
+            "resonance": 0.21,
+            "attack": 0.092,
+            "decay": 0.488,
+            "sustain": 0.5,
+            "release": 1.468
+          },
+          "composite": 1.1514
+        },
+        {
+          "id": "roll-lead-97",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -10.9,
+            "cutoff": 936,
+            "resonance": 0.479,
+            "attack": 0.009,
+            "decay": 0.755,
+            "sustain": 0.56,
+            "release": 1.213
+          },
+          "composite": 1.1372
+        },
+        {
+          "id": "roll-lead-471",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -10,
+            "cutoff": 881,
+            "resonance": 0.241,
+            "attack": 0.01,
+            "decay": 0.44,
+            "sustain": 0.84,
+            "release": 1.466
+          },
+          "composite": 1.0979
+        },
+        {
+          "id": "roll-lead-581",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -6.2,
+            "cutoff": 1904,
+            "resonance": 0.238,
+            "attack": 0.025,
+            "decay": 0.062,
+            "sustain": 0.99,
+            "release": 0.856
+          },
+          "composite": 0.9846
+        },
+        {
+          "id": "roll-lead-10",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -14,
+            "cutoff": 1199,
+            "resonance": 0.623,
+            "attack": 0.011,
+            "decay": 0.05,
+            "sustain": 0.88,
+            "release": 1.527
+          },
+          "composite": 0.8733
+        },
+        {
+          "id": "roll-lead-516",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -9.8,
+            "cutoff": 851,
+            "resonance": 0.582,
+            "attack": 0.037,
+            "decay": 0.639,
+            "sustain": 0.52,
+            "release": 1.255
+          },
+          "composite": 0.8474
+        },
+        {
+          "id": "roll-lead-157",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -7.9,
+            "cutoff": 1126,
+            "resonance": 0.45,
+            "attack": 0.049,
+            "decay": 0.02,
+            "sustain": 0.4,
+            "release": 0.418
+          },
+          "composite": 0.7936
+        },
+        {
+          "id": "roll-lead-35",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -8.5,
+            "cutoff": 549,
+            "resonance": 0.231,
+            "attack": 0.03,
+            "decay": 0.939,
+            "sustain": 0.94,
+            "release": 1.045
+          },
+          "composite": 0.7693
+        },
+        {
+          "id": "roll-lead-431",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -10.7,
+            "cutoff": 1548,
+            "resonance": 0.211,
+            "attack": 0.018,
+            "decay": 0.212,
+            "sustain": 0.52,
+            "release": 0.875
+          },
+          "composite": 0.7399
+        },
+        {
+          "id": "roll-lead-493",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9.3,
+            "cutoff": 1406,
+            "resonance": 0.445,
+            "attack": 0.005,
+            "decay": 0.039,
+            "sustain": 0.7,
+            "release": 1.494
+          },
+          "composite": 0.734
+        },
+        {
+          "id": "roll-lead-89",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -9.4,
+            "cutoff": 1172,
+            "resonance": 0.391,
+            "attack": 0.011,
+            "decay": 0.159,
+            "sustain": 0.67,
+            "release": 0.51
+          },
+          "composite": 0.6854
+        },
+        {
+          "id": "roll-lead-378",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "sawtooth",
+            "volume": -10.8,
+            "cutoff": 1396,
+            "resonance": 0.402,
+            "attack": 0.011,
+            "decay": 0.02,
+            "sustain": 0.74,
+            "release": 0.633
+          },
+          "composite": 0.6642
+        },
+        {
+          "id": "roll-lead-337",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "triangle",
+            "volume": -8.6,
+            "cutoff": 1125,
+            "resonance": 0.212,
+            "attack": 0.046,
+            "decay": 0.024,
+            "sustain": 0.77,
+            "release": 0.684
+          },
+          "composite": 0.6499
+        },
+        {
+          "id": "roll-lead-396",
+          "source": "random-roll",
+          "category": "roll",
+          "params": {
+            "osc": "square",
+            "volume": -6,
+            "cutoff": 1775,
+            "resonance": 0.528,
+            "attack": 0.003,
+            "decay": 0.03,
+            "sustain": 0.61,
+            "release": 1.31
+          },
+          "composite": 0.6333
+        }
+      ]
+    }
+  }
+}
