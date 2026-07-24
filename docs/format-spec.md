@@ -938,6 +938,37 @@ scene s1
   land, consumers take a slot's at-0/first placement (`firstPlacementClip`) — single-placement
   projects, i.e. every pre-v0.11 document, play and render exactly as before.
 
+### v0.12 additions — surge sidecar-instrument tracks (Track 1a; decisions.md D23; docs/surge-track.md)
+
+A fifth track kind, `surge`, whose SOUND SOURCE is a Surge XT factory patch rendered
+out-of-process by `python/surge_render.py` at render time, while its parameters and notes stay
+ordinary diffable text. GPL stays out-of-process — nothing links Surge (D23).
+
+- **`track <id> <name> <color> surge`** carries a `surge` block (level 1, before the synth block):
+  `patch "<name>"` (the factory patch name — the format's ONE quoted string, since factory names
+  have spaces; a bare `patch Foo Bar` also parses and re-serializes quoted), optional `sampleRate
+  <hz>` (elided at 44100), and zero or more `override <param> <0..1>` lines (normalized params in
+  Surge's own space; serialized sorted by param name; duplicate param = parse error). It ALSO
+  carries the standard `synth` production block + `effect` chain + notes/clips — a surge track is a
+  pitched track whose timbre happens to come from Surge.
+- **Canonical elision & round-trip** follow the house rules exactly: `sampleRate 44100` and an empty
+  override list emit nothing; the synth block is optional on input (INIT defaults) and always
+  re-emitted; `serialize(parse(x)) === x` for canonical `x`.
+- **Parse never requires Surge** — a `.beat` with a surge track loads on a machine with no Surge
+  build. The surgepy/patch-availability check is deferred to RENDER (fail-loudly there), the same
+  split as the media block's load-time hash check.
+- **Render semantics** (out of grammar scope, see docs/surge-track.md): notes → sidecar note-list →
+  content-hash-keyed cached WAV under `media/` (+ provenance sidecar) → hosted as a drums-kind
+  sample voice through the track's own production chain (the surgeplus mechanism). Same doc → same
+  audio. **v1 limitations**: no live GUI re-synthesis (plays the last rendered WAV; a knob edit
+  re-renders next render); only track-level notes render (clips/scenes/song arrangement deferred);
+  osc-bank synth fields are honest no-ops on the hosted playback.
+- **Edit/diff**: `beat set <track>.surge.patch|.sampleRate|.override.<param>` (empty value clears an
+  override) through the standard path; production fields route to the synth block; diff reports
+  `surge-param`/`surge-override` as one-line musical facts.
+- **Licensing**: rendered surge WAVs carry Surge's unresolved factory-patch content license (D23) —
+  gitignore the project's `media/` surge renders; the `.beat` (a patch-NAME reference) is safe.
+
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)
 
 Clips/scenes (shipped v0.4), arrangement (shipped v0.4), multi-device chains beyond the
