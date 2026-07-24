@@ -23,6 +23,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawn, execFileSync } from 'node:child_process'
 import { chromium } from 'playwright-core'
+import { prepareSurgeTracks } from './surge-render-prep.mjs'
 
 // Phase 39 Stream UA (pilot 105): the first EXISTING bundled-Playwright-chromium binary, or
 // undefined if none is found. `chromium.executablePath()` is playwright-core's programmatic path to
@@ -171,6 +172,19 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   if (!existsSync(join(repoRoot, 'dist/src/daemon/daemon.js')) || !existsSync(join(repoRoot, 'dist/src/core/index.js'))) {
     console.error('building repo (dist/ missing)...')
     execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
+  }
+
+  // Track 1a: render surge tracks to cached WAVs and rewrite the doc as drums-kind sample hosts the
+  // engine can play (surgeplus hosting), BEFORE the daemon boots. A doc with no surge tracks passes
+  // through untouched. The scratch sits beside the original so relative media/ resolves identically;
+  // its cleanup joins the session teardown. A surge render failure (surgepy/patch unavailable)
+  // throws here — the fail-loudly-at-render contract — before any daemon/browser spins up.
+  let surgeCleanup = () => {}
+  const surgePrep = await prepareSurgeTracks(beatPath)
+  if (surgePrep.isSurge) {
+    if (surgePrep.info) console.error(surgePrep.info)
+    beatPath = surgePrep.beatPath
+    surgeCleanup = surgePrep.cleanup
   }
   // Ensure ui/ is built AND current (vite preview serves ui/dist verbatim).
   // Phase 40 Stream VC: this used to build only when ui/dist/index.html was MISSING, so after any
@@ -337,6 +351,7 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
     await browser.close()
     served.proc.killTree() // group kill — see serveUi (pilot 109's vite-leak finding)
     await daemon.close()
+    surgeCleanup() // Track 1a: remove the desugared surge scratch (best-effort)
   }
   return { page, pageErrors, doc, seconds, close }
 }

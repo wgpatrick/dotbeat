@@ -1,0 +1,7 @@
+# Track 1a: surge renders carry Surge XT's still-unresolved factory-patch CONTENT license
+# (D23 / surge issue #6741) — the rendered WAVs + their provenance sidecars stay out of git,
+# same posture as the eval's gitignore-gated surge batches. The .beat itself (a patch-NAME
+# reference only) is committed; the audio is regenerated from it with `beat render`.
+media/
+.render-surge.*
+loop.wav
