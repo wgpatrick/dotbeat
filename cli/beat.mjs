@@ -89,7 +89,7 @@ import {
   BeatPresetError,
   BeatPitchTimeError,
 } from '../dist/src/core/index.js'
-import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile, BeatProfileError } from '../dist/src/metrics/index.js'
+import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile, BeatProfileError, screen, formatScreens } from '../dist/src/metrics/index.js'
 // --- Phase 37 Stream RB begin ---
 import { analyzeStructure, formatStructure, BeatAnalysisError } from '../dist/src/analysis/index.js'
 // --- Phase 37 Stream RB end ---
@@ -883,16 +883,33 @@ const HELP = [
   },
   {
     cmd: 'lint',
-    text: `  beat lint <file.wav> [--target <LUFS> | --ref <ref.json>] [--json] [--doc <file.beat>]
+    text: `  beat lint <file.wav> [--target <LUFS> | --ref <ref.json>] [--screens [--sections <file.beat>]] [--json] [--doc <file.beat>]
                                                           deterministic mix findings (default target -14);
                                                           --ref compares against a saved reference profile
                                                           instead of absolute targets (LUFS/band/width/crest
                                                           deltas) — full-mix statics only: a profile can't
                                                           hear arrangement, sections, or masking;
+                                                          --screens runs the standing PATHOLOGY suite (clicks,
+                                                          DC offset, mono-collapse, 2-5kHz resonance, mud,
+                                                          crest collapse, dead air, sub rumble) — deterministic
+                                                          DEFECT checks, distinct from the taste findings above;
+                                                          --sections <file.beat> adds the song section map so the
+                                                          arrangement-flatness screen runs (flags "everything on
+                                                          all the time") and dead air is located by section
+                                                          (implies --screens);
                                                           --doc renders each track solo to name the actual
                                                           offending track in each finding's suggestion, and
                                                           makes fix lines cite that .beat by name (without it
                                                           they show an honest <file.beat> placeholder)`,
+  },
+  {
+    cmd: 'excerpt',
+    text: `  beat excerpt <file.beat> <section...> [--out <path>]
+                                                          write a derived .beat keeping ONLY the named song
+                                                          sections (tracks/scenes/clips/media untouched) — for
+                                                          cheap partial renders of e.g. just the drop. Sections
+                                                          are named by scene id or name; requested order is kept.
+                                                          Default output <file>-excerpt.beat next to the source.`,
   },
   {
     cmd: 'render',
@@ -943,9 +960,9 @@ const HELP = [
                                                           boundaries and report the per-section energy arc
                                                           (LUFS / spectral balance / width / crest per section
                                                           + section-to-section movement, flagged only when it
-                                                          clears the render-run variance floor, + arrangement
-                                                          lint: INFO [arrangement-flat] when no adjacent section
-                                                          moves >2 LU and the whole arc spans <6 LU). --ref compares
+                                                          clears the render-run variance floor), and runs the
+                                                          pathology screens including arrangement-flatness (which
+                                                          FLAGS a mix with no dynamic arc). --ref compares
                                                           each section (or the whole song) against a saved
                                                           reference profile (beat metrics --save-profile).
                                                           Honest limits: per-section STATIC metrics only — this
@@ -4663,6 +4680,15 @@ function metricsCmd(argv) {
   )
 }
 
+/** Section specs (bar counts + labels) from a .beat's song block, for the flatness/dead-air screens
+ * and for `beat feedback --sections`. Throws if the file is in loop mode (no song to slice). */
+function sectionSpecsFromDoc(doc, path) {
+  if (!doc.song || doc.song.length === 0) {
+    throw new BeatEditError(`--sections needs a song block, but ${path} is in loop mode (no sections). Remove --sections, or add a song timeline first.`)
+  }
+  return doc.song.map((s) => ({ bars: s.bars, scene: s.scene, name: doc.scenes.find((sc) => sc.id === s.scene)?.name }))
+}
+
 // Phase 33 Stream MD item 2 (research/98): `--doc <file.beat>` lets lint name the actual offending
 // track in each finding's suggestion instead of a generic fix pattern. This is opt-in and only
 // pays for real per-track audio (one solo render per track, via render.mjs's headless-chromium
@@ -4674,6 +4700,16 @@ async function lintCmd(argv) {
   const target = targetIdx !== -1 ? Number(argv[targetIdx + 1]) : undefined
   const docIdx = argv.indexOf('--doc')
   const docPath = docIdx !== -1 ? argv[docIdx + 1] : undefined
+  // Pathology screens (src/metrics/screens.ts): the standing DEFECT suite (clicks, DC, mono-collapse,
+  // resonance, mud, crest collapse, dead air, sub rumble, and — with a section map — arrangement
+  // flatness). --sections <file.beat> supplies the song section map (bpm + bar counts) that the
+  // flatness/dead-air screens use for context; passing it implies --screens.
+  const sectionsIdx = argv.indexOf('--sections')
+  const sectionsPath = sectionsIdx !== -1 ? argv[sectionsIdx + 1] : undefined
+  if (sectionsIdx !== -1 && (!sectionsPath || sectionsPath.startsWith('--'))) {
+    throw new BeatEditError('--sections needs a .beat file with a song block, e.g. beat lint mix.wav --screens --sections song.beat')
+  }
+  const wantScreens = argv.includes('--screens') || sectionsPath !== undefined
   // Phase 35 Stream OD: --ref <profile.json> switches the taste comparisons (loudness / bands /
   // width / crest) to deltas against a saved reference profile. One comparison frame at a time:
   // --ref and --target together is a contradiction, not a combination — error loudly.
@@ -4690,6 +4726,7 @@ async function lintCmd(argv) {
       !a.startsWith('--') &&
       (targetIdx === -1 || i !== targetIdx + 1) &&
       (docIdx === -1 || i !== docIdx + 1) &&
+      (sectionsIdx === -1 || i !== sectionsIdx + 1) &&
       (refIdx === -1 || i !== refIdx + 1),
   )
   if (!file) throw new BeatEditError('lint needs a wav file')
@@ -4717,8 +4754,34 @@ async function lintCmd(argv) {
     findings = lint(analyze(channels, sampleRate), { ...lintOpts, trackMetrics })
   }
 
-  process.stdout.write(json ? JSON.stringify(findings, null, 2) + '\n' : formatLint(findings))
-  process.exitCode = findings.some((f) => f.level === 'warn') ? 1 : 0
+  // Pathology screens: the DEFECT suite, run alongside the taste lint when asked. A section map
+  // (--sections) enables the arrangement-flatness screen and locates dead air by section.
+  let screenFindings = []
+  if (wantScreens) {
+    const screenOpts = {}
+    if (sectionsPath !== undefined) {
+      const secDoc = readDoc(sectionsPath)
+      screenOpts.sections = sectionSpecsFromDoc(secDoc, sectionsPath)
+      screenOpts.bpm = secDoc.bpm
+    }
+    screenFindings = screen(channels, sampleRate, screenOpts)
+  }
+
+  if (json) {
+    process.stdout.write(JSON.stringify(wantScreens ? { findings, screens: screenFindings } : findings, null, 2) + '\n')
+  } else {
+    process.stdout.write(formatLint(findings))
+    if (wantScreens) {
+      process.stdout.write('\n' + formatScreens(screenFindings, basename(file)))
+      // don't let "all screens pass" overclaim: the arrangement-flatness screen only runs with a
+      // section map, so say when it (and section-located dead air) were NOT evaluated.
+      if (sectionsPath === undefined) {
+        process.stdout.write('  note: arrangement-flatness was NOT checked — it needs the song section map. Add --sections <file.beat> to include it.\n')
+      }
+    }
+  }
+  // exit non-zero on any lint WARN or any severity>=3 pathology (a real defect worth blocking on)
+  process.exitCode = findings.some((f) => f.level === 'warn') || screenFindings.some((f) => f.severity >= 3) ? 1 : 0
   // render.mjs leaves event-loop stragglers (chromium pipes, vite) — same fix `render`'s own case
   // in main()'s switch needs. Only the --doc path touches chromium at all, so the fast/common path
   // (no --doc) exits naturally exactly as it always has.
@@ -4763,8 +4826,17 @@ async function feedbackCmd(argv) {
     }
     const specs = doc.song.map((s) => ({ bars: s.bars, scene: s.scene, name: doc.scenes.find((sc) => sc.id === s.scene)?.name }))
     const secMetrics = analyzeSections(channels, sampleRate, doc.bpm, specs)
-    const arcFindings = arrangementFindings(secMetrics) // research/122 §4.2: the flatness detector
-    process.stdout.write(json ? JSON.stringify({ sections: secMetrics, findings: arcFindings, ...(ref ? { ref: ref.source } : {}) }, null, 2) + '\n' : formatSectionFeedback(secMetrics, ref))
+    // Also run the pathology screens with the section map — this is where arrangement-flatness
+    // ("everything on all the time") gets FLAGGED, closing the gap where the per-section numbers
+    // existed but no rule turned them into a verdict (research 122 §4.2).
+    const screenFindings = screen(channels, sampleRate, { sections: specs, bpm: doc.bpm, metrics: analyze(channels, sampleRate) })
+    if (json) {
+      process.stdout.write(JSON.stringify({ sections: secMetrics, screens: screenFindings, ...(ref ? { ref: ref.source } : {}) }, null, 2) + '\n')
+    } else {
+      process.stdout.write(formatSectionFeedback(secMetrics, ref))
+      process.stdout.write('\n' + formatScreens(screenFindings, basename(file)))
+    }
+    if (screenFindings.some((f) => f.severity >= 3)) process.exitCode = 1
   } else {
     const m = analyze(channels, sampleRate)
     const findings = lint(m, { beatPath: file, ...(ref ? { ref } : {}) })
@@ -4810,6 +4882,48 @@ async function renderStemsCmd(argv) {
   process.exit(0) // render leaves chromium/vite event-loop stragglers — see render.mjs footer
 }
 // ---- Phase 37 Stream RA end -----------------------------------------------------------------
+
+/** `beat excerpt <file> <section...>` — write a derived .beat whose song block keeps ONLY the named
+ * sections (everything else — tracks, scenes, clips, media — is preserved untouched; render only
+ * plays the song timeline). This is the cheap-partial-render pattern agents used to hand-roll as
+ * one-off test-*.beat files. Sections are named by scene id or scene name; the requested order is
+ * kept (so you can reorder for a render), and a name matching several song entries expands to all
+ * of them in song order. */
+function excerptCmd(argv) {
+  const outIdx = argv.indexOf('--out')
+  const outPath = outIdx !== -1 ? argv[outIdx + 1] : undefined
+  if (outIdx !== -1 && (!outPath || outPath.startsWith('--'))) throw new BeatEditError('--out needs a path, e.g. beat excerpt song.beat drop_1 --out drop.beat')
+  const positional = argv.filter((a, i) => !a.startsWith('--') && (outIdx === -1 || i !== outIdx + 1))
+  const [file, ...names] = positional
+  if (!file) throw new BeatEditError('excerpt needs a .beat file and one or more sections: beat excerpt song.beat strip drop_1')
+  if (names.length === 0) throw new BeatEditError('excerpt needs at least one section to keep, e.g. beat excerpt song.beat strip drop_1')
+  const doc = readDoc(file)
+  if (!doc.song || doc.song.length === 0) throw new BeatEditError(`${file} is in loop mode (no song sections to excerpt) — excerpt needs a song block`)
+  // resolve requested names against scene id OR scene name
+  const sceneByName = new Map()
+  for (const sc of doc.scenes) {
+    sceneByName.set(sc.id, sc.id)
+    if (sc.name) sceneByName.set(sc.name, sc.id)
+  }
+  const chosen = []
+  const unknown = []
+  for (const nm of names) {
+    const sceneId = sceneByName.get(nm)
+    const matches = sceneId ? doc.song.filter((s) => s.scene === sceneId) : []
+    if (matches.length === 0) unknown.push(nm)
+    else chosen.push(...matches)
+  }
+  if (unknown.length) {
+    const avail = [...new Set(doc.song.map((s) => s.scene))].join(', ')
+    throw new BeatEditError(`unknown section(s): ${unknown.join(', ')} — sections in ${basename(file)}'s song are: ${avail}`)
+  }
+  const out = outPath ?? join(dirname(resolve(file)), basename(file).replace(/\.beat$/, '') + '-excerpt.beat')
+  writeFileSync(out, serialize({ ...doc, song: chosen }))
+  const totalBars = chosen.reduce((n, s) => n + s.bars, 0)
+  process.stdout.write(
+    `wrote ${out}: ${chosen.length} section${chosen.length === 1 ? '' : 's'} (${chosen.map((s) => `${s.scene}:${s.bars}b`).join(' ')}), ${totalBars} bars total — render it with: beat render ${out}\n`,
+  )
+}
 
 /** `git show rev:path` needs the path relative to the repo root, wherever we're invoked from. */
 function gitShow(rev, file) {
@@ -5376,6 +5490,9 @@ async function main() {
     // Phase 37 Stream RA: render once, then section-aware or whole-song mix feedback in one step.
     case 'feedback':
       await feedbackCmd(rest)
+      break
+    case 'excerpt':
+      excerptCmd(rest)
       break
     case 'daemon': {
       const { daemonCommand } = await import('./daemon.mjs')

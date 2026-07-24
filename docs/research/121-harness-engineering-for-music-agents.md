@@ -417,9 +417,17 @@ is often not synthesizing it. Harness shape, in order of effort:
 
 ### 3.6 Format/tool gaps the process exposed (build list)
 
-In leverage order: **(1)** render-true automation — make the offline/render path honor clip
+In leverage order: **(1)** ~~render-true automation — make the offline/render path honor clip
 automation (the applyParams stomp is arguably a bug, and NOTES.md documents the measured
-symptom); **(2)** a section/timeline-level energy primitive — per-section track gain/duck/filter
+symptom)~~ — **FIXED** (see below): `applyParams()`/`sync()` re-asserted the static patch value
+for every automatable param on every 16th-note tick, clobbering the drawn curve on both the live
+and offline path (a −60 dB volume lane rendered at only ~−4.6 dB; an automated 150 Hz cutoff read
+~10 dB louder than the identical static-150 Hz control). The tick now resolves which lanes the
+active clip drives and skips re-asserting the static value for exactly those params, handing each
+automated `AudioParam` to the tick's automation pass. Verified with the real engine (60.7 dB of
+attenuation on the −60 dB volume lane, 0.0 dB between the automated and static 150 Hz cutoff):
+`ui/verify-clip-automation-render.mjs` + `test/clip-automation-render.test.ts`; **(2)** a
+section/timeline-level energy primitive — per-section track gain/duck/filter
 offsets or song-scoped automation lanes, so "the drop bass steps up" is one line, not a cloned
 clip at ×0.735 velocities; **(3)** `beat excerpt <file> <sections…>` (auto test-\*.beat) and
 solo/section render flags naming the existing stems path; **(4)** surge track v1 limits that

@@ -13,9 +13,9 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..') // di
 const beatCli = join(repoRoot, 'cli', 'beat.mjs')
 const exampleBeat = join(repoRoot, 'examples', 'real-groove.beat')
 
-function beat(args: string[], opts: { cwd?: string; expectExit?: number } = {}): string {
+function beat(args: string[], opts: { cwd?: string; expectExit?: number; env?: NodeJS.ProcessEnv } = {}): string {
   try {
-    return execFileSync(process.execPath, [beatCli, ...args], { encoding: 'utf8', cwd: opts.cwd })
+    return execFileSync(process.execPath, [beatCli, ...args], { encoding: 'utf8', cwd: opts.cwd, env: opts.env })
   } catch (err) {
     const e = err as { status?: number; stdout?: string; stderr?: string }
     if (opts.expectExit !== undefined && e.status === opts.expectExit) return (e.stdout ?? '') + (e.stderr ?? '')
@@ -453,7 +453,10 @@ test('beat source add: --license passes through to the sidecar (only the Freesou
 })
 
 test('beat source search without a key fails with an actionable error and NO stack trace (exit 2)', () => {
-  const out = beat(['source', 'search', 'kick'], { expectExit: 2 })
+  // Scrub the owner's real key so "no key" holds even on machines that have one configured.
+  const noKeyEnv = { ...process.env }
+  delete noKeyEnv.FREESOUND_API_KEY
+  const out = beat(['source', 'search', 'kick'], { expectExit: 2, env: noKeyEnv })
   assert.match(out, /^error: Freesound needs an API key/)
   assert.match(out, /FREESOUND_API_KEY/)
   assert.doesNotMatch(out, /\n\s+at /, 'must not leak a JS stack trace')

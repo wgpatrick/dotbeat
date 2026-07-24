@@ -18,7 +18,11 @@ interface McpClient {
 }
 
 function startMcp(): McpClient {
-  const proc: ChildProcess = spawn(process.execPath, [join(repoRoot, 'cli', 'beat.mjs'), 'mcp'], { stdio: ['pipe', 'pipe', 'inherit'] })
+  // Scrub the owner's real Freesound key: the source-search case asserts the no-key isError, and
+  // an inherited key would turn it into a live network call.
+  const env = { ...process.env }
+  delete env.FREESOUND_API_KEY
+  const proc: ChildProcess = spawn(process.execPath, [join(repoRoot, 'cli', 'beat.mjs'), 'mcp'], { stdio: ['pipe', 'pipe', 'inherit'], env })
   let nextId = 1
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
   let buf = ''
