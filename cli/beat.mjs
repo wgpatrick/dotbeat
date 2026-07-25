@@ -2072,7 +2072,7 @@ function flagValue(argv, flag) {
 // varies the PIPELINE — different grammar (roles + sources, no --per-seed/--count), different
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
-  const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--ref-dir', '--midi-dir', '--seconds', '--log']
+  const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--gen-provider', '--ref-dir', '--midi-dir', '--seconds', '--log']
   const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure', '--random-patches', '--theory'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
@@ -2118,6 +2118,9 @@ async function showdownCmd(argv) {
   const rounds = flagValue(argv, '--rounds') ? Number(flagValue(argv, '--rounds')) : 1
   const metaSeed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
   const genBackend = flagValue(argv, '--gen-backend') ?? 'fal'
+  // --gen-provider: a fal model path (e.g. fal-ai/lyria2) for the gen + keymap clips — the
+  // research/127 bake-off arms. Undefined keeps each backend's own default provider.
+  const genProvider = flagValue(argv, '--gen-provider')
   const targetSeconds = flagValue(argv, '--seconds') !== undefined ? Number(flagValue(argv, '--seconds')) : undefined
   // the engineplus ablation (docs/source-showdown-eval.md): a fifth clip — same figure, same
   // patch, plus a production pass as ordinary .beat edits — measuring how much of the engine's
@@ -2479,7 +2482,7 @@ async function showdownCmd(argv) {
           writeFileSync(kmBase, showdown.keymapScratchText(batchBpm))
           const oneShot = genSubject(spec.keymap.oneShotSubjectId)
           const kmPrompt = `${oneShot.subject}, ${kmStyle}`
-          await lib.addGeneratedSource({ beatFile: kmBase, id: 'sdkm', prompt: kmPrompt, seconds: oneShot.seconds, seed: kmSeed, backend: genBackend })
+          await lib.addGeneratedSource({ beatFile: kmBase, id: 'sdkm', prompt: kmPrompt, seconds: oneShot.seconds, seed: kmSeed, backend: genBackend, provider: genProvider })
           const scratch = parse(readFileSync(kmBase, 'utf8'))
           const { channels, sampleRate } = decodeWav(readFileSync(join(workDir, 'media', 'sdkm.wav')))
           const pitch = detectPitch(channels, sampleRate)
@@ -2498,7 +2501,7 @@ async function showdownCmd(argv) {
           for (const [lane, subjectId] of Object.entries(spec.keymap.laneSubjects)) {
             const oneShot = genSubject(subjectId)
             const prompt = `${oneShot.subject}, ${kmStyle}`
-            await lib.addGeneratedSource({ beatFile: kmBase, id: `sd${lane}`, prompt, seconds: oneShot.seconds, seed: kmSeed + promptsUsed.length, backend: genBackend })
+            await lib.addGeneratedSource({ beatFile: kmBase, id: `sd${lane}`, prompt, seconds: oneShot.seconds, seed: kmSeed + promptsUsed.length, backend: genBackend, provider: genProvider })
             samplesByLane[lane] = `sd${lane}`
             promptsUsed.push(prompt)
           }
@@ -2540,6 +2543,7 @@ async function showdownCmd(argv) {
           seconds: phraseSubject.seconds,
           seedFrom: genSeed,
           backend: genBackend,
+          provider: genProvider,
           outDir: genDir,
         })
 
@@ -2649,7 +2653,7 @@ async function showdownCmd(argv) {
             ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: withPatchProvenance(`${sharedFigure ? `same ${figDesc(plusDrawn)} and patch as the engine clip` : `${figDesc(plusDrawn)} through the engine patch`} + production pass: ${produced.applied.join(', ')} (dotbeat engine)`, enginePatchProvenance) }]
             : []),
           { kind: 'keymap', wav: join(workDir, produced ? 'v3.wav' : 'v2.wav'), from: kmFrom },
-          { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genBackend})` },
+          { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genProvider ?? genBackend})` },
           ...(surgeClip ? [surgeClip] : []),
           ...(surgeplusClip ? [surgeplusClip] : []),
         ]
