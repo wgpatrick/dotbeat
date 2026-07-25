@@ -1,0 +1,6 @@
+#!/Users/willpatrick/Documents/dotbeat/dotbeat/python/venv-roughness/bin/python3.10
+import sys
+from fontTools.merge import main
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(main())

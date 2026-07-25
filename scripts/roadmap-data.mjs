@@ -2127,16 +2127,16 @@ export const rows = [
     research: 'research/121-harness-engineering-for-music-agents.md', plan: null,
   },
   {
-    area: 'Known usability gaps (backlog)', feature: 'Showdown usage line doesn\'t state <dir> is a `beat taste-seeds` output (pilot 128)',
-    description: 'CLI pilot 128 (`beat showdown --theory --gen-backend stub`, docs/research/128): the `beat showdown --help` usage line is just `beat showdown <dir>`, and only the prose body (and the `related:` footer) reveal that <dir> must be a `beat taste-seeds` output — a first-timer relies on reading to the bottom. Cheap help-text polish: name the seed-dir prerequisite on the usage line itself. (The two harder pilot-128 findings — silent `--gen-backend` typos and the raw-ENOENT trace on a missing dir — were fixed same-session.)',
+    area: 'Known usability gaps (backlog)', feature: 'Showdown usage line doesn\'t state <dir> is a `beat taste-seeds` output (pilot 129)',
+    description: 'CLI pilot 129 (`beat showdown --theory --gen-backend stub`, docs/research/129): the `beat showdown --help` usage line is just `beat showdown <dir>`, and only the prose body (and the `related:` footer) reveal that <dir> must be a `beat taste-seeds` output — a first-timer relies on reading to the bottom. Cheap help-text polish: name the seed-dir prerequisite on the usage line itself. (The two harder pilot-129 findings — silent `--gen-backend` typos and the raw-ENOENT trace on a missing dir — were fixed same-session.)',
     core: 'na', cli: 'not-started', gui: 'na', status: 'not-started',
-    research: 'research/128-usability-pilot-showdown-theory.md', plan: null,
+    research: 'research/129-usability-pilot-showdown-theory.md', plan: null,
   },
   {
-    area: 'Known usability gaps (backlog)', feature: 'No headless rate/score path — the showdown→rate→report loop needs a browser (pilot 128)',
+    area: 'Known usability gaps (backlog)', feature: 'No headless rate/score path — the showdown→rate→report loop needs a browser (pilot 129)',
     description: 'CLI pilot 128: the middle step of the collect->rate->report loop, `beat rate`, is a browser-only local web UI, so a headless / CI / agent user who COLLECTED a showdown (or any vary) batch cannot complete it — they can build and report but not rank. Bigger than a help fix: a headless rate/score surface (e.g. a `beat rate --pick <dir> <v..>` non-interactive scorer, or serving the audition.wav + a text prompt) so the taste loop closes without a GUI. Cites pilot 128; relates to the shipped `beat audition` clip-set stitcher (which already produces a scoreable batch) and `beat score`.',
     core: 'na', cli: 'missing', gui: 'na', status: 'not-started',
-    research: 'research/128-usability-pilot-showdown-theory.md', plan: null,
+    research: 'research/129-usability-pilot-showdown-theory.md', plan: null,
   },
 
   // ── Desktop app / packaging ──────────────────────────────────────────────
