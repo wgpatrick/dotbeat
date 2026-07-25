@@ -112,9 +112,11 @@ export interface VaryBatchManifest {
   // Showdown midi-figure source (docs/source-showdown-eval.md, "The midi figure source"): where
   // this batch's COMPOSED figures came from — 'midi' (extracted from private MIDI transcriptions
   // of commercial tracks; the batch dir is gitignore-gated and each variant's `from` records the
-  // midi path as a local reference) or 'bank' (the internal archetype bank). scoreBatch copies
-  // THIS LABEL ONLY into the shared log — never a song title, artist, or path.
-  figureSource?: 'midi' | 'bank' | 'theory'
+  // midi path as a local reference), 'theory' (the deterministic theory-aware layer,
+  // src/taste/theory.ts), 'ca2' (Composer's Assistant 2 composing over that layer's chord track,
+  // src/taste/ca2.ts) or 'bank' (the internal archetype bank). scoreBatch copies THIS LABEL ONLY
+  // into the shared log — never a song title, artist, or path.
+  figureSource?: 'midi' | 'bank' | 'theory' | 'ca2'
   // D21 strain (a): `file` is "vN.beat" for vary batches and "vN.wav" for gen batches — every
   // reader below resolves the variant through THIS field rather than re-deriving "vN.beat".
   // `source` (source-showdown eval, docs/source-showdown-eval.md): which PIPELINE produced this
@@ -628,11 +630,13 @@ export interface ScoreEntry {
    * a ref clip's origin path stays in the batch dir's manifest, never in the shared log. */
   sources?: Record<string, string>
   /** Showdown batches only: where the composed figures came from — 'midi' (commercial MIDI
-   * transcriptions, private) or 'bank' (internal archetypes). The label is the ONLY midi-related
+   * transcriptions, private), 'theory' (the deterministic theory-aware layer), 'ca2' (Composer's
+   * Assistant 2 over that layer's chord track) or 'bank' (internal archetypes). The label is the
+   * ONLY midi-related
    * fact that ever reaches this shared log (the licensing posture): song identity stays in the
    * gitignore-gated batch dir's manifest. Lets the report separate "our sounds with commercial
    * composition" from "our sounds with our composition". */
-  figureSource?: 'midi' | 'bank' | 'theory'
+  figureSource?: 'midi' | 'bank' | 'theory' | 'ca2'
   /** "None of these are good" verdict (owner, twice after a showdown batch: nothing deserved a
    * pick, and the only options were picking or silently skipping — which loses the signal). A
    * none-good entry carries `picks: []`, `rejected: [every variant]`, and `verdict: 'none-good'`.

@@ -741,7 +741,7 @@ const HELP = [
     cmd: 'showdown',
     text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
                 [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--random-patches]
-                [--ref-dir <path>] [--midi-dir <path>] [--theory] [--seconds S]
+                [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
                                                           source — engine (the role's seed phrase, soloed, through
@@ -792,6 +792,16 @@ const HELP = [
                                                           keeps the bank) — the figureSource:'theory' arm that
                                                           blind-compares theory vs bank vs midi composition with
                                                           the sound source held constant (research 124 §C.7).
+                                                          With --ca2 the pitched sources draw figures from
+                                                          Composer's Assistant 2 composing OVER that theory chord
+                                                          track (research 124 §A.4's LLM-as-orchestrator: our code
+                                                          picks key/chords/register/density, the model proposes
+                                                          notes; the theory layer's register/scale guards and
+                                                          pre-render lint then gate it, reseeding up to 3x on a
+                                                          gross failure). drum-loop keeps the bank; CA2's install
+                                                          and weights live OUT of the repo (BEAT_CA2_DIR /
+                                                          BEAT_CA2_PYTHON) and a missing install fails the batch
+                                                          loudly — see beat showdown --ca2-doctor.
                                                           Clips are duration-matched (trim/pad;
                                                           --seconds overrides the shortest-clip default) and
                                                           loudness-normalized to a
@@ -815,7 +825,12 @@ const HELP = [
         keep them outside any repo): the tool only ever READS them, midi-figure batches get the
         generated .gitignore gate, the manifest records the midi path/transposition as a local
         reference only, and the shared scores log records only figureSource:'midi'|'bank' — never
-        a song title, artist, or path.`,
+        a song title, artist, or path.
+        --ca2 needs an out-of-repo Composer's Assistant 2 install (MIT code, 716MB release
+        weights): BEAT_CA2_DIR -> its Scripts/composers_assistant_v2 dir, BEAT_CA2_PYTHON -> a
+        venv python with python/requirements-ca2.txt. Weights never enter the repo. CA2's training
+        set is public-domain/permissive MIDI only (research 124 §A.3), so ca2 batches carry no
+        third-party-content posture: no gitignore gate, and the log records figureSource:'ca2'.`,
   },
   {
     cmd: 'prodtask',
@@ -1416,6 +1431,38 @@ function formatSurgeDoctor(report) {
     if (report.error) lines.push(`error: ${report.error}`)
     if (surgepy.fix) lines.push(`fix: ${surgepy.fix}`)
   }
+  return lines.join('\n') + '\n'
+}
+
+/** Human-readable `beat showdown --ca2-doctor`: the interpreter, the out-of-repo CA2 checkout and
+ * weights, the python packages, and the result of one tiny REAL generation — the smoke line is the
+ * gate, since a present checkout with a broken venv still can't compose. */
+function formatCA2Doctor(report) {
+  const lines = []
+  lines.push(`interpreter: ${report.interpreter ?? '(unknown)'}${report.pythonVersion ? ` (python ${report.pythonVersion})` : ''}`)
+  if (report.pythonFound === false) {
+    lines.push('python: NOT FOUND (set BEAT_CA2_PYTHON)')
+    if (report.error) lines.push(`error: ${report.error}`)
+    if (report.fix) lines.push(`fix: ${report.fix}`)
+    return lines.join('\n') + '\n'
+  }
+  lines.push(`ca2 checkout: ${report.ca2DirFound ? report.ca2Dir : 'NOT FOUND (set BEAT_CA2_DIR)'}`)
+  lines.push(`weights: ${report.weightsFound ? report.modelDir : 'NOT FOUND (set BEAT_CA2_MODEL)'}`)
+  const pkgs = report.packages ?? {}
+  const pkgLine = Object.keys(pkgs).length > 0
+    ? Object.entries(pkgs).map(([n, ok]) => `${n}${ok ? '' : ' MISSING'}`).join(', ')
+    : '(not probed)'
+  lines.push(`packages: ${pkgLine}`)
+  if (report.device) lines.push(`device: ${report.device}`)
+  const smoke = report.smoke
+  if (smoke) {
+    lines.push(smoke.ok
+      ? `smoke generation: ok (${smoke.notes} notes in ${smoke.wallSeconds}s on ${smoke.device})`
+      : `smoke generation: FAILED — ${smoke.error}`)
+  }
+  lines.push(report.available === true ? 'ca2 figures: READY (beat showdown <dir> --ca2)' : 'ca2 figures: NOT AVAILABLE')
+  if (report.error) lines.push(`error: ${report.error}`)
+  if (report.available !== true && report.fix) lines.push(`fix: ${report.fix}`)
   return lines.join('\n') + '\n'
 }
 
@@ -2147,7 +2194,7 @@ function flagValue(argv, flag) {
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
   const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--gen-provider', '--ref-dir', '--midi-dir', '--seconds', '--log']
-  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure', '--random-patches', '--theory'])
+  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure', '--random-patches', '--theory', '--ca2', '--ca2-doctor'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const dir = positional[0]
@@ -2160,6 +2207,18 @@ async function showdownCmd(argv) {
     const { surgeDoctor } = await import('../dist/src/analysis/surge.js')
     const report = await surgeDoctor()
     process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : formatSurgeDoctor(report))
+    return
+  }
+
+  // ---- CA2 diagnostics -------------------------------------------------------------------------
+  // CA2's checkout + its 716MB release weights live outside the repo; this reports exactly which
+  // of (checkout, weights, python packages) is missing AND runs one tiny real generation, so
+  // "--ca2 is ready" is proven rather than assumed. Same spirit as --surge-doctor / analyze --doctor.
+  if (argv.includes('--ca2-doctor')) {
+    const { ca2Doctor } = await import('../dist/src/taste/ca2.js')
+    const report = await ca2Doctor({ smoke: true })
+    process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : formatCA2Doctor(report))
+    if (report.available !== true) process.exitCode = 1
     return
   }
 
@@ -2266,6 +2325,28 @@ async function showdownCmd(argv) {
   const theoryOn = argv.includes('--theory')
   const theoryMod = theoryOn ? await import('../dist/src/taste/theory.js') : null
   if (theoryOn) process.stderr.write(`theory figures: composed pitched sources draw from the theory-aware layer (bank fallback for drum-loop)\n`)
+
+  // The CA2 figure source (research 124 §A.4, 125 §4, src/taste/ca2.js): --ca2 mirrors --theory
+  // exactly — the same pitched roles, the same per-role exclude chain, drum-loop keeps the bank —
+  // except the notes come from Composer's Assistant 2 composing OVER the theory layer's chord
+  // track (our code decides key/chords/register/density; the model proposes notes; the theory
+  // layer's register/scale guards and pre-render lint gate the result and reseed up to 3x on a
+  // gross failure). CA2's training data is public-domain/permissive MIDI only, so ca2 batches are
+  // NOT gitignore-gated. UNLIKE --midi-dir/--theory this flag does NOT degrade: a missing install
+  // fails the whole run here, loudly, rather than silently substituting bank figures and quietly
+  // corrupting the figureSource arm the batch exists to measure.
+  const ca2On = argv.includes('--ca2')
+  const ca2Mod = ca2On ? await import('../dist/src/taste/ca2.js') : null
+  if (ca2On) {
+    const report = await ca2Mod.ca2Doctor()
+    if (!ca2Mod.ca2Available(report)) {
+      const missing = Array.isArray(report.missing) && report.missing.length > 0 ? 'missing python packages: ' + report.missing.join(', ') : null
+      const why = report.error ?? [report.ca2DirFound ? null : 'no CA2 checkout (BEAT_CA2_DIR)', report.weightsFound ? null : 'no weights (BEAT_CA2_MODEL)', missing].filter(Boolean).join('; ')
+      throw new BeatEditError(`--ca2: Composer's Assistant 2 is unavailable (${why || 'unknown'}) — run "beat showdown --ca2-doctor" for the full report. ${ca2Mod.CA2_SETUP_HINT}`)
+    }
+    process.stderr.write(`ca2 figures: composed pitched sources draw from Composer's Assistant 2 over the theory chord track (${report.model ?? 'unjoined/infill'} on ${report.device}; bank fallback for drum-loop)\n`)
+  }
+  if (ca2On && theoryOn) process.stderr.write(`note: --ca2 outranks --theory on pitched roles (both build the same chord track; ca2 fills it with the model)\n`)
 
   // Resolve surge availability + the factory patch catalogue ONCE (not per batch): a doctor probe,
   // then the patch listing. On any failure surge is disabled for the whole run with one warning —
@@ -2436,12 +2517,25 @@ async function showdownCmd(argv) {
         const drawnFigures = []
         let batchUsedMidi = false
         let batchUsedTheory = false
-        const drawComposed = (seedOffset) => {
+        let batchUsedCA2 = false
+        const drawComposed = async (seedOffset) => {
           const exclude = [...runExclude, ...drawnFigures]
-          // --theory: pitched roles draw from the theory-aware layer; drum-loop has no theory
-          // generator, so it keeps the archetype bank (same posture as --midi-dir's drum-loop).
+          // --ca2: pitched roles draw from Composer's Assistant 2 composing over the theory chord
+          // track; drum-loop has no CA2 generator (CA2 is a pitched multi-track infiller, dotbeat's
+          // drums are a kit-mapped grid), so it keeps the archetype bank — the same posture
+          // --theory and --midi-dir take. A CA2 failure PROPAGATES: no silent bank substitution.
           let composed
-          if (theoryMod !== null && spec.role !== 'drum-loop' && pitchedKey !== null) {
+          if (ca2Mod !== null && ca2Mod.isCA2Role(spec.role) && pitchedKey !== null) {
+            composed = await ca2Mod.composeCA2Phrase(spec.role, pitchedKey, batchSeed + seedOffset, { exclude, bpm: batchBpm })
+            batchUsedCA2 = true
+            const c = composed.ca2
+            process.stderr.write(`ca2 [${spec.role} ${composed.archetype}]: ${composed.notes.length} notes in ${c.wallSeconds}s on ${c.device}` +
+              `${c.reseeds > 0 ? `, ${c.reseeds} reseed(s) after a lint rejection` : ''}` +
+              `${c.corrections.scaleSnapped + c.corrections.registerLifted + c.corrections.rangeFolded > 0
+                ? `, guards corrected ${c.corrections.scaleSnapped} out-of-key / ${c.corrections.registerLifted} sub-register / ${c.corrections.rangeFolded} out-of-range note(s)` : ''}` +
+              ` (raw scale-consistency ${c.corrections.rawScaleConsistency.toFixed(2)})\n`)
+            if (composed.lint?.flags?.length) process.stderr.write(`lint [${spec.role} ${composed.archetype}]: ${composed.lint.flags.join('; ')} (reseed budget exhausted)\n`)
+          } else if (theoryMod !== null && spec.role !== 'drum-loop' && pitchedKey !== null) {
             composed = theoryMod.composeTheoryPhrase(spec.role, pitchedKey, batchSeed + seedOffset, { exclude })
             batchUsedTheory = true
             // pre-render lint (gross-error gates only — flag, never score): warn if the theory
@@ -2481,7 +2575,7 @@ async function showdownCmd(argv) {
             }
             process.stderr.write(`warning: no usable ${midiPart} midi figure — ${spec.role} falls back to the archetype bank\n`)
           }
-          return { composed: drawComposed(seedOffset), midi: null }
+          return { composed: await drawComposed(seedOffset), midi: null }
         }
         // honest per-clip figure description for the manifest `from` (the midi path and the
         // transposition are LOCAL provenance — the shared log only ever sees figureSource)
@@ -2772,11 +2866,12 @@ async function showdownCmd(argv) {
         rmSync(workDir, { recursive: true }) // never leave a scoreable work batch for beat rate to find
         // figureSource: 'midi' when ANY composed clip drew a midi figure (a partial bank
         // fallback still taints the batch's composition provenance) — gitignore-gates the dir
-        // and puts the label (nothing else) in the scores log via scoreBatch. 'theory' when the
-        // theory-aware layer supplied the figures (internally composed — no gitignore gate);
-        // 'bank' otherwise. midi outranks theory when both are live (midi's provenance is the
-        // stricter constraint the gate exists for).
-        const figureSource = batchUsedMidi ? 'midi' : batchUsedTheory ? 'theory' : 'bank'
+        // and puts the label (nothing else) in the scores log via scoreBatch. 'ca2' when
+        // Composer's Assistant 2 supplied them, 'theory' when the theory-aware layer did (both
+        // internally composed / permissively licensed — no gitignore gate); 'bank' otherwise.
+        // midi outranks both when live (its provenance is the stricter constraint the gate exists
+        // for), and ca2 outranks theory (ca2 IS theory's chord track, filled by the model).
+        const figureSource = batchUsedMidi ? 'midi' : batchUsedCA2 ? 'ca2' : batchUsedTheory ? 'theory' : 'bank'
         showdown.writeShowdownBatch(outDir, spec.role, files, { seed: batchSeed, figureSource })
         const match = showdown.matchClipDurations(outDir, files.map((f) => f.file), targetSeconds !== undefined ? { targetSeconds } : {})
         process.stdout.write(`${outDir}/: ${files.length} clips (${clips.map((c) => c.kind).sort().join(' vs ')}), duration-matched to ${match.targetSeconds}s`)
