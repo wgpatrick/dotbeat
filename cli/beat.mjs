@@ -2622,7 +2622,17 @@ async function showdownCmd(argv) {
         // showdown round's gen clip isn't recognizable by always being the same musical
         // character (owner, 2026-07-21).
         const phraseSubject = genSubjectVaried(spec.phraseSubjectId, rng)
-        const genPrompt = `${phraseSubject.subject}, ${style}, ${batchBpm} BPM`
+        // Long-form full-track providers (Lyria) weigh GENRE/ERA first (Google's own prompt
+        // guide) — genre-led prompts summon full arrangements regardless of prose isolation or
+        // negative_prompt (owner rating passes, 2026-07-25). For those providers the prompt
+        // leads with an instrument-first solo framing; the varied subject follows as color.
+        const soloLead = {
+          bassline: 'Instrumental. A completely solo, unaccompanied bass recording — one single instrument, nothing else. ',
+          melody: 'Instrumental. A completely solo, unaccompanied synth lead recording — one single instrument, nothing else. ',
+          chords: 'Instrumental. A completely solo, unaccompanied keyboard chords recording — one single instrument, nothing else. ',
+        }[spec.phraseSubjectId]
+        const longFormProvider = genProvider !== undefined && /lyria/.test(genProvider)
+        const genPrompt = `${longFormProvider && soloLead ? soloLead : ''}${phraseSubject.subject}, ${style}, ${batchBpm} BPM`
         const genDir = join(workDir, 'gen')
         await lib.genSourceBatch({
           beatFile: seedPath,
