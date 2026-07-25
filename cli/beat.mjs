@@ -4877,6 +4877,19 @@ async function lintCmd(argv) {
   if (refPath !== undefined && !existsSync(refPath)) {
     throw new BeatEditError(`no profile at ${refPath} — write one with: beat metrics <ref.wav> --save-profile ${refPath}`)
   }
+  // Friendlier than parseProfile's generic "not a mix profile": if the user hands lint an ARC
+  // profile, point them at the command that actually consumes it (arc comparison is section-shaped).
+  if (refPath !== undefined) {
+    let peek
+    try {
+      peek = JSON.parse(readFileSync(refPath, 'utf8'))?.format
+    } catch {
+      // not JSON — let parseProfile raise its own friendly error below
+    }
+    if (peek === ARC_FORMAT) {
+      throw new BeatEditError(`${refPath} is an energy-ARC profile — arc comparison is section-shaped: beat feedback <file>.beat --sections --ref ${refPath} (lint --ref takes a whole-mix profile from \`beat metrics --save-profile\`)`)
+    }
+  }
   const { channels, sampleRate } = decodeWav(readFileSync(file))
   // Pilot 103: fix lines used to hardcode a `song.beat` placeholder that reads like a real file.
   // With --doc, they cite the actual .beat; without it, an honest `<file.beat>` placeholder.
