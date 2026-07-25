@@ -104,6 +104,11 @@ export function buildBoardDetail(batch, computeBatchFeatures) {
   })
   const features = {}
   for (const [file, fv] of Object.entries(rawFeatures)) features[file] = displayFeatures(fv)
+  // Broken-render tripwire (pilot finding): if every candidate that HAS a feature vector measures
+  // as digital silence (LUFS clamped to the -80 floor), the renders are almost certainly missing or
+  // broken — say so instead of letting the owner audition silence deadpan.
+  const featVals = Object.values(features)
+  const silentRenders = featVals.length > 0 && featVals.every((f) => f !== null && f.lufs <= -79)
   return {
     id: dir,
     label: batchLabel(manifest),
@@ -113,6 +118,7 @@ export function buildBoardDetail(batch, computeBatchFeatures) {
     prompt: manifest.prompt ?? null,
     count: manifest.variants.length,
     warnLarge: manifest.variants.length > 4,
+    silentRenders,
     hasContext: candidates.length > 0 && candidates.every((c) => c.context !== null),
     candidates,
     features,
@@ -230,7 +236,10 @@ async function show(){
   detail=await (await fetch('/api/board?id='+encodeURIComponent(queue[idx].id))).json()
   $('prog').textContent='board '+(idx+1)+' of '+queue.length
   $('title').textContent=detail.label
-  $('warn').innerHTML=detail.warnLarge?'<div class="warn">'+detail.count+' candidates — boards read best at 2-4 (fatigue is the documented failure mode). the agent should shortlist finalists.</div>':''
+  let warn=''
+  if(detail.silentRenders)warn+='<div class="warn" style="border-color:var(--danger);background:rgba(224,108,117,0.14)">every candidate measures as digital silence — the renders are probably missing or broken. re-render before deciding.</div>'
+  if(detail.warnLarge)warn+='<div class="warn">'+detail.count+' candidates — boards read best at 2-4 (fatigue is the documented failure mode). the agent should shortlist finalists.</div>'
+  $('warn').innerHTML=warn
   render()
 }
 function provHtml(p){

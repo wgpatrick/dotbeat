@@ -132,6 +132,9 @@ test('recordRejectAll REQUIRES a note (the reject-with-feedback rule) and reject
   const df = readDecisionFile(batchA)!
   assert.equal(df.decision, 'reject-all')
   assert.equal(df.none, 'all too bright, need darker', 'reject-all fills the doc-128 none slot')
+  // pilot fix: the reason lives once, in `none` — not echoed into `note` and every rejected[] too
+  assert.equal(df.note, undefined, 'reject-all decision.json does not duplicate the reason in note')
+  assert.ok(df.rejected.every((r) => r.note === undefined), 'and not on every rejected variant either')
 })
 
 test('decidedBatchDirs scans the log; SKIP leaves a batch undecided', () => {

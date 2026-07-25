@@ -152,13 +152,17 @@ function land(
   const features = computeBatchFeatures(dir, manifest.variants.map((v) => v.file))
   if (Object.keys(features).length > 0) entry.features = features
 
+  // decision.json is the COMPACT agent answer: one place per fact. A pick carries its optional
+  // `note`; a reject-all carries its required reason in `none` (the doc-128 §2.1 slot) and NOT also
+  // in `note` — the pilot found the same string echoed three ways (note + none + every rejected[])
+  // cryptic. The full per-variant reject notes live in the log entry (the training record), not here.
   const file: DecisionFile = {
     decided_at: entry.t,
     board_id: basename(dir),
     decision: entry.decision,
     ...(entry.picks[0] !== undefined ? { pick: entry.picks[0].variant } : {}),
-    rejected: entry.rejected,
-    ...(entry.note !== undefined ? { note: entry.note } : {}),
+    rejected: entry.rejected.map((r) => ({ variant: r.variant })),
+    ...(entry.decision === 'pick' && entry.note !== undefined ? { note: entry.note } : {}),
     ...(entry.decision === 'reject-all' && entry.note !== undefined ? { none: entry.note } : {}),
   }
 
