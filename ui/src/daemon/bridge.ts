@@ -1086,6 +1086,29 @@ export function initBridge(): void {
       console.warn('[daw] bad undo-state event payload:', err)
     }
   })
+  events.addEventListener('focus', (e) => {
+    // research/128 §2.2: the agent's `POST /focus` deep link (via `beat open`), broadcast to every
+    // connected GUI. Map it onto the SAME layout state a hand action would touch (applyFocus →
+    // selectedTrackId + Clip/Device pane + Mixer overlay + the scroll/param-flash epoch), then fire
+    // the two daemon round-trips a manual track-header click also fires (clickHeader in
+    // ArrangementView.tsx: write `selected_track` to the file and POST the D2 pointing selection) so
+    // that after an agent focus and a hand click the app is in an indistinguishable state — no
+    // parallel selection concept, per the coordinator directive.
+    try {
+      const f = JSON.parse((e as MessageEvent).data) as {
+        track?: string
+        view?: 'clip' | 'device' | 'mixer' | 'arrangement'
+        param?: string
+      }
+      useStore.getState().applyFocus(f)
+      if (f.track) {
+        postEdit('selected_track', f.track)
+        postSelection({ tracks: [f.track] })
+      }
+    } catch (err) {
+      console.warn('[daw] bad focus event payload:', err)
+    }
+  })
   events.addEventListener('parse-error', (e) => {
     const msg = (JSON.parse((e as MessageEvent).data) as { message: string }).message
     console.warn('[daw] file edit did not parse:', msg)

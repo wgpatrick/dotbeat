@@ -150,6 +150,21 @@ interface DawState {
    * of a shared clock. Session-only, like every other GUI-inference field here; resets on reload
    * (a fresh mount re-derives straight from the live document instead, see MacroKnob/PresetPicker). */
   presetEpoch: Record<string, number>
+  /** research/128 §2.2 deep links: a monotonic counter bumped every time the agent's `POST /focus`
+   * lands here via the `focus` SSE event (bridge.ts). It exists so a repeat focus on the SAME
+   * track/param still re-triggers the arrangement scroll + the SynthPanel param flash even when the
+   * values are byte-identical — the same "the number is meaningless, only a CHANGE in it is" idiom
+   * `presetEpoch`/`currentStep` already use. Session-only, resets on reload. */
+  focusEpoch: number
+  /** The track id a focus event asked the ArrangementView to scroll into view (null = none yet).
+   * Read alongside `focusEpoch`; the actual track SELECTION still goes through the ordinary
+   * `selectedTrackId` above, so an agent-focused track and a hand-clicked one are indistinguishable
+   * afterward — this is only the "scroll it into view" hint, not a second selection concept. */
+  focusTrackId: string | null
+  /** The synth param key a focus event asked SynthPanel to flash in the Device pane (null = none).
+   * Consumed by SynthPanel, which flashes the group card holding the param and the control itself,
+   * reusing the existing `param-group-flash` transition — see SynthPanel.tsx. */
+  focusParam: string | null
 
   setDoc: (doc: BeatDocument) => void
   setConnected: (c: boolean) => void
@@ -174,6 +189,14 @@ interface DawState {
   setAuditioning: (trackId: string | null) => void
   setUndoState: (s: { canUndo: boolean; canRedo: boolean }) => void
   bumpPresetEpoch: (trackId: string) => void
+  /** research/128 §2.2: apply an agent `focus` deep link onto existing layout state — select the
+   * track (the SAME `selectedTrackId` a header click sets), open the right bottom-pane tab (reusing
+   * the Clip/Device mechanism Shift+Tab drives), raise the Mixer overlay for view 'mixer', and arm
+   * the scroll/param-flash via `focusEpoch`. Deliberately maps onto the store fields the GUI already
+   * has rather than inventing parallel view state (coordinator directive). The daemon round-trips a
+   * header click also performs (POST /selection, `selected_track` edit) are added by bridge.ts's
+   * handler so agent-focus and hand-click end in the same place. */
+  applyFocus: (f: { track?: string | null; view?: 'clip' | 'device' | 'mixer' | 'arrangement' | null; param?: string | null }) => void
 }
 
 export const useStore = create<DawState>((set) => ({
@@ -202,6 +225,9 @@ export const useStore = create<DawState>((set) => ({
   selectedSectionIndex: null,
   selectedPlacement: null,
   presetEpoch: {},
+  focusEpoch: 0,
+  focusTrackId: null,
+  focusParam: null,
 
   setDoc: (doc) =>
     set((s) => {
@@ -247,6 +273,33 @@ export const useStore = create<DawState>((set) => ({
   setAuditioning: (auditioningTrackId) => set({ auditioningTrackId }),
   setUndoState: ({ canUndo, canRedo }) => set({ canUndo, canRedo }),
   bumpPresetEpoch: (trackId) => set((s) => ({ presetEpoch: { ...s.presetEpoch, [trackId]: (s.presetEpoch[trackId] ?? 0) + 1 } })),
+  applyFocus: ({ track, view, param }) =>
+    set((s) => {
+      const patch: Partial<DawState> = { focusEpoch: s.focusEpoch + 1, focusParam: param ?? null }
+      if (track) {
+        patch.selectedTrackId = track
+        patch.focusTrackId = track
+      }
+      // A param names a synth control, which lives in the Device pane — so a param focus implies
+      // Device even when the caller didn't spell out a view. An explicit non-device view still wins
+      // for the pane, but the param is armed regardless (harmless if the pane is elsewhere).
+      const wantsDevice = view === 'device' || (param != null && view == null)
+      if (view === 'clip') {
+        patch.bottomPane = 'clip'
+        patch.bottomPaneOpen = true
+      } else if (wantsDevice) {
+        patch.bottomPane = 'device'
+        patch.bottomPaneOpen = true
+      } else if (view === 'arrangement') {
+        // Just re-open the pane on the newly-selected track and let the scroll (focusEpoch) run;
+        // the arrangement is always the main area, so there is no pane to switch to.
+        patch.bottomPaneOpen = true
+      }
+      // The Mixer is an on-demand overlay (App.tsx) — a focus onto it OPENS it (never toggles, so a
+      // second mixer-focus is idempotent), reusing the same `mixerOpen` flag the topbar button drives.
+      if (view === 'mixer') patch.mixerOpen = true
+      return patch
+    }),
 }))
 
 /** A track is effectively silenced iff it is explicitly muted, OR any track is soloed and this one
