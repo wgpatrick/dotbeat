@@ -143,6 +143,87 @@ description + suspected stem (if any)**. Each complaint triggers, in order:
 3. **Report it** — thresholds plus the before/after pair go in the final report so a permanent
    lint rule can be added. The same failure must never be shipped to ears twice.
 
+## Working with the owner: the session rhythm
+
+The checkpoint-listen protocol above says *when* the owner listens. This says what the owner does
+with their turn and how you find out — the GUI-era handoff (research 128). It is a **file
+protocol**, not a feeling: every handoff is a file in the workshop dir, so a dead session's
+successor reconstructs the whole state from files alone. **The GUI is the owner's home surface** —
+they pick, tune, and edit there; you meet them where they already are, and every brief hands them a
+one-click way in.
+
+**Handoff OUT — at every checkpoint-listen milestone, write `workshop/BRIEF.md`.** One screen. It
+is the turn token and the record of which checkpoint the owner's session starts from. It contains,
+in order:
+
+1. **What just finished** — the phase you closed and **which checks passed** (the phase-6 gauntlet
+   lines, green). One line each; the owner should not have to re-derive that the mix is clip-safe.
+2. **The listening packet** — the file list from the checkpoint-listen protocol, each excerpt with
+   a one-line "listen for X" (paths, not prose).
+3. **Option boards** — the phase's open picks as boards. `beat board` is the intended surface (a
+   per-batch page: 2-4 finalists, provenance + measurements, in-context renders, pick /
+   reject-with-note, writes `decision.json`) — it is being built on a sibling branch, so **check
+   `beat help` for it**. Manual fallback until it lands: list the candidate render paths under each
+   open pick and ask the owner to reply with the winner's name (you record the pick into NOTES.md
+   yourself).
+4. **Deep links — the owner's way into the GUI.** For every suspect track and every board winner,
+   a copy-pasteable `beat open` line (this shipped — item 5, research 128 §2.2):
+   `beat open <file.beat> --track <id> --view device --param <knob>` drops them onto the exact
+   control to fine-tune; `--view clip` for note edits; `--view mixer` for balance. Assume a daemon
+   is (or should be) running on port 8420; if none is, `beat open` prints the one line that starts
+   one. Present these as the primary invitation — "open the lead's cutoff and taste it" — not a
+   footnote to the CLI.
+5. **What you are LEAST sure of** — your uncertainty list, which is the owner's triage list (same
+   rule as the one-screen brief above).
+6. A final literal line: **`state: awaiting-owner @ <checkpoint-ref>`** — the pinned ref their
+   session diffs against.
+
+Then **block, or do only explicitly-reversible work** while awaiting-owner (unchanged from the
+checkpoint-listen protocol). The gated resource is owner ears, not file safety — everything is
+git-reversible, so run free *between* checkpoints; never touch a track the owner has open (read
+`beat selection` to see what is in focus during a co-present session).
+
+**The owner's return path** — they pick on boards (a `decision.json` lands in each batch dir), and/
+or fine-tune synths/melodies/arrangement directly in the GUI (the daemon captures every knob turn
+as one canonical line — their edits are already in the file and already checkpoint-able), and/or
+write complaints into `workshop/FEEDBACK.md` in the capture format (timestamp/section + description
++ suspected stem) — or say them in chat, which you transcribe into FEEDBACK.md so the record
+survives the session. They end their turn with the GUI's **Save checkpoint** button (or a chat
+"done") — that checkpoint bounds your diff.
+
+**Handoff BACK — your wake-up ritual, in order (chat is the wake channel, per D14):**
+
+1. **Read board decisions** — glob the open batch dirs for `decision.json`; each names a pick,
+   runner-up, and reject notes.
+2. **Diff the owner's session** — `beat diff --since <the awaiting-owner ref> --rollup`: the net
+   per-param before→after with tweak counts, the session's *story* not its hundreds of debounced
+   lines. `--since`/`--rollup` are being built on a sibling branch — **check `beat help`**; until
+   they land, fall back to `beat diff --git <awaiting-owner-ref> <now> <file>` and do the grouping
+   by hand (net endpoint per track+param; a param the owner dithered on many times is one they
+   care about and struggled with — flag it either way).
+3. **Read `workshop/FEEDBACK.md`** — the complaints; each still triggers the localize → metric
+   signature → permanent-lint-rule loop from the checkpoint-listen protocol.
+4. **Interpret owner edits into NOTES.md** — one paragraph of *musical* reading, not a re-log of
+   the rollup: "owner brightened the bass +100 Hz cutoff and pulled the lead −2 dB — my mix was
+   dark and lead-heavy." The rollup is *what* changed; you supply *why*.
+5. **NEVER revert an owner edit — it is ground truth.** If an owner tweak breaks a lint gate or a
+   phase-3 target (a fader push that clips the master), *raise it in the next brief with the
+   measurement and propose — never apply — the fix.* The only exception is a mechanical repair the
+   owner explicitly asked for. (Owner edits are the cheapest high-signal taste data the project
+   collects; reverting one silently discards it and breaks trust.)
+6. **Convert repeated corrections into `workshop/PREFERENCES.md`** — when rollups across sessions
+   repeat a directional fix (air band up on pads, twice; hats un-quantized, every time), record it
+   with evidence (dates, before/afters) and, where a threshold is expressible, propose a lint rule
+   — preference-per-correction, the sibling of the complaint→lint loop.
+7. **Proceed, then update the state line** — adopt the winners (`beat adopt <batch> <pick>` so the
+   checkpoint that lands them records the intent), do the next phase's work, and replace the
+   `state:` line when you next hand off.
+
+Where the handoffs live, in one line: **BRIEF.md (you→owner) · boards + decision.json (owner→you,
+picks) · FEEDBACK.md (owner→you, complaints) · owner GUI edits (ground truth, read via
+`diff --since --rollup`) · the checkpoint stream (turn boundaries) · NOTES.md / PREFERENCES.md (the
+accumulated understanding).** All text, all in git's reach, all reconstructable.
+
 ## Capability truth — tools that lie cost more than tools that are absent
 
 - **Clip automation is currently defeated in offline renders**: `applyParams` stomps automated

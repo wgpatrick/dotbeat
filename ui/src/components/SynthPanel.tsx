@@ -33,8 +33,18 @@ function inactiveHintFor(p: BeatTrack['synth'], spec: ParamSpec): string | null 
   return null
 }
 
+// research/128 §2.2: the last store `focusEpoch` a param deep link actually flashed for. Module
+// scope on purpose — only one SynthPanel mounts at a time (the bottom Device pane), and this must
+// survive the panel unmount/remount that toggling Clip↔Device causes, so a focus flashes exactly
+// once even when it is the focus itself that opened the Device pane and mounted this panel.
+let flashedFocusEpoch = -1
+
 /** One control, dispatched by spec.kind. */
-function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec; trackIds: string[] }) {
+// `flash` (research/128 §2.2): true for exactly the one control an agent `beat open --param <key>`
+// deep link pointed at, for one moment — it adds the `param-flash` accent-outline animation (the
+// per-control sibling of the group card's `param-group-flash`, same keyframe feel) so the owner's eye
+// lands on the precise knob, not just the group. Purely additive; every other control renders as before.
+function Control({ track, spec, trackIds, flash = false }: { track: BeatTrack; spec: ParamSpec; trackIds: string[]; flash?: boolean }) {
   const p = track.synth
   const path = `${track.id}.${spec.key}`
 
@@ -45,7 +55,7 @@ function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec;
     // dimmed-knob precedent: you can still change a value that isn't currently driving the sound).
     const enumHint = inactiveHintFor(p, spec)
     return (
-      <label className={`param-enum ${enumHint ? 'param-inactive' : ''}`} title={enumHint ? `${spec.hint ? spec.hint + ' — ' : ''}${enumHint}` : spec.hint}>
+      <label className={`param-enum ${enumHint ? 'param-inactive' : ''}${flash ? ' param-flash' : ''}`} title={enumHint ? `${spec.hint ? spec.hint + ' — ' : ''}${enumHint}` : spec.hint}>
         <span className="knob-label">{spec.label}</span>
         <select value={value} onChange={(ev) => postEdit(path, ev.target.value)}>
           {spec.values!.map((o) => (
@@ -64,7 +74,7 @@ function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec;
     // "true"/"false" — edit.ts's 'bool' SYNTH_FIELD kind parses exactly those two tokens.
     const value = p[spec.key] === true
     return (
-      <label className="param-enum" title={spec.hint}>
+      <label className={`param-enum${flash ? ' param-flash' : ''}`} title={spec.hint}>
         <span className="knob-label">{spec.label}</span>
         <input type="checkbox" checked={value} onChange={(ev) => postEdit(path, ev.target.checked ? 'true' : 'false')} />
       </label>
@@ -76,7 +86,7 @@ function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec;
     const raw = p[spec.key]
     const value = raw == null || raw === '' ? 'none' : String(raw)
     return (
-      <label className="param-enum" title={spec.hint}>
+      <label className={`param-enum${flash ? ' param-flash' : ''}`} title={spec.hint}>
         <span className="knob-label">{spec.label}</span>
         <select value={value} onChange={(ev) => postEdit(path, ev.target.value)}>
           <option value="none">none</option>
@@ -114,11 +124,13 @@ function Control({ track, spec, trackIds }: { track: BeatTrack; spec: ParamSpec;
   )
   // Only the handful of gated knobs (filter-env shape knobs, effect Mix knobs) get the extra
   // wrapper div — every other knob in the app renders exactly as before, unaffected by this change.
-  if (!inactiveHint) return knob
+  // A `flash`-targeted knob also takes the wrapper (the established `.knob-slot` layout, already
+  // known-safe inside the knob-row) so the accent-outline has an element to land on.
+  if (!inactiveHint && !flash) return knob
   return (
-    <div className="knob-slot knob-inactive" data-knob-inactive={spec.key}>
+    <div className={`knob-slot${inactiveHint ? ' knob-inactive' : ''}${flash ? ' param-flash' : ''}`} data-knob-inactive={inactiveHint ? spec.key : undefined}>
       {knob}
-      <div className="knob-inactive-hint">{inactiveHint}</div>
+      {inactiveHint && <div className="knob-inactive-hint">{inactiveHint}</div>}
     </div>
   )
 }
@@ -604,7 +616,21 @@ export function MacroRow({ track }: { track: BeatTrack }) {
 // Exported (Phase 26 Stream DC) so InstrumentPanel.tsx can render the same effectType-gated groups
 // (eq3/comp/distortion/bitcrush/eq7/autoFilter/... — see synthParams.ts's PARAM_GROUPS) instead of
 // reinventing the renderer.
-export function Group({ track, group, trackIds, highlight }: { track: BeatTrack; group: ParamGroup; trackIds: string[]; highlight: boolean }) {
+export function Group({
+  track,
+  group,
+  trackIds,
+  highlight,
+  flashKey = null,
+}: {
+  track: BeatTrack
+  group: ParamGroup
+  trackIds: string[]
+  highlight: boolean
+  /** research/128 §2.2: the one param key a `beat open --param` deep link pointed at, so the matching
+   * control inside this group flashes — null when no param focus targets this group. */
+  flashKey?: string | null
+}) {
   const ref = useRef<HTMLDetailsElement>(null)
   useEffect(() => {
     if (highlight && ref.current) {
@@ -623,7 +649,7 @@ export function Group({ track, group, trackIds, highlight }: { track: BeatTrack;
                 full-width sub-heading right before it, breaking the flat knob-row without a second
                 <details> card. `flex-basis: 100%` (styles.css) is what forces the row break. */}
             {spec.subLabel && <div className="knob-row-sublabel">{spec.subLabel}</div>}
-            <Control track={track} spec={spec} trackIds={trackIds} />
+            <Control track={track} spec={spec} trackIds={trackIds} flash={spec.key === flashKey} />
           </Fragment>
         ))}
       </div>
@@ -673,6 +699,25 @@ export function SynthPanel({ track }: { track: BeatTrack }) {
     return () => clearTimeout(t)
   }, [justAdded])
 
+  // research/128 §2.2 deep links: a `beat open --param <key>` sets focusParam + bumps focusEpoch in
+  // the store (via bridge.ts's focus handler). Flash the group holding that param, and the control
+  // itself, for one moment — reusing the SAME open+scroll+`param-group-flash` mechanism `justAdded`
+  // already drives for a freshly-added effect, so an agent-focused param and a just-added effect
+  // read identically. `flashedFocusEpoch` (module scope, one panel mounts at a time) makes the flash
+  // fire exactly ONCE per focus regardless of whether the Device pane was already open or was opened
+  // by this very focus — so re-opening Device later by hand never re-triggers a stale flash.
+  const focusParam = useStore((s) => s.focusParam)
+  const focusEpoch = useStore((s) => s.focusEpoch)
+  const [focusFlashKey, setFocusFlashKey] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusParam || focusEpoch === flashedFocusEpoch) return
+    flashedFocusEpoch = focusEpoch
+    setFocusFlashKey(focusParam)
+    const t = setTimeout(() => setFocusFlashKey(null), 1600)
+    return () => clearTimeout(t)
+  }, [focusEpoch, focusParam])
+  const flashGroupId = focusFlashKey ? groups.find((g) => g.params.some((p) => p.key === focusFlashKey))?.id : undefined
+
   return (
     <div className="synth-panel">
       <div className="editor-toolbar">
@@ -690,7 +735,14 @@ export function SynthPanel({ track }: { track: BeatTrack }) {
       {(kind === 'synth' || kind === 'drums') && <EffectChain track={track} onAdded={setJustAdded} />}
       <div className="param-groups">
         {groups.map((g) => (
-          <Group key={g.id} track={track} group={g} trackIds={trackIds} highlight={g.effectType === justAdded} />
+          <Group
+            key={g.id}
+            track={track}
+            group={g}
+            trackIds={trackIds}
+            highlight={g.effectType === justAdded || g.id === flashGroupId}
+            flashKey={g.id === flashGroupId ? focusFlashKey : null}
+          />
         ))}
       </div>
     </div>

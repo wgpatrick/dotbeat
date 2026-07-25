@@ -1456,6 +1456,12 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'done', status: 'done',
     research: null, plan: 'phase-13-editing.md',
   },
+  {
+    area: 'Selection protocol', feature: 'Agent→GUI deep links (beat open + daemon /focus)',
+    description: 'Research 128 §2.2: the sibling of /selection in the other direction — the agent points the owner AT a spot instead of reading where they are. A daemon `POST /focus {track?, clip?, view?, param?}` validates against the live doc (unknown track → 400 with the known list) and broadcasts a `focus` event on the existing /events SSE stream — no router. The GUI mirrors it onto the SAME layout state a hand action touches (select the track via selectedTrackId, open the Clip/Device pane the Shift+Tab toggle drives, raise the Mixer overlay, scroll the arrangement, and flash the named SynthPanel control with a per-control sibling of param-group-flash) so an agent-focused track and a hand-clicked one are indistinguishable afterward. `beat open <file> [--track] [--view device|clip|mixer|arrangement] [--param] [--port] [--gui-url]` POSTs /focus if a daemon is reachable and prints the GUI URL (?daw=port), else prints how to start one — no auto-spawn in v1; exit 0 focused, 3 no daemon. Honest gap: surge tracks have no GUI panel to deep-link to. Playwright verify covers the full round-trip.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/128-agent-owner-gui-loop.md', plan: null,
+  },
 
   // ── Drag & drop (cross-cutting) ───────────────────────────────────────────
   // Research 74 found dotbeat has five real drag-and-drop implementations (library→track/lane,
@@ -2085,6 +2091,12 @@ export const rows = [
   },
 
   {
+    area: 'Known usability gaps (backlog)', feature: 'beat open: find a daemon on another port instead of dead-ending',
+    description: 'CLI pilot on `beat open` (research/128, MEDIUM): with a daemon live on a non-default port (e.g. 8480), `beat open` on the default 8420 reports "no daemon" and instructs the user to start a SECOND daemon for the same file \u2014 a trap toward duplicate daemons on one project. It should detect a daemon already serving this file on a nearby/known port and suggest `--port <that>` rather than a fresh start (needs a way to ask a daemon which file it serves \u2014 the daemon exposes no path endpoint today, so a small `GET /file` or a local port registry is the enabling piece). The HIGH finding from the same pilot \u2014 an unvalidated `--param` typo returning a dead deep link \u2014 was fixed in-cycle (the daemon now 400s an unknown param). Lower-priority leftovers logged the same day: top-level `beat help` is a 72KB wall (a compact index + `--all` would help discovery, and is cross-cutting beyond this command).',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/128-agent-owner-gui-loop.md', plan: null,
+  },
+  {
     area: 'Known usability gaps (backlog)', feature: 'Pilot 104 low-severity leftovers (Phase 37 surface) \u2014 resolved in Phase 38 SD',
     description: 'The low/minor remainder of pilot 104, all three cleared by Phase 38 Stream SD: (1) `vary automation:<param>` gained an explicit `--clip <id>` selector (CLI + beat_vary MCP), documented in help/--groups (default still targets the first clip); (2) the harmless `404 Not Found` render page-error is now filtered from console forwarding while genuine JS exceptions and engine media-load warnings still surface; (3) `source add`/`ingest` now prints an explicit re-register note (replaced sha256 abc\u2026\u2192def\u2026, or "already registered (unchanged)") instead of silently replacing. Kept as a done-row for the citation trail.',
     core: 'done', cli: 'done', gui: 'na', status: 'done',
@@ -2341,5 +2353,11 @@ export const rows = [
     description: 'Live-verified onboarding skill that sets an agent up to drive dotbeat via MCP.',
     core: 'na', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: 'phase-17-cc-skill.md',
+  },
+  {
+    area: 'Agent onboarding', feature: 'Owner–agent session-rhythm protocol (produce-song skill)',
+    description: 'Research 128 §2.5, decision D29: the GUI-era hand-off loop codified as a FILE protocol in the produce-song skill, so a dead session\'s successor reconstructs it from files alone. At every checkpoint-listen milestone the agent writes workshop/BRIEF.md — what finished + which checks passed, the listening packet, option-board URLs (`beat board` intended surface with a list-and-pick-by-reply fallback), copy-pasteable `beat open` deep links presenting the GUI as the owner\'s home surface, the uncertainty triage list, and a literal `state: awaiting-owner @ <ref>` turn token. The owner picks on boards (decision.json), fine-tunes in the GUI, and/or writes workshop/FEEDBACK.md, ending with a checkpoint. The agent\'s wake-up ritual is a fixed checklist: read decisions → `beat diff --since <ref> --rollup` (with a `beat diff --git` fallback) → read FEEDBACK.md → interpret owner edits into NOTES.md → NEVER revert an owner edit (the ground-truth rule: flag with measurements, propose never apply) → mine repeated corrections into PREFERENCES.md → adopt winners → update the state line. Prompt/docs only.',
+    core: 'na', cli: 'na', gui: 'na', status: 'done',
+    research: 'research/128-agent-owner-gui-loop.md', plan: '.claude/skills/produce-song/SKILL.md',
   },
 ]

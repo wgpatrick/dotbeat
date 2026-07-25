@@ -9,6 +9,30 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D29 — the owner–agent session rhythm is a file protocol, and owner GUI edits are ground truth (2026-07-25)
+
+**The decision.** The hand-off loop between the agent's phase work and the owner's GUI/board
+session is codified as a **file protocol in the workshop dir** (`.claude/skills/produce-song/SKILL.md`,
+"Working with the owner: the session rhythm"), not left to improvisation: at every checkpoint-listen
+milestone the agent writes `workshop/BRIEF.md` (what finished + checks passed, the listening packet,
+option-board URLs, `beat open` deep links, the uncertainty list, and a literal
+`state: awaiting-owner @ <ref>` turn token); the owner picks on boards (`decision.json`), fine-tunes
+in the GUI, and/or writes `workshop/FEEDBACK.md`, ending their turn with a checkpoint; the agent's
+wake-up ritual is a fixed checklist — read decisions, `beat diff --since <ref> --rollup`, read
+feedback, interpret owner edits into NOTES.md, mine repeated corrections into `PREFERENCES.md`, adopt
+winners, update the state line. **The GUI is the owner's home surface**, and deep links
+(`beat open`, D-this-cycle / research 128 §2.2) meet them there.
+
+**The ground-truth rule (load-bearing).** *Owner edits are never reverted.* An owner tweak that
+breaks a lint gate or a phase-3 target is *raised in the next brief with the measurement and a
+proposed — never applied — fix*; the sole exception is a mechanical repair the owner asked for. The
+daemon's single-writer design already captures every GUI knob turn as one canonical line, so owner
+edits are the cheapest high-signal taste data the project collects; silently reverting one discards
+that signal and breaks trust. **Why now.** Research 128 operationalizes the log-don't-train verdict
+(116 §4) into a concrete loop the toy-song runs will exercise; the protocol is prompt/docs only (128
+§3 item 2, S-effort, the highest-ROI artifact class in this repo per 121) and every other item in
+128's build plan is *named* by it. Cites `research/128-agent-owner-gui-loop.md` §2.5/§2.2.
+
 ## D28 — full-song production runs follow the `produce-song` skill, not ad-hoc prompts (2026-07-24)
 
 **The decision.** Any agent asked to produce a complete song/cover uses the stage-gated workflow

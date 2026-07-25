@@ -1724,6 +1724,19 @@ export function ArrangementView() {
   // 16x/bar, so it's allowed in reactive state (docs/research/15 §2); only the lightweight playhead
   // div re-renders on it — the memoized row canvases don't (their effect deps exclude currentStep).
   const currentStep = useStore((s) => s.currentStep)
+  // research/128 §2.2 deep links: when the agent's `POST /focus` selects a track, scroll that track's
+  // row into view here — the selection itself is already handled by the ordinary `selectedTrackId`
+  // path (bridge.ts's focus handler), this only nudges the timeline so the newly-focused track is
+  // actually visible. Keyed on `focusEpoch` so a repeat focus on the same track re-scrolls; the row
+  // is found by its stable `data-track` attribute (the `.arr-lane` below), the same hook the verify
+  // scripts use. `block: 'nearest'` never yanks the view when the row is already on screen.
+  const focusEpoch = useStore((s) => s.focusEpoch)
+  const focusTrackId = useStore((s) => s.focusTrackId)
+  useEffect(() => {
+    if (!focusTrackId) return
+    const row = document.querySelector(`[data-track="${focusTrackId}"]`)
+    row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [focusEpoch, focusTrackId])
   // Phase 31 Stream KE item 1 (docs/research/90): the list-level coordinator behind the "rename
   // takes one double-click, not two" fix — see TrackRow's own comment on `renameRequest` for the
   // full root-cause writeup. Deliberately lives here, not per-row: a real double-click's second

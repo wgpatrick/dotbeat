@@ -154,6 +154,8 @@ const HELP_FAMILIES = [
   ['pilot', 'taste-eval', 'rate', 'score'], // the T5 overnight critic-guided QD search (docs/pilot.md, research/117)
   ['board', 'vary', 'adopt', 'rate'], // the NON-BLIND production picking loop (research/128): vary candidates -> board pick -> adopt (rate is the blind sibling)
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
+  ['daemon', 'open', 'selection'], // the running-GUI surface: serve a file, deep-link into it, read/set its selection
+
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
   ['add-note', 'rm-note', 'add-hit', 'rm-hit'],
@@ -1020,6 +1022,7 @@ const HELP = [
                                                           only how sections differ as isolated static mixes`,
   },
   // ---- Phase 37 Stream RA end -------------------------------------------------------------
+<<<<<<< HEAD
   {
     cmd: 'daemon',
     text: `  beat daemon <file> [--port 8420] [--edit-log]           two-way sync with a running dotbeat GUI;
@@ -1027,6 +1030,20 @@ const HELP = [
                                                           ~/.dotbeat/edit-log.jsonl (research/116 log-don't-train
                                                           telemetry, opt-in; = BEAT_EDIT_LOG=1)`,
   },
+=======
+  { cmd: 'daemon', text: `  beat daemon <file> [--port 8420]` },
+  {
+    cmd: 'open',
+    text: `  beat open <file.beat> [--track X] [--view device|clip|mixer|arrangement]
+                        [--param cutoff] [--port 8420] [--gui-url URL]
+                                                          deep-link the running GUI to a spot: if a daemon is reachable
+                                                          on --port, focus it (select the track, open the pane, flash
+                                                          the param — a --param always opens the device view) and print
+                                                          the GUI URL; if none is running, print how to start one. Exit
+                                                          0 focused, 3 no daemon. --param names a synth param (the ones
+                                                          beat inspect lists). GUI base is --gui-url / $BEAT_GUI_URL /
+                                                          http://localhost:5300` },
+>>>>>>> origin/focus-protocol
   { cmd: 'checkpoint', text: `  beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)` },
   {
     cmd: 'history',
@@ -5377,6 +5394,75 @@ async function selectionCmd(argv) {
   process.stdout.write(Object.keys(sel).length === 0 ? 'no selection\n' : serializeSelection(sel))
 }
 
+// research/128 §2.2: the agent→GUI deep-link wrapper. Turns a spot in the song ("the lead synth's
+// cutoff") into one copy-pasteable line a listening brief can hand the owner — the agent meets the
+// owner where the GUI already is. If a daemon for the file is serving on --port, POST /focus (the
+// daemon validates the track and broadcasts a `focus` event every connected GUI mirrors onto its
+// selection/pane/scroll) and print the GUI URL. If no daemon answers, print exactly how to start one
+// and the URL to open — v1 deliberately does NOT auto-spawn (a background daemon the owner didn't ask
+// for is worse than one honest instruction). Machine-friendly exit codes: 0 focused, 3 no daemon.
+async function openCmd(argv) {
+  const VALUED = ['--track', '--view', '--param', '--port', '--gui-url']
+  const flagVal = (name) => {
+    const i = argv.indexOf(name)
+    return i === -1 ? undefined : argv[i + 1]
+  }
+  const file = argv.find((a, i) => !a.startsWith('--') && !VALUED.includes(argv[i - 1]))
+  if (!file) throw new BeatEditError('open needs a <file.beat> — the project a daemon is (or will be) serving')
+
+  const track = flagVal('--track')
+  const view = flagVal('--view')
+  const param = flagVal('--param')
+  const port = Number(flagVal('--port') ?? 8420)
+  if (!Number.isFinite(port)) throw new BeatEditError(`--port must be a number, got "${flagVal('--port')}"`)
+  const VIEWS = ['clip', 'device', 'mixer', 'arrangement']
+  if (view !== undefined && !VIEWS.includes(view)) throw new BeatEditError(`unknown --view "${view}" (expected: ${VIEWS.join(', ')})`)
+
+  const guiBase = (flagVal('--gui-url') ?? process.env.BEAT_GUI_URL ?? 'http://localhost:5300').replace(/\/$/, '')
+  const guiUrl = `${guiBase}/?daw=${port}`
+  const focus = {
+    ...(track ? { track } : {}),
+    ...(view ? { view } : {}),
+    ...(param ? { param } : {}),
+  }
+
+  let res
+  try {
+    res = await fetch(`http://127.0.0.1:${port}/focus`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(focus),
+    })
+  } catch {
+    // No daemon on this port — v1 does NOT auto-spawn. Tell the owner how to start one and which URL
+    // to open, then exit 3 ("no daemon") so a calling script can branch on it deterministically.
+    process.stderr.write(
+      `no daemon reachable on port ${port} for ${file}.\n` +
+        `start one, then open the GUI:\n` +
+        `  beat daemon ${file} --port ${port}\n` +
+        `  open ${guiUrl}\n`,
+    )
+    process.exitCode = 3
+    return
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    const known = Array.isArray(body.tracks) ? ` (tracks: ${body.tracks.join(', ')})` : ''
+    throw new BeatEditError(`daemon rejected the focus: ${body.error ?? res.statusText}${known}`)
+  }
+  const body = await res.json().catch(() => ({}))
+  // A --param always lands on the device view (the GUI opens Device to flash the control), so say so
+  // even when --view was omitted — CLI-pilot LOW finding: "focused param cutoff" with no view read
+  // as ambiguous about which pane the owner would see.
+  const effectiveView = view ?? (param ? 'device' : undefined)
+  const what = [track && `track ${track}`, effectiveView && `${effectiveView} view`, param && `param ${param}`].filter(Boolean).join(', ') || 'the project'
+  process.stdout.write(`focused ${what}.\n`)
+  // `clients: 0` means the daemon accepted the focus but no GUI window is subscribed to see it —
+  // still exit 0 (the focus fired), but point the owner at the URL that will show it.
+  if (body.clients === 0) process.stdout.write(`no GUI window is connected yet — open ${guiUrl}\n`)
+  else process.stdout.write(`open ${guiUrl}\n`)
+}
+
 // D5's "BYO-Claude-Code fallback" (docs/product-spec-desktop.md §6): `beat mcp` already runs a
 // full stdio JSON-RPC MCP server, but pointing a client at it was tribal knowledge (the right
 // command, the right absolute path to this repo's beat.mjs). This writes the one-file config
@@ -5802,6 +5888,9 @@ async function main() {
     }
     case 'selection':
       await selectionCmd(rest)
+      break
+    case 'open':
+      await openCmd(rest)
       break
     case 'help':
     case '--help':

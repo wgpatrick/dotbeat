@@ -985,6 +985,22 @@ body {
     box-shadow: 0 0 0 0 transparent;
   }
 }
+/* research/128 §2.2 deep links: the per-CONTROL sibling of param-group-flash — the one knob/select an
+   agent `beat open --param <key>` pointed at glows with the same accent for the same 1.6s, so the
+   owner's eye lands on the exact control, not just the group card. Same token (--accent), same feel;
+   a rounded outline that fits both a `.knob-slot` wrapper and a `.param-enum` label without reflow. */
+.param-flash {
+  border-radius: 6px;
+  animation: param-flash 1.6s ease-out;
+}
+@keyframes param-flash {
+  0% {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
 .param-enum {
   display: flex;
   flex-direction: column;
