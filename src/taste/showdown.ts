@@ -1275,6 +1275,40 @@ export function loadShowdownEntries(logPath: string): { entries: ShowdownLogEntr
   return { entries, skipped }
 }
 
+/** Count "none of these are good" verdicts (batch.ts recordNoneGood) per showdown role — the
+ * signal the empty-picks exclusion deliberately keeps OUT of the win-rate/pairwise math but that
+ * the report still wants to surface ("for lead, the owner rejected the whole board 3 times").
+ * Reads `verdict: 'none-good'` on `showdown:<role>` entries; latest-per-batch, so a none-good
+ * that was later re-scored (or vice versa) counts by the batch's final verdict only. */
+export function noneGoodByRole(logPath: string): { byRole: { role: string; batches: number }[]; total: number } {
+  let text: string
+  try {
+    text = readFileSync(logPath, 'utf8')
+  } catch {
+    return { byRole: [], total: 0 }
+  }
+  // latest entry per batch decides — a none-good can be superseded by a real ranking and vice versa
+  const verdictByBatch = new Map<string, { role: string; noneGood: boolean }>()
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    let raw: { batch?: string; group?: string; verdict?: string }
+    try {
+      raw = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+    if (typeof raw.batch !== 'string' || typeof raw.group !== 'string' || !raw.group.startsWith('showdown:')) continue
+    verdictByBatch.set(raw.batch, { role: raw.group.slice('showdown:'.length), noneGood: raw.verdict === 'none-good' })
+  }
+  const counts = new Map<string, number>()
+  for (const { role, noneGood } of verdictByBatch.values()) {
+    if (noneGood) counts.set(role, (counts.get(role) ?? 0) + 1)
+  }
+  const byRole = [...counts.entries()].map(([role, batches]) => ({ role, batches })).sort((a, b) => a.role.localeCompare(b.role))
+  return { byRole, total: byRole.reduce((s, r) => s + r.batches, 0) }
+}
+
 export interface SourceStat {
   kind: string
   /** batches this source appeared in */
@@ -1300,6 +1334,9 @@ export interface ShowdownReport {
   refPools: SourceStat[]
   roles: { role: string; batches: number; smoke: boolean; stats: SourceStat[] }[]
   smokeMinBatches: number
+  /** "None of these are good" verdicts per role (recordNoneGood) — excluded from the win-rate math
+   * above (empty picks, no winner to imply pairs from) but surfaced here so the signal isn't lost. */
+  noneGood: { byRole: { role: string; batches: number }[]; total: number }
 }
 
 /** The minimal ranked-batch shape the per-arm tally needs — a set of ranked picks, the rejected
@@ -1411,6 +1448,7 @@ export function computeShowdownReport(logPath: string): ShowdownReport {
     refPools: refPoolTally(entries),
     roles,
     smokeMinBatches: SPLIT_SMOKE_MIN_BATCHES,
+    noneGood: noneGoodByRole(logPath),
   }
 }
 
@@ -1431,6 +1469,10 @@ export function statLine(s: SourceStat, indent: string): string {
 export function formatShowdownReport(r: ShowdownReport): string {
   let out = `source showdown — per-source win rates over ${r.totalBatches} scored showdown batch(es) in ${r.logPath}\n`
   if (r.skipped > 0) out += `(${r.skipped} showdown-group entr${r.skipped === 1 ? 'y' : 'ies'} skipped: no per-variant source record)\n`
+  if (r.noneGood.total > 0) {
+    out += `none-good verdicts (whole board rejected — excluded from the win rates above): ${r.noneGood.total} batch(es)` +
+      ` [${r.noneGood.byRole.map((n) => `${n.role} ${n.batches}`).join(', ')}]\n`
+  }
   if (r.totalBatches === 0) {
     out += 'nothing scored yet — collect a round (beat showdown <dir>) and rate it (beat rate <dir>) first\n'
     return out

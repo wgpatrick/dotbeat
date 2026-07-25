@@ -61,14 +61,16 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>beat rate</title>
   .bar button{flex:1;padding:12px;border:0;border-radius:10px;cursor:pointer;font-size:15px}
   #submit{background:#98c379;color:#111}
   #skip,#clear{background:#2c313a;color:#e6e6e6}
+  #nonegood{background:#3a2c2c;color:#e6b0b0}
   #done{color:#98c379;font-size:18px;text-align:center}
   .hint{color:#6b7280;font-size:12px;margin-top:12px}
 </style>
 <main>
   <h1 id="title">loading…</h1><div class="prog" id="prog"></div>
   <div id="list"></div>
-  <div class="bar"><button id="submit">save ranking</button><button id="clear">clear</button><button id="skip">skip batch</button></div>
-  <div class="hint">click "pick" in preference order (best first — rank as many as you can judge; a full ranking teaches the most, unranked clips just count as below every pick) — letters are shuffled per batch, so listen, don't pattern-match. keys: 1-9 pick, enter save, s skip.</div>
+  <div class="bar"><button id="submit">save ranking</button><button id="clear">clear</button><button id="nonegood">none are good</button><button id="skip">skip batch</button></div>
+  <div class="hint">click "pick" in preference order (best first — rank as many as you can judge; a full ranking teaches the most, unranked clips just count as below every pick) — letters are shuffled per batch, so listen, don't pattern-match. keys: 1-9 pick, enter save, n none-good, s skip.</div>
+  <div class="hint">"none are good" records a verdict (all variants rejected) instead of forcing a pick or silently skipping — it's excluded from the taste model and win-rate math, and counted in the showdown report.</div>
   <div class="hint" id="sinkrow">output: <select id="sink"><option value="">system default</option></select>
     <button id="sinkbtn" title="list this machine's outputs (asks a one-time permission so device names show)">find headphones…</button>
     — moves ONLY this page's audio; the rest of the system stays where it was.</div>
@@ -107,8 +109,17 @@ async function submit(){
   if(!res.ok){alert('save failed: '+await res.text());return}
   idx++;show()
 }
+async function noneGood(){
+  const b=queue[idx]
+  if(!b)return
+  if(!confirm('Mark ALL '+b.order.length+' clips in this batch as "none good"? This records a verdict (no pick) and moves on.'))return
+  const res=await fetch('/api/none-good',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.id})})
+  if(!res.ok){alert('save failed: '+await res.text());return}
+  idx++;show()
+}
 $('submit').onclick=submit
 $('clear').onclick=()=>{picks=[];paint()}
+$('nonegood').onclick=noneGood
 $('skip').onclick=()=>{idx++;show()}
 // Per-page audio output (setSinkId): rate through Bluetooth headphones while the system default
 // (someone else's audio) stays on another device. Labels need a one-time mic permission grant —
@@ -130,6 +141,7 @@ if(navigator.mediaDevices)navigator.mediaDevices.addEventListener?.('devicechang
 populateSinks(false)
 document.addEventListener('keydown',(e)=>{
   if(e.key==='Enter')submit()
+  else if(e.key==='n')noneGood()
   else if(e.key==='s')(idx++,show())
   else if(/^[1-9]$/.test(e.key)){const i=Number(e.key)-1;if(queue[idx]&&i<queue[idx].order.length)togglePick(i)}
 })
@@ -156,7 +168,7 @@ export async function rateCommand(argv) {
     console.error(`error: no directory at ${root}`)
     process.exit(2)
   }
-  const { scoreBatch } = await import(pathToFileURL(join(repoRoot, 'dist/src/vary/batch.js')).href)
+  const { scoreBatch, recordNoneGood } = await import(pathToFileURL(join(repoRoot, 'dist/src/vary/batch.js')).href)
   const { shuffledOrder } = await import(pathToFileURL(join(repoRoot, 'dist/src/vary/audition.js')).href)
 
   const buildQueue = () => {
@@ -210,6 +222,26 @@ export async function rateCommand(argv) {
           return
         }
         console.error(`scored ${batchDir}: ${picks.join(' > ')}`)
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, log: result.logPath ?? logPath }))
+      } else if (url.pathname === '/api/none-good' && req.method === 'POST') {
+        // "None of these are good" verdict: no pick, all variants rejected — recorded instead of
+        // a silent skip so the signal survives. Same batch-dir path discipline as /api/score.
+        let body = ''
+        for await (const chunk of req) body += chunk
+        const { id } = JSON.parse(body)
+        const batchDir = resolve(id)
+        if (!batchDir.startsWith(root)) {
+          res.writeHead(400).end('batch outside root')
+          return
+        }
+        let result
+        try {
+          result = recordNoneGood(batchDir, logPath)
+        } catch (ngErr) {
+          res.writeHead(400).end(String(ngErr?.message ?? ngErr))
+          return
+        }
+        console.error(`none-good ${batchDir}: no pick, ${result.entry.rejected.length} variants rejected`)
         res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, log: result.logPath ?? logPath }))
       } else {
         res.writeHead(404).end('not found')
