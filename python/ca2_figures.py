@@ -39,7 +39,8 @@ CONTRACT
        "bpm":124, "bars":4, "seed":7,
        "register":{"lo":36,"hi":55},
        "chordTrack":[{"bar":0,"bars":2,"root":48,"tones":[48,51,55]}, ...],
-       "temperature":1.0, "topP":0.85}     # temperature/topP optional
+       "density":{"horiz":2,"vert":1},     # optional; defaults to the role's bins
+       "temperature":1.0, "topP":0.85}     # optional
     stdout:
       {"backend":"ca2","contract":1,"model":"unjoined/infill/finetuned_epoch_49_0",
        "device":"mps","role":"bassline","seed":7,"bars":4,
@@ -321,6 +322,17 @@ def validate_request(req):
         tones = chord.get("tones")
         if not isinstance(tones, list) or not tones or not all(isinstance(t, int) for t in tones):
             raise UsageError("chordTrack[%d].tones must be a non-empty array of integer pitches" % i)
+    density = dict(ROLE_DENSITY_BINS[role])
+    given = req.get("density")
+    if given is not None:
+        if not isinstance(given, dict):
+            raise UsageError("density must be {horiz:int, vert:int}")
+        for k, hi in (("horiz", 5), ("vert", 4)):
+            if k in given:
+                v = given[k]
+                if not isinstance(v, int) or not (0 <= v <= hi):
+                    raise UsageError("density.%s must be an integer 0..%d" % (k, hi))
+                density[k] = v
     return {
         "role": role,
         "bars": bars,
@@ -328,6 +340,7 @@ def validate_request(req):
         "bpm": float(bpm),
         "register": {"lo": reg["lo"], "hi": reg["hi"]},
         "chordTrack": track,
+        "density": density,
         "temperature": float(req.get("temperature", 1.0)),
         "topP": float(req.get("topP", 0.85)),
     }
@@ -371,12 +384,11 @@ class _CA2:
 
     # -- commands ---------------------------------------------------------------------------------
 
-    def track_measure_commands(self, role, register, target_track, n_measures):
+    def track_measure_commands(self, bins, register, target_track, n_measures):
         """The "our code decides register/density" controls, per masked (track, measure) cell:
-        loose lowest/highest note bounds from the theory layer's register, plus the role's
+        loose lowest/highest note bounds from the theory layer's register, plus the caller's
         horizontal/vertical onset-density bins."""
         enc = self.enc
-        bins = ROLE_DENSITY_BINS[role]
         cmd = (enc.instruction_str(int(register["lo"]), enc.ENCODING_INSTRUCTION_LOWEST_NOTE_LOOSE)
                + enc.instruction_str(int(register["hi"]), enc.ENCODING_INSTRUCTION_HIGHEST_NOTE_LOOSE)
                + enc.instruction_str(bins["horiz"], enc.MEASUREMENT_HORIZ_NOTE_ONSET_DENSITY)
@@ -454,7 +466,7 @@ class _CA2:
         s, _labels = self.enc.encode_midisongbymeasure_with_masks(
             song, mask_locations=mask, include_heads_for_empty_masked_measures=True,
             return_labels_too=False,
-            track_measure_commands=self.track_measure_commands(role, req["register"], target, n_measures))
+            track_measure_commands=self.track_measure_commands(req["density"], req["register"], target, n_measures))
 
         torch = self.torch
         torch.manual_seed(req["seed"])
