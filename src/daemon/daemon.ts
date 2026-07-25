@@ -67,6 +67,8 @@ import {
   applyMacro,
   BeatMacroError,
   DRUM_LANES,
+  SYNTH_FIELDS,
+  SYNTH_PARAM_ORDER,
   addEffect,
   removeEffect,
   moveEffect,
@@ -773,6 +775,11 @@ function resolveLibraryPath(rel: string): string | null {
   return abs
 }
 
+// The set a `POST /focus` `param` is validated against (research/128 §2.2): every real settable
+// synth-param key — the core-9 (`SYNTH_PARAM_ORDER`) plus every optional `SYNTH_FIELD`. A typo'd
+// param is rejected (400) rather than accepted into a dead deep link that flashes nothing.
+const FOCUSABLE_PARAMS: ReadonlySet<string> = new Set<string>([...SYNTH_PARAM_ORDER, ...SYNTH_FIELDS.map((f) => f.key)])
+
 export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
   const filePath = resolve(opts.filePath)
   const requestedPort = opts.port ?? 8420
@@ -1052,9 +1059,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             json(res, 400, { error: `unknown view ${JSON.stringify(raw.view)} (views: ${VIEWS.join(', ')})` })
             return
           }
-          if (raw.param !== undefined && typeof raw.param !== 'string') {
-            json(res, 400, { error: 'param must be a string' })
-            return
+          if (raw.param !== undefined) {
+            // Validate against the real settable synth-param key set (the core-9 + every SYNTH_FIELD),
+            // same discipline as the track check — CLI-pilot HIGH finding: an unvalidated `--param`
+            // typo used to return 200 and hand the owner a dead deep link that silently flashes
+            // nothing. Reject a nonsense param loudly instead.
+            if (typeof raw.param !== 'string' || !FOCUSABLE_PARAMS.has(raw.param)) {
+              json(res, 400, { error: `unknown param ${JSON.stringify(raw.param)}` })
+              return
+            }
           }
           if (raw.clip !== undefined && typeof raw.clip !== 'string') {
             json(res, 400, { error: 'clip must be a string' })

@@ -192,6 +192,16 @@ test('POST /focus rejects an unknown view with a 400', async () => {
   })
 })
 
+test('POST /focus rejects an unknown param with a 400 but accepts a real synth param', async () => {
+  await withDaemon(async (daemon) => {
+    const bad = await postFocus(daemon.port, { track: 'lead', param: 'bananas' })
+    assert.equal(bad.status, 400)
+    assert.match(((await bad.json()) as { error: string }).error, /unknown param/)
+    const ok = await postFocus(daemon.port, { track: 'lead', param: 'cutoff' })
+    assert.equal(ok.status, 200)
+  })
+})
+
 test('POST /focus with no track is allowed (a bare view/param focus) and still broadcasts', async () => {
   await withDaemon(async (daemon) => {
     const { promise, ready } = nextSseEvent(daemon.port, ['focus'])

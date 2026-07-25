@@ -1002,12 +1002,13 @@ const HELP = [
     cmd: 'open',
     text: `  beat open <file.beat> [--track X] [--view device|clip|mixer|arrangement]
                         [--param cutoff] [--port 8420] [--gui-url URL]
-                                                          deep-link the running GUI to a spot (research/128): if a
-                                                          daemon is reachable on --port, POST /focus (select the
-                                                          track, open the pane, flash the param) and print the GUI
-                                                          URL; if none is running, print how to start one. Exit 0
-                                                          focused, 3 no daemon. GUI base is --gui-url / $BEAT_GUI_URL
-                                                          / http://localhost:5300` },
+                                                          deep-link the running GUI to a spot: if a daemon is reachable
+                                                          on --port, focus it (select the track, open the pane, flash
+                                                          the param — a --param always opens the device view) and print
+                                                          the GUI URL; if none is running, print how to start one. Exit
+                                                          0 focused, 3 no daemon. --param names a synth param (the ones
+                                                          beat inspect lists). GUI base is --gui-url / $BEAT_GUI_URL /
+                                                          http://localhost:5300` },
   { cmd: 'checkpoint', text: `  beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)` },
   {
     cmd: 'history',
@@ -5375,7 +5376,11 @@ async function openCmd(argv) {
     throw new BeatEditError(`daemon rejected the focus: ${body.error ?? res.statusText}${known}`)
   }
   const body = await res.json().catch(() => ({}))
-  const what = [track && `track ${track}`, view && `${view} view`, param && `param ${param}`].filter(Boolean).join(', ') || 'the project'
+  // A --param always lands on the device view (the GUI opens Device to flash the control), so say so
+  // even when --view was omitted — CLI-pilot LOW finding: "focused param cutoff" with no view read
+  // as ambiguous about which pane the owner would see.
+  const effectiveView = view ?? (param ? 'device' : undefined)
+  const what = [track && `track ${track}`, effectiveView && `${effectiveView} view`, param && `param ${param}`].filter(Boolean).join(', ') || 'the project'
   process.stdout.write(`focused ${what}.\n`)
   // `clients: 0` means the daemon accepted the focus but no GUI window is subscribed to see it —
   // still exit 0 (the focus fired), but point the owner at the URL that will show it.

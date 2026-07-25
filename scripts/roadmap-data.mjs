@@ -2073,6 +2073,12 @@ export const rows = [
   },
 
   {
+    area: 'Known usability gaps (backlog)', feature: 'beat open: find a daemon on another port instead of dead-ending',
+    description: 'CLI pilot on `beat open` (research/128, MEDIUM): with a daemon live on a non-default port (e.g. 8480), `beat open` on the default 8420 reports "no daemon" and instructs the user to start a SECOND daemon for the same file \u2014 a trap toward duplicate daemons on one project. It should detect a daemon already serving this file on a nearby/known port and suggest `--port <that>` rather than a fresh start (needs a way to ask a daemon which file it serves \u2014 the daemon exposes no path endpoint today, so a small `GET /file` or a local port registry is the enabling piece). The HIGH finding from the same pilot \u2014 an unvalidated `--param` typo returning a dead deep link \u2014 was fixed in-cycle (the daemon now 400s an unknown param). Lower-priority leftovers logged the same day: top-level `beat help` is a 72KB wall (a compact index + `--all` would help discovery, and is cross-cutting beyond this command).',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/128-agent-owner-gui-loop.md', plan: null,
+  },
+  {
     area: 'Known usability gaps (backlog)', feature: 'Pilot 104 low-severity leftovers (Phase 37 surface) \u2014 resolved in Phase 38 SD',
     description: 'The low/minor remainder of pilot 104, all three cleared by Phase 38 Stream SD: (1) `vary automation:<param>` gained an explicit `--clip <id>` selector (CLI + beat_vary MCP), documented in help/--groups (default still targets the first clip); (2) the harmless `404 Not Found` render page-error is now filtered from console forwarding while genuine JS exceptions and engine media-load warnings still surface; (3) `source add`/`ingest` now prints an explicit re-register note (replaced sha256 abc\u2026\u2192def\u2026, or "already registered (unchanged)") instead of silently replacing. Kept as a done-row for the citation trail.',
     core: 'done', cli: 'done', gui: 'na', status: 'done',
