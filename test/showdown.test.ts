@@ -33,6 +33,7 @@ import {
   classifyRefPool,
   computeShowdownReport,
   formatShowdownReport,
+  noneGoodByRole,
   SHOWDOWN_MUTE_DB,
   SHOWDOWN_PROMINENT_DB,
   inferSeedKey,
@@ -59,7 +60,8 @@ import {
   type ComposedPhrase,
 } from '../src/taste/showdown.js'
 import { variantTypeOf } from '../src/taste/eval.js'
-import { scoreBatch, adoptVariant, normalizeBatchLoudness, readBatchManifest, BeatBatchError } from '../src/vary/batch.js'
+import { scoreBatch, recordNoneGood, adoptVariant, normalizeBatchLoudness, readBatchManifest, BeatBatchError } from '../src/vary/batch.js'
+import { loadTasteBatches } from '../src/taste/eval.js'
 
 // ---- synthetic audio helper (same shape as test/taste.test.ts) ---------------------------------
 
@@ -725,6 +727,85 @@ test('formatShowdownReport: empty log points at the collect->rate loop', () => {
   writeFileSync(log, '')
   const text = formatShowdownReport(computeShowdownReport(log))
   assert.ok(text.includes('nothing scored yet'))
+})
+
+// ---- "none of these are good" verdict (Task 2) -------------------------------------------------
+
+test('recordNoneGood: empty picks, every variant rejected, verdict field, sources carried', () => {
+  const container = mkdtempSync(join(tmpdir(), 'beat-nonegood-'))
+  const dir = join(container, 'showdown-bassline-7')
+  mkdirSync(dir)
+  writeFileSync(join(dir, 'v1.wav'), toneWav(220, 0.4))
+  writeFileSync(join(dir, 'v2.wav'), toneWav(440, 0.3))
+  writeFileSync(join(dir, 'v3.wav'), toneWav(880, 0.2))
+  writeShowdownBatch(dir, 'bassline', [
+    { file: 'v1.wav', source: { kind: 'gen', from: '"a rolling bassline" (stub)' } },
+    { file: 'v2.wav', source: { kind: 'engine', from: 'seed-003.beat bass solo' } },
+    { file: 'v3.wav', source: { kind: 'keymap', from: 'keymap of "a deep bass stab"' } },
+  ], { seed: 7 })
+
+  const result = recordNoneGood(dir)
+  assert.deepEqual(result.entry.picks, [], 'no pick recorded')
+  assert.deepEqual([...result.entry.rejected].sort(), ['v1.wav', 'v2.wav', 'v3.wav'], 'every variant rejected')
+  assert.equal(result.entry.verdict, 'none-good')
+  assert.equal(result.entry.group, 'showdown:bassline')
+  // enrichment preserved so the entry stays self-describing
+  assert.deepEqual(result.entry.sources, { 'v1.wav': 'gen', 'v2.wav': 'engine', 'v3.wav': 'keymap' })
+  // ref-privacy contract still holds: kinds only, never the `from` provenance
+  assert.ok(!JSON.stringify(result.entry).includes('seed-003'), 'source provenance stays out of the log entry')
+
+  // it lands in the shared log as one appended line
+  const lines = readFileSync(result.logPath, 'utf8').trim().split('\n')
+  assert.equal(lines.length, 1)
+  assert.equal((JSON.parse(lines[0]!) as { verdict?: string }).verdict, 'none-good')
+})
+
+test('a none-good entry is excluded from both taste-model training and the showdown win-rate math', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-nonegood-load-'))
+  const log = join(dir, 'beat-scores.jsonl')
+  const sources = { 'v1.wav': 'gen', 'v2.wav': 'engine', 'v3.wav': 'keymap' }
+  writeFileSync(log, [
+    // one real ranking (engine wins) + one none-good batch (whole board rejected)
+    showdownEntry('/b/good', 'bassline', ['v2.wav', 'v1.wav', 'v3.wav'], sources),
+    JSON.stringify({ t: new Date().toISOString(), batch: '/b/none', group: 'showdown:bassline', seed: 1, parentSha256: '', picks: [], rejected: ['v1.wav', 'v2.wav', 'v3.wav'], sources, verdict: 'none-good' }),
+  ].join('\n') + '\n')
+
+  // showdown loader: empty picks skipped, so ONLY the real batch reaches the scoreboard
+  const { entries } = loadShowdownEntries(log)
+  assert.equal(entries.length, 1)
+  const report = computeShowdownReport(log)
+  assert.equal(report.totalBatches, 1, 'none-good batch does not inflate the win-rate denominator')
+  const overall = Object.fromEntries(report.overall.map((s) => [s.kind, s]))
+  assert.equal(overall.engine!.wins, 1)
+  assert.equal(overall.engine!.batches, 1, 'source batch counts exclude the none-good batch')
+
+  // taste-model loader: empty picks skipped at load (src/taste/eval.ts) — no training pair from it
+  const { batches } = loadTasteBatches(log)
+  assert.ok(!batches.some((b) => b.dir === '/b/none'), 'none-good batch never becomes a taste batch')
+
+  // but the signal is surfaced, not lost
+  assert.deepEqual(report.noneGood.byRole, [{ role: 'bassline', batches: 1 }])
+  assert.equal(report.noneGood.total, 1)
+  assert.ok(formatShowdownReport(report).includes('none-good verdicts'))
+})
+
+test('noneGoodByRole: latest-per-batch (a re-score flips a none-good to a real pick and back)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-nonegood-supersede-'))
+  const log = join(dir, 'beat-scores.jsonl')
+  const sources = { 'v1.wav': 'gen', 'v2.wav': 'engine' }
+  const none = (batch: string, role: string) =>
+    JSON.stringify({ t: new Date().toISOString(), batch, group: `showdown:${role}`, seed: 1, parentSha256: '', picks: [], rejected: ['v1.wav', 'v2.wav'], sources, verdict: 'none-good' })
+  writeFileSync(log, [
+    none('/b/1', 'lead'),                                       // /b/1: none-good ...
+    showdownEntry('/b/1', 'lead', ['v1.wav', 'v2.wav'], sources), // ... then reconsidered: a real pick wins -> NOT none-good
+    showdownEntry('/b/2', 'lead', ['v2.wav'], sources),          // /b/2: real pick ...
+    none('/b/2', 'lead'),                                       // ... then changed to none-good -> IS none-good
+    none('/b/3', 'chords'),                                     // /b/3: none-good, never revised
+  ].join('\n') + '\n')
+
+  const { byRole, total } = noneGoodByRole(log)
+  assert.equal(total, 2, 'only /b/2 (final none-good) and /b/3 count; /b/1 was superseded by a real pick')
+  assert.deepEqual(byRole, [{ role: 'chords', batches: 1 }, { role: 'lead', batches: 1 }])
 })
 
 // ---- rate-UI integration guarantee -------------------------------------------------------------
