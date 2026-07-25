@@ -90,6 +90,7 @@ import {
   BeatPitchTimeError,
 } from '../dist/src/core/index.js'
 import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile, BeatProfileError, screen, formatScreens, buildArcProfile, serializeArcProfile, parseArcProfile, formatArcTable, BeatArcError, ARC_FORMAT, roughnessCompare, BeatRoughnessError } from '../dist/src/metrics/index.js'
+import { recordEdits } from '../dist/src/telemetry/index.js'
 // --- Phase 37 Stream RB begin ---
 import { analyzeStructure, formatStructure, BeatAnalysisError } from '../dist/src/analysis/index.js'
 // --- Phase 37 Stream RB end ---
@@ -995,7 +996,13 @@ const HELP = [
                                                           only how sections differ as isolated static mixes`,
   },
   // ---- Phase 37 Stream RA end -------------------------------------------------------------
-  { cmd: 'daemon', text: `  beat daemon <file> [--port 8420]` },
+  {
+    cmd: 'daemon',
+    text: `  beat daemon <file> [--port 8420] [--edit-log]           two-way sync with a running dotbeat GUI;
+                                                          --edit-log appends every edit (GUI/CLI/MCP) to
+                                                          ~/.dotbeat/edit-log.jsonl (research/116 log-don't-train
+                                                          telemetry, opt-in; = BEAT_EDIT_LOG=1)`,
+  },
   { cmd: 'checkpoint', text: `  beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)` },
   {
     cmd: 'history',
@@ -1053,10 +1060,15 @@ function readDoc(path) {
   return parse(readFileSync(path, 'utf8'))
 }
 
-/** Write the canonical form and print the musical edit list for what changed. */
+/** Write the canonical form and print the musical edit list for what changed. This is the ONE
+ * write moment every CLI edit verb funnels through (set, add-note, quantize, humanize, transpose,
+ * …), so it is also the single telemetry hook for the whole CLI surface — recordEdits derives the
+ * logged entries from the same before/after diff already computed for the echo, and no-ops unless
+ * BEAT_EDIT_LOG is set (research/116 §4, research/128 §2.4). */
 function writeDoc(path, before, after) {
   const text = serialize(after)
   writeFileSync(path, text)
+  recordEdits(before, after, { surface: 'cli', file: path })
   process.stdout.write(formatDiff(diffDocuments(before, after)))
 }
 
