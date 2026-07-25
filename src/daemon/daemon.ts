@@ -120,6 +120,7 @@ import { decodeWav } from '../metrics/index.js'
 // daemon's own directory watcher picks up and broadcasts as a `doc` SSE event, so the GUI hot-reloads
 // through the exact same external-edit path a hand edit or `beat set` uses — no special echo needed.
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, HistoryError } from '../history/index.js'
+import { noteDaemonEdit, flushEditLog, type EditSurface } from '../telemetry/index.js'
 // D2/D5 vary-and-audition surface over HTTP (Phase 15 Stream I): the GUI's inline "vary" affordance
 // POSTs /vary, which resolves the daemon's live pointing selection into a (track, param-group) and
 // runs core's `varyTrack` — the exact same rung-1 param-variation `beat vary <file> <track> <group>`
@@ -627,6 +628,30 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Headers': 'content-type',
 }
 
+/**
+ * Honest surface attribution for a daemon-borne edit (research/128 §2.4, owner directive
+ * 2026-07-25: "don't mislabel"). Everything through the daemon is 'gui' ONLY if it actually came
+ * from the GUI. We distinguish with what the request context truthfully offers:
+ *
+ *   1. an explicit `source` field in the request body — a programmatic client (the agent posting
+ *      to the daemon) can self-attribute as 'cli' or 'mcp'; the GUI never sends it (ui/src is
+ *      untouched), so this only ever OVERRIDES toward non-gui, never fakes gui.
+ *   2. otherwise, browser-origin headers: a webview/browser fetch always carries `Origin` (and
+ *      usually `Sec-Fetch-*`); a plain node http POST omits them unless it deliberately sets them.
+ *      Present -> 'gui'; absent -> 'cli' (a non-browser client is programmatic, CLI-category).
+ *
+ * LIMITATION (documented, per the directive): this is best-effort. A programmatic client that
+ * spoofs an Origin header would be logged as 'gui', and a browser extension stripping Origin would
+ * be logged as 'cli'. For the real loop — a browser GUI and an agent that edits via `beat`/MCP or
+ * self-attributes when it posts — it is truthful.
+ */
+function daemonSurface(req: IncomingMessage, bodySource?: unknown): EditSurface {
+  if (bodySource === 'cli' || bodySource === 'mcp' || bodySource === 'gui') return bodySource
+  const h = req.headers
+  const browserOriginated = typeof h.origin === 'string' || typeof h['sec-fetch-site'] === 'string'
+  return browserOriginated ? 'gui' : 'cli'
+}
+
 function readBody(req: IncomingMessage, maxBytes = 10 * 1024 * 1024): Promise<string> {
   return new Promise((resolvePromise, reject) => {
     const chunks: Buffer[] = []
@@ -834,6 +859,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       return // transient (mid-rename); the next event will retry
     }
     if (text === lastFileText) return // echo of our own write, or a no-op save
+    // An external write (hand edit / CLI / another process) landed — close out any in-flight GUI
+    // gesture's telemetry before we adopt the new on-disk state, so its `after` is the value the
+    // owner actually left, not whatever the external change makes it.
+    flushEditLog()
     lastFileText = text
     let next: BeatDocument
     try {
@@ -885,11 +914,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
   // knob drag firing many debounced /edit calls for one path) rather than a new undo step — see
   // research/28 §5.3. Callers with no natural gesture identity (add-track, effect ops, …) omit it
   // and each call is its own distinct undo step, which is correct for one-shot structural edits.
-  function writeIfChanged(nextDoc: BeatDocument, coalesceKey?: string): boolean {
+  function writeIfChanged(nextDoc: BeatDocument, coalesceKey?: string, surface: EditSurface = 'gui'): boolean {
     const nextText = serialize(nextDoc)
     if (nextText === canonicalText) return false
     const now = Date.now()
     const coalesced = coalesceKey !== undefined && coalesceKey === lastUndoKey && now - lastUndoAt < UNDO_COALESCE_MS
+    const preDoc = doc // the pre-write state — a gesture's telemetry `before` when this starts one
     if (!coalesced) {
       // Push the PRE-write document — the state Ctrl+Z should land back on — and drop the oldest
       // entry once past the cap. A fresh edit always invalidates any redo branch (research/28 §5.1).
@@ -903,6 +933,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     lastFileText = nextText
     canonicalText = nextText
     doc = parse(nextText)
+    // Edit telemetry (research/116 §4): ride the SAME gesture boundary the undo stack just used
+    // (`coalesced`), so a 60 ms-debounced knob drag logs ONE entry, not one per tick. No-ops
+    // unless BEAT_EDIT_LOG is set — the enabled check inside is the only cost on the hot path.
+    noteDaemonEdit(preDoc, doc, { coalesced, gestureKey: coalesceKey, surface, file: filePath })
     broadcastUndoState()
     return true
   }
@@ -1110,7 +1144,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     if (req.method === 'POST' && url.pathname === '/edit') {
       readBody(req)
         .then((body) => {
-          const { path, value, gestureId } = JSON.parse(body) as { path?: unknown; value?: unknown; gestureId?: unknown }
+          const { path, value, gestureId, source } = JSON.parse(body) as { path?: unknown; value?: unknown; gestureId?: unknown; source?: unknown }
           if (typeof path !== 'string' || typeof value !== 'string') {
             json(res, 400, { error: 'body must be {path: string, value: string}' })
             return
@@ -1137,7 +1171,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           // gesture, so that exception still wins even if a caller mistakenly sent a gestureId with it.
           const isAppendGrammar = path.endsWith('.note') || path.endsWith('.hit')
           const coalesceKey = isAppendGrammar ? undefined : typeof gestureId === 'string' && gestureId ? gestureId : path
-          const written = writeIfChanged(setValue(doc, path, value), coalesceKey)
+          const written = writeIfChanged(setValue(doc, path, value), coalesceKey, daemonSurface(req, source))
           revalidateSelection()
           json(res, 200, { written })
         })
@@ -2533,6 +2567,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     close: () =>
       new Promise<void>((done) => {
         if (watchTimer) clearTimeout(watchTimer)
+        flushEditLog() // emit any gesture still buffered so a session's last drag isn't lost
         watcher.close()
         for (const client of sseClients) client.end()
         sseClients.clear()

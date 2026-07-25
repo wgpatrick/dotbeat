@@ -42,14 +42,24 @@ export async function daemonCommand(argv) {
   installCrashLogging()
   let target
   let port = 8420
+  let editLog = false
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port') port = Number(argv[++i])
+    else if (argv[i] === '--edit-log') editLog = true
     else target = argv[i]
   }
   if (!target) {
-    console.error('usage: beat daemon <project.beat | project-folder> [--port 8420]')
+    console.error('usage: beat daemon <project.beat | project-folder> [--port 8420] [--edit-log]')
+    console.error('  --edit-log   append every edit (GUI/CLI/MCP) to ~/.dotbeat/edit-log.jsonl for later')
+    console.error('               analysis — the research/116 "log-don\'t-train" telemetry stream. Opt-in;')
+    console.error('               equivalent to setting BEAT_EDIT_LOG=1. Off unless this flag or that env is set.')
     process.exit(1)
   }
+  // Opt-in edit telemetry (research/116 §4, research/128 §2.4). `beat daemon --edit-log` is the
+  // convenient way to turn it on for a produce-song session without exporting an env var first;
+  // it just sets the same env the telemetry module reads, so a GUI knob-drag, a CLI `beat set`,
+  // and an MCP tool call all append to ~/.dotbeat/edit-log.jsonl (outside any project repo).
+  if (editLog) process.env.BEAT_EDIT_LOG = '1'
   let filePath
   try {
     const resolved = resolveProjectFile(target)
@@ -63,6 +73,7 @@ export async function daemonCommand(argv) {
   console.log(`beat daemon: ${daemon.filePath}`)
   console.log(`  http://localhost:${daemon.port}  (GET /doc, GET /events, POST /state)`)
   console.log(`  open BeatLab with ?daw=${daemon.port} to connect the GUI`)
+  if (editLog) console.log(`  edit telemetry ON → ${process.env.BEAT_EDIT_LOG_FILE ?? '~/.dotbeat/edit-log.jsonl'}`)
   const shutdown = () => {
     daemon.close().then(() => process.exit(0))
   }

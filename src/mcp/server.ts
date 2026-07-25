@@ -102,6 +102,7 @@ import { applyProducedDefaults, resolveProducedProfile } from '../analysis/index
 import { buildKeymap, noteToMidi, midiToNote, rateForPitch } from '../core/keymap.js'
 // ==== end Phase 40 Stream VA ====
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
+import { recordEdits, editLogEnabled } from '../telemetry/index.js'
 import { suggestNext, parseScoresLog } from '../vary/suggest.js'
 import { varyTrack, varyFeel, varyAutomation, VARY_GROUPS } from '../vary/vary.js'
 import { AUTOMATION_SHAPES } from '../core/automation-shape.js'
@@ -174,6 +175,15 @@ const str = (args: Record<string, unknown>, key: string): string => {
   const v = args[key]
   if (typeof v !== 'string' || v === '') throw new Error(`missing required string argument "${key}"`)
   return v
+}
+/** Best-effort parse of a .beat file for edit telemetry — returns null (never throws) if the file
+ * is absent or unparseable, so a snapshot around a tool call can't itself break the call. */
+function tryParseBeat(file: string): BeatDocument | null {
+  try {
+    return existsSync(file) ? parse(readFileSync(file, 'utf8')) : null
+  } catch {
+    return null
+  }
 }
 const num = (args: Record<string, unknown>, key: string): number => {
   const v = args[key]
@@ -2420,7 +2430,18 @@ export async function runMcpServer(input: NodeJS.ReadableStream = process.stdin,
         continue
       }
       try {
+        // Edit telemetry (research/116 §4): one dispatch-level hook covers the whole MCP surface
+        // without touching a single handler — every mutation tool takes a `file` arg and rewrites
+        // it, so snapshotting that file's parsed state around the handler and diffing gives the
+        // edit list. Gated on editLogEnabled() so a disabled log reads/parses nothing (zero cost);
+        // tools that don't touch a .beat file, or leave it unchanged, produce an empty diff.
+        const telemetryFile = editLogEnabled() && typeof args.file === 'string' ? args.file : undefined
+        const beforeDoc = telemetryFile ? tryParseBeat(telemetryFile) : null
         const text = await tool.handler(args)
+        if (telemetryFile && beforeDoc) {
+          const afterDoc = tryParseBeat(telemetryFile)
+          if (afterDoc) recordEdits(beforeDoc, afterDoc, { surface: 'mcp', file: telemetryFile })
+        }
         send({ jsonrpc: '2.0', id, result: toolResultText(text) })
       } catch (err) {
         // tool-level failures are results with isError (per MCP), not protocol errors —

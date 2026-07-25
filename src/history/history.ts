@@ -8,7 +8,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync, readdirSync, realpathSync } from 'node:fs'
-import { resolve, dirname, join, relative, sep } from 'node:path'
+import { resolve, dirname, join, relative, sep, basename } from 'node:path'
 import { parse, diffDocuments, formatDiff } from '../core/index.js'
 
 export class HistoryError extends Error {
@@ -352,6 +352,32 @@ export function unpin(beatFilePath: string, name: string): void {
   const tagName = `${PIN_PREFIX}${slugifyPinName(trimmed)}`
   if (git(repoRoot, ['tag', '--list', tagName]).trim() === '') throw new HistoryError(`no pin named "${trimmed}"`)
   git(repoRoot, ['tag', '-d', tagName])
+}
+
+/**
+ * The saved text of this file at `ref`, where `ref` is EITHER a git commit-ish (a checkpoint
+ * short-sha, `HEAD`, `HEAD~2`, a tag) OR a pin NAME ("the good bridge") — pins are `pin/<slug>`
+ * tags (see PIN_PREFIX), so a bare name is tried both as-given and as its pin tag. This is the
+ * resolution `beat diff --since <ref>` needs: "what did the file look like at checkpoint/pin X."
+ * Throws HistoryError if nothing resolves. (Reuses the same history repo as checkpoints/pins, so
+ * the ref namespace is exactly what `beat history`/`beat pins` show.)
+ */
+export function showFileAt(beatFilePath: string, ref: string): string {
+  const abs = realAbs(beatFilePath)
+  const repoRoot = ensureHistoryRepo(dirname(abs))
+  const rel = relpath(repoRoot, abs)
+  // Try the ref verbatim first (a sha / HEAD~n / an explicit tag), then as a pin name. Order
+  // matters only cosmetically — a bare token is far more likely a pin name than a raw sha, but a
+  // real sha resolves on the first try and never reaches the slug attempt.
+  const candidates = [ref, `${PIN_PREFIX}${slugifyPinName(ref)}`]
+  for (const c of candidates) {
+    try {
+      return git(repoRoot, ['show', `${c}:${rel}`])
+    } catch {
+      // try the next candidate
+    }
+  }
+  throw new HistoryError(`could not resolve "${ref}" to a saved version of ${basename(abs)} — tried it as a checkpoint ref (see \`beat history\`) and as a pin name (see \`beat pins\`)`)
 }
 
 /** This file's pins, newest checkpoint first. */
