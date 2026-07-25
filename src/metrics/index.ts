@@ -16,5 +16,37 @@ export {
   type SectionMetrics,
 } from './sections.js'
 export { buildProfile, serializeProfile, parseProfile, BeatProfileError, PROFILE_FORMAT, PROFILE_VERSION, type MixProfile } from './profile.js'
+export {
+  buildArcProfile,
+  analyzeArcRanges,
+  serializeArcProfile,
+  parseArcProfile,
+  formatArcTable,
+  diffArc,
+  formatArcDiff,
+  BeatArcError,
+  ARC_FORMAT,
+  ARC_VERSION,
+  ARC_SECTION_TOLERANCE_LU,
+  type ArcProfile,
+  type ArcSection,
+  type ArcRange,
+  type ArcSectionSource,
+  type ArcDiff,
+  type ArcDiffRow,
+} from './arc.js'
 export { RENDER_RUN_VARIANCE_LU, RENDER_RUN_VARIANCE_PEAK_DB, RENDER_RUN_VARIANCE_BAND_PCT, RENDER_RUN_VARIANCE_WIDTH_DB, RENDER_RUN_VARIANCE_META } from './variance.js'
 export { screen, formatScreens, type PathologyFinding, type ScreenOptions } from './screens.js'
+export {
+  runRoughness,
+  roughnessCompare,
+  roughnessFindings,
+  parseRoughnessResult,
+  roughnessDoctor,
+  resolveRoughnessPython,
+  BeatRoughnessError,
+  ROUGHNESS_RISE_PCT,
+  ROUGHNESS_RISE_ABS,
+  type RoughnessResult,
+  type RoughnessBin,
+} from './roughness.js'

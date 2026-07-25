@@ -181,6 +181,39 @@ the showdown gitignore-gates any batch that contains a surge clip, the shared sc
 the source kind only, and nothing derived from a surge render is ever registered or redistributed.
 Re-check #6741 before publishing any Surge-rendered clip.
 
+## Roughness sidecar (`beat lint --roughness-baseline`)
+
+`python/roughness.py` computes Daniel & Weber time-varying psychoacoustic roughness (via **MoSQITo**,
+Apache-2.0) — research 123's verdict: the only measured signal that tracks the owner's "grindy"
+complaint, usable **only pair-relative** (there is no valid absolute threshold — commercial material
+out-roughs the flagged defect). It reads one WAV, collapses to the channel-mean, and prints the
+binned roughness curve (3 s bins) plus overall `mean`/`p95` on stdout. The TS wrapper
+(`src/metrics/roughness.ts`) does the pair-relative comparison; `beat lint <candidate.wav> --screens
+--roughness-baseline <baseline.wav>` wires it into the pathology screens.
+
+**Use a DEDICATED venv, `python/venv-roughness`.** MoSQITo pins `numpy<2` transitively, which can
+fight the shared `python/.venv` (stable-audio / Beat This). The sidecar auto-discovers its own venv,
+so keep it separate:
+
+```sh
+/opt/homebrew/bin/python3.10 -m venv python/venv-roughness
+python/venv-roughness/bin/pip install -r python/requirements-roughness.txt
+python/venv-roughness/bin/python3 python/roughness.py --doctor   # {"available": true, ...}
+```
+
+`beat lint --roughness-baseline` resolves its interpreter in this order (distinct from the analysis
+chain so the two venvs never collide):
+
+1. `$BEAT_ROUGHNESS_PYTHON` (explicit override)
+2. `<repo>/python/venv-roughness/bin/python3` (the dedicated venv above)
+3. `$BEAT_PYTHON`, then `<repo>/python/.venv/bin/python3`, then `python3` (shared fallbacks — fine if
+   MoSQITo happens to install cleanly alongside the other sidecars)
+
+A missing sidecar degrades cleanly: `beat lint` prints a one-line "roughness: SKIPPED" note and the
+rest of the run is unaffected (roughness is a pair-relative advisory, never a hard precondition).
+`roughness.py` follows the same contract as the others (stdlib-only top level, lazy MoSQITo import,
+exit `0/2/3/4` with a `pip install -r python/requirements-roughness.txt` fix line on a missing dep).
+
 ## Contract summary (for anyone editing `analyze.py`)
 
 ```

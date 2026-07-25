@@ -89,7 +89,7 @@ import {
   BeatPresetError,
   BeatPitchTimeError,
 } from '../dist/src/core/index.js'
-import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile, BeatProfileError, screen, formatScreens } from '../dist/src/metrics/index.js'
+import { decodeWav, analyze, lint, formatLint, RENDER_RUN_VARIANCE_META, buildProfile, serializeProfile, parseProfile, BeatProfileError, screen, formatScreens, buildArcProfile, serializeArcProfile, parseArcProfile, formatArcTable, BeatArcError, ARC_FORMAT, roughnessCompare, BeatRoughnessError } from '../dist/src/metrics/index.js'
 // --- Phase 37 Stream RB begin ---
 import { analyzeStructure, formatStructure, BeatAnalysisError } from '../dist/src/analysis/index.js'
 // --- Phase 37 Stream RB end ---
@@ -880,14 +880,24 @@ const HELP = [
   },
   {
     cmd: 'metrics',
-    text: `  beat metrics <file.wav> [--json] [--save-profile <ref.json>]
+    text: `  beat metrics <file.wav> [--json] [--save-profile <ref.json>] [--sections-from <src>]
                                                           LUFS, true peak, crest, spectral, stereo;
                                                           --save-profile writes the numbers as a reusable
-                                                          reference profile (with provenance) for lint --ref`,
+                                                          reference profile (with provenance) for lint --ref.
+                                                          --sections-from builds a per-section ENERGY-ARC
+                                                          profile from the reference instead: each section's
+                                                          loudness relative to the loudest (the drop = 0 dB),
+                                                          the phase-3 dynamics plan. <src> is 'analysis' (the
+                                                          sibling <file>.analysis.json from beat analyze),
+                                                          a <name>.analysis.json, a <file>.beat (its song
+                                                          block), or a <file>.csv of label,start,end seconds.
+                                                          Prints the arc table (paste into NOTES.md); with
+                                                          --save-profile also writes it for feedback --sections
+                                                          --ref to verify the render against`,
   },
   {
     cmd: 'lint',
-    text: `  beat lint <file.wav> [--target <LUFS> | --ref <ref.json>] [--screens [--sections <file.beat>]] [--json] [--doc <file.beat>]
+    text: `  beat lint <file.wav> [--target <LUFS> | --ref <ref.json>] [--screens [--sections <file.beat>] [--roughness-baseline <baseline.wav>]] [--json] [--doc <file.beat>]
                                                           deterministic mix findings (default target -14);
                                                           --ref compares against a saved reference profile
                                                           instead of absolute targets (LUFS/band/width/crest
@@ -901,6 +911,13 @@ const HELP = [
                                                           arrangement-flatness screen runs (flags "everything on
                                                           all the time") and dead air is located by section
                                                           (implies --screens);
+                                                          --roughness-baseline <baseline.wav> adds the PAIR-RELATIVE
+                                                          grind screen (Daniel-Weber roughness via MoSQITo): flags
+                                                          3s bins where <file.wav> got grindier than a matched
+                                                          baseline render of the same material (implies --screens).
+                                                          Pair-relative ONLY — there is no absolute roughness gate
+                                                          (research 123: commercial material out-roughs the defect);
+                                                          skipped with a note if no baseline is given;
                                                           --doc renders each track solo to name the actual
                                                           offending track in each finding's suggestion, and
                                                           makes fix lines cite that .beat by name (without it
@@ -967,8 +984,12 @@ const HELP = [
                                                           clears the render-run variance floor), and runs the
                                                           pathology screens including arrangement-flatness (which
                                                           FLAGS a mix with no dynamic arc). --ref compares
-                                                          each section (or the whole song) against a saved
-                                                          reference profile (beat metrics --save-profile).
+                                                          against a saved reference profile: a whole-mix profile
+                                                          (beat metrics --save-profile) critiques each section's
+                                                          static metrics; an ARC profile (beat metrics
+                                                          --sections-from) diffs the render's energy arc against
+                                                          the reference's section-by-section and PASS/FAILs it
+                                                          (the phase-6 dynamics-plan check).
                                                           Honest limits: per-section STATIC metrics only — this
                                                           does NOT hear masking, arrangement, or transitions,
                                                           only how sections differ as isolated static mixes`,
@@ -4669,6 +4690,91 @@ function fmtDb(x, unit = '') {
   return Number.isFinite(x) ? `${x.toFixed(1)}${unit}` : String(x)
 }
 
+/** Section RANGES (label + start/end seconds) for the energy-arc profile, from one of three
+ * sources. `analysis` = the sibling <wav>.analysis.json (beat analyze) or a named one — detected
+ * boundaries in seconds. `beat` = a .beat song block — bar counts turned into seconds via bpm.
+ * `csv` = explicit `label,start,end` seconds. Returns { ranges, kind, bpm? }. */
+function arcRangesFromSource(wavPath, secFrom) {
+  let kind
+  let srcPath
+  if (secFrom === 'analysis') {
+    kind = 'analysis'
+    srcPath = wavPath.replace(/\.[^./\\]+$/, '') + '.analysis.json'
+  } else if (secFrom.endsWith('.analysis.json')) {
+    kind = 'analysis'
+    srcPath = secFrom
+  } else if (secFrom.endsWith('.beat')) {
+    kind = 'beat'
+    srcPath = secFrom
+  } else if (secFrom.endsWith('.csv')) {
+    kind = 'csv'
+    srcPath = secFrom
+  } else {
+    throw new BeatEditError(`--sections-from expects 'analysis', a <name>.analysis.json, a <file>.beat, or a <file>.csv (got "${secFrom}")`)
+  }
+  if (!existsSync(srcPath)) {
+    const hint =
+      kind === 'analysis'
+        ? `run \`beat analyze ${basename(wavPath)}\` first to detect sections, or pass an explicit <file>.beat / <file>.csv`
+        : 'check the path'
+    throw new BeatEditError(`--sections-from: no file at ${srcPath} — ${hint}`)
+  }
+
+  if (kind === 'analysis') {
+    let art
+    try {
+      art = JSON.parse(readFileSync(srcPath, 'utf8'))
+    } catch {
+      throw new BeatEditError(`${srcPath} is not valid JSON (expected a beat-analyze .analysis.json)`)
+    }
+    const secs = Array.isArray(art.sections) ? art.sections : []
+    if (secs.length === 0) {
+      throw new BeatEditError(
+        `${basename(srcPath)} has no detected sections (this backend/clip produced none) — supply boundaries explicitly with ` +
+          `--sections-from <file>.beat (a song block) or --sections-from <file>.csv (label,start,end seconds)`,
+      )
+    }
+    const ranges = secs.map((s, i) => ({ label: typeof s.label === 'string' && s.label ? s.label : `section ${i + 1}`, startSeconds: Number(s.start), endSeconds: Number(s.end) }))
+    return { ranges, kind, bpm: typeof art.bpm === 'number' ? art.bpm : undefined }
+  }
+
+  if (kind === 'beat') {
+    const doc = readDoc(srcPath)
+    if (!doc.song || doc.song.length === 0) {
+      throw new BeatEditError(`${srcPath} is in loop mode (no song block) — --sections-from <file>.beat needs a song timeline`)
+    }
+    const secPerBar = 240 / doc.bpm // 4 beats/bar × 60/bpm
+    let cum = 0
+    const ranges = doc.song.map((s) => {
+      const startSeconds = cum * secPerBar
+      cum += s.bars
+      const name = doc.scenes.find((sc) => sc.id === s.scene)?.name
+      return { label: name ?? s.scene ?? 'section', startSeconds, endSeconds: cum * secPerBar, bars: s.bars }
+    })
+    return { ranges, kind, bpm: doc.bpm }
+  }
+
+  // csv: label,start,end seconds. Blank lines and #-comments skipped; a header row (non-numeric
+  // start) is skipped too. Forgiving on whitespace.
+  const rows = readFileSync(srcPath, 'utf8')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l !== '' && !l.startsWith('#'))
+  const ranges = []
+  for (const line of rows) {
+    const cols = line.split(',').map((c) => c.trim())
+    if (cols.length < 3) continue
+    const start = Number(cols[1])
+    const end = Number(cols[2])
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue // header or junk row
+    ranges.push({ label: cols[0] || `section ${ranges.length + 1}`, startSeconds: start, endSeconds: end })
+  }
+  if (ranges.length === 0) {
+    throw new BeatEditError(`${srcPath} has no usable rows — expected lines of "label,start,end" in seconds (e.g. "intro,0,8")`)
+  }
+  return { ranges, kind }
+}
+
 function metricsCmd(argv) {
   const json = argv.includes('--json')
   const profileIdx = argv.indexOf('--save-profile')
@@ -4676,8 +4782,31 @@ function metricsCmd(argv) {
   if (profileIdx !== -1 && (!profilePath || profilePath.startsWith('--'))) {
     throw new BeatEditError('--save-profile needs a path to write, e.g. beat metrics ref.wav --save-profile ref.json')
   }
-  const file = argv.find((a, i) => !a.startsWith('--') && (profileIdx === -1 || i !== profileIdx + 1))
+  const secFromIdx = argv.indexOf('--sections-from')
+  const secFrom = secFromIdx !== -1 ? argv[secFromIdx + 1] : undefined
+  if (secFromIdx !== -1 && (!secFrom || secFrom.startsWith('--'))) {
+    throw new BeatEditError("--sections-from needs a source: 'analysis', a <name>.analysis.json, a <file>.beat, or a <file>.csv")
+  }
+  const file = argv.find((a, i) => !a.startsWith('--') && (profileIdx === -1 || i !== profileIdx + 1) && (secFromIdx === -1 || i !== secFromIdx + 1))
   if (!file) throw new BeatEditError('metrics needs a wav file')
+
+  // --sections-from: build a per-section ENERGY-ARC profile from the reference (research 121 §3.4,
+  // D28 phase 3) instead of the whole-mix statics. The arc table is the dynamics plan for NOTES.md;
+  // --save-profile also persists it for `feedback --sections --ref` to verify the render against.
+  if (secFrom !== undefined) {
+    const { channels, sampleRate } = decodeWav(readFileSync(file))
+    const { ranges, kind, bpm } = arcRangesFromSource(file, secFrom)
+    const arcProfile = buildArcProfile(channels, sampleRate, ranges, basename(file), kind, bpm !== undefined ? { bpm } : {})
+    if (profilePath) writeFileSync(profilePath, serializeArcProfile(arcProfile))
+    if (json) {
+      process.stdout.write(JSON.stringify(arcProfile, null, 2) + '\n')
+    } else {
+      process.stdout.write(formatArcTable(arcProfile))
+      if (profilePath) process.stdout.write(`\narc profile saved to ${profilePath} — verify a render against it with: beat feedback ${file.replace(/\.[^.]+$/, '.beat')} --sections --ref ${profilePath}\n`)
+    }
+    return
+  }
+
   const { channels, sampleRate } = decodeWav(readFileSync(file))
   const m = analyze(channels, sampleRate)
   if (profilePath) {
@@ -4737,7 +4866,14 @@ async function lintCmd(argv) {
   if (sectionsIdx !== -1 && (!sectionsPath || sectionsPath.startsWith('--'))) {
     throw new BeatEditError('--sections needs a .beat file with a song block, e.g. beat lint mix.wav --screens --sections song.beat')
   }
-  const wantScreens = argv.includes('--screens') || sectionsPath !== undefined
+  // research 123: --roughness-baseline <baseline.wav> adds the PAIR-RELATIVE grind screen. It is a
+  // pathology screen, so it implies --screens. Pair-relative ONLY: no absolute roughness gate exists.
+  const roughIdx = argv.indexOf('--roughness-baseline')
+  const roughnessBaseline = roughIdx !== -1 ? argv[roughIdx + 1] : undefined
+  if (roughIdx !== -1 && (!roughnessBaseline || roughnessBaseline.startsWith('--'))) {
+    throw new BeatEditError('--roughness-baseline needs a baseline WAV, e.g. beat lint candidate.wav --roughness-baseline prev.wav')
+  }
+  const wantScreens = argv.includes('--screens') || sectionsPath !== undefined || roughnessBaseline !== undefined
   // Phase 35 Stream OD: --ref <profile.json> switches the taste comparisons (loudness / bands /
   // width / crest) to deltas against a saved reference profile. One comparison frame at a time:
   // --ref and --target together is a contradiction, not a combination — error loudly.
@@ -4755,11 +4891,28 @@ async function lintCmd(argv) {
       (targetIdx === -1 || i !== targetIdx + 1) &&
       (docIdx === -1 || i !== docIdx + 1) &&
       (sectionsIdx === -1 || i !== sectionsIdx + 1) &&
+      (roughIdx === -1 || i !== roughIdx + 1) &&
       (refIdx === -1 || i !== refIdx + 1),
   )
   if (!file) throw new BeatEditError('lint needs a wav file')
+  if (roughnessBaseline !== undefined && !existsSync(roughnessBaseline)) {
+    throw new BeatEditError(`no baseline WAV at ${roughnessBaseline} — --roughness-baseline needs a matched render of the same material to compare against`)
+  }
   if (refPath !== undefined && !existsSync(refPath)) {
     throw new BeatEditError(`no profile at ${refPath} — write one with: beat metrics <ref.wav> --save-profile ${refPath}`)
+  }
+  // Friendlier than parseProfile's generic "not a mix profile": if the user hands lint an ARC
+  // profile, point them at the command that actually consumes it (arc comparison is section-shaped).
+  if (refPath !== undefined) {
+    let peek
+    try {
+      peek = JSON.parse(readFileSync(refPath, 'utf8'))?.format
+    } catch {
+      // not JSON — let parseProfile raise its own friendly error below
+    }
+    if (peek === ARC_FORMAT) {
+      throw new BeatEditError(`${refPath} is an energy-ARC profile — arc comparison is section-shaped: beat feedback <file>.beat --sections --ref ${refPath} (lint --ref takes a whole-mix profile from \`beat metrics --save-profile\`)`)
+    }
   }
   const { channels, sampleRate } = decodeWav(readFileSync(file))
   // Pilot 103: fix lines used to hardcode a `song.beat` placeholder that reads like a real file.
@@ -4795,6 +4948,26 @@ async function lintCmd(argv) {
     screenFindings = screen(channels, sampleRate, screenOpts)
   }
 
+  // Pair-relative roughness (research 123): a DEFECT screen gated ONLY by a matched baseline. It
+  // spawns a Python/MoSQITo sidecar, so it degrades gracefully — a missing sidecar must never break
+  // a lint run — recording WHY it was skipped rather than failing.
+  let roughnessNote // set when roughness ran or was skipped, for the human summary
+  if (roughnessBaseline !== undefined) {
+    try {
+      const { findings: roughFindings } = await roughnessCompare(roughnessBaseline, file)
+      screenFindings = [...screenFindings, ...roughFindings].sort((a, b) => b.severity - a.severity)
+      roughnessNote =
+        roughFindings.length > 0
+          ? `roughness (vs ${basename(roughnessBaseline)}): ${roughFindings.length} bin${roughFindings.length === 1 ? '' : 's'} grindier than the baseline (flagged above)`
+          : `roughness (vs ${basename(roughnessBaseline)}): no bin rose >=15% and >=0.2 asper over the baseline — no grind regression`
+    } catch (err) {
+      if (!(err instanceof BeatRoughnessError)) throw err
+      roughnessNote = `roughness: SKIPPED — ${err.message.split('\n')[0]}`
+    }
+  } else if (wantScreens) {
+    roughnessNote = 'roughness: not checked — pair-relative only. Add --roughness-baseline <baseline.wav> (a matched render of the same material) to include it.'
+  }
+
   if (json) {
     process.stdout.write(JSON.stringify(wantScreens ? { findings, screens: screenFindings } : findings, null, 2) + '\n')
   } else {
@@ -4806,6 +4979,7 @@ async function lintCmd(argv) {
       if (sectionsPath === undefined) {
         process.stdout.write('  note: arrangement-flatness was NOT checked — it needs the song section map. Add --sections <file.beat> to include it.\n')
       }
+      if (roughnessNote) process.stdout.write(`  ${roughnessNote}\n`)
     }
   }
   // exit non-zero on any lint WARN or any severity>=3 pathology (a real defect worth blocking on)
@@ -4828,7 +5002,7 @@ async function lintCmd(argv) {
  * compares each section (or the whole song) against a saved reference profile. Honest limits:
  * per-section STATIC metrics only — no masking, arrangement, or transition awareness. */
 async function feedbackCmd(argv) {
-  const { analyzeSections, formatSectionFeedback, formatWholeSongFeedback, arrangementFindings } = await import('../dist/src/metrics/index.js')
+  const { analyzeSections, formatSectionFeedback, formatWholeSongFeedback, arrangementFindings, diffArc, formatArcDiff } = await import('../dist/src/metrics/index.js')
   const { renderToBuffer } = await import('./render.mjs')
 
   const json = argv.includes('--json')
@@ -4836,14 +5010,33 @@ async function feedbackCmd(argv) {
   const refIdx = argv.indexOf('--ref')
   const refPath = refIdx !== -1 ? argv[refIdx + 1] : undefined
   if (refIdx !== -1 && (!refPath || refPath.startsWith('--'))) {
-    throw new BeatEditError('--ref needs a profile path — write one with: beat metrics <ref.wav> --save-profile <ref.json>')
+    throw new BeatEditError('--ref needs a profile path — write one with: beat metrics <ref.wav> --save-profile <ref.json> (or --sections-from <src> for an arc profile)')
   }
   const file = argv.find((a, i) => !a.startsWith('--') && (refIdx === -1 || i !== refIdx + 1))
   if (!file) throw new BeatEditError('feedback needs a .beat file (it renders the file, then analyzes the render)')
   if (refPath !== undefined && !existsSync(refPath)) {
     throw new BeatEditError(`no profile at ${refPath} — write one with: beat metrics <ref.wav> --save-profile ${refPath}`)
   }
-  const ref = refPath !== undefined ? parseProfile(readFileSync(refPath, 'utf8'), refPath) : undefined
+  // --ref accepts EITHER a whole-mix profile (per-section static critique) or an energy-ARC profile
+  // (diff the rendered arc against the reference's, PASS/FAIL — the phase-6 dynamics check). Detect
+  // by the file's `format` field.
+  let ref // whole-mix profile
+  let arcRef // energy-arc profile
+  if (refPath !== undefined) {
+    const refText = readFileSync(refPath, 'utf8')
+    let peekFormat
+    try {
+      peekFormat = JSON.parse(refText)?.format
+    } catch {
+      // fall through to parseProfile, which raises the friendly not-JSON error
+    }
+    if (peekFormat === ARC_FORMAT) {
+      arcRef = parseArcProfile(refText, refPath)
+      if (!wantSections) throw new BeatEditError(`${refPath} is an energy-ARC profile — it compares an arc, so add --sections: beat feedback ${file} --sections --ref ${refPath}`)
+    } else {
+      ref = parseProfile(refText, refPath)
+    }
+  }
 
   const { bytes, doc } = await renderToBuffer(file)
   const { channels, sampleRate } = decodeWav(bytes)
@@ -4858,13 +5051,17 @@ async function feedbackCmd(argv) {
     // ("everything on all the time") gets FLAGGED, closing the gap where the per-section numbers
     // existed but no rule turned them into a verdict (research 122 §4.2).
     const screenFindings = screen(channels, sampleRate, { sections: specs, bpm: doc.bpm, metrics: analyze(channels, sampleRate) })
+    // arc ref (energy-arc profile): diff the render's arc against the plan and PASS/FAIL it.
+    const arcDiff = arcRef ? diffArc(secMetrics, arcRef) : undefined
     if (json) {
-      process.stdout.write(JSON.stringify({ sections: secMetrics, screens: screenFindings, ...(ref ? { ref: ref.source } : {}) }, null, 2) + '\n')
+      process.stdout.write(JSON.stringify({ sections: secMetrics, screens: screenFindings, ...(ref ? { ref: ref.source } : {}), ...(arcDiff ? { arcDiff, arcRef: arcRef.source } : {}) }, null, 2) + '\n')
     } else {
       process.stdout.write(formatSectionFeedback(secMetrics, ref))
+      if (arcDiff) process.stdout.write('\n' + formatArcDiff(arcDiff, arcRef.source))
       process.stdout.write('\n' + formatScreens(screenFindings, basename(file)))
     }
-    if (screenFindings.some((f) => f.severity >= 3)) process.exitCode = 1
+    // a failed arc check is a real dynamics-plan miss (phase 6) → non-zero, same as a sev>=3 screen
+    if (screenFindings.some((f) => f.severity >= 3) || (arcDiff && !arcDiff.pass)) process.exitCode = 1
   } else {
     const m = analyze(channels, sampleRate)
     const findings = lint(m, { beatPath: file, ...(ref ? { ref } : {}) })

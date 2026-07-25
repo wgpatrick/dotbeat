@@ -1944,6 +1944,18 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: 'research/122-machine-listening-for-production.md', plan: null,
   },
+  {
+    area: 'Metrics / critique loop', feature: 'Source-derived dynamics plan (energy-arc profile + verify)',
+    description: 'Research/121 §3.4, decision D28 phase 3: the produce-song skill demands "per-section energy targets derived from the reference\'s measured arc, not vibes." `beat metrics <ref.wav> --sections-from <analysis|<name>.analysis.json|<file>.beat|<file>.csv>` slices a reference recording at those boundaries and builds a per-section ENERGY-ARC profile (src/metrics/arc.ts) — each section\'s LUFS/RMS relative to the loudest section (the drop = 0 dB), plus band shares and width. It prints the arc table an agent pastes into NOTES.md as the phase-3 plan, and (with --save-profile) persists a dotbeat-arc-profile JSON. `beat feedback --sections --ref <arc.json>` diffs the render\'s arc against the plan section-by-section (matched by position, interpolated when the counts differ), variance-padded, PASS/FAIL with exit 1 on fail — the phase-6 machine check. Whole-mix `--ref` profiles keep their per-section static critique; the two profile kinds are told apart by `format`. Honest limits: per-section statics — the arc is the relative-loudness SHAPE, not masking/transition awareness.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/121-harness-engineering-for-music-agents.md', plan: null,
+  },
+  {
+    area: 'Metrics / critique loop', feature: 'Pair-relative roughness ("grind") ear',
+    description: 'Research/123: the listening benchmark proved Daniel-Weber time-varying roughness (MoSQITo, Apache-2.0) is the only measured signal that tracks the owner\'s "grindy" complaint (fail 2.09 vs pass 1.67 asper on the matched pair) — but has NO valid absolute threshold (commercial material out-roughs the defect), so it can only gate PAIR-RELATIVE. `python/roughness.py` sidecar (channel-mean, 3s bins, mean/p95; same JSON/versioned/deterministic contract as embed.py) + src/metrics/roughness.ts `roughnessCompare(baseline, candidate)` flags 3s bins where the candidate rose ≥+15% AND ≥+0.2 asper over a matched baseline (pathology-screen schema, source \'roughness-dw\', severity by rise). `beat lint <candidate.wav> --screens --roughness-baseline <baseline.wav>` wires it into the screens; no baseline ⇒ skipped with a note (never an absolute gate). Degrades cleanly when the MoSQITo sidecar is absent. Dedicated python/venv-roughness (MoSQITo pins numpy<2). Reproduces the benchmark numbers; flags the fail→ direction, stays silent on the reverse.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/123-listening-benchmark-results.md', plan: null,
+  },
 
   // ── Feedback, generation & sound sources (Phase 37) ──────────────────────
   {
