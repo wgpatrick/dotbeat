@@ -155,6 +155,53 @@ test('round-trip sanity: the text the daemon writes re-parses to the same docume
   })
 })
 
+// ─── research/128 §2.2: agent→GUI deep links (POST /focus) ────────────────────────────────────────
+const postFocus = (port: number, body: unknown) =>
+  fetch(`http://127.0.0.1:${port}/focus`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
+test('POST /focus validates the target and broadcasts a `focus` SSE event', async () => {
+  await withDaemon(async (daemon) => {
+    const { promise, ready } = nextSseEvent(daemon.port, ['focus'])
+    await ready
+    const res = await postFocus(daemon.port, { track: 'lead', view: 'device', param: 'cutoff' })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { focused: Record<string, unknown>; clients: number }
+    assert.deepEqual(body.focused, { track: 'lead', view: 'device', param: 'cutoff' })
+    // one SSE client is connected (nextSseEvent's own /events subscription)
+    assert.ok(body.clients >= 1)
+    const { data } = await promise
+    assert.deepEqual(data, { track: 'lead', view: 'device', param: 'cutoff' })
+  })
+})
+
+test('POST /focus rejects an unknown track with a 400 and the known track list', async () => {
+  await withDaemon(async (daemon) => {
+    const res = await postFocus(daemon.port, { track: 'nope' })
+    assert.equal(res.status, 400)
+    const body = (await res.json()) as { error: string; tracks: string[] }
+    assert.match(body.error, /unknown track/)
+    assert.ok(Array.isArray(body.tracks) && body.tracks.includes('lead'))
+  })
+})
+
+test('POST /focus rejects an unknown view with a 400', async () => {
+  await withDaemon(async (daemon) => {
+    const res = await postFocus(daemon.port, { track: 'lead', view: 'nonsense' })
+    assert.equal(res.status, 400)
+    assert.match(((await res.json()) as { error: string }).error, /unknown view/)
+  })
+})
+
+test('POST /focus with no track is allowed (a bare view/param focus) and still broadcasts', async () => {
+  await withDaemon(async (daemon) => {
+    const { promise, ready } = nextSseEvent(daemon.port, ['focus'])
+    await ready
+    const res = await postFocus(daemon.port, { view: 'mixer' })
+    assert.equal(res.status, 200)
+    assert.deepEqual((await promise).data, { view: 'mixer' })
+  })
+})
+
 // ─── Phase 19 Stream V: the arrangement-length surface (POST /song) ───────────────────────────────
 const postSong = (port: number, body: unknown) =>
   fetch(`http://127.0.0.1:${port}/song`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })

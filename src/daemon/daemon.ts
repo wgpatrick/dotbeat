@@ -13,6 +13,9 @@
 //                    a `parse-error` event when a hand-edit is (momentarily) invalid
 //   POST /state    → the browser's full sandbox payload; converted, canonically serialized,
 //                    written to disk ONLY if musically different from the current document
+//   POST /focus    → an agent→GUI deep link (research/128 §2.2): {track?, clip?, view?, param?},
+//                    validated against the live doc, broadcast as a `focus` event on /events so a
+//                    `beat open …` line in a brief drops the owner straight onto the right control
 //   POST /edit     → a single {path,value} edit primitive (the same vocabulary `beat set` uses,
 //                    via core's setValue); one edit → one canonical line → a one-line git diff.
 //                    dotbeat's own frontend uses this instead of the whole-document /state push:
@@ -1019,6 +1022,54 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           selection = next
           broadcast('selection', selection)
           json(res, 200, selection)
+        })
+        .catch((err) => {
+          json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
+    // research/128 §2.2: agent→GUI deep links. `beat open` (cli/beat.mjs) POSTs here so a listening
+    // brief can say "click here to fine-tune this synth"; the daemon validates the target against the
+    // LIVE document (an unknown track is a 400 with the known list, same loud-fail discipline as
+    // /selection) and broadcasts a `focus` event on the SAME /events stream `doc`/`selection`/
+    // `undo-state` ride — no router, no URL state, just one more event the GUI already subscribes to.
+    // Every axis is optional and additive: {track?, clip?, view?: clip|device|mixer|arrangement,
+    // param?}. The daemon only validates and fans out; mapping the event onto store state (select the
+    // track, open the right pane, scroll, flash the param) is the GUI's job (ui/src/daemon/bridge.ts).
+    if (req.method === 'POST' && url.pathname === '/focus') {
+      readBody(req)
+        .then((body) => {
+          const raw = JSON.parse(body) as { track?: unknown; clip?: unknown; view?: unknown; param?: unknown }
+          const VIEWS = ['clip', 'device', 'mixer', 'arrangement']
+          if (raw.track !== undefined) {
+            if (typeof raw.track !== 'string' || !doc.tracks.some((t) => t.id === raw.track)) {
+              json(res, 400, { error: `unknown track ${JSON.stringify(raw.track)}`, tracks: doc.tracks.map((t) => t.id) })
+              return
+            }
+          }
+          if (raw.view !== undefined && (typeof raw.view !== 'string' || !VIEWS.includes(raw.view))) {
+            json(res, 400, { error: `unknown view ${JSON.stringify(raw.view)} (views: ${VIEWS.join(', ')})` })
+            return
+          }
+          if (raw.param !== undefined && typeof raw.param !== 'string') {
+            json(res, 400, { error: 'param must be a string' })
+            return
+          }
+          if (raw.clip !== undefined && typeof raw.clip !== 'string') {
+            json(res, 400, { error: 'clip must be a string' })
+            return
+          }
+          const focus = {
+            ...(typeof raw.track === 'string' ? { track: raw.track } : {}),
+            ...(typeof raw.clip === 'string' ? { clip: raw.clip } : {}),
+            ...(typeof raw.view === 'string' ? { view: raw.view } : {}),
+            ...(typeof raw.param === 'string' ? { param: raw.param } : {}),
+          }
+          broadcast('focus', focus)
+          // `clients` lets `beat open` tell the owner whether a GUI window is actually listening
+          // (focus fired, but nothing subscribed) versus focused-and-shown.
+          json(res, 200, { focused: focus, clients: sseClients.size })
         })
         .catch((err) => {
           json(res, 400, { error: err instanceof Error ? err.message : String(err) })
