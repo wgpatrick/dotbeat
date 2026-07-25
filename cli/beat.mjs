@@ -2122,6 +2122,14 @@ async function showdownCmd(argv) {
   const rounds = flagValue(argv, '--rounds') ? Number(flagValue(argv, '--rounds')) : 1
   const metaSeed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 41
   const genBackend = flagValue(argv, '--gen-backend') ?? 'fal'
+  // CLI pilot (research 128): a typo'd --gen-backend (e.g. `stubbb`) used to be accepted silently —
+  // it echoed in the batch header as if real, then every role failed downstream with a generic
+  // "showdown <role> failed — skipping", giving the user no hint the backend NAME was wrong. Same
+  // loud-error stance as --gen-backend elsewhere and the pilot 109-112 flag work: reject up front.
+  const KNOWN_GEN_BACKENDS = ['fal', 'stub', 'stableaudio']
+  if (!KNOWN_GEN_BACKENDS.includes(genBackend)) {
+    throw new BeatEditError(`unknown --gen-backend "${genBackend}" (known: ${KNOWN_GEN_BACKENDS.join(', ')}; stub = free offline placeholder audio, no network/key)`)
+  }
   // --gen-provider: a fal model path (e.g. fal-ai/lyria2) for the gen + keymap clips — the
   // research/127 bake-off arms. Undefined keeps each backend's own default provider.
   const genProvider = flagValue(argv, '--gen-provider')
@@ -2220,6 +2228,9 @@ async function showdownCmd(argv) {
     }
   }
 
+  // CLI pilot (research 128): a nonexistent <dir> used to throw a raw ENOENT stack trace from
+  // readdirSync. Guard first so the message points at how to make the dir, same as the empty case.
+  if (!existsSync(dir)) throw new BeatEditError(`no directory at ${dir} — create seed songs first: beat taste-seeds ${dir}`)
   const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
   if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
   const seeds = seedFiles.map((f) => ({ file: f, doc: parse(readFileSync(join(dir, f), 'utf8')) }))
@@ -2766,6 +2777,9 @@ async function prodtaskCmd(argv) {
   const arms = ARM_ORDER.filter((a) => requestedArms.includes(a))
   if (arms.length < 2) throw new BeatEditError('a prodtask batch needs at least two arms (e.g. --arms original,tricked)')
 
+  // CLI pilot (research 128): a nonexistent <dir> used to throw a raw ENOENT stack trace from
+  // readdirSync. Guard first so the message points at how to make the dir, same as the empty case.
+  if (!existsSync(dir)) throw new BeatEditError(`no directory at ${dir} — create seed songs first: beat taste-seeds ${dir}`)
   const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
   if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
   const seeds = seedFiles.map((f) => ({ file: f, doc: parse(readFileSync(join(dir, f), 'utf8')) }))
@@ -2932,6 +2946,9 @@ async function pilotCmd(argv) {
     .filter(Boolean)
     .map((r) => pilot.pilotRole(r).role) // throws with the legal list on a typo
 
+  // CLI pilot (research 128): a nonexistent <dir> used to throw a raw ENOENT stack trace from
+  // readdirSync. Guard first so the message points at how to make the dir, same as the empty case.
+  if (!existsSync(dir)) throw new BeatEditError(`no directory at ${dir} — create seed songs first: beat taste-seeds ${dir}`)
   const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
   if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
   const seeds = seedFiles.map((f) => ({ file: f, doc: parse(readFileSync(join(dir, f), 'utf8')) }))
