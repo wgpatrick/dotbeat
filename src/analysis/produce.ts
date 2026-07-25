@@ -225,19 +225,40 @@ export interface ProducedResult {
   applied: string[]
 }
 
+export interface ApplyProducedOptions {
+  /** Opt-in: also apply the utility (mid/side widener) and auto-pan inserts on a DRUMS-kind track.
+   * Both are members of the reorderable `track.effects` chain that the offline engine reconciles the
+   * SAME way for drums as for synth tracks (Phase 26 Stream DC — engine.ts reconcileEffectChain), so
+   * they genuinely render on a drum/sample voice; only the osc-BANK width moves (osc2/unison/noise)
+   * stay synth-only, since a sample truly has no osc bank. Default `false` keeps the guard closed so
+   * every existing caller — the FROZEN engineplus ablation and every gen-kit / authoring `.beat` —
+   * stays byte-identical. The surgeplus sample host (src/taste/showdown.ts) sets it true: hosted
+   * audio has no osc bank to widen, so the insert-chain width IS its width. (The sidechain `duck` is
+   * deliberately NOT unlocked here — the drums branch of the engine's offline tick() returns before
+   * the synth-only duck block, so a duck on a drums voice silently no-ops; keeping it guarded by the
+   * source-track existence check below means an honest `applied` list never claims it.) */
+  sampleHostWidth?: boolean
+}
+
 /** Apply a production profile to `trackId` — the one primitive. Notes/hits are untouched by
  * construction; only the synth patch and (where a move needs one) the insert chain change. Every
  * move is intensify-only, so a patch already carrying production keeps its own richer settings.
  * osc-bank moves (osc2/unison/noise) apply to synth-kind tracks only — drum and sample voices don't
  * read the osc bank, so claiming them there would be dishonest; their width comes from the chorus /
- * utility inserts and the stereo reverb bus instead. */
-export function applyProducedDefaults(doc: BeatDocument, trackId: string, profile: ProductionProfile): ProducedResult {
+ * utility / auto-pan inserts (the last two only with `opts.sampleHostWidth`, see the type) and the
+ * stereo reverb bus instead. */
+export function applyProducedDefaults(doc: BeatDocument, trackId: string, profile: ProductionProfile, opts: ApplyProducedOptions = {}): ProducedResult {
   const track = doc.tracks.find((t) => t.id === trackId)
   if (!track) throw new BeatProduceError(`no track "${trackId}" to produce (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
   if (track.kind !== 'synth' && track.kind !== 'drums') {
     throw new BeatProduceError(`production covers synth/drums tracks, and "${trackId}" is ${track.kind}`)
   }
   const isSynth = track.kind === 'synth'
+  // utility + auto-pan are reorderable-chain inserts the offline engine reconciles identically on
+  // synth AND drums tracks (Phase 26 Stream DC), so a drums-kind SAMPLE host can carry them when the
+  // caller opts in — hosted audio's only width IS its insert chain (surgeplus). Off by default so
+  // the frozen ablation and every gen-kit/authoring output stay byte-identical.
+  const insertWidth = isSynth || opts.sampleHostWidth === true
   const applied: string[] = []
   const s: BeatSynth = { ...track.synth }
   let addUtility = false
@@ -263,10 +284,12 @@ export function applyProducedDefaults(doc: BeatDocument, trackId: string, profil
     s.chorusMix = Math.max(s.chorusMix, profile.chorusMix)
     applied.push(`chorus mix ${rnd2(s.chorusMix)}`)
   }
-  // utility (mid/side widener) is a reorderable-chain insert the engine wires on synth tracks; the
-  // drum bus's fixed tail doesn't carry it, so a drum/sample track's width comes from chorus + the
-  // stereo reverb send instead (setting an inert utility field/insert there would be dishonest).
-  if (profile.utilityWidth !== undefined && isSynth && s.utilityWidth < profile.utilityWidth) {
+  // utility (mid/side widener) is a reorderable-chain insert. It renders on synth tracks always, and
+  // on a drums-kind SAMPLE host when the caller opts in (`sampleHostWidth`) — the offline engine
+  // reconciles the drums track.effects chain the same way it does a synth's (Phase 26 Stream DC), so
+  // it is NOT confined to synth voices; only the osc-BANK moves above are. Default-off keeps every
+  // existing drums caller (which never sets the flag) unchanged.
+  if (profile.utilityWidth !== undefined && insertWidth && s.utilityWidth < profile.utilityWidth) {
     s.utilityWidth = Math.max(s.utilityWidth, profile.utilityWidth)
     addUtility = true
     applied.push(`utility width ${rnd2(s.utilityWidth)}`)
@@ -302,8 +325,9 @@ export function applyProducedDefaults(doc: BeatDocument, trackId: string, profil
     applied.push(`noise wash ${rnd2(s.noiseLevel)}`)
   }
 
-  // --- motion: auto-pan (reorderable-chain insert — synth tracks only, same reason as utility) ---
-  if (profile.autoPan && isSynth && s.autoPanMix < profile.autoPan.mix) {
+  // --- motion: auto-pan (reorderable-chain insert — synth tracks, or a drums sample host that opted
+  // into sampleHostWidth; same renders-on-both-kinds reasoning as utility above) ---
+  if (profile.autoPan && insertWidth && s.autoPanMix < profile.autoPan.mix) {
     s.autoPanRate = profile.autoPan.rate
     s.autoPanDepth = profile.autoPan.depth
     s.autoPanMix = Math.max(s.autoPanMix, profile.autoPan.mix)

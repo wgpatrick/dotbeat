@@ -512,7 +512,7 @@ test('surgeSampleHostText + buildSurgeSampleHost: a single-trigger sample voice 
   serializeChecked(doc)
 })
 
-test('applySurgeplusProduction on a pitched role: the sample-voice EFFECT subset lands; synth-only width moves are skipped; the render is untouched', () => {
+test('applySurgeplusProduction on a pitched role: the STRENGTHENED renderable subset lands (incl. utility + auto-pan width on the sample host); only the osc bank is skipped; the render is untouched', () => {
   let scratch = parse(surgeSampleHostText(120))
   scratch = setMediaSample(scratch, 'sdsurge', 'c'.repeat(64), 'media/sdsurge.wav')
   const host = buildSurgeSampleHost(scratch, 'sdsurge')
@@ -524,36 +524,49 @@ test('applySurgeplusProduction on a pitched role: the sample-voice EFFECT subset
   // the surge render (the hit + its sample lane) is held constant — only production varies
   assert.deepEqual(after.hits, before.hits, 'the surge render is untouched')
   assert.deepEqual(after.lanes, before.lanes, 'the sample lane is untouched')
-  // the EFFECT subset that renders on a sample voice: glue, chorus width, space (both sends), air
+  // glue, chorus width, space (both sends), air
   assert.ok(after.synth.saturatorDrive > 0 && after.synth.saturatorMix > 0, 'saturator glue')
   assert.notEqual(after.synth.chorusMode, 'off')
-  assert.ok(after.synth.chorusMix > 0, 'chorus width')
+  assert.ok(after.synth.chorusMix >= 0.55, 'assertive chorus width')
   assert.ok(after.synth.sendReverb > 0 && after.synth.sendDelay > 0, 'reverb + delay space')
-  assert.ok(after.synth.eqHigh > 0, 'eq3 high-shelf air')
+  assert.ok(after.synth.eqHigh >= 5, 'firm eq3 high-shelf air')
   assert.ok(after.effects.some((e) => e.type === 'eq3' && e.enabled), 'an enabled eq3 carries the air lift')
-  // the synth-VOICE-only width moves are dead weight on a sample voice — they must NOT be claimed
+  // NEW: the utility mid/side widener + auto-pan motion DO render on a drums-kind sample host
+  // (sampleHostWidth) — the reorderable chain reconciles on drums as on synth (Phase 26 Stream DC)
+  assert.ok(after.synth.utilityWidth >= 0.85, 'utility widener set')
+  assert.ok(after.effects.some((e) => e.type === 'utility' && e.enabled), 'utility insert added to the drum bus chain')
+  assert.ok(after.synth.autoPanMix > 0, 'auto-pan motion set')
+  assert.ok(after.effects.some((e) => e.type === 'autoPan' && e.enabled), 'autoPan insert added to the drum bus chain')
+  assert.ok(applied.some((a) => a.includes('utility')) && applied.some((a) => a.includes('autoPan')),
+    `utility + autoPan claimed honestly (${applied.join(', ')})`)
+  // the osc-BANK width moves are dead weight on a sample voice — they must NOT be claimed
   assert.equal(after.synth.osc2Level, before.synth.osc2Level, 'no osc bank on a sample voice')
   assert.equal(after.synth.unisonVoices, before.synth.unisonVoices)
-  assert.ok(!applied.some((a) => a.includes('osc2') || a.includes('unison') || a.includes('utility')),
-    `no osc-bank / utility-width claims on a sample voice (${applied.join(', ')})`)
-  assert.ok(!after.effects.some((e) => e.type === 'utility'), 'no utility insert added on the drum bus')
+  assert.ok(!applied.some((a) => a.includes('osc2') || a.includes('unison') || a.includes('noise wash')),
+    `no osc-bank claims on a sample voice (${applied.join(', ')})`)
+  // and the duck never fires on a drums voice (structurally unreachable offline) — none claimed
+  assert.ok(!applied.some((a) => a.includes('duck')), 'no duck on a drums-kind voice')
   serializeChecked(doc)
   // deterministic — same input, same production
   assert.deepEqual(applySurgeplusProduction(host, 'lead').applied, applied)
 })
 
-test('applySurgeplusProduction on bassline: mono-anchored glue only (no width, no sends — produce.ts §2.2)', () => {
+test('applySurgeplusProduction on bassline: audibly produced but mono-anchored (saturation-forward glue + air + light chorus; NO wide utility, NO auto-pan smear — produce.ts §2.2)', () => {
   let scratch = parse(surgeSampleHostText(100))
   scratch = setMediaSample(scratch, 'sdsurge', 'd'.repeat(64), 'media/sdsurge.wav')
   const host = buildSurgeSampleHost(scratch, 'sdsurge')
   const { doc, applied } = applySurgeplusProduction(host, 'bassline')
   const after = doc.tracks.find((t) => t.id === SURGEPLUS_TRACK_ID)!
   if (after.kind !== 'drums') return
-  assert.ok(after.synth.saturatorDrive > 0 && after.synth.saturatorMix > 0, 'bass gets saturation glue')
-  // the bass profile carries NO width/space — a mono-anchored low end stays dry-center
-  assert.equal(after.synth.chorusMode, 'off')
-  assert.equal(after.synth.sendReverb, 0)
-  assert.ok(applied.every((a) => a.includes('saturator')), `bass surgeplus is glue only (${applied.join(', ')})`)
+  // clearly produced now (fixing the twin problem for bass too): saturation-forward glue + air
+  assert.ok(after.synth.saturatorDrive >= 0.4 && after.synth.saturatorMix >= 0.45, 'bass leans on saturation glue')
+  assert.ok(after.synth.eqHigh >= 4, 'bass gets air')
+  assert.notEqual(after.synth.chorusMode, 'off')
+  assert.ok(after.synth.sendReverb > 0, 'a touch of space')
+  // but the low end stays mono-anchored: no WIDE utility widener, no auto-pan motion on the sub
+  assert.ok(!after.effects.some((e) => e.type === 'utility'), 'no utility widener on a mono-anchored bass')
+  assert.ok(!after.effects.some((e) => e.type === 'autoPan'), 'no auto-pan smear on the sub')
+  assert.ok(!applied.some((a) => a.includes('utility') || a.includes('autoPan')), `bass stays mono-anchored (${applied.join(', ')})`)
   serializeChecked(doc)
 })
 
