@@ -182,7 +182,7 @@ const round2 = (x: number) => Math.round(x * 100) / 100
 
 /** Scale every sample of a 16-bit PCM / 32-bit float wav by a pure linear gain, in place on
  * disk. Header and any extra chunks are preserved byte-for-byte; only the data chunk changes. */
-function applyWavGain(path: string, gainDb: number): void {
+export function applyWavGain(path: string, gainDb: number): void {
   const bytes = readFileSync(path)
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const ascii = (off: number, len: number) => String.fromCharCode(...bytes.subarray(off, off + len))
@@ -208,12 +208,23 @@ function applyWavGain(path: string, gainDb: number): void {
       const v = Math.round(view.getInt16(p, true) * g)
       view.setInt16(p, Math.max(-32768, Math.min(32767, v)), true)
     }
+  } else if (fmt.format === 1 && fmt.bitsPerSample === 24) {
+    // 24-bit refs are common in commercial packs (49/50 of refs-packs/chords) — scale the
+    // signed 3-byte LE samples in place, same header-preserving contract as the other paths.
+    for (let p = dataOff; p + 3 <= dataOff + dataLen; p += 3) {
+      let v = view.getUint8(p) | (view.getUint8(p + 1) << 8) | (view.getUint8(p + 2) << 16)
+      if (v & 0x800000) v -= 0x1000000
+      v = Math.max(-8388608, Math.min(8388607, Math.round(v * g)))
+      view.setUint8(p, v & 0xff)
+      view.setUint8(p + 1, (v >> 8) & 0xff)
+      view.setUint8(p + 2, (v >> 16) & 0xff)
+    }
   } else if (fmt.format === 3 && fmt.bitsPerSample === 32) {
     for (let p = dataOff; p + 4 <= dataOff + dataLen; p += 4) {
       view.setFloat32(p, view.getFloat32(p, true) * g, true)
     }
   } else {
-    throw new BeatBatchError(`${path}: unsupported wav encoding (format ${fmt.format}, ${fmt.bitsPerSample}-bit — need 16-bit PCM or 32-bit float)`)
+    throw new BeatBatchError(`${path}: unsupported wav encoding (format ${fmt.format}, ${fmt.bitsPerSample}-bit — need 16-bit PCM, 24-bit PCM, or 32-bit float)`)
   }
   writeFileSync(path, bytes)
 }
