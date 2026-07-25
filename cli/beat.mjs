@@ -741,7 +741,7 @@ const HELP = [
     cmd: 'showdown',
     text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
                 [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--random-patches]
-                [--ref-dir <path>] [--midi-dir <path>] [--theory] [--seconds S]
+                [--ref-dir <path>] [--midi-dir <path>] [--theory] [--seconds S] [--gen-stem-extract]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
                                                           source — engine (the role's seed phrase, soloed, through
@@ -792,6 +792,26 @@ const HELP = [
                                                           keeps the bank) — the figureSource:'theory' arm that
                                                           blind-compares theory vs bank vs midi composition with
                                                           the sound source held constant (research 124 §C.7).
+                                                          With --gen-stem-extract the gen clip is put
+                                                          through Demucs (htdemucs) after download and
+                                                          before the downbeat trim, keeping ONLY the
+                                                          role's stem — bassline->bass, chords/lead->
+                                                          other, drum-loop->drums. This is the
+                                                          GUARANTEE that prompting could not give:
+                                                          Lyria is a full-track model and prose
+                                                          isolation, negative_prompt and instrument-
+                                                          first framing all still returned a band
+                                                          (2026-07-25). If the requested stem comes
+                                                          back >25 dB below the mix (the prompt DID
+                                                          solo the instrument and demucs filed it
+                                                          elsewhere) it falls back to other, then the
+                                                          loudest non-drums stem, recording which was
+                                                          used — it never emits silence. The local
+                                                          manifest's gen from-string gains
+                                                          "+ demucs:<stem>"; the shared scores log is
+                                                          kind-only and unchanged. Needs the demucs
+                                                          sidecar — check with
+                                                          beat showdown --stem-doctor. Off by default.
                                                           Clips are duration-matched (trim/pad;
                                                           --seconds overrides the shortest-clip default) and
                                                           loudness-normalized to a
@@ -2147,7 +2167,7 @@ function flagValue(argv, flag) {
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
   const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--gen-provider', '--ref-dir', '--midi-dir', '--seconds', '--log']
-  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure', '--random-patches', '--theory'])
+  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure', '--random-patches', '--theory', '--gen-stem-extract', '--stem-doctor'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const dir = positional[0]
@@ -2160,6 +2180,17 @@ async function showdownCmd(argv) {
     const { surgeDoctor } = await import('../dist/src/analysis/surge.js')
     const report = await surgeDoctor()
     process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : formatSurgeDoctor(report))
+    return
+  }
+
+  // ---- stem-extract diagnostics ----------------------------------------------------------------
+  // Is --gen-stem-extract usable here? Probes the demucs sidecar the same way --surge-doctor probes
+  // surgepy: interpreter, deps, and whether the htdemucs weights are already cached (a first run
+  // otherwise downloads ~80 MB).
+  if (argv.includes('--stem-doctor')) {
+    const { stemDoctor } = await import('../dist/src/analysis/stems.js')
+    const report = await stemDoctor()
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n')
     return
   }
 
@@ -2203,6 +2234,13 @@ async function showdownCmd(argv) {
   // --gen-provider: a fal model path (e.g. fal-ai/lyria2) for the gen + keymap clips — the
   // research/127 bake-off arms. Undefined keeps each backend's own default provider.
   const genProvider = flagValue(argv, '--gen-provider')
+  // --gen-stem-extract: GUARANTEE the gen clip is one instrument, by extraction rather than by
+  // prompting. Lyria is a full-track model (Google's own prompt guide leads with genre/era) and
+  // three escalating prompt-side isolation attempts — prose, the real negative_prompt channel,
+  // instrument-first framing — all still came back as a band (owner rating passes, 2026-07-25).
+  // With this flag the download is Demucs-separated and only the role's stem survives. OFF by
+  // default so every existing run stays byte-identical; the Lyria arm turns it on.
+  const genStemExtract = argv.includes('--gen-stem-extract')
   const targetSeconds = flagValue(argv, '--seconds') !== undefined ? Number(flagValue(argv, '--seconds')) : undefined
   // the engineplus ablation (docs/source-showdown-eval.md): a fifth clip — same figure, same
   // patch, plus a production pass as ordinary .beat edits — measuring how much of the engine's
@@ -2634,7 +2672,15 @@ async function showdownCmd(argv) {
         const longFormProvider = genProvider !== undefined && /lyria/.test(genProvider)
         const genPrompt = `${longFormProvider && soloLead ? soloLead : ''}${phraseSubject.subject}, ${style}, ${batchBpm} BPM`
         const genDir = join(workDir, 'gen')
-        await lib.genSourceBatch({
+        // --gen-stem-extract: the guarantee prompting could not give. bassline -> bass,
+        // chords/lead -> other (htdemucs' catch-all for pitched non-bass instruments — exactly the
+        // mix minus drums and bass), drum-loop -> drums. Extraction happens inside the fal adapter,
+        // on the full download, before the downbeat trim.
+        const genStem = genStemExtract ? showdown.genStemForRole(spec) : undefined
+        if (genStemExtract && genStem === undefined) {
+          process.stderr.write(`warning: --gen-stem-extract has no stem mapping for role ${spec.role} — its gen clip stays a full mix\n`)
+        }
+        const genBatch = await lib.genSourceBatch({
           beatFile: seedPath,
           id: `sd${spec.role.replace(/-/g, '')}`,
           prompt: phraseSubject.subject,
@@ -2646,8 +2692,17 @@ async function showdownCmd(argv) {
           // Exclusions via the backend's real negative_prompt channel (Lyria) — prose "no drums"
           // in the positive prompt is demonstrably ignored (owner rating pass, 2026-07-25).
           negativePrompt: PHRASE_NEGATIVE[spec.phraseSubjectId],
+          ...(genStem !== undefined ? { stemExtract: genStem } : {}),
           outDir: genDir,
         })
+        // Extraction provenance for the LOCAL manifest from-string (the shared beat-scores log
+        // records the clip kind only and never sees this). `stemUsed` is what actually shipped —
+        // it differs from the request when the sidecar's near-silence guard fired.
+        const genStemUsed = genBatch?.candidates?.[0]?.sidecar?.generated?.stemExtract ?? null
+        if (genStemUsed) {
+          const note = genStemUsed.fallback ? ` [guard: ${genStemUsed.fallback}]` : ''
+          process.stderr.write(`gen stem: kept "${genStemUsed.stemUsed}" (${genStemUsed.keptRmsDb} dBFS) of a ${genStemUsed.mixRmsDb} dBFS mix; discarded ${genStemUsed.residualRmsDb} dBFS${note}\n`)
+        }
 
         // surge clip (--with-surge, pitched roles only): the SAME composed figure rendered through
         // a Surge XT factory patch — timbre comparison, composition held constant. The patch is a
@@ -2758,7 +2813,7 @@ async function showdownCmd(argv) {
             ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: withPatchProvenance(`${sharedFigure ? `same ${figDesc(plusDrawn)} and patch as the engine clip` : `${figDesc(plusDrawn)} through the engine patch`} + production pass: ${produced.applied.join(', ')} (dotbeat engine)`, enginePatchProvenance) }]
             : []),
           { kind: 'keymap', wav: join(workDir, produced ? 'v3.wav' : 'v2.wav'), from: kmFrom },
-          { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genProvider ?? genBackend})` },
+          { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genProvider ?? genBackend})${genStemUsed ? ` + demucs:${genStemUsed.stemUsed}${genStemUsed.stemUsed !== genStemUsed.stem ? ` (guard fell back from ${genStemUsed.stem})` : ''}` : ''}` },
           ...(surgeClip ? [surgeClip] : []),
           ...(surgeplusClip ? [surgeplusClip] : []),
         ]
