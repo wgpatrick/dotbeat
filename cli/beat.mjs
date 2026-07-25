@@ -1022,7 +1022,6 @@ const HELP = [
                                                           only how sections differ as isolated static mixes`,
   },
   // ---- Phase 37 Stream RA end -------------------------------------------------------------
-<<<<<<< HEAD
   {
     cmd: 'daemon',
     text: `  beat daemon <file> [--port 8420] [--edit-log]           two-way sync with a running dotbeat GUI;
@@ -1030,8 +1029,6 @@ const HELP = [
                                                           ~/.dotbeat/edit-log.jsonl (research/116 log-don't-train
                                                           telemetry, opt-in; = BEAT_EDIT_LOG=1)`,
   },
-=======
-  { cmd: 'daemon', text: `  beat daemon <file> [--port 8420]` },
   {
     cmd: 'open',
     text: `  beat open <file.beat> [--track X] [--view device|clip|mixer|arrangement]
@@ -1043,7 +1040,6 @@ const HELP = [
                                                           0 focused, 3 no daemon. --param names a synth param (the ones
                                                           beat inspect lists). GUI base is --gui-url / $BEAT_GUI_URL /
                                                           http://localhost:5300` },
->>>>>>> origin/focus-protocol
   { cmd: 'checkpoint', text: `  beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)` },
   {
     cmd: 'history',
