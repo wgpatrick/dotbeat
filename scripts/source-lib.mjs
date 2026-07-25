@@ -212,7 +212,7 @@ export async function addLocalSource({ beatFile, id, audioFile, license = 'unspe
  * media/.<id>.gen.wav, ingests it, and removes the temp file in a finally. The default `stableaudio`
  * backend needs torch + the model owner-side; `stub` runs everywhere (deterministic tone bed).
  * Wraps gen failures as SourceError, matching the PrepError→SourceError pattern in ingest(). */
-export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, seed, backend = 'stableaudio', provider = 'stable-audio-open', model, license } = {}) {
+export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, seed, backend = 'stableaudio', provider = 'stable-audio-open', model, license, negativePrompt } = {}) {
   if (!prompt || typeof prompt !== 'string') throw new SourceError('source gen needs a <prompt>, e.g. beat source gen song.beat pad "warm analog pad"')
   const { mediaDir } = resolveTarget(beatFile, id)
   mkdirSync(mediaDir, { recursive: true })
@@ -224,7 +224,7 @@ export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, se
   const effectiveSeed = seed ?? promptSeed(prompt)
   const tempWav = join(mediaDir, `.${id}.gen.wav`)
   try {
-    const { license: effectiveLicense, source, extra } = await generateRaw({ prompt, seconds, seed: effectiveSeed, backend, provider, model, license, outPath: tempWav })
+    const { license: effectiveLicense, source, extra } = await generateRaw({ prompt, seconds, seed: effectiveSeed, backend, provider, model, license, outPath: tempWav, negativePrompt })
     return await ingest({ beatFile, id, inPath: tempWav, license: effectiveLicense, source, query: prompt, extra })
   } finally {
     try { rmSync(tempWav) } catch { /* best-effort */ }
@@ -234,10 +234,10 @@ export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, se
 /** Run the generator once into `outPath` and derive the provenance facts every gen path records.
  * Shared by the single-shot addGeneratedSource above and the batch below, so a candidate's
  * provenance is the same shape (and the same honest licensing call) either way. */
-async function generateRaw({ prompt, seconds, seed, backend, provider, model, license, outPath }) {
+async function generateRaw({ prompt, seconds, seed, backend, provider, model, license, outPath, negativePrompt }) {
   let meta
   try {
-    ;({ meta } = await runGen({ prompt, seconds, seed, backend, provider, outPath }))
+    ;({ meta } = await runGen({ prompt, seconds, seed, backend, provider, outPath, negativePrompt }))
   } catch (err) {
     // BeatGenError (or anything the sidecar wrapper throws) → a clean, stack-trace-free SourceError.
     throw new SourceError(err instanceof Error ? err.message : String(err))
@@ -295,7 +295,7 @@ async function generateRaw({ prompt, seconds, seed, backend, provider, model, li
  *
  * Seeds are `seedFrom .. seedFrom+count-1` — contiguous and recorded per candidate, so a winner is
  * reproducible from its provenance sidecar exactly like a single-shot generation is. */
-export async function genSourceBatch({ beatFile, id, prompt, prompts, seconds = 2, seedFrom, count = 3, backend = 'stableaudio', provider = 'stable-audio-open', model, license, outDir, group, onProgress } = {}) {
+export async function genSourceBatch({ beatFile, id, prompt, prompts, seconds = 2, seedFrom, count = 3, backend = 'stableaudio', provider = 'stable-audio-open', model, license, outDir, group, onProgress, negativePrompt } = {}) {
   if (!prompt || typeof prompt !== 'string') throw new SourceError('source gen needs a <prompt>, e.g. beat source gen song.beat snare "tight acoustic snare" --count 3')
   // Optional per-variant prompts (taste-collect's within-batch STYLE diversity, owner insight
   // 2026-07-17): same-prompt-different-seed one-shots are near-identical — especially tight 1s hits
@@ -325,7 +325,7 @@ export async function genSourceBatch({ beatFile, id, prompt, prompts, seconds = 
     const rawWav = join(dir, `.v${i + 1}.gen.wav`)
     const candidateWav = join(dir, `v${i + 1}.wav`)
     try {
-      const { license: effectiveLicense, source, extra } = await generateRaw({ prompt: variantPrompt, seconds, seed, backend, provider, model, license, outPath: rawWav })
+      const { license: effectiveLicense, source, extra } = await generateRaw({ prompt: variantPrompt, seconds, seed, backend, provider, model, license, outPath: rawWav, negativePrompt })
       const { sha256, durationSeconds, sidecar } = await prepCandidate({ inPath: rawWav, outPath: candidateWav, license: effectiveLicense, source, query: variantPrompt, extra })
       variants.push({ media: { id, sha256, durationSeconds, license: effectiveLicense, source, seed, sidecar } })
     } finally {

@@ -74,6 +74,9 @@ export interface RunGenOptions {
   /** fal backend only: the fal model path (defaults to FAL_DEFAULT_PROVIDER). The Python
    * backends ignore it — their provider is baked into gen.py's own metadata. */
   provider?: string
+  /** fal backend only: negative prompt, honored by adapters with a real negative_prompt channel
+   * (Lyria); silently ignored elsewhere. */
+  negativePrompt?: string
 }
 
 export interface RunGenResult {
@@ -135,7 +138,7 @@ export async function runGen(opts: RunGenOptions): Promise<RunGenResult> {
     // provider labels like "stable-audio-open" through this field for the Python backends, and
     // those must fall back to fal's default model rather than 404 as a bogus endpoint.
     const provider = opts.provider !== undefined && opts.provider.includes('/') ? opts.provider : undefined
-    const meta = await runGenFal({ prompt, seconds, seed, provider, outPath })
+    const meta = await runGenFal({ prompt, seconds, seed, provider, outPath, ...(opts.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}) })
     return { meta, outPath }
   }
 

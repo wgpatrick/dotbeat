@@ -907,11 +907,11 @@ test('genSubjectVaried appends the role isolation clause to every phrase prompt'
   const { mulberry32 } = await import('../src/taste/eval.js')
   for (const id of ['bassline', 'melody', 'chords', 'drumloop']) {
     const s = genSubjectVaried(id, mulberry32(7))
-    assert.match(s.subject, /only, no /, `${id} prompt carries an isolation clause: ${s.subject}`)
+    assert.match(s.subject, /only, (absolutely )?no /, `${id} prompt carries an isolation clause: ${s.subject}`)
   }
   // one-shots pass through untouched
   const kick = genSubjectVaried('kick', mulberry32(7))
-  assert.ok(!kick.subject.includes('only, no'), 'one-shot subjects unchanged')
+  assert.ok(!kick.subject.includes('only, no') && !kick.subject.includes('stem only'), 'one-shot subjects unchanged')
 })
 
 // ---- surge probe (research 114 §7 "Surge-as-sound-factory") ------------------------------------

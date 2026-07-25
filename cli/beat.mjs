@@ -2178,7 +2178,7 @@ async function showdownCmd(argv) {
   // ---- collection ------------------------------------------------------------------------------
   if (!dir) throw new BeatEditError('showdown needs the taste-seeds directory: beat showdown <dir> [--roles r1,r2] [--rounds 1] [--with-produced] [--ref-dir <path>] (or --report)')
   const { mulberry32 } = await import('../dist/src/taste/eval.js')
-  const { genSubject, genSubjectVaried, genStyles } = await import('../dist/src/taste/seeds.js')
+  const { genSubject, genSubjectVaried, genStyles, PHRASE_NEGATIVE } = await import('../dist/src/taste/seeds.js')
   const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
   const { mkdirSync, copyFileSync } = await import('node:fs')
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
@@ -2567,7 +2567,11 @@ async function showdownCmd(argv) {
           writeFileSync(kmBase, showdown.keymapScratchText(batchBpm))
           const oneShot = genSubject(spec.keymap.oneShotSubjectId)
           const kmPrompt = `${oneShot.subject}, ${kmStyle}`
-          await lib.addGeneratedSource({ beatFile: kmBase, id: 'sdkm', prompt: kmPrompt, seconds: oneShot.seconds, seed: kmSeed, backend: genBackend, provider: genProvider })
+          // One-shots NEVER use --gen-provider: long-form providers (Lyria, 30s full-mix only)
+          // produce a band recording where a single stab should be, and the keymap sampler then
+          // re-pitches that whole mix per note — the owner's "weirdly sped-up" clips (2026-07-25).
+          // Short-form one-shots stay on the default stable-audio path.
+          await lib.addGeneratedSource({ beatFile: kmBase, id: 'sdkm', prompt: kmPrompt, seconds: oneShot.seconds, seed: kmSeed, backend: genBackend })
           const scratch = parse(readFileSync(kmBase, 'utf8'))
           const { channels, sampleRate } = decodeWav(readFileSync(join(workDir, 'media', 'sdkm.wav')))
           const pitch = detectPitch(channels, sampleRate)
@@ -2586,7 +2590,7 @@ async function showdownCmd(argv) {
           for (const [lane, subjectId] of Object.entries(spec.keymap.laneSubjects)) {
             const oneShot = genSubject(subjectId)
             const prompt = `${oneShot.subject}, ${kmStyle}`
-            await lib.addGeneratedSource({ beatFile: kmBase, id: `sd${lane}`, prompt, seconds: oneShot.seconds, seed: kmSeed + promptsUsed.length, backend: genBackend, provider: genProvider })
+            await lib.addGeneratedSource({ beatFile: kmBase, id: `sd${lane}`, prompt, seconds: oneShot.seconds, seed: kmSeed + promptsUsed.length, backend: genBackend })
             samplesByLane[lane] = `sd${lane}`
             promptsUsed.push(prompt)
           }
@@ -2629,6 +2633,9 @@ async function showdownCmd(argv) {
           seedFrom: genSeed,
           backend: genBackend,
           provider: genProvider,
+          // Exclusions via the backend's real negative_prompt channel (Lyria) — prose "no drums"
+          // in the positive prompt is demonstrably ignored (owner rating pass, 2026-07-25).
+          negativePrompt: PHRASE_NEGATIVE[spec.phraseSubjectId],
           outDir: genDir,
         })
 

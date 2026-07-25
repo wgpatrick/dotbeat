@@ -294,10 +294,21 @@ const PHRASE_VARIANTS: Record<string, string[]> = {
  * consumers inherit it. If prompts prove insufficient by ear, v2 is Demucs stem-extraction on
  * gen clips (the T3 pipeline already runs Demucs). */
 const PHRASE_ISOLATION: Record<string, string> = {
-  melody: 'solo lead melody only, no drums, no other instruments',
-  bassline: 'solo bassline only, no drums, no other instruments',
-  chords: 'chords only, no drums, no bass, no other instruments',
+  melody: 'isolated solo lead melody stem only, no drums, no other instruments',
+  bassline: 'isolated solo bassline stem only, absolutely no drums, no percussion, no other instruments',
+  chords: 'isolated chords stem only, no drums, no bass, no other instruments',
   drumloop: 'drums only, no melodic instruments',
+}
+
+/** Per-role NEGATIVE prompts for backends with a real negative_prompt channel (Lyria via the
+ * gen-fal adapter). Prose negations inside the positive prompt are demonstrably ignored — the
+ * owner's 2026-07-25 rating pass caught Lyria putting drums in "no drums" bassline clips whose
+ * genre phrase literally contained the word drum ("drum-and-bass"). Exclusions belong here. */
+export const PHRASE_NEGATIVE: Record<string, string> = {
+  melody: 'drums, percussion, kick drum, snare, hi-hats, cymbals, bass, vocals',
+  bassline: 'drums, percussion, kick drum, snare, hi-hats, cymbals, lead melody, chords, vocals',
+  chords: 'drums, percussion, kick drum, snare, hi-hats, cymbals, bass, lead melody, vocals',
+  drumloop: 'melody, bassline, chords, synths, vocals',
 }
 
 /** Same lookup as `genSubject`, but for phrase-tier ids with real musical variety, one entry of
