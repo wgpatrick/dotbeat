@@ -149,6 +149,7 @@ const HELP_FAMILIES = [
   ['trick', 'produce', 'prodtask', 'rate'], // production tricks + the produced-track authoring commands + the blind eval that validates them (docs/prodtask.md)
   ['produce', 'add-track', 'trick', 'gen-kit'], // composing produced: retrofit a track / create one produced / pull a named move / generate a whole produced kit (docs/producing.md)
   ['pilot', 'taste-eval', 'rate', 'score'], // the T5 overnight critic-guided QD search (docs/pilot.md, research/117)
+  ['board', 'vary', 'adopt', 'rate'], // the NON-BLIND production picking loop (research/128): vary candidates -> board pick -> adopt (rate is the blind sibling)
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
@@ -866,6 +867,20 @@ const HELP = [
                                                           standard score path into ONE beat-scores.jsonl at the dir
                                                           root (--log overrides). Re-running resumes where you left
                                                           off; then: beat taste-eval --log <dir>/beat-scores.jsonl`,
+  },
+  {
+    cmd: 'board',
+    text: `  beat board <dir> [--port 4322] [--log f]              option-board PICKING UI (NON-BLIND, production — the
+                                                          sibling of beat rate) over every UNDECIDED rendered batch
+                                                          under <dir>: each board shows its candidates with visible
+                                                          provenance (source.kind / recipe / provider) + the measured
+                                                          features table; PICK one (1-9, optional note), REJECT ALL
+                                                          (n, note REQUIRED), or SKIP (s). Writes decision.json per
+                                                          batch + ONE beat-decisions.jsonl at the dir root (--log
+                                                          overrides) — a SEPARATE log from blind beat-scores.jsonl,
+                                                          never merged. --status [--json]: no server, print per-batch
+                                                          decided/undecided + decisions (how the produce loop polls).
+                                                          Adopt a winner with: beat adopt <batch> <pick>`,
   },
   {
     cmd: 'audition',
@@ -5642,6 +5657,11 @@ async function main() {
       const { rateCommand } = await import('./rate.mjs')
       await rateCommand(rest)
       return // the rating server runs until ctrl-c
+    }
+    case 'board': {
+      const { boardCommand } = await import('./board.mjs')
+      await boardCommand(rest)
+      return // the picking server runs until ctrl-c (--status returns instead)
     }
     case 'taste-eval':
       await tasteEvalCmd(rest)
