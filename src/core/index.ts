@@ -15,6 +15,7 @@ export {
   type PartialTrack,
 } from './convert.js'
 export { diffDocuments, formatDiff, type DiffEntry } from './diff.js'
+export { rollupDiff, formatRollup, type Rollup, type TrackRoll, type ParamRoll, type NoteRoll, type AutomationRoll } from './rollup.js'
 export {
   setValue,
   addNote,

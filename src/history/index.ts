@@ -7,6 +7,7 @@ export {
   pin,
   unpin,
   pins,
+  showFileAt,
   HistoryError,
   type HistoryEntry,
   type CheckpointResult,

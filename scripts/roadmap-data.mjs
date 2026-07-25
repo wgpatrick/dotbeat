@@ -1229,6 +1229,18 @@ export const rows = [
     core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
     research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: null,
   },
+  {
+    area: 'Versioning / history', feature: '`beat diff --since <ref>` + `--rollup` (the agent\'s morning read of an owner GUI session)',
+    description: 'research/128 §2.3, the GUI→agent half of the owner-agent-GUI loop. `beat diff --since <ref> <file>` is sugar for "what changed since checkpoint X" — the file\'s saved state at <ref> vs the CURRENT on-disk state (uncommitted edits included), reusing the existing gitShow/semantic-diff plumbing. <ref> is a checkpoint ref (from `beat history`) OR a pin NAME (from `beat pins`) — pins are `pin/<slug>` git tags, resolved by a new history.showFileAt that tries the ref verbatim then as a pin tag. `--rollup` collapses the semantic diff for agent consumption: net before→after per param with a tweakCount (repeated same-path edits fold into one row keeping first-before/last-after — a wiggled-14-times knob is the struggle signal), note/hit edits clustered per track and musical bar ("notes m1-2: 2 added"), clip automation summarized per (clip, param) with peak delta, structural facts as prose, tracks ordered by edit mass and params by tweaks-then-delta. Prose by default; `--json` emits the structured Rollup (or the raw DiffEntry[]). Vocabulary is the GUI/CLI\'s own (SynthPanel param keys, track ids) so the owner reads it untranslated right after a session. Pure rollupDiff/formatRollup in core; unit-tested (pin+ref resolution, repeat-collapse, --json shape) plus a CLI pilot.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/128-agent-owner-gui-loop.md', plan: null,
+  },
+  {
+    area: 'Versioning / history', feature: 'Edit telemetry — opt-in append-only edit-stream JSONL (log-don\'t-train)',
+    description: 'research/116 §4 / research/128 §2.4, operationalized: an opt-in, append-only record of every document edit across all three write surfaces (GUI daemon, CLI, MCP), written to ~/.dotbeat/edit-log.jsonl OUTSIDE any project repo (the beat-scores.jsonl posture) so a working tree never carries telemetry. Off by default; `BEAT_EDIT_LOG=1` or `beat daemon --edit-log` turns it on for produce-song sessions. Schema per entry: {t, session (per-process id), surface (gui|cli|mcp), op, path, before, after, file}. Hook design (documented in edit-log.ts): NOT an observer inside the pure edit.ts (setValue fires dozens of times per debounced knob drag and gesture boundaries are a daemon concept — a pure-lib observer would log 60/sec and still miss the CLI/MCP verbs that call addNote/quantize directly), but ONE shared module hit at each surface\'s write moment, deriving entries from diffDocuments(before, after) — the project\'s own changeset vocabulary. GUI gestures ride the EXISTING undo-stack gesture boundary so a drag logs one entry (before=gesture start, after=drag settled), not one per tick. Surface attribution is honest: daemon edits are \'gui\' only when browser-originated (Origin/Sec-Fetch headers) or unspecified, with a body `source` self-attribution escape hatch for a programmatic client. Unit-tested: schema, gesture coalescing to one entry, zero cost when disabled.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/116-daw-automation-sota.md', plan: null,
+  },
 
   // ── Vary / audition loop ────────────────────────────────────────────────
   {

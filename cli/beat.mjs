@@ -66,6 +66,8 @@ import {
   defaultDrumKitLanes,
   diffDocuments,
   formatDiff,
+  rollupDiff,
+  formatRollup,
   describeDocument,
   parsePresetLibrary,
   applyPreset,
@@ -278,8 +280,15 @@ const HELP = [
   },
   {
     cmd: 'diff',
-    text: `  beat diff <a.beat> <b.beat>
-  beat diff --git <rev1> <rev2> <file>`,
+    text: `  beat diff <a.beat> <b.beat>                             semantic (musical) diff — reads like an edit list
+  beat diff --git <rev1> <rev2> <file>                    same, between two git revisions
+  beat diff --since [<ref>] <file> [--rollup] [--json]    <ref> (a checkpoint from \`beat history\` or a pin name
+                                                          from \`beat pins\`; defaults to the LAST checkpoint) -> the
+                                                          CURRENT on-disk file: "what changed since checkpoint X".
+                                                          --rollup collapses to the agent's morning read (net per-
+                                                          param + tweak counts, note clusters per bar, ordered by
+                                                          edit mass); --json emits the structured form (of the diff,
+                                                          or of the rollup)`,
   },
   {
     cmd: 'presets',
@@ -5175,23 +5184,58 @@ function gitShow(rev, file) {
   }
 }
 
-function diffCmd(argv) {
+async function diffCmd(argv) {
+  // Flags can sit anywhere; peel them off, then read the mode from the leading positional.
+  const rollup = argv.includes('--rollup')
+  const json = argv.includes('--json')
+  const rest = argv.filter((a) => a !== '--rollup' && a !== '--json')
   let aText, bText, label
-  if (argv[0] === '--git') {
-    const [, rev1, rev2, file] = argv
+  if (rest[0] === '--git') {
+    const [, rev1, rev2, file] = rest
     if (!rev1 || !rev2 || !file) throw new BeatEditError('diff --git needs <rev1> <rev2> <file>')
     aText = gitShow(rev1, file)
     bText = gitShow(rev2, file)
     label = `${file}: ${rev1} -> ${rev2}`
+  } else if (rest[0] === '--since') {
+    // research/128 §2.3: "what changed since checkpoint X" — the ref's saved text vs the CURRENT
+    // on-disk state (uncommitted edits included). <ref> is a checkpoint ref OR a pin name; the
+    // history module resolves both against the same repo `beat history`/`beat pins` read.
+    // <ref> is OPTIONAL: `beat diff --since <file>` defaults to the most recent checkpoint (the
+    // spec's "sugar for last checkpoint → now" and the interval a resuming agent always wants).
+    const { showFileAt, history } = await import('../dist/src/history/index.js')
+    const args = rest.slice(1)
+    let ref, file
+    if (args.length === 1) {
+      // Only a file given — default the ref to the latest checkpoint of that file.
+      file = args[0]
+      const h = history(file, { limit: 1 })
+      if (h.length === 0) throw new BeatEditError(`diff --since ${file}: no checkpoints yet — take one with \`beat checkpoint\`, or pass an explicit <ref>`)
+      ref = h[0].ref
+    } else {
+      ;[ref, file] = args
+    }
+    if (!ref || !file) throw new BeatEditError('diff --since needs <file> (defaults to the last checkpoint) or <ref> <file> (ref = a checkpoint from `beat history` or a pin name from `beat pins`)')
+    aText = showFileAt(file, ref)
+    bText = readFileSync(file, 'utf8')
+    label = `${file}: ${ref} -> working tree`
   } else {
-    const [a, b] = argv
-    if (!a || !b) throw new BeatEditError('diff needs two files (or --git <rev1> <rev2> <file>)')
+    const [a, b] = rest
+    if (!a || !b) throw new BeatEditError('diff needs two files (or --git <rev1> <rev2> <file>, or --since <ref> <file>)')
     aText = readFileSync(a, 'utf8')
     bText = readFileSync(b, 'utf8')
     label = `${a} -> ${b}`
   }
   const entries = diffDocuments(parse(aText), parse(bText))
-  process.stdout.write(`# ${label}\n` + formatDiff(entries))
+  if (rollup) {
+    // The agent's morning read: collapse to net-per-param + note clusters, ordered by edit mass.
+    const r = rollupDiff(entries)
+    if (json) process.stdout.write(JSON.stringify(r, null, 2) + '\n')
+    else process.stdout.write(`# ${label} (rollup)\n` + formatRollup(r))
+  } else if (json) {
+    process.stdout.write(JSON.stringify(entries, null, 2) + '\n')
+  } else {
+    process.stdout.write(`# ${label}\n` + formatDiff(entries))
+  }
   process.exitCode = entries.length === 0 ? 0 : 1 // diff(1) convention
 }
 
@@ -5513,7 +5557,7 @@ async function main() {
       consolidateCmd(rest)
       break
     case 'diff':
-      diffCmd(rest)
+      await diffCmd(rest)
       break
     case 'checkpoint':
       await checkpointCmd(rest)
