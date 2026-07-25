@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { resolvePython } from './sidecar.js'
+import type { StemName } from './stems.js'
 
 // dist/src/analysis/gen.js → repo root is three levels up (analysis → src → dist → root), matching
 // sidecar.ts's ANALYZE_PY handling. Kept relative so gen.py's own `pip install -r python/…` fix
@@ -63,6 +64,24 @@ export interface GenMeta {
   rawOutPath?: string
   trimOffsetSeconds?: number
   trimmedSeconds?: number
+  /** Set when the download was run through Demucs and reduced to ONE stem (src/analysis/stems.ts).
+   * The full mix is preserved at `mixPath` so the decision stays auditable and reversible. */
+  stemExtract?: GenStemExtract
+}
+
+/** What survives a stem extraction into the provenance record (the sidecar's numbers, minus the
+ * per-stem table). `stemUsed` differs from `stem` exactly when the near-silence guard fired. */
+export interface GenStemExtract {
+  stem: string
+  stemUsed: string
+  model: string
+  device: string
+  mixRmsDb: number
+  keptRmsDb: number
+  residualRmsDb: number
+  fallback: string | null
+  /** the untouched full-mix download, kept beside the stem */
+  mixPath: string
 }
 
 export interface RunGenOptions {
@@ -77,6 +96,10 @@ export interface RunGenOptions {
   /** fal backend only: negative prompt, honored by adapters with a real negative_prompt channel
    * (Lyria); silently ignored elsewhere. */
   negativePrompt?: string
+  /** fal backend only, OPT-IN: run the download through Demucs and keep only this stem, so a
+   * full-mix model (Lyria) still yields a single-instrument clip. Off by default — the existing
+   * one-shot/batch callers are byte-unchanged. The Python backends ignore it. */
+  stemExtract?: StemName
 }
 
 export interface RunGenResult {
@@ -138,7 +161,15 @@ export async function runGen(opts: RunGenOptions): Promise<RunGenResult> {
     // provider labels like "stable-audio-open" through this field for the Python backends, and
     // those must fall back to fal's default model rather than 404 as a bogus endpoint.
     const provider = opts.provider !== undefined && opts.provider.includes('/') ? opts.provider : undefined
-    const meta = await runGenFal({ prompt, seconds, seed, provider, outPath, ...(opts.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}) })
+    const meta = await runGenFal({
+      prompt,
+      seconds,
+      seed,
+      provider,
+      outPath,
+      ...(opts.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}),
+      ...(opts.stemExtract ? { stemExtract: opts.stemExtract } : {}),
+    })
     return { meta, outPath }
   }
 
