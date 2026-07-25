@@ -754,9 +754,13 @@ const HELP = [
                                                           SAME surge render through a dotbeat production pass
                                                           (hosted as a sample voice on a drums-kind track — the
                                                           audio-playback track the engine produces; 'audio'-kind
-                                                          tracks carry no effect chain — applying eqHigh air /
-                                                          saturation / chorus / reverb+delay sends), isolating
-                                                          production for surge as engineplus does for engine.
+                                                          tracks carry no effect chain — applying a strengthened,
+                                                          role-aware pass: chords/lead get assertive chorus + the
+                                                          mid/side utility widener + slow auto-pan + saturation +
+                                                          reverb/delay space + a firm air shelf; bass stays
+                                                          mono-anchored [saturation + air, no wide utility]),
+                                                          isolating production for surge as engineplus does for
+                                                          engine (moves stereo width 5-8 dB on pitched roles).
                                                           Optionally ref
                                                           (--ref-dir). With --midi-dir the composed sources
                                                           (engine/engineplus/keymap/surge) draw their figures
@@ -2612,10 +2616,13 @@ async function showdownCmd(argv) {
         // 'audio'-KIND track carries no effect chain by format design (the engine renders it dry),
         // so the render is hosted the SAME way the keymap clip hosts its one-shot: a single-trigger
         // sample voice on a drums-kind scratch host — the audio-playback track dotbeat's engine
-        // actually produces (sample -> filter -> drum bus + reverb/delay sends). Produced with the
-        // role's produce.ts profile (applyProducedDefaults, engineplus's own primitive; its synth-
-        // only width moves are auto-dropped on a sample voice), rendered offline like the work
-        // batch. Graceful skip on any failure — and whenever surge itself skipped.
+        // actually produces (sample -> filter -> drum bus + reverb/delay sends + the reorderable
+        // insert chain). Produced with the STRENGTHENED, role-aware surgeplusProfile through
+        // applyProducedDefaults (engineplus's own primitive) with sampleHostWidth, so the sample
+        // host gets the utility widener + auto-pan too (they render on drums via the reorderable
+        // chain); only the osc bank (no sample osc bank) and the duck (no-op on a drums voice) drop
+        // out. Rendered offline like the work batch. Graceful skip on any failure — and whenever
+        // surge itself skipped.
         let surgeplusClip = null
         if (withProduced && surgeClip !== null) {
           try {
