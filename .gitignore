@@ -18,7 +18,7 @@ target/
 /prior_art/
 
 # Owner-side Python venv for the ML sidecars (python/README.md) — machine-local, never committed.
-python/.venv/
+python/.venv
 # Dedicated venv for the roughness sidecar (MoSQITo can conflict with the shared venv's pins).
 # No trailing slash so a symlink-to-venv (used when developing in a git worktree) is ignored too.
 python/venv-roughness

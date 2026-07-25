@@ -1,0 +1,24 @@
+# python/stem_extract.py — Demucs stem isolation for the gen path (`--gen-stem-extract`).
+#
+# Confirmed owner-side 2026-07-25 against the EXISTING python/.venv, which already carried demucs
+# 4.1.0 (installed for the taste-dataset T3 ref-chop pipeline: taste-dataset/t3_stems.py chops
+# stems/htdemucs/<song>/{drums,bass,other,vocals}.wav). This file documents that install so a fresh
+# machine can reproduce it; on the owner machine it is already satisfied.
+#
+# Install into the SHARED venv (python/.venv, Python 3.10 — see python/README.md "Install"):
+#   python/.venv/bin/pip install -r python/requirements-demucs.txt
+
+demucs==4.1.0
+
+# demucs 4.1.0 declares einops/huggingface-hub/julius/lameenc/pyyaml/safetensors/sphn/torch/tqdm.
+# torch is pinned here to the version the rest of the venv already runs (stable-audio-tools +
+# Beat This) so installing this file never silently upgrades the shared interpreter's torch.
+torch==2.7.1
+
+# soundfile decodes every container the fal gen path can hand the sidecar (wav/flac/ogg/mp3).
+# stem_extract.py falls back to the stdlib `wave` module for 16-bit PCM WAV when it is absent, so
+# this is a convenience, not a hard requirement.
+soundfile>=0.12
+
+# numpy 2.x is what the shared venv runs; the sidecar's level math is numpy-only.
+numpy>=2.0
