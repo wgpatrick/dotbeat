@@ -1,0 +1,20 @@
+# dotbeat roughness sidecar (python/roughness.py) — pair-relative "grind" ear (research 123).
+#
+# Daniel & Weber time-varying psychoacoustic roughness via MoSQITo (Apache-2.0). research 123's
+# verdict: the only measured signal that tracks the owner's "grindy" complaint, usable ONLY
+# pair-relative (no valid absolute threshold — commercial material out-roughs the defect).
+#
+# MoSQITo pins numpy<2 transitively; to keep it from fighting the shared python/.venv (stable-audio
+# / beat_this), install this into a DEDICATED venv the sidecar auto-discovers at python/venv-roughness
+# (or point $BEAT_ROUGHNESS_PYTHON at it). Build on Python 3.10, like the shared venv:
+#   python3.10 -m venv python/venv-roughness
+#   python/venv-roughness/bin/pip install -r python/requirements-roughness.txt
+# Verify: python/venv-roughness/bin/python3 python/roughness.py --doctor
+# pip is BLOCKED in the dev/CI container; this file is validated OWNER-SIDE via --doctor.
+
+mosqito>=1.2.1
+numpy<2
+
+# soundfile is optional (the sidecar falls back to stdlib `wave` for 16-bit PCM), but it lets the
+# roughness sidecar read non-16-bit / non-WAV renders too, and is a light install.
+soundfile
