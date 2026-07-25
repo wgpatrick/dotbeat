@@ -1438,6 +1438,12 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'done', status: 'done',
     research: null, plan: 'phase-13-editing.md',
   },
+  {
+    area: 'Selection protocol', feature: 'Agent→GUI deep links (beat open + daemon /focus)',
+    description: 'Research 128 §2.2: the sibling of /selection in the other direction — the agent points the owner AT a spot instead of reading where they are. A daemon `POST /focus {track?, clip?, view?, param?}` validates against the live doc (unknown track → 400 with the known list) and broadcasts a `focus` event on the existing /events SSE stream — no router. The GUI mirrors it onto the SAME layout state a hand action touches (select the track via selectedTrackId, open the Clip/Device pane the Shift+Tab toggle drives, raise the Mixer overlay, scroll the arrangement, and flash the named SynthPanel control with a per-control sibling of param-group-flash) so an agent-focused track and a hand-clicked one are indistinguishable afterward. `beat open <file> [--track] [--view device|clip|mixer|arrangement] [--param] [--port] [--gui-url]` POSTs /focus if a daemon is reachable and prints the GUI URL (?daw=port), else prints how to start one — no auto-spawn in v1; exit 0 focused, 3 no daemon. Honest gap: surge tracks have no GUI panel to deep-link to. Playwright verify covers the full round-trip.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/128-agent-owner-gui-loop.md', plan: null,
+  },
 
   // ── Drag & drop (cross-cutting) ───────────────────────────────────────────
   // Research 74 found dotbeat has five real drag-and-drop implementations (library→track/lane,
@@ -2323,5 +2329,11 @@ export const rows = [
     description: 'Live-verified onboarding skill that sets an agent up to drive dotbeat via MCP.',
     core: 'na', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: 'phase-17-cc-skill.md',
+  },
+  {
+    area: 'Agent onboarding', feature: 'Owner–agent session-rhythm protocol (produce-song skill)',
+    description: 'Research 128 §2.5, decision D29: the GUI-era hand-off loop codified as a FILE protocol in the produce-song skill, so a dead session\'s successor reconstructs it from files alone. At every checkpoint-listen milestone the agent writes workshop/BRIEF.md — what finished + which checks passed, the listening packet, option-board URLs (`beat board` intended surface with a list-and-pick-by-reply fallback), copy-pasteable `beat open` deep links presenting the GUI as the owner\'s home surface, the uncertainty triage list, and a literal `state: awaiting-owner @ <ref>` turn token. The owner picks on boards (decision.json), fine-tunes in the GUI, and/or writes workshop/FEEDBACK.md, ending with a checkpoint. The agent\'s wake-up ritual is a fixed checklist: read decisions → `beat diff --since <ref> --rollup` (with a `beat diff --git` fallback) → read FEEDBACK.md → interpret owner edits into NOTES.md → NEVER revert an owner edit (the ground-truth rule: flag with measurements, propose never apply) → mine repeated corrections into PREFERENCES.md → adopt winners → update the state line. Prompt/docs only.',
+    core: 'na', cli: 'na', gui: 'na', status: 'done',
+    research: 'research/128-agent-owner-gui-loop.md', plan: '.claude/skills/produce-song/SKILL.md',
   },
 ]

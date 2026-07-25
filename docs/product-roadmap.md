@@ -24,9 +24,9 @@ data file, not this file directly, so it stays in sync with the matching artifac
 A feature with links in both columns but status "Not started" means: fully scoped, ready for a
 stream to pick up — not guesswork, a decision away from being built.
 
-## Snapshot — 367 features tracked
+## Snapshot — 369 features tracked
 
-**170** Done · **9** In progress · **188** Not started
+**172** Done · **9** In progress · **188** Not started
 
 ---
 
@@ -358,6 +358,7 @@ stream to pick up — not guesswork, a decision away from being built.
 | Feature | Description | Core | CLI/MCP | GUI | Status | Research | Plan |
 |---|---|---|---|---|---|---|---|
 | daemon /selection + --scope selection | A shared selection axis grammar wired into both the arrangement and note views and the CLI. | ✅ done | ✅ done | ✅ done | ✅ Done | — | [`phase-13-editing.md`](phase-13-editing.md) |
+| Agent→GUI deep links (beat open + daemon /focus) | Research 128 §2.2: the sibling of /selection in the other direction — the agent points the owner AT a spot instead of reading where they are. A daemon `POST /focus {track?, clip?, view?, param?}` validates against the live doc (unknown track → 400 with the known list) and broadcasts a `focus` event on the existing /events SSE stream — no router. The GUI mirrors it onto the SAME layout state a hand action touches (select the track via selectedTrackId, open the Clip/Device pane the Shift+Tab toggle drives, raise the Mixer overlay, scroll the arrangement, and flash the named SynthPanel control with a per-control sibling of param-group-flash) so an agent-focused track and a hand-clicked one are indistinguishable afterward. `beat open <file> [--track] [--view device|clip|mixer|arrangement] [--param] [--port] [--gui-url]` POSTs /focus if a daemon is reachable and prints the GUI URL (?daw=port), else prints how to start one — no auto-spawn in v1; exit 0 focused, 3 no daemon. Honest gap: surge tracks have no GUI panel to deep-link to. Playwright verify covers the full round-trip. | ✅ done | ✅ done | ✅ done | ✅ Done | [`128-agent-owner-gui-loop.md`](research/128-agent-owner-gui-loop.md) | — |
 
 ## Drag & drop (cross-cutting)
 
@@ -490,6 +491,7 @@ stream to pick up — not guesswork, a decision away from being built.
 |---|---|---|---|---|---|---|---|
 | Music-session scaffold + GUI-selection-aware vary over MCP | The fix for "the agent started updating the README": `beat mcp-init` now also writes a 27-line music-session CLAUDE.md next to the .beat (never overwrites without --force) — you are here to MAKE MUSIC, run metrics+lint after every render and say what changed, taste goes through vary→audition→score→adopt, checkpoint at milestones, velocity is 0-1, lane gain is dB, never touch the dotbeat repo. Plus the GUI-interop bridge: beat_vary accepts scope "selection" + port, resolving the user's live GUI selection off the running daemon exactly like the CLI's --scope selection — "vary this" now means what the human highlighted. | — | ✅ done | — | ✅ Done | [`101-usability-pilot-mcp-taste-loop.md`](research/101-usability-pilot-mcp-taste-loop.md) | [`phase-35-plan.md`](phase-35-plan.md) |
 | beat mcp-init + Claude Code skill | Live-verified onboarding skill that sets an agent up to drive dotbeat via MCP. | — | ✅ done | — | ✅ Done | — | [`phase-17-cc-skill.md`](phase-17-cc-skill.md) |
+| Owner–agent session-rhythm protocol (produce-song skill) | Research 128 §2.5, decision D29: the GUI-era hand-off loop codified as a FILE protocol in the produce-song skill, so a dead session's successor reconstructs it from files alone. At every checkpoint-listen milestone the agent writes workshop/BRIEF.md — what finished + which checks passed, the listening packet, option-board URLs (`beat board` intended surface with a list-and-pick-by-reply fallback), copy-pasteable `beat open` deep links presenting the GUI as the owner's home surface, the uncertainty triage list, and a literal `state: awaiting-owner @ <ref>` turn token. The owner picks on boards (decision.json), fine-tunes in the GUI, and/or writes workshop/FEEDBACK.md, ending with a checkpoint. The agent's wake-up ritual is a fixed checklist: read decisions → `beat diff --since <ref> --rollup` (with a `beat diff --git` fallback) → read FEEDBACK.md → interpret owner edits into NOTES.md → NEVER revert an owner edit (the ground-truth rule: flag with measurements, propose never apply) → mine repeated corrections into PREFERENCES.md → adopt winners → update the state line. Prompt/docs only. | — | — | — | ✅ Done | [`128-agent-owner-gui-loop.md`](research/128-agent-owner-gui-loop.md) | [`SKILL.md`](.claude/skills/produce-song/SKILL.md) |
 
 ## Feedback, generation & sound sources (Phase 37)
 
