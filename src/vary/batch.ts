@@ -633,6 +633,17 @@ export interface ScoreEntry {
    * gitignore-gated batch dir's manifest. Lets the report separate "our sounds with commercial
    * composition" from "our sounds with our composition". */
   figureSource?: 'midi' | 'bank' | 'theory'
+  /** "None of these are good" verdict (owner, twice after a showdown batch: nothing deserved a
+   * pick, and the only options were picking or silently skipping — which loses the signal). A
+   * none-good entry carries `picks: []`, `rejected: [every variant]`, and `verdict: 'none-good'`.
+   * The empty picks array is deliberate and load-bearing: BOTH consumers already skip empty-picks
+   * entries at LOAD (src/taste/eval.ts loadTasteBatches and src/taste/showdown.ts
+   * loadShowdownEntries), so a none-good batch is cleanly EXCLUDED from taste-model training and
+   * from the showdown win-rate/pairwise math rather than corrupting either (there is no winner to
+   * imply a pairwise comparison from). The signal is preserved in two places that read the field
+   * directly: the showdown report tallies a `noneGood` count per collection, and the taste log
+   * keeps the entry verbatim. Semantics: "all variants rejected, none worth ranking." */
+  verdict?: 'none-good'
 }
 
 export interface ScoreBatchResult {
@@ -807,6 +818,49 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   }
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
   return { dir, logPath: resolvedLog, manifest, ranks, entry, usesRecipe, usesMedia, ...(previousPicks !== undefined ? { previousPicks } : {}) }
+}
+
+export interface NoneGoodResult {
+  dir: string
+  logPath: string
+  manifest: VaryBatchManifest
+  entry: ScoreEntry
+}
+
+/** Record a "none of these are good" verdict against a batch dir — the owner finished the batch
+ * and nothing deserved a pick (recorded instead of silently skipping, which loses the signal).
+ * Writes ONE append-only entry shaped exactly like a `scoreBatch` entry but with `picks: []`,
+ * `rejected: [every variant]`, and `verdict: 'none-good'`. Same log resolution, same feature /
+ * source / figure-source enrichment as scoreBatch, so the entry is fully self-describing for the
+ * report. The empty picks array is what makes the existing load-time guards exclude it from the
+ * taste model and the win-rate math (see the ScoreEntry.verdict comment) — no consumer change is
+ * needed for the exclusion; only the report's own none-good tally reads the field. */
+export function recordNoneGood(dir: string, logPath?: string): NoneGoodResult {
+  const manifest = readBatchManifest(dir)
+  const resolvedLog = logPath ?? (manifest.parent === '' ? resolve(dirname(resolve(dir)), DEFAULT_SCORES_LOG) : defaultScoresLog(resolveBatchParent(dir, manifest)))
+  const allFiles = manifest.variants.map((v) => v.file)
+  const entry: ScoreEntry = {
+    t: new Date().toISOString(),
+    batch: dir,
+    ...(manifest.track !== undefined ? { track: manifest.track } : {}),
+    group: manifest.group,
+    amount: manifest.amount,
+    seed: manifest.seed,
+    parentSha256: manifest.parentSha256,
+    ...(manifest.prompt !== undefined ? { prompt: manifest.prompt } : {}),
+    picks: [],
+    rejected: allFiles,
+    verdict: 'none-good',
+  }
+  // Same enrichment scoreBatch does — the entry stays self-describing (a report reading the
+  // none-good count still wants to know which sources were on the table).
+  const features = computeBatchFeatures(dir, allFiles)
+  if (Object.keys(features).length > 0) entry.features = features
+  const sources = Object.fromEntries(manifest.variants.filter((v) => v.source !== undefined).map((v) => [v.file, v.source!.kind]))
+  if (Object.keys(sources).length > 0) entry.sources = sources
+  if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
+  appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
+  return { dir, logPath: resolvedLog, manifest, entry }
 }
 
 /** The human-facing summary both surfaces emit after a score: the scored line plus the

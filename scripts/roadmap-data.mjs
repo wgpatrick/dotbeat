@@ -2010,6 +2010,50 @@ export const rows = [
     research: 'research/105-usability-pilot-audio-import.md', plan: 'phase-39-plan.md',
   },
 
+  // \u2500\u2500 Machine listening, composition & gen providers (taste program) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  {
+    area: 'Machine listening, composition & gen providers (taste program)', feature: 'Pathology screen suite (`beat lint --screens` / `beat feedback --sections`)',
+    description: 'A standing suite of deterministic DSP DEFECT screens (does this render have a flaw), distinct from lint\'s taste/reference distances. Nine screens \u2014 arrangement-flatness (needs a section map; flags "everything on all the time"), click, dc-offset, mono-collapse (phase), 2-5 kHz resonance, mud, crest-collapse, dead-air, sub-rumble \u2014 each emitting one unified PathologyFinding shape (kind / severity 1-5 / source / detail / optional start-end seconds / band / measured-vs-threshold) so a future `beat listen` can merge LLM critics into the same severity-ranked stream (research 122 \u00a77). Thresholds calibrated for \u22480 false positives on the commercial ref pools (refs-packs/refs-cc0) and padded by the render-variance floor so re-rendering an unchanged .beat can\'t flip a finding. Surfaced via `beat lint <file.wav> --screens [--sections <file.beat>]` (--sections implies --screens and enables the arrangement-flatness + section-located dead-air screens) and inside `beat feedback --sections`. Curvature-based click detector with synthetic-buffer tests. src/metrics/screens.ts + sections.ts.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/122-machine-listening-for-production.md', plan: null,
+  },
+  {
+    area: 'Machine listening, composition & gen providers (taste program)', feature: 'Extended WAV decode \u2014 24-bit / int32 / float64 / WAVE_FORMAT_EXTENSIBLE',
+    description: 'The metrics WAV reader (src/metrics/wav.ts) accepted only 16-bit PCM / 32-bit float, throwing WavDecodeError on everything else \u2014 so every 24-bit file read downstream as SILENCE (137 of 165 refs-packs loops are 24-bit PCM; "24-bit basslines are mostly silent" was the symptom). Adds per-format sample readers normalizing to -1..1: signed 24-bit (manual sign-extend from bit 23 \u2014 DataView has no getInt24), 32-bit integer PCM, 64-bit float, and unwraps WAVE_FORMAT_EXTENSIBLE (0xFFFE) by reading the real format tag from the SubFormat GUID. Unit test covers every bit depth + sign-extension + extensible + the unsupported-encoding path. Load-bearing for the pathology screens\' ref-pool calibration.',
+    core: 'done', cli: 'na', gui: 'na', status: 'done',
+    research: 'research/122-machine-listening-for-production.md', plan: null,
+  },
+  {
+    area: 'Machine listening, composition & gen providers (taste program)', feature: 'Clip-automation render-truth fix (engine)',
+    description: 'The shared live/offline engine (ui/src/audio/engine.ts) re-asserted the static patch value for every automatable param on every 16th-note tick (from sync()), so an automated param spent nearly the whole step pinned at the patch default and only ramped to the automated value by the NEXT step. Measured: a -60 dB volume lane rendered at only ~-4.6 dB attenuation; an automated 150 Hz cutoff read ~10 dB louder than an identical static 150 Hz control. Fix resolves per synth track which lane params the active clip drives THIS tick and skips re-asserting the static value for exactly those, so tick()\'s automation pass owns each automated AudioParam (non-automated params re-assert as before). Verified with recorded audio: 60.7 dB attenuation on the -60 dB lane; 0.0 dB between automated vs static cutoff. CLIP-scoped automation \u2014 distinct from the song-scoped section-energy primitive still in the backlog.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
+    research: 'research/121-harness-engineering-for-music-agents.md', plan: null,
+  },
+  {
+    area: 'Machine listening, composition & gen providers (taste program)', feature: 'Cheap section excerpt (`beat excerpt`)',
+    description: '`beat excerpt <file.beat> <section...> [--out <path>]` writes a derived .beat whose song block keeps ONLY the named sections (by scene id or name; requested order preserved, a name matching several entries expands to all in song order) while tracks / scenes / clips / media are preserved untouched \u2014 the cheap-partial-render pattern agents used to hand-roll as one-off test-*.beat files (render just the drop). Refuses loop-mode files (no song block). Prints a bars summary + the ready-to-run `beat render` line. Default output <file>-excerpt.beat next to source. CLI-only (research 121 \u00a73.6 "auto test-*.beat").',
+    core: 'na', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/121-harness-engineering-for-music-agents.md', plan: null,
+  },
+  {
+    area: 'Machine listening, composition & gen providers (taste program)', feature: 'Theory composition layer (`beat showdown --theory`)',
+    description: 'A deterministic, theory-aware composition layer (src/taste/theory.ts + motif.ts) that replaces showdown\'s uniform archetype-bank draws with the craft rules the theory-aware-assistant category ships (Ableton 12 generators, Scaler, Captain Chords) \u2014 no ML, just conditional structure, seeded in the caller\'s mulberry32 and returning the same ComposedPhrase shape applyComposedPhrase already consumes. Pieces (research 124 \u00a7C.1-C.4/C.7): a weighted, FUNCTION-tagged progression bank (workhorse / breakdown-bed / pre-drop-rise / pads-loop) with position-conditional cadence substitution and a techno parallel-planing mode; a bass REGISTER rule (below ~130 Hz / MIDI 48 only root/5th/octave) with trance/tech-house archetypes; minimal-motion VOICE-LEADING chords (voiceLeadingCost/chooseVoicing + top-voice-hold); MOTIF-first leads (single-peak) with a motif-variation operator library (euclid, transpose-to-next-chord, contour inversion, rhythmic displacement, one-change-per-repeat); plus a pre-render gross-error lint (flag, never score). `beat showdown --theory` draws pitched sources (bassline/chords/lead) from it (drum-loop keeps the bank; midi outranks theory when both are live), recording figureSource:\'theory\' in the scores log \u2014 the figureSource arm that blind-compares theory vs bank vs midi composition with the sound source held constant. Internally composed, so batches are NOT gitignore-gated.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/124-midi-composition.md', plan: null,
+  },
+  {
+    area: 'Machine listening, composition & gen providers (taste program)', feature: 'Gen-provider adapters + bake-off (`--gen-provider`)',
+    description: 'A per-provider request/response adapter table on the fal backend (src/analysis/gen-fal.ts PROVIDER_ADAPTERS) so a stronger hosted model is "a provider-param mapping, not a new backend," each adapter carrying its rights verdict (watermark; training-ban -> taste-training holdout tag): lyria2 (fal-ai/lyria2, native 48 kHz, SynthID watermark, trainable), minimax-music (is_instrumental, training-excluded), elevenlabs-music (music_length_ms 3000 ms floor \u2014 the only native short-duration control, training-excluded), stable-audio (incumbent default/fallback, 422 duration-alias retry). Plus a dependency-free downbeat-aligned trim module (gen-trim.ts \u2014 cuts fixed-length Lyria/MiniMax outputs to the requested bars starting at a detected downbeat over the known BPM grid) and a resumable real-fal-spend bake-off harness (scripts/gen-bakeoff-run.mjs + gen-bakeoff-metrics.mjs \u2014 DSP + Audiobox-Aesthetics scorer, resumes by on-disk file so a paid clip is never re-spent). `beat showdown --gen-provider <fal model path>` selects the model for the gen + keymap clips (research 127 arms). Verdict rule: a backend replaces the default provider only if it beats Stable Audio 3 in blind pairwise.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/127-gen-backend-bakeoff.md', plan: null,
+  },
+  {
+    area: 'Machine listening, composition & gen providers (taste program)', feature: 'Full-song production skill (`produce-song`, decisions.md D28)',
+    description: 'A stage-gated full-song production WORKFLOW skill (.claude/skills/produce-song/SKILL.md \u2014 a checklist, not code) distilled from the Sandstorm-cover craftsman sessions: six phases (research; source mining + material plan; dynamics plan FROM source before any track is built; then build/mix/master), each naming its instruments and an explicit exit gate, plus a checkpoint-listen protocol, a workshop-dir + NOTES.md cross-session log, and capability-truth notes. The core lesson (research 121 \u00a73.7 changes #1+#2, the highest-ROI S-effort items): agents use exactly the tools their prompt names, at the altitude it names them \u2014 so the skill tells agents to use `beat feedback --sections`, `beat render --stems`, the produce/trick layer, and the lint gates (incl. <= -1 dBTP) rather than re-implement them, under the prime directive "a render that fails a known check NEVER reaches the owner\'s ears." D28 (2026-07-24): any agent asked to produce a complete song/cover uses this workflow, not ad-hoc prompts.',
+    core: 'na', cli: 'na', gui: 'na', status: 'done',
+    research: 'research/121-harness-engineering-for-music-agents.md', plan: 'decisions.md',
+  },
+
   {
     area: 'Known usability gaps (backlog)', feature: 'Pilot 104 low-severity leftovers (Phase 37 surface) \u2014 resolved in Phase 38 SD',
     description: 'The low/minor remainder of pilot 104, all three cleared by Phase 38 Stream SD: (1) `vary automation:<param>` gained an explicit `--clip <id>` selector (CLI + beat_vary MCP), documented in help/--groups (default still targets the first clip); (2) the harmless `404 Not Found` render page-error is now filtered from console forwarding while genuine JS exceptions and engine media-load warnings still surface; (3) `source add`/`ingest` now prints an explicit re-register note (replaced sha256 abc\u2026\u2192def\u2026, or "already registered (unchanged)") instead of silently replacing. Kept as a done-row for the citation trail.',
@@ -2062,6 +2106,37 @@ export const rows = [
     description: 'Varying the osc group (osc2Level/osc2Detune/subLevel/unisonVoices/unisonWidth/wtPos) on a POLYPHONIC synth track (simultaneous note starts, i.e. chords) makes the engine throw "Start time must be strictly greater than previous start time" (Tone.js scheduling) on BOTH render paths — offline compute and live capture. Repro: `beat vary examples/taste-t1/seed-005.beat chords osc --count 2 --render` (also seed-007). Surfaced 2026-07-18 as the recurring "2 failed" in every taste-collect run. CLOSED 2026-07-18: root cause was NOT unison/osc2 voice scheduling — the osc vary group also includes noiseLevel, and chain.noise is the one persistent Tone source shared by every note on a synth track, retriggered once per chord note at the identical slot time — i.e. exactly the pilot-111 noise-layer bug, already fixed by a7ac2c6\'s SynthChain.lastNoiseStart monotonic guard (--spread sets EVERY group param, so every osc batch raised noiseLevel on the chords track). Verified by neutering the guard (exact throw reproduces on the recorded repro) and restoring it (seed-005 and seed-007 osc batches render clean on both paths); the rest of the bank (osc2/osc3/uniPairs/sub/fm) is per-note Tone.PolySynth voices — a fresh voice per trigger, even for identical simultaneous pitches, verified hot with noise off — so no second guard is needed. taste-collect\'s osc-on-poly skip is removed; poly tracks are back in the osc taste pool.',
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: null, plan: null,
+  },
+
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Song-scoped automation / section-energy WRITE primitive',
+    description: 'The shipped `beat feedback --sections` energy-arc is a read-only MEASUREMENT; there is no primitive to WRITE a section-level energy move. Intended (research 121 §3.6 item (2) / §3.7 change #5): a section/timeline-level energy primitive — per-section track gain/duck/filter offsets, or song-scoped automation lanes — so "the drop bass steps up" is ONE line, not a cloned clip at x0.735 velocities. Explicitly distinct from the clip-scoped automation render-truth fix that just landed (that fixed per-clip lanes; this is a NEW song/arrangement-level format + engine primitive, rated L). Complements the §3.4 source-derived per-section dynamics-plan artifact (rated M, verified by feedback --ref) — the plan says the target, this primitive renders it.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/121-harness-engineering-for-music-agents.md', plan: null,
+  },
+  {
+    area: 'Known usability gaps (backlog)', feature: '`beat listen` audio-critic sidecar',
+    description: 'A sidecar (same child-process pattern as the surge/aes/analyze sidecars) that takes a render + optional section map and emits structured critique to stdout/JSON in ONE schema shared across DSP detectors and LLM critics — exactly the PathologyFinding shape the screens already emit (source / issues[] with start-end MM:SS / kind / severity 1-5 / band / track_hint / detail / confidence). Candidate sources (research 122 §7, sequenced by the research 123 benchmark — "DW roughness in, Gemini out"): roughness-dw (MoSQITo Daniel-Weber time-varying roughness), flatness-lint (shipped), plus an LLM critic. LLM-sourced issues carry confidence and are advisory-only (never auto-adopt); DSP-sourced issues can gate like ringDb. Per-stem mode turns track_hint from a guess into a measurement. Prereq largely met: the unified finding schema and the arrangement-flatness screen already shipped; this row is the sidecar wiring + the roughness detector on top.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/122-machine-listening-for-production.md', plan: null,
+  },
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Candidate / critic "option-board" surface (naming TBD with owner)',
+    description: 'Consolidation row for candidate-and-critic presentation. NAMING CAVEAT: no doc uses the literal term "option-board" (grepped research/121, /122, /127, decisions.md) — confirm with the owner what it should name. The documented mechanisms it would unify: (1) the shipped contact-sheet audition (`beat vary --audition` stitches every variant into one audition.wav + timecode index/json — the CLI/MCP analogue of an option board); (2) research 121 §3.5\'s "critic panel with named jurisdictions, not a pile" — dotbeat\'s critic is already plural (metrics bands, lint, per-section feedback, screens, aes, roughness) and should be PRESENTED as a panel (rated Medium-high); (3) the not-started GUI take-lanes / candidate-clip lane stack (product-roadmap take-lanes row, research/62 — don\'t build before the segment-splice primitive); (4) gen-provider bake-off candidates (research 127 — competing loops the blind pairwise/rate flow currently adjudicates with no GUI). A single GUI surface by this name does not exist in the docs; scope it down with the owner before promoting to a stream.',
+    core: 'missing', cli: 'partial', gui: 'missing', status: 'not-started',
+    research: 'research/121-harness-engineering-for-music-agents.md', plan: null,
+  },
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Showdown usage line doesn\'t state <dir> is a `beat taste-seeds` output (pilot 128)',
+    description: 'CLI pilot 128 (`beat showdown --theory --gen-backend stub`, docs/research/128): the `beat showdown --help` usage line is just `beat showdown <dir>`, and only the prose body (and the `related:` footer) reveal that <dir> must be a `beat taste-seeds` output — a first-timer relies on reading to the bottom. Cheap help-text polish: name the seed-dir prerequisite on the usage line itself. (The two harder pilot-128 findings — silent `--gen-backend` typos and the raw-ENOENT trace on a missing dir — were fixed same-session.)',
+    core: 'na', cli: 'not-started', gui: 'na', status: 'not-started',
+    research: 'research/128-usability-pilot-showdown-theory.md', plan: null,
+  },
+  {
+    area: 'Known usability gaps (backlog)', feature: 'No headless rate/score path — the showdown→rate→report loop needs a browser (pilot 128)',
+    description: 'CLI pilot 128: the middle step of the collect->rate->report loop, `beat rate`, is a browser-only local web UI, so a headless / CI / agent user who COLLECTED a showdown (or any vary) batch cannot complete it — they can build and report but not rank. Bigger than a help fix: a headless rate/score surface (e.g. a `beat rate --pick <dir> <v..>` non-interactive scorer, or serving the audition.wav + a text prompt) so the taste loop closes without a GUI. Cites pilot 128; relates to the shipped `beat audition` clip-set stitcher (which already produces a scoreable batch) and `beat score`.',
+    core: 'na', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/128-usability-pilot-showdown-theory.md', plan: null,
   },
 
   // ── Desktop app / packaging ──────────────────────────────────────────────

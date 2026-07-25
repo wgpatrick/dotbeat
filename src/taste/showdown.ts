@@ -40,7 +40,7 @@ import {
   type BeatDocument,
 } from '../core/index.js'
 import { NOTE_FIELD_DEFAULTS } from '../core/index.js'
-import { applyProducedDefaults, productionProfileFor, type ProductionProfile, type ProductionRole, type ProducedResult } from '../analysis/produce.js'
+import { applyProducedDefaults, type ProductionProfile, type ProductionRole, type ProducedResult } from '../analysis/produce.js'
 import { buildKeymap, midiToNote } from '../core/keymap.js'
 import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { shuffledOrder } from '../vary/audition.js'
@@ -948,15 +948,24 @@ const round4 = (x: number) => Math.round(x * 10000) / 10000
 // routes player -> filter -> the drum bus (EQ/comp/distortion/bitcrush + saturator + reverb/delay
 // sends) and the reorderable insert chain, all rendered offline like the other work clips.
 //
-// The production pass is the shared produce.ts profile for the role (applyProducedDefaults, the same
-// primitive engineplus wraps). On a drums-kind sample voice its synth-VOICE-only moves are dropped
-// by applyProducedDefaults' own `isSynth` guards: the osc-bank width stack (osc2 layer / unison /
-// noise wash — a sample has no osc bank) and the utility mid/side widener (a synth-chain insert the
-// drum bus's fixed tail doesn't carry). What ACTUALLY renders on the surge audio — and what the
-// clip's `from` records as `applied` — is the sample-voice EFFECT subset: eq3 high-shelf air
-// (eqHigh), saturator glue (drive/mix), chorus width, and the reverb + delay sends. That subset is
-// the honest answer to "the audio-track production chain actually supported"; the two width moves
-// above are the documented skips.
+// The production pass is a STRENGTHENED, sample-host-specific profile (surgeplusProfile), applied
+// through the shared applyProducedDefaults primitive (the same one engineplus wraps) with the
+// sampleHostWidth opt-in. It fixes the measured "twin problem": the old pass reused the mild genkit
+// profile AND dropped its two biggest width moves on the sample voice, so a surgeplus render landed
+// within ~0.5 dB RMS of its surge sibling (0% wins — the owner heard duplicates). The honest map of
+// what renders on the drums-kind sample voice, corrected against the engine (the reorderable
+// track.effects chain reconciles on drums exactly as on synth — Phase 26 Stream DC — so utility and
+// auto-pan ARE available inserts, NOT synth-only; the earlier claim that "the drum bus's fixed tail
+// doesn't carry utility" conflated the fixed tail with the reorderable chain):
+//   RENDERS  → eq3 high-shelf air (eqHigh), saturator glue, chorus width, reverb + delay sends,
+//              the utility mid/side widener, and auto-pan motion (the last two via sampleHostWidth).
+//   DROPPED  → the osc-BANK width stack (osc2 layer / unison / noise wash — a sample truly has no
+//              osc bank), and the sidechain duck (the drums branch of the engine's offline tick()
+//              returns before the synth-only duck block, so a duck on a drums voice silently
+//              no-ops — surgeplusProfile sets none, keeping the `applied` list honest).
+// So surgeplus leans on the full renderable width path — utility + auto-pan + assertive chorus —
+// plus stronger air/saturation/space, targeting the dead-mono / no-air deficit the whole effort
+// chases while staying same-figure (notes/hits held constant against the surge clip).
 
 /** The drums-kind scratch host's track id — the CLI registers the surge WAV as a sample lane on it
  * (beat source add -> media/) before buildSurgeSampleHost declares the lane and the single hit. */
@@ -975,11 +984,40 @@ export function surgeplusProductionRole(role: string): ProductionRole {
   return SURGEPLUS_PRODUCTION_ROLE[role] ?? 'default'
 }
 
-/** The role's production profile for the surgeplus host — the shared produce.ts genkit-tier profile
- * (the EFFECT subset that survives applyProducedDefaults' isSynth guards on a sample voice is what
- * lands; see the section note). Deterministic function of role, no rng. */
+/** The role's STRENGTHENED production profile for the surgeplus host. Deterministic function of role,
+ * no rng. Not the shared genkit profile: surgeplus fixes the "twin problem" (measured — a surgeplus
+ * render landed within 0.5 dB RMS of its surge sibling, so the owner heard duplicates and it scored
+ * 0% wins). The genkit chords/lead profile is mild (chorus 0.3, sat 0.18/0.25, revb 0.28, air +2.5)
+ * AND its two biggest width moves — the osc-bank stack and utility — were being dropped on the
+ * sample host, leaving only faint chorus/eq. This profile instead LEANS on exactly what the drums-
+ * kind sample host renders offline (verified: the reorderable chain reconciles on drums as on synth,
+ * Phase 26 Stream DC — so utility + auto-pan ARE available; only the osc bank and the synth-only duck
+ * are not): assertive chorus, the mid/side utility widener, slow auto-pan motion, saturation glue,
+ * bigger reverb/delay sends, and a firm air shelf. Role-aware: bass stays mono-anchored (no wide
+ * utility, no auto-pan that would smear the sub — research 115 §2.2) but is still audibly produced
+ * via saturation-forward glue + air + a touch of chorus; chords/lead get the full width stack. */
 export function surgeplusProfile(role: string): ProductionProfile {
-  return productionProfileFor(surgeplusProductionRole(role))
+  const r = surgeplusProductionRole(role)
+  if (r === 'bass') {
+    return {
+      role: r,
+      chorusMix: 0.3,
+      saturator: { drive: 0.4, mix: 0.45 },
+      sendReverb: 0.18,
+      sendDelay: 0.06,
+      eqHigh: 4,
+    }
+  }
+  return {
+    role: r,
+    chorusMix: 0.55,
+    utilityWidth: 0.85,
+    autoPan: { rate: 0.15, depth: 0.4, mix: 0.3 },
+    saturator: { drive: 0.3, mix: 0.4 },
+    sendReverb: 0.42,
+    sendDelay: 0.16,
+    eqHigh: 5,
+  }
 }
 
 /** Minimal drums-kind host for the surge render: one track ("surge") the CLI registers the surge WAV
@@ -1029,12 +1067,14 @@ export function buildSurgeSampleHost(scratchDoc: BeatDocument, sampleId: string)
   return doc
 }
 
-/** Apply the surgeplus production pass to the built host — the role's produce.ts profile through the
- * shared applyProducedDefaults primitive (the same one engineplus wraps). Returns the produced doc
- * and the honest `applied` list (only the moves that actually landed on the drums-kind sample voice
- * — the sample-voice EFFECT subset; the synth-only width moves are silently dropped, see the note). */
+/** Apply the surgeplus production pass to the built host — the strengthened surgeplusProfile through
+ * the shared applyProducedDefaults primitive (the same one engineplus wraps), with sampleHostWidth
+ * so the drums-kind sample host gets the utility + auto-pan inserts too (they render on drums via the
+ * reorderable chain — see the section note). Returns the produced doc and the honest `applied` list
+ * (only the moves that actually landed; the osc-bank width stack has no target on a sample voice and
+ * is silently dropped, and the profile sets no duck since it no-ops on a drums voice offline). */
 export function applySurgeplusProduction(doc: BeatDocument, role: string): ProducedResult {
-  return applyProducedDefaults(doc, SURGEPLUS_TRACK_ID, surgeplusProfile(role))
+  return applyProducedDefaults(doc, SURGEPLUS_TRACK_ID, surgeplusProfile(role), { sampleHostWidth: true })
 }
 
 // ---- batch assembly ----------------------------------------------------------------------------
@@ -1275,6 +1315,40 @@ export function loadShowdownEntries(logPath: string): { entries: ShowdownLogEntr
   return { entries, skipped }
 }
 
+/** Count "none of these are good" verdicts (batch.ts recordNoneGood) per showdown role — the
+ * signal the empty-picks exclusion deliberately keeps OUT of the win-rate/pairwise math but that
+ * the report still wants to surface ("for lead, the owner rejected the whole board 3 times").
+ * Reads `verdict: 'none-good'` on `showdown:<role>` entries; latest-per-batch, so a none-good
+ * that was later re-scored (or vice versa) counts by the batch's final verdict only. */
+export function noneGoodByRole(logPath: string): { byRole: { role: string; batches: number }[]; total: number } {
+  let text: string
+  try {
+    text = readFileSync(logPath, 'utf8')
+  } catch {
+    return { byRole: [], total: 0 }
+  }
+  // latest entry per batch decides — a none-good can be superseded by a real ranking and vice versa
+  const verdictByBatch = new Map<string, { role: string; noneGood: boolean }>()
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    let raw: { batch?: string; group?: string; verdict?: string }
+    try {
+      raw = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+    if (typeof raw.batch !== 'string' || typeof raw.group !== 'string' || !raw.group.startsWith('showdown:')) continue
+    verdictByBatch.set(raw.batch, { role: raw.group.slice('showdown:'.length), noneGood: raw.verdict === 'none-good' })
+  }
+  const counts = new Map<string, number>()
+  for (const { role, noneGood } of verdictByBatch.values()) {
+    if (noneGood) counts.set(role, (counts.get(role) ?? 0) + 1)
+  }
+  const byRole = [...counts.entries()].map(([role, batches]) => ({ role, batches })).sort((a, b) => a.role.localeCompare(b.role))
+  return { byRole, total: byRole.reduce((s, r) => s + r.batches, 0) }
+}
+
 export interface SourceStat {
   kind: string
   /** batches this source appeared in */
@@ -1300,6 +1374,9 @@ export interface ShowdownReport {
   refPools: SourceStat[]
   roles: { role: string; batches: number; smoke: boolean; stats: SourceStat[] }[]
   smokeMinBatches: number
+  /** "None of these are good" verdicts per role (recordNoneGood) — excluded from the win-rate math
+   * above (empty picks, no winner to imply pairs from) but surfaced here so the signal isn't lost. */
+  noneGood: { byRole: { role: string; batches: number }[]; total: number }
 }
 
 /** The minimal ranked-batch shape the per-arm tally needs — a set of ranked picks, the rejected
@@ -1411,6 +1488,7 @@ export function computeShowdownReport(logPath: string): ShowdownReport {
     refPools: refPoolTally(entries),
     roles,
     smokeMinBatches: SPLIT_SMOKE_MIN_BATCHES,
+    noneGood: noneGoodByRole(logPath),
   }
 }
 
@@ -1431,6 +1509,10 @@ export function statLine(s: SourceStat, indent: string): string {
 export function formatShowdownReport(r: ShowdownReport): string {
   let out = `source showdown — per-source win rates over ${r.totalBatches} scored showdown batch(es) in ${r.logPath}\n`
   if (r.skipped > 0) out += `(${r.skipped} showdown-group entr${r.skipped === 1 ? 'y' : 'ies'} skipped: no per-variant source record)\n`
+  if (r.noneGood.total > 0) {
+    out += `none-good verdicts (whole board rejected — excluded from the win rates above): ${r.noneGood.total} batch(es)` +
+      ` [${r.noneGood.byRole.map((n) => `${n.role} ${n.batches}`).join(', ')}]\n`
+  }
   if (r.totalBatches === 0) {
     out += 'nothing scored yet — collect a round (beat showdown <dir>) and rate it (beat rate <dir>) first\n'
     return out

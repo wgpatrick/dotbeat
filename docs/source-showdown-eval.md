@@ -228,13 +228,20 @@ That is the audio-playback track dotbeat's engine actually **produces**: its sam
 `player → filter → the drum bus` (EQ / comp / saturator / reverb + delay sends) plus the reorderable
 insert chain, rendered offline in its own one-boot work batch like every other work clip.
 
-**The production chain actually supported (and the skips).** The pass is the shared `produce.ts`
-profile for the role, through the same `applyProducedDefaults` primitive engineplus wraps
-(`applySurgeplusProduction`). On a drums-kind **sample** voice, the primitive's own `isSynth` guards
-drop the synth-voice-only moves — the **osc-bank width stack** (osc2 layer / unison / noise wash: a
-sample has no osc bank) and the **utility** mid/side widener (a synth-chain insert the drum bus's
-fixed tail doesn't carry). What **actually renders on the surge audio** — and what the clip's `from`
-records as `applied` — is the sample-voice **EFFECT subset**, role-aware from `produce.ts`:
+**The production chain actually supported (and the twin-problem fix).** Early on the pass reused the
+mild shared `produce.ts` profile AND dropped its two biggest width moves on the sample host, so a
+`surgeplus` render landed within **~0.5 dB RMS** of its `surge` sibling — the owner heard duplicates
+and it scored **0% wins / 26% pairwise**. The strengthened pass (`surgeplusProfile` +
+`applySurgeplusProduction`, still through the same `applyProducedDefaults` primitive engineplus
+wraps, with the `sampleHostWidth` opt-in) fixes it by leaning on **exactly what the drums-kind sample
+host renders offline**. The renderable set was re-checked against the engine and corrected: the
+**utility** mid/side widener and **auto-pan** are members of the reorderable `track.effects` chain,
+which the offline engine reconciles on a drums track the SAME way it does a synth's (Phase 26 Stream
+DC) — so they are NOT synth-only. The earlier claim that "the drum bus's fixed tail doesn't carry
+utility" conflated the fixed tail with the reorderable chain (its own `eq3`/`eqHigh` move already
+proves the chain works on drums). What genuinely does NOT apply: the **osc-bank** stack (a sample has
+no osc bank) and the **sidechain duck** (the drums branch of the engine's offline `tick()` returns
+before the synth-only duck block, so a duck on a drums voice silently no-ops).
 
 | move | renders on the sample voice? | source |
 |------|------------------------------|--------|
@@ -242,15 +249,27 @@ records as `applied` — is the sample-voice **EFFECT subset**, role-aware from 
 | **saturator** glue (drive / mix) | ✅ | drum-bus saturator |
 | **chorus** width (mix) | ✅ | drum-bus chorus insert |
 | **reverb** + **delay** sends | ✅ | shared return buses |
+| **utility** mid/side width | ✅ (`sampleHostWidth`) | reorderable `track.effects` insert — reconciles on drums as on synth (Phase 26 Stream DC) |
+| **auto-pan** motion | ✅ (`sampleHostWidth`) | reorderable `track.effects` insert — same path as utility |
 | osc-bank width (osc2 / unison / noise) | ⛔ skipped | synth voices only — no osc bank on a sample |
-| **utility** mid/side width | ⛔ skipped | synth-chain insert; the drum bus doesn't carry it |
+| sidechain **duck** | ⛔ skipped | drums `tick()` returns before the synth-only duck block — silent no-op offline |
 
-Role-aware exactly as `produce.ts` is: `bassline` gets **glue only** (mono-anchored low end — no
-width, no sends, research 115 §2.2); `chords`/`lead` get the full renderable subset (chorus width +
-saturation + reverb/delay space + air). Verified offline on a synthetic surge render: the produced
-clip's stereo correlation drops from **1.00 (dead mono) to ~0.90** and its `applied` list is exactly
-`[chorus, saturator, sendReverb, sendDelay, eqHigh air]` — the arm is not a no-op, and it targets the
-same dead-mono / no-air deficit the whole showdown effort is chasing.
+Role-aware: `chords`/`lead` get the full renderable width stack (assertive chorus + the utility
+widener + slow auto-pan + saturation + bigger reverb/delay space + a firm +5 dB air shelf);
+`bassline` stays **mono-anchored** (research 115 §2.2 — no wide utility, no auto-pan that would smear
+the sub) but is now still audibly produced via saturation-forward glue + a +4 dB air shelf + a touch
+of chorus, rather than the old glue-only near-twin. **Verified offline** by hosting CC0 loops through
+the OLD vs NEW treatment and measuring (`featuresForAudioFile`):
+
+| role | Δ stereo-width | Δ correlation | Δ RMS | Δ air-band |
+|------|----------------|---------------|-------|------------|
+| lead | **+5.6 dB** | −0.62 | +2.6 dB | + |
+| chords | **+8.5 dB** | −0.46 | −0.8 dB | + |
+| bassline | +1.3 dB (mono by design) | −0.08 | **+4.0 dB** | **+4.5 pct-pts** |
+
+Pitched roles move stereo width **5–8 dB** and decorrelate hard; bass moves RMS/air by 4 dB / 4.5
+pct-pts while staying mono — all well past the "audible, not subtle" bar, targeting the same
+dead-mono / no-air deficit the whole showdown effort is chasing.
 
 **Licensing.** A `surgeplus` clip is the same surge factory-patch audio, produced — it carries the
 same still-unresolved Surge XT factory-**content** license as `surge`, so a `surgeplus`-bearing batch
