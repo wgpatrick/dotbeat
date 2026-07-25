@@ -155,6 +155,92 @@ test('extractAudioUrl accepts the known response shapes and rejects junk', () =>
   assert.equal(extractAudioUrl({ audio: 'not-a-url' }), null)
 })
 
+// ---- Per-provider adapter request shapes (research/127 §4.2, Part A1) --------------------------
+
+test('lyria2 adapter: {prompt, seed} body, no duration/output_format, synthid watermark, trainable', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fal-lyria-'))
+  const out = join(dir, 'v1.wav')
+  const { transport, calls } = mockTransport({ postBody: JSON.stringify({ audio: { url: 'https://cdn.fal.example/lyria.wav' } }) })
+  const meta = await runGenFal({ prompt: 'a rolling deep house bassline, solo bassline only', seconds: 8, seed: 12, provider: 'fal-ai/lyria2', outPath: out, transport, apiKey: 'k' })
+  assert.equal(calls[0]!.url, 'https://fal.run/fal-ai/lyria2')
+  assert.deepEqual(JSON.parse(calls[0]!.body!), { prompt: 'a rolling deep house bassline, solo bassline only', seed: 12 })
+  assert.equal(meta.watermark, 'synthid')
+  assert.equal(meta.trainingExcluded, undefined) // Lyria stays trainable per the doc
+})
+
+test('lyria2 adapter includes negative_prompt only when provided', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fal-lyria-neg-'))
+  const { transport, calls } = mockTransport({ postBody: JSON.stringify({ audio: { url: 'https://a/x.wav' } }) })
+  await runGenFal({ prompt: 'p', seconds: 8, seed: 1, provider: 'fal-ai/lyria2', negativePrompt: 'no drums', outPath: join(dir, 'v.wav'), transport, apiKey: 'k' })
+  assert.deepEqual(JSON.parse(calls[0]!.body!), { prompt: 'p', seed: 1, negative_prompt: 'no drums' })
+})
+
+test('minimax v2.6 adapter: is_instrumental + wav audio_setting, no duration/seed, training-excluded', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fal-mmx-'))
+  const out = join(dir, 'v1.wav')
+  const { transport, calls } = mockTransport({ postBody: JSON.stringify({ audio: { url: 'https://cdn.fal.example/mmx.wav' } }) })
+  const meta = await runGenFal({ prompt: 'a dark techno sub bassline, solo bassline only', seconds: 8, seed: 5, provider: 'fal-ai/minimax-music/v2.6', outPath: out, transport, apiKey: 'k' })
+  assert.equal(calls[0]!.url, 'https://fal.run/fal-ai/minimax-music/v2.6')
+  assert.deepEqual(JSON.parse(calls[0]!.body!), { prompt: 'a dark techno sub bassline, solo bassline only', is_instrumental: true, audio_setting: { format: 'wav', sample_rate: 44100 } })
+  assert.equal(meta.trainingExcluded, true)
+  assert.equal(meta.watermark, undefined)
+})
+
+test('elevenlabs/music adapter: music_length_ms (3s floor) + force_instrumental, training-excluded', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fal-11-'))
+  const { transport, calls } = mockTransport({ postBody: JSON.stringify({ audio: { url: 'https://a/e.wav' } }) })
+  // 8 s -> 8000 ms
+  const meta = await runGenFal({ prompt: 'a funky disco bassline, solo bassline only', seconds: 8, seed: 9, provider: 'fal-ai/elevenlabs/music', outPath: join(dir, 'v1.wav'), transport, apiKey: 'k' })
+  assert.deepEqual(JSON.parse(calls[0]!.body!), { prompt: 'a funky disco bassline, solo bassline only', music_length_ms: 8000, force_instrumental: true })
+  assert.equal(meta.trainingExcluded, true)
+  // 1 s clamps UP to the 3000 ms floor
+  const { transport: t2, calls: c2 } = mockTransport({ postBody: JSON.stringify({ audio: { url: 'https://a/e.wav' } }) })
+  await runGenFal({ prompt: 'p', seconds: 1, seed: 9, provider: 'fal-ai/elevenlabs/music', outPath: join(dir, 'v2.wav'), transport: t2, apiKey: 'k' })
+  assert.equal(JSON.parse(c2[0]!.body!).music_length_ms, 3000)
+})
+
+test('non-stable-audio adapters do NOT trigger the duration-alias 422 retry', async () => {
+  // The alias retry swaps duration<->seconds_total, which is meaningless for lyria/minimax/11labs.
+  // A 422 from those must surface immediately, not spawn a second POST.
+  const dir = mkdtempSync(join(tmpdir(), 'fal-noretry-'))
+  const { transport, calls } = mockTransport({ postStatus: 422, postBody: '{"detail":"bad prompt"}' })
+  await assert.rejects(
+    runGenFal({ prompt: 'p', seconds: 8, seed: 1, provider: 'fal-ai/lyria2', outPath: join(dir, 'v.wav'), transport, apiKey: 'k' }),
+    /HTTP 422.*bad prompt/s,
+  )
+  assert.equal(calls.filter((c) => c.method === 'POST').length, 1, 'exactly one POST — no alias retry')
+})
+
+test('runGenFal downbeat-trims a WAV when bpm+bars given, preserving the raw download', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fal-trim-'))
+  const out = join(dir, 'v1.wav')
+  // a 4 s 48 kHz mono WAV with a transient at ~0.5 s
+  const sr = 48000, frames = 4 * sr
+  const chData = Buffer.alloc(frames * 2)
+  for (let i = 0; i < frames; i++) {
+    let s = Math.sin(i * 0.01) * 0.0005
+    const rel = i - Math.round(0.5 * sr)
+    if (rel >= 0 && rel < 200) s = 0.9 * Math.exp(-rel / 40)
+    chData.writeInt16LE(Math.round(Math.max(-1, Math.min(1, s)) * 32767), i * 2)
+  }
+  const h = Buffer.alloc(44)
+  h.write('RIFF', 0); h.writeUInt32LE(36 + chData.length, 4); h.write('WAVE', 8)
+  h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22)
+  h.writeUInt32LE(sr, 24); h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34)
+  h.write('data', 36); h.writeUInt32LE(chData.length, 40)
+  const bigWav = Buffer.concat([h, chData])
+  const { transport } = mockTransport({ wav: bigWav })
+  const meta = await runGenFal({ prompt: 'p', seconds: 2, seed: 1, provider: 'fal-ai/lyria2', bpm: 120, bars: 1, outPath: out, transport, apiKey: 'k' })
+  // 1 bar @120 = 2 s of the original 4 s, trimmed at the transient
+  assert.ok(meta.trimmedSeconds !== undefined && Math.abs(meta.trimmedSeconds - 2) < 0.02, `trimmed ~2s, got ${meta.trimmedSeconds}`)
+  assert.ok(meta.trimOffsetSeconds !== undefined && Math.abs(meta.trimOffsetSeconds - 0.5) < 0.02, `offset ~0.5s, got ${meta.trimOffsetSeconds}`)
+  assert.equal(meta.rawOutPath, `${out}.raw.wav`)
+  const trimmedDur = readFileSync(out).readUInt32LE(40) / (sr * 2)
+  assert.ok(Math.abs(trimmedDur - 2) < 0.02, 'the written file is the ~2s trimmed clip')
+  const rawDur = readFileSync(`${out}.raw.wav`).readUInt32LE(40) / (sr * 2)
+  assert.ok(Math.abs(rawDur - 4) < 0.02, 'the raw 4s download is preserved alongside')
+})
+
 test('falDoctor reports key presence without touching the network', () => {
   const saved = { key: process.env.FAL_KEY, alt: process.env.FAL_API_KEY }
   try {

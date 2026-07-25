@@ -51,6 +51,18 @@ export interface GenMeta {
   seconds: number
   seed: number
   sampleRate: number
+  /** Rights/provenance tags surfaced by the fal adapter table (gen-fal.ts, research/127 §4.2).
+   * `watermark` names an inaudible-but-mandatory mark ("synthid" for Google Lyria); undefined for
+   * backends that document none. `trainingExcluded` = the provider's ToS bans using outputs to
+   * train ML models (ElevenLabs categorical; MiniMax unknown-treat-as-banned) — the taste-training
+   * holdout marker, wired into src/taste/eval.ts exactly like the refs-packs exclusion. */
+  watermark?: string
+  trainingExcluded?: boolean
+  /** When the fal adapter downbeat-trimmed a long generation to the requested bar count, the raw
+   * (untrimmed) download is kept alongside outPath at this path, and these describe the cut. */
+  rawOutPath?: string
+  trimOffsetSeconds?: number
+  trimmedSeconds?: number
 }
 
 export interface RunGenOptions {
