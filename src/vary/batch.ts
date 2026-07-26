@@ -179,6 +179,10 @@ export interface VaryBatchManifest {
   // src/taste/ca2.ts) or 'bank' (the internal archetype bank). scoreBatch copies THIS LABEL ONLY
   // into the shared log — never a song title, artist, or path.
   figureSource?: 'midi' | 'bank' | 'theory' | 'ca2'
+  // Showdown/gen batches: WHICH generator produced the `gen` clip — the model id, e.g.
+  // 'stable-audio-3', 'lyria2', 'minimax-music', or the bare backend ('fal', 'stub') when no
+  // provider was pinned. scoreBatch copies THIS LABEL ONLY, never the prompt.
+  genProvider?: string
   // D21 strain (a): `file` is "vN.beat" for vary batches and "vN.wav" for gen batches — every
   // reader below resolves the variant through THIS field rather than re-deriving "vN.beat".
   // `source` (source-showdown eval, docs/source-showdown-eval.md): which PIPELINE produced this
@@ -811,6 +815,25 @@ export interface ScoreEntry {
    * gitignore-gated batch dir's manifest. Lets the report separate "our sounds with commercial
    * composition" from "our sounds with our composition". */
   figureSource?: 'midi' | 'bank' | 'theory' | 'ca2'
+  /** Which generator produced this batch's `gen` clip — the model id ('stable-audio-3', 'lyria2',
+   * 'minimax-music', ...) or the bare backend when none was pinned.
+   *
+   * WHY THIS EXISTS (2026-07-26). `gen` is the second-strongest source in the whole log — 72%
+   * pairwise over 185 rated batches, behind only real commercial loops — and until this field
+   * NOTHING said which generator earned it: 170 of 188 surviving manifests record only 'fal', 18
+   * record nothing, and zero of 266 log lines named a model. So the single best-performing
+   * non-reference source was unattributable, and a backend bake-off could not be settled from the
+   * evidence we had already paid for. Same shape and same discipline as `figureSource` and
+   * `refPools`: one label, copied into the shared log, never the prompt.
+   *
+   * Leaks nothing the log did not already carry: `sources` already records the KIND ('gen'); this
+   * is a sub-label of that kind, exactly as `refPools` is a sub-label of 'ref'. Blindness is
+   * unaffected — the log is written AFTER rating.
+   *
+   * BACK-FILL IS PARTIAL: recoverable from a surviving batch dir's manifest, impossible once the
+   * dir is deleted (the documented lifecycle). `scripts/backfill-gen-provider.mjs` does what can
+   * be done and reports what cannot. */
+  genProvider?: string
   /** "None of these are good" verdict (owner, twice after a showdown batch: nothing deserved a
    * pick, and the only options were picking or silently skipping — which loses the signal). A
    * none-good entry carries `picks: []`, `rejected: [every variant]`, and `verdict: 'none-good'`.
@@ -1119,6 +1142,7 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   // Midi-figure showdown batches: carry the figure-source LABEL (see the ScoreEntry field
   // comment — 'midi'/'bank' only, never what the midi transcribes).
   if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
+  if (manifest.genProvider !== undefined) entry.genProvider = manifest.genProvider
   // Pilot 108: detect a re-score of an already-scored batch BEFORE appending, so the summary can
   // say so — a fat-fingered duplicate otherwise silently contradicts the taste log's history.
   let previousPicks: string | undefined
@@ -1189,6 +1213,7 @@ export function recordNoneGood(dir: string, logPath?: string): NoneGoodResult {
   if (Object.keys(sources).length > 0) entry.trainingExcluded = trainingExcludedFiles(manifest) // see scoreBatch
   if (Object.keys(sources).length > 0) entry.refPools = refPoolsOf(manifest) // see scoreBatch
   if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
+  if (manifest.genProvider !== undefined) entry.genProvider = manifest.genProvider
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
   return { dir, logPath: resolvedLog, manifest, entry }
 }

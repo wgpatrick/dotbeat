@@ -2638,6 +2638,9 @@ async function showdownCmd(argv) {
   const dir = positional[0]
   const showdown = await import('../dist/src/taste/showdown.js')
   const layeredMod = await import('../dist/src/taste/layered.js')
+  // the model the bare `fal` backend actually calls — imported rather than restated so the log's
+  // provider label can never drift from what was really invoked
+  const { FAL_DEFAULT_PROVIDER } = await import('../dist/src/analysis/gen-fal.js')
 
   // ---- surge diagnostics -----------------------------------------------------------------------
   // surgepy is a source-build artifact of Surge XT (no PyPI wheel); this surfaces exactly what's
@@ -3438,7 +3441,16 @@ async function showdownCmd(argv) {
         // midi outranks both when live (its provenance is the stricter constraint the gate exists
         // for), and ca2 outranks theory (ca2 IS theory's chord track, filled by the model).
         const figureSource = batchUsedMidi ? 'midi' : batchUsedCA2 ? 'ca2' : batchUsedTheory ? 'theory' : 'bank'
-        showdown.writeShowdownBatch(outDir, spec.role, files, { seed: batchSeed, figureSource })
+        // genProvider: WHICH generator made the gen clip. Resolve the BARE backend to the model it
+        // actually calls rather than logging 'fal' — a backend name is not a model, and the whole
+        // point of the field is that "which generator earned gen's 72% pairwise" must be answerable
+        // from the log alone (see the ScoreEntry field comment).
+        const resolvedGenProvider = genProvider ?? (genBackend === 'fal' ? FAL_DEFAULT_PROVIDER : genBackend)
+        // genProvider: WHICH generator made the gen clip, the pinned model when there is one and
+        // the bare backend otherwise. Rides the log beside figureSource (see the ScoreEntry field
+        // comment): `gen` is the strongest non-reference source in the log and was, until this
+        // line, entirely unattributable — 170 of 188 manifests said only 'fal'.
+        showdown.writeShowdownBatch(outDir, spec.role, files, { seed: batchSeed, figureSource, genProvider: resolvedGenProvider })
         const match = showdown.matchClipDurations(outDir, files.map((f) => f.file), targetSeconds !== undefined ? { targetSeconds } : {})
         process.stdout.write(`${outDir}/: ${files.length} clips (${clips.map((c) => c.kind).sort().join(' vs ')}), duration-matched to ${match.targetSeconds}s`)
         const adjusted = match.clips.filter((c) => c.action !== 'kept')

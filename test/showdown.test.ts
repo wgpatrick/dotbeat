@@ -1223,3 +1223,48 @@ test('renderVaryBatch puts the CHILD render\'s own words in the error it throws'
     },
   )
 })
+
+// The generator label rides the log (2026-07-26). `gen` is the strongest non-reference source in
+// the whole log and was, until this field, entirely unattributable: 170 of 188 surviving manifests
+// recorded only the BACKEND name 'fal', and zero of 266 log lines named a model. A backend is not a
+// model, so the resolution happens at write time against gen-fal's own exported default rather than
+// being restated here — a copy would drift the day the default moves.
+test('a showdown batch records WHICH generator made its gen clip, and only when there is one', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-genprov-'))
+  const log = join(dir, 'scores.jsonl')
+
+  const withGen = join(dir, 'a')
+  mkdirSync(withGen, { recursive: true })
+  for (const f of ['v1.wav', 'v2.wav']) writeFileSync(join(withGen, f), toneWav(220, 0.35))
+  writeShowdownBatch(
+    withGen,
+    'bassline',
+    [
+      { file: 'v1.wav', source: { kind: 'gen', from: '"a bassline" (fal-ai/stable-audio-3/medium/text-to-audio)' } },
+      { file: 'v2.wav', source: { kind: 'engine', from: 'seed.beat' } },
+    ],
+    { seed: 5, genProvider: 'fal-ai/stable-audio-3/medium/text-to-audio' },
+  )
+  scoreBatch(withGen, ['1'], log)
+  const entry = JSON.parse(readFileSync(log, 'utf8').trim().split('\n').pop()!) as { genProvider?: string }
+  assert.equal(entry.genProvider, 'fal-ai/stable-audio-3/medium/text-to-audio')
+
+  // ...and a batch with NO gen clip carries no label at all: "no generator was involved" and "we
+  // forgot to record which one" must stay distinguishable, the same discipline refPools uses.
+  const noGen = join(dir, 'b')
+  mkdirSync(noGen, { recursive: true })
+  for (const f of ['v1.wav', 'v2.wav']) writeFileSync(join(noGen, f), toneWav(220, 0.35))
+  writeShowdownBatch(
+    noGen,
+    'bassline',
+    [
+      { file: 'v1.wav', source: { kind: 'engine', from: 'seed.beat' } },
+      { file: 'v2.wav', source: { kind: 'keymap', from: 'a stab' } },
+    ],
+    { seed: 6, genProvider: 'fal-ai/stable-audio-3/medium/text-to-audio' },
+  )
+  scoreBatch(noGen, ['1'], log)
+  const second = JSON.parse(readFileSync(log, 'utf8').trim().split('\n').pop()!) as { genProvider?: string }
+  assert.equal(second.genProvider, undefined, 'a batch with no gen clip must not claim a generator')
+
+})

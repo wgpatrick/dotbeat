@@ -1181,7 +1181,7 @@ export function writeShowdownBatch(
   outDir: string,
   role: string,
   clips: { file: string; source: { kind: ShowdownSourceKind; from?: string } }[],
-  opts: { seed?: number; figureSource?: 'midi' | 'bank' | 'theory' | 'ca2' } = {},
+  opts: { seed?: number; figureSource?: 'midi' | 'bank' | 'theory' | 'ca2'; genProvider?: string } = {},
 ): VaryBatchManifest {
   if (clips.length < 2) throw new BeatBatchError('a showdown batch needs at least two source clips')
   for (const c of clips) {
@@ -1195,6 +1195,9 @@ export function writeShowdownBatch(
     seed: opts.seed ?? 41,
     createdAt: new Date().toISOString(),
     ...(opts.figureSource !== undefined ? { figureSource: opts.figureSource } : {}),
+    // only when the batch actually HAS a gen clip — "no generator was involved" and "we forgot to
+    // record which one" must stay distinguishable, the same discipline refPools/trainingExcluded use
+    ...(opts.genProvider !== undefined && clips.some((c) => c.source.kind === 'gen') ? { genProvider: opts.genProvider } : {}),
     variants: clips.map((c) => ({ file: c.file, source: c.source })),
   }
   writeFileSync(resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
