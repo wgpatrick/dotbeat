@@ -288,9 +288,11 @@ the ~50 store-level params the format couldn't express. v0.3 exposes them:
   the same code path as `beat set`, so applying one produces a normal edit list and a normal
   diff. Presets never carry track references — routing stays a per-project edit.
 
-Proven exit (Phase 5, `scripts/verify-phase5.mjs`): the Night Shift v3 sound design —
-originally only reachable by patching the live store — reproduced from pure v0.3 text, with
-exact store-state equivalence on every track and render metrics matching the archived reference.
+Proven exit (Phase 5, `scripts/verify-phase5.mjs` — a historical measurement; that script was
+retired with the other BeatLab-era verify scripts in `2b725f5a`/D15): the Night Shift v3 sound
+design — originally only reachable by patching the live store — reproduced from pure v0.3 text,
+with exact store-state equivalence on every track and render metrics matching the archived
+reference.
 
 ### v0.5 additions — media block + sample-backed drum lanes (Phase 7)
 
