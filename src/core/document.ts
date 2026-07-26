@@ -149,7 +149,7 @@ export interface BeatLaneSampleBacking {
  * and `hold`/`decay: 0` are real, meaningful defaults (not sentinels needing special-casing at
  * the type level): 0 hold/decay just means "no envelope shaping past attack" and 0 length means
  * "no trim" since a real zero-length hit would be silent anyway. */
-export const SAMPLE_LANE_PARAM_KEYS = ['start', 'length', 'attack', 'hold', 'decay', 'cutoff', 'resonance'] as const
+export const SAMPLE_LANE_PARAM_KEYS = ['start', 'length', 'attack', 'hold', 'decay', 'cutoff', 'resonance', 'voices'] as const
 export type SampleLaneParamKey = (typeof SAMPLE_LANE_PARAM_KEYS)[number]
 export const SAMPLE_LANE_PARAM_DEFAULTS: Record<SampleLaneParamKey, number> = {
   start: 0,
@@ -159,9 +159,43 @@ export const SAMPLE_LANE_PARAM_DEFAULTS: Record<SampleLaneParamKey, number> = {
   decay: 0,
   cutoff: 18000,
   resonance: 0.7,
+  // Research 142 D6 (new this pass, previously unattributed): every sample-backed lane is ONE
+  // Tone.Player, and `Source.start()` on an already-started source calls `restart()`, which stops
+  // the most recently created source. So a repeated hit on one lane CUTS ITS OWN TAIL — there is
+  // no legato and no overlap. On a drum lane that is usually what you want (and is exactly how
+  // every existing project sounds), but a KEYMAP lane is a pitched instrument built out of drum
+  // lanes: on the bells, plucks and pads that workflow generates, a line that revisits a pitch
+  // inside the sample's own decay comes out chopped and mechanical.
+  //
+  // `voices` is that lane's polyphony — how many hits may ring at once before the oldest is
+  // recycled. DEFAULT 1, deliberately: 1 is exactly today's behavior, so every committed project,
+  // every golden render and every drum kit is bit-for-bit unchanged, and self-choking stays the
+  // default for drums where it belongs. `beat keymap` mints its lanes with a real pool (see
+  // KEYMAP_LANE_VOICES in src/core/keymap.ts), and any lane can opt in with
+  // `beat set <track>.lane.<name>.voices <n>`.
+  //
+  // Bounded at SAMPLE_LANE_VOICES_MAX because each pool slot is a real player+filter+gain triple:
+  // a 15-lane keymap at 8 voices is 120 node triples, and 142's D7 already flags per-lane buffer
+  // duplication as the thing that caps how many zones this shape can afford.
+  voices: 1,
 }
+/** Legal polyphony range for a sample-backed lane's `voices` param — validated at parse and edit
+ * time (not silently clamped: a `voices 0` lane would be silent and a `voices 2.5` lane would be
+ * a rounding surprise, and both are user errors with obvious fixes). */
+export const SAMPLE_LANE_VOICES_MIN = 1
+export const SAMPLE_LANE_VOICES_MAX = 8
 export function isSampleLaneParamKey(s: string): s is SampleLaneParamKey {
   return (SAMPLE_LANE_PARAM_KEYS as readonly string[]).includes(s)
+}
+/** The one validation rule any sample-lane param carries today, shared by parse.ts and edit.ts so
+ * a hand-edited file and a `beat set` can never disagree about what is legal. Returns an error
+ * MESSAGE (not a thrown error) because the two callers throw different error classes. */
+export function sampleLaneParamError(key: string, value: number): string | null {
+  if (key !== 'voices') return null
+  if (!Number.isInteger(value) || value < SAMPLE_LANE_VOICES_MIN || value > SAMPLE_LANE_VOICES_MAX) {
+    return `voices must be an integer ${SAMPLE_LANE_VOICES_MIN}-${SAMPLE_LANE_VOICES_MAX} (1 = monophonic/self-choking, the default), got ${value}`
+  }
+  return null
 }
 export const SAMPLE_LANE_FILTER_TYPES = ['lowpass', 'bandpass', 'highpass'] as const
 export type SampleLaneFilterType = (typeof SAMPLE_LANE_FILTER_TYPES)[number]
@@ -1265,6 +1299,66 @@ export const SYNTH_FIELDS: readonly SynthFieldDef[] = [
 
 export const SYNTH_FIELD_BY_KEY: ReadonlyMap<string, SynthFieldDef> = new Map(SYNTH_FIELDS.map((f) => [f.key, f]))
 
+// ==== audio tracks get a production chain (research 142 headline 1 / §3.2) ====
+// Before this stream an `audio` track's whole engine voice was three nodes — `player -> muteGain
+// -> master` — with no filter, no effect chain, no volume/pan and no sends, while a sample-backed
+// DRUM LANE had a filter, an AHD envelope, its own ordered effect chain AND the drum bus's full
+// production block. 142's words for that inversion: "the drum machine can produce a sample, the
+// [track] literally named audio cannot," and it is the one fact everything else in the sampling
+// toolkit leans on (filtering-as-extraction, the tape/vinyl/bitcrush degradation stack, `beat
+// trick` on a sampled loop, a loop/texture layer in a layered instrument).
+//
+// The shape deliberately COPIES the instrument-track precedent (INSTRUMENT_EFFECT_FIELD_KEYS
+// above) rather than inventing one: an audio track still has NO `synth` block (parse.ts keeps
+// refusing it — the osc/envelope/LFO half of BeatSynth is exactly as meaningless on a played
+// buffer as it is on a SoundFont voice), it carries BARE `key value` lines for the subset that
+// genuinely applies, and those land in the same shared `BeatTrack.synth` record every other
+// track kind's knobs already live in. No format-version bump, no new grammar.
+//
+// WHAT DOES NOT APPLY, stated honestly rather than wired to nothing: the core-9 amp envelope
+// (attack/decay/sustain/release) and `osc` — a region's amplitude shape is its own `gainDb` +
+// gain-automation lane, and there is no oscillator; every filter-ENVELOPE / LFO / keytrack /
+// velocity-mod field, because those all modulate PER NOTE and an audio region is not a note;
+// unison/detune/sub/noise/FM layers, which are oscillator-stack fields; the duck block, whose
+// `duckSource` sidechain is a drum-lane trigger concept (widening it is a separate call, and a
+// sibling stream is actively editing that path). Time-stretch (`warp complex`) is still a no-op
+// and no production field changes that.
+export const AUDIO_TRACK_PRODUCTION_FIELDS: readonly SynthFieldDef[] = [
+  // Level/position. `volume` defaults to 0 dB, NOT INIT_SYNTH's -10: an audio track's voice has
+  // always played at unity into master, so 0 is the value that leaves every existing render
+  // bit-for-bit unchanged. Same reasoning for the wide-open filter below.
+  { key: 'volume', kind: 'number', default: 0 },
+  { key: 'pan', kind: 'number', default: 0 },
+  // One pre-chain filter, the same Tone.Filter primitive synth tracks and drum lanes use — this
+  // is what makes filtering-as-extraction and a sampled layer's crossover band expressible on a
+  // loop. Defaults are transparent (20 kHz, Q 0), not INIT_SYNTH's 2 kHz / 0.8.
+  { key: 'cutoff', kind: 'number', default: 20000 },
+  { key: 'resonance', kind: 'number', default: 0 },
+  { key: 'filterType', kind: 'enum', default: 'lowpass', values: ['lowpass', 'bandpass', 'highpass'] },
+  // The shared reverb/delay return buses, tapped post-fader exactly as on synth/drums tracks.
+  { key: 'sendReverb', kind: 'number', default: 0 },
+  { key: 'sendDelay', kind: 'number', default: 0 },
+]
+
+/** Every SYNTH_FIELDS-shaped field an audio track may carry, in canonical serialization order:
+ * the production block above, then the ~12 EffectType chain members' own knobs (the same set an
+ * instrument track carries — eq3/comp/distortion/bitcrush/autoFilter/autoPan/tremolo/utility/
+ * grainDelay/vinylDistortion/resonator/eq7 — which are generic audio inserts and apply to a
+ * played buffer exactly as well as to a synth voice). */
+export const AUDIO_TRACK_FIELDS: readonly SynthFieldDef[] = [
+  ...AUDIO_TRACK_PRODUCTION_FIELDS,
+  ...SYNTH_FIELDS.filter((f) => INSTRUMENT_EFFECT_FIELD_KEYS.has(f.key)),
+]
+
+/** Flattened lookup for parse/serialize/edit — "is this key one an audio track is allowed to
+ * carry," and its def (kind/default/enum values). */
+export const AUDIO_TRACK_FIELD_BY_KEY: ReadonlyMap<string, SynthFieldDef> = new Map(AUDIO_TRACK_FIELDS.map((f) => [f.key, f]))
+
+export function isAudioTrackFieldKey(s: string): boolean {
+  return AUDIO_TRACK_FIELD_BY_KEY.has(s)
+}
+// ==== end audio-track production chain ====
+
 /** v0.9: the params clip automation may target — every NUMERIC synth field (core 9 minus the
  * enum `osc`, plus every v0.3 field of kind 'number'). Enum/bool/trackref fields (osc,
  * wtTable, filterType, osc2Type, lfoDest/lfo2Dest, lfoShape, duckSource) don't have a
@@ -1311,6 +1405,18 @@ export const INIT_SYNTH: BeatSynth = {
   pan: 0,
   ...defaultSynthFields(),
 } as BeatSynth
+
+/** The init patch for an AUDIO track: INIT_SYNTH with every AUDIO_TRACK_PRODUCTION_FIELDS key at
+ * ITS default instead (0 dB, wide-open transparent filter, no sends), so a freshly created — or
+ * freshly re-parsed — audio track sounds exactly like the pre-production-chain `player -> muteGain
+ * -> master` voice did. Every other BeatSynth field keeps its INIT_SYNTH value and is inert: an
+ * audio track neither serializes nor renders them (see AUDIO_TRACK_FIELDS' comment for the
+ * honest "what does not apply" list). */
+export function initAudioTrackSynth(): BeatSynth {
+  const out: Record<string, unknown> = { ...INIT_SYNTH }
+  for (const f of AUDIO_TRACK_PRODUCTION_FIELDS) out[f.key] = f.default
+  return out as unknown as BeatSynth
+}
 
 /** Default track colors cycled by `beat add-track` when none is given — beatlab's own palette. */
 export const TRACK_COLORS = ['#e06c75', '#56b6c2', '#f7c948', '#c678dd', '#98c379', '#61afef'] as const

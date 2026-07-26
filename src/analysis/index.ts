@@ -207,3 +207,23 @@ export {
   type SpectralPartial,
 } from './pitch.js'
 // ==== Phase 40 Stream VA end ====
+// ==== beat chop (research 142 §2.1) ====
+// Beat/bar/section-aware cutting of a real audio file into candidate chops. `planChops` is pure
+// (grid math only) and `cutChops` is pure (sample-domain only); the CLI owns file I/O.
+export {
+  planChops,
+  cutChops,
+  snapToZeroCrossing,
+  buildChopSidecar,
+  chopFileName,
+  CHOP_GRIDS,
+  CHOP_FADE_SECONDS,
+  CHOP_GITIGNORE,
+  ZERO_CROSS_WINDOW_SECONDS,
+  type ChopGrid,
+  type ChopPlan,
+  type ChopPlanOptions,
+  type CutChop,
+  type ChopSidecar,
+  type ChopIndex,
+} from './chop.js'

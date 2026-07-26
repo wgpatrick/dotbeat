@@ -206,6 +206,9 @@ test('drum tracks can now carry the new effect types too (folded into the same r
     doc.tracks.find((t) => t.id === 'drums')!.effects.map((e) => e.type),
     ['eq3', 'comp', 'distortion', 'bitcrush', 'resonator'],
   )
+  // Research 142 §3.2: audio tracks carry the same reorderable chain now (this used to assert the
+  // refusal) — and start from [], so the new insert is the whole chain.
   const { doc: audioDoc } = addTrack(withTrack, { id: 'atrk', kind: 'audio' })
-  assert.throws(() => addEffect(audioDoc, 'atrk', 'resonator'), BeatEditError)
+  const { doc: audioWithFx } = addEffect(audioDoc, 'atrk', 'resonator')
+  assert.deepEqual(audioWithFx.tracks.find((t) => t.id === 'atrk')!.effects.map((e) => e.type), ['resonator'])
 })

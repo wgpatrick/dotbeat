@@ -236,6 +236,40 @@ const HELP = [
   beat analyze --doctor                                   report the Python interpreter + which backends are installed`,
   },
   // ==== Phase 38 Stream SB end ====
+  // ==== research 142 §2.1 ====
+  {
+    cmd: 'chop',
+    text: `  beat chop <audio.wav> [--grid bar|beat|section] [--bars N] [--max N] [--out <dir>]
+                        [--analysis <file>] [--backend beatthis|stub|allin1] [--license "..."] [--json]
+                                                          cut a real audio file into candidate chops on its DETECTED grid
+                                                          (runs/reuses beat analyze's cached <audio>.analysis.json), into
+                                                          chop-<name>/ as c001.wav … + one <chop>.wav.json provenance sidecar
+                                                          each + chops.json + a clip-set manifest, so beat board / beat
+                                                          audition / beat rate work on the result immediately.
+                                                          --grid bar (default, --bars N bars per chop) | beat | section
+                                                          (section needs a section-detecting backend, e.g. allin1).
+                                                          RAW cuts: no normalize, no silence-trim — both destroy the level
+                                                          and timing relationships BETWEEN chops that you are listening for.
+                                                          Cuts snap to a zero crossing (±2ms) with a 3ms seam fade.
+                                                          Registers NOTHING into any project, and writes a .gitignore into
+                                                          the chop dir (chops of a record are that record).`,
+  },
+  {
+    cmd: 'resample',
+    text: `  beat resample <file.beat> <track> [--out <sample-id>] [--license "..."] [--json]
+                                                          bounce ONE track's own output back into the project as a
+                                                          registered sample, with full provenance (which track, which
+                                                          document sha, which effect chain). This is what converts "a
+                                                          recording" into "an instrument": resample long then trim short
+                                                          (you can shorten a sample, never lengthen it), and commit a
+                                                          degradation chain so it cannot be re-balanced later.
+                                                          COST: ~10-15s harness boot + roughly REALTIME capture of the
+                                                          whole project (there is no range render — use beat excerpt).
+                                                          A deliberate act, not an inner-loop operation.
+                                                          --out defaults to a fresh <track>-resample id; an explicit id
+                                                          may re-register an existing sample, and says so.`,
+  },
+  // ==== end research 142 §2.1 ====
   // --- Phase 37 Stream RB begin ---
   {
     cmd: 'analyze-structure',
@@ -1674,6 +1708,147 @@ async function analyzeCmd(argv) {
   process.stdout.write(out.join('\n') + '\n')
 }
 // ==== Phase 38 Stream SB end ====
+
+// ==== beat chop (research 142 §2.1) ====
+// Cut a real audio file into candidate chops on its DETECTED grid. The one missing verb in the
+// finding loop: everything upstream (`beat analyze`) and everything downstream (`beat board`,
+// `beat audition`, `beat rate`) already existed. All the musical design calls — grid-default,
+// zero-crossing snap + seam fade, no normalize, no silence trim, register nothing — live in
+// src/analysis/chop.ts with the corpus sourcing that motivates each one. This function is the
+// file I/O and the report.
+async function chopCmd(argv) {
+  const { planChops, cutChops, buildChopSidecar, chopFileName, CHOP_GITIGNORE, CHOP_GRIDS, validateAnalysisArtifact } =
+    await import('../dist/src/analysis/index.js')
+  const { encodeWav16 } = await import('../dist/src/analysis/gen-trim.js')
+  const { writeClipSetBatch } = await import('../dist/src/vary/batch.js')
+  const { createHash } = await import('node:crypto')
+
+  const json = argv.includes('--json')
+  const grid = flagValue(argv, '--grid') ?? 'bar'
+  if (!CHOP_GRIDS.includes(grid)) throw new BeatAnalysisError(`unknown --grid "${grid}" (one of: ${CHOP_GRIDS.join(', ')})`)
+  const barsRaw = flagValue(argv, '--bars')
+  const bars = barsRaw === undefined ? 1 : Number(barsRaw)
+  const maxRaw = flagValue(argv, '--max')
+  const max = maxRaw === undefined ? undefined : Number(maxRaw)
+  const backend = flagValue(argv, '--backend') ?? 'beatthis'
+  const analysisPath = flagValue(argv, '--analysis')
+  const license = flagValue(argv, '--license') ?? 'unspecified'
+  const outArg = flagValue(argv, '--out')
+
+  const flagsWithValues = ['--grid', '--bars', '--max', '--backend', '--analysis', '--license', '--out']
+  // Loud exit on an unknown flag (R1-F2 / pilot 109's "silent mode changes are the worst failure
+  // shape"): a typo'd `--gird bar` must not silently cut on the default grid.
+  const knownFlags = new Set([...flagsWithValues, '--json'])
+  for (const a of argv) {
+    if (a.startsWith('--') && !knownFlags.has(a)) throw new BeatAnalysisError(`unknown flag "${a}" (known: ${[...knownFlags].join(', ')})`)
+  }
+  const consumed = new Set()
+  for (const f of flagsWithValues) {
+    const i = argv.indexOf(f)
+    if (i !== -1) consumed.add(i + 1)
+  }
+  const audioPath = argv.find((a, i) => !a.startsWith('-') && !consumed.has(i))
+  if (!audioPath) {
+    throw new BeatAnalysisError('chop needs an audio file: beat chop <audio.wav> [--grid bar|beat|section] [--bars N] [--out <dir>]')
+  }
+  if (!existsSync(audioPath)) throw new BeatAnalysisError(`audio file not found: ${audioPath}`)
+
+  // The analysis artifact: an explicit --analysis path, else the cached/created sibling. `beat
+  // analyze` owns the cache and the backend contract; chop never re-implements either.
+  let artifact
+  if (analysisPath) {
+    artifact = validateAnalysisArtifact(JSON.parse(readFileSync(analysisPath, 'utf8')))
+  } else {
+    ;({ artifact } = await runAnalysis({ audioPath, backend }))
+  }
+
+  const plans = planChops(artifact, { grid, bars, max })
+
+  const bytes = readFileSync(audioPath)
+  const sourceSha = createHash('sha256').update(bytes).digest('hex')
+  if (sourceSha !== artifact.source.sha256) {
+    throw new BeatAnalysisError(
+      `the analysis artifact was made from different bytes than ${basename(audioPath)} ` +
+        `(artifact sha ${artifact.source.sha256.slice(0, 12)}…, file sha ${sourceSha.slice(0, 12)}…) — re-run beat analyze --force`,
+    )
+  }
+  const { channels, sampleRate } = decodeWav(bytes)
+  const cuts = cutChops(channels, sampleRate, plans)
+
+  const stem = basename(audioPath).replace(/\.[^./\\]+$/, '')
+  const outDir = outArg ?? join(dirname(resolve(audioPath)), `chop-${stem}`)
+  mkdirSync(outDir, { recursive: true })
+  // Generated .gitignore FIRST, so the wavs are never briefly stageable (D30 constraint 1).
+  writeFileSync(join(outDir, '.gitignore'), CHOP_GITIGNORE)
+
+  const preparedAt = new Date().toISOString()
+  const files = []
+  const indexChops = []
+  for (const cut of cuts) {
+    const name = chopFileName(cut.plan.index)
+    const wav = encodeWav16(cut.channels, sampleRate)
+    writeFileSync(join(outDir, name), wav)
+    const sidecar = buildChopSidecar({
+      cut,
+      artifact,
+      sourcePath: resolve(audioPath),
+      sha256: createHash('sha256').update(wav).digest('hex'),
+      grid,
+      bars: grid === 'section' ? null : bars,
+      license,
+      preparedAt,
+    })
+    writeFileSync(join(outDir, `${name}.json`), JSON.stringify(sidecar, null, 2) + '\n')
+    files.push(name)
+    indexChops.push({
+      file: name,
+      index: cut.plan.index,
+      startSeconds: sidecar.derivedFrom.startSeconds,
+      endSeconds: sidecar.derivedFrom.endSeconds,
+      durationSeconds: sidecar.durationSeconds,
+      downbeatIndex: cut.plan.downbeatIndex,
+      sectionLabel: cut.plan.sectionLabel,
+    })
+  }
+
+  const index = {
+    dotbeatChops: 1,
+    source: { file: resolve(audioPath), sha256: sourceSha, durationSeconds: artifact.source.durationSeconds },
+    backend: artifact.backend.name,
+    bpm: artifact.bpm,
+    grid,
+    bars: grid === 'section' ? null : bars,
+    createdAt: preparedAt,
+    chops: indexChops,
+  }
+  writeFileSync(join(outDir, 'chops.json'), JSON.stringify(index, null, 2) + '\n')
+  // The clip-set manifest is what makes `beat board`/`beat audition`/`beat rate` work on this dir
+  // with no new code — v1..vN in cut order (chopFileName zero-pads so that order is the file order).
+  writeClipSetBatch(outDir, files, { group: `chop-${stem}` })
+
+  if (json) {
+    process.stdout.write(JSON.stringify(index, null, 2) + '\n')
+    return
+  }
+  const out = []
+  out.push(`chopped ${basename(audioPath)} → ${outDir}`)
+  out.push(`  ${cuts.length} chop${cuts.length === 1 ? '' : 's'} on the ${grid} grid${grid === 'section' ? '' : ` (${bars} ${grid}${bars === 1 ? '' : 's'} each)`} · bpm ${Number(artifact.bpm).toFixed(2)} · backend ${artifact.backend.name}`)
+  if (artifact.backend.name === 'stub') {
+    out.push(`  ⚠ stub backend — a synthetic fixed 120-BPM grid, NOT detected from your audio. These cut points are plumbing, not music.`)
+  }
+  const shown = indexChops.slice(0, 12)
+  for (const c of shown) {
+    const label = c.sectionLabel ? ` ${c.sectionLabel}` : ''
+    out.push(`    ${c.file}  ${c.startSeconds.toFixed(2)}s → ${c.endSeconds.toFixed(2)}s  (${c.durationSeconds.toFixed(2)}s)${label}`)
+  }
+  if (indexChops.length > shown.length) out.push(`    … ${indexChops.length - shown.length} more (see chops.json)`)
+  out.push(`  raw cuts: no normalize, no silence trim — the level and timing relationships BETWEEN chops are what you are listening for`)
+  out.push(`  provenance: one <chop>.wav.json per chop (license "${license}"); nothing was registered into any project`)
+  out.push(`  next: beat board ${outDir}        # listen and pick, provenance shown`)
+  out.push(`        beat audition ${outDir}     # or one stitched straight-through listen`)
+  process.stdout.write(out.join('\n') + '\n')
+}
+// ==== end beat chop ====
 
 // --- Phase 37 Stream RB begin ---
 async function analyzeStructureCmd(argv) {
@@ -5743,6 +5918,89 @@ async function renderStemsCmd(argv) {
   process.stdout.write(`wrote ${trackIds.length} stem${trackIds.length === 1 ? '' : 's'} to ${dir}/ (one solo render per track: ${trackIds.join(', ')})\n`)
   process.exit(0) // render leaves chromium/vite event-loop stragglers — see render.mjs footer
 }
+// ==== beat resample (research 142 §3.1) ====
+// Bounce ONE track's own output back into the project as a registered sample — the corpus's #1
+// unprompted pick, because "the resample step is what converts 'a recording' into 'an instrument'."
+// Glue between renderTrackSolosCommand (which already renders one solo WAV per track through one
+// harness boot) and registerResample (src/vary/resample.ts — id minting + the enforced provenance
+// sidecar + registerPreppedMedia, the same primitive `beat adopt` uses). Nothing new is invented
+// here; the verb is the thing that was missing.
+async function resampleCmd(argv) {
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { renderTrackSolosCommand } = await import('./render.mjs')
+  const { registerResample, projectRenderSeconds } = await import('../dist/src/vary/resample.js')
+
+  const known = new Set(['--out', '--as', '--license', '--preview-port', '--json'])
+  for (const a of argv) {
+    if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
+  }
+  const json = argv.includes('--json')
+  // `--out` is the owner's spelling and `--as` is research 142's; both mean the same thing (the
+  // media id of the result), so both are accepted rather than making anyone remember which.
+  const asId = flagValue(argv, '--out') ?? flagValue(argv, '--as')
+  const license = flagValue(argv, '--license')
+  const previewPortRaw = flagValue(argv, '--preview-port')
+  const previewPort = previewPortRaw === undefined ? undefined : Number(previewPortRaw)
+  if (previewPortRaw !== undefined && !Number.isFinite(previewPort)) throw new BeatEditError('--preview-port needs a port number')
+
+  const consumed = new Set()
+  for (const f of ['--out', '--as', '--license', '--preview-port']) {
+    const i = argv.indexOf(f)
+    if (i !== -1) consumed.add(i + 1)
+  }
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !consumed.has(i))
+  const [file, trackId] = positional
+  if (!file || !trackId) throw new BeatEditError('resample needs <file.beat> <track> [--out <sample-id>]')
+
+  const doc = readDoc(file)
+  const track = doc.tracks.find((t) => t.id === trackId)
+  if (!track) throw new BeatEditError(`no track "${trackId}" in ${file} (have: ${doc.tracks.map((t) => t.id).join(', ') || 'none'})`)
+  const seconds = projectRenderSeconds(doc)
+
+  // Say the cost out loud BEFORE paying it — a bounce is a deliberate act, and a command that
+  // looks hung for 30 s with no explanation is how pilots report "I assumed it had crashed."
+  console.error(`resampling track "${trackId}" from ${basename(file)} — ~10-15s harness boot + ~${seconds.toFixed(1)}s realtime capture (the whole project renders; use beat excerpt for a range)`)
+
+  const wavByTrack = await renderTrackSolosCommand(file, [trackId], previewPort !== undefined ? { previewPort } : {})
+  const wavBytes = wavByTrack.get(trackId)
+  if (!wavBytes || wavBytes.length === 0) throw new BeatEditError(`the solo render of "${trackId}" produced no audio`)
+
+  const scratch = mkdtempSync(join(tmpdir(), 'dotbeat-resample-'))
+  const scratchWav = join(scratch, 'bounce.wav')
+  writeFileSync(scratchWav, wavBytes)
+  const decoded = decodeWav(wavBytes)
+
+  const res = registerResample({
+    beatFilePath: file,
+    trackId,
+    wavBytes,
+    wavPath: scratchWav,
+    durationSeconds: decoded.durationSeconds,
+    opts: { ...(asId !== undefined ? { as: asId } : {}), ...(license !== undefined ? { license } : {}) },
+  })
+  rmSync(scratch, { recursive: true, force: true })
+
+  if (json) {
+    process.stdout.write(JSON.stringify(res, null, 2) + '\n')
+    process.exit(0)
+  }
+  const out = []
+  out.push(`resampled ${trackId} → sample "${res.id}" (${res.relPath}, ${res.durationSeconds.toFixed(2)}s)`)
+  if (res.reregistered) {
+    out.push(`  ⚠ re-registered an existing sample id — the previous bytes (${res.reregistered.previousSha256.slice(0, 12)}…) are gone from the media block`)
+  }
+  const chain = res.provenance.chain.filter((e) => e.enabled).map((e) => e.type)
+  out.push(`  committed chain: ${chain.length ? chain.join(' → ') : '(none — the track carries no enabled inserts)'}`)
+  out.push(`  provenance: ${res.sidecarPath} (doc ${res.provenance.docSha256.slice(0, 12)}…, licence "${res.license}")`)
+  out.push(`  the chain above is now BAKED IN — that is the point, and it cannot be undone from the sample`)
+  out.push(`  next: beat keymap ${file} <track> ${res.id}   # play it chromatically`)
+  out.push(`        beat lane ${file} <drums> <lane> ${res.id}   # or slice/trim it on a drum lane`)
+  process.stdout.write(out.join('\n') + '\n')
+  process.exit(0) // render leaves chromium/vite event-loop stragglers — see render.mjs footer
+}
+// ==== end beat resample ====
+
 // ---- Phase 37 Stream RA end -----------------------------------------------------------------
 
 /** `beat excerpt <file> <section...>` — write a derived .beat whose song block keeps ONLY the named
@@ -6188,6 +6446,13 @@ async function main() {
       break
     case 'inspect':
       await inspectCmd(rest)
+      break
+    // ==== research 142 §2.1 / §3.1 ====
+    case 'chop':
+      await chopCmd(rest)
+      break
+    case 'resample':
+      await resampleCmd(rest)
       break
     // ==== Phase 38 Stream SB begin ====
     case 'analyze':
