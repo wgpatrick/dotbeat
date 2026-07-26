@@ -17,6 +17,36 @@ needs **no packages at all** — that's what CI and the dev container run, so `n
 zero Python installed. The real ML backends import lazily, so a missing package degrades cleanly to
 an actionable error, never a stack trace.
 
+## The fleet (all 8 sidecars)
+
+`analyze.py` was the first; the same contract now carries seven more. **This table is the index —
+a new sidecar adds a row here and a section below.** (Four of these were undocumented until
+research/130 W0.6; the doc had stopped being updated after `roughness.py` even though D17 designates
+it the shared template, so a new sidecar author reading it saw half the fleet.)
+
+| sidecar | what it does | TS wrapper | CLI surface | requirements | venv |
+|---|---|---|---|---|---|
+| `analyze.py` | beats / downbeats / sections (seconds) | `src/analysis/sidecar.ts` | `beat analyze` | `-beatthis`, `-allin1` | shared |
+| `gen.py` | text→audio one-shot, writes the WAV | `src/analysis/gen.ts` | `beat source gen` | `-stableaudio` | shared |
+| `surge_render.py` | renders notes through a Surge XT patch, writes the WAV | `src/analysis/surge.ts` | `beat showdown --with-surge` | *(source build, no wheel)* | shared |
+| `roughness.py` | Daniel–Weber time-varying roughness curve | `src/metrics/roughness.ts` | `beat lint --roughness-baseline` | `-roughness` | **`venv-roughness`** |
+| `embed.py` | audio embeddings (clap/mert) + Audiobox axes (aes) | `src/taste/embeddings.ts` | `beat taste-eval` | `-clap`, `-mert`, `-aesthetics` | shared |
+| `midi_extract.py` | pulls one part out of a MIDI file as a figure | `src/taste/midifig.ts` | `beat showdown --midi-dir` | `-midi` | shared |
+| `stem_extract.py` | Demucs separation, keeps one stem, writes the WAV | `src/analysis/stems.ts` | `beat source gen --stem`, showdown gen arm | `-demucs` | shared |
+| `ca2_figures.py` | Composer's Assistant 2 composes over our chord track | `src/taste/ca2.ts` | `beat showdown --ca2` | `-ca2` | **out-of-repo** |
+
+Exit-code discipline is 8/8: `0` ok · `2` usage/bad input · `3` missing dependency (with a
+copy-pasteable `pip install -r python/requirements-*.txt` as the **last stderr line**) · `4` failure.
+All 8 implement `--doctor`. Five print their whole result as stdout JSON; `gen.py`,
+`surge_render.py` and `stem_extract.py` write **binary audio** to a path they are told and print
+metadata only (the one deliberate contract variation, see D19 below).
+
+On the TypeScript side all eight wrappers now go through **one** scaffold,
+`src/analysis/spawn-sidecar.ts` — one spawn, one 600 s timeout, one 64 MiB output cap, one
+`resolvePython({ envVar?, dedicatedVenv?, extraCandidates? })`, one `sidecarDoctor()`. Before
+research/130 W1.1 each wrapper re-declared all of it (8 copies of the constants, 7 of the spawn).
+**Do not re-declare `spawnPython`/`SPAWN_TIMEOUT_MS` in a new wrapper** — import the scaffold.
+
 ## Install (owner machine)
 
 pip is intentionally blocked in the dev/CI container, so the real backends are installed and
@@ -213,6 +243,113 @@ A missing sidecar degrades cleanly: `beat lint` prints a one-line "roughness: SK
 rest of the run is unaffected (roughness is a pair-relative advisory, never a hard precondition).
 `roughness.py` follows the same contract as the others (stdlib-only top level, lazy MoSQITo import,
 exit `0/2/3/4` with a `pip install -r python/requirements-roughness.txt` fix line on a missing dep).
+
+## Embedding + aesthetics sidecar (`beat taste-eval`)
+
+`python/embed.py` turns one audio file into a feature vector for the taste model. Five backends
+behind one flag, all lazily imported:
+
+- `aes` — **Audiobox-Aesthetics** (facebook/audiobox-aesthetics, CC-BY-4.0): four crowd-trained
+  NAMED axes, CE content enjoyment / CU content usefulness / PC production complexity / PQ
+  production quality. This is the **endorsed** representation (research/122 §5) and the default of
+  `embedAudioFile`. Deps: `requirements-aesthetics.txt`.
+- `aes-stub` — deterministic plumbing-truth axes, no torch, so the whole aes path tests everywhere.
+- `clap` — LAION-CLAP `larger_clap_music`, 512-d (Apache-2.0). **RETIRED**: it scored *below
+  chance* on held-out owner picks at n=37 and was killed at the T1 gate. Kept selectable to
+  reproduce old runs only. Deps: `requirements-clap.txt`.
+- `mert` — MERT-v1-330M (CC-BY-NC weights, personal use only). Implemented and pinned but **no
+  caller anywhere selects it** — untried, same caveat as CLAP.
+- `stub` — deterministic, dependency-free.
+
+```sh
+python/embed.py --backend aes --input clip.wav [--model M]   # or --doctor
+```
+
+stdout is `{backend, model, dims, embedding: [...]}`. The TS side (`src/taste/embeddings.ts`)
+caches the result **next to the audio** keyed by `sha256 + backend + model`, in
+`<file>.embedding.json` for the vector backends and `<file>.aesthetics.json` for aes — two files
+because taste-eval runs an embedding backend and an aes backend over the same wavs in one pass and
+a shared cache would thrash. `beat taste-eval --doctor` prints the readiness report.
+
+Note `embed.py` hard-exits after printing its one JSON line, deliberately: a lingering
+huggingface_hub thread could otherwise block teardown, and it loads `local_files_only` first so a
+flaky hub connection can never park the sidecar in an SSL retry loop.
+
+## MIDI figure sidecar (`beat showdown --midi-dir`)
+
+`python/midi_extract.py` (via **mido**, MIT) reads a `.mid` file and extracts ONE part as a 4- or
+8-bar figure the showdown can render as a clip — the third figure source beside the archetype bank
+and the theory layer.
+
+```sh
+python/midi_extract.py --input song.mid --part bass|chords|lead --bars 4|8
+python/midi_extract.py --scan --input song.mid     # classify every voice in the file
+python/midi_extract.py --doctor                    # probe mido
+```
+
+stdout is the figure (notes as `{pitch, start, duration, velocity}` on a 16th grid plus the part
+classification). Validation is the TS side's (`validateMidiFigure`) and it is deliberately strict:
+a malformed payload must fail with a specific message, never as NaN pitches at render time.
+Deps: `requirements-midi.txt` (mido only — no torch, installs in seconds).
+
+**Third-party content posture:** MIDI files you point `--midi-dir` at are yours to license; the
+figures they produce carry the `midi:` label prefix in the batch manifest, and the scores log
+records only that label, never the source path.
+
+## Stem-extraction sidecar (`beat source gen --stem`, showdown gen arm)
+
+`python/stem_extract.py` separates a mix with **Demucs** (`htdemucs`, MIT) and keeps exactly one of
+`bass | other | drums | vocals`, writing it as a 16-bit 44.1 kHz WAV. It exists because Lyria is a
+full-track model — a "solo bassline" prompt reliably returns a band — and three escalating
+prompt-side attempts failed, so the guarantee comes from extraction instead.
+
+```sh
+python/stem_extract.py --input mix.wav --stem bass --output stem.wav \
+  [--model htdemucs] [--device auto|cpu|mps|cuda] [--silence-margin-db 25]
+python/stem_extract.py --doctor
+```
+
+Writes the audio, prints metadata only: the model/device, the stem asked for, the stem actually
+written, and RMS dBFS for the mix, the kept stem and the residual. A **near-silence guard** fires
+when the requested stem sits more than `--silence-margin-db` below the mix — it substitutes the
+loudest stem and says so in `fallback`/`stemUsed` rather than shipping silence. `--device cpu` is
+the default because its numerics are stable.
+
+The TS wrapper (`src/analysis/stems.ts`) throws on ANY failure — deliberately NOT the
+degrade-and-continue posture roughness takes, because silently shipping the full mix would poison a
+blind eval far more quietly than a loud failure does. Its interpreter chain adds one step:
+`$BEAT_STEM_PYTHON` → `$BEAT_PYTHON` → shared venv → `python3`. There is no dedicated venv (demucs
+shares the venv's torch happily). Deps: `requirements-demucs.txt`.
+
+## CA2 figure sidecar (`beat showdown --ca2`)
+
+`python/ca2_figures.py` runs **Composer's Assistant 2** (Malandro, ISMIR 2024; MIT code,
+public-domain/permissive training MIDI) as a note generator over a chord track *we* decide. The
+division of labour is the point: our theory layer picks key, progression, register and density; CA2
+proposes notes; our guards (bass register, snap-to-scale, the pre-render lint) have the last word,
+and every correction is counted into the batch's provenance.
+
+```sh
+echo '<request json>' | python/ca2_figures.py --request -    # request on STDIN
+python/ca2_figures.py --doctor      # probe checkout + weights + packages
+python/ca2_figures.py --smoke       # --doctor plus one tiny real generation
+```
+
+The request/response contract is versioned: `CONTRACT_VERSION` (currently 1) is echoed in the
+payload as `contract` and the TS side refuses a mismatch loudly rather than misreading a skewed
+payload. (Note the field is named `contract`/`CONTRACT_VERSION` here where the other stdout-JSON
+sidecars use `version` — harmless today, worth knowing if a cache is ever keyed on it.)
+
+**The install lives OUTSIDE the repo** — CA2's checkout and its 716 MB release weights, plus its own
+python3.10 venv, behind two env vars:
+
+1. `BEAT_CA2_DIR` → CA2's `Scripts/composers_assistant_v2` directory
+2. `BEAT_CA2_PYTHON` → a venv python with `requirements-ca2.txt` installed
+
+`beat showdown --ca2-doctor` prints the full readiness report. The interpreter chain is
+`$BEAT_CA2_PYTHON` → a couple of known out-of-repo `amt-venv` locations → the shared chain.
+`requirements-ca2.txt` pins `transformers<4.50`, which caps the ceiling for the whole shared venv —
+watch it when bumping the other ML sidecars.
 
 ## Contract summary (for anyone editing `analyze.py`)
 

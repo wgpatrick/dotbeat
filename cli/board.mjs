@@ -15,9 +15,8 @@
 // without rework.
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
-import { join, dirname, resolve, normalize } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { createServer } from 'node:http'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -348,6 +347,11 @@ export async function boardCommand(argv) {
 
   const { computeBatchFeatures } = await import(pathToFileURL(join(repoRoot, 'dist/src/taste/features.js')).href)
   const { recordPick, recordRejectAll, decidedBatchDirs, readDecisionFile } = await import(pathToFileURL(join(repoRoot, 'dist/src/board/decisions.js')).href)
+  // The shared server shell `beat rate` uses too — see src/serve/review-server.ts for why these
+  // two twins now import one shell instead of carrying two copies of the same guards.
+  const { createReviewServer, listenReviewServer, isInside, ReviewHttpError } = await import(
+    pathToFileURL(join(repoRoot, 'dist/src/serve/review-server.js')).href
+  )
 
   // --status: no server. Print per-batch decided/undecided + decisions; --json for the loop.
   if (argv.includes('--status')) {
@@ -380,67 +384,59 @@ export async function boardCommand(argv) {
       .map((b) => ({ id: b.dir, label: batchLabel(b.manifest), count: b.manifest.variants.length }))
   }
 
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url, `http://localhost:${port}`)
-    try {
-      if (url.pathname === '/') {
-        res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE)
-      } else if (url.pathname === '/api/queue') {
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(buildQueue()))
-      } else if (url.pathname === '/api/board') {
-        const dir = resolve(url.searchParams.get('id') ?? '')
-        if (!dir.startsWith(root) || !existsSync(join(dir, 'manifest.json'))) {
-          res.writeHead(404).end('no such board')
-          return
-        }
-        const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'))
-        const wavs = manifest.variants.map((v) => v.file.replace(/\.beat$/, '.wav'))
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(buildBoardDetail({ dir, manifest, wavs }, computeBatchFeatures)))
-      } else if (url.pathname === '/audio') {
-        const batchDir = resolve(url.searchParams.get('b') ?? '')
-        const file = normalize(url.searchParams.get('f') ?? '')
-        const full = resolve(batchDir, file)
-        if (!batchDir.startsWith(root) || !full.startsWith(batchDir) || !full.endsWith('.wav') || !existsSync(full)) {
-          res.writeHead(404).end('not found')
-          return
-        }
-        res.writeHead(200, { 'content-type': 'audio/wav' }).end(readFileSync(full))
-      } else if (url.pathname === '/api/pick' && req.method === 'POST') {
-        let body = ''
-        for await (const chunk of req) body += chunk
-        const { id, variant, note } = JSON.parse(body)
-        const dir = resolve(id)
-        if (!dir.startsWith(root)) { res.writeHead(400).end('batch outside root'); return }
-        let result
-        try {
-          result = recordPick(dir, String(variant), note ? { note: String(note) } : {}, logPath)
-        } catch (err) {
-          res.writeHead(400).end(String(err?.message ?? err))
-          return
-        }
-        console.error(`picked ${result.entry.picks[0]?.variant} in ${dir}${note ? ` — "${note}"` : ''}`)
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, log: result.logPath }))
-      } else if (url.pathname === '/api/reject-all' && req.method === 'POST') {
-        let body = ''
-        for await (const chunk of req) body += chunk
-        const { id, note } = JSON.parse(body)
-        const dir = resolve(id)
-        if (!dir.startsWith(root)) { res.writeHead(400).end('batch outside root'); return }
-        let result
-        try {
-          result = recordRejectAll(dir, String(note ?? ''), logPath)
-        } catch (err) {
-          res.writeHead(400).end(String(err?.message ?? err))
-          return
-        }
-        console.error(`reject-all ${dir}: "${note}"`)
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, log: result.logPath }))
-      } else {
-        res.writeHead(404).end('not found')
-      }
-    } catch (err) {
-      res.writeHead(500).end(String(err?.message ?? err))
-    }
+  /** A batch id (query param or POST body), checked for real containment in the scanned root. */
+  const batchDirFrom = (id, status = 400) => {
+    const dir = resolve(String(id ?? ''))
+    if (!isInside(root, dir)) throw new ReviewHttpError(status, 'batch outside root')
+    return dir
+  }
+
+  const server = createReviewServer({
+    root,
+    page: PAGE,
+    routes: {
+      '/api/queue': { method: 'GET', handler: () => buildQueue() },
+      '/api/board': {
+        method: 'GET',
+        handler: (url) => {
+          const dir = batchDirFrom(url.searchParams.get('id'), 404)
+          if (!existsSync(join(dir, 'manifest.json'))) throw new ReviewHttpError(404, 'no such board')
+          const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'))
+          const wavs = manifest.variants.map((v) => v.file.replace(/\.beat$/, '.wav'))
+          return buildBoardDetail({ dir, manifest, wavs }, computeBatchFeatures)
+        },
+      },
+      '/api/pick': {
+        method: 'POST',
+        handler: (body) => {
+          const { id, variant, note } = body ?? {}
+          const dir = batchDirFrom(id)
+          let result
+          try {
+            result = recordPick(dir, String(variant), note ? { note: String(note) } : {}, logPath)
+          } catch (err) {
+            throw new ReviewHttpError(400, String(err?.message ?? err))
+          }
+          console.error(`picked ${result.entry.picks[0]?.variant} in ${dir}${note ? ` — "${note}"` : ''}`)
+          return { ok: true, log: result.logPath }
+        },
+      },
+      '/api/reject-all': {
+        method: 'POST',
+        handler: (body) => {
+          const { id, note } = body ?? {}
+          const dir = batchDirFrom(id)
+          let result
+          try {
+            result = recordRejectAll(dir, String(note ?? ''), logPath)
+          } catch (err) {
+            throw new ReviewHttpError(400, String(err?.message ?? err))
+          }
+          console.error(`reject-all ${dir}: "${note}"`)
+          return { ok: true, log: result.logPath }
+        },
+      },
+    },
   })
 
   const initial = buildQueue()
@@ -449,17 +445,14 @@ export async function boardCommand(argv) {
     console.error(`generate candidates first (e.g. beat vary <file> <track> <group> --count 3 --render), or check what's already decided: beat board ${root} --status`)
     process.exit(1)
   }
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`error: port ${port} is already in use — pass --port <other> (is another beat board or beat rate still running?)`)
-      process.exit(2)
-    }
-    console.error(`error: ${err.message}`)
-    process.exit(1)
-  })
-  server.listen(port, '127.0.0.1', () => {
-    console.error(`board: ${initial.length} undecided batch(es) under ${root}`)
-    console.error(`decisions -> ${logPath}`)
-    console.error(`open http://localhost:${port} — ctrl-c here when done`)
-  })
+  listenReviewServer(
+    server,
+    port,
+    () => {
+      console.error(`board: ${initial.length} undecided batch(es) under ${root}`)
+      console.error(`decisions -> ${logPath}`)
+      console.error(`open http://localhost:${port} — ctrl-c here when done`)
+    },
+    'is another beat board or beat rate still running?',
+  )
 }

@@ -480,7 +480,7 @@ const HELP = [
                                                           GATED: fetch a specific CC0 sound from Freesound by id and
                                                           register it (label "CC0-1.0"); needs the key + egress. CC0
                                                           is the only license ever fetched (zero redistribution risk)
-  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio|fal] [--provider P] [--license L]
+  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio|fal] [--provider P] [--license L] [--bpm N --bars N]
                                                           GENERATE a one-shot with Stable Audio Open (local text-to-audio)
                                                           and register it as media with a provenance sidecar. Default
                                                           --backend stableaudio (needs torch + the model, owner-side;
@@ -492,11 +492,17 @@ const HELP = [
                                                           under the Community License); --provider picks others:
                                                           fal-ai/stable-audio (Open, the local backend's model) or
                                                           fal-ai/stable-audio-25/text-to-audio (2.5, Stability
-                                                          platform terms). "Powered by Stability AI"
+                                                          platform terms). "Powered by Stability AI".
+                                                          --bpm N --bars N (fal only, both required) cuts the
+                                                          download to N bars at that tempo, starting on a DETECTED
+                                                          DOWNBEAT — so Lyria's fixed 30s or MiniMax's multi-minute
+                                                          track becomes a loop that begins on a strong beat. The cut
+                                                          is recorded in the provenance sidecar
+                                                          (generated.downbeatTrim)
   beat source gen --doctor                                report which generative backends are installed (JSON)` +
     // ==== Phase 40 Stream VB ====
     `
-  beat source gen <file.beat> <sample-id> "<prompt>" --count N [--seed-from S] [--out-dir d] [--audition]
+  beat source gen <file.beat> <sample-id> "<prompt>" --count N [--seed-from S] [--out-dir d] [--audition] [--bpm N --bars N]
                                                           BATCH: generate N candidates of ONE prompt across seeds
                                                           S..S+N-1 into gen-<sample-id>-<S>/ next to the .beat and
                                                           register NOTHING — then rank them with \`beat score\` and
@@ -671,7 +677,7 @@ const HELP = [
   },
   {
     cmd: 'taste-eval',
-    text: `  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M] [--aes-backend aes|stub|off]
+    text: `  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend off|stub|clap|mert] [--embed-model M] [--aes-backend aes|stub|off]
                                                           the taste-model eval harness (docs/taste-loop-design.md):
                                                           leave-one-batch-out held-out pick prediction over the
                                                           scores log — top-1/top-3/pairwise accuracy vs chance for
@@ -679,14 +685,18 @@ const HELP = [
                                                           renders still exist to embed — embed-bt and both-bt, the
                                                           T2 ablation) plus the learned taste directions. Embeddings
                                                           come from a Python sidecar (python/embed.py), cached next
-                                                          to each wav: clap = LAION-CLAP (default, Apache-2.0),
-                                                          mert = MERT-330M (stronger on music benchmarks; CC-BY-NC
-                                                          weights, personal use only), stub = deterministic no-deps.
-                                                          --aes-backend adds Audiobox-Aesthetics (CC-BY-4.0): four
-                                                          NAMED axes per clip — CE content enjoyment, CU content
-                                                          usefulness, PC production complexity, PQ production
-                                                          quality — as explicit features (aes-bt / dsp+aes-bt in
-                                                          the ablation) plus signed per-axis taste directions.
+                                                          to each wav, and DEFAULT TO off: clap = LAION-CLAP
+                                                          (Apache-2.0) is RETIRED — it scored below chance on
+                                                          held-out owner picks (research/122 §5) — and mert =
+                                                          MERT-330M (CC-BY-NC weights, personal use only) was never
+                                                          tried; both stay selectable to reproduce an old run.
+                                                          stub = deterministic no-deps. The endorsed representation
+                                                          is --aes-backend (Audiobox-Aesthetics, CC-BY-4.0), ON by
+                                                          default: four NAMED axes per clip — CE content enjoyment,
+                                                          CU content usefulness, PC production complexity, PQ
+                                                          production quality — as explicit features (aes-bt /
+                                                          dsp+aes-bt in the ablation) plus signed per-axis taste
+                                                          directions.
                                                           Scored batches carry per-variant DSP features in the log
                                                           since T0; --backfill derives them for older entries whose
                                                           batch renders still exist (rewrites the log, .bak kept).
@@ -3731,9 +3741,14 @@ async function tasteEvalCmd(argv) {
   if (!file && explicitLog === undefined) throw new BeatEditError('taste-eval needs <file.beat> (the log defaults to beat-scores.jsonl next to it) or an explicit --log <path>')
   const { defaultScoresLog } = await import('../dist/src/vary/batch.js')
   const { evaluate, formatEvalReport } = await import('../dist/src/taste/eval.js')
-  const embedBackend = flagValue(argv, '--embed-backend') ?? 'clap'
+  // Defaults to 'off' (R4-3 / research/130 W0.4): clap was RETIRED at the T1 gate for scoring below
+  // chance on held-out owner picks (research/122 §5) and mert is untried with the same caveat, so a
+  // bare `beat taste-eval` must not spin up either. Both stay selectable to reproduce an old run.
+  // 'aes' is deliberately NOT an --embed-backend value: the Audiobox axes are named features that
+  // are never PCA-projected, and they ride --aes-backend (default 'aes') instead.
+  const embedBackend = flagValue(argv, '--embed-backend') ?? 'off'
   if (!['stub', 'clap', 'mert', 'off'].includes(embedBackend)) {
-    throw new BeatEditError(`--embed-backend must be one of stub|clap|mert|off, got "${embedBackend}"`)
+    throw new BeatEditError(`--embed-backend must be one of off|stub|clap|mert, got "${embedBackend}" (the endorsed Audiobox axes ride --aes-backend, which is on by default)`)
   }
   // Audiobox-Aesthetics axes (research/107 §4.1): 'stub' maps to the sidecar's aes-stub backend
   // (deterministic plumbing-truth axes, no torch) so the whole aes path tests everywhere.
@@ -4196,6 +4211,8 @@ async function sourceCmd(argv) {
     // ==== Phase 40 Stream VB ==== (gen batches)
     '--count', '--seed-from',
     // ==== end Phase 40 Stream VB ====
+    // R4-4: the downbeat trim (fal only, both required together)
+    '--bpm', '--bars',
   ])
   const positionals = rest.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(rest[i - 1]))
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
@@ -4277,6 +4294,12 @@ async function sourceCmd(argv) {
         backend: flag('--backend', 'stableaudio'),
         provider: flag('--provider', 'stable-audio-open'),
         ...(flag('--license') !== undefined ? { license: flag('--license') } : {}),
+        // R4-4: the downbeat-aligned trim was reachable only from scripts/gen-bakeoff-run.mjs
+        // until now — RunGenOptions simply had no bpm/bars to forward. Opt-in and validated
+        // (both-or-neither, fal-only) in runGen, so a wrong combination errors instead of being
+        // silently ignored.
+        ...(flag('--bpm') !== undefined ? { bpm: Number(flag('--bpm')) } : {}),
+        ...(flag('--bars') !== undefined ? { bars: Number(flag('--bars')) } : {}),
       })
       process.stdout.write(
         `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +
@@ -4321,6 +4344,9 @@ async function sourceGenBatch(lib, { file, id, prompt, rest, flag }) {
     provider: flag('--provider', 'stable-audio-open'),
     ...(flag('--license') !== undefined ? { license: flag('--license') } : {}),
     ...(flag('--out-dir') !== undefined ? { outDir: flag('--out-dir') } : {}),
+    // R4-4: same downbeat trim as the single-shot path, applied to every candidate.
+    ...(flag('--bpm') !== undefined ? { bpm: Number(flag('--bpm')) } : {}),
+    ...(flag('--bars') !== undefined ? { bars: Number(flag('--bars')) } : {}),
     onProgress: (i, n, seed) => process.stdout.write(`generating v${i}/${n} (seed ${seed})...\n`),
   })
   const last = result.seedFrom + result.candidates.length - 1

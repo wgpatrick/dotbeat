@@ -23,7 +23,7 @@
 
 import { scalePitchClasses, degreePitch, chooseSeeded, type PhraseKey, type ScaleMode, type ComposedNote, type ComposedPhrase } from './phrase.js'
 import { mulberry32 } from './eval.js'
-import { contourInversion, transposeToNextChord, rhythmicDisplacement, oneChangePerRepeat, type MotifOperator } from './motif.js'
+import { contourInversion, transposeToNextChord, rhythmicDisplacement, sameRhythmNewPitches, oneChangePerRepeat, euclidSteps, type MotifOperator } from './motif.js'
 
 const rnd2 = (x: number): number => Math.round(x * 100) / 100
 const clampVel = (v: number): number => rnd2(Math.min(0.95, Math.max(0.05, v)))
@@ -128,10 +128,32 @@ function diatonicTones(key: PhraseKey, d: number, seventh: boolean): number[] {
   return tones
 }
 
+/** The minor-key mode palette (§C.4, "mode as a one-parameter genre colorizer"), as a weighted
+ * draw: natural minor is the genre workhorse, Phrygian is the melodic-techno/psytrance colour (the
+ * b2 as featured neighbour tone) and Dorian the house/deep-house one. Weighted, not uniform —
+ * natural minor stays the default sound; the other two are the "same progression, different colour"
+ * axis that keeps a round of figures from all sharing one palette (owner ear-report 2026-07-26). */
+const MINOR_MODE_WEIGHTS: readonly { mode: ScaleMode; weight: number }[] = [
+  { mode: 'natural-minor', weight: 7 },
+  { mode: 'phrygian', weight: 2 },
+  { mode: 'dorian', weight: 2 },
+]
+
+const pickWeightedMode = (rng: () => number): ScaleMode => {
+  const total = MINOR_MODE_WEIGHTS.reduce((s, e) => s + e.weight, 0)
+  let r = rng() * total
+  for (const e of MINOR_MODE_WEIGHTS) {
+    r -= e.weight
+    if (r <= 0) return e.mode
+  }
+  return 'natural-minor'
+}
+
 export interface ChordTrackOptions {
   /** total bars (default 4 — a showdown clip) */
   bars?: number
-  /** force the mode; default derives natural-minor/major from the picked progression's tonality */
+  /** force the mode; default is a seeded weighted draw over the minor palette (natural minor /
+   * Phrygian / Dorian) for minor keys, and 'major' for major ones */
   mode?: ScaleMode
   /** force parallel-planing on/off; default is a seeded ~15% chance for minor keys */
   planing?: boolean
@@ -139,8 +161,10 @@ export interface ChordTrackOptions {
   barsPerChord?: number
   /** add sevenths to every diatonic chord's tone content (m7 colour); default false */
   sevenths?: boolean
-  /** enable position-conditional harmonic-minor V cadence substitution at the phrase end
-   * (default true for minor keys) */
+  /** enable position-conditional harmonic-minor V cadence substitution at the phrase end (default
+   * true for NATURAL-minor keys only — the borrowed V is the natural-minor/trance move; Phrygian
+   * cadences on its bII and Dorian on its natural-6 IV, so forcing a raised leading tone into
+   * either mode just sprays out-of-scale tones the lint would rightly flag) */
   cadence?: boolean
 }
 
@@ -153,14 +177,18 @@ export function buildChordTrack(key: PhraseKey, seed: number, opts: ChordTrackOp
   const bars = opts.bars ?? 4
   const slice = PROGRESSION_BANK.filter((e) => e.minor === key.minor)
   const entry = weightedPick(rng, slice.length > 0 ? slice : PROGRESSION_BANK)
-  const mode: ScaleMode = opts.mode ?? (key.minor ? 'natural-minor' : 'major')
+  const mode: ScaleMode = opts.mode ?? (key.minor ? pickWeightedMode(rng) : 'major')
   const trackKey: PhraseKey = { ...key, mode }
-  // harmonic rhythm: 1 or 2 bars per chord — never a hardcoded always-one-per-bar (§C.1). Held
-  // (2-bar) chords are the trance-breakdown norm, so weight toward them.
-  const barsPerChord = opts.barsPerChord ?? (rng() < 0.55 ? 2 : 1)
+  // harmonic rhythm: 1, 2 or (rarely) 4 bars per chord — never a hardcoded always-one-per-bar
+  // (§C.1). Held (2-bar) chords are the trance-breakdown norm, so weight toward them; the whole-
+  // clip hold is the techno one-chord vamp, kept rare so it colours a round rather than defining it.
+  const barsPerChord = opts.barsPerChord ?? ((): number => {
+    const r = rng()
+    return r < 0.4 ? 1 : r < 0.9 ? 2 : bars
+  })()
   const planing = opts.planing ?? (key.minor && rng() < 0.15)
   const sevenths = opts.sevenths ?? false
-  const cadence = opts.cadence ?? key.minor
+  const cadence = opts.cadence ?? (key.minor && mode === 'natural-minor')
 
   // lay chords sequentially across the bar span, cycling the progression to fill
   const chords: ChordTrackChord[] = []
@@ -196,7 +224,9 @@ export function buildChordTrack(key: PhraseKey, seed: number, opts: ChordTrackOp
   if (cadence && !planing && chords.length > 0) {
     const last = chords[chords.length - 1]!
     if (last.rootDegree === 4 || rng() < 0.5) {
-      const vTones = diatonicTones(trackKey, 4, sevenths)
+      // the borrowed V is spelled from NATURAL minor whatever the track's mode is — it is a
+      // borrowed chord, and Phrygian's b2 / Dorian's natural 6 would otherwise bend its fifth
+      const vTones = diatonicTones({ ...trackKey, mode: 'natural-minor' }, 4, sevenths)
       vTones[1] = vTones[1]! + 1 // raise the third: b7 (subtonic) -> leading tone
       chords[chords.length - 1] = { ...last, rootDegree: 4, rootOffset: vTones[0]!, tones: vTones, cadential: true }
     }
@@ -252,9 +282,13 @@ export function enforceBassRegister(pitch: number, chordRootPitch: number): numb
 export const THEORY_BASS_ARCHETYPES = ['trance-roller', 'stussy', 'offbeat-root', 'sub-pulse', 'octave-drive'] as const
 
 /** Swing window for the Stussy tech-house recipe (§C.2: "56-58%, <54% stiff, >62% dragged").
- * Applied to offbeat 16ths as a fractional-step delay: shift = 2*(pct/100) - 1 steps. */
-const STUSSY_SWING_PCT = 57
+ * Applied to offbeat 16ths as a fractional-step delay: shift = 2*(pct/100) - 1 steps. The recipe
+ * gives a WINDOW, not a number — so the figure draws one, seeded, inside it. */
+const STUSSY_SWING_WINDOW: readonly number[] = [56, 56.5, 57, 57.5, 58]
 const swingShiftSteps = (pct: number): number => rnd2(2 * (pct / 100) - 1)
+
+/** Seeded pick of one item (exactly one rng draw). */
+const pickOne = <T>(rng: () => number, items: readonly T[]): T => items[Math.floor(rng() * items.length)]!
 
 interface BassContext {
   track: ChordTrack
@@ -268,101 +302,246 @@ function bassRootAt(ctx: BassContext, step: number): number {
   return ctx.key.root - 12 + chord.rootOffset
 }
 
-function tranceRoller(ctx: BassContext): ComposedNote[] {
-  // Myloops uplifting-trance rolling bass: kick on quarters, bass on the 16th offbeats "e-&-a" of
-  // every beat (12 notes/bar), all chord root, cut short (~40 ms decay -> ~0.5-step gate), -8..-12
-  // velocity on the "&"s.
-  const notes: ComposedNote[] = []
-  for (let bar = 0; bar < ctx.track.bars; bar++) {
-    for (const beat of [0, 4, 8, 12]) {
-      for (const k of [1, 2, 3]) {
-        const step = bar * 16 + beat + k
-        const root = bassRootAt(ctx, step)
-        const isAnd = k === 2 // the "&" — the 8th offbeat
-        notes.push({ pitch: root, start: step, duration: 0.5, velocity: clampVel(isAnd ? 0.72 : 0.82) })
-      }
+// ---- seeded rhythm-skeleton realization (owner ear-report, 2026-07-26) -------------------------
+// The archetypes above were defined by FIXED 16th-slot lists, so every draw of one was the same
+// groove with different pitches — measured at 8 distinct onset skeletons across 144 draws, i.e. ~10
+// same-skeleton repeats per 15 figures, which is what the owner heard in blind rating. The fix is
+// not more archetypes: it is a seeded FAMILY of rhythmic realizations inside each one, plus the
+// per-bar variation schedule the research already prescribes but only Stussy implemented.
+
+/** A rolling-bass bar as slot -> (interval above the chord root, gate, velocity), the representation
+ * the variation schedule edits before pitches are resolved. `shift` is a fractional-step delay
+ * (Chandler's groove-via-offset, §C.2). */
+interface BassSlot {
+  slot: number
+  /** semitones above the chord's sub-register root — 0/7/12 are register-safe by construction, and
+   * anything else (Stussy's b3) is lifted by `enforceBassRegister` at render time */
+  interval: number
+  gate: number
+  velocity: number
+  shift?: number
+}
+
+/** One bar's SINGLE change in a rolling-bass variation schedule (§C.2's literal Stussy schedule —
+ * "bar 2: slot-7 octave→tonic; bar 3: skip slot 14; bar 4: full pattern" — generalized by §C.3's
+ * "successful tracks change one element per repeat while holding the core"). */
+export type BassBarChange =
+  | { kind: 'full' }
+  | { kind: 'skip'; slot: number }
+  | { kind: 'tonic'; slot: number }
+  | { kind: 'octave'; slot: number }
+  | { kind: 'push'; slot: number }
+  | { kind: 'ghost'; slot: number }
+
+const BASS_CHANGE_KINDS = ['skip', 'tonic', 'octave', 'push', 'ghost'] as const
+
+/** Build the seeded one-change-per-bar schedule for a `bars`-bar figure over `slots`: the FIRST bar
+ * states the pattern and the LAST restates it in full (the Stussy schedule's own shape); each bar
+ * between them carries exactly one change, drawn seeded. Changes land in the back half of the bar,
+ * where a rolling bass's variations actually go. */
+export function bassBarSchedule(rng: () => number, slots: readonly number[], bars: number): BassBarChange[] {
+  const sched: BassBarChange[] = Array.from({ length: bars }, () => ({ kind: 'full' }) as BassBarChange)
+  if (slots.length === 0 || bars < 3) return sched
+  const late = slots.filter((s) => s >= 8)
+  const pool = late.length > 0 ? late : slots
+  const free: number[] = []
+  for (let s = 1; s < 16; s++) if (!slots.includes(s) && s % 4 !== 0) free.push(s)
+  for (let b = 1; b < bars - 1; b++) {
+    const kind = pickOne(rng, BASS_CHANGE_KINDS)
+    if (kind === 'ghost') {
+      sched[b] = free.length > 0 ? { kind, slot: pickOne(rng, free) } : { kind: 'full' }
+      continue
     }
+    // a pushed note must stay inside its own bar
+    const kindPool = kind === 'push' ? pool.filter((s) => s < 15) : pool
+    sched[b] = kindPool.length > 0 ? { kind, slot: pickOne(rng, kindPool) } : { kind: 'full' }
   }
+  return sched
+}
+
+/** Render one bar of a slot spec: apply that bar's single scheduled change, the figure's swing on
+ * offbeat 16ths, and the register rule on every note. */
+function renderBassBar(ctx: BassContext, bar: number, spec: readonly BassSlot[], change: BassBarChange, swing: number): ComposedNote[] {
+  let slots: BassSlot[] = spec.map((s) => ({ ...s }))
+  switch (change.kind) {
+    case 'skip':
+      slots = slots.filter((s) => s.slot !== change.slot)
+      break
+    case 'tonic':
+      slots = slots.map((s) => (s.slot === change.slot ? { ...s, interval: 0 } : s))
+      break
+    case 'octave':
+      // "this slot becomes the octave" — capped at the octave so the sub never climbs out of range
+      slots = slots.map((s) => (s.slot === change.slot ? { ...s, interval: 12 } : s))
+      break
+    case 'push':
+      slots = slots.map((s) => (s.slot === change.slot ? { ...s, shift: (s.shift ?? 0) + 1 } : s))
+      break
+    case 'ghost':
+      if (!slots.some((s) => s.slot === change.slot)) slots.push({ slot: change.slot, interval: 0, gate: 0.9, velocity: 0.42 })
+      break
+    default:
+      break
+  }
+  const o = bar * 16
+  const out: ComposedNote[] = []
+  for (const s of slots) {
+    const step = o + s.slot
+    const root = bassRootAt(ctx, step)
+    const start = rnd2(step + (s.shift ?? 0) + (s.slot % 2 === 1 ? swing : 0))
+    out.push({ pitch: enforceBassRegister(root + s.interval, root), start, duration: s.gate, velocity: clampVel(s.velocity) })
+  }
+  return out
+}
+
+/** Render a whole figure from one bar spec plus a seeded per-bar schedule. */
+function renderBassFigure(ctx: BassContext, spec: readonly BassSlot[], swing = 0): ComposedNote[] {
+  const sched = bassBarSchedule(ctx.rng, spec.map((s) => s.slot), ctx.track.bars)
+  const notes: ComposedNote[] = []
+  for (let bar = 0; bar < ctx.track.bars; bar++) notes.push(...renderBassBar(ctx, bar, spec, sched[bar] ?? { kind: 'full' }, swing))
   return notes
 }
+
+/** Seeded realizations of the Myloops rolling bass. The sourced pattern — all three 16th offbeats
+ * "e-&-a" of every beat, 12 notes/bar — carries three of the five slots, so it stays the dominant
+ * sound; the thinner sets are the same recipe at lower density (Attack's wider off-beat archetype,
+ * §C.2: notes BETWEEN the kicks). */
+const TRANCE_ROLLER_OFFBEATS: readonly (readonly number[])[] = [
+  [1, 2, 3],
+  [1, 2, 3],
+  [1, 2, 3],
+  [2, 3], // "&-a" — a more spacious roller
+  [1, 3], // "e-a" — a 16th gap on every "&"
+]
+
+function tranceRoller(ctx: BassContext): ComposedNote[] {
+  // Myloops uplifting-trance rolling bass: kick on quarters, bass on the 16th offbeats of every
+  // beat, all chord root, cut short (~40 ms decay -> a sub-1-step gate), -8..-12 velocity on one
+  // offbeat of each beat. Density, gate and WHICH offbeat carries the velocity dip are seeded; the
+  // recipe fixes none of the three (it says "optional -8-12 velocity on the &s").
+  const offbeats = pickOne(ctx.rng, TRANCE_ROLLER_OFFBEATS)
+  const gate = pickOne(ctx.rng, [0.4, 0.5, 0.6])
+  const dip = pickOne(ctx.rng, offbeats)
+  const spec: BassSlot[] = []
+  for (const beat of [0, 4, 8, 12]) {
+    for (const k of offbeats) spec.push({ slot: beat + k, interval: 0, gate, velocity: k === dip ? 0.72 : 0.82 })
+  }
+  return renderBassFigure(ctx, spec)
+}
+
+/** "Quiet tonic fillers elsewhere" is the one part of the Stussy spec left open — the recipe pins
+ * slots 1/9, 5/13 and 7/15 and then says only "elsewhere" for the fillers. These are the candidate
+ * filler sets, all on weak 16ths so the pinned slots keep their weight. */
+const STUSSY_FILLER_SETS: readonly (readonly number[])[] = [
+  [2, 10],
+  [2, 10, 13],
+  [3, 11],
+  [10],
+  [2, 7, 10],
+  [2, 10, 15],
+]
 
 function stussy(ctx: BassContext): ComposedNote[] {
   // The tech-house "Stussy 3-note pattern" (§C.2, the producer's school): pitch set 1-5-8 (root,
   // fifth, octave) or 1-b3-5; tonic on slots 1/9 (steps 0/8), fifth on 5/13 (steps 4/12), octave on
   // 7/15 (steps 6/14), quiet tonic fillers elsewhere; gate 60% on downbeats / 90-100% offbeats;
-  // velocities ~110/90/75 (of 127); swing 56-58%; a one-change-per-bar variation schedule.
+  // velocities ~110/90/75 (of 127); swing 56-58%.
+  //
+  // The recipe's OWN one-change-per-bar schedule (bar 2: slot-7 octave->tonic; bar 3: skip slot 14;
+  // bar 4: full pattern) is kept verbatim — so this archetype does NOT take the generic seeded
+  // schedule. Its seeded axes are the ones the recipe leaves open: the pitch-set variant, the swing
+  // percentage inside the stated 56-58 window, the gate values inside the stated ranges, and which
+  // weak 16ths carry the "quiet tonic fillers".
   const useMinorThird = ctx.rng() < 0.4 // the 1-b3-5 colour variant
-  const swing = swingShiftSteps(STUSSY_SWING_PCT)
-  const notes: ComposedNote[] = []
-  const add = (step: number, interval: number, gate: number, v: number): void => {
-    const root = bassRootAt(ctx, step)
-    // a b3 in the sub register is lifted an octave by enforceBassRegister below (register rule)
-    const pitch = enforceBassRegister(root + interval, root)
-    const start = step % 2 === 1 ? step + swing : step // swing the offbeat 16ths
-    notes.push({ pitch, start: rnd2(start), duration: gate, velocity: clampVel(v) })
-  }
+  const swing = swingShiftSteps(pickOne(ctx.rng, STUSSY_SWING_WINDOW))
+  const downGate = pickOne(ctx.rng, [0.55, 0.6, 0.65])
+  const offGate = pickOne(ctx.rng, [0.9, 0.95, 1])
+  const fillers = pickOne(ctx.rng, STUSSY_FILLER_SETS)
   const OCT = 12
   const FIFTH = 7
   const B3 = 3
+  const octInterval = useMinorThird ? B3 : OCT
+  const notes: ComposedNote[] = []
   for (let bar = 0; bar < ctx.track.bars; bar++) {
-    const o = bar * 16
     const barIx = bar % 4 // the schedule is a 4-bar cycle
-    // strong slots
-    add(o + 0, 0, 0.6, 0.87) // tonic on the downbeat (with the kick), short gate
-    add(o + 8, 0, 0.6, 0.87)
-    add(o + 4, FIFTH, 0.95, 0.71) // fifth, offbeat, long gate
-    add(o + 12, FIFTH, 0.95, 0.71)
-    // octave slots (steps 6/14) — bar 2 turns slot-7 (step 6) octave into a tonic; bar 3 skips
-    // slot 14; the b3 variant swaps the octave colour for a raised minor third
-    const octInterval = useMinorThird ? B3 : OCT
-    if (barIx === 1) add(o + 6, 0, 0.95, 0.59) // octave -> tonic
-    else add(o + 6, octInterval, 0.95, 0.59)
-    if (barIx !== 2) add(o + 14, octInterval, 0.95, 0.59) // bar 3 skips slot 14
-    // quiet tonic fillers on the remaining offbeat 16ths
-    for (const step of [2, 10]) add(o + step, 0, 0.9, 0.47)
+    const spec: BassSlot[] = [
+      { slot: 0, interval: 0, gate: downGate, velocity: 0.87 }, // tonic on the downbeat (with the kick)
+      { slot: 8, interval: 0, gate: downGate, velocity: 0.87 },
+      { slot: 4, interval: FIFTH, gate: offGate, velocity: 0.71 },
+      { slot: 12, interval: FIFTH, gate: offGate, velocity: 0.71 },
+      // bar 2 turns slot-7 (step 6) octave into a tonic
+      { slot: 6, interval: barIx === 1 ? 0 : octInterval, gate: offGate, velocity: 0.59 },
+    ]
+    if (barIx !== 2) spec.push({ slot: 14, interval: octInterval, gate: offGate, velocity: 0.59 }) // bar 3 skips slot 14
+    for (const slot of fillers) spec.push({ slot, interval: 0, gate: 0.9, velocity: 0.47 })
+    notes.push(...renderBassBar(ctx, bar, spec, { kind: 'full' }, swing))
   }
   return notes
 }
+
+/** Seeded off-beat root patterns (§C.2, Attack: notes BETWEEN the kicks). The plain 8th offbeats
+ * stay dominant; the rest add a 16th anticipation or a dropped/displaced onset without ever landing
+ * a note ON a quarter, which is what makes the archetype off-beat. */
+const OFFBEAT_ROOT_SETS: readonly (readonly number[])[] = [
+  [2, 6, 10, 14],
+  [2, 6, 10, 14],
+  [2, 6, 10, 13, 14],
+  [2, 6, 9, 10, 14],
+  [2, 7, 10, 14],
+  [2, 6, 10, 15],
+  [2, 6, 10, 11, 14],
+]
 
 function offbeatRoot(ctx: BassContext): ComposedNote[] {
-  // root on the offbeat 8ths (between the kicks), root + an occasional octave lift — register safe
-  const notes: ComposedNote[] = []
-  for (let bar = 0; bar < ctx.track.bars; bar++) {
-    for (const s of [2, 6, 10, 14]) {
-      const step = bar * 16 + s
-      const root = bassRootAt(ctx, step)
-      const oct = s === 14 && ctx.rng() < 0.4 ? 12 : 0
-      notes.push({ pitch: root + oct, start: step, duration: 2, velocity: clampVel(0.8) })
-    }
-  }
-  return notes
+  const slots = pickOne(ctx.rng, OFFBEAT_ROOT_SETS)
+  const lifted = ctx.rng() < 0.4 ? slots[slots.length - 1]! : -1 // an occasional octave lift on the tail
+  const spec: BassSlot[] = slots.map((slot, i) => ({
+    slot,
+    interval: slot === lifted ? 12 : 0,
+    gate: Math.max(0.5, Math.min(2, (slots[i + 1] ?? slot + 2) - slot)),
+    velocity: 0.8,
+  }))
+  return renderBassFigure(ctx, spec)
 }
+
+/** Seeded sparse-sub shapes (§C.2's DnB posture: roots and octaves "with breathing space"). Each is
+ * a long root plus at most two answers; only root/octave intervals appear, so the register rule is
+ * satisfied by construction rather than by correction. */
+const SUB_PULSE_SHAPES: readonly (readonly BassSlot[])[] = [
+  [{ slot: 0, interval: 0, gate: 6, velocity: 0.9 }, { slot: 10, interval: 0, gate: 3, velocity: 0.72 }],
+  [{ slot: 0, interval: 0, gate: 8, velocity: 0.9 }, { slot: 12, interval: 0, gate: 3, velocity: 0.7 }],
+  [{ slot: 0, interval: 0, gate: 4, velocity: 0.9 }, { slot: 6, interval: 0, gate: 2, velocity: 0.66 }, { slot: 11, interval: 12, gate: 4, velocity: 0.6 }],
+  [{ slot: 2, interval: 0, gate: 6, velocity: 0.86 }, { slot: 10, interval: 0, gate: 4, velocity: 0.72 }], // pushed off the downbeat
+  [{ slot: 0, interval: 0, gate: 10, velocity: 0.9 }], // one long root, nothing else
+  [{ slot: 0, interval: 0, gate: 5, velocity: 0.9 }, { slot: 7, interval: 12, gate: 2, velocity: 0.62 }, { slot: 14, interval: 0, gate: 2, velocity: 0.68 }],
+]
 
 function subPulse(ctx: BassContext): ComposedNote[] {
-  // sparse sub with breathing space (§C.2 DnB posture): long roots, an octave tail — root/octave only
-  const notes: ComposedNote[] = []
-  for (let bar = 0; bar < ctx.track.bars; bar++) {
-    const o = bar * 16
-    const root = bassRootAt(ctx, o)
-    notes.push({ pitch: root, start: o, duration: 6, velocity: clampVel(0.9) })
-    notes.push({ pitch: root, start: o + 10, duration: 3, velocity: clampVel(0.72) })
-    if (bar % 2 === 1 && ctx.rng() < 0.5) notes.push({ pitch: root + 12, start: o + 14, duration: 2, velocity: clampVel(0.6) })
-  }
-  return notes
+  return renderBassFigure(ctx, pickOne(ctx.rng, SUB_PULSE_SHAPES))
 }
 
+/** Seeded onset grids for the bass-as-lead driver: straight 8ths (the §C.2 recipe, weighted to stay
+ * dominant) plus three Euclidean timelines E(k,16) rotated so a downbeat onset is guaranteed — the
+ * §C.5 Toussaint generator, which the operator library has always exported and nothing used. */
+const OCTAVE_DRIVE_GRIDS: readonly (readonly number[])[] = [
+  [0, 2, 4, 6, 8, 10, 12, 14],
+  [0, 2, 4, 6, 8, 10, 12, 14],
+  [0, 2, 4, 6, 8, 10, 12, 14],
+  euclidSteps(5, 16, 1),
+  euclidSteps(6, 16, 1),
+  euclidSteps(7, 16, 1),
+  euclidSteps(9, 16, 1),
+]
+
 function octaveDrive(ctx: BassContext): ComposedNote[] {
-  // bass-as-lead: 8th-note root/octave alternation (§C.2), register safe by construction
-  const notes: ComposedNote[] = []
-  for (let bar = 0; bar < ctx.track.bars; bar++) {
-    for (let s = 0; s < 16; s += 2) {
-      const step = bar * 16 + s
-      const root = bassRootAt(ctx, step)
-      const high = (s / 2) % 2 === 1
-      notes.push({ pitch: high ? root + 12 : root, start: step, duration: 1, velocity: clampVel(high ? 0.62 : 0.82) })
-    }
-  }
-  return notes
+  // bass-as-lead: root/octave alternation over the grid (§C.2), register safe by construction
+  const grid = pickOne(ctx.rng, OCTAVE_DRIVE_GRIDS)
+  const phase = ctx.rng() < 0.3 ? 1 : 0 // which half of the alternation opens the bar
+  const spec: BassSlot[] = grid.map((slot, i) => {
+    const high = (i + phase) % 2 === 1
+    return { slot, interval: high ? 12 : 0, gate: 1, velocity: high ? 0.62 : 0.82 }
+  })
+  return renderBassFigure(ctx, spec)
 }
 
 /** One theory-aware bass figure over a chord track, deterministic in `rng`. Every note is passed
@@ -495,46 +674,185 @@ export function chooseVoicing(key: PhraseKey, chord: ChordTrackChord, style: Cho
 
 const CHORD_STYLES: readonly ChordVoicingStyle[] = ['triad', 'm7', 'm9', 'omit5']
 
+/** Pick the OPENING voicing seeded from the most compact candidates, rather than always the single
+ * most compact one (owner ear-report 2026-07-26: every figure over the same chord opened on the
+ * same inversion in the same octave, so the whole pad part was pinned by chord choice alone). The
+ * candidates are sorted by spread and the draw is confined to the compact end, so the opening is
+ * still a tidy close-position voicing — just not always the SAME one. Voice-leading from the second
+ * chord on is unchanged: minimal motion from wherever the figure opened. */
+export function chooseOpeningVoicing(key: PhraseKey, chord: ChordTrackChord, style: ChordVoicingStyle, rng: () => number): number[] {
+  const cands = candidateVoicings(styleToneOffsets(key, chord, style), key.root)
+    .slice()
+    .sort((a, b) => voiceLeadingCost(a, null) - voiceLeadingCost(b, null))
+  return pickOne(rng, cands.slice(0, Math.min(4, cands.length)))
+}
+
+/** One bar's SINGLE change in a chord figure's variation schedule — the chord analogue of
+ * `bassBarSchedule`'s menu (a stab dropped, delayed a 16th behind the beat in Chandler's
+ * groove-via-offset move, or answered by an extra hit). */
+export type ChordBarChange = { kind: 'full' } | { kind: 'skip'; slot: number } | { kind: 'push'; slot: number } | { kind: 'add'; slot: number }
+
+const CHORD_CHANGE_KINDS = ['skip', 'push', 'add'] as const
+
+/** The seeded one-change-per-bar schedule for a chord figure: first bar states the rhythm, last bar
+ * restates it, each bar between carries exactly one change. */
+export function chordBarSchedule(rng: () => number, slots: readonly number[], bars: number): ChordBarChange[] {
+  const sched: ChordBarChange[] = Array.from({ length: bars }, () => ({ kind: 'full' }) as ChordBarChange)
+  if (slots.length === 0 || bars < 3) return sched
+  const late = slots.filter((s) => s >= 8)
+  const pool = late.length > 0 ? late : slots
+  const free: number[] = []
+  for (let s = 1; s < 16; s++) if (!slots.includes(s)) free.push(s)
+  for (let b = 1; b < bars - 1; b++) {
+    const kind = pickOne(rng, CHORD_CHANGE_KINDS)
+    if (kind === 'add') {
+      sched[b] = free.length > 0 ? { kind, slot: pickOne(rng, free) } : { kind: 'full' }
+      continue
+    }
+    const kindPool = kind === 'push' ? pool.filter((s) => s < 15) : pool
+    sched[b] = kindPool.length > 0 ? { kind, slot: pickOne(rng, kindPool) } : { kind: 'full' }
+  }
+  return sched
+}
+
+/** Seeded off-beat stab placements. The plain 8th offbeats keep two of the seven slots so the
+ * archetype still sounds like itself; the rest thin it, double it, or push it onto the 3-against-4
+ * grid — all placements a house/techno stab part actually uses. */
+const STAB_PATTERNS: readonly (readonly number[])[] = [
+  [2, 6, 10, 14],
+  [2, 6, 10, 14],
+  [2, 6, 14],
+  [2, 5, 8, 11, 14],
+  [2, 10],
+  [2, 6, 10, 13, 14],
+  [3, 7, 11, 15],
+]
+
+/** Seeded house-pulse grids: straight 8ths (dominant) plus Euclidean timelines E(k,16) rotated to a
+ * downbeat onset (§C.5). */
+const PULSE_PATTERNS: readonly (readonly number[])[] = [
+  [0, 2, 4, 6, 8, 10, 12, 14],
+  [0, 2, 4, 6, 8, 10, 12, 14],
+  [0, 2, 4, 6, 8, 10, 12],
+  [0, 2, 4, 6, 8, 10, 14],
+  euclidSteps(6, 16, 1),
+  euclidSteps(7, 16, 1),
+  euclidSteps(9, 16, 1),
+]
+
+/** Seeded charleston placements — the downbeat hit plus a syncopated answer, at the several offsets
+ * the figure is actually played at. */
+const CHARLESTON_PATTERNS: readonly (readonly number[])[] = [
+  [0, 6],
+  [0, 6],
+  [0, 6, 12],
+  [0, 7],
+  [0, 3, 6],
+  [0, 6, 10],
+  [0, 6, 11, 14],
+]
+
+/** Seeded pad shapes over ONE chord's span (a pad's identity is holding, so this stays chord-scoped
+ * rather than per-bar): held, held with a release gap, a two-part swell, an anticipated entry a 16th
+ * before the chord, and a breathing re-articulation near the end. */
+type PadShape = 'held' | 'held-gap' | 'swell' | 'anticipated' | 'breathing'
+const PAD_SHAPES: readonly PadShape[] = ['held', 'held', 'held-gap', 'swell', 'anticipated', 'breathing']
+
 /** One theory-aware chord figure over a chord track: a per-chord voicing chosen by minimal-motion
- * voice-leading, rendered with the archetype's rhythm and honouring the track's harmonic rhythm (the
+ * voice-leading from a SEEDED opening voicing, rendered with a seeded realization of the archetype's
+ * rhythm plus a one-change-per-bar variation schedule, honouring the track's harmonic rhythm (the
  * voicing changes only at chord boundaries, never re-drawn per bar). Deterministic in `seed`. */
 export function composeTheoryChords(archetype: string, track: ChordTrack, seed: number): ComposedNote[] {
   const rng = mulberry32(seed + 1487)
-  const style = CHORD_STYLES[Math.floor(rng() * CHORD_STYLES.length)]!
-  const notes: ComposedNote[] = []
+  const style = pickOne(rng, CHORD_STYLES)
+
+  // one voicing per CHORD: seeded opening, minimal motion thereafter
+  const voicings: number[][] = []
   let prev: number[] | null = null
   for (const chord of track.chords) {
-    const voicing = chooseVoicing(track.key, chord, style, prev)
-    prev = voicing
-    const o = chord.startBar * 16
-    const len = chord.bars * 16
-    const stack = (start: number, duration: number, v: number): void => {
-      for (const pitch of voicing) notes.push({ pitch, start, duration, velocity: clampVel(v) })
+    const v: number[] = prev === null ? chooseOpeningVoicing(track.key, chord, style, rng) : chooseVoicing(track.key, chord, style, prev)
+    voicings.push(v)
+    prev = v
+  }
+  const voicingAtBar = (bar: number): number[] => {
+    for (let i = 0; i < track.chords.length; i++) {
+      const c = track.chords[i]!
+      if (bar >= c.startBar && bar < c.startBar + c.bars) return voicings[i]!
     }
-    switch (archetype) {
-      case 'lush-pad':
-        stack(o, len - (rng() < 0.3 ? 2 : 0), 0.6)
-        break
-      case 'offbeat-stabs':
-        for (let s = 2; s < len; s += 4) stack(o + s, rng() < 0.5 ? 1 : 2, 0.62)
-        break
-      case 'house-pulse':
-        for (let s = 0; s < len; s += 2) {
-          if (s % 16 === 14 && rng() < 0.3) continue // seeded breath before a barline
-          stack(o + s, 1, s % 8 === 0 ? 0.7 : 0.52)
-        }
-        break
-      default: {
-        // charleston: a downbeat hit + a syncopated "and", per bar of the chord's span
-        for (let b = 0; b < chord.bars; b++) {
-          const bo = o + b * 16
-          stack(bo, 3, 0.66)
-          stack(bo + 6, 2, 0.55)
-          if (rng() < 0.4) stack(bo + 12, 2, 0.5)
-        }
-        break
+    return voicings[voicings.length - 1]!
+  }
+
+  const notes: ComposedNote[] = []
+  const stack = (voicing: readonly number[], start: number, duration: number, v: number): void => {
+    for (const pitch of voicing) notes.push({ pitch, start: rnd2(start), duration, velocity: clampVel(v) })
+  }
+
+  if (archetype === 'lush-pad') {
+    const shape = pickOne(rng, PAD_SHAPES)
+    const level = pickOne(rng, [0.54, 0.6, 0.66])
+    track.chords.forEach((chord, i) => {
+      const o = chord.startBar * 16
+      const len = chord.bars * 16
+      const voicing = voicings[i]!
+      switch (shape) {
+        case 'held-gap':
+          stack(voicing, o, len - 2, level)
+          break
+        case 'swell':
+          stack(voicing, o, Math.floor(len / 2), level - 0.06)
+          stack(voicing, o + Math.floor(len / 2), len - Math.floor(len / 2), level + 0.06)
+          break
+        case 'anticipated':
+          // a 16th early, except at the very top of the clip where there is nothing to anticipate
+          if (i === 0) stack(voicing, o, len, level)
+          else stack(voicing, o - 1, len + 1, level)
+          break
+        case 'breathing':
+          stack(voicing, o, len - 4, level)
+          stack(voicing, o + len - 3, 3, level - 0.08)
+          break
+        default:
+          stack(voicing, o, len, level)
+          break
       }
+    })
+    notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+    return notes
+  }
+
+  // the rhythmic archetypes are laid out per BAR, so the seeded variation schedule applies
+  const slots = archetype === 'offbeat-stabs'
+    ? pickOne(rng, STAB_PATTERNS)
+    : archetype === 'house-pulse'
+      ? pickOne(rng, PULSE_PATTERNS)
+      : pickOne(rng, CHARLESTON_PATTERNS)
+  const gate = archetype === 'offbeat-stabs'
+    ? pickOne(rng, [1, 1.5, 2])
+    : archetype === 'house-pulse'
+      ? pickOne(rng, [0.75, 1, 1.5])
+      : pickOne(rng, [2, 3])
+  const accent = pickOne(rng, [0.66, 0.7, 0.74])
+  const soft = accent - pickOne(rng, [0.1, 0.16, 0.22])
+  const sched = chordBarSchedule(rng, slots, track.bars)
+
+  for (let bar = 0; bar < track.bars; bar++) {
+    const voicing = voicingAtBar(bar)
+    const change = sched[bar] ?? { kind: 'full' }
+    let events = slots.map((slot) => ({ slot, shift: 0, velocity: slot % 8 === 0 ? accent : soft, gate }))
+    switch (change.kind) {
+      case 'skip':
+        events = events.filter((e) => e.slot !== change.slot)
+        break
+      case 'push':
+        events = events.map((e) => (e.slot === change.slot ? { ...e, shift: 1 } : e))
+        break
+      case 'add':
+        if (!events.some((e) => e.slot === change.slot)) events.push({ slot: change.slot, shift: 0, velocity: soft, gate })
+        break
+      default:
+        break
     }
+    for (const e of events) stack(voicing, bar * 16 + e.slot + e.shift, e.gate, e.velocity)
   }
   notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
   return notes
@@ -553,18 +871,61 @@ export const THEORY_LEAD_ARCHETYPES = ['motif-call-response', 'motif-repeat', 'a
 
 /** Lead register — two octaves above the key root (§ midifig register targets). */
 const LEAD_REGISTER = 24
+/** Seeded octave placement for a lead figure: the two-octaves-up default dominates, with a lower
+ * "tenor" placement and a bright top-octave one as the register-variety axis (owner ear-report
+ * 2026-07-26 — every lead sat in exactly one octave). Octave multiples only, so `degreePitch`'s
+ * scale-degree arithmetic is unaffected. */
+const LEAD_REGISTERS: readonly number[] = [24, 24, 24, 12, 36]
 const STRONG_STEPS = new Set([0, 4, 8, 12])
 
 /** 1-bar rhythm cells (onset steps), each using <=3 distinct inter-onset durations (motif economy,
- * §C.3). Denser cells first — the archetype picks a slice. */
-const MOTIF_RHYTHMS: readonly (readonly number[])[] = [
-  [0, 4, 8, 12], // quarter pulse
-  [0, 3, 4, 8, 11, 12], // dotted-ish cell
-  [0, 2, 4, 8, 10, 12], // 8ths with gaps
-  [0, 4, 6, 8, 12, 14], // syncopated
-  [0, 4, 7, 12], // sparse, off-grid middle
-  [0, 2, 4, 6, 8, 10, 12, 14], // running 8ths
-]
+ * §C.3), grouped by the character an archetype asks for. Every cell opens on step 0, which is what
+ * guarantees the phrase always has strong-beat onsets for the peak rule to land on. */
+const MOTIF_RHYTHM_POOLS: Record<'sparse' | 'running' | 'syncopated', readonly (readonly number[])[]> = {
+  sparse: [
+    [0, 4, 7, 12],
+    [0, 6, 12],
+    [0, 4, 12],
+    [0, 8, 12, 14],
+    [0, 5, 8],
+    [0, 4, 10],
+  ],
+  running: [
+    [0, 2, 4, 6, 8, 10, 12, 14],
+    [0, 2, 4, 8, 10, 12],
+    [0, 2, 4, 6, 8, 12, 14],
+    [0, 1, 2, 4, 6, 8, 10, 12],
+    [0, 2, 3, 4, 8, 10, 11, 12],
+  ],
+  syncopated: [
+    [0, 3, 4, 8, 11, 12],
+    [0, 2, 4, 8, 10, 12],
+    [0, 4, 6, 8, 12, 14],
+    [0, 4, 7, 12],
+    [0, 3, 6, 8, 11, 14],
+    [0, 2, 6, 8, 10, 14],
+    [0, 4, 6, 10, 12],
+  ],
+}
+
+/** Seeded ornament/rest on a rhythm cell: leave it alone, add one onset on a free WEAK 16th, or
+ * remove one non-initial onset. Both edits keep step 0 and the strong beats intact, so chord tones
+ * still land on strong beats and the cell keeps its motif economy — this just multiplies the family
+ * of cells a given archetype can state. */
+function varyRhythmCell(rng: () => number, cell: readonly number[]): number[] {
+  const r = rng()
+  if (r < 0.34 || cell.length < 3) return [...cell]
+  if (r < 0.67) {
+    const free: number[] = []
+    for (let s = 1; s < 16; s++) if (!cell.includes(s) && s % 4 !== 0) free.push(s)
+    if (free.length === 0) return [...cell]
+    return [...cell, pickOne(rng, free)].sort((a, b) => a - b)
+  }
+  const removable = cell.filter((s) => s !== 0 && !STRONG_STEPS.has(s))
+  if (removable.length === 0) return [...cell]
+  const drop = pickOne(rng, removable)
+  return cell.filter((s) => s !== drop)
+}
 
 /** A note in scale-degree space (0 = key root), the representation the motif is built in so chord
  * tones on strong beats and stepwise motion are exact before pitches are resolved. */
@@ -677,16 +1038,44 @@ export function enforceSinglePeak(notes: ComposedNote[], targetStep: number, key
 /** Resolve a bar of degree-space motif notes to pitches over `chord`, diatonically transposed onto
  * the chord (transpose-to-next-chord in degree space keeps chord tones as chord tones), offset to
  * the bar's absolute step position. */
-function barFromMotif(motif: readonly DegNote[], chord: ChordTrackChord, rootDeg0: number, barStart: number, key: PhraseKey): ComposedNote[] {
+function barFromMotif(motif: readonly DegNote[], chord: ChordTrackChord, rootDeg0: number, barStart: number, key: PhraseKey, register: number): ComposedNote[] {
   const rootDeg = chord.rootDegree ?? 0
   const delta = rootDeg - rootDeg0
   return motif.map((n) => ({
-    pitch: degreePitch(key, n.degree + delta, LEAD_REGISTER),
+    pitch: degreePitch(key, n.degree + delta, register),
     start: barStart + n.start,
     duration: n.duration,
     velocity: clampVel(n.velocity),
   }))
 }
+
+/** The pitch-space one-change operators a lead phrase is DERIVED with (§C.3 / §C.7 piece 3). Each is
+ * a single hearable change that keeps the motif recognisable: a 16th or 8th rhythmic displacement,
+ * a contour inversion (interval-preserving, so the 60-80% stepwise motion survives), the same rhythm
+ * with the pitch sequence rotated (repetition type 2), and a thinned tail (the call/response gap).
+ * Before this the whole 4-bar phrase was one bar stated four times with only the LAST bar varied. */
+/** Restrict an operator to the bar's TAIL (its second half). A rhythmic displacement applied to a
+ * WHOLE bar of straight 8ths lands every onset on the opposite 16ths — bars that share no onsets at
+ * all, which is exactly what the groove-consistency gate flags. Varying only the tail keeps the
+ * bar's first half anchored, which is both what the gate wants and what the one-change rule means:
+ * hold the core, change one thing. */
+const onTail = (op: MotifOperator): MotifOperator => (ns) => {
+  const head = ns.filter((n) => n.start < 8).map((n) => ({ ...n }))
+  const tail = ns.filter((n) => n.start >= 8)
+  if (tail.length === 0 || head.length === 0) return op(ns.map((n) => ({ ...n })))
+  const varied = op(tail.map((n) => ({ ...n, start: rnd2(n.start - 8) }))).map((n) => ({ ...n, start: rnd2(n.start + 8) }))
+  return [...head, ...varied].sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+}
+
+const LEAD_OPS: readonly MotifOperator[] = [
+  onTail((ns) => rhythmicDisplacement(ns, 1, 8)),
+  onTail((ns) => rhythmicDisplacement(ns, -1, 8)),
+  onTail((ns) => rhythmicDisplacement(ns, 2, 8)),
+  onTail((ns) => contourInversion(ns)),
+  (ns) => contourInversion(ns), // pitch-only: rhythm identical, so the groove is untouched
+  (ns) => sameRhythmNewPitches(ns, [...ns.slice(1).map((n) => n.pitch), ns[0]?.pitch ?? 60]),
+  (ns) => (ns.length > 3 ? ns.slice(0, -1).map((n) => ({ ...n })) : ns.map((n) => ({ ...n }))),
+]
 
 /** One theory-aware lead figure over a chord track: a 1-bar motif derived into a 4-bar call-and-
  * response phrase via the motif operators, with the single-peak and call-high/answer-low rules
@@ -694,50 +1083,51 @@ function barFromMotif(motif: readonly DegNote[], chord: ChordTrackChord, rootDeg
 export function composeTheoryLead(archetype: string, track: ChordTrack, seed: number): ComposedNote[] {
   const rng = mulberry32(seed + 1693)
   const key = track.key
-  // archetype-driven rhythm slice: sparse -> the sparse cells, arp -> the running cells, else the
-  // syncopated middle
+  // archetype-driven rhythm character: sparse -> the sparse cells, arp -> the running cells, else
+  // the syncopated middle; then a seeded ornament/rest on the drawn cell
   const rhythmPool = archetype === 'sparse-motif'
-    ? MOTIF_RHYTHMS.slice(4)
+    ? MOTIF_RHYTHM_POOLS.sparse
     : archetype === 'arp-motif'
-      ? MOTIF_RHYTHMS.slice(2)
-      : MOTIF_RHYTHMS.slice(1, 5)
-  const rhythm = rhythmPool[Math.floor(rng() * rhythmPool.length)]!
+      ? MOTIF_RHYTHM_POOLS.running
+      : MOTIF_RHYTHM_POOLS.syncopated
+  const rhythm = varyRhythmCell(rng, pickOne(rng, rhythmPool))
+  const register = pickOne(rng, LEAD_REGISTERS)
   const chord0 = chordAtStep(track, 0)
   const rootDeg0 = chord0.rootDegree ?? 0
   const motif = buildMotif(chord0, rng, rhythm)
 
   // The answer inverts the call's contour for call-response archetypes, else repeats it (motif-
   // repeat). Inversion is done in DEGREE space (mirror around the motif's opening degree) so it
-  // stays diatonic; the pitch-space contourInversion operator is exercised too, below, on bar 3.
+  // stays diatonic; the pitch-space operators below then derive the bars WITHIN each half.
   const invert = archetype !== 'motif-repeat'
   const axisDeg = motif[0]!.degree
   const answerMotif: DegNote[] = invert ? motif.map((n) => ({ ...n, degree: 2 * axisDeg - n.degree })) : motif.map((n) => ({ ...n }))
 
+  // Each half of the phrase STATES its shape in its first bar and DERIVES every later bar from the
+  // one before it by exactly one operator (§C.3's one-change-per-repeat, via motif.ts's own
+  // scheduler). Statement bars are never displaced, which is what keeps strong-beat onsets in the
+  // phrase for the peak rule. Bars whose chord differs from their half's statement chord are moved
+  // onto it with transpose-to-next-chord in pitch space, then re-snapped to the key.
+  const answerStart = Math.max(1, Math.floor(track.bars / 2))
+  const halves: readonly { start: number; end: number; shape: DegNote[] }[] = [
+    { start: 0, end: answerStart, shape: motif },
+    { start: answerStart, end: track.bars, shape: answerMotif },
+  ]
   const notes: ComposedNote[] = []
-  for (let bar = 0; bar < track.bars; bar++) {
-    const chord = chordAtStep(track, bar * 16)
-    const isAnswer = bar >= track.bars / 2
-    const shape = isAnswer ? answerMotif : motif
-    notes.push(...barFromMotif(shape, chord, rootDeg0, bar * 16, key))
-  }
-
-  // Derive the LAST bar with the operator library as a one-change-per-repeat variation of itself
-  // (rhythmic displacement by a 16th OR a pitch-space contour inversion), then re-snap to scale — a
-  // concrete demonstration that the phrase is derived by operators, not redrawn.
-  const lastBarStart = (track.bars - 1) * 16
-  const lastBar = notes.filter((n) => n.start >= lastBarStart)
-  if (lastBar.length > 0) {
-    const ops: MotifOperator[] = [
-      (ns) => rhythmicDisplacement(ns, 1, 16).map((n) => ({ ...n, start: n.start + lastBarStart })),
-      (ns) => contourInversion(ns.map((n) => ({ ...n, start: n.start - lastBarStart })), ns[0]!.pitch).map((n) => ({ ...n, start: n.start + lastBarStart })),
-    ]
-    const local = lastBar.map((n) => ({ ...n, start: n.start - lastBarStart }))
-    const varied = oneChangePerRepeat(local, 1, ops.map((op) => (ns: readonly ComposedNote[]) => op(ns.map((n) => ({ ...n, start: n.start + lastBarStart })))), seed).at(-1)!
-    // rebuild notes: keep everything before the last bar, replace the last bar with the varied copy
-    const head = notes.filter((n) => n.start < lastBarStart)
-    notes.length = 0
-    notes.push(...head, ...varied.map((n) => ({ ...n, pitch: snapToScale(n.pitch, key) })))
-  }
+  halves.forEach((half, hi) => {
+    const len = half.end - half.start
+    if (len <= 0) return
+    const stmtChord = chordAtStep(track, half.start * 16)
+    const base = barFromMotif(half.shape, stmtChord, rootDeg0, 0, key, register)
+    const derived = oneChangePerRepeat(base, len - 1, LEAD_OPS, seed + hi * 101)
+    for (let i = 0; i < len; i++) {
+      const bar = half.start + i
+      const chord = chordAtStep(track, bar * 16)
+      const local = derived[i] ?? base
+      const moved = transposeToNextChord(local, key.root + stmtChord.rootOffset, key.root + chord.rootOffset)
+      for (const n of moved) notes.push({ ...n, pitch: snapToScale(n.pitch, key), start: rnd2(bar * 16 + n.start) })
+    }
+  })
 
   // snap every pitch to scale (guards the chromatic operators), then enforce cross-phrase contour
   for (const n of notes) n.pitch = snapToScale(n.pitch, key)

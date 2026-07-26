@@ -11,7 +11,7 @@ blob you hope merges.
 
 ```bash
 npm install
-npm test                          # 890 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
+npm test                          # 1,426 tests: format, conversion, daemon sync, CLI surface, vary/humanize, DSP metrics, MCP parity
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat bass.cutoff 900   # prints "bass: cutoff 700 -> 900"
@@ -29,10 +29,17 @@ node cli/beat.mjs daemon examples/real-groove.beat                # two-way sync
 cd ui && npm install && npm run dev   # dotbeat's own frontend (Vite + React), talks to the daemon above
 ```
 
-Everything above runs with zero Python. The two ML-backed commands — `beat analyze` (real
-beat/downbeat detection) and `beat source gen` (local text-to-audio one-shots via Stable Audio
-Open) — additionally need a **Python 3.10** venv at `python/.venv` and, for generation, a
-Hugging Face login + accepting the gated model license at
+Everything above runs with zero Python. The ML-backed commands shell out to a fleet of **eight
+Python sidecars** (beat/downbeat detection, text-to-audio generation, Surge XT patch rendering,
+roughness curves, audio embeddings, MIDI figure extraction, Demucs stem extraction, Composer's
+Assistant 2 — the full table is in [`python/README.md`](python/README.md)); all of them share one
+spawn/doctor contract and degrade to actionable errors, and CI runs green with zero Python via
+stub backends. The two you need first — `beat analyze` (real beat/downbeat detection) and
+`beat source gen` (text-to-audio one-shots: Stable Audio Open locally, or hosted on fal.ai with
+`--backend fal`, where a provider adapter table also covers Stable Audio 2.5/3, Lyria 2, MiniMax
+Music, and ElevenLabs Music, plus BPM-aware downbeat trimming and per-role stem extraction) —
+need a **Python 3.10** venv at `python/.venv` and, for local generation, a Hugging Face login +
+accepting the gated model license at
 [stabilityai/stable-audio-open-1.0](https://huggingface.co/stabilityai/stable-audio-open-1.0):
 
 ```bash
@@ -53,7 +60,8 @@ file is literally a recipe.
 
 Run `node cli/beat.mjs` with no arguments for the full command list — it's grown a lot (track
 groups, drum kits, audio-clip splitting, effect chains, checkpoint/restore/pin history, selection
-sync with the GUI) since the walkthrough above.
+sync with the GUI, production tricks, per-section mix feedback, blind source showdowns, the
+`beat board` review surface) since the walkthrough above.
 
 ## The idea in one picture
 
@@ -77,23 +85,26 @@ the full thesis and prior-art comparison.
 
 | Path | What |
 |---|---|
-| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (338 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
+| [`docs/product-roadmap.md`](docs/product-roadmap.md) | **Start here for what's built.** Every tracked feature (375 and counting), each rated done/in-progress/not-started across the core format, CLI/MCP, and GUI layers — the live source of truth, not a snapshot. |
 | [`ROADMAP.md`](ROADMAP.md) | **Start here for the big picture.** Thesis, format design, architecture, prior-art comparison, research provenance. |
 | `src/core/` | The `.beat` format: types, parser, serializer, converter, semantic diff, edit primitives (quantize/humanize/transpose/fit-to-scale/groove/…), inspect. Pure TS, no GUI deps. |
 | `src/daemon/` | The `beat daemon` — owns a `.beat` file, two-way sync with the GUI over HTTP/SSE, echo suppression by canonical-text comparison. |
 | `src/history/` | Checkpoint/restore/pin — a git-backed, append-only version history (`beat checkpoint`/`history`/`restore`/`pin`). |
-| `src/metrics/` | The guardrail layer: integrated LUFS (ITU-R BS.1770), true peak, crest, spectral balance, stereo field, plus deterministic mix-lint rules. Zero deps. |
-| `src/vary/` | The variation-and-taste loop: `beat vary` generates small-diff variants, `beat score` records ranked picks, `beat suggest` proposes the next round from that history. |
-| `src/mcp/` | `beat mcp` — zero-dep stdio MCP server exposing the whole toolchain to AI agents. |
+| `src/metrics/` | The guardrail layer: integrated LUFS (ITU-R BS.1770), true peak, crest, spectral balance, stereo field, deterministic mix-lint rules, per-section energy-arc profiles, a pathology-screen suite (clicks, silence, arrangement flatness, ring), and a Daniel–Weber roughness ear (Python sidecar). |
+| `src/vary/` | The variation-and-taste loop: `beat vary` generates small-diff variants, `beat score` records ranked picks, `beat suggest` proposes the next round from that history — all batches flow through one `runVaryBatch` orchestrator shared by CLI and MCP. |
+| `src/analysis/` | The ML-sidecar and production layer: beat/downbeat detection, text-to-audio generation (local + hosted provider adapters), Demucs stems, Surge XT rendering, pitch detection, produced-defaults profiles, the `beat trick` catalog. TS owns caching/hashing/contracts; Python stays tiny (see `python/README.md`). |
+| `src/taste/` | The taste-model program: blind source showdowns (`beat showdown`), figure sources (archetype bank / theory composer / commercial MIDI / Composer's Assistant 2), production-task evals (`beat prodtask`), the DSP+Aesthetics ranker behind `beat suggest --taste`, and the overnight critic-guided pilot (`beat pilot`). |
+| `src/mcp/` | `beat mcp` — zero-dep stdio MCP server exposing the toolchain to AI agents (71 tools, golden-snapshot + CLI↔MCP parity tested). |
+| `src/telemetry/` | Opt-in edit telemetry: one append-only JSONL of every document edit across GUI/CLI/MCP (off by default, lives outside the project repo). |
 | `ui/` | dotbeat's own GUI (Vite + React + Tone.js) — arrangement view, piano-roll/drum-lane clip editing, mixer, effects chain, content browser. Its own product design, not a wrapped teaching app (see `docs/decisions.md` D12). |
 | `desktop/` | Tauri desktop shell — early-stage, working toward a native Mac app (`docs/product-spec-desktop.md`). |
 | `cli/beat.mjs` | The unified `beat` CLI — run with no args for the full, current command list. |
-| `test/` | 890 tests — format round-trips, conversion fidelity, daemon sync, CLI, DSP metrics vs known-answer signals, MCP protocol, vary/humanize/groove determinism. |
+| `test/` | 1,426 tests — format round-trips, conversion fidelity, daemon sync + undo, a CLI surface test (help↔dispatch integrity, unknown-flag rejection), DSP metrics vs known-answer signals, MCP protocol + CLI↔MCP parity, vary/humanize/groove determinism, frozen-eval-constant guards. |
 | `presets/` | Factory sound + drum-kit libraries — curated voicings applied as ordinary edits, never referenced by the format itself. |
-| `ui/verify*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. |
+| `ui/verify-*.mjs` | Measured, Playwright-driven proofs against the real running app — not mocked assertions. Now registered in `ui/verify-manifest.mjs` and runnable as a suite: `npm run verify` (and a `verify:engine` tier for audio-engine gates). |
 | `examples/` | Real projects as `.beat` text, incl. a multi-track song with full arrangement/automation (`night-shift-song.beat`). |
-| [`docs/research/`](docs/research/) | 104 research passes — landscape/prior-art, engine architecture, three full passes against Ableton Live's own reference manual (feature-by-feature 50-69, implementation-level UI/UX 70-74, round-2 live re-verification 75-79), and twenty-five exploratory usability pilots (80-104, see `docs/usability-testing.md`) — an agent driving the real app (or, for the CLI/MCP variant, its own command output) with no pre-scripted checklist, reacting like a human tester. Covers realistic musical workflows, focused GUI audits, following real published Ableton tutorials step by step in dotbeat instead of Ableton, and — the newest variant — testing the `beat` CLI and MCP tool surface directly, no GUI at all, since that's dramatically cheaper (~4 minutes per pilot vs. 15-50+ for a GUI one) and tests dotbeat's actual agent-native thesis. |
-| [`docs/decisions.md`](docs/decisions.md) | 15 numbered design decisions with rationale and "revisit when" — check before proposing something that might contradict one. |
+| [`docs/research/`](docs/research/) | 130 research passes — landscape/prior-art, engine architecture, three full passes against Ableton Live's own reference manual (feature-by-feature 50-69, implementation-level UI/UX 70-74, round-2 live re-verification 75-79), the taste/production program's eval arcs (107-129), a six-stream codebase review synthesis (130), and thirty-three exploratory usability pilots (80-113 and 129, see `docs/usability-testing.md`) — an agent driving the real app (or, for the CLI/MCP variant, its own command output) with no pre-scripted checklist, reacting like a human tester. Covers realistic musical workflows, focused GUI audits, following real published Ableton tutorials step by step in dotbeat instead of Ableton, and — the newest variant — testing the `beat` CLI and MCP tool surface directly, no GUI at all, since that's dramatically cheaper (~4 minutes per pilot vs. 15-50+ for a GUI one) and tests dotbeat's actual agent-native thesis. |
+| [`docs/decisions.md`](docs/decisions.md) | 29 numbered design decisions (D1-D29) with rationale and "revisit when" — check before proposing something that might contradict one. |
 | [`docs/usability-testing.md`](docs/usability-testing.md) | The exploratory usability-pilot methodology — no checklist, an agent reads its own screenshots (or, for the CLI/MCP variant, every command's real output) and reacts like a human tester. A standing practice, run alongside `ui/verify-*.mjs`'s scripted assertions whenever GUI-facing behavior changes — and, since CLI/MCP pilots run in minutes rather than tens of minutes, whenever a `beat` subcommand or MCP tool changes too. |
 | [`docs/format-spec.md`](docs/format-spec.md) | The `.beat` format grammar. |
 | [`docs/architecture.md`](docs/architecture.md) | Component architecture (daemon, engine, CLI, MCP, GUI/desktop tiers). |
@@ -105,7 +116,7 @@ The core loop this project was built to prove works and is exercised daily: a ha
 turn a knob in the GUI and `git diff` shows exactly one changed line; edit the file by hand and
 the GUI hot-reloads without stopping playback.
 
-**Built and stable** (152 of 342 tracked features done — the live list is
+**Built and stable** (177 of 375 tracked features done, 9 more in progress — the live list is
 [`docs/product-roadmap.md`](docs/product-roadmap.md)):
 
 - **The format and edit surface** — round-trip parser/serializer, semantic diff, edit primitives
@@ -115,17 +126,36 @@ the GUI hot-reloads without stopping playback.
   panel, content browser, in-session undo/redo alongside the git-backed checkpoint/restore
   history. Its design was shaped by three research passes against Ableton Live 12's own reference
   manual and hardened by ~30 exploratory usability pilots.
-- **CLI/MCP parity** — the whole toolchain as MCP tools for AI agents, with shared batch logic so
-  parity is structural rather than reviewed-in; per-command `--help`; only `daemon` stays CLI-only.
-- **Render and guardrails** — headless renders (offline-exact by default, ~3-4× realtime), BS.1770
-  LUFS / true-peak / spectral / stereo metrics, and `beat lint` mix critique, including against
-  reference profiles derived from music the owner loves.
-- **ML sidecars, contained** — `beat analyze` (Beat This beat/downbeat detection), `beat source
-  gen` (Stable Audio Open locally, fal hosted), and CLAP + Audiobox-Aesthetics embeddings. Python
-  stays tiny and dumb; TypeScript owns caching/hashing/contracts; stub backends keep CI green with
-  zero Python; owner-side tests cover the real-model paths CI structurally can't. The proof:
-  [`examples/recipe-song/`](examples/recipe-song/) regenerates every audio asset byte-for-byte
-  from provenance sidecars.
+- **CLI/MCP parity** — 71 MCP tools mirror the project-editing toolchain for AI agents, with
+  per-command `--help`. Parity is increasingly structural rather than reviewed-in: a `tools/list`
+  golden snapshot, a table-driven CLI↔MCP byte-parity test, a CLI surface test
+  (help↔dispatch integrity, unknown-flag rejection), and shared orchestrators like
+  `runVaryBatch`. The daemon, the human review surfaces (`beat rate`, `beat board`), and the
+  owner-side taste/eval loop (showdown, prodtask, pilot, taste-*) stay deliberately CLI-only.
+- **Render and guardrails** — headless renders through dotbeat's one canonical engine
+  (live-capture by default; `--offline` computes the same mix through an offline context, and
+  batch renders default to offline where it's both exact and fast), BS.1770 LUFS / true-peak /
+  spectral / stereo metrics, and `beat lint` mix critique against reference profiles derived from
+  music the owner loves — now joined by per-section energy-arc feedback
+  (`beat feedback --sections`, arc reference profiles), a calibrated pathology-screen suite
+  (clicks, silence, arrangement flatness), and a psychoacoustic roughness ear. Clip automation
+  renders truthfully — automation lanes win over static patch values (the research/121 stomp bug,
+  fixed and golden-WAV-gated).
+- **The agent↔owner loop** — `beat board` (a non-blind picking UI over undecided batches, with a
+  separate decisions log that never mixes with the blind scores log), `beat open` (deep-link the
+  running GUI to a track/param), `beat diff --since --rollup` (the agent's morning read of what
+  the owner changed), and opt-in edit telemetry across all three write surfaces (research/128,
+  D29).
+- **ML sidecars, contained** — eight Python sidecars behind one shared spawn/doctor scaffold
+  (`src/analysis/spawn-sidecar.ts`): `beat analyze` (Beat This beat/downbeat detection),
+  `beat source gen` (Stable Audio Open locally; hosted providers via a fal.ai adapter table —
+  Stable Audio 2.5/3, Lyria 2, MiniMax, ElevenLabs — with downbeat trimming and Demucs stem
+  extraction), Surge XT patch rendering, roughness curves, Audiobox-Aesthetics embeddings (CLAP
+  measured below chance and retired from the default), MIDI figure extraction, and Composer's
+  Assistant 2. Python stays tiny and dumb; TypeScript owns caching/hashing/contracts; stub
+  backends keep CI green with zero Python; owner-side tests cover the real-model paths CI
+  structurally can't. The proof: [`examples/recipe-song/`](examples/recipe-song/) regenerates
+  every audio asset byte-for-byte from provenance sidecars.
 - **The generative sampler** — `beat sample-info` pitch detection, `beat keymap` minting a
   playable, diffable sampler instrument from any one-shot, and generation candidates flowing
   through the same score/adopt loop as everything else.
@@ -158,17 +188,28 @@ with preconditions and measurable receipts — verified by ear via `beat prodtas
 tricked beat a random-edit control 90% vs 33% pairwise), **Surge XT as an out-of-process sound
 factory** (`--with-surge`; 639 factory patches; a surgepy channel-corruption bug was root-caused
 and fixed — upstream issue drafted), and **commercial-MIDI figures** (`--midi-dir`, private) that
-hold composition at commercial quality. Current standings with commercial figures: refs ~93%
+hold composition at commercial quality. Composition since grew two more figure sources that don't
+need private data: a **theory composition layer** (voice-leading chord generation + a motif-first
+lead generator with pre-render gross-error gates, `--theory`) and **Composer's Assistant 2**
+(`--ca2`, composing over the chord track — the winner of the research/125 MIDI-model trials).
+Current standings with commercial figures: refs ~93%
 pairwise, gen 52% ≈ surge 50% ≈ keymap 45%, raw engine 0% — the chosen path (D26) is making
 engine/surge sound commercial, and the program's north star (D27) is the first blind batch where
 the owner genuinely ranks a dotbeat-rendered clip above the reference. T4 (`beat suggest
---taste`) is live; the critic now carries bootstrap-ensemble uncertainty (pessimistic scoring
-that auto-discounts its measured blind spots) — the stated prerequisite for the first constrained
-T5 overnight pilot.
+--taste`) is live; the critic carries bootstrap-ensemble uncertainty (pessimistic scoring
+that auto-discounts its measured blind spots), and the first constrained T5 overnight pilot is
+built as `beat pilot` — critic-guided quality-diversity search over per-seed lineages, with
+`beat board` as the owner's morning review surface.
 
-**How it's kept honest.** 890 tests plus Playwright-driven verify scripts assert known-correct
-behavior; exploratory usability pilots — an agent driving the real app or CLI with no checklist
+**How it's kept honest.** 1,426 tests plus a manifest-run Playwright verify fleet
+(`npm run verify`, with a `verify:engine` tier) assert known-correct behavior; exploratory
+usability pilots — an agent driving the real app or CLI with no checklist
 ([`docs/usability-testing.md`](docs/usability-testing.md)) — keep finding what scripted suites
-structurally cannot, and their findings land as roadmap rows, never a second backlog. The
-phase-by-phase history that used to live in this section is in `docs/` (phase plans, 104+
+structurally cannot, and their findings land as roadmap rows, never a second backlog. A
+six-stream codebase review ([`docs/research/130`](docs/research/130-codebase-review-synthesis.md),
+2026-07-25) turned "parity by review discipline" into structure: safety gates first (CLI surface
+test, MCP parity snapshot, committed engine golden WAVs, `===` guards on frozen eval constants),
+then the top-ranked extractions (one sidecar spawn scaffold, one seeded RNG, one figure
+vocabulary, one vary-batch orchestrator) and thousands of lines of dead code deleted. The
+phase-by-phase history that used to live in this section is in `docs/` (phase plans, 130
 research passes) and the git log.

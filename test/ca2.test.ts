@@ -185,7 +185,9 @@ test('guardCA2Notes: folds out-of-range notes back into the window OUR code aske
 })
 
 test('guardCA2Notes: snaps out-of-key notes but SPARES chord tones of the sounding chord', () => {
-  const track = buildChordTrack(KEY, 4, { planing: false, cadence: false })
+  // the mode is PINNED: minor chord tracks now draw a weighted mode palette, and the b9 fixture
+  // below is only out-of-key in natural minor (Phrygian's b2 makes it diatonic)
+  const track = buildChordTrack(KEY, 4, { planing: false, cadence: false, mode: 'natural-minor' })
   const chord = track.chords[0]!
   const chordTone = KEY.root + 12 + chord.tones[1]! // the third, an octave up
   const outOfKey = KEY.root + 13 // a b9 above the key root — not in natural minor

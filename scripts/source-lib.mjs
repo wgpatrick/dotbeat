@@ -212,7 +212,7 @@ export async function addLocalSource({ beatFile, id, audioFile, license = 'unspe
  * media/.<id>.gen.wav, ingests it, and removes the temp file in a finally. The default `stableaudio`
  * backend needs torch + the model owner-side; `stub` runs everywhere (deterministic tone bed).
  * Wraps gen failures as SourceError, matching the PrepError→SourceError pattern in ingest(). */
-export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, seed, backend = 'stableaudio', provider = 'stable-audio-open', model, license, negativePrompt, stemExtract } = {}) {
+export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, seed, backend = 'stableaudio', provider = 'stable-audio-open', model, license, negativePrompt, stemExtract, bpm, bars } = {}) {
   if (!prompt || typeof prompt !== 'string') throw new SourceError('source gen needs a <prompt>, e.g. beat source gen song.beat pad "warm analog pad"')
   const { mediaDir } = resolveTarget(beatFile, id)
   mkdirSync(mediaDir, { recursive: true })
@@ -224,22 +224,24 @@ export async function addGeneratedSource({ beatFile, id, prompt, seconds = 2, se
   const effectiveSeed = seed ?? promptSeed(prompt)
   const tempWav = join(mediaDir, `.${id}.gen.wav`)
   try {
-    const { license: effectiveLicense, source, extra } = await generateRaw({ prompt, seconds, seed: effectiveSeed, backend, provider, model, license, outPath: tempWav, negativePrompt, stemExtract })
+    const { license: effectiveLicense, source, extra } = await generateRaw({ prompt, seconds, seed: effectiveSeed, backend, provider, model, license, outPath: tempWav, negativePrompt, stemExtract, bpm, bars })
     return await ingest({ beatFile, id, inPath: tempWav, license: effectiveLicense, source, query: prompt, extra })
   } finally {
     try { rmSync(tempWav) } catch { /* best-effort */ }
     // the preserved full mix (stem extraction) is a sibling of the raw download — same cleanup
     try { rmSync(`${tempWav}.mix.wav`) } catch { /* best-effort */ }
+    // ditto the untrimmed download the downbeat trim leaves behind (--bpm/--bars)
+    try { rmSync(`${tempWav}.raw.wav`) } catch { /* best-effort */ }
   }
 }
 
 /** Run the generator once into `outPath` and derive the provenance facts every gen path records.
  * Shared by the single-shot addGeneratedSource above and the batch below, so a candidate's
  * provenance is the same shape (and the same honest licensing call) either way. */
-async function generateRaw({ prompt, seconds, seed, backend, provider, model, license, outPath, negativePrompt, stemExtract }) {
+async function generateRaw({ prompt, seconds, seed, backend, provider, model, license, outPath, negativePrompt, stemExtract, bpm, bars }) {
   let meta
   try {
-    ;({ meta } = await runGen({ prompt, seconds, seed, backend, provider, outPath, negativePrompt, stemExtract }))
+    ;({ meta } = await runGen({ prompt, seconds, seed, backend, provider, outPath, negativePrompt, stemExtract, bpm, bars }))
   } catch (err) {
     // BeatGenError (or anything the sidecar wrapper throws) → a clean, stack-trace-free SourceError.
     throw new SourceError(err instanceof Error ? err.message : String(err))
@@ -270,6 +272,13 @@ async function generateRaw({ prompt, seconds, seed, backend, provider, model, li
   // local manifests and the media/<id>.wav.json sidecar — and NOT in the shared beat-scores log,
   // which records the clip KIND only and never sees this string.
   const stemExtracted = meta?.stemExtract && typeof meta.stemExtract === 'object' ? meta.stemExtract : null
+  // Downbeat trim (R4-4): when --bpm/--bars cut the hosted download to a bar count, the registered
+  // audio is a WINDOW of what the model emitted, so the provenance records where the cut landed —
+  // the same honesty rule the stem-extraction block above follows. The raw download itself is a
+  // temp sibling and is cleaned up with the rest, so only the numbers survive.
+  const trimmed = typeof meta?.trimmedSeconds === 'number'
+    ? { bpm, bars, offsetSeconds: meta.trimOffsetSeconds ?? 0, seconds: meta.trimmedSeconds }
+    : null
   return {
     license: license ?? (isStub ? 'stub-placeholder' : isPlatformModel ? 'Stability-Platform-Terms' : 'Stability-AI-Community'),
     source: `generated:${resolvedProvider}${stemExtracted ? ` + demucs:${stemExtracted.stemUsed}` : ''}`,
@@ -285,6 +294,7 @@ async function generateRaw({ prompt, seconds, seed, backend, provider, model, li
         watermark,
         trainingExcluded,
         ...(stemExtracted ? { stemExtract: stemExtracted } : {}),
+        ...(trimmed ? { downbeatTrim: trimmed } : {}),
         licenseUrl: isStub ? null : isPlatformModel ? 'https://stability.ai/terms-of-use' : 'https://stability.ai/community-license-agreement',
       },
     },
@@ -304,7 +314,7 @@ async function generateRaw({ prompt, seconds, seed, backend, provider, model, li
  *
  * Seeds are `seedFrom .. seedFrom+count-1` — contiguous and recorded per candidate, so a winner is
  * reproducible from its provenance sidecar exactly like a single-shot generation is. */
-export async function genSourceBatch({ beatFile, id, prompt, prompts, seconds = 2, seedFrom, count = 3, backend = 'stableaudio', provider = 'stable-audio-open', model, license, outDir, group, onProgress, negativePrompt, stemExtract } = {}) {
+export async function genSourceBatch({ beatFile, id, prompt, prompts, seconds = 2, seedFrom, count = 3, backend = 'stableaudio', provider = 'stable-audio-open', model, license, outDir, group, onProgress, negativePrompt, stemExtract, bpm, bars } = {}) {
   if (!prompt || typeof prompt !== 'string') throw new SourceError('source gen needs a <prompt>, e.g. beat source gen song.beat snare "tight acoustic snare" --count 3')
   // Optional per-variant prompts (taste-collect's within-batch STYLE diversity, owner insight
   // 2026-07-17): same-prompt-different-seed one-shots are near-identical — especially tight 1s hits
@@ -334,13 +344,15 @@ export async function genSourceBatch({ beatFile, id, prompt, prompts, seconds = 
     const rawWav = join(dir, `.v${i + 1}.gen.wav`)
     const candidateWav = join(dir, `v${i + 1}.wav`)
     try {
-      const { license: effectiveLicense, source, extra } = await generateRaw({ prompt: variantPrompt, seconds, seed, backend, provider, model, license, outPath: rawWav, negativePrompt, stemExtract })
+      const { license: effectiveLicense, source, extra } = await generateRaw({ prompt: variantPrompt, seconds, seed, backend, provider, model, license, outPath: rawWav, negativePrompt, stemExtract, bpm, bars })
       const { sha256, durationSeconds, sidecar } = await prepCandidate({ inPath: rawWav, outPath: candidateWav, license: effectiveLicense, source, query: variantPrompt, extra })
       variants.push({ media: { id, sha256, durationSeconds, license: effectiveLicense, source, seed, sidecar } })
     } finally {
       try { rmSync(rawWav) } catch { /* best-effort */ }
       // the preserved full mix (stem extraction) is a sibling of the raw download — same cleanup
       try { rmSync(`${rawWav}.mix.wav`) } catch { /* best-effort */ }
+      // ditto the untrimmed download the downbeat trim leaves behind (--bpm/--bars)
+      try { rmSync(`${rawWav}.raw.wav`) } catch { /* best-effort */ }
     }
   }
   const manifest = writeGenBatch({ parentPath: beatFile, parentText, id, prompt, seed: baseSeed, outDir: dir, variants, ...(group !== undefined ? { group } : {}) })

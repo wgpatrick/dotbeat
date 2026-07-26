@@ -9,6 +9,7 @@ import { test } from 'node:test'
 import {
   scalePitchClasses,
 } from '../src/taste/showdown.js'
+import { mulberry32 } from '../src/taste/eval.js'
 import {
   PROGRESSION_BANK,
   buildChordTrack,
@@ -29,6 +30,10 @@ import {
   registerRuleViolations,
   grooveConsistency,
   lintFigure,
+  bassBarSchedule,
+  chooseOpeningVoicing,
+  THEORY_CHORD_ARCHETYPES,
+  THEORY_LEAD_ARCHETYPES,
 } from '../src/taste/theory.js'
 
 const MINOR = { root: 48, minor: true }
@@ -77,14 +82,38 @@ test('major keys draw only major progressions', () => {
 
 // ---- harmonic rhythm (§C.1) --------------------------------------------------------------------
 
-test('harmonic rhythm is 1 or 2 bars per chord — never a hardcoded always-one-per-bar', () => {
-  const rhythms = new Set<number>()
-  for (let seed = 0; seed < 200; seed++) rhythms.add(buildChordTrack(MINOR, seed).barsPerChord)
-  assert.deepEqual([...rhythms].sort(), [1, 2], 'both 1-bar and 2-bar harmonic rhythms must occur')
+test('harmonic rhythm is 1, 2 or (rarely) the whole clip per chord — never a hardcoded always-one-per-bar', () => {
+  const rhythms = new Map<number, number>()
+  for (let seed = 0; seed < 200; seed++) {
+    const b = buildChordTrack(MINOR, seed).barsPerChord
+    rhythms.set(b, (rhythms.get(b) ?? 0) + 1)
+  }
+  assert.deepEqual([...rhythms.keys()].sort((a, b) => a - b), [1, 2, 4], 'all three harmonic rhythms must occur')
+  // the whole-clip hold (the techno one-chord vamp) stays RARE — it colours a round, never defines it
+  assert.ok((rhythms.get(4) ?? 0) < (rhythms.get(1) ?? 0), 'the 4-bar hold is rarer than the 1-bar rhythm')
+  assert.ok((rhythms.get(2) ?? 0) > (rhythms.get(1) ?? 0), 'the 2-bar held chord stays the trance-breakdown norm')
   // a 2-bar rhythm actually holds a chord across two bars
   const held = buildChordTrack(MINOR, 0, { barsPerChord: 2, bars: 4 })
   assert.ok(held.chords.every((c) => c.bars === 2))
   assert.equal(held.chords.length, 2)
+})
+
+// ---- mode colour (§C.4) ------------------------------------------------------------------------
+
+test('minor chord tracks draw a weighted mode palette — natural minor dominant, Phrygian/Dorian as colour', () => {
+  const counts = new Map<string, number>()
+  for (let seed = 0; seed < 600; seed++) {
+    const m = buildChordTrack(MINOR, seed).key.mode!
+    counts.set(m, (counts.get(m) ?? 0) + 1)
+  }
+  assert.deepEqual([...counts.keys()].sort(), ['dorian', 'natural-minor', 'phrygian'])
+  const nat = counts.get('natural-minor')!
+  assert.ok(nat > counts.get('phrygian')! * 2, 'natural minor stays the genre workhorse')
+  assert.ok(nat > counts.get('dorian')! * 2, 'natural minor stays the genre workhorse')
+  // major keys keep one mode
+  for (let seed = 0; seed < 100; seed++) assert.equal(buildChordTrack(MAJOR, seed).key.mode, 'major')
+  // and an explicit mode still wins
+  assert.equal(buildChordTrack(MINOR, 4, { mode: 'dorian' }).key.mode, 'dorian')
 })
 
 // ---- cadence position (§C.1) -------------------------------------------------------------------
@@ -92,7 +121,7 @@ test('harmonic rhythm is 1 or 2 bars per chord — never a hardcoded always-one-
 test('cadence substitution is position-conditional: only ever the phrase-FINAL chord, and it is a harmonic-minor V', () => {
   let sawCadential = false
   for (let seed = 0; seed < 400; seed++) {
-    const track = buildChordTrack(MINOR, seed)
+    const track = buildChordTrack(MINOR, seed, { mode: 'natural-minor' })
     track.chords.forEach((c, i) => {
       if (c.cadential) {
         sawCadential = true
@@ -107,11 +136,18 @@ test('cadence substitution is position-conditional: only ever the phrase-FINAL c
   assert.ok(sawCadential, 'some minor phrases must get the cadence substitution')
 })
 
-test('cadence:false disables the substitution; major keys never cadential by default', () => {
+test('cadence:false disables the substitution; major and modal keys never cadential by default', () => {
   for (let seed = 0; seed < 200; seed++) {
     assert.ok(!buildChordTrack(MINOR, seed, { cadence: false }).chords.some((c) => c.cadential))
     assert.ok(!buildChordTrack(MAJOR, seed).chords.some((c) => c.cadential))
+    // the borrowed harmonic-minor V is the NATURAL-minor move; Phrygian/Dorian cadence elsewhere
+    assert.ok(!buildChordTrack(MINOR, seed, { mode: 'phrygian' }).chords.some((c) => c.cadential))
+    assert.ok(!buildChordTrack(MINOR, seed, { mode: 'dorian' }).chords.some((c) => c.cadential))
   }
+  // forced on over a modal track, the V is still spelled from natural minor (a borrowed chord)
+  const forced = buildChordTrack(MINOR, 3, { mode: 'phrygian', cadence: true, barsPerChord: 1 })
+  const last = forced.chords[forced.chords.length - 1]!
+  if (last.cadential) assert.deepEqual(last.tones.map((t) => t - last.tones[0]!), [0, 4, 7])
 })
 
 // ---- parallel planing (§C.1) -------------------------------------------------------------------
@@ -155,6 +191,79 @@ test('every theory bass figure carries ONLY root/5th/octave in the sub register'
   }
 })
 
+// ---- rhythm-skeleton variety (owner ear-report, 2026-07-26) ------------------------------------
+// Calibration: before this work the five bass archetypes produced EIGHT distinct onset skeletons
+// across 144 draws of a simulated 9-batch round (~9.6 same-skeleton repeats per 15 figures) — the
+// owner heard it in blind rating as "a lot of the same note patterns again". After: 99 skeletons,
+// 0.87 repeats per 15. These guards pin the mechanism, not the exact numbers.
+
+const onsetKey = (notes: readonly { start: number }[]): string =>
+  [...new Set(notes.map((n) => Math.round(n.start)))].sort((a, b) => a - b).join(',')
+
+test('each bass archetype has a FAMILY of rhythmic realizations, not one fixed slot list', () => {
+  for (const archetype of THEORY_BASS_ARCHETYPES) {
+    const skeletons = new Set<string>()
+    for (let seed = 0; seed < 40; seed++) {
+      const track = buildChordTrack(MINOR, seed)
+      skeletons.add(onsetKey(composeTheoryBass(archetype, track, seed)))
+    }
+    assert.ok(skeletons.size >= 6, `${archetype} produced only ${skeletons.size} distinct skeletons in 40 draws`)
+  }
+})
+
+test('bassBarSchedule states the pattern in bar 1 and restates it in full in the last bar', () => {
+  for (let seed = 0; seed < 60; seed++) {
+    const sched = bassBarSchedule(mulberry32(seed), [0, 4, 8, 10, 12, 14], 4)
+    assert.equal(sched.length, 4)
+    assert.equal(sched[0]!.kind, 'full', 'bar 1 states the pattern')
+    assert.equal(sched[3]!.kind, 'full', 'the last bar restates it in full')
+    // every middle bar carries at most ONE change, on a slot inside the bar
+    for (const c of sched.slice(1, 3)) {
+      if (c.kind === 'full') continue
+      assert.ok(c.slot >= 0 && c.slot < 16, 'a scheduled change stays inside its bar')
+      if (c.kind === 'push') assert.ok(c.slot < 15, 'a pushed note cannot cross the barline')
+    }
+  }
+})
+
+test("the Stussy recipe's OWN per-bar schedule survives the seeded variation", () => {
+  // §C.2 verbatim: bar 2 turns the slot-7 octave into a tonic; bar 3 skips slot 14; bar 4 is full.
+  for (let seed = 0; seed < 30; seed++) {
+    const track = buildChordTrack(MINOR, seed, { barsPerChord: 1 })
+    const notes = composeTheoryBass('stussy', track, seed)
+    const rootOf = (bar: number): number => track.key.root - 12 + chordAtStep(track, bar * 16).rootOffset
+    const at = (bar: number, slot: number): number[] => notes.filter((n) => Math.round(n.start) === bar * 16 + slot).map((n) => n.pitch)
+    for (const bar of [0, 1, 2, 3]) assert.ok(at(bar, 0).includes(rootOf(bar)), `bar ${bar + 1} keeps the slot-1 tonic`)
+    assert.deepEqual(at(1, 6), [rootOf(1)], 'bar 2: the slot-7 octave becomes the tonic')
+    assert.deepEqual(at(2, 14), [], 'bar 3: slot 14 is skipped')
+    assert.ok(at(3, 14).length > 0, 'bar 4: the full pattern returns')
+  }
+})
+
+test('a bass figure is never four copies of bar 1 — the per-bar schedule always changes something', () => {
+  let variedFigures = 0
+  let total = 0
+  for (const archetype of THEORY_BASS_ARCHETYPES) {
+    for (let seed = 0; seed < 40; seed++) {
+      const track = buildChordTrack(MINOR, seed, { barsPerChord: 4 }) // one chord: only RHYTHM can differ
+      const notes = composeTheoryBass(archetype, track, seed)
+      const bars = [0, 1, 2, 3].map((b) => onsetKey(notes.filter((n) => Math.floor(n.start / 16) === b).map((n) => ({ start: n.start - b * 16 }))))
+      total += 1
+      if (new Set(bars).size > 1) variedFigures += 1
+    }
+  }
+  assert.ok(variedFigures / total > 0.6, `only ${variedFigures}/${total} figures vary bar-to-bar`)
+})
+
+test('every bass archetype is deterministic in its seed across the new seeded realizations', () => {
+  for (const archetype of THEORY_BASS_ARCHETYPES) {
+    for (let seed = 0; seed < 20; seed++) {
+      const track = buildChordTrack(MINOR, seed)
+      assert.deepEqual(composeTheoryBass(archetype, track, seed), composeTheoryBass(archetype, track, seed))
+    }
+  }
+})
+
 // ---- voice-leading (§C.4) ----------------------------------------------------------------------
 
 test('voiceLeadingCost rewards common tones / minimal motion over a leap', () => {
@@ -189,6 +298,37 @@ test('composeTheoryChords stays register-separated from the sub bass across styl
     const track = buildChordTrack(MINOR, seed)
     const notes = composeTheoryChords('lush-pad', track, seed)
     for (const n of notes) assert.ok(n.pitch >= track.key.root, 'a pad note never enters the sub octave')
+  }
+})
+
+test('each chord archetype has a family of rhythmic realizations, and the opening voicing is seeded', () => {
+  for (const archetype of THEORY_CHORD_ARCHETYPES) {
+    const skeletons = new Set<string>()
+    for (let seed = 0; seed < 40; seed++) {
+      const track = buildChordTrack(MINOR, seed)
+      skeletons.add(onsetKey(composeTheoryChords(archetype, track, seed)))
+    }
+    assert.ok(skeletons.size >= 6, `${archetype} produced only ${skeletons.size} distinct skeletons in 40 draws`)
+  }
+  // the SAME chord, drawn many times, opens on more than one voicing — but always a compact one
+  const track = buildChordTrack(MINOR, 9, { barsPerChord: 1, mode: 'natural-minor' })
+  const chord = track.chords[0]!
+  const openings = new Set<string>()
+  for (let seed = 0; seed < 60; seed++) {
+    const v = chooseOpeningVoicing(track.key, chord, 'triad', mulberry32(seed))
+    openings.add(v.join(','))
+    assert.ok(Math.min(...v) >= track.key.root, 'an opening voicing never dips into the sub')
+    assert.ok(Math.max(...v) - Math.min(...v) <= 24, 'an opening voicing stays close-position')
+  }
+  assert.ok(openings.size >= 2, `the opening voicing is seeded, got ${openings.size} distinct`)
+})
+
+test('chord figures are deterministic in the seed across the new seeded realizations', () => {
+  for (const archetype of THEORY_CHORD_ARCHETYPES) {
+    for (let seed = 0; seed < 20; seed++) {
+      const track = buildChordTrack(MINOR, seed)
+      assert.deepEqual(composeTheoryChords(archetype, track, seed), composeTheoryChords(archetype, track, seed))
+    }
   }
 })
 
@@ -227,6 +367,41 @@ test('lead melody is mostly stepwise and the call ends higher than the answer en
   assert.ok(callEnd.pitch > answerEnd.pitch, 'call ends high, answer ends low')
 })
 
+test('a lead phrase is DERIVED bar by bar, never one bar stated four times', () => {
+  let variedFigures = 0
+  let total = 0
+  const skeletons = new Map<string, Set<string>>()
+  for (const archetype of THEORY_LEAD_ARCHETYPES) {
+    skeletons.set(archetype, new Set())
+    for (let seed = 0; seed < 40; seed++) {
+      // one chord for the whole clip, so only the OPERATORS can make the bars differ
+      const track = buildChordTrack(MINOR, seed, { barsPerChord: 4 })
+      const notes = composeTheoryLead(archetype, track, seed)
+      skeletons.get(archetype)!.add(onsetKey(notes))
+      const bars = [0, 1, 2, 3].map((b) =>
+        notes
+          .filter((n) => Math.floor(n.start / 16) === b)
+          .map((n) => `${Math.round(n.start) - b * 16}:${n.pitch}`)
+          .join(','))
+      total += 1
+      if (new Set(bars).size >= 3) variedFigures += 1
+    }
+  }
+  assert.ok(variedFigures / total > 0.8, `only ${variedFigures}/${total} lead phrases have 3+ distinct bars`)
+  for (const [archetype, set] of skeletons) {
+    assert.ok(set.size >= 8, `${archetype} produced only ${set.size} distinct skeletons in 40 draws`)
+  }
+})
+
+test('lead phrases are deterministic in the seed across the operator-derived bars', () => {
+  for (const archetype of THEORY_LEAD_ARCHETYPES) {
+    for (let seed = 0; seed < 20; seed++) {
+      const track = buildChordTrack(MINOR, seed)
+      assert.deepEqual(composeTheoryLead(archetype, track, seed), composeTheoryLead(archetype, track, seed))
+    }
+  }
+})
+
 test('snapToScale maps any pitch into the key; enforceSinglePeak yields exactly one maximum', () => {
   const key = { root: 48, minor: true }
   const scale = scalePitchClasses(key)
@@ -262,6 +437,51 @@ test('composeTheoryPhrase honours the exclude chain (consecutive draws avoid a u
   const first = composeTheoryPhrase('bassline', MINOR, 30)
   const second = composeTheoryPhrase('bassline', MINOR, 30, { exclude: [first.archetype] })
   assert.notEqual(second.archetype, first.archetype)
+})
+
+// ---- round-level variety: the owner's actual complaint, as a gate -------------------------------
+//
+// Calibration (2026-07-26). The owner in blind rating: "I'm hearing a lot of the same note patterns
+// again in the showdown". Simulating a round the way cli/beat.mjs draws one — a run rng producing
+// batch seeds, four composed sources per batch at seed offsets 0/101/202/977, the per-role exclude
+// chain accumulating across the whole run — and counting how many of every 15 consecutive figures
+// repeat an onset skeleton already heard in that window:
+//
+//              before   after
+//   bassline    9.57     0.87
+//   chords      6.74     0.69
+//   lead        7.60     0.36
+//
+// The gate is set at 3.0: comfortably above the after numbers (which will drift as archetypes are
+// added) and far below every before number, so it fails if the fixed-skeleton regression returns.
+
+test('a simulated round does not repeat onset skeletons — the 2026-07-26 ear-report gate', () => {
+  const OFFSETS = [0, 101, 202, 977]
+  for (const role of ['bassline', 'chords', 'lead'] as const) {
+    const skeletons: string[] = []
+    for (const key of [MINOR, { root: 51, minor: true }, MAJOR]) {
+      const rng = mulberry32(7000 + key.root)
+      const used: string[] = []
+      for (let batch = 0; batch < 6; batch++) {
+        const batchSeed = Math.floor(rng() * 100000)
+        const drawn: string[] = []
+        for (const off of OFFSETS) {
+          const p = composeTheoryPhrase(role, key, batchSeed + off, { exclude: [...used, ...drawn] })
+          drawn.push(p.archetype)
+          skeletons.push(onsetKey(p.notes))
+        }
+        used.push(...drawn)
+      }
+    }
+    let repeats = 0
+    let windows = 0
+    for (let i = 0; i + 15 <= skeletons.length; i++) {
+      repeats += 15 - new Set(skeletons.slice(i, i + 15)).size
+      windows += 1
+    }
+    const perWindow = repeats / Math.max(1, windows)
+    assert.ok(perWindow < 3, `${role}: ${perWindow.toFixed(2)} same-skeleton repeats per 15 draws (was 6.7-9.6 before the fix, gate 3.0)`)
+  }
 })
 
 // ---- pre-render lint (§B.7) --------------------------------------------------------------------

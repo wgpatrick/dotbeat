@@ -8,19 +8,20 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { execFile } from 'node:child_process'
-import { resolvePython } from '../analysis/sidecar.js'
+import { lastNonEmptyLine, resolvePython, spawnSidecar, type SpawnResult } from '../analysis/spawn-sidecar.js'
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-const EMBED_PY = 'python/embed.py'
-const SPAWN_TIMEOUT_MS = 600_000
-const SPAWN_MAX_BUFFER = 64 * 1024 * 1024
+const EMBED_PY = 'python/embed.py' // relative to the repo root, like every sidecar
 
+/** The raw-vector backends. Both real ones are LEGACY as of research/122 §5 ("Embedding spaces for
+ * music, post-CLAP-retirement"): `clap` scored BELOW CHANCE on held-out owner picks and actively
+ * misled at n=37, so it was killed at the T1 gate; `mert` was never tried and carries the same
+ * caveat (python/embed.py implements run_mert and requirements-mert.txt pins its deps, but no
+ * caller anywhere selects it — it is reachable only by hand). They stay selectable so an old run
+ * can be reproduced; neither is a default any more (R4-3 / research/130 W0.4). */
 export type EmbedBackend = 'stub' | 'clap' | 'mert'
 /** Audiobox-Aesthetics axes ride the same sidecar/cache plumbing but are NOT embeddings — four
- * named, crowd-trained axes (CE/CU/PC/PQ) used as explicit features, never PCA-projected. */
+ * named, crowd-trained axes (CE/CU/PC/PQ) used as explicit features, never PCA-projected. This is
+ * the ENDORSED representation (research/122 §5) and hence embedAudioFile's default. */
 export type AesBackend = 'aes' | 'aes-stub'
 export const AES_AXES = ['CE', 'CU', 'PC', 'PQ'] as const
 
@@ -51,15 +52,8 @@ function sha256File(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
-function spawnEmbed(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string; enoent: boolean }> {
-  const python = resolvePython()
-  return new Promise((resolvePromise) => {
-    execFile(python, args, { cwd: repoRoot, timeout: SPAWN_TIMEOUT_MS, maxBuffer: SPAWN_MAX_BUFFER }, (err, stdout, stderr) => {
-      if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') resolvePromise({ code: null, stdout, stderr, enoent: true })
-      else if (err) resolvePromise({ code: typeof (err as NodeJS.ErrnoException).code === 'number' ? (err as unknown as { code: number }).code : 1, stdout, stderr, enoent: false })
-      else resolvePromise({ code: 0, stdout, stderr, enoent: false })
-    })
-  })
+function spawnEmbed(args: readonly string[]): Promise<SpawnResult> {
+  return spawnSidecar({ python: resolvePython(), args })
 }
 
 /**
@@ -70,7 +64,11 @@ function spawnEmbed(args: string[]): Promise<{ code: number | null; stdout: stri
  */
 export async function embedAudioFile(audioPath: string, opts: { backend?: EmbedBackend | AesBackend; model?: string } = {}): Promise<EmbeddingResult> {
   if (!existsSync(audioPath)) throw new BeatEmbedError(`no audio file at ${audioPath}`)
-  const backend = opts.backend ?? 'clap'
+  // 'aes', not the retired 'clap' (R4-3): every live caller — gen-bakeoff-metrics, curate-engine-
+  // presets, curate-surge-patches, eval.ts's attach* pair, the CLI's taste-collect — already passes
+  // a backend explicitly, so this default only governs a bare call, and a bare call should get the
+  // endorsed representation rather than a backend measured below chance.
+  const backend = opts.backend ?? 'aes'
   const sha = sha256File(audioPath)
   const cp = cachePath(audioPath, backend)
   if (existsSync(cp)) {
@@ -86,10 +84,14 @@ export async function embedAudioFile(audioPath: string, opts: { backend?: EmbedB
   const args = [EMBED_PY, '--backend', backend, '--input', audioPath]
   if (opts.model !== undefined) args.push('--model', opts.model)
   const res = await spawnEmbed(args)
-  if (res.enoent) throw new BeatEmbedError('no Python interpreter found for the embedding sidecar (point $BEAT_PYTHON at one, or python3 -m venv python/.venv && python/.venv/bin/pip install -r python/requirements-clap.txt)')
+  if (res.enoent) {
+    // Name the requirements file for the backend actually asked for — pointing an aes run at
+    // requirements-clap.txt (the pre-R4-3 text) installs the retired model and still fails.
+    const reqs = backend === 'clap' ? 'requirements-clap.txt' : backend === 'mert' ? 'requirements-mert.txt' : 'requirements-aesthetics.txt'
+    throw new BeatEmbedError(`no Python interpreter found for the embedding sidecar (point $BEAT_PYTHON at one, or python3 -m venv python/.venv && python/.venv/bin/pip install -r python/${reqs})`)
+  }
   if (res.code !== 0) {
-    const lines = res.stderr.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '')
-    throw new BeatEmbedError(`embed sidecar (${backend}) failed: ${lines[lines.length - 1] ?? `exit ${res.code}`}${res.code === 3 ? ' — run `beat taste-eval --doctor` (or use --embed-backend stub)' : ''}`)
+    throw new BeatEmbedError(`embed sidecar (${backend}) failed: ${lastNonEmptyLine(res.stderr) || `exit ${res.code}`}${res.code === 3 ? ' — run `beat taste-eval --doctor` (or use --embed-backend stub)' : ''}`)
   }
   let parsed: { backend?: string; model?: string; dims?: number; embedding?: number[] }
   try {
@@ -104,7 +106,9 @@ export async function embedAudioFile(audioPath: string, opts: { backend?: EmbedB
 
 /** The sidecar's --doctor report plus interpreter facts. Never throws. */
 export async function embedDoctor(): Promise<Record<string, unknown>> {
-  const res = await spawnEmbed([EMBED_PY, '--doctor']).catch((e: unknown) => ({ code: 1, stdout: '', stderr: String(e), enoent: true }))
+  // Not the generic sidecarDoctor: this report deliberately omits the `interpreter` field the other
+  // seven carry (it is printed by `beat taste-eval --doctor`, whose JSON shape is asserted).
+  const res = await spawnEmbed([EMBED_PY, '--doctor'])
   if (res.enoent) return { pythonFound: false, error: 'no Python interpreter found' }
   if (res.code !== 0) return { pythonFound: true, error: res.stderr.trim() || `--doctor exited ${res.code}` }
   try {
