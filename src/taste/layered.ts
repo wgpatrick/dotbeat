@@ -15,7 +15,30 @@
 //     elite ref lead is wide (-4.6 dB); the frozen engineplus constant is -10..-12 dB everywhere,
 //     measurably wrong in both directions.
 // None of those are reachable by ONE voice with ONE filter and ONE pan position. They are reachable
-// by three or four voices placed deliberately, which is what this module assembles.
+// by two to four voices placed deliberately, which is what this module assembles.
+//
+// WHAT THE OWNER'S EAR CHANGED (2026-07-26). The first version of this module shipped three FROZEN
+// architectures gated by ONE-SIDED thresholds, scored 19 of 24 measured targets against engineplus's
+// 3 — the largest measured jump in the program — and the owner listened and said: "the bassline
+// layering doesn't sound great from my POV... I liked the unlayered one better", plus "all the
+// layering... makes everything sort of sound the same-ish." Both halves were right, and both are
+// diagnosable with numbers the gate did not have:
+//   * OVERSHOOT. A floor of `bandSubPct >= 30` cannot fail 96.1%, and the reference class's own
+//     median is 50.1%. Worse, the floor CAUSED the sound: this file used to resolve a real source
+//     disagreement about bass balance with "our own measured target only reaches with the sub
+//     carrying the stack." Every target is now the reference pool's INTERQUARTILE RANGE, two-sided,
+//     reported against the pool median.
+//   * INAUDIBLE LAYERS. Rendered per layer (scripts/layered-diagnose.mjs), the growl arrived 14 dB
+//     under the mix and the click 49 dB under, at nominal offsets of -5 and -16 dB; sub-alone RMS
+//     came within 0.05 dB of the whole instrument. Balance is now drawn against MEASURED
+//     contribution, with the loudest character layer floored at the sub's own level.
+//   * SAME-NESS. Three frozen architectures meant every layered clip in every round was the same
+//     instrument. They are now seeded SWEEPS over the mined ranges — the same fix, one level up,
+//     that src/taste/theory.ts made at the note layer.
+//   * A MISSING SENSE. `MixMetrics` is whole-file and whole-band, so no gate could see note
+//     boundaries or per-layer audibility at all. src/taste/articulation.ts adds both, and
+//     `layeredFeatures` now REQUIRES the audio so they cannot be skipped.
+// The case is banked at listen-bench/cases/2026-07-26-layered-bass-preferred-unlayered.json.
 //
 // WHAT IT IS NOT. No new DSP: every move here is an ordinary `.beat` field on an ordinary synth
 // track, and the engine has always rendered multi-track projects. The frozen `engineplusProfile` /
