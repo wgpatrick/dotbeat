@@ -1,0 +1,5285 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-26T11:46:07+00:00",
+  "note": "Per-role parameter distributions mined from professionally designed Surge XT patches (research 141). Target data for patch generation and preset retargeting: the DISTRIBUTION is the finding, not any single value. All times in milliseconds, cutoff in Hz, unison detune in cents (Surge's +/- half-spread convention), resonance on Surge's own 0..1 knob (NOT a biquad Q - not directly comparable to dotbeat's `resonance`, which is Tone.Filter Q).",
+  "corpus": {
+    "source": "Surge XT factory + bundled third-party patch banks",
+    "dataHome": "$SURGE_DATA_HOME = tools/surge/resources/data",
+    "surgeVersion": "1.4.main.c5d6735 (surgepy build in tools/surge/build)",
+    "patchesTotal": 3559,
+    "patchesFactory": 639,
+    "patches3rdParty": 2920,
+    "roleSource": "patch directory: patches_factory/<Category>/ and patches_3rdparty/<Author>/<Category>/",
+    "sceneMeasured": "the sounding scene: scene_active when scenemode=single, otherwise scene A; dual/split patches also sound scene B, which is not measured",
+    "roleMapping": {
+      "Leads": "lead",
+      "Plucks": "pluck",
+      "Pads": "pad",
+      "Basses": "bass",
+      "Bass": "bass",
+      "Keys": "keys",
+      "Polysynths": "polysynth",
+      "Synths": "polysynth",
+      "Chords": "chords",
+      "Sequences": "sequence",
+      "Arps": "sequence",
+      "Rhythms": "sequence",
+      "Bells": "bell",
+      "Mallets": "bell",
+      "Brass": "brass",
+      "Strings": "strings",
+      "Organs": "organ",
+      "Guitars": "guitar",
+      "Atmospheres": "atmos",
+      "Ambiance": "atmos",
+      "Ambiances": "atmos",
+      "Soundscapes": "atmos",
+      "Textures": "atmos",
+      "Drones": "atmos",
+      "FX": "fx",
+      "Drums": "drum",
+      "Percussion": "drum",
+      "Winds": "wind",
+      "Woodwinds": "wind",
+      "Vox": "vox",
+      "Voices": "vox",
+      "Vocals": "vox"
+    },
+    "excludedCategories": [
+      "Templates",
+      "Tutorials",
+      "Splits",
+      "MPE",
+      "Vocoder",
+      "Modelled",
+      "Audio In",
+      "(root)"
+    ]
+  },
+  "conversions": {
+    "envelopeTime": "seconds = 2 ** raw (Surge ct_envtime, raw range -8..5 => 3.906 ms .. 32 s)",
+    "envelopeTimeFloorNote": "raw = -8 is Surge's minimum and its UI DISPLAYS it as '0.00 s'; the digital (default) envelope actually ramps over 2^-8 s = 3.906 ms. 3.906 ms values in this file are that floor.",
+    "filterCutoff": "Hz = 440 * 2 ** (raw / 12) (raw -60..70 => 13.75 Hz .. 25087.7 Hz)",
+    "resonance": "0..1 as stored (Surge ct_percent)",
+    "unisonDetune": "cents = raw * 100 (x12 when extend_range=1); Surge spreads unison voices from -detune to +detune, so this is the +/- HALF spread - total stack width is 2x this number",
+    "envelopeIdentity": "env1_* = adsr[0] = amp EG; env2_* = adsr[1] = filter EG",
+    "verification": "500-patch random sample loaded in surgepy and compared against Surge's own getParamDisplay(): cutoff 500/500, resonance 500/500, sustain 500/500, unison detune 419/419, amp-EG decay 482/497, release 473/496, attack 221/494 - every mismatch is the display floor above (Surge prints '0.0 ms' for raw -8)."
+  },
+  "caveats": [
+    "Static knob values only: LFO / velocity / macro / mod-matrix routings to these params are NOT resolved, so a patch's sounding cutoff and envelope can differ from the stored value.",
+    "cutoffHzKnob is the knob; the sounding cutoff also includes filter keytrack and filter-EG envmod (both reported separately).",
+    "Dual- and split-scene patches (15.6% of corpus) sound a second scene that is not measured.",
+    "Amp-EG stages that are tempo-synced are excluded from the ms statistics for that stage (1.18% of patches tempo-sync at least one amp-EG stage; 0.84% tempo-sync attack).",
+    "Role labels are the patch authors' own directory names, not a listening judgement.",
+    "63 of 21,354 stored oscillator unison-voice values were outside Surge's declared 1..16 range (very old streaming revisions) and were clamped exactly as Surge's bound_value() does on load."
+  ],
+  "pooledUnisonDetuneCentsByVoiceCount": {
+    "2": {
+      "n": 594,
+      "min": 0.0,
+      "p10": 0.0,
+      "p25": 3.9,
+      "median": 8.6,
+      "p75": 16.1,
+      "p90": 23.8,
+      "max": 350.0
+    },
+    "3": {
+      "n": 384,
+      "min": 0.0,
+      "p10": 2.0,
+      "p25": 5.4,
+      "median": 10.0,
+      "p75": 16.3,
+      "p90": 23.2,
+      "max": 99.5
+    },
+    "4": {
+      "n": 232,
+      "min": 0.0,
+      "p10": 1.5,
+      "p25": 6.6,
+      "median": 11.1,
+      "p75": 20.0,
+      "p90": 35.7,
+      "max": 100.0
+    },
+    "5": {
+      "n": 170,
+      "min": 0.0,
+      "p10": 3.8,
+      "p25": 4.0,
+      "median": 9.3,
+      "p75": 19.2,
+      "p90": 30.9,
+      "max": 62.9
+    },
+    "6": {
+      "n": 120,
+      "min": 0.0,
+      "p10": 1.0,
+      "p25": 10.0,
+      "median": 20.0,
+      "p75": 25.7,
+      "p90": 39.6,
+      "max": 75.8
+    },
+    "7": {
+      "n": 154,
+      "min": 0.0,
+      "p10": 2.8,
+      "p25": 6.0,
+      "median": 10.0,
+      "p75": 20.0,
+      "p90": 32.9,
+      "max": 89.0
+    },
+    "8": {
+      "n": 96,
+      "min": 0.0,
+      "p10": 6.6,
+      "p25": 10.0,
+      "median": 19.3,
+      "p75": 20.0,
+      "p90": 39.6,
+      "max": 100.0
+    },
+    "9": {
+      "n": 46,
+      "min": 4.3,
+      "p10": 10.0,
+      "p25": 12.3,
+      "median": 12.3,
+      "p75": 20.1,
+      "p90": 38.5,
+      "max": 72.0
+    },
+    "10": {
+      "n": 21,
+      "min": 0.0,
+      "p10": 10.0,
+      "p25": 12.0,
+      "median": 25.4,
+      "p75": 38.2,
+      "p90": 49.8,
+      "max": 63.7
+    },
+    "11": {
+      "n": 21,
+      "min": 0.0,
+      "p10": 5.0,
+      "p25": 8.8,
+      "median": 14.4,
+      "p75": 30.1,
+      "p90": 59.1,
+      "max": 84.0
+    },
+    "12": {
+      "n": 21,
+      "min": 8.8,
+      "p10": 10.8,
+      "p25": 13.5,
+      "median": 22.1,
+      "p75": 27.9,
+      "p90": 49.5,
+      "max": 100.0
+    },
+    "13": {
+      "n": 14,
+      "min": 5.9,
+      "p10": 7.0,
+      "p25": 8.5,
+      "median": 10.0,
+      "p75": 29.5,
+      "p90": 50.6,
+      "max": 58.2
+    },
+    "14": {
+      "n": 7,
+      "min": 0.0,
+      "p10": 1.1,
+      "p25": 4.6,
+      "median": 15.0,
+      "p75": 25.6,
+      "p90": 59.7,
+      "max": 96.0
+    },
+    "15": {
+      "n": 15,
+      "min": 0.0,
+      "p10": 0.3,
+      "p25": 1.5,
+      "median": 5.9,
+      "p75": 16.7,
+      "p90": 71.2,
+      "max": 99.0
+    },
+    "16": {
+      "n": 125,
+      "min": 0.0,
+      "p10": 0.0,
+      "p25": 6.6,
+      "median": 16.1,
+      "p75": 23.4,
+      "p90": 46.4,
+      "max": 100.0
+    }
+  },
+  "roles": {
+    "lead": {
+      "n_patches": 448,
+      "ampEnv": {
+        "attackMs": {
+          "n": 448,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 9.77,
+          "p90": 32.83,
+          "max": 1795.83,
+          "pct_at_floor": 65.0,
+          "pct_le_6ms": 68.8,
+          "pct_le_12_5ms": 80.1,
+          "pct_le_20ms": 86.2,
+          "pct_le_30ms": 88.8,
+          "pct_gt_100ms": 4.7
+        },
+        "decayMs": {
+          "n": 448,
+          "min": 3.91,
+          "p10": 72.01,
+          "p25": 250.0,
+          "median": 871.11,
+          "p75": 1000.0,
+          "p90": 2215.58,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 448,
+          "min": 0.0,
+          "p10": 0.286,
+          "p25": 0.659,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 448,
+          "min": 3.91,
+          "p10": 6.19,
+          "p25": 31.25,
+          "median": 31.25,
+          "p75": 331.51,
+          "p90": 1137.92,
+          "max": 9414.56
+        },
+        "attackShapePct": {
+          "0": 6.5,
+          "1": 85.7,
+          "2": 7.8
+        },
+        "pctAnalogMode": 6.2
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 448,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 16.62,
+          "p90": 95.07,
+          "max": 7338.18
+        },
+        "decayMs": {
+          "n": 446,
+          "min": 3.91,
+          "p10": 33.46,
+          "p25": 185.47,
+          "median": 250.0,
+          "p75": 1223.56,
+          "p90": 3076.8,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 448,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.351,
+          "p90": 0.655,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 448,
+          "min": 3.91,
+          "p10": 27.15,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 352.39,
+          "p90": 1190.16,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 448,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 3.92,
+        "p75": 21.28,
+        "p90": 97.23,
+        "max": 3704.52,
+        "pct_le_12_5ms": 67.0,
+        "pct_le_30ms": 78.1
+      },
+      "filter": {
+        "pctFilter1Off": 10.9,
+        "cutoffHzKnob": {
+          "n": 399,
+          "min": 14.0,
+          "p10": 52.0,
+          "p25": 147.0,
+          "median": 419.0,
+          "p75": 1258.0,
+          "p90": 4497.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 399,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.319,
+          "p75": 0.656,
+          "p90": 0.85,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 399,
+          "min": -96.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 11.14,
+          "p75": 40.02,
+          "p90": 62.5,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 399,
+          "min": -1.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.182,
+          "p75": 0.709,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 65.0,
+          "off": 10.9,
+          "FX": 9.6,
+          "HP": 9.6,
+          "Notch": 2.5,
+          "BP": 2.5
+        },
+        "pctFilter2On": 61.2
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 448,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1.0,
+          "median": 2.0,
+          "p75": 2.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 3.6,
+          "1": 41.5,
+          "2": 35.0,
+          "3": 19.9
+        },
+        "typePct": {
+          "Classic": 57.4,
+          "Wavetable": 31.9,
+          "Sine": 17.0,
+          "FM2": 3.3,
+          "Modern": 3.3,
+          "FM3": 3.1,
+          "Window": 2.2,
+          "Alias": 1.8,
+          "Twist": 1.6,
+          "S&H Noise": 0.9,
+          "String": 0.4
+        },
+        "pctOctaveSplit": 37.9,
+        "pctNoiseLayer": 15.0,
+        "pctRingMod": 9.4,
+        "pctFM": 27.5,
+        "pctWaveshaper": 53.8
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 240,
+          "2": 76,
+          "3": 29,
+          "4": 16,
+          "5": 12,
+          "6": 14,
+          "7": 20,
+          "8": 12,
+          "9": 4,
+          "10": 2,
+          "11": 3,
+          "12": 1,
+          "13": 2,
+          "14": 2,
+          "16": 15
+        },
+        "pct_unison_on": 46.4,
+        "pct_voices_ge3": 29.5,
+        "pct_voices_ge5": 19.4,
+        "pct_voices_ge7": 13.6,
+        "detune_cents_any_unison": {
+          "n": 296,
+          "min": 0.0,
+          "p10": 0.1,
+          "p25": 4.0,
+          "median": 10.0,
+          "p75": 20.0,
+          "p90": 41.2,
+          "max": 100.0
+        },
+        "detune_cents_voices_ge5": {
+          "n": 132,
+          "min": 0.0,
+          "p10": 0.4,
+          "p25": 4.2,
+          "median": 10.0,
+          "p75": 27.6,
+          "p90": 47.6,
+          "max": 100.0
+        },
+        "median_voices_when_on": 3.0
+      },
+      "voicing": {
+        "polymodePct": {
+          "mono_st_fp": 31.5,
+          "mono_st": 23.7,
+          "poly": 21.7,
+          "mono": 17.9,
+          "mono_fp": 5.4
+        },
+        "pctDualScene": 7.6
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 448,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1.0,
+          "median": 2.0,
+          "p75": 3.0,
+          "p90": 4.3,
+          "max": 11
+        },
+        "pctByType": {
+          "delay": 66.5,
+          "reverb1": 35.0,
+          "eq": 27.0,
+          "conditioner": 16.1,
+          "reverb2": 13.4,
+          "distortion": 12.9,
+          "chorus": 12.9,
+          "phaser": 9.4,
+          "airwindows": 8.5,
+          "freqshift": 5.6,
+          "flanger": 5.1,
+          "rotary": 3.1,
+          "graphiceq": 2.2,
+          "waveshaper": 2.2,
+          "nimbus": 1.3,
+          "tape": 0.9,
+          "ensemble": 0.9,
+          "combulator": 0.7,
+          "resonator": 0.7,
+          "ringmod": 0.7,
+          "audio_input": 0.2,
+          "bonsai": 0.2,
+          "mstool": 0.2
+        },
+        "pctNoFx": 9.4
+      }
+    },
+    "pluck": {
+      "n_patches": 234,
+      "ampEnv": {
+        "attackMs": {
+          "n": 234,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 7.15,
+          "p90": 13.7,
+          "max": 891.58,
+          "pct_at_floor": 65.8,
+          "pct_le_6ms": 72.2,
+          "pct_le_12_5ms": 88.5,
+          "pct_le_20ms": 91.9,
+          "pct_le_30ms": 93.2,
+          "pct_gt_100ms": 1.7
+        },
+        "decayMs": {
+          "n": 234,
+          "min": 3.91,
+          "p10": 146.43,
+          "p25": 250.0,
+          "median": 866.85,
+          "p75": 1282.37,
+          "p90": 3035.19,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 234,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.011,
+          "p75": 0.995,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 234,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 179.85,
+          "median": 642.83,
+          "p75": 1505.48,
+          "p90": 2408.04,
+          "max": 6200.0
+        },
+        "attackShapePct": {
+          "0": 9.4,
+          "1": 79.9,
+          "2": 10.7
+        },
+        "pctAnalogMode": 18.8
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 234,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 3.91,
+          "p90": 13.67,
+          "max": 2547.17
+        },
+        "decayMs": {
+          "n": 234,
+          "min": 3.91,
+          "p10": 56.52,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 956.25,
+          "p90": 2754.14,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 234,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.0,
+          "p90": 0.395,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 234,
+          "min": 3.91,
+          "p10": 117.43,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 1485.57,
+          "p90": 3916.72,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 234,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 3.91,
+        "p75": 8.77,
+        "p90": 21.66,
+        "max": 1108.2,
+        "pct_le_12_5ms": 84.6,
+        "pct_le_30ms": 91.0
+      },
+      "filter": {
+        "pctFilter1Off": 15.4,
+        "cutoffHzKnob": {
+          "n": 198,
+          "min": 14.0,
+          "p10": 47.0,
+          "p25": 131.0,
+          "median": 335.0,
+          "p75": 1107.0,
+          "p90": 3727.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 198,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.172,
+          "p75": 0.478,
+          "p90": 0.788,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 198,
+          "min": -91.75,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 1.32,
+          "p75": 29.83,
+          "p90": 56.56,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 198,
+          "min": -1.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.504,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 59.4,
+          "off": 15.4,
+          "FX": 12.4,
+          "HP": 5.6,
+          "Notch": 4.7,
+          "BP": 2.6
+        },
+        "pctFilter2On": 54.3
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 234,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 2.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 11.1,
+          "1": 44.0,
+          "2": 30.3,
+          "3": 14.5
+        },
+        "typePct": {
+          "Classic": 42.7,
+          "Wavetable": 38.5,
+          "Sine": 11.5,
+          "FM3": 6.4,
+          "Modern": 4.3,
+          "String": 3.8,
+          "FM2": 3.4,
+          "Window": 1.3,
+          "Twist": 0.9,
+          "S&H Noise": 0.4
+        },
+        "pctOctaveSplit": 29.9,
+        "pctNoiseLayer": 10.3,
+        "pctRingMod": 9.4,
+        "pctFM": 21.4,
+        "pctWaveshaper": 34.6
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 156,
+          "2": 12,
+          "3": 15,
+          "4": 5,
+          "5": 5,
+          "6": 10,
+          "7": 9,
+          "8": 6,
+          "10": 2,
+          "11": 1,
+          "12": 1,
+          "13": 1,
+          "14": 1,
+          "15": 1,
+          "16": 9
+        },
+        "pct_unison_on": 33.3,
+        "pct_voices_ge3": 28.2,
+        "pct_voices_ge5": 19.7,
+        "pct_voices_ge7": 13.2,
+        "detune_cents_any_unison": {
+          "n": 104,
+          "min": 0.0,
+          "p10": 1.1,
+          "p25": 7.9,
+          "median": 19.2,
+          "p75": 27.1,
+          "p90": 40.8,
+          "max": 99.5
+        },
+        "detune_cents_voices_ge5": {
+          "n": 61,
+          "min": 0.0,
+          "p10": 0.7,
+          "p25": 8.8,
+          "median": 20.0,
+          "p75": 32.7,
+          "p90": 47.9,
+          "max": 75.8
+        },
+        "median_voices_when_on": 6.0
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 94.4,
+          "mono": 3.0,
+          "mono_fp": 1.7,
+          "mono_st": 0.9
+        },
+        "pctDualScene": 16.2
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 234,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1.0,
+          "median": 2.0,
+          "p75": 4.0,
+          "p90": 6.0,
+          "max": 10
+        },
+        "pctByType": {
+          "delay": 70.9,
+          "reverb1": 40.2,
+          "eq": 38.5,
+          "conditioner": 25.2,
+          "airwindows": 20.1,
+          "reverb2": 18.4,
+          "chorus": 17.9,
+          "phaser": 9.8,
+          "flanger": 8.5,
+          "distortion": 6.0,
+          "freqshift": 4.7,
+          "rotary": 2.6,
+          "tape": 1.7,
+          "waveshaper": 1.7,
+          "audio_input": 1.3,
+          "combulator": 1.3,
+          "graphiceq": 1.3,
+          "ringmod": 1.3,
+          "nimbus": 0.9,
+          "spring_reverb": 0.4
+        },
+        "pctNoFx": 5.1
+      }
+    },
+    "pad": {
+      "n_patches": 419,
+      "ampEnv": {
+        "attackMs": {
+          "n": 406,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 69.97,
+          "median": 540.64,
+          "p75": 1405.28,
+          "p90": 2955.48,
+          "max": 20221.16,
+          "pct_at_floor": 13.5,
+          "pct_le_6ms": 15.0,
+          "pct_le_12_5ms": 16.7,
+          "pct_le_20ms": 17.7,
+          "pct_le_30ms": 20.7,
+          "pct_gt_100ms": 71.4
+        },
+        "decayMs": {
+          "n": 411,
+          "min": 3.91,
+          "p10": 250.0,
+          "p25": 250.0,
+          "median": 1000.0,
+          "p75": 3321.77,
+          "p90": 9072.1,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 419,
+          "min": 0.0,
+          "p10": 0.498,
+          "p25": 0.678,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 410,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 611.32,
+          "median": 1802.5,
+          "p75": 3000.0,
+          "p90": 5237.69,
+          "max": 20534.76
+        },
+        "attackShapePct": {
+          "0": 11.0,
+          "1": 85.2,
+          "2": 3.8
+        },
+        "pctAnalogMode": 6.7
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 413,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 958.79,
+          "p90": 3054.04,
+          "max": 12383.64
+        },
+        "decayMs": {
+          "n": 415,
+          "min": 3.91,
+          "p10": 194.21,
+          "p25": 250.0,
+          "median": 618.05,
+          "p75": 4527.06,
+          "p90": 9323.19,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 419,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.482,
+          "p90": 0.703,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 418,
+          "min": 3.91,
+          "p10": 250.0,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 2661.98,
+          "p90": 8199.49,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 406,
+        "min": 3.91,
+        "p10": 4.04,
+        "p25": 129.44,
+        "median": 753.18,
+        "p75": 2043.12,
+        "p90": 3880.59,
+        "max": 20221.16,
+        "pct_le_12_5ms": 13.8,
+        "pct_le_30ms": 18.2
+      },
+      "filter": {
+        "pctFilter1Off": 8.8,
+        "cutoffHzKnob": {
+          "n": 382,
+          "min": 14.0,
+          "p10": 51.0,
+          "p25": 149.0,
+          "median": 480.0,
+          "p75": 1190.0,
+          "p90": 3389.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 382,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.196,
+          "p75": 0.487,
+          "p90": 0.855,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 382,
+          "min": -96.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 32.4,
+          "p90": 65.78,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 382,
+          "min": -1.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.215,
+          "p75": 0.999,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 64.7,
+          "FX": 12.6,
+          "off": 8.8,
+          "BP": 4.8,
+          "Notch": 4.5,
+          "HP": 3.3,
+          "Multi": 1.2
+        },
+        "pctFilter2On": 65.6
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 419,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1.0,
+          "median": 2,
+          "p75": 3.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 7.4,
+          "1": 36.0,
+          "2": 30.5,
+          "3": 26.0
+        },
+        "typePct": {
+          "Wavetable": 43.7,
+          "Classic": 42.7,
+          "Sine": 10.5,
+          "Modern": 6.2,
+          "Twist": 4.8,
+          "FM3": 3.6,
+          "FM2": 3.1,
+          "Window": 2.6,
+          "Alias": 2.1,
+          "S&H Noise": 1.9,
+          "String": 1.2
+        },
+        "pctOctaveSplit": 38.7,
+        "pctNoiseLayer": 10.7,
+        "pctRingMod": 11.9,
+        "pctFM": 28.6,
+        "pctWaveshaper": 31.7
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 160,
+          "2": 57,
+          "3": 52,
+          "4": 29,
+          "5": 24,
+          "6": 15,
+          "7": 23,
+          "8": 17,
+          "9": 5,
+          "10": 3,
+          "11": 4,
+          "12": 4,
+          "13": 2,
+          "15": 4,
+          "16": 20
+        },
+        "pct_unison_on": 61.8,
+        "pct_voices_ge3": 48.2,
+        "pct_voices_ge5": 28.9,
+        "pct_voices_ge7": 19.6,
+        "detune_cents_any_unison": {
+          "n": 377,
+          "min": 0.0,
+          "p10": 4.0,
+          "p25": 8.4,
+          "median": 12.2,
+          "p75": 20.0,
+          "p90": 26.9,
+          "max": 82.1
+        },
+        "detune_cents_voices_ge5": {
+          "n": 149,
+          "min": 0.0,
+          "p10": 5.0,
+          "p25": 10.0,
+          "median": 17.7,
+          "p75": 22.9,
+          "p90": 30.0,
+          "max": 79.1
+        },
+        "median_voices_when_on": 4
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 99.3,
+          "mono": 0.5,
+          "mono_st": 0.2
+        },
+        "pctDualScene": 16.5
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 419,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 2.0,
+          "median": 3,
+          "p75": 4.0,
+          "p90": 6.0,
+          "max": 10
+        },
+        "pctByType": {
+          "delay": 60.9,
+          "reverb1": 40.1,
+          "eq": 34.6,
+          "reverb2": 25.3,
+          "airwindows": 24.8,
+          "chorus": 19.6,
+          "conditioner": 10.5,
+          "freqshift": 9.3,
+          "flanger": 8.4,
+          "phaser": 8.1,
+          "nimbus": 6.2,
+          "graphiceq": 4.8,
+          "rotary": 4.1,
+          "distortion": 3.1,
+          "tape": 2.6,
+          "ensemble": 2.4,
+          "combulator": 1.9,
+          "resonator": 1.2,
+          "spring_reverb": 0.7,
+          "ringmod": 0.5,
+          "mstool": 0.5,
+          "waveshaper": 0.2
+        },
+        "pctNoFx": 4.8
+      }
+    },
+    "bass": {
+      "n_patches": 494,
+      "ampEnv": {
+        "attackMs": {
+          "n": 494,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 8.16,
+          "p90": 29.67,
+          "max": 4080.02,
+          "pct_at_floor": 65.8,
+          "pct_le_6ms": 72.5,
+          "pct_le_12_5ms": 83.2,
+          "pct_le_20ms": 86.8,
+          "pct_le_30ms": 90.3,
+          "pct_gt_100ms": 4.7
+        },
+        "decayMs": {
+          "n": 492,
+          "min": 3.91,
+          "p10": 185.97,
+          "p25": 250.0,
+          "median": 620.56,
+          "p75": 1080.08,
+          "p90": 3631.66,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 494,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.332,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 492,
+          "min": 3.91,
+          "p10": 10.99,
+          "p25": 31.25,
+          "median": 38.77,
+          "p75": 248.38,
+          "p90": 796.56,
+          "max": 8181.94
+        },
+        "attackShapePct": {
+          "0": 7.5,
+          "1": 87.9,
+          "2": 4.7
+        },
+        "pctAnalogMode": 16.2
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 494,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 3.91,
+          "p90": 39.63,
+          "max": 32000.0
+        },
+        "decayMs": {
+          "n": 494,
+          "min": 3.91,
+          "p10": 44.26,
+          "p25": 174.81,
+          "median": 250.0,
+          "p75": 468.25,
+          "p90": 1623.86,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 494,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.112,
+          "p90": 0.53,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 494,
+          "min": 3.91,
+          "p10": 14.02,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 250.0,
+          "p90": 1000.0,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 494,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 3.91,
+        "p75": 11.21,
+        "p90": 45.72,
+        "max": 9665.61,
+        "pct_le_12_5ms": 77.3,
+        "pct_le_30ms": 85.4
+      },
+      "filter": {
+        "pctFilter1Off": 12.8,
+        "cutoffHzKnob": {
+          "n": 431,
+          "min": 14.0,
+          "p10": 33.0,
+          "p25": 76.0,
+          "median": 203.0,
+          "p75": 732.0,
+          "p90": 2615.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 431,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.185,
+          "p75": 0.492,
+          "p90": 0.707,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 431,
+          "min": -70.45,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 5.76,
+          "p75": 41.73,
+          "p90": 63.77,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 431,
+          "min": -1.0,
+          "p10": -0.002,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.784,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 69.4,
+          "off": 12.8,
+          "FX": 5.5,
+          "Notch": 4.7,
+          "HP": 3.8,
+          "BP": 3.8
+        },
+        "pctFilter2On": 56.1
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 494,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1.0,
+          "median": 2.0,
+          "p75": 2.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 2.8,
+          "1": 40.5,
+          "2": 35.8,
+          "3": 20.9
+        },
+        "typePct": {
+          "Classic": 45.3,
+          "Wavetable": 28.9,
+          "Sine": 20.9,
+          "FM2": 9.7,
+          "Modern": 9.3,
+          "FM3": 5.1,
+          "Twist": 2.6,
+          "Window": 2.4,
+          "String": 1.8,
+          "Alias": 1.4,
+          "S&H Noise": 1.2
+        },
+        "pctOctaveSplit": 37.7,
+        "pctNoiseLayer": 13.4,
+        "pctRingMod": 7.9,
+        "pctFM": 29.8,
+        "pctWaveshaper": 62.8
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 274,
+          "2": 86,
+          "3": 43,
+          "4": 24,
+          "5": 16,
+          "6": 12,
+          "7": 12,
+          "8": 5,
+          "9": 4,
+          "10": 3,
+          "12": 2,
+          "13": 1,
+          "14": 1,
+          "15": 1,
+          "16": 10
+        },
+        "pct_unison_on": 44.5,
+        "pct_voices_ge3": 27.1,
+        "pct_voices_ge5": 13.6,
+        "pct_voices_ge7": 7.9,
+        "detune_cents_any_unison": {
+          "n": 274,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 4.6,
+          "median": 10.0,
+          "p75": 20.0,
+          "p90": 33.3,
+          "max": 100.0
+        },
+        "detune_cents_voices_ge5": {
+          "n": 76,
+          "min": 0.0,
+          "p10": 4.8,
+          "p25": 9.4,
+          "median": 16.6,
+          "p75": 24.2,
+          "p90": 35.8,
+          "max": 63.7
+        },
+        "median_voices_when_on": 3.0
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 27.5,
+          "mono": 24.9,
+          "mono_st_fp": 20.6,
+          "mono_st": 18.6,
+          "mono_fp": 8.3
+        },
+        "pctDualScene": 11.7
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 494,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 1.0,
+          "median": 2.0,
+          "p75": 4.0,
+          "p90": 5.0,
+          "max": 10
+        },
+        "pctByType": {
+          "eq": 34.2,
+          "delay": 26.3,
+          "conditioner": 24.7,
+          "distortion": 22.7,
+          "reverb1": 20.2,
+          "airwindows": 19.2,
+          "chorus": 12.1,
+          "phaser": 7.3,
+          "reverb2": 6.9,
+          "freqshift": 5.5,
+          "waveshaper": 5.1,
+          "graphiceq": 3.8,
+          "resonator": 2.8,
+          "mstool": 2.6,
+          "flanger": 2.4,
+          "rotary": 2.4,
+          "combulator": 1.6,
+          "ringmod": 1.0,
+          "bonsai": 1.0,
+          "neuron": 0.8,
+          "nimbus": 0.8,
+          "tape": 0.8,
+          "spring_reverb": 0.8,
+          "chow": 0.6,
+          "treemonster": 0.6,
+          "ensemble": 0.4,
+          "audio_input": 0.2,
+          "exciter": 0.2
+        },
+        "pctNoFx": 18.8
+      }
+    },
+    "keys": {
+      "n_patches": 315,
+      "ampEnv": {
+        "attackMs": {
+          "n": 314,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 4.78,
+          "p75": 10.1,
+          "p90": 41.01,
+          "max": 3829.24,
+          "pct_at_floor": 43.9,
+          "pct_le_6ms": 55.7,
+          "pct_le_12_5ms": 78.3,
+          "pct_le_20ms": 84.4,
+          "pct_le_30ms": 88.5,
+          "pct_gt_100ms": 4.1
+        },
+        "decayMs": {
+          "n": 314,
+          "min": 3.91,
+          "p10": 104.06,
+          "p25": 250.0,
+          "median": 1000.0,
+          "p75": 2990.06,
+          "p90": 7594.75,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 315,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.449,
+          "p75": 0.843,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 313,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 77.41,
+          "median": 489.59,
+          "p75": 1532.6,
+          "p90": 2283.35,
+          "max": 17437.21
+        },
+        "attackShapePct": {
+          "0": 15.2,
+          "1": 81.0,
+          "2": 3.8
+        },
+        "pctAnalogMode": 20.0
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 315,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 7.41,
+          "p90": 70.07,
+          "max": 3000.0
+        },
+        "decayMs": {
+          "n": 315,
+          "min": 3.91,
+          "p10": 49.24,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 1500.0,
+          "p90": 3445.36,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 315,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.262,
+          "p90": 0.618,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 315,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 1052.15,
+          "p90": 3081.08,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 314,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 5.0,
+        "p75": 13.32,
+        "p90": 62.86,
+        "max": 3829.24,
+        "pct_le_12_5ms": 73.6,
+        "pct_le_30ms": 84.7
+      },
+      "filter": {
+        "pctFilter1Off": 16.5,
+        "cutoffHzKnob": {
+          "n": 263,
+          "min": 14.0,
+          "p10": 51.0,
+          "p25": 161.0,
+          "median": 475.0,
+          "p75": 1103.0,
+          "p90": 3632.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 263,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.093,
+          "p75": 0.4,
+          "p90": 0.735,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 263,
+          "min": -96.0,
+          "p10": -12.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 27.89,
+          "p90": 56.78,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 263,
+          "min": -0.998,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.738,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 55.2,
+          "off": 16.5,
+          "FX": 13.7,
+          "HP": 8.3,
+          "BP": 3.5,
+          "Notch": 2.5,
+          "Multi": 0.3
+        },
+        "pctFilter2On": 61.9
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 315,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 1.0,
+          "median": 2,
+          "p75": 2.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 13.0,
+          "1": 35.2,
+          "2": 28.6,
+          "3": 23.2
+        },
+        "typePct": {
+          "Wavetable": 36.5,
+          "Classic": 22.5,
+          "Sine": 19.4,
+          "FM2": 13.7,
+          "Modern": 7.6,
+          "FM3": 4.1,
+          "S&H Noise": 3.2,
+          "Twist": 3.2,
+          "Alias": 2.9,
+          "String": 2.9,
+          "Window": 1.6
+        },
+        "pctOctaveSplit": 35.9,
+        "pctNoiseLayer": 11.1,
+        "pctRingMod": 13.0,
+        "pctFM": 30.5,
+        "pctWaveshaper": 39.0
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 191,
+          "2": 39,
+          "3": 23,
+          "4": 20,
+          "5": 10,
+          "6": 4,
+          "7": 11,
+          "8": 7,
+          "9": 1,
+          "10": 2,
+          "11": 1,
+          "12": 1,
+          "13": 3,
+          "16": 2
+        },
+        "pct_unison_on": 39.4,
+        "pct_voices_ge3": 27.0,
+        "pct_voices_ge5": 13.3,
+        "pct_voices_ge7": 8.9,
+        "detune_cents_any_unison": {
+          "n": 169,
+          "min": 0.0,
+          "p10": 0.1,
+          "p25": 2.9,
+          "median": 8.5,
+          "p75": 10.9,
+          "p90": 20.0,
+          "max": 51.9
+        },
+        "detune_cents_voices_ge5": {
+          "n": 52,
+          "min": 0.0,
+          "p10": 3.5,
+          "p25": 4.9,
+          "median": 10.0,
+          "p75": 14.4,
+          "p90": 19.9,
+          "max": 39.5
+        },
+        "median_voices_when_on": 3.5
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 98.4,
+          "mono_st_fp": 0.6,
+          "mono": 0.6,
+          "mono_st": 0.3
+        },
+        "pctDualScene": 21.6
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 315,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 2.0,
+          "median": 3,
+          "p75": 5.0,
+          "p90": 7.0,
+          "max": 14
+        },
+        "pctByType": {
+          "reverb1": 45.1,
+          "delay": 43.2,
+          "eq": 38.1,
+          "reverb2": 31.1,
+          "airwindows": 25.7,
+          "chorus": 25.4,
+          "conditioner": 24.8,
+          "flanger": 13.0,
+          "rotary": 11.4,
+          "distortion": 11.4,
+          "phaser": 8.9,
+          "graphiceq": 7.3,
+          "waveshaper": 2.9,
+          "freqshift": 2.9,
+          "resonator": 2.9,
+          "tape": 2.5,
+          "spring_reverb": 2.5,
+          "combulator": 2.5,
+          "nimbus": 1.6,
+          "ensemble": 1.3,
+          "mstool": 1.0,
+          "exciter": 1.0,
+          "audio_input": 0.3,
+          "ringmod": 0.3,
+          "convolution": 0.3,
+          "treemonster": 0.3
+        },
+        "pctNoFx": 8.3
+      }
+    },
+    "polysynth": {
+      "n_patches": 189,
+      "ampEnv": {
+        "attackMs": {
+          "n": 188,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 21.22,
+          "p90": 129.23,
+          "max": 5348.53,
+          "pct_at_floor": 50.0,
+          "pct_le_6ms": 56.4,
+          "pct_le_12_5ms": 68.1,
+          "pct_le_20ms": 73.9,
+          "pct_le_30ms": 82.4,
+          "pct_gt_100ms": 10.6
+        },
+        "decayMs": {
+          "n": 188,
+          "min": 3.91,
+          "p10": 250.0,
+          "p25": 250.0,
+          "median": 1000.0,
+          "p75": 1569.51,
+          "p90": 4281.67,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 189,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.546,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 188,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 31.25,
+          "median": 327.68,
+          "p75": 1066.86,
+          "p90": 1772.87,
+          "max": 6293.72
+        },
+        "attackShapePct": {
+          "0": 9.0,
+          "1": 72.5,
+          "2": 18.5
+        },
+        "pctAnalogMode": 10.6
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 189,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 19.52,
+          "p90": 430.39,
+          "max": 32000.0
+        },
+        "decayMs": {
+          "n": 189,
+          "min": 3.91,
+          "p10": 37.69,
+          "p25": 173.6,
+          "median": 446.19,
+          "p75": 3228.97,
+          "p90": 5628.92,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 189,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.3,
+          "p90": 0.659,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 189,
+          "min": 3.91,
+          "p10": 63.8,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 1891.93,
+          "p90": 3172.69,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 188,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 5.61,
+        "p75": 24.95,
+        "p90": 567.61,
+        "max": 25545.64,
+        "pct_le_12_5ms": 60.1,
+        "pct_le_30ms": 77.7
+      },
+      "filter": {
+        "pctFilter1Off": 7.9,
+        "cutoffHzKnob": {
+          "n": 174,
+          "min": 14.0,
+          "p10": 74.0,
+          "p25": 131.0,
+          "median": 319.0,
+          "p75": 594.0,
+          "p90": 1665.0,
+          "max": 19912.0
+        },
+        "resonance01": {
+          "n": 174,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.31,
+          "p75": 0.685,
+          "p90": 0.895,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 174,
+          "min": -96.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 9.26,
+          "p75": 32.79,
+          "p90": 53.21,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 174,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.461,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 67.2,
+          "FX": 10.1,
+          "HP": 7.9,
+          "off": 7.9,
+          "Notch": 3.2,
+          "BP": 2.6,
+          "Multi": 1.1
+        },
+        "pctFilter2On": 54.0
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 189,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1,
+          "median": 2,
+          "p75": 2,
+          "p90": 2.2,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 6.3,
+          "1": 39.7,
+          "2": 43.9,
+          "3": 10.1
+        },
+        "typePct": {
+          "Classic": 59.3,
+          "Wavetable": 24.9,
+          "FM2": 6.9,
+          "Window": 5.8,
+          "Sine": 5.3,
+          "Alias": 4.2,
+          "Modern": 2.6,
+          "FM3": 1.6,
+          "S&H Noise": 0.5,
+          "Twist": 0.5
+        },
+        "pctOctaveSplit": 27.5,
+        "pctNoiseLayer": 18.5,
+        "pctRingMod": 4.8,
+        "pctFM": 13.2,
+        "pctWaveshaper": 42.9
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 87,
+          "2": 17,
+          "3": 14,
+          "4": 14,
+          "5": 8,
+          "6": 10,
+          "7": 6,
+          "8": 7,
+          "9": 13,
+          "12": 3,
+          "13": 2,
+          "15": 1,
+          "16": 7
+        },
+        "pct_unison_on": 54.0,
+        "pct_voices_ge3": 45.0,
+        "pct_voices_ge5": 30.2,
+        "pct_voices_ge7": 20.6,
+        "detune_cents_any_unison": {
+          "n": 143,
+          "min": 0.0,
+          "p10": 4.9,
+          "p25": 9.0,
+          "median": 15.0,
+          "p75": 20.0,
+          "p90": 29.0,
+          "max": 52.1
+        },
+        "detune_cents_voices_ge5": {
+          "n": 75,
+          "min": 0.0,
+          "p10": 6.8,
+          "p25": 12.3,
+          "median": 20.0,
+          "p75": 24.4,
+          "p90": 36.1,
+          "max": 45.4
+        },
+        "median_voices_when_on": 5.0
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 96.8,
+          "mono": 2.6,
+          "mono_st": 0.5
+        },
+        "pctDualScene": 12.2
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 189,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1,
+          "median": 2,
+          "p75": 3,
+          "p90": 4.0,
+          "max": 8
+        },
+        "pctByType": {
+          "delay": 75.1,
+          "reverb1": 38.1,
+          "eq": 32.8,
+          "chorus": 16.4,
+          "airwindows": 7.9,
+          "conditioner": 7.4,
+          "distortion": 6.9,
+          "reverb2": 6.3,
+          "phaser": 5.8,
+          "freqshift": 2.6,
+          "rotary": 2.1,
+          "mstool": 1.1,
+          "flanger": 1.1,
+          "combulator": 0.5,
+          "resonator": 0.5,
+          "ensemble": 0.5,
+          "graphiceq": 0.5
+        },
+        "pctNoFx": 7.4
+      }
+    },
+    "chords": {
+      "n_patches": 28,
+      "ampEnv": {
+        "attackMs": {
+          "n": 28,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 4.83,
+          "p75": 6.03,
+          "p90": 24.89,
+          "max": 41.59,
+          "pct_at_floor": 50.0,
+          "pct_le_6ms": 53.6,
+          "pct_le_12_5ms": 85.7,
+          "pct_le_20ms": 89.3,
+          "pct_le_30ms": 89.3,
+          "pct_gt_100ms": 0.0
+        },
+        "decayMs": {
+          "n": 28,
+          "min": 44.93,
+          "p10": 132.49,
+          "p25": 132.49,
+          "median": 250.0,
+          "p75": 1000.0,
+          "p90": 1000.0,
+          "max": 7970.35
+        },
+        "sustain": {
+          "n": 28,
+          "min": 0.0,
+          "p10": 0.306,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 28,
+          "min": 9.81,
+          "p10": 22.21,
+          "p25": 25.75,
+          "median": 31.25,
+          "p75": 63.25,
+          "p90": 180.29,
+          "max": 186.44
+        },
+        "attackShapePct": {
+          "0": 3.6,
+          "1": 57.1,
+          "2": 39.3
+        },
+        "pctAnalogMode": 0.0
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 28,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 4.07,
+          "p75": 108.84,
+          "p90": 480.92,
+          "max": 829.53
+        },
+        "decayMs": {
+          "n": 28,
+          "min": 15.21,
+          "p10": 112.58,
+          "p25": 238.22,
+          "median": 250.0,
+          "p75": 446.19,
+          "p90": 1898.69,
+          "max": 2303.09
+        },
+        "sustain": {
+          "n": 28,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.0,
+          "p90": 0.143,
+          "max": 0.252
+        },
+        "releaseMs": {
+          "n": 28,
+          "min": 9.92,
+          "p10": 250.0,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 2661.98,
+          "p90": 2661.98,
+          "max": 2728.7
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 28,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 6.03,
+        "p75": 27.87,
+        "p90": 480.92,
+        "max": 829.53,
+        "pct_le_12_5ms": 67.9,
+        "pct_le_30ms": 75.0
+      },
+      "filter": {
+        "pctFilter1Off": 3.6,
+        "cutoffHzKnob": {
+          "n": 27,
+          "min": 30.0,
+          "p10": 57.0,
+          "p25": 129.0,
+          "median": 523.0,
+          "p75": 3120.0,
+          "p90": 6692.0,
+          "max": 19912.0
+        },
+        "resonance01": {
+          "n": 27,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.091,
+          "median": 0.222,
+          "p75": 0.335,
+          "p90": 0.635,
+          "max": 0.726
+        },
+        "envModSemitones": {
+          "n": 27,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 19.54,
+          "p75": 65.74,
+          "p90": 96.0,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 27,
+          "min": -0.286,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.232,
+          "p90": 0.493,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 82.1,
+          "BP": 7.1,
+          "Notch": 3.6,
+          "off": 3.6,
+          "FX": 3.6
+        },
+        "pctFilter2On": 25.0
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 28,
+          "min": 1,
+          "p10": 1.0,
+          "p25": 2.0,
+          "median": 3.0,
+          "p75": 3.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "1": 14.3,
+          "2": 14.3,
+          "3": 71.4
+        },
+        "typePct": {
+          "Classic": 60.7,
+          "Wavetable": 21.4,
+          "Sine": 21.4
+        },
+        "pctOctaveSplit": 78.6,
+        "pctNoiseLayer": 14.3,
+        "pctRingMod": 3.6,
+        "pctFM": 17.9,
+        "pctWaveshaper": 14.3
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 14,
+          "2": 2,
+          "3": 7,
+          "4": 2,
+          "6": 1,
+          "7": 1,
+          "8": 1
+        },
+        "pct_unison_on": 50.0,
+        "pct_voices_ge3": 42.9,
+        "pct_voices_ge5": 10.7,
+        "pct_voices_ge7": 7.1,
+        "detune_cents_any_unison": {
+          "n": 28,
+          "min": 4.3,
+          "p10": 5.0,
+          "p25": 8.6,
+          "median": 12.1,
+          "p75": 18.5,
+          "p90": 21.6,
+          "max": 350.0
+        },
+        "detune_cents_voices_ge5": {
+          "n": 3,
+          "min": 12.0,
+          "p10": 13.2,
+          "p25": 15.1,
+          "median": 18.2,
+          "p75": 21.8,
+          "p90": 24.0,
+          "max": 25.4
+        },
+        "median_voices_when_on": 3.0
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 39.3,
+          "mono_st_fp": 17.9,
+          "mono": 14.3,
+          "mono_st": 14.3,
+          "mono_fp": 14.3
+        },
+        "pctDualScene": 21.4
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 28,
+          "min": 0,
+          "p10": 0.7,
+          "p25": 1.0,
+          "median": 2.0,
+          "p75": 2.25,
+          "p90": 4.0,
+          "max": 8
+        },
+        "pctByType": {
+          "reverb1": 42.9,
+          "delay": 35.7,
+          "chorus": 32.1,
+          "airwindows": 17.9,
+          "reverb2": 17.9,
+          "eq": 10.7,
+          "phaser": 7.1,
+          "freqshift": 3.6,
+          "conditioner": 3.6,
+          "distortion": 3.6
+        },
+        "pctNoFx": 10.7
+      }
+    },
+    "sequence": {
+      "n_patches": 230,
+      "ampEnv": {
+        "attackMs": {
+          "n": 229,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 6.97,
+          "p90": 29.97,
+          "max": 6837.73,
+          "pct_at_floor": 68.6,
+          "pct_le_6ms": 72.5,
+          "pct_le_12_5ms": 83.0,
+          "pct_le_20ms": 86.9,
+          "pct_le_30ms": 90.0,
+          "pct_gt_100ms": 6.6
+        },
+        "decayMs": {
+          "n": 228,
+          "min": 3.91,
+          "p10": 108.5,
+          "p25": 250.0,
+          "median": 611.01,
+          "p75": 1000.0,
+          "p90": 8734.69,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 230,
+          "min": 0.0,
+          "p10": 0.045,
+          "p25": 0.728,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 228,
+          "min": 3.91,
+          "p10": 11.72,
+          "p25": 31.25,
+          "median": 31.25,
+          "p75": 625.24,
+          "p90": 1508.05,
+          "max": 11035.93
+        },
+        "attackShapePct": {
+          "0": 1.7,
+          "1": 91.7,
+          "2": 6.5
+        },
+        "pctAnalogMode": 14.3
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 229,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 4.27,
+          "p90": 47.06,
+          "max": 32000.0
+        },
+        "decayMs": {
+          "n": 227,
+          "min": 3.91,
+          "p10": 58.2,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 739.51,
+          "p90": 3473.59,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 230,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.158,
+          "p90": 0.62,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 230,
+          "min": 3.91,
+          "p10": 245.2,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 267.68,
+          "p90": 2861.51,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 229,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 3.91,
+        "p75": 10.43,
+        "p90": 101.86,
+        "max": 32000.0,
+        "pct_le_12_5ms": 76.9,
+        "pct_le_30ms": 83.8
+      },
+      "filter": {
+        "pctFilter1Off": 13.9,
+        "cutoffHzKnob": {
+          "n": 198,
+          "min": 14.0,
+          "p10": 41.0,
+          "p25": 131.0,
+          "median": 497.0,
+          "p75": 1482.0,
+          "p90": 4743.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 198,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.225,
+          "p75": 0.582,
+          "p90": 0.814,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 198,
+          "min": -51.26,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 32.38,
+          "p90": 81.08,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 198,
+          "min": -0.129,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.246,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 63.5,
+          "off": 13.9,
+          "FX": 9.6,
+          "HP": 7.8,
+          "BP": 3.5,
+          "Multi": 1.3,
+          "Notch": 0.4
+        },
+        "pctFilter2On": 59.1
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 230,
+          "min": 0,
+          "p10": 0.9,
+          "p25": 1.0,
+          "median": 2.0,
+          "p75": 2.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 10.0,
+          "1": 39.1,
+          "2": 26.1,
+          "3": 24.8
+        },
+        "typePct": {
+          "Classic": 38.7,
+          "Wavetable": 34.8,
+          "Sine": 15.7,
+          "FM2": 8.7,
+          "Window": 6.1,
+          "Twist": 3.5,
+          "S&H Noise": 2.6,
+          "FM3": 2.6,
+          "Modern": 2.6,
+          "Alias": 1.3
+        },
+        "pctOctaveSplit": 37.4,
+        "pctNoiseLayer": 14.8,
+        "pctRingMod": 6.1,
+        "pctFM": 21.7,
+        "pctWaveshaper": 49.6
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 132,
+          "2": 27,
+          "3": 22,
+          "4": 4,
+          "5": 7,
+          "6": 10,
+          "7": 6,
+          "8": 6,
+          "9": 3,
+          "10": 2,
+          "11": 3,
+          "13": 1,
+          "14": 1,
+          "15": 1,
+          "16": 5
+        },
+        "pct_unison_on": 42.6,
+        "pct_voices_ge3": 30.9,
+        "pct_voices_ge5": 19.6,
+        "pct_voices_ge7": 12.2,
+        "detune_cents_any_unison": {
+          "n": 131,
+          "min": 0.0,
+          "p10": 4.5,
+          "p25": 7.2,
+          "median": 11.2,
+          "p75": 20.0,
+          "p90": 25.4,
+          "max": 93.4
+        },
+        "detune_cents_voices_ge5": {
+          "n": 60,
+          "min": 0.0,
+          "p10": 3.8,
+          "p25": 7.2,
+          "median": 15.3,
+          "p75": 20.2,
+          "p90": 24.4,
+          "max": 87.0
+        },
+        "median_voices_when_on": 3.5
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 70.0,
+          "mono_st": 12.6,
+          "mono": 10.0,
+          "mono_st_fp": 7.0,
+          "mono_fp": 0.4
+        },
+        "pctDualScene": 35.2
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 230,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 2.0,
+          "median": 3.0,
+          "p75": 5.0,
+          "p90": 6.0,
+          "max": 11
+        },
+        "pctByType": {
+          "delay": 75.7,
+          "reverb1": 41.3,
+          "conditioner": 25.7,
+          "chorus": 23.0,
+          "eq": 20.9,
+          "airwindows": 18.3,
+          "distortion": 13.5,
+          "phaser": 11.7,
+          "reverb2": 8.7,
+          "freqshift": 6.5,
+          "nimbus": 6.1,
+          "rotary": 3.9,
+          "flanger": 1.7,
+          "tape": 1.7,
+          "ensemble": 1.3,
+          "combulator": 1.3,
+          "graphiceq": 0.9,
+          "ringmod": 0.9,
+          "spring_reverb": 0.9,
+          "waveshaper": 0.9,
+          "exciter": 0.4,
+          "neuron": 0.4
+        },
+        "pctNoFx": 3.5
+      }
+    },
+    "bell": {
+      "n_patches": 52,
+      "ampEnv": {
+        "attackMs": {
+          "n": 52,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 5.16,
+          "p75": 14.26,
+          "p90": 20.03,
+          "max": 620.93,
+          "pct_at_floor": 34.6,
+          "pct_le_6ms": 51.9,
+          "pct_le_12_5ms": 71.2,
+          "pct_le_20ms": 88.5,
+          "pct_le_30ms": 90.4,
+          "pct_gt_100ms": 5.8
+        },
+        "decayMs": {
+          "n": 52,
+          "min": 3.91,
+          "p10": 54.77,
+          "p25": 301.18,
+          "median": 1477.19,
+          "p75": 2526.87,
+          "p90": 3836.5,
+          "max": 5398.29
+        },
+        "sustain": {
+          "n": 52,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.127,
+          "p75": 0.5,
+          "p90": 0.638,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 49,
+          "min": 19.08,
+          "p10": 64.99,
+          "p25": 402.13,
+          "median": 1614.2,
+          "p75": 3000.0,
+          "p90": 4733.34,
+          "max": 17709.17
+        },
+        "attackShapePct": {
+          "0": 17.3,
+          "1": 82.7
+        },
+        "pctAnalogMode": 40.4
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 52,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 3.91,
+          "p90": 6.6,
+          "max": 375.0
+        },
+        "decayMs": {
+          "n": 52,
+          "min": 3.91,
+          "p10": 38.05,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 669.17,
+          "p90": 2566.85,
+          "max": 7698.89
+        },
+        "sustain": {
+          "n": 52,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 52,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 1000.0,
+          "p90": 2000.0,
+          "max": 11887.93
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 52,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 5.16,
+        "p75": 14.26,
+        "p90": 20.03,
+        "max": 620.93,
+        "pct_le_12_5ms": 69.2,
+        "pct_le_30ms": 90.4
+      },
+      "filter": {
+        "pctFilter1Off": 28.8,
+        "cutoffHzKnob": {
+          "n": 37,
+          "min": 14.0,
+          "p10": 56.0,
+          "p25": 236.0,
+          "median": 1442.0,
+          "p75": 3172.0,
+          "p90": 6000.0,
+          "max": 12812.0
+        },
+        "resonance01": {
+          "n": 37,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.25,
+          "p75": 0.701,
+          "p90": 0.82,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 37,
+          "min": -36.89,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 12.34,
+          "p90": 60.6,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 37,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "FX": 28.8,
+          "off": 28.8,
+          "LP": 25.0,
+          "HP": 7.7,
+          "BP": 7.7,
+          "Notch": 1.9
+        },
+        "pctFilter2On": 59.6
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 52,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 2.0,
+          "p90": 2.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 13.5,
+          "1": 59.6,
+          "2": 21.2,
+          "3": 5.8
+        },
+        "typePct": {
+          "Sine": 30.8,
+          "Twist": 15.4,
+          "Modern": 15.4,
+          "FM3": 13.5,
+          "Wavetable": 9.6,
+          "FM2": 5.8,
+          "String": 1.9,
+          "Alias": 1.9
+        },
+        "pctOctaveSplit": 21.2,
+        "pctNoiseLayer": 7.7,
+        "pctRingMod": 7.7,
+        "pctFM": 17.3,
+        "pctWaveshaper": 36.5
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 41,
+          "2": 5,
+          "3": 2,
+          "8": 1,
+          "16": 3
+        },
+        "pct_unison_on": 21.2,
+        "pct_voices_ge3": 11.5,
+        "pct_voices_ge5": 7.7,
+        "pct_voices_ge7": 7.7,
+        "detune_cents_any_unison": {
+          "n": 13,
+          "min": 0.0,
+          "p10": 1.6,
+          "p25": 2.0,
+          "median": 8.1,
+          "p75": 10.0,
+          "p90": 11.0,
+          "max": 11.2
+        },
+        "detune_cents_voices_ge5": {
+          "n": 6,
+          "min": 1.5,
+          "p10": 4.8,
+          "p25": 8.6,
+          "median": 10.0,
+          "p75": 10.9,
+          "p90": 11.2,
+          "max": 11.2
+        },
+        "median_voices_when_on": 3
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 94.2,
+          "mono_fp": 1.9,
+          "mono_st_fp": 1.9,
+          "mono": 1.9
+        },
+        "pctDualScene": 7.7
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 52,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1.0,
+          "median": 2.0,
+          "p75": 4.0,
+          "p90": 6.0,
+          "max": 8
+        },
+        "pctByType": {
+          "reverb2": 46.2,
+          "reverb1": 44.2,
+          "eq": 42.3,
+          "conditioner": 28.8,
+          "delay": 25.0,
+          "flanger": 13.5,
+          "airwindows": 13.5,
+          "chorus": 13.5,
+          "resonator": 9.6,
+          "combulator": 3.8,
+          "distortion": 1.9,
+          "ringmod": 1.9,
+          "nimbus": 1.9,
+          "phaser": 1.9,
+          "graphiceq": 1.9,
+          "rotary": 1.9
+        },
+        "pctNoFx": 5.8
+      }
+    },
+    "brass": {
+      "n_patches": 75,
+      "ampEnv": {
+        "attackMs": {
+          "n": 75,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 21.37,
+          "p75": 54.53,
+          "p90": 511.9,
+          "max": 5193.8,
+          "pct_at_floor": 29.3,
+          "pct_le_6ms": 32.0,
+          "pct_le_12_5ms": 40.0,
+          "pct_le_20ms": 45.3,
+          "pct_le_30ms": 57.3,
+          "pct_gt_100ms": 17.3
+        },
+        "decayMs": {
+          "n": 75,
+          "min": 3.91,
+          "p10": 139.54,
+          "p25": 250.0,
+          "median": 512.17,
+          "p75": 4526.66,
+          "p90": 10852.86,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 75,
+          "min": 0.0,
+          "p10": 0.49,
+          "p25": 0.72,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 75,
+          "min": 3.91,
+          "p10": 14.93,
+          "p25": 31.25,
+          "median": 61.43,
+          "p75": 227.54,
+          "p90": 1277.85,
+          "max": 8049.69
+        },
+        "attackShapePct": {
+          "0": 10.7,
+          "1": 82.7,
+          "2": 6.7
+        },
+        "pctAnalogMode": 16.0
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 75,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 21.37,
+          "p75": 72.65,
+          "p90": 399.25,
+          "max": 24341.72
+        },
+        "decayMs": {
+          "n": 75,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 250.0,
+          "median": 591.67,
+          "p75": 2347.99,
+          "p90": 6898.35,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 75,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.147,
+          "p75": 0.589,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 75,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 94.48,
+          "median": 250.0,
+          "p75": 668.07,
+          "p90": 1391.11,
+          "max": 21343.4
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 75,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 12.04,
+        "median": 41.59,
+        "p75": 116.86,
+        "p90": 537.92,
+        "max": 24341.72,
+        "pct_le_12_5ms": 25.3,
+        "pct_le_30ms": 41.3
+      },
+      "filter": {
+        "pctFilter1Off": 10.7,
+        "cutoffHzKnob": {
+          "n": 67,
+          "min": 14.0,
+          "p10": 37.0,
+          "p25": 69.0,
+          "median": 234.0,
+          "p75": 523.0,
+          "p90": 939.0,
+          "max": 12812.0
+        },
+        "resonance01": {
+          "n": 67,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.26,
+          "p90": 0.471,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 67,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 15.63,
+          "p75": 28.29,
+          "p90": 63.77,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 67,
+          "min": -0.202,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.163,
+          "p75": 0.955,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 72.0,
+          "off": 10.7,
+          "FX": 6.7,
+          "HP": 6.7,
+          "BP": 2.7,
+          "Notch": 1.3
+        },
+        "pctFilter2On": 61.3
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 75,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1.0,
+          "median": 2,
+          "p75": 2.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 8.0,
+          "1": 40.0,
+          "2": 38.7,
+          "3": 13.3
+        },
+        "typePct": {
+          "Classic": 41.3,
+          "Wavetable": 24.0,
+          "FM2": 20.0,
+          "Twist": 9.3,
+          "Modern": 5.3,
+          "String": 5.3,
+          "FM3": 2.7,
+          "S&H Noise": 1.3
+        },
+        "pctOctaveSplit": 17.3,
+        "pctNoiseLayer": 18.7,
+        "pctRingMod": 4.0,
+        "pctFM": 8.0,
+        "pctWaveshaper": 32.0
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 47,
+          "2": 7,
+          "3": 7,
+          "4": 5,
+          "6": 2,
+          "8": 1,
+          "9": 4,
+          "16": 2
+        },
+        "pct_unison_on": 37.3,
+        "pct_voices_ge3": 28.0,
+        "pct_voices_ge5": 12.0,
+        "pct_voices_ge7": 9.3,
+        "detune_cents_any_unison": {
+          "n": 38,
+          "min": 2.2,
+          "p10": 3.6,
+          "p25": 6.6,
+          "median": 10.0,
+          "p75": 12.3,
+          "p90": 19.6,
+          "max": 20.0
+        },
+        "detune_cents_voices_ge5": {
+          "n": 13,
+          "min": 2.2,
+          "p10": 5.3,
+          "p25": 10.0,
+          "median": 12.3,
+          "p75": 20.0,
+          "p90": 20.0,
+          "max": 20.0
+        },
+        "median_voices_when_on": 3.5
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 96.0,
+          "mono_st_fp": 1.3,
+          "mono": 1.3,
+          "mono_st": 1.3
+        },
+        "pctDualScene": 10.7
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 75,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1.0,
+          "median": 2,
+          "p75": 4.5,
+          "p90": 7.0,
+          "max": 11
+        },
+        "pctByType": {
+          "reverb2": 38.7,
+          "reverb1": 34.7,
+          "delay": 32.0,
+          "eq": 32.0,
+          "airwindows": 17.3,
+          "graphiceq": 17.3,
+          "conditioner": 16.0,
+          "resonator": 13.3,
+          "waveshaper": 9.3,
+          "ensemble": 6.7,
+          "phaser": 4.0,
+          "combulator": 4.0,
+          "tape": 4.0,
+          "chorus": 2.7,
+          "distortion": 2.7,
+          "nimbus": 2.7,
+          "freqshift": 2.7,
+          "spring_reverb": 1.3,
+          "rotary": 1.3
+        },
+        "pctNoFx": 9.3
+      }
+    },
+    "strings": {
+      "n_patches": 65,
+      "ampEnv": {
+        "attackMs": {
+          "n": 65,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 39.63,
+          "p75": 260.42,
+          "p90": 843.97,
+          "max": 11800.04,
+          "pct_at_floor": 27.7,
+          "pct_le_6ms": 40.0,
+          "pct_le_12_5ms": 44.6,
+          "pct_le_20ms": 47.7,
+          "pct_le_30ms": 49.2,
+          "pct_gt_100ms": 43.1
+        },
+        "decayMs": {
+          "n": 65,
+          "min": 3.91,
+          "p10": 250.0,
+          "p25": 250.0,
+          "median": 703.0,
+          "p75": 2259.04,
+          "p90": 3295.8,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 65,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.339,
+          "median": 0.769,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 65,
+          "min": 3.91,
+          "p10": 62.6,
+          "p25": 173.14,
+          "median": 431.84,
+          "p75": 1469.0,
+          "p90": 2500.0,
+          "max": 6323.47
+        },
+        "attackShapePct": {
+          "0": 20.0,
+          "1": 80.0
+        },
+        "pctAnalogMode": 21.5
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 65,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 4.93,
+          "p90": 44.43,
+          "max": 2957.32
+        },
+        "decayMs": {
+          "n": 65,
+          "min": 3.91,
+          "p10": 12.52,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 737.14,
+          "p90": 3622.0,
+          "max": 17429.09
+        },
+        "sustain": {
+          "n": 65,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.671,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 65,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 2142.0,
+          "p90": 5786.01,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 65,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 52.9,
+        "p75": 301.01,
+        "p90": 992.28,
+        "max": 11800.04,
+        "pct_le_12_5ms": 43.1,
+        "pct_le_30ms": 46.2
+      },
+      "filter": {
+        "pctFilter1Off": 6.2,
+        "cutoffHzKnob": {
+          "n": 61,
+          "min": 14.0,
+          "p10": 73.0,
+          "p25": 157.0,
+          "median": 503.0,
+          "p75": 1873.0,
+          "p90": 2817.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 61,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.23,
+          "p75": 0.624,
+          "p90": 0.874,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 61,
+          "min": -31.43,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 2.61,
+          "p90": 17.94,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 61,
+          "min": -1.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.691,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 60.0,
+          "FX": 16.9,
+          "HP": 12.3,
+          "off": 6.2,
+          "Notch": 3.1,
+          "BP": 1.5
+        },
+        "pctFilter2On": 81.5
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 65,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 1,
+          "median": 1,
+          "p75": 2,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 18.5,
+          "1": 38.5,
+          "2": 20.0,
+          "3": 23.1
+        },
+        "typePct": {
+          "String": 29.2,
+          "Wavetable": 24.6,
+          "Classic": 23.1,
+          "Twist": 9.2,
+          "FM2": 9.2,
+          "Modern": 6.2,
+          "Alias": 1.5,
+          "Sine": 1.5
+        },
+        "pctOctaveSplit": 13.8,
+        "pctNoiseLayer": 13.8,
+        "pctRingMod": 6.2,
+        "pctFM": 16.9,
+        "pctWaveshaper": 44.6
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 53,
+          "2": 2,
+          "3": 1,
+          "4": 2,
+          "7": 1,
+          "8": 1,
+          "9": 1,
+          "10": 1,
+          "16": 3
+        },
+        "pct_unison_on": 18.5,
+        "pct_voices_ge3": 15.4,
+        "pct_voices_ge5": 10.8,
+        "pct_voices_ge7": 10.8,
+        "detune_cents_any_unison": {
+          "n": 20,
+          "min": 5.3,
+          "p10": 8.0,
+          "p25": 10.0,
+          "median": 10.6,
+          "p75": 16.5,
+          "p90": 19.0,
+          "max": 20.1
+        },
+        "detune_cents_voices_ge5": {
+          "n": 11,
+          "min": 9.6,
+          "p10": 10.0,
+          "p25": 10.6,
+          "median": 16.0,
+          "p75": 18.8,
+          "p90": 19.0,
+          "max": 20.1
+        },
+        "median_voices_when_on": 7.5
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 95.4,
+          "mono_st_fp": 3.1,
+          "mono_fp": 1.5
+        },
+        "pctDualScene": 27.7
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 65,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 2,
+          "median": 4,
+          "p75": 7,
+          "p90": 8.6,
+          "max": 13
+        },
+        "pctByType": {
+          "eq": 53.8,
+          "reverb1": 46.2,
+          "reverb2": 46.2,
+          "conditioner": 35.4,
+          "airwindows": 35.4,
+          "delay": 24.6,
+          "resonator": 23.1,
+          "combulator": 18.5,
+          "chorus": 15.4,
+          "graphiceq": 12.3,
+          "waveshaper": 12.3,
+          "flanger": 7.7,
+          "ensemble": 7.7,
+          "tape": 4.6,
+          "nimbus": 4.6,
+          "distortion": 3.1,
+          "spring_reverb": 3.1,
+          "phaser": 3.1,
+          "bonsai": 1.5,
+          "freqshift": 1.5
+        },
+        "pctNoFx": 9.2
+      }
+    },
+    "organ": {
+      "n_patches": 40,
+      "ampEnv": {
+        "attackMs": {
+          "n": 40,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 4.1,
+          "p75": 21.71,
+          "p90": 288.79,
+          "max": 989.14,
+          "pct_at_floor": 47.5,
+          "pct_le_6ms": 57.5,
+          "pct_le_12_5ms": 65.0,
+          "pct_le_20ms": 75.0,
+          "pct_le_30ms": 75.0,
+          "pct_gt_100ms": 15.0
+        },
+        "decayMs": {
+          "n": 40,
+          "min": 3.91,
+          "p10": 6.41,
+          "p25": 250.0,
+          "median": 302.53,
+          "p75": 1000.0,
+          "p90": 2633.68,
+          "max": 9876.43
+        },
+        "sustain": {
+          "n": 40,
+          "min": 0.0,
+          "p10": 0.435,
+          "p25": 0.739,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 40,
+          "min": 15.09,
+          "p10": 26.94,
+          "p25": 31.25,
+          "median": 73.84,
+          "p75": 511.49,
+          "p90": 1882.31,
+          "max": 3543.08
+        },
+        "attackShapePct": {
+          "0": 2.5,
+          "1": 97.5
+        },
+        "pctAnalogMode": 12.5
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 40,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 3.91,
+          "p90": 183.46,
+          "max": 32000.0
+        },
+        "decayMs": {
+          "n": 40,
+          "min": 3.91,
+          "p10": 13.43,
+          "p25": 231.78,
+          "median": 250.0,
+          "p75": 250.0,
+          "p90": 770.92,
+          "max": 31378.17
+        },
+        "sustain": {
+          "n": 40,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.005,
+          "p75": 0.661,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 40,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 31.25,
+          "median": 250.0,
+          "p75": 250.0,
+          "p90": 522.1,
+          "max": 3796.22
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 40,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 4.1,
+        "p75": 25.18,
+        "p90": 417.67,
+        "max": 32000.0,
+        "pct_le_12_5ms": 65.0,
+        "pct_le_30ms": 75.0
+      },
+      "filter": {
+        "pctFilter1Off": 17.5,
+        "cutoffHzKnob": {
+          "n": 33,
+          "min": 14.0,
+          "p10": 148.0,
+          "p25": 286.0,
+          "median": 523.0,
+          "p75": 830.0,
+          "p90": 1784.0,
+          "max": 12812.0
+        },
+        "resonance01": {
+          "n": 33,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.159,
+          "median": 0.38,
+          "p75": 0.627,
+          "p90": 0.917,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 33,
+          "min": -34.52,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 24.17,
+          "p90": 46.7,
+          "max": 64.63
+        },
+        "keytrack01": {
+          "n": 33,
+          "min": -0.043,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 60.0,
+          "off": 17.5,
+          "FX": 12.5,
+          "HP": 7.5,
+          "BP": 2.5
+        },
+        "pctFilter2On": 42.5
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 40,
+          "min": 0,
+          "p10": 0.9,
+          "p25": 1.0,
+          "median": 2.0,
+          "p75": 3.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 10.0,
+          "1": 25.0,
+          "2": 30.0,
+          "3": 35.0
+        },
+        "typePct": {
+          "Wavetable": 45.0,
+          "Classic": 22.5,
+          "Modern": 17.5,
+          "Sine": 15.0,
+          "Alias": 10.0,
+          "FM2": 5.0
+        },
+        "pctOctaveSplit": 50.0,
+        "pctNoiseLayer": 27.5,
+        "pctRingMod": 5.0,
+        "pctFM": 22.5,
+        "pctWaveshaper": 50.0
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 27,
+          "2": 3,
+          "3": 3,
+          "4": 2,
+          "5": 1,
+          "6": 1,
+          "8": 1,
+          "10": 1,
+          "16": 1
+        },
+        "pct_unison_on": 32.5,
+        "pct_voices_ge3": 25.0,
+        "pct_voices_ge5": 12.5,
+        "pct_voices_ge7": 7.5,
+        "detune_cents_any_unison": {
+          "n": 17,
+          "min": 1.4,
+          "p10": 1.9,
+          "p25": 4.0,
+          "median": 9.5,
+          "p75": 10.0,
+          "p90": 15.8,
+          "max": 100.0
+        },
+        "detune_cents_voices_ge5": {
+          "n": 5,
+          "min": 4.6,
+          "p10": 6.8,
+          "p25": 10.0,
+          "median": 10.0,
+          "p75": 24.6,
+          "p90": 69.8,
+          "max": 100.0
+        },
+        "median_voices_when_on": 4
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 100.0
+        },
+        "pctDualScene": 7.5
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 40,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 2.0,
+          "p75": 2.25,
+          "p90": 4.0,
+          "max": 5
+        },
+        "pctByType": {
+          "rotary": 45.0,
+          "reverb1": 27.5,
+          "eq": 15.0,
+          "delay": 12.5,
+          "reverb2": 12.5,
+          "chorus": 12.5,
+          "conditioner": 10.0,
+          "airwindows": 7.5,
+          "distortion": 5.0,
+          "nimbus": 5.0,
+          "graphiceq": 5.0,
+          "combulator": 2.5,
+          "tape": 2.5,
+          "phaser": 2.5
+        },
+        "pctNoFx": 30.0
+      }
+    },
+    "guitar": {
+      "n_patches": 39,
+      "ampEnv": {
+        "attackMs": {
+          "n": 39,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 4.4,
+          "p90": 10.28,
+          "max": 35.99,
+          "pct_at_floor": 66.7,
+          "pct_le_6ms": 79.5,
+          "pct_le_12_5ms": 89.7,
+          "pct_le_20ms": 97.4,
+          "pct_le_30ms": 97.4,
+          "pct_gt_100ms": 0.0
+        },
+        "decayMs": {
+          "n": 39,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 308.92,
+          "median": 1862.38,
+          "p75": 6022.28,
+          "p90": 6927.37,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 39,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.001,
+          "p75": 0.992,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 39,
+          "min": 3.91,
+          "p10": 13.13,
+          "p25": 30.1,
+          "median": 92.14,
+          "p75": 254.79,
+          "p90": 1000.0,
+          "max": 1756.67
+        },
+        "attackShapePct": {
+          "0": 5.1,
+          "1": 94.9
+        },
+        "pctAnalogMode": 71.8
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 39,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 3.91,
+          "p90": 8.58,
+          "max": 31.44
+        },
+        "decayMs": {
+          "n": 39,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 178.1,
+          "median": 1315.6,
+          "p75": 3409.86,
+          "p90": 5928.6,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 39,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.0,
+          "p90": 0.051,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 39,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 49.46,
+          "median": 250.0,
+          "p75": 408.79,
+          "p90": 2637.17,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 39,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 3.91,
+        "p75": 7.97,
+        "p90": 13.12,
+        "max": 35.99,
+        "pct_le_12_5ms": 89.7,
+        "pct_le_30ms": 94.9
+      },
+      "filter": {
+        "pctFilter1Off": 12.8,
+        "cutoffHzKnob": {
+          "n": 34,
+          "min": 18.0,
+          "p10": 32.0,
+          "p25": 107.0,
+          "median": 312.0,
+          "p75": 523.0,
+          "p90": 1554.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 34,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.065,
+          "p75": 0.187,
+          "p90": 0.539,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 34,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 22.92,
+          "p75": 46.29,
+          "p90": 95.74,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 34,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.214,
+          "median": 0.577,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 56.4,
+          "FX": 25.6,
+          "off": 12.8,
+          "Notch": 2.6,
+          "BP": 2.6
+        },
+        "pctFilter2On": 79.5
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 39,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 1.0,
+          "median": 1,
+          "p75": 2.0,
+          "p90": 2.2,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 2.6,
+          "1": 66.7,
+          "2": 20.5,
+          "3": 10.3
+        },
+        "typePct": {
+          "Wavetable": 25.6,
+          "String": 20.5,
+          "FM2": 15.4,
+          "Twist": 15.4,
+          "Modern": 12.8,
+          "Alias": 7.7,
+          "Classic": 7.7,
+          "Sine": 5.1,
+          "Window": 2.6,
+          "FM3": 2.6,
+          "S&H Noise": 2.6
+        },
+        "pctOctaveSplit": 12.8,
+        "pctNoiseLayer": 5.1,
+        "pctRingMod": 10.3,
+        "pctFM": 15.4,
+        "pctWaveshaper": 35.9
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 30,
+          "2": 3,
+          "3": 2,
+          "4": 2,
+          "5": 2
+        },
+        "pct_unison_on": 23.1,
+        "pct_voices_ge3": 15.4,
+        "pct_voices_ge5": 5.1,
+        "pct_voices_ge7": 0.0,
+        "detune_cents_any_unison": {
+          "n": 12,
+          "min": 0.0,
+          "p10": 0.1,
+          "p25": 1.2,
+          "median": 6.9,
+          "p75": 8.8,
+          "p90": 10.2,
+          "max": 12.9
+        },
+        "detune_cents_voices_ge5": {
+          "n": 2,
+          "min": 4.5,
+          "p10": 4.9,
+          "p25": 5.6,
+          "median": 6.7,
+          "p75": 7.8,
+          "p90": 8.5,
+          "max": 8.9
+        },
+        "median_voices_when_on": 3
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 94.9,
+          "mono": 2.6,
+          "mono_st_fp": 2.6
+        },
+        "pctDualScene": 17.9
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 39,
+          "min": 0,
+          "p10": 1.8,
+          "p25": 2.0,
+          "median": 4,
+          "p75": 5.0,
+          "p90": 7.0,
+          "max": 10
+        },
+        "pctByType": {
+          "eq": 59.0,
+          "delay": 43.6,
+          "distortion": 41.0,
+          "reverb1": 35.9,
+          "airwindows": 33.3,
+          "reverb2": 33.3,
+          "conditioner": 23.1,
+          "graphiceq": 20.5,
+          "chorus": 17.9,
+          "resonator": 15.4,
+          "combulator": 7.7,
+          "tape": 5.1,
+          "ensemble": 5.1,
+          "freqshift": 2.6,
+          "neuron": 2.6,
+          "phaser": 2.6,
+          "flanger": 2.6,
+          "waveshaper": 2.6,
+          "exciter": 2.6
+        },
+        "pctNoFx": 2.6
+      }
+    },
+    "atmos": {
+      "n_patches": 196,
+      "ampEnv": {
+        "attackMs": {
+          "n": 193,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 9.31,
+          "median": 100.0,
+          "p75": 1091.64,
+          "p90": 1995.71,
+          "max": 10714.06,
+          "pct_at_floor": 17.6,
+          "pct_le_6ms": 19.7,
+          "pct_le_12_5ms": 32.1,
+          "pct_le_20ms": 36.8,
+          "pct_le_30ms": 41.5,
+          "pct_gt_100ms": 50.8
+        },
+        "decayMs": {
+          "n": 193,
+          "min": 3.91,
+          "p10": 55.19,
+          "p25": 250.0,
+          "median": 1000.0,
+          "p75": 3000.0,
+          "p90": 6126.57,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 196,
+          "min": 0.0,
+          "p10": 0.374,
+          "p25": 0.593,
+          "median": 0.691,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 193,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 314.88,
+          "median": 1500.0,
+          "p75": 2000.0,
+          "p90": 3389.89,
+          "max": 16245.88
+        },
+        "attackShapePct": {
+          "0": 18.9,
+          "1": 78.6,
+          "2": 2.6
+        },
+        "pctAnalogMode": 3.1
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 196,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 124.79,
+          "p90": 1595.64,
+          "max": 10308.15
+        },
+        "decayMs": {
+          "n": 196,
+          "min": 3.91,
+          "p10": 94.4,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 1000.0,
+          "p90": 3298.89,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 196,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.175,
+          "p75": 0.5,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 196,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 1421.23,
+          "p90": 2171.34,
+          "max": 20382.1
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 193,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 10.0,
+        "median": 103.28,
+        "p75": 1324.46,
+        "p90": 3000.0,
+        "max": 10714.06,
+        "pct_le_12_5ms": 28.5,
+        "pct_le_30ms": 38.3
+      },
+      "filter": {
+        "pctFilter1Off": 8.2,
+        "cutoffHzKnob": {
+          "n": 180,
+          "min": 14.0,
+          "p10": 49.0,
+          "p25": 160.0,
+          "median": 600.0,
+          "p75": 1867.0,
+          "p90": 3406.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 180,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.162,
+          "p75": 0.426,
+          "p90": 0.778,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 180,
+          "min": -74.91,
+          "p10": -13.86,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 15.43,
+          "p90": 41.56,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 180,
+          "min": -0.849,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.332,
+          "p90": 0.994,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 37.8,
+          "FX": 31.6,
+          "HP": 12.8,
+          "off": 8.2,
+          "BP": 5.6,
+          "Notch": 2.6,
+          "Multi": 1.5
+        },
+        "pctFilter2On": 91.3
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 196,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 1.0,
+          "median": 2.0,
+          "p75": 3.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 16.3,
+          "1": 12.8,
+          "2": 32.1,
+          "3": 38.8
+        },
+        "typePct": {
+          "Sine": 36.2,
+          "Wavetable": 35.2,
+          "Classic": 25.0,
+          "FM3": 11.2,
+          "FM2": 8.7,
+          "Twist": 5.1,
+          "Alias": 5.1,
+          "S&H Noise": 5.1,
+          "Window": 3.6,
+          "String": 2.0,
+          "Modern": 2.0
+        },
+        "pctOctaveSplit": 54.6,
+        "pctNoiseLayer": 9.7,
+        "pctRingMod": 31.1,
+        "pctFM": 60.2,
+        "pctWaveshaper": 42.9
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 78,
+          "2": 22,
+          "3": 25,
+          "4": 11,
+          "5": 10,
+          "6": 7,
+          "7": 24,
+          "8": 4,
+          "9": 5,
+          "10": 4,
+          "11": 3,
+          "12": 1,
+          "15": 1,
+          "16": 1
+        },
+        "pct_unison_on": 60.2,
+        "pct_voices_ge3": 49.0,
+        "pct_voices_ge5": 30.6,
+        "pct_voices_ge7": 21.9,
+        "detune_cents_any_unison": {
+          "n": 198,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 4.0,
+          "median": 8.0,
+          "p75": 14.8,
+          "p90": 29.3,
+          "max": 99.0
+        },
+        "detune_cents_voices_ge5": {
+          "n": 87,
+          "min": 0.0,
+          "p10": 4.0,
+          "p25": 4.0,
+          "median": 6.0,
+          "p75": 11.9,
+          "p90": 32.2,
+          "max": 99.0
+        },
+        "median_voices_when_on": 5.0
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 90.8,
+          "mono": 3.1,
+          "mono_st_fp": 2.6,
+          "mono_st": 2.6,
+          "mono_fp": 1.0
+        },
+        "pctDualScene": 20.9
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 196,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 2.0,
+          "median": 4.0,
+          "p75": 6.0,
+          "p90": 8.0,
+          "max": 12
+        },
+        "pctByType": {
+          "delay": 74.0,
+          "reverb1": 61.7,
+          "eq": 39.8,
+          "reverb2": 39.3,
+          "chorus": 32.7,
+          "conditioner": 31.6,
+          "flanger": 30.6,
+          "airwindows": 20.9,
+          "phaser": 9.7,
+          "nimbus": 6.1,
+          "combulator": 3.6,
+          "ensemble": 3.1,
+          "spring_reverb": 3.1,
+          "resonator": 2.6,
+          "rotary": 2.6,
+          "neuron": 2.0,
+          "tape": 2.0,
+          "freqshift": 2.0,
+          "distortion": 2.0,
+          "treemonster": 1.5,
+          "ringmod": 1.5
+        },
+        "pctNoFx": 6.1
+      }
+    },
+    "fx": {
+      "n_patches": 238,
+      "ampEnv": {
+        "attackMs": {
+          "n": 234,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 50.25,
+          "p90": 835.34,
+          "max": 12996.09,
+          "pct_at_floor": 58.1,
+          "pct_le_6ms": 62.8,
+          "pct_le_12_5ms": 67.5,
+          "pct_le_20ms": 69.2,
+          "pct_le_30ms": 70.9,
+          "pct_gt_100ms": 20.5
+        },
+        "decayMs": {
+          "n": 236,
+          "min": 3.91,
+          "p10": 134.62,
+          "p25": 250.0,
+          "median": 279.48,
+          "p75": 1000.0,
+          "p90": 4763.52,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 238,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.368,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 237,
+          "min": 3.91,
+          "p10": 10.3,
+          "p25": 31.25,
+          "median": 90.38,
+          "p75": 826.2,
+          "p90": 2466.19,
+          "max": 17090.11
+        },
+        "attackShapePct": {
+          "0": 0.8,
+          "1": 91.2,
+          "2": 8.0
+        },
+        "pctAnalogMode": 12.6
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 238,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 3.91,
+          "p90": 61.2,
+          "max": 25137.85
+        },
+        "decayMs": {
+          "n": 235,
+          "min": 3.91,
+          "p10": 91.83,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 625.56,
+          "p90": 4985.92,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 238,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.005,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 238,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 250.0,
+          "p90": 2334.79,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 234,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 3.91,
+        "p75": 66.3,
+        "p90": 943.28,
+        "max": 19133.58,
+        "pct_le_12_5ms": 65.4,
+        "pct_le_30ms": 68.8
+      },
+      "filter": {
+        "pctFilter1Off": 21.8,
+        "cutoffHzKnob": {
+          "n": 186,
+          "min": 14.0,
+          "p10": 48.0,
+          "p25": 131.0,
+          "median": 448.0,
+          "p75": 1685.0,
+          "p90": 5968.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 186,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.439,
+          "p75": 0.824,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 186,
+          "min": -86.4,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 15.43,
+          "p90": 54.64,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 186,
+          "min": -0.904,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.803,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 38.7,
+          "off": 21.8,
+          "FX": 13.9,
+          "HP": 11.8,
+          "BP": 8.8,
+          "Multi": 2.5,
+          "Notch": 2.5
+        },
+        "pctFilter2On": 58.0
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 238,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 2.0,
+          "p90": 3.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 17.6,
+          "1": 52.1,
+          "2": 18.1,
+          "3": 12.2
+        },
+        "typePct": {
+          "Wavetable": 25.6,
+          "Classic": 22.3,
+          "Sine": 15.5,
+          "Twist": 11.8,
+          "S&H Noise": 8.4,
+          "Modern": 5.9,
+          "FM2": 3.4,
+          "Alias": 3.4,
+          "Window": 2.9,
+          "FM3": 2.9,
+          "String": 0.4
+        },
+        "pctOctaveSplit": 18.9,
+        "pctNoiseLayer": 20.2,
+        "pctRingMod": 8.8,
+        "pctFM": 27.3,
+        "pctWaveshaper": 41.6
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 160,
+          "2": 21,
+          "3": 14,
+          "4": 10,
+          "5": 6,
+          "6": 2,
+          "7": 3,
+          "8": 2,
+          "11": 1,
+          "12": 1,
+          "15": 2,
+          "16": 16
+        },
+        "pct_unison_on": 32.8,
+        "pct_voices_ge3": 23.9,
+        "pct_voices_ge5": 13.9,
+        "pct_voices_ge7": 10.5,
+        "detune_cents_any_unison": {
+          "n": 101,
+          "min": 0.0,
+          "p10": 1.9,
+          "p25": 7.3,
+          "median": 15.6,
+          "p75": 26.5,
+          "p90": 71.0,
+          "max": 100.0
+        },
+        "detune_cents_voices_ge5": {
+          "n": 42,
+          "min": 0.0,
+          "p10": 1.3,
+          "p25": 10.0,
+          "median": 20.0,
+          "p75": 31.3,
+          "p90": 99.0,
+          "max": 100.0
+        },
+        "median_voices_when_on": 4.0
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 77.3,
+          "mono_st_fp": 9.2,
+          "mono": 7.1,
+          "mono_st": 5.0,
+          "mono_fp": 0.8,
+          "latch": 0.4
+        },
+        "pctDualScene": 8.8
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 238,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 1.0,
+          "median": 3.0,
+          "p75": 4.0,
+          "p90": 5.3,
+          "max": 13
+        },
+        "pctByType": {
+          "delay": 46.2,
+          "reverb1": 42.9,
+          "eq": 22.3,
+          "conditioner": 18.5,
+          "airwindows": 18.1,
+          "distortion": 14.7,
+          "nimbus": 13.4,
+          "chorus": 13.0,
+          "reverb2": 11.8,
+          "freqshift": 11.3,
+          "phaser": 9.2,
+          "rotary": 5.9,
+          "combulator": 2.9,
+          "graphiceq": 2.9,
+          "flanger": 2.9,
+          "resonator": 2.9,
+          "ringmod": 2.5,
+          "treemonster": 2.1,
+          "ensemble": 2.1,
+          "waveshaper": 2.1,
+          "tape": 0.8,
+          "spring_reverb": 0.4,
+          "mstool": 0.4
+        },
+        "pctNoFx": 10.9
+      }
+    },
+    "drum": {
+      "n_patches": 286,
+      "ampEnv": {
+        "attackMs": {
+          "n": 286,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 3.91,
+          "p90": 9.32,
+          "max": 1553.71,
+          "pct_at_floor": 75.9,
+          "pct_le_6ms": 86.0,
+          "pct_le_12_5ms": 92.7,
+          "pct_le_20ms": 94.8,
+          "pct_le_30ms": 96.9,
+          "pct_gt_100ms": 1.4
+        },
+        "decayMs": {
+          "n": 286,
+          "min": 3.91,
+          "p10": 35.94,
+          "p25": 85.87,
+          "median": 250.0,
+          "p75": 603.68,
+          "p90": 1821.61,
+          "max": 24523.21
+        },
+        "sustain": {
+          "n": 286,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.212,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 286,
+          "min": 3.91,
+          "p10": 8.31,
+          "p25": 31.25,
+          "median": 115.99,
+          "p75": 305.49,
+          "p90": 1000.0,
+          "max": 6411.28
+        },
+        "attackShapePct": {
+          "0": 6.3,
+          "1": 92.7,
+          "2": 1.0
+        },
+        "pctAnalogMode": 39.9
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 286,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 3.91,
+          "p90": 3.91,
+          "max": 4761.55
+        },
+        "decayMs": {
+          "n": 286,
+          "min": 3.91,
+          "p10": 12.47,
+          "p25": 76.2,
+          "median": 250.0,
+          "p75": 250.0,
+          "p90": 361.68,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 286,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.0,
+          "p90": 0.306,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 286,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 250.0,
+          "p90": 1000.0,
+          "max": 32000.0
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 286,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 3.91,
+        "median": 3.91,
+        "p75": 4.09,
+        "p90": 11.73,
+        "max": 4761.55,
+        "pct_le_12_5ms": 90.9,
+        "pct_le_30ms": 96.2
+      },
+      "filter": {
+        "pctFilter1Off": 26.2,
+        "cutoffHzKnob": {
+          "n": 211,
+          "min": 14.0,
+          "p10": 53.0,
+          "p25": 189.0,
+          "median": 558.0,
+          "p75": 3356.0,
+          "p90": 7811.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 211,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.115,
+          "p75": 0.438,
+          "p90": 0.837,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 211,
+          "min": -45.6,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 16.95,
+          "p90": 47.45,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 211,
+          "min": -0.026,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 35.0,
+          "off": 26.2,
+          "HP": 18.9,
+          "FX": 15.0,
+          "BP": 4.2,
+          "Notch": 0.7
+        },
+        "pctFilter2On": 59.4
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 286,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 2.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 37.1,
+          "1": 44.8,
+          "2": 12.6,
+          "3": 5.6
+        },
+        "typePct": {
+          "Sine": 17.8,
+          "FM2": 12.2,
+          "Wavetable": 9.1,
+          "Twist": 9.1,
+          "Classic": 7.7,
+          "S&H Noise": 6.3,
+          "FM3": 5.2,
+          "Modern": 3.1,
+          "Alias": 2.4,
+          "Window": 2.1,
+          "String": 1.4
+        },
+        "pctOctaveSplit": 12.6,
+        "pctNoiseLayer": 28.3,
+        "pctRingMod": 5.9,
+        "pctFM": 18.2,
+        "pctWaveshaper": 50.0
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 270,
+          "2": 5,
+          "3": 1,
+          "4": 2,
+          "5": 1,
+          "6": 1,
+          "7": 1,
+          "12": 2,
+          "16": 3
+        },
+        "pct_unison_on": 5.6,
+        "pct_voices_ge3": 3.8,
+        "pct_voices_ge5": 2.8,
+        "pct_voices_ge7": 2.1,
+        "detune_cents_any_unison": {
+          "n": 17,
+          "min": 3.8,
+          "p10": 7.7,
+          "p25": 11.4,
+          "median": 49.5,
+          "p75": 100.0,
+          "p90": 100.0,
+          "max": 100.0
+        },
+        "detune_cents_voices_ge5": {
+          "n": 8,
+          "min": 10.2,
+          "p10": 37.7,
+          "p25": 49.5,
+          "median": 57.4,
+          "p75": 100.0,
+          "p90": 100.0,
+          "max": 100.0
+        },
+        "median_voices_when_on": 4.5
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 69.2,
+          "mono": 26.2,
+          "mono_st": 2.8,
+          "mono_st_fp": 1.0,
+          "mono_fp": 0.7
+        },
+        "pctDualScene": 19.2
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 286,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 2.0,
+          "median": 3.0,
+          "p75": 5.0,
+          "p90": 6.0,
+          "max": 12
+        },
+        "pctByType": {
+          "eq": 53.8,
+          "airwindows": 39.9,
+          "reverb1": 38.5,
+          "distortion": 26.6,
+          "conditioner": 23.8,
+          "reverb2": 22.4,
+          "delay": 15.0,
+          "graphiceq": 8.4,
+          "combulator": 8.0,
+          "nimbus": 6.6,
+          "freqshift": 6.3,
+          "resonator": 5.6,
+          "flanger": 4.9,
+          "chorus": 4.9,
+          "waveshaper": 4.5,
+          "ringmod": 4.2,
+          "rotary": 3.1,
+          "treemonster": 2.4,
+          "phaser": 2.1,
+          "exciter": 0.7,
+          "tape": 0.3,
+          "neuron": 0.3,
+          "mstool": 0.3,
+          "ensemble": 0.3,
+          "spring_reverb": 0.3,
+          "bonsai": 0.3
+        },
+        "pctNoFx": 6.3
+      }
+    },
+    "wind": {
+      "n_patches": 86,
+      "ampEnv": {
+        "attackMs": {
+          "n": 86,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 6.13,
+          "median": 38.7,
+          "p75": 153.13,
+          "p90": 608.91,
+          "max": 6096.77,
+          "pct_at_floor": 22.1,
+          "pct_le_6ms": 24.4,
+          "pct_le_12_5ms": 31.4,
+          "pct_le_20ms": 33.7,
+          "pct_le_30ms": 38.4,
+          "pct_gt_100ms": 32.6
+        },
+        "decayMs": {
+          "n": 86,
+          "min": 3.91,
+          "p10": 18.38,
+          "p25": 250.0,
+          "median": 457.54,
+          "p75": 2188.44,
+          "p90": 6527.05,
+          "max": 32000.0
+        },
+        "sustain": {
+          "n": 86,
+          "min": 0.0,
+          "p10": 0.441,
+          "p25": 0.831,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 86,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 31.61,
+          "median": 101.12,
+          "p75": 281.26,
+          "p90": 622.19,
+          "max": 2399.12
+        },
+        "attackShapePct": {
+          "0": 7.0,
+          "1": 73.3,
+          "2": 19.8
+        },
+        "pctAnalogMode": 23.3
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 86,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 8.19,
+          "p90": 69.92,
+          "max": 2901.34
+        },
+        "decayMs": {
+          "n": 86,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 2133.04,
+          "p90": 4629.83,
+          "max": 31598.26
+        },
+        "sustain": {
+          "n": 86,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.005,
+          "p75": 0.547,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 86,
+          "min": 3.91,
+          "p10": 31.25,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 394.72,
+          "p90": 1957.92,
+          "max": 22183.76
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 86,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 6.51,
+        "median": 45.54,
+        "p75": 161.52,
+        "p90": 608.91,
+        "max": 6096.77,
+        "pct_le_12_5ms": 27.9,
+        "pct_le_30ms": 34.9
+      },
+      "filter": {
+        "pctFilter1Off": 7.0,
+        "cutoffHzKnob": {
+          "n": 80,
+          "min": 14.0,
+          "p10": 78.0,
+          "p25": 172.0,
+          "median": 523.0,
+          "p75": 967.0,
+          "p90": 3011.0,
+          "max": 25088.0
+        },
+        "resonance01": {
+          "n": 80,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.043,
+          "median": 0.337,
+          "p75": 0.734,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "envModSemitones": {
+          "n": 80,
+          "min": -0.51,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 2.23,
+          "p90": 28.76,
+          "max": 96.0
+        },
+        "keytrack01": {
+          "n": 80,
+          "min": -0.996,
+          "p10": 0.0,
+          "p25": 0.326,
+          "median": 0.999,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 43.0,
+          "FX": 25.6,
+          "BP": 14.0,
+          "Notch": 7.0,
+          "off": 7.0,
+          "HP": 3.5
+        },
+        "pctFilter2On": 80.2
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 86,
+          "min": 0,
+          "p10": 0.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 1.75,
+          "p90": 2.0,
+          "max": 3
+        },
+        "activeCountPct": {
+          "0": 22.1,
+          "1": 52.3,
+          "2": 19.8,
+          "3": 5.8
+        },
+        "typePct": {
+          "Wavetable": 33.7,
+          "Sine": 16.3,
+          "Classic": 15.1,
+          "S&H Noise": 5.8,
+          "Twist": 5.8,
+          "Modern": 5.8,
+          "FM2": 5.8,
+          "String": 1.2
+        },
+        "pctOctaveSplit": 18.6,
+        "pctNoiseLayer": 46.5,
+        "pctRingMod": 8.1,
+        "pctFM": 31.4,
+        "pctWaveshaper": 65.1
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 74,
+          "2": 8,
+          "3": 2,
+          "4": 1,
+          "7": 1
+        },
+        "pct_unison_on": 14.0,
+        "pct_voices_ge3": 4.7,
+        "pct_voices_ge5": 1.2,
+        "pct_voices_ge7": 1.2,
+        "detune_cents_any_unison": {
+          "n": 12,
+          "min": 0.0,
+          "p10": 0.3,
+          "p25": 4.3,
+          "median": 4.6,
+          "p75": 6.8,
+          "p90": 9.8,
+          "max": 10.0
+        },
+        "detune_cents_voices_ge5": {
+          "n": 1,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.0,
+          "p90": 0.0,
+          "max": 0.0
+        },
+        "median_voices_when_on": 2.0
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 62.8,
+          "mono_st_fp": 18.6,
+          "mono_st": 9.3,
+          "mono_fp": 4.7,
+          "mono": 4.7
+        },
+        "pctDualScene": 14.0
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 86,
+          "min": 0,
+          "p10": 1.0,
+          "p25": 2.0,
+          "median": 2.0,
+          "p75": 4.0,
+          "p90": 6.0,
+          "max": 9
+        },
+        "pctByType": {
+          "reverb1": 53.5,
+          "delay": 39.5,
+          "eq": 37.2,
+          "reverb2": 29.1,
+          "airwindows": 19.8,
+          "chorus": 16.3,
+          "distortion": 14.0,
+          "conditioner": 11.6,
+          "resonator": 10.5,
+          "combulator": 9.3,
+          "graphiceq": 9.3,
+          "rotary": 2.3,
+          "ringmod": 2.3,
+          "convolution": 2.3,
+          "waveshaper": 2.3,
+          "nimbus": 1.2,
+          "phaser": 1.2,
+          "freqshift": 1.2,
+          "flanger": 1.2
+        },
+        "pctNoFx": 7.0
+      }
+    },
+    "vox": {
+      "n_patches": 31,
+      "ampEnv": {
+        "attackMs": {
+          "n": 31,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 15.02,
+          "median": 186.93,
+          "p75": 747.68,
+          "p90": 1952.47,
+          "max": 5720.24,
+          "pct_at_floor": 22.6,
+          "pct_le_6ms": 22.6,
+          "pct_le_12_5ms": 25.8,
+          "pct_le_20ms": 25.8,
+          "pct_le_30ms": 29.0,
+          "pct_gt_100ms": 61.3
+        },
+        "decayMs": {
+          "n": 31,
+          "min": 3.91,
+          "p10": 174.06,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 1045.25,
+          "p90": 1456.85,
+          "max": 3278.1
+        },
+        "sustain": {
+          "n": 31,
+          "min": 0.062,
+          "p10": 0.388,
+          "p25": 0.675,
+          "median": 1.0,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 31,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 14.93,
+          "median": 127.59,
+          "p75": 482.95,
+          "p90": 1768.34,
+          "max": 5110.87
+        },
+        "attackShapePct": {
+          "0": 3.2,
+          "1": 87.1,
+          "2": 9.7
+        },
+        "pctAnalogMode": 29.0
+      },
+      "filterEnv": {
+        "attackMs": {
+          "n": 31,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 25.67,
+          "p90": 148.97,
+          "max": 16543.82
+        },
+        "decayMs": {
+          "n": 31,
+          "min": 3.91,
+          "p10": 150.6,
+          "p25": 250.0,
+          "median": 250.0,
+          "p75": 250.0,
+          "p90": 1642.7,
+          "max": 12383.62
+        },
+        "sustain": {
+          "n": 31,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 0.556,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "releaseMs": {
+          "n": 31,
+          "min": 3.91,
+          "p10": 3.91,
+          "p25": 47.98,
+          "median": 250.0,
+          "p75": 966.52,
+          "p90": 12738.34,
+          "max": 14781.43
+        }
+      },
+      "perceivedAttackProxyMs": {
+        "n": 31,
+        "min": 3.91,
+        "p10": 3.91,
+        "p25": 19.52,
+        "median": 186.93,
+        "p75": 747.68,
+        "p90": 2178.32,
+        "max": 7954.87,
+        "pct_le_12_5ms": 19.4,
+        "pct_le_30ms": 29.0
+      },
+      "filter": {
+        "pctFilter1Off": 6.5,
+        "cutoffHzKnob": {
+          "n": 29,
+          "min": 102.0,
+          "p10": 102.0,
+          "p25": 233.0,
+          "median": 476.0,
+          "p75": 814.0,
+          "p90": 1648.0,
+          "max": 12812.0
+        },
+        "resonance01": {
+          "n": 29,
+          "min": 0.0,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.291,
+          "p75": 0.56,
+          "p90": 0.69,
+          "max": 0.806
+        },
+        "envModSemitones": {
+          "n": 29,
+          "min": -30.86,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.0,
+          "p75": 36.34,
+          "p90": 48.24,
+          "max": 58.11
+        },
+        "keytrack01": {
+          "n": 29,
+          "min": -0.35,
+          "p10": 0.0,
+          "p25": 0.0,
+          "median": 0.55,
+          "p75": 1.0,
+          "p90": 1.0,
+          "max": 1.0
+        },
+        "familyPct": {
+          "LP": 71.0,
+          "HP": 12.9,
+          "off": 6.5,
+          "FX": 3.2,
+          "BP": 3.2,
+          "Multi": 3.2
+        },
+        "pctFilter2On": 71.0
+      },
+      "oscillators": {
+        "activeCount": {
+          "n": 31,
+          "min": 1,
+          "p10": 1,
+          "p25": 1.0,
+          "median": 2,
+          "p75": 2.0,
+          "p90": 2,
+          "max": 3
+        },
+        "activeCountPct": {
+          "1": 48.4,
+          "2": 45.2,
+          "3": 6.5
+        },
+        "typePct": {
+          "Wavetable": 41.9,
+          "Twist": 32.3,
+          "Classic": 29.0,
+          "Alias": 9.7,
+          "Sine": 3.2,
+          "Modern": 3.2
+        },
+        "pctOctaveSplit": 29.0,
+        "pctNoiseLayer": 9.7,
+        "pctRingMod": 0.0,
+        "pctFM": 22.6,
+        "pctWaveshaper": 32.3
+      },
+      "unison": {
+        "voices_hist": {
+          "1": 16,
+          "2": 5,
+          "4": 3,
+          "7": 3,
+          "8": 1,
+          "11": 1,
+          "12": 2
+        },
+        "pct_unison_on": 48.4,
+        "pct_voices_ge3": 32.3,
+        "pct_voices_ge5": 22.6,
+        "pct_voices_ge7": 22.6,
+        "detune_cents_any_unison": {
+          "n": 23,
+          "min": 4.7,
+          "p10": 5.1,
+          "p25": 6.7,
+          "median": 11.0,
+          "p75": 28.1,
+          "p90": 43.6,
+          "max": 44.3
+        },
+        "detune_cents_voices_ge5": {
+          "n": 9,
+          "min": 5.0,
+          "p10": 9.0,
+          "p25": 10.8,
+          "median": 25.2,
+          "p75": 39.2,
+          "p90": 43.6,
+          "max": 43.6
+        },
+        "median_voices_when_on": 4
+      },
+      "voicing": {
+        "polymodePct": {
+          "poly": 71.0,
+          "mono": 12.9,
+          "mono_st_fp": 12.9,
+          "mono_st": 3.2
+        },
+        "pctDualScene": 3.2
+      },
+      "effects": {
+        "slotsUsed": {
+          "n": 31,
+          "min": 0,
+          "p10": 0,
+          "p25": 2.0,
+          "median": 2,
+          "p75": 4.0,
+          "p90": 5,
+          "max": 6
+        },
+        "pctByType": {
+          "reverb1": 38.7,
+          "delay": 38.7,
+          "reverb2": 29.0,
+          "eq": 22.6,
+          "airwindows": 19.4,
+          "resonator": 16.1,
+          "freqshift": 9.7,
+          "nimbus": 9.7,
+          "chorus": 6.5,
+          "graphiceq": 6.5,
+          "ensemble": 6.5,
+          "combulator": 3.2,
+          "tape": 3.2,
+          "rotary": 3.2,
+          "conditioner": 3.2,
+          "spring_reverb": 3.2
+        },
+        "pctNoFx": 16.1
+      }
+    }
+  }
+}
