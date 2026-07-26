@@ -41,6 +41,45 @@ export interface CurationCandidate {
   scores: CurationRawScores
 }
 
+/** ROLE -> SURGE PATCH CATEGORIES, CORRECTED (research 141 §7.3; re-verified from the .fxp corpus
+ * 2026-07-26). Lives HERE, not in showdown.ts, so the curation script and the showdown draw can
+ * share one definition instead of two that drift.
+ *
+ * THE BUG: `showdown.ts`'s `SURGE_ROLE_CATEGORIES` maps `chords -> ['Pads','Keys']`. Measured over
+ * the installed corpus (amp-EG attack of the SOUNDING scene, n = 3,559 .fxp):
+ *
+ *   category      n     median attack   % <= 12.5 ms
+ *   Pads        419         537.8 ms          18%     <- what chords actually drew from
+ *   Keys        315           4.8 ms          78%
+ *   Chords       28           3.9 ms          89%     <- never eligible
+ *   Polysynths  122           3.9 ms          75%     <- never eligible
+ *   Sequences   121           3.9 ms          84%     <- never eligible (needed the tempo fix)
+ *
+ * and all 16 curated chords picks in the OLD presets/surge-curated.json came from `Pads` (zero from
+ * Keys) — factory Pads alone median 829.5 ms, 4.6% within target. Against 131's measured chords
+ * target of <= 12 ms attack that is the wrong shelf outright, so `Pads` is REMOVED from chords.
+ *
+ * Also folded in: the third-party pool's synonym vocabulary (`Bass` beside `Basses`, `Synths`
+ * beside `Polysynths`, `Arps`/`Rhythms` beside `Sequences`), which only became reachable when the
+ * sidecar started enumerating `patches_3rdparty`; and `Sequences`, which research 132 §2 gated
+ * explicitly on the tempo fix (a synced arp rendered at the wrong tempo is worse than no arp).
+ *
+ * Matching semantics are showdown's `patchInCategories`: case-insensitive SUBSTRING, so 'Bass'
+ * also catches 'Basses' and 'Sequence' also catches 'Sequences'. Both spellings are listed anyway
+ * — substring matching is idempotent and the explicit list is what a reader can check. */
+export const SURGE_ROLE_CATEGORIES_V2: Record<string, readonly string[] | null> = {
+  bassline: ['Basses', 'Bass'],
+  chords: ['Chords', 'Polysynths', 'Synths', 'Keys'],
+  lead: ['Leads', 'Plucks', 'Sequences', 'Arps', 'Rhythms'],
+  'drum-loop': null,
+}
+
+/** The corrected role -> categories, or null when surge is skipped for the role (drum-loop) or the
+ * role is unknown. Same degrade-never-throw contract as showdown's `surgeRoleCategories`. */
+export function surgeRoleCategoriesV2(role: string): readonly string[] | null {
+  return role in SURGE_ROLE_CATEGORIES_V2 ? SURGE_ROLE_CATEGORIES_V2[role]! : null
+}
+
 /** Hard rejects applied BEFORE the composite (a ringy or near-silent render is out regardless of
  * how it scores elsewhere). ringDbMax mirrors the showdown ring screen; activeFractionMin mirrors
  * the ref audibility guard. */

@@ -20,10 +20,12 @@ import {
   curatedKey,
   curatedKeysForRole,
   loadCuratedFile,
+  SURGE_ROLE_CATEGORIES_V2,
+  surgeRoleCategoriesV2,
   type CurationCandidate,
   type CurationRawScores,
 } from '../src/taste/surgeCuration.js'
-import { pickSurgePatch, type SurgePatch } from '../src/taste/showdown.js'
+import { pickSurgePatch, patchInCategories, SURGE_ROLE_CATEGORIES, type SurgePatch } from '../src/taste/showdown.js'
 
 const scores = (o: Partial<CurationRawScores>): CurationRawScores => ({
   ringDb: -60,
@@ -219,4 +221,64 @@ test('pickSurgePatch: a curated pick is still deterministic and enumeration-orde
   const b = pickSurgePatch([...patches].reverse(), 'bassline', 55, { curatedKeys: keys })
   assert.ok(a && b && a.name === b.name, 'stable across enumeration order')
   assert.ok(a!.name === 'A' || a!.name === 'C', 'the pick is inside the curated pool')
+})
+
+// ---- the corrected role -> category mapping (research 141 §7.3) -----------------------------------
+// The old `SURGE_ROLE_CATEGORIES.chords = ['Pads','Keys']` sent every chords draw to a shelf whose
+// measured amp-EG attack median is 537.8 ms across the installed corpus (829.5 ms in the factory
+// pool alone, 4.6% within the <= 12 ms target 131 measured for chords) — and all 16 curated chords
+// picks in presets/surge-curated.json did come from Pads, zero from Keys. These assertions pin the
+// correction so it cannot silently regress back.
+
+test('SURGE_ROLE_CATEGORIES_V2: chords no longer draws from Pads, and CAN draw from Chords/Polysynths', () => {
+  const chords = surgeRoleCategoriesV2('chords')
+  assert.ok(chords, 'chords is a surge-eligible role')
+  const lower = chords!.map((c) => c.toLowerCase())
+  assert.ok(!lower.includes('pads'), 'Pads (median attack 537.8 ms, 18% <= 12.5 ms) must NOT be a chords source')
+  assert.ok(lower.includes('chords'), "Surge's own Chords category (median 3.9 ms) must be eligible")
+  assert.ok(lower.includes('polysynths'), 'Polysynths (median 3.9 ms) must be eligible')
+  assert.ok(lower.includes('keys'), 'Keys (median 4.8 ms) stays eligible')
+})
+
+test('SURGE_ROLE_CATEGORIES_V2: lead gains Sequences (unblocked by the tempo fix)', () => {
+  const lead = surgeRoleCategoriesV2('lead')!.map((c) => c.toLowerCase())
+  assert.ok(lead.includes('leads') && lead.includes('plucks'), 'the original lead sources stay')
+  assert.ok(lead.includes('sequences'), 'Sequences is only safe once the sidecar renders at the project tempo (D6)')
+})
+
+test('SURGE_ROLE_CATEGORIES_V2: covers the third-party pool synonym vocabulary via substring match', () => {
+  // patchInCategories is case-insensitive substring, so 'Bass' catches both 'Bass' and 'Basses'.
+  const cases: [string, string, boolean][] = [
+    ['bassline', 'Basses', true],
+    ['bassline', 'Bass', true],
+    ['chords', 'Polysynths', true],
+    ['chords', 'Synths', true],
+    ['chords', 'Pads', false],
+    ['chords', 'Ambiances', false],
+    ['lead', 'Arps', true],
+    ['lead', 'Rhythms', true],
+    ['lead', 'Pads', false],
+  ]
+  for (const [role, category, expected] of cases) {
+    const cats = surgeRoleCategoriesV2(role)!
+    assert.equal(patchInCategories(patch('X', category), cats), expected, `${role} x ${category}`)
+  }
+})
+
+test('SURGE_ROLE_CATEGORIES_V2: drum-loop still skips surge, unknown roles degrade to null', () => {
+  assert.equal(surgeRoleCategoriesV2('drum-loop'), null)
+  assert.equal(surgeRoleCategoriesV2('nonsense'), null)
+})
+
+test('SURGE_ROLE_CATEGORIES_V2 covers exactly the roles showdown knows about', () => {
+  // Stable across the coordinator's one-line swap: whichever mapping showdown.ts points at, the two
+  // must agree on WHICH roles are surge-eligible — only on which categories each draws from.
+  assert.deepEqual(Object.keys(SURGE_ROLE_CATEGORIES_V2).sort(), Object.keys(SURGE_ROLE_CATEGORIES).sort())
+  for (const role of Object.keys(SURGE_ROLE_CATEGORIES)) {
+    assert.equal(
+      SURGE_ROLE_CATEGORIES_V2[role] === null,
+      SURGE_ROLE_CATEGORIES[role] === null,
+      `${role}: a role that skips surge must skip it in both mappings`,
+    )
+  }
 })
