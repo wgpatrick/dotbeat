@@ -178,8 +178,14 @@ export interface ProductionTreatment {
  * glue / space / air targets whose blind-rating effect was measured — so they live HERE, spelled
  * out, rather than being drawn from `productionProfileFor` (whose role profiles are free to evolve).
  * Synth roles get the osc-bank width stack + delay glue; drums get the lighter chorus and no delay
- * (it would re-write the groove), and no osc-bank claims (drum voices ignore the osc bank). */
-function engineplusProfile(kind: 'synth' | 'drums'): ProductionProfile {
+ * (it would re-write the groove), and no osc-bank claims (drum voices ignore the osc bank).
+ *
+ * Exported ONLY so test/showdown.test.ts can pin it field-for-field with `===` (the `>=` assertions
+ * on the produced doc test a different property — "values only intensify" — and would happily pass a
+ * silent change to these numbers, which would break comparability with every batch already rated
+ * against the engineplus ablation). Not part of the module's working API: nothing but the test and
+ * applyProductionTreatment below should call it. */
+export function engineplusProfile(kind: 'synth' | 'drums'): ProductionProfile {
   if (kind === 'synth') {
     return {
       role: 'default',

@@ -19,6 +19,7 @@ import {
   soloForShowdown,
   activeFraction,
   applyProductionTreatment,
+  engineplusProfile,
   foldBpmToRange,
   keymapScratchText,
   phraseFromSeed,
@@ -145,6 +146,78 @@ test('soloForShowdown: target boosted to prominent, everything else muted', () =
 })
 
 // ---- production treatment (the engineplus ablation) --------------------------------------------
+
+// ---- FROZEN ablation constants -----------------------------------------------------------------
+// engineplusProfile and surgeplusProfile are frozen SCIENCE: the exact width / glue / space / air
+// targets whose blind-rating effect was measured, and against which ~21+ batches have already been
+// rated. Every other assertion in this file about them is an inequality (`>=`), which is the right
+// test for the "values only ever intensify (Math.max)" semantics of applyProducedDefaults — but an
+// inequality does NOT freeze anything: raising engineplus eqHigh from 2.5 to 4.0 passes the whole
+// suite while silently making the engineplus ablation a claim about two different treatments (the
+// D26/D27 reading "production-only edits move the engine 3%->29%" would quietly stop being
+// comparable across batches). These two tests pin the values field-for-field.
+//
+// IF ONE OF THESE FAILS: someone changed the frozen science. That is not a test to update — it
+// invalidates comparability with every batch already rated, so it needs an owner decision and a new
+// ablation name, not a new expected number. Do NOT merge these profiles into productionProfileFor
+// (whose role profiles are deliberately free to evolve).
+
+test('engineplusProfile: FROZEN — exact field-for-field values for the synth and drums ablations', () => {
+  assert.deepEqual(engineplusProfile('synth'), {
+    role: 'default',
+    osc2Layer: { level: 0.35, detuneCents: 10 },
+    unison: { voices: 5, width: 0.6 },
+    chorusMix: 0.25,
+    saturator: { drive: 0.25, mix: 0.3 },
+    sendReverb: 0.18,
+    sendDelay: 0.08,
+    eqHigh: 2.5,
+  })
+  assert.deepEqual(engineplusProfile('drums'), {
+    role: 'default',
+    chorusMix: 0.15, // lighter on drums — keeps the kick's mono punch
+    saturator: { drive: 0.25, mix: 0.3 },
+    sendReverb: 0.18,
+    eqHigh: 2.5,
+  })
+  // the drums arm makes NO osc-bank claims (drum voices ignore them) and no delay (it would
+  // re-write the groove) — absence is part of the frozen profile, so pin it explicitly
+  const drums = engineplusProfile('drums') as unknown as Record<string, unknown>
+  for (const absent of ['osc2Layer', 'unison', 'sendDelay', 'utilityWidth', 'autoPan']) {
+    assert.equal(absent in drums, false, `engineplus drums must not claim ${absent}`)
+  }
+})
+
+test('surgeplusProfile: FROZEN — exact field-for-field values for the bass and wide (chords/lead) arms', () => {
+  // bass stays mono-anchored (no utilityWidth, no autoPan — research 115 §2.2) but audibly produced
+  assert.deepEqual(surgeplusProfile('bassline'), {
+    role: 'bass',
+    chorusMix: 0.3,
+    saturator: { drive: 0.4, mix: 0.45 },
+    sendReverb: 0.18,
+    sendDelay: 0.06,
+    eqHigh: 4,
+  })
+  const bass = surgeplusProfile('bassline') as unknown as Record<string, unknown>
+  for (const absent of ['utilityWidth', 'autoPan', 'osc2Layer', 'unison']) {
+    assert.equal(absent in bass, false, `surgeplus bass must not claim ${absent}`)
+  }
+  // chords/lead get the full width stack — same numbers, only `role` differs
+  const wide = (role: 'chords' | 'lead'): unknown => ({
+    role,
+    chorusMix: 0.55,
+    utilityWidth: 0.85,
+    autoPan: { rate: 0.15, depth: 0.4, mix: 0.3 },
+    saturator: { drive: 0.3, mix: 0.4 },
+    sendReverb: 0.42,
+    sendDelay: 0.16,
+    eqHigh: 5,
+  })
+  assert.deepEqual(surgeplusProfile('chords'), wide('chords'))
+  assert.deepEqual(surgeplusProfile('lead'), wide('lead'))
+  // an out-of-scope role degrades to the same wide stack under the 'default' produce.ts role
+  assert.deepEqual(surgeplusProfile('drum-loop'), { ...(wide('chords') as object), role: 'default' })
+})
 
 test('applyProductionTreatment on a synth track: notes and patch identity preserved, width/glue/space/air applied', () => {
   const seed = extendToFourBars(parse(generateSeedBeat(3).text))
