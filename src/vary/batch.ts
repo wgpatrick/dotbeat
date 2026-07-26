@@ -686,9 +686,12 @@ export interface ScoreEntry {
    * is the documented lifecycle. Delete the dirs and every purchased-loop clip silently became
    * training data, with no error and no visible change. Carrying the file names here leaks nothing
    * `sources` doesn't already (variant file names + kinds; the ref's origin PATH still never
-   * leaves the batch dir). BACK-FILL IS IMPOSSIBLE for entries written before this field existed:
-   * once a batch dir is gone, nothing on disk records which pool its ref came from. eval.ts
-   * therefore treats a ref variant with no manifest and no logged list as UNKNOWN => EXCLUDED. */
+   * leaves the batch dir). Present — possibly EMPTY — on every entry whose batch carries source
+   * records, because "checked, nothing excluded" and "written before this existed" must be
+   * distinguishable: only the first keeps a training-safe refs-cc0 ref trainable once its dir is
+   * gone. BACK-FILL IS IMPOSSIBLE for entries written before this field existed: nothing on disk
+   * records which pool a deleted batch's ref came from, so eval.ts treats a ref variant with no
+   * manifest and no logged list as UNKNOWN => EXCLUDED. */
   trainingExcluded?: string[]
   /** Showdown batches only: where the composed figures came from — 'midi' (commercial MIDI
    * transcriptions, private), 'theory' (the deterministic theory-aware layer), 'ca2' (Composer's
@@ -956,8 +959,10 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   const sources = Object.fromEntries(manifest.variants.filter((v) => v.source !== undefined).map((v) => [v.file, v.source!.kind]))
   if (Object.keys(sources).length > 0) entry.sources = sources
   // D25 holdout (hunt H3): the exclusion list must outlive the batch dir — see the field comment.
-  const excluded = trainingExcludedFiles(manifest)
-  if (excluded.length > 0) entry.trainingExcluded = excluded
+  // Written whenever the batch HAS source records, empty list included: "the scorer looked and
+  // found nothing to exclude" is a different fact from "this entry predates the field", and only
+  // the first lets a training-safe ref (refs-cc0) stay trainable after its dir is deleted.
+  if (Object.keys(sources).length > 0) entry.trainingExcluded = trainingExcludedFiles(manifest)
   // Midi-figure showdown batches: carry the figure-source LABEL (see the ScoreEntry field
   // comment — 'midi'/'bank' only, never what the midi transcribes).
   if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
@@ -1028,8 +1033,7 @@ export function recordNoneGood(dir: string, logPath?: string): NoneGoodResult {
   if (Object.keys(features).length > 0) entry.features = features
   const sources = Object.fromEntries(manifest.variants.filter((v) => v.source !== undefined).map((v) => [v.file, v.source!.kind]))
   if (Object.keys(sources).length > 0) entry.sources = sources
-  const excluded = trainingExcludedFiles(manifest)
-  if (excluded.length > 0) entry.trainingExcluded = excluded
+  if (Object.keys(sources).length > 0) entry.trainingExcluded = trainingExcludedFiles(manifest) // see scoreBatch
   if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
   return { dir, logPath: resolvedLog, manifest, entry }

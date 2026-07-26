@@ -344,6 +344,19 @@ test('H3: a purchased-pool ref stays out of training after its batch dir is dele
   assert.ok(Object.keys(after.features).includes('v3.wav'))
 })
 
+test('H3: a training-SAFE ref stays trainable after its dir is deleted (the empty list is a fact)', () => {
+  const root = tmp('h3c')
+  const log = join(root, 'beat-scores.jsonl')
+  const dir = makeShowdownBatch(join(root, 'showdown-bassline-5'), ['engine', 'gen', 'ref'], {
+    from: { ref: '/somewhere/taste-dataset/refs-cc0/bassline/FREESOUND_LOOP.wav' }, // CC0: trainable
+  })
+  scoreBatch(dir, ['3', '2'], log)
+  rmSync(dir, { recursive: true, force: true })
+  const after = loadTasteBatches(log).batches[0]!
+  assert.equal(after.trainingExcluded.size, 0, 'a CC0 ref was conservatively excluded even though the scorer had recorded it as trainable')
+  assert.deepEqual(trainable(after).picks, ['v3.wav', 'v2.wav'])
+})
+
 test('H3: a ref variant with no manifest and no logged holdout is excluded — unknown means exclude', () => {
   const root = tmp('h3b')
   const log = join(root, 'beat-scores.jsonl')
