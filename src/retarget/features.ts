@@ -83,10 +83,8 @@ export interface RetargetFeatures {
   widthMeanDb: number
 }
 
-export type RetargetFeatureKey = keyof RetargetFeatures
-
 /** Every key a target profile may reference. `durationSeconds`/`lufs` are context, not axes. */
-export const RETARGET_FEATURE_KEYS: readonly RetargetFeatureKey[] = [
+export const RETARGET_FEATURE_KEYS = [
   'truePeakDb',
   'crestDb',
   'bandSubPct',
@@ -113,7 +111,10 @@ export const RETARGET_FEATURE_KEYS: readonly RetargetFeatureKey[] = [
   'envStdDb',
   'sustainPct',
   'widthMeanDb',
-] as const
+] as const satisfies readonly (keyof RetargetFeatures)[]
+
+/** A scored/reported feature axis (excludes the `durationSeconds`/`lufs` context fields). */
+export type RetargetFeatureKey = (typeof RETARGET_FEATURE_KEYS)[number]
 
 // ---- small helpers -----------------------------------------------------------------------------
 
