@@ -1,6 +1,7 @@
 export { decodeWav, readWavFormat, wavSampleCodec, WavDecodeError, type DecodedWav, type WavFormatInfo, type WavSampleCodec } from './wav.js'
 export { integratedLoudness, type LoudnessResult } from './loudness.js'
 export { analyze, fft, truePeak, type MixMetrics, type SpectralBands } from './analyze.js'
+export { analyzeRich, ATTACK_WINDOW_MS, WIDTH_FLOOR_DB, type RichMetrics } from './rich.js'
 export { lint, formatLint, refFindings, worstTrack, type LintFinding, type LintOptions, type TrackContribution } from './lint.js'
 export {
   sliceSections,
