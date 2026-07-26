@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 import { resolvePython } from '../analysis/sidecar.js'
 import { BeatBatchError } from '../vary/batch.js'
 import { mulberry32 } from './eval.js'
-import type { ComposedPhrase, PhraseKey } from './showdown.js'
+import { chooseSeeded, type ComposedPhrase, type PhraseKey } from './phrase.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const MIDI_EXTRACT_PY = 'python/midi_extract.py' // relative to repoRoot, like every sidecar
@@ -204,18 +204,13 @@ export function listMidiFiles(dir: string): string[] {
   return out.sort()
 }
 
-/** Seeded pick of one midi file whose label isn't in `exclude` — the same first-unused-of-a-
- * seeded-shuffle contract as chooseArchetype, so per-source distinct figures and the per-run
- * exclude chain work identically for midi figures. Every file used -> seeded pick anyway. */
+/** Seeded pick of one midi file whose label isn't in `exclude` — through the shared selector in
+ * phrase.ts, so per-source distinct figures and the per-run exclude chain work identically for midi
+ * figures. Every file used -> seeded pick anyway. */
 export function pickMidiFile(files: readonly string[], seed: number, exclude: readonly string[]): string | null {
   if (files.length === 0) return null
   const rng = mulberry32(seed + 523) // midi salt, distinct from the archetype/surge salts
-  const shuffled = [...files]
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
-    ;[shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!]
-  }
-  return shuffled.find((f) => !exclude.includes(midiFigureLabel(f))) ?? shuffled[0]!
+  return chooseSeeded(rng, files, midiFigureLabel, exclude)
 }
 
 // ---- sidecar spawn -----------------------------------------------------------------------------
