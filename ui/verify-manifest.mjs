@@ -31,6 +31,38 @@
 // coverage of a real invariant is marked `legacy` with the reason, never silently left `live`.
 //
 // Paths are relative to the repo root.
+//
+// ---- BASELINE: `npm run verify:engine`, 2026-07-25 (W1.5), 9/14 = 64% -------------------------
+// The first time this tier has ever been run as a suite. Recorded because a pass rate nobody
+// wrote down is a pass rate nobody can tell has moved. The five failures, diagnosed but NOT fixed
+// (out of W1.5's scope — each is someone's real finding):
+//
+//   verify-osc2-fix            2 of 5 fields fail their own bar: osc2Level moved the spectral
+//                              centroid 100Hz / LUFS 0.7, osc2Detune 39Hz / -1.3. The store DID
+//                              update both times, so this is "the value reaches the graph but
+//                              barely changes the sound", not a wiring break. subLevel /
+//                              noiseLevel / unisonVoices all pass comfortably.
+//   verify-phase26-stream-da   [AUTOMATION-VS-LFO] smoothed pan balance shows correlation 0.000
+//                              against a left->right automation ramp (bar: < -0.85). Exactly zero
+//                              is suspicious — it reads as "pan automation did not move at all".
+//                              Worth a real look; the script's other checks (incl. the post-fader
+//                              send tap) pass.
+//   verify-phase37-stream-ra   Not a rendering failure at all: `beat feedback --sections --json`
+//                              printed valid JSON and exited 1, because feedback sets exitCode 1
+//                              when a screen finding has severity >= 3 or the arc diff fails
+//                              (cli/beat.mjs). The script runs it through execFileSync, which
+//                              throws on ANY non-zero exit, so a deliberately-extreme test song
+//                              trips its own success path. This is R1-F5's "the exit-code
+//                              meanings are not centrally documented" biting.
+//   verify-phase36-stream-pc   EADDRINUSE on 127.0.0.1:8479 — its hardcoded daemon port was held
+//                              by a `beat daemon` from an unrelated concurrent session. Purely
+//                              environmental, and precisely the hazard verify-lib's pickPort
+//                              removes; it will stop happening when this script is ported.
+//   verify-phase22-audio-region FLAKY, not failing: three runs gave 14/14, 13/14 ([GAIN
+//                              automation] delta 2.4dB vs a > 3dB bar) and 13/14 (a DIFFERENT
+//                              check, the trim comparison). Real-time capture in headless
+//                              Chromium against onset-relative windows; roughly 1-in-3 runs trips
+//                              some threshold. Needs calibration, not a widened constant.
 
 /** @typedef {{ script: string, area: string, tier: 'engine'|'gui'|'both'|'cli', status: 'live'|'legacy', note?: string }} VerifyEntry */
 
