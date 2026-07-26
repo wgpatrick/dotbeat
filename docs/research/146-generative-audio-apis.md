@@ -1,6 +1,6 @@
-# Research pass 145 — Generative-audio APIs: can generated chops/SFX legally ship inside a user's `.beat` project?
+# Research pass 146 — Generative-audio APIs: can generated chops/SFX legally ship inside a user's `.beat` project?
 
-> **Renumbered 2026-07-26 (was 103).** Two docs were both filed as 103 on 2026-07-14 — this one and
+> **Renumbered 2026-07-26 (was 103, then briefly 145 — 145 collided with 145-showdown-arm-pairing).** Two docs were both filed as 103 on 2026-07-14 — this one and
 > `103-usability-pilot-lane-taste-loop.md`. This one moved to the next free number because the
 > pilot's number is baked into ~17 source-code comments as an event name ("Pilot 103 found…").
 > Nothing in the findings changed. A pre-commit check (`scripts/check-doc-numbering.mjs`) now fails

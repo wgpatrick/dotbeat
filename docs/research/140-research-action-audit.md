@@ -675,7 +675,7 @@ top"* — dated 07-17, it sits above D27, D26, D25 and D24 (all 07-22). Move it 
 ### 5.3 Research doc `103` is duplicated — the identical pathology
 
 ```
-docs/research/145-generative-audio-apis.md
+docs/research/146-generative-audio-apis.md
 docs/research/103-usability-pilot-lane-taste-loop.md
 ```
 

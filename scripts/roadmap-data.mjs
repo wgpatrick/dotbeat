@@ -2016,13 +2016,13 @@ export const rows = [
     area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Freesound CC0 into the taste loop (`beat source`)',
     description: 'Phase 37 Stream RD: wires the already-built CC0 search→prep→register pipeline into first-class verbs. `beat source search <query>` (CC0-hard-filtered Freesound discovery, top-rated first) and `beat source add <file.beat> <sample-id> <local-audio-file>` (offline: prep-oneshot trim/normalize/16-bit → register into media → enforced provenance sidecar media/<id>.wav.json) + a gated `--freesound <id>` download path. CLI + beat_source_search/add MCP. License default "unspecified" for local files (honest — can\'t verify), "CC0-1.0" only on the Freesound path. Network verified BLOCKED through the proxy (no key + CONNECT 403), so search/--freesound are env-gated with clean actionable errors; the offline add path is fully working and tested. Zero licensing risk.',
     core: 'done', cli: 'done', gui: 'na', status: 'done',
-    research: 'research/145-generative-audio-apis.md', plan: 'phase-37-plan.md',
+    research: 'research/146-generative-audio-apis.md', plan: 'phase-37-plan.md',
   },
   {
     area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Generative-audio direction (research 145, filed as 103) — deferred build',
     description: 'Research 145 (renumbered from a duplicate 103 on 2026-07-26): generative-audio API landscape for the vocal-chop/SFX pain. Verdict (with an owner-supplied primary-source correction on the ElevenLabs Music terms): ElevenLabs splits by product — SFX distribution-banned (avoid), Music undetermined-and-wrong-shape (full songs, not chops), Voice/TTS the actually-relevant product for vocal chops (needs its own terms fetched). MusicGen/AudioCraft weights are non-commercial. The clean path is Stable Audio Open run LOCALLY (own outputs, purpose-built for short 44.1kHz one-shots, zero egress/cost) — but it inherits the Phase-38 Python-sidecar plumbing, so build AFTER beat analyze. Near-term generative substitute: the CC0 Freesound path above. No build this phase.',
     core: 'na', cli: 'na', gui: 'na', status: 'not-started',
-    research: 'research/145-generative-audio-apis.md', plan: null,
+    research: 'research/146-generative-audio-apis.md', plan: null,
   },
 
   // \u2500\u2500 Audio-structure import (Phase 38) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -2043,7 +2043,7 @@ export const rows = [
     area: 'Generative sound & render trust (Phase 39)', feature: 'Text-to-audio sample generation (`beat source gen`, Stable Audio Open)',
     description: 'Phase 39 Stream UB: dotbeat\'s SECOND Python sidecar. `beat source gen <file.beat> <id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio]` (+ beat_source_gen MCP) generates a one-shot locally via Stable Audio Open and registers it into media through the existing source-lib ingest path \u2014 same prep/sha256/enforced-provenance-sidecar/rollback as beat source add, with a `generated` block recording prompt/provider/model/seconds/seed/license. Contract variation from D17 (decisions.md D19): gen writes the WAV to a told --output path + JSON metadata on stdout (audio isn\'t a stdout JSON line); TS/source-lib owns registration. A deterministic stdlib `stub` backend keeps CI/dev green with zero packages; real Stable Audio Open runs owner-side (torch + ~couple-GB HF weights, egress-blocked here). Stability AI Community License posture: outputs are the user\'s, free commercial use <$1M revenue with Stability registration, "Powered by Stability AI" attribution in dotbeat docs. Placeholders to confirm owner-side: HF repo stabilityai/stable-audio-open-1.0, stable-audio-tools==0.0.16.',
     core: 'done', cli: 'done', gui: 'na', status: 'done',
-    research: 'research/145-generative-audio-apis.md', plan: 'phase-39-plan.md',
+    research: 'research/146-generative-audio-apis.md', plan: 'phase-39-plan.md',
   },
   {
     area: 'Generative sound & render trust (Phase 39)', feature: 'Silent-render warning (unplaced-content detector)',

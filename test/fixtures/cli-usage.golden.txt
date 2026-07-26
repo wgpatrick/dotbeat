@@ -841,12 +841,13 @@ usage (one command's block: beat help <command>, or beat <command> --help):
   beat unpin <file> <name...>                             remove a pin by name
   beat pins <file>                                        list this project's pins, newest checkpoint first
   beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon
-  beat mcp                                                MCP server over stdio: the commands above as tools (~58,
+  beat mcp                                                MCP server over stdio: the commands above as tools (75,
                                                           covering track/note/hit/effect/scene/place/song/preset/macro/
                                                           drum-kit/vary/score/adopt/sample/lane/checkpoint/render/metrics editing) —
-                                                          only daemon (a long-running process, structurally not a
-                                                          tool call) stays CLI-only; send tools/list on a running
-                                                          'beat mcp' for the exact, current set
+                                                          the orchestration and eval verbs stay CLI-only (daemon,
+                                                          showdown, pilot, board, recipe, rolecheck and friends);
+                                                          send tools/list on a running 'beat mcp' for the exact,
+                                                          current set
   beat mcp-init <file> [--force | --force-config | --force-claude]
                                                           write a .mcp.json next to <file> so Claude Code
                                                           (or any MCP client) auto-discovers 'beat mcp' there,
