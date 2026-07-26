@@ -671,7 +671,7 @@ const HELP = [
   },
   {
     cmd: 'taste-eval',
-    text: `  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M] [--aes-backend aes|stub|off]
+    text: `  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend off|stub|clap|mert] [--embed-model M] [--aes-backend aes|stub|off]
                                                           the taste-model eval harness (docs/taste-loop-design.md):
                                                           leave-one-batch-out held-out pick prediction over the
                                                           scores log — top-1/top-3/pairwise accuracy vs chance for
@@ -679,10 +679,14 @@ const HELP = [
                                                           renders still exist to embed — embed-bt and both-bt, the
                                                           T2 ablation) plus the learned taste directions. Embeddings
                                                           come from a Python sidecar (python/embed.py), cached next
-                                                          to each wav: clap = LAION-CLAP (default, Apache-2.0),
-                                                          mert = MERT-330M (stronger on music benchmarks; CC-BY-NC
-                                                          weights, personal use only), stub = deterministic no-deps.
-                                                          --aes-backend adds Audiobox-Aesthetics (CC-BY-4.0): four
+                                                          to each wav, and DEFAULT TO off: clap = LAION-CLAP
+                                                          (Apache-2.0) is RETIRED — it scored below chance on
+                                                          held-out owner picks (research/122 §5) — and mert =
+                                                          MERT-330M (CC-BY-NC weights, personal use only) was never
+                                                          tried; both stay selectable to reproduce an old run.
+                                                          stub = deterministic no-deps. The endorsed representation
+                                                          is --aes-backend (Audiobox-Aesthetics, CC-BY-4.0), ON by
+                                                          default: four
                                                           NAMED axes per clip — CE content enjoyment, CU content
                                                           usefulness, PC production complexity, PQ production
                                                           quality — as explicit features (aes-bt / dsp+aes-bt in
@@ -3723,9 +3727,14 @@ async function tasteEvalCmd(argv) {
   if (!file && explicitLog === undefined) throw new BeatEditError('taste-eval needs <file.beat> (the log defaults to beat-scores.jsonl next to it) or an explicit --log <path>')
   const { defaultScoresLog } = await import('../dist/src/vary/batch.js')
   const { evaluate, formatEvalReport } = await import('../dist/src/taste/eval.js')
-  const embedBackend = flagValue(argv, '--embed-backend') ?? 'clap'
+  // Defaults to 'off' (R4-3 / research/130 W0.4): clap was RETIRED at the T1 gate for scoring below
+  // chance on held-out owner picks (research/122 §5) and mert is untried with the same caveat, so a
+  // bare `beat taste-eval` must not spin up either. Both stay selectable to reproduce an old run.
+  // 'aes' is deliberately NOT an --embed-backend value: the Audiobox axes are named features that
+  // are never PCA-projected, and they ride --aes-backend (default 'aes') instead.
+  const embedBackend = flagValue(argv, '--embed-backend') ?? 'off'
   if (!['stub', 'clap', 'mert', 'off'].includes(embedBackend)) {
-    throw new BeatEditError(`--embed-backend must be one of stub|clap|mert|off, got "${embedBackend}"`)
+    throw new BeatEditError(`--embed-backend must be one of off|stub|clap|mert, got "${embedBackend}" (the endorsed Audiobox axes ride --aes-backend, which is on by default)`)
   }
   // Audiobox-Aesthetics axes (research/107 §4.1): 'stub' maps to the sidecar's aes-stub backend
   // (deterministic plumbing-truth axes, no torch) so the whole aes path tests everywhere.

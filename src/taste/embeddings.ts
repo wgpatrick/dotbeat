@@ -18,9 +18,16 @@ const EMBED_PY = 'python/embed.py'
 const SPAWN_TIMEOUT_MS = 600_000
 const SPAWN_MAX_BUFFER = 64 * 1024 * 1024
 
+/** The raw-vector backends. Both real ones are LEGACY as of research/122 §5 ("Embedding spaces for
+ * music, post-CLAP-retirement"): `clap` scored BELOW CHANCE on held-out owner picks and actively
+ * misled at n=37, so it was killed at the T1 gate; `mert` was never tried and carries the same
+ * caveat (python/embed.py implements run_mert and requirements-mert.txt pins its deps, but no
+ * caller anywhere selects it — it is reachable only by hand). They stay selectable so an old run
+ * can be reproduced; neither is a default any more (R4-3 / research/130 W0.4). */
 export type EmbedBackend = 'stub' | 'clap' | 'mert'
 /** Audiobox-Aesthetics axes ride the same sidecar/cache plumbing but are NOT embeddings — four
- * named, crowd-trained axes (CE/CU/PC/PQ) used as explicit features, never PCA-projected. */
+ * named, crowd-trained axes (CE/CU/PC/PQ) used as explicit features, never PCA-projected. This is
+ * the ENDORSED representation (research/122 §5) and hence embedAudioFile's default. */
 export type AesBackend = 'aes' | 'aes-stub'
 export const AES_AXES = ['CE', 'CU', 'PC', 'PQ'] as const
 
@@ -70,7 +77,11 @@ function spawnEmbed(args: string[]): Promise<{ code: number | null; stdout: stri
  */
 export async function embedAudioFile(audioPath: string, opts: { backend?: EmbedBackend | AesBackend; model?: string } = {}): Promise<EmbeddingResult> {
   if (!existsSync(audioPath)) throw new BeatEmbedError(`no audio file at ${audioPath}`)
-  const backend = opts.backend ?? 'clap'
+  // 'aes', not the retired 'clap' (R4-3): every live caller — gen-bakeoff-metrics, curate-engine-
+  // presets, curate-surge-patches, eval.ts's attach* pair, the CLI's taste-collect — already passes
+  // a backend explicitly, so this default only governs a bare call, and a bare call should get the
+  // endorsed representation rather than a backend measured below chance.
+  const backend = opts.backend ?? 'aes'
   const sha = sha256File(audioPath)
   const cp = cachePath(audioPath, backend)
   if (existsSync(cp)) {
@@ -86,7 +97,12 @@ export async function embedAudioFile(audioPath: string, opts: { backend?: EmbedB
   const args = [EMBED_PY, '--backend', backend, '--input', audioPath]
   if (opts.model !== undefined) args.push('--model', opts.model)
   const res = await spawnEmbed(args)
-  if (res.enoent) throw new BeatEmbedError('no Python interpreter found for the embedding sidecar (point $BEAT_PYTHON at one, or python3 -m venv python/.venv && python/.venv/bin/pip install -r python/requirements-clap.txt)')
+  if (res.enoent) {
+    // Name the requirements file for the backend actually asked for — pointing an aes run at
+    // requirements-clap.txt (the pre-R4-3 text) installs the retired model and still fails.
+    const reqs = backend === 'clap' ? 'requirements-clap.txt' : backend === 'mert' ? 'requirements-mert.txt' : 'requirements-aesthetics.txt'
+    throw new BeatEmbedError(`no Python interpreter found for the embedding sidecar (point $BEAT_PYTHON at one, or python3 -m venv python/.venv && python/.venv/bin/pip install -r python/${reqs})`)
+  }
   if (res.code !== 0) {
     const lines = res.stderr.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '')
     throw new BeatEmbedError(`embed sidecar (${backend}) failed: ${lines[lines.length - 1] ?? `exit ${res.code}`}${res.code === 3 ? ' — run `beat taste-eval --doctor` (or use --embed-backend stub)' : ''}`)
