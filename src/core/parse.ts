@@ -374,6 +374,9 @@ export function parse(text: string): BeatDocument {
       if (tokens.length < 6) throw new BeatParseError('lane sample expects at least 4 values: <name> sample <sample-id> <gain dB> <tune semitones> [key=value ...]', lineNo)
       const gainDb = parseFloatStrict(tokens[4]!, lineNo, 'lane gain')
       const tune = parseFloatStrict(tokens[5]!, lineNo, 'lane tune')
+      // Same clamp every WRITER enforces (edit.ts:846, drumkit.ts:48) — without it here a file
+      // can parse into a state no edit can reproduce or touch, breaking D4 (review R2 finding F1).
+      if (tune < -24 || tune > 24) throw new BeatParseError(`lane "${name}": tune must be -24..24 semitones, got ${tune}`, lineNo)
       backing = { type: 'sample', sample: tokens[3]!, gainDb, tune, ...parseSampleLaneExtras(name, tokens.slice(6), lineNo) }
     } else if (sel === 'sf') {
       if (tokens.length !== 6) throw new BeatParseError('lane sf expects exactly 4 values: <name> sf <sample-id> <program> <note>', lineNo)
