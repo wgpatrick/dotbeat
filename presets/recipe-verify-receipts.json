@@ -2,23 +2,23 @@
   "version": 1,
   "generatedAt": "2026-07-26",
   "note": "REGENERATED, never hand-edited. Each entry is one recipe built, rendered through dotbeat's own engine, and checked against its own declared gates. A `fail` row is a FINDING (the recipe is wrong for this engine, or this engine cannot express what the corpus describes) — never a reason to widen the band. A `pending` row names a research 131 §4 discriminator FEATURE_KEYS does not compute yet (138 B0).",
-  "regenerate": "npm run build && node scripts/gen-recipe-receipts.mjs --seed 11 --key Am --bpm 124",
+  "regenerate": "npm run build && node scripts/gen-recipe-receipts.mjs --seed 11 --key Am --bpm 124 --layers",
   "build": {
     "seed": 11,
     "key": "Am",
     "bpm": 124,
     "mode": "offline",
-    "layerSolos": false
+    "layerSolos": true
   },
   "totals": {
     "recipes": 13,
     "pass": 0,
-    "fail": 9,
-    "incomplete": 4,
-    "gatesPass": 44,
-    "gatesFail": 23,
+    "fail": 12,
+    "incomplete": 1,
+    "gatesPass": 77,
+    "gatesFail": 33,
     "gatesPending": 24,
-    "gatesUnmeasured": 43
+    "gatesUnmeasured": 0
   },
   "entries": [
     {
@@ -27,27 +27,27 @@
       "role": "bassline",
       "archetype": "rolling-8ths",
       "tracks": 3,
-      "verdict": "incomplete",
+      "verdict": "fail",
       "counts": {
-        "pass": 5,
-        "fail": 0,
+        "pass": 8,
+        "fail": 1,
         "pending": 3,
-        "unmeasured": 4
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -23.66791178710298,
+        "lufs": -23.667911773712024,
         "samplePeakDb": -9.667104438136313,
         "truePeakDb": -9.665877515705649,
-        "crestDb": 12.97105355714286,
-        "rmsDb": -22.638157995279172,
-        "bandSubPct": 51.79101449080387,
-        "bandBassPct": 46.85826547621083,
-        "bandMidsPct": 1.350573968002949,
-        "bandPresencePct": 0.00014070270339866452,
-        "bandAirPct": 0.000005362278749309622,
-        "centroidLog2": 6.105921190320229,
-        "stereoCorrelation": 0.9999992674181932,
-        "stereoWidthDb": -64.32754257877502
+        "crestDb": 12.971053571712662,
+        "rmsDb": -22.638158009848976,
+        "bandSubPct": 51.791014185978824,
+        "bandBassPct": 46.85826581954924,
+        "bandMidsPct": 1.3505739291221164,
+        "bandPresencePct": 0.00014070304011839791,
+        "bandAirPct": 0.0000053623099765972295,
+        "centroidLog2": 6.105921199052124,
+        "stereoCorrelation": 0.9999992674260922,
+        "stereoWidthDb": -64.32759116263527
       },
       "gates": [
         {
@@ -68,7 +68,7 @@
             8,
             50
           ],
-          "measured": 46.85826547621083,
+          "measured": 46.85826581954924,
           "status": "pass",
           "distance": 0
         },
@@ -79,7 +79,7 @@
             30,
             78
           ],
-          "measured": 51.79101449080387,
+          "measured": 51.791014185978824,
           "status": "pass",
           "distance": 0
         },
@@ -90,7 +90,7 @@
             5,
             6.8
           ],
-          "measured": 6.105921190320229,
+          "measured": 6.105921199052124,
           "status": "pass",
           "distance": 0
         },
@@ -101,7 +101,7 @@
             7,
             16
           ],
-          "measured": 12.97105355714286,
+          "measured": 12.971053571712662,
           "status": "pass",
           "distance": 0
         },
@@ -134,7 +134,7 @@
             -100,
             -35
           ],
-          "measured": -64.32754257877502,
+          "measured": -64.32759116263527,
           "status": "pass",
           "distance": 0
         },
@@ -145,8 +145,8 @@
             45,
             100
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 89.00704054334003,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -156,8 +156,8 @@
             -100,
             -35
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": -68.5351747127344,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -167,9 +167,9 @@
             25,
             75
           ],
-          "measured": null,
-          "status": "unmeasured",
-          "distance": 0
+          "measured": 92.74168247692677,
+          "status": "fail",
+          "distance": 17.74168247692677
         },
         {
           "scope": "mid",
@@ -178,8 +178,8 @@
             0,
             25
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 4.158508661326275,
+          "status": "pass",
           "distance": 0
         }
       ],
@@ -197,25 +197,25 @@
       "tracks": 2,
       "verdict": "fail",
       "counts": {
-        "pass": 2,
-        "fail": 3,
+        "pass": 5,
+        "fail": 4,
         "pending": 2,
-        "unmeasured": 4
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -17.47531104907224,
+        "lufs": -17.47531103538184,
         "samplePeakDb": -7.78766996148766,
         "truePeakDb": -7.7865729191632465,
-        "crestDb": 10.203737632693462,
-        "rmsDb": -17.991407594181123,
-        "bandSubPct": 38.17162359708873,
-        "bandBassPct": 51.97318326111162,
-        "bandMidsPct": 9.776387536064947,
-        "bandPresencePct": 0.07821183189211653,
-        "bandAirPct": 0.0005937738425428361,
-        "centroidLog2": 7.1640563792146095,
-        "stereoCorrelation": 0.9841330962801591,
-        "stereoWidthDb": -20.97077925057093
+        "crestDb": 10.203737596809956,
+        "rmsDb": -17.991407558297617,
+        "bandSubPct": 38.17162395524948,
+        "bandBassPct": 51.97318324132244,
+        "bandMidsPct": 9.776387236448265,
+        "bandPresencePct": 0.07821179480695926,
+        "bandAirPct": 0.0005937721728457062,
+        "centroidLog2": 7.164056341940942,
+        "stereoCorrelation": 0.9841330982670894,
+        "stereoWidthDb": -20.970779798595814
       },
       "gates": [
         {
@@ -225,9 +225,9 @@
             8,
             50
           ],
-          "measured": 51.97318326111162,
+          "measured": 51.97318324132244,
           "status": "fail",
-          "distance": 1.9731832611116218
+          "distance": 1.9731832413224382
         },
         {
           "scope": "",
@@ -236,7 +236,7 @@
             30,
             78
           ],
-          "measured": 38.17162359708873,
+          "measured": 38.17162395524948,
           "status": "pass",
           "distance": 0
         },
@@ -247,9 +247,9 @@
             5,
             6.9
           ],
-          "measured": 7.1640563792146095,
+          "measured": 7.164056341940942,
           "status": "fail",
-          "distance": 0.2640563792146091
+          "distance": 0.2640563419409414
         },
         {
           "scope": "",
@@ -258,7 +258,7 @@
             6,
             16
           ],
-          "measured": 10.203737632693462,
+          "measured": 10.203737596809956,
           "status": "pass",
           "distance": 0
         },
@@ -291,9 +291,9 @@
             -100,
             -30
           ],
-          "measured": -20.97077925057093,
+          "measured": -20.970779798595814,
           "status": "fail",
-          "distance": 9.029220749429069
+          "distance": 9.029220201404186
         },
         {
           "scope": "sub",
@@ -302,8 +302,8 @@
             45,
             100
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 93.07213962739677,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -313,8 +313,8 @@
             -100,
             -35
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": -68.4963937432019,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -324,9 +324,9 @@
             20,
             75
           ],
-          "measured": null,
-          "status": "unmeasured",
-          "distance": 0
+          "measured": 82.63531320444908,
+          "status": "fail",
+          "distance": 7.635313204449076
         },
         {
           "scope": "reese",
@@ -335,8 +335,8 @@
             0,
             22
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 0.7619597340468778,
+          "status": "pass",
           "distance": 0
         }
       ],
@@ -354,25 +354,25 @@
       "tracks": 1,
       "verdict": "fail",
       "counts": {
-        "pass": 2,
+        "pass": 3,
         "fail": 4,
         "pending": 0,
-        "unmeasured": 1
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -34.75525996418757,
-        "samplePeakDb": -13.956369355384052,
-        "truePeakDb": -13.894242207434964,
-        "crestDb": 23.266613815750933,
-        "rmsDb": -37.222983171134985,
-        "bandSubPct": 0.027131589446290006,
-        "bandBassPct": 54.70445036446172,
-        "bandMidsPct": 44.20384434553394,
-        "bandPresencePct": 1.0117675821073342,
-        "bandAirPct": 0.052806118450434085,
-        "centroidLog2": 8.992535412051174,
-        "stereoCorrelation": 0.963658901880634,
-        "stereoWidthDb": -17.26214743530526
+        "lufs": -34.755552214738266,
+        "samplePeakDb": -13.952404704282246,
+        "truePeakDb": -13.890249058911532,
+        "crestDb": 23.27083848610704,
+        "rmsDb": -37.22324319038928,
+        "bandSubPct": 0.02715295837428608,
+        "bandBassPct": 54.69504884755282,
+        "bandMidsPct": 44.21297356719134,
+        "bandPresencePct": 1.0120060244240032,
+        "bandAirPct": 0.05281860245714444,
+        "centroidLog2": 8.992760099296197,
+        "stereoCorrelation": 0.9631924111167484,
+        "stereoWidthDb": -17.206314443170427
       },
       "gates": [
         {
@@ -382,7 +382,7 @@
             10,
             60
           ],
-          "measured": 54.70445036446172,
+          "measured": 54.69504884755282,
           "status": "pass",
           "distance": 0
         },
@@ -393,7 +393,7 @@
             10,
             70
           ],
-          "measured": 44.20384434553394,
+          "measured": 44.21297356719134,
           "status": "pass",
           "distance": 0
         },
@@ -404,9 +404,9 @@
             5,
             55
           ],
-          "measured": 0.027131589446290006,
+          "measured": 0.02715295837428608,
           "status": "fail",
-          "distance": 4.97286841055371
+          "distance": 4.972847041625714
         },
         {
           "scope": "",
@@ -415,9 +415,9 @@
             5.5,
             8.5
           ],
-          "measured": 8.992535412051174,
+          "measured": 8.992760099296197,
           "status": "fail",
-          "distance": 0.4925354120511738
+          "distance": 0.4927600992961967
         },
         {
           "scope": "",
@@ -426,9 +426,9 @@
             8,
             17
           ],
-          "measured": 23.266613815750933,
+          "measured": 23.27083848610704,
           "status": "fail",
-          "distance": 6.266613815750933
+          "distance": 6.2708384861070385
         },
         {
           "scope": "",
@@ -437,9 +437,9 @@
             -100,
             -18
           ],
-          "measured": -17.26214743530526,
+          "measured": -17.206314443170427,
           "status": "fail",
-          "distance": 0.7378525646947409
+          "distance": 0.7936855568295726
         },
         {
           "scope": "acid",
@@ -448,8 +448,8 @@
             10,
             70
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 54.70008430477068,
+          "status": "pass",
           "distance": 0
         }
       ],
@@ -466,27 +466,27 @@
       "role": "bassline",
       "archetype": "sparse-sub",
       "tracks": 2,
-      "verdict": "incomplete",
+      "verdict": "fail",
       "counts": {
-        "pass": 5,
-        "fail": 0,
+        "pass": 8,
+        "fail": 1,
         "pending": 1,
-        "unmeasured": 4
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -29.283204187250085,
+        "lufs": -29.283204136056497,
         "samplePeakDb": -12.255889194835841,
         "truePeakDb": -11.140888268034486,
-        "crestDb": 16.56646521740735,
-        "rmsDb": -28.822354412243193,
-        "bandSubPct": 81.19612638825225,
-        "bandBassPct": 18.350631832390736,
-        "bandMidsPct": 0.4122751760720835,
-        "bandPresencePct": 0.028181430668392297,
-        "bandAirPct": 0.01278517261669292,
-        "centroidLog2": 5.814750524254805,
-        "stereoCorrelation": 0.9999995779422876,
-        "stereoWidthDb": -66.72921172005458
+        "crestDb": 16.56646524071695,
+        "rmsDb": -28.822354435552793,
+        "bandSubPct": 81.19612571174707,
+        "bandBassPct": 18.350632444907763,
+        "bandMidsPct": 0.4122752403121271,
+        "bandPresencePct": 0.028181430428062856,
+        "bandAirPct": 0.01278517260495526,
+        "centroidLog2": 5.8147505386292,
+        "stereoCorrelation": 0.9999995779137479,
+        "stereoWidthDb": -66.72892459112181
       },
       "gates": [
         {
@@ -496,7 +496,7 @@
             5,
             45
           ],
-          "measured": 18.350631832390736,
+          "measured": 18.350632444907763,
           "status": "pass",
           "distance": 0
         },
@@ -507,7 +507,7 @@
             30,
             85
           ],
-          "measured": 81.19612638825225,
+          "measured": 81.19612571174707,
           "status": "pass",
           "distance": 0
         },
@@ -518,7 +518,7 @@
             4.8,
             6.6
           ],
-          "measured": 5.814750524254805,
+          "measured": 5.8147505386292,
           "status": "pass",
           "distance": 0
         },
@@ -529,7 +529,7 @@
             7,
             18
           ],
-          "measured": 16.56646521740735,
+          "measured": 16.56646524071695,
           "status": "pass",
           "distance": 0
         },
@@ -551,7 +551,7 @@
             -100,
             -35
           ],
-          "measured": -66.72921172005458,
+          "measured": -66.72892459112181,
           "status": "pass",
           "distance": 0
         },
@@ -562,8 +562,8 @@
             45,
             100
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 87.26999328004175,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -573,8 +573,8 @@
             -100,
             -35
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": -69.01434873826639,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -584,9 +584,9 @@
             12,
             75
           ],
-          "measured": null,
-          "status": "unmeasured",
-          "distance": 0
+          "measured": 96.39645208138451,
+          "status": "fail",
+          "distance": 21.39645208138451
         },
         {
           "scope": "body",
@@ -595,8 +595,8 @@
             0,
             30
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 0.7630263562228122,
+          "status": "pass",
           "distance": 0
         }
       ],
@@ -615,25 +615,25 @@
       "tracks": 2,
       "verdict": "fail",
       "counts": {
-        "pass": 2,
-        "fail": 4,
+        "pass": 5,
+        "fail": 5,
         "pending": 2,
-        "unmeasured": 4
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -24.5983723901333,
-        "samplePeakDb": -12.75121019176468,
-        "truePeakDb": -12.728399357260223,
-        "crestDb": 14.159340899297211,
-        "rmsDb": -26.91055109106189,
-        "bandSubPct": 0.0011185967158940764,
-        "bandBassPct": 74.69688591021965,
-        "bandMidsPct": 24.938997990875983,
-        "bandPresencePct": 0.3204170885345012,
-        "bandAirPct": 0.04258041365387559,
-        "centroidLog2": 8.359991142791502,
-        "stereoCorrelation": 0.7053306033453716,
-        "stereoWidthDb": -7.616362060679763
+        "lufs": -24.61165453381713,
+        "samplePeakDb": -12.999812245955065,
+        "truePeakDb": -12.999812245955065,
+        "crestDb": 13.94526181595902,
+        "rmsDb": -26.945074061914084,
+        "bandSubPct": 0.001122499255317364,
+        "bandBassPct": 72.69944875910645,
+        "bandMidsPct": 26.92895240894162,
+        "bandPresencePct": 0.3272906459760399,
+        "bandAirPct": 0.04318568672046491,
+        "centroidLog2": 8.409167386159933,
+        "stereoCorrelation": 0.7002374750058528,
+        "stereoWidthDb": -7.537315181840798
       },
       "gates": [
         {
@@ -654,9 +654,9 @@
             0.3,
             9
           ],
-          "measured": 0.04258041365387559,
+          "measured": 0.04318568672046491,
           "status": "fail",
-          "distance": 0.2574195863461244
+          "distance": 0.2568143132795351
         },
         {
           "scope": "",
@@ -665,9 +665,9 @@
             8,
             42
           ],
-          "measured": 74.69688591021965,
+          "measured": 72.69944875910645,
           "status": "fail",
-          "distance": 32.69688591021965
+          "distance": 30.699448759106446
         },
         {
           "scope": "",
@@ -676,9 +676,9 @@
             40,
             85
           ],
-          "measured": 24.938997990875983,
+          "measured": 26.92895240894162,
           "status": "fail",
-          "distance": 15.061002009124017
+          "distance": 13.071047591058381
         },
         {
           "scope": "",
@@ -687,9 +687,9 @@
             1,
             20
           ],
-          "measured": 0.3204170885345012,
+          "measured": 0.3272906459760399,
           "status": "fail",
-          "distance": 0.6795829114654988
+          "distance": 0.6727093540239601
         },
         {
           "scope": "",
@@ -698,7 +698,7 @@
             9,
             19
           ],
-          "measured": 14.159340899297211,
+          "measured": 13.94526181595902,
           "status": "pass",
           "distance": 0
         },
@@ -720,7 +720,7 @@
             -16,
             -1
           ],
-          "measured": -7.616362060679763,
+          "measured": -7.537315181840798,
           "status": "pass",
           "distance": 0
         },
@@ -731,9 +731,9 @@
             30,
             95
           ],
-          "measured": null,
-          "status": "unmeasured",
-          "distance": 0
+          "measured": 24.891202471853084,
+          "status": "fail",
+          "distance": 5.108797528146916
         },
         {
           "scope": "pad",
@@ -742,8 +742,8 @@
             -16,
             -1
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": -7.697530014261221,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -753,8 +753,8 @@
             0.5,
             70
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 31.07913669964073,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -764,8 +764,8 @@
             2,
             70
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 40.856644215998834,
+          "status": "pass",
           "distance": 0
         }
       ],
@@ -784,25 +784,25 @@
       "tracks": 2,
       "verdict": "fail",
       "counts": {
-        "pass": 1,
+        "pass": 4,
         "fail": 3,
         "pending": 2,
-        "unmeasured": 3
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -29.589373775866978,
-        "samplePeakDb": -13.155113543463365,
-        "truePeakDb": -13.155113543463365,
-        "crestDb": 19.61711724753578,
-        "rmsDb": -32.772230790999146,
-        "bandSubPct": 0.8551035496619576,
-        "bandBassPct": 8.278712198182259,
-        "bandMidsPct": 89.27237176624607,
-        "bandPresencePct": 1.565806276839566,
-        "bandAirPct": 0.028006209069603466,
-        "centroidLog2": 9.584383480507958,
-        "stereoCorrelation": 0.9863186151429207,
-        "stereoWidthDb": -21.589389417065867
+        "lufs": -29.59037745271927,
+        "samplePeakDb": -13.139457862927548,
+        "truePeakDb": -13.139457862927548,
+        "crestDb": 19.635457863993246,
+        "rmsDb": -32.774915726920796,
+        "bandSubPct": 0.8825171142545637,
+        "bandBassPct": 8.165278449794632,
+        "bandMidsPct": 89.35394309168112,
+        "bandPresencePct": 1.570336771293792,
+        "bandAirPct": 0.02792457297581678,
+        "centroidLog2": 9.58212544963697,
+        "stereoCorrelation": 0.986575800139385,
+        "stereoWidthDb": -21.70177410856713
       },
       "gates": [
         {
@@ -823,9 +823,9 @@
             10,
             42
           ],
-          "measured": 8.278712198182259,
+          "measured": 8.165278449794632,
           "status": "fail",
-          "distance": 1.7212878018177413
+          "distance": 1.8347215502053675
         },
         {
           "scope": "",
@@ -834,9 +834,9 @@
             40,
             85
           ],
-          "measured": 89.27237176624607,
+          "measured": 89.35394309168112,
           "status": "fail",
-          "distance": 4.272371766246067
+          "distance": 4.353943091681117
         },
         {
           "scope": "",
@@ -845,7 +845,7 @@
             11,
             20
           ],
-          "measured": 19.61711724753578,
+          "measured": 19.635457863993246,
           "status": "pass",
           "distance": 0
         },
@@ -867,9 +867,9 @@
             -16,
             -1
           ],
-          "measured": -21.589389417065867,
+          "measured": -21.70177410856713,
           "status": "fail",
-          "distance": 5.589389417065867
+          "distance": 5.701774108567129
         },
         {
           "scope": "stab",
@@ -878,8 +878,8 @@
             25,
             92
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 90.68211637594182,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -889,8 +889,8 @@
             8,
             80
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 56.52566636115588,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -900,8 +900,8 @@
             0,
             30
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 0.4121695138622161,
+          "status": "pass",
           "distance": 0
         }
       ],
@@ -919,25 +919,25 @@
       "tracks": 1,
       "verdict": "fail",
       "counts": {
-        "pass": 1,
+        "pass": 2,
         "fail": 3,
         "pending": 1,
-        "unmeasured": 1
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -26.32561291416234,
+        "lufs": -26.352083937625597,
         "samplePeakDb": -7.5568532891017535,
         "truePeakDb": -7.552604430584334,
-        "crestDb": 22.798870502964625,
-        "rmsDb": -30.355723792066378,
-        "bandSubPct": 3.5988244450160294,
-        "bandBassPct": 68.28666016803359,
-        "bandMidsPct": 27.141103320289062,
-        "bandPresencePct": 0.9149537102077953,
-        "bandAirPct": 0.058458356453333526,
-        "centroidLog2": 8.400490424640367,
-        "stereoCorrelation": 0.9546249786190178,
-        "stereoWidthDb": -16.29962778022411
+        "crestDb": 22.822458023396564,
+        "rmsDb": -30.379311312498317,
+        "bandSubPct": 3.604865947031589,
+        "bandBassPct": 68.43802941372805,
+        "bandMidsPct": 26.976690271779674,
+        "bandPresencePct": 0.9216232133763343,
+        "bandAirPct": 0.058791154084156465,
+        "centroidLog2": 8.402687626919759,
+        "stereoCorrelation": 0.9545752071675927,
+        "stereoWidthDb": -16.270598780952817
       },
       "gates": [
         {
@@ -958,9 +958,9 @@
             35,
             92
           ],
-          "measured": 27.141103320289062,
+          "measured": 26.976690271779674,
           "status": "fail",
-          "distance": 7.858896679710938
+          "distance": 8.023309728220326
         },
         {
           "scope": "",
@@ -969,9 +969,9 @@
             1,
             30
           ],
-          "measured": 0.9149537102077953,
+          "measured": 0.9216232133763343,
           "status": "fail",
-          "distance": 0.08504628979220474
+          "distance": 0.07837678662366565
         },
         {
           "scope": "",
@@ -980,9 +980,9 @@
             11,
             21
           ],
-          "measured": 22.798870502964625,
+          "measured": 22.822458023396564,
           "status": "fail",
-          "distance": 1.7988705029646255
+          "distance": 1.822458023396564
         },
         {
           "scope": "",
@@ -991,7 +991,7 @@
             -18,
             -1
           ],
-          "measured": -16.29962778022411,
+          "measured": -16.270598780952817,
           "status": "pass",
           "distance": 0
         },
@@ -1002,8 +1002,8 @@
             25,
             92
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 27.104345693629266,
+          "status": "pass",
           "distance": 0
         }
       ],
@@ -1021,25 +1021,25 @@
       "tracks": 2,
       "verdict": "incomplete",
       "counts": {
-        "pass": 6,
+        "pass": 10,
         "fail": 0,
         "pending": 2,
-        "unmeasured": 4
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -16.17248124282376,
-        "samplePeakDb": -5.007922929114065,
-        "truePeakDb": -5.001696659857102,
-        "crestDb": 14.04950126232612,
-        "rmsDb": -19.057424191440184,
-        "bandSubPct": 0.8471162047695229,
-        "bandBassPct": 12.76174910765065,
-        "bandMidsPct": 78.63036679283766,
-        "bandPresencePct": 4.732027917481954,
-        "bandAirPct": 3.0287399772605204,
-        "centroidLog2": 9.935627171922253,
-        "stereoCorrelation": 0.780269964993055,
-        "stereoWidthDb": -9.083278139020605
+        "lufs": -16.16179195509008,
+        "samplePeakDb": -4.984364765396493,
+        "truePeakDb": -4.984364765396493,
+        "crestDb": 14.061609443871586,
+        "rmsDb": -19.045974209268078,
+        "bandSubPct": 0.9016610532118647,
+        "bandBassPct": 12.206749123542222,
+        "bandMidsPct": 79.11876881580737,
+        "bandPresencePct": 4.751887924618494,
+        "bandAirPct": 3.0209330828202234,
+        "centroidLog2": 9.932923472368316,
+        "stereoCorrelation": 0.7816064953187732,
+        "stereoWidthDb": -9.110939728890612
       },
       "gates": [
         {
@@ -1060,7 +1060,7 @@
             0.2,
             10
           ],
-          "measured": 3.0287399772605204,
+          "measured": 3.0209330828202234,
           "status": "pass",
           "distance": 0
         },
@@ -1071,7 +1071,7 @@
             0.5,
             22
           ],
-          "measured": 12.76174910765065,
+          "measured": 12.206749123542222,
           "status": "pass",
           "distance": 0
         },
@@ -1082,7 +1082,7 @@
             35,
             90
           ],
-          "measured": 78.63036679283766,
+          "measured": 79.11876881580737,
           "status": "pass",
           "distance": 0
         },
@@ -1093,7 +1093,7 @@
             2,
             28
           ],
-          "measured": 4.732027917481954,
+          "measured": 4.751887924618494,
           "status": "pass",
           "distance": 0
         },
@@ -1104,7 +1104,7 @@
             10,
             20
           ],
-          "measured": 14.04950126232612,
+          "measured": 14.061609443871586,
           "status": "pass",
           "distance": 0
         },
@@ -1126,7 +1126,7 @@
             -14,
             -1
           ],
-          "measured": -9.083278139020605,
+          "measured": -9.110939728890612,
           "status": "pass",
           "distance": 0
         },
@@ -1137,8 +1137,8 @@
             25,
             92
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 79.10088292428344,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1148,8 +1148,8 @@
             -14,
             -1
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": -9.10873637529729,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1159,8 +1159,8 @@
             0,
             25
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 0.001074798886022514,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1170,8 +1170,8 @@
             2,
             70
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 6.168465653793377,
+          "status": "pass",
           "distance": 0
         }
       ],
@@ -1190,25 +1190,25 @@
       "tracks": 2,
       "verdict": "fail",
       "counts": {
-        "pass": 3,
-        "fail": 2,
+        "pass": 4,
+        "fail": 3,
         "pending": 2,
-        "unmeasured": 2
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -25.557844551246635,
-        "samplePeakDb": -12.51288366183265,
-        "truePeakDb": -12.51288366183265,
-        "crestDb": 16.41545509030733,
-        "rmsDb": -28.92833875213998,
-        "bandSubPct": 0.7318828274428236,
-        "bandBassPct": 23.91312413409994,
-        "bandMidsPct": 70.21556788388985,
-        "bandPresencePct": 4.224264417176646,
-        "bandAirPct": 0.9151607373909316,
-        "centroidLog2": 9.657143594933668,
-        "stereoCorrelation": 0.9849436265486009,
-        "stereoWidthDb": -21.19930993719001
+        "lufs": -25.536242538760003,
+        "samplePeakDb": -12.542038495633378,
+        "truePeakDb": -12.53661321454414,
+        "crestDb": 16.364322638187932,
+        "rmsDb": -28.90636113382131,
+        "bandSubPct": 0.7250668039141663,
+        "bandBassPct": 23.977419572652163,
+        "bandMidsPct": 70.17215480129317,
+        "bandPresencePct": 4.216457060290914,
+        "bandAirPct": 0.9089017618495753,
+        "centroidLog2": 9.656631297157228,
+        "stereoCorrelation": 0.985179158914966,
+        "stereoWidthDb": -21.262514727530956
       },
       "gates": [
         {
@@ -1229,9 +1229,9 @@
             0.5,
             22
           ],
-          "measured": 23.91312413409994,
+          "measured": 23.977419572652163,
           "status": "fail",
-          "distance": 1.9131241340999416
+          "distance": 1.9774195726521633
         },
         {
           "scope": "",
@@ -1240,7 +1240,7 @@
             35,
             92
           ],
-          "measured": 70.21556788388985,
+          "measured": 70.17215480129317,
           "status": "pass",
           "distance": 0
         },
@@ -1251,7 +1251,7 @@
             1.5,
             28
           ],
-          "measured": 4.224264417176646,
+          "measured": 4.216457060290914,
           "status": "pass",
           "distance": 0
         },
@@ -1262,7 +1262,7 @@
             11,
             21
           ],
-          "measured": 16.41545509030733,
+          "measured": 16.364322638187932,
           "status": "pass",
           "distance": 0
         },
@@ -1284,9 +1284,9 @@
             -16,
             -1
           ],
-          "measured": -21.19930993719001,
+          "measured": -21.262514727530956,
           "status": "fail",
-          "distance": 5.199309937190009
+          "distance": 5.262514727530956
         },
         {
           "scope": "pluck",
@@ -1295,8 +1295,8 @@
             25,
             94
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 68.61502916276254,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1306,9 +1306,9 @@
             2,
             70
           ],
-          "measured": null,
-          "status": "unmeasured",
-          "distance": 0
+          "measured": 0.6765749118560503,
+          "status": "fail",
+          "distance": 1.3234250881439498
         }
       ],
       "gaps": [
@@ -1326,24 +1326,24 @@
       "verdict": "fail",
       "counts": {
         "pass": 4,
-        "fail": 1,
+        "fail": 3,
         "pending": 1,
-        "unmeasured": 2
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -18.512330251713703,
-        "samplePeakDb": -8.93118761403565,
-        "truePeakDb": -8.92079861144886,
-        "crestDb": 13.075143027338274,
-        "rmsDb": -22.006330641373925,
-        "bandSubPct": 0.0688876000809873,
-        "bandBassPct": 11.704256532202077,
-        "bandMidsPct": 82.6967507271119,
-        "bandPresencePct": 5.196841081154669,
-        "bandAirPct": 0.3332640594506304,
-        "centroidLog2": 9.666792129839132,
-        "stereoCorrelation": 0.9731159908900167,
-        "stereoWidthDb": -18.65638105039138
+        "lufs": -18.51099901281756,
+        "samplePeakDb": -8.989939092916966,
+        "truePeakDb": -8.97306953018343,
+        "crestDb": 13.013929812324399,
+        "rmsDb": -22.003868905241365,
+        "bandSubPct": 0.0690318255437425,
+        "bandBassPct": 11.71706722223003,
+        "bandMidsPct": 82.77920382135288,
+        "bandPresencePct": 5.100126646448707,
+        "bandAirPct": 0.3345704844248948,
+        "centroidLog2": 9.669861161414147,
+        "stereoCorrelation": 0.9706458330115981,
+        "stereoWidthDb": -18.258005861188398
       },
       "gates": [
         {
@@ -1353,7 +1353,7 @@
             2,
             40
           ],
-          "measured": 11.704256532202077,
+          "measured": 11.71706722223003,
           "status": "pass",
           "distance": 0
         },
@@ -1364,7 +1364,7 @@
             30,
             90
           ],
-          "measured": 82.6967507271119,
+          "measured": 82.77920382135288,
           "status": "pass",
           "distance": 0
         },
@@ -1375,7 +1375,7 @@
             1,
             30
           ],
-          "measured": 5.196841081154669,
+          "measured": 5.100126646448707,
           "status": "pass",
           "distance": 0
         },
@@ -1386,7 +1386,7 @@
             8,
             19
           ],
-          "measured": 13.075143027338274,
+          "measured": 13.013929812324399,
           "status": "pass",
           "distance": 0
         },
@@ -1408,9 +1408,9 @@
             -18,
             -1
           ],
-          "measured": -18.65638105039138,
+          "measured": -18.258005861188398,
           "status": "fail",
-          "distance": 0.6563810503913814
+          "distance": 0.25800586118839774
         },
         {
           "scope": "swirl",
@@ -1419,9 +1419,9 @@
             20,
             92
           ],
-          "measured": null,
-          "status": "unmeasured",
-          "distance": 0
+          "measured": 92.67396022244338,
+          "status": "fail",
+          "distance": 0.6739602224433838
         },
         {
           "scope": "weight",
@@ -1430,9 +1430,9 @@
             5,
             80
           ],
-          "measured": null,
-          "status": "unmeasured",
-          "distance": 0
+          "measured": 81.86850163495238,
+          "status": "fail",
+          "distance": 1.8685016349523806
         }
       ],
       "gaps": [
@@ -1449,25 +1449,25 @@
       "tracks": 1,
       "verdict": "fail",
       "counts": {
-        "pass": 2,
-        "fail": 2,
+        "pass": 3,
+        "fail": 3,
         "pending": 4,
-        "unmeasured": 2
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -22.567378892373526,
-        "samplePeakDb": -6.366145399743105,
-        "truePeakDb": -6.096903821113965,
-        "crestDb": 16.443137574813896,
-        "rmsDb": -22.809282974557,
-        "bandSubPct": 70.29246463093439,
-        "bandBassPct": 23.545324174523767,
-        "bandMidsPct": 0.6925766804518418,
-        "bandPresencePct": 0.3898504726782274,
-        "bandAirPct": 5.0797840414119175,
-        "centroidLog2": 9.451983034474098,
-        "stereoCorrelation": 0.9571491283400065,
-        "stereoWidthDb": -16.59662850187859
+        "lufs": -22.567385662957054,
+        "samplePeakDb": -5.903174985891251,
+        "truePeakDb": -5.903174985891251,
+        "crestDb": 16.907097292852786,
+        "rmsDb": -22.810272278744037,
+        "bandSubPct": 70.31444031041818,
+        "bandBassPct": 23.56556623175646,
+        "bandMidsPct": 0.6977260042000681,
+        "bandPresencePct": 0.4095682545385876,
+        "bandAirPct": 5.0126991990865095,
+        "centroidLog2": 9.433686219697826,
+        "stereoCorrelation": 0.9564914993298945,
+        "stereoWidthDb": -16.529034641256263
       },
       "gates": [
         {
@@ -1477,7 +1477,7 @@
             1.5,
             12
           ],
-          "measured": 5.0797840414119175,
+          "measured": 5.0126991990865095,
           "status": "pass",
           "distance": 0
         },
@@ -1488,9 +1488,9 @@
             4,
             45
           ],
-          "measured": 0.6925766804518418,
+          "measured": 0.6977260042000681,
           "status": "fail",
-          "distance": 3.307423319548158
+          "distance": 3.302273995799932
         },
         {
           "scope": "",
@@ -1499,9 +1499,9 @@
             18,
             55
           ],
-          "measured": 70.29246463093439,
+          "measured": 70.31444031041818,
           "status": "fail",
-          "distance": 15.29246463093439
+          "distance": 15.314440310418178
         },
         {
           "scope": "",
@@ -1510,7 +1510,7 @@
             9,
             18
           ],
-          "measured": 16.443137574813896,
+          "measured": 16.907097292852786,
           "status": "pass",
           "distance": 0
         },
@@ -1565,8 +1565,8 @@
             1,
             15
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 4.969267734159929,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1576,9 +1576,9 @@
             15,
             60
           ],
-          "measured": null,
-          "status": "unmeasured",
-          "distance": 0
+          "measured": 70.35261700251037,
+          "status": "fail",
+          "distance": 10.352617002510371
         }
       ],
       "gaps": [
@@ -1595,27 +1595,27 @@
       "role": "bassline",
       "archetype": "rolling-8ths",
       "tracks": 4,
-      "verdict": "incomplete",
+      "verdict": "fail",
       "counts": {
-        "pass": 6,
-        "fail": 0,
+        "pass": 11,
+        "fail": 1,
         "pending": 2,
-        "unmeasured": 6
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -23.711579326977027,
+        "lufs": -23.71157940002694,
         "samplePeakDb": -7.408179898453882,
         "truePeakDb": -7.40601214146146,
-        "crestDb": 15.104043852840931,
-        "rmsDb": -22.512223751294812,
-        "bandSubPct": 64.39098388381058,
-        "bandBassPct": 32.070573321201614,
-        "bandMidsPct": 3.479360509735368,
-        "bandPresencePct": 0.04726370963061415,
-        "bandAirPct": 0.011818575621665566,
-        "centroidLog2": 6.392287943293292,
-        "stereoCorrelation": 0.9996605971491058,
-        "stereoWidthDb": -37.70160055616474
+        "crestDb": 15.104043928085506,
+        "rmsDb": -22.512223826539387,
+        "bandSubPct": 64.39098408303259,
+        "bandBassPct": 32.070573100687895,
+        "bandMidsPct": 3.479360564084861,
+        "bandPresencePct": 0.04726367795332559,
+        "bandAirPct": 0.011818574241484223,
+        "centroidLog2": 6.3922879249240525,
+        "stereoCorrelation": 0.9996605973504815,
+        "stereoWidthDb": -37.70160307024583
       },
       "gates": [
         {
@@ -1625,7 +1625,7 @@
             8,
             50
           ],
-          "measured": 32.070573321201614,
+          "measured": 32.070573100687895,
           "status": "pass",
           "distance": 0
         },
@@ -1636,7 +1636,7 @@
             2,
             40
           ],
-          "measured": 3.479360509735368,
+          "measured": 3.479360564084861,
           "status": "pass",
           "distance": 0
         },
@@ -1647,7 +1647,7 @@
             30,
             78
           ],
-          "measured": 64.39098388381058,
+          "measured": 64.39098408303259,
           "status": "pass",
           "distance": 0
         },
@@ -1658,7 +1658,7 @@
             5,
             7.2
           ],
-          "measured": 6.392287943293292,
+          "measured": 6.3922879249240525,
           "status": "pass",
           "distance": 0
         },
@@ -1669,7 +1669,7 @@
             6,
             16
           ],
-          "measured": 15.104043852840931,
+          "measured": 15.104043928085506,
           "status": "pass",
           "distance": 0
         },
@@ -1702,7 +1702,7 @@
             -100,
             -25
           ],
-          "measured": -37.70160055616474,
+          "measured": -37.70160307024583,
           "status": "pass",
           "distance": 0
         },
@@ -1713,8 +1713,8 @@
             50,
             100
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 85.9482531695394,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1724,8 +1724,8 @@
             -100,
             -35
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": -67.69366782866145,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1735,9 +1735,9 @@
             20,
             85
           ],
-          "measured": null,
-          "status": "unmeasured",
-          "distance": 0
+          "measured": 91.40757677429468,
+          "status": "fail",
+          "distance": 6.407576774294682
         },
         {
           "scope": "body",
@@ -1746,8 +1746,8 @@
             0,
             25
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 0.6106821805353084,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1757,8 +1757,8 @@
             0.5,
             70
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 2.6863826648798406,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1768,8 +1768,8 @@
             0,
             15
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 6.098848453107585e-8,
+          "status": "pass",
           "distance": 0
         }
       ],
@@ -1787,25 +1787,25 @@
       "tracks": 3,
       "verdict": "fail",
       "counts": {
-        "pass": 5,
-        "fail": 1,
+        "pass": 10,
+        "fail": 2,
         "pending": 2,
-        "unmeasured": 6
+        "unmeasured": 0
       },
       "clipFeatures": {
-        "lufs": -17.26115697387557,
-        "samplePeakDb": -6.618009072780408,
-        "truePeakDb": -6.618009072780408,
-        "crestDb": 14.579698542470359,
-        "rmsDb": -21.197707615250767,
-        "bandSubPct": 0.4861912829297147,
-        "bandBassPct": 0.24601374398732562,
-        "bandMidsPct": 84.13815396576042,
-        "bandPresencePct": 8.929335415248909,
-        "bandAirPct": 6.200305592073493,
-        "centroidLog2": 10.716090638380061,
-        "stereoCorrelation": 0.8117224462872266,
-        "stereoWidthDb": -9.823682834469459
+        "lufs": -17.276466343452366,
+        "samplePeakDb": -6.6521495280205105,
+        "truePeakDb": -6.6521495280205105,
+        "crestDb": 14.561457513535343,
+        "rmsDb": -21.213607041555854,
+        "bandSubPct": 0.49821996428935056,
+        "bandBassPct": 0.24531910630972184,
+        "bandMidsPct": 84.07225928935172,
+        "bandPresencePct": 9.027052776559842,
+        "bandAirPct": 6.157148863488881,
+        "centroidLog2": 10.71558954369107,
+        "stereoCorrelation": 0.8163687686490692,
+        "stereoWidthDb": -9.950358554947767
       },
       "gates": [
         {
@@ -1826,7 +1826,7 @@
             0.3,
             12
           ],
-          "measured": 6.200305592073493,
+          "measured": 6.157148863488881,
           "status": "pass",
           "distance": 0
         },
@@ -1837,9 +1837,9 @@
             0.5,
             22
           ],
-          "measured": 0.24601374398732562,
+          "measured": 0.24531910630972184,
           "status": "fail",
-          "distance": 0.2539862560126744
+          "distance": 0.25468089369027813
         },
         {
           "scope": "",
@@ -1848,7 +1848,7 @@
             30,
             88
           ],
-          "measured": 84.13815396576042,
+          "measured": 84.07225928935172,
           "status": "pass",
           "distance": 0
         },
@@ -1859,7 +1859,7 @@
             2,
             30
           ],
-          "measured": 8.929335415248909,
+          "measured": 9.027052776559842,
           "status": "pass",
           "distance": 0
         },
@@ -1870,7 +1870,7 @@
             10,
             20
           ],
-          "measured": 14.579698542470359,
+          "measured": 14.561457513535343,
           "status": "pass",
           "distance": 0
         },
@@ -1892,7 +1892,7 @@
             -12,
             -1
           ],
-          "measured": -9.823682834469459,
+          "measured": -9.950358554947767,
           "status": "pass",
           "distance": 0
         },
@@ -1903,8 +1903,8 @@
             25,
             92
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 85.33614605239254,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1914,8 +1914,8 @@
             -14,
             -1
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": -10.068584646819577,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1925,8 +1925,8 @@
             0,
             20
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 0.0000010609273998306901,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1936,8 +1936,8 @@
             2,
             70
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 11.709266309814904,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1947,8 +1947,8 @@
             1,
             80
           ],
-          "measured": null,
-          "status": "unmeasured",
+          "measured": 4.432492121541503,
+          "status": "pass",
           "distance": 0
         },
         {
@@ -1958,9 +1958,9 @@
             2,
             80
           ],
-          "measured": null,
-          "status": "unmeasured",
-          "distance": 0
+          "measured": 95.34196912105618,
+          "status": "fail",
+          "distance": 15.34196912105618
         }
       ],
       "gaps": [

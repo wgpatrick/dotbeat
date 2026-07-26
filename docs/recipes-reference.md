@@ -53,27 +53,27 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
 ## Last verification run — every recipe built, rendered and checked
 
 *From `presets/recipe-verify-receipts.json`, generated 2026-07-26 by
-`npm run build && node scripts/gen-recipe-receipts.mjs --seed 11 --key Am --bpm 124` (seed 11, key Am, 124 BPM,
-offline render).
-**44 gates passed, 23 FAILED, 24 pending on 138's B0 feature upgrade.**
-0 recipes are clean on every computable gate; 9 have at least one real failure.
+`npm run build && node scripts/gen-recipe-receipts.mjs --seed 11 --key Am --bpm 124 --layers` (seed 11, key Am, 124 BPM,
+offline render, per-layer solo renders included).
+**77 gates passed, 33 FAILED, 24 pending on 138's B0 feature upgrade.**
+0 recipes are clean on every computable gate; 12 have at least one real failure.
 A failure here is a FINDING, kept verbatim — the bands are never widened to make this table green.*
 
 | recipe | verdict | pass | fail | pending | what failed |
 |---|---|---|---|---|---|
-| `rolling-sub-bass` | INCOMPLETE | 5 | 0 | 3 | — |
-| `reese-bass` | FAIL | 2 | 3 | 2 | `bandBassPct` 51.97 vs 8..50; `centroidLog2` 7.16 vs 5..6.9; `stereoWidthDb` -20.97 vs -100..-30 |
-| `acid-303` | FAIL | 2 | 4 | 0 | `bandSubPct` 0.03 vs 5..55; `centroidLog2` 8.99 vs 5.5..8.5; `crestDb` 23.27 vs 8..17; `stereoWidthDb` -17.26 vs -100..-18 |
-| `808-glide-bass` | INCOMPLETE | 5 | 0 | 1 | — |
-| `warm-pad-with-air` | FAIL | 2 | 4 | 2 | `bandAirPct` 0.04 vs 0.3..9; `bandBassPct` 74.7 vs 8..42; `bandMidsPct` 24.94 vs 40..85; `bandPresencePct` 0.32 vs 1..20 |
-| `house-chord-stab` | FAIL | 1 | 3 | 2 | `bandBassPct` 8.28 vs 10..42; `bandMidsPct` 89.27 vs 40..85; `stereoWidthDb` -21.59 vs -16..-1 |
-| `techno-stab` | FAIL | 1 | 3 | 1 | `bandMidsPct` 27.14 vs 35..92; `bandPresencePct` 0.91 vs 1..30; `crestDb` 22.8 vs 11..21 |
-| `supersaw-trance-lead` | INCOMPLETE | 6 | 0 | 2 | — |
-| `pluck-delay-lead` | FAIL | 3 | 2 | 2 | `bandBassPct` 23.91 vs 0.5..22; `stereoWidthDb` -21.2 vs -16..-1 |
-| `hoover-lead` | FAIL | 4 | 1 | 1 | `stereoWidthDb` -18.66 vs -18..-1 |
-| `layered-house-kit` | FAIL | 2 | 2 | 4 | `bandMidsPct` 0.69 vs 4..45; `bandSubPct` 70.29 vs 18..55 |
-| `three-layer-bass-stack` | INCOMPLETE | 6 | 0 | 2 | — |
-| `layered-lead-stack` | FAIL | 5 | 1 | 2 | `bandBassPct` 0.25 vs 0.5..22 |
+| `rolling-sub-bass` | FAIL | 8 | 1 | 3 | `mid.bandBassPct` 92.74 vs 25..75 |
+| `reese-bass` | FAIL | 5 | 4 | 2 | `bandBassPct` 51.97 vs 8..50; `centroidLog2` 7.16 vs 5..6.9; `stereoWidthDb` -20.97 vs -100..-30; `reese.bandBassPct` 82.64 vs 20..75 |
+| `acid-303` | FAIL | 3 | 4 | 0 | `bandSubPct` 0.03 vs 5..55; `centroidLog2` 8.99 vs 5.5..8.5; `crestDb` 23.27 vs 8..17; `stereoWidthDb` -17.21 vs -100..-18 |
+| `808-glide-bass` | FAIL | 8 | 1 | 1 | `body.bandBassPct` 96.4 vs 12..75 |
+| `warm-pad-with-air` | FAIL | 5 | 5 | 2 | `bandAirPct` 0.04 vs 0.3..9; `bandBassPct` 72.7 vs 8..42; `bandMidsPct` 26.93 vs 40..85; `bandPresencePct` 0.33 vs 1..20; `pad.bandMidsPct` 24.89 vs 30..95 |
+| `house-chord-stab` | FAIL | 4 | 3 | 2 | `bandBassPct` 8.17 vs 10..42; `bandMidsPct` 89.35 vs 40..85; `stereoWidthDb` -21.7 vs -16..-1 |
+| `techno-stab` | FAIL | 2 | 3 | 1 | `bandMidsPct` 26.98 vs 35..92; `bandPresencePct` 0.92 vs 1..30; `crestDb` 22.82 vs 11..21 |
+| `supersaw-trance-lead` | INCOMPLETE | 10 | 0 | 2 | — |
+| `pluck-delay-lead` | FAIL | 4 | 3 | 2 | `bandBassPct` 23.98 vs 0.5..22; `stereoWidthDb` -21.26 vs -16..-1; `shimmer.bandPresencePct` 0.68 vs 2..70 |
+| `hoover-lead` | FAIL | 4 | 3 | 1 | `stereoWidthDb` -18.26 vs -18..-1; `swirl.bandMidsPct` 92.67 vs 20..92; `weight.bandBassPct` 81.87 vs 5..80 |
+| `layered-house-kit` | FAIL | 3 | 3 | 4 | `bandMidsPct` 0.7 vs 4..45; `bandSubPct` 70.31 vs 18..55; `kit.bandSubPct` 70.35 vs 15..60 |
+| `three-layer-bass-stack` | FAIL | 11 | 1 | 2 | `body.bandBassPct` 91.41 vs 20..85 |
+| `layered-lead-stack` | FAIL | 10 | 2 | 2 | `bandBassPct` 0.25 vs 0.5..22; `air.bandPresencePct` 95.34 vs 2..80 |
 
 
 ## The expressibility gaps — what the corpus asks for that dotbeat cannot do
@@ -172,7 +172,7 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
     - *[measured — owned refs]* docs/research/131 §7 P1 + §2.2 — the gate numbers: packs-ref bass puts 60.1% of energy below 60 Hz (p25 ≈37) with centroid ≈74 Hz and dead-mono width; engineplus sits at 0.22% sub and 162 Hz
     - *[measured — owned refs]* docs/research/138 §2 free wins 1, 2, 5, 9 — subLevel 0→0.5, bass root E1–A1 (MIDI 28–33), bass mono discipline, and the ghost-kick pump track (duck reads kick HITS, so a −60 dB ghost track works today)
 
-**Clip gates** (checked on the summed render) — last verified run: **INCOMPLETE**:
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
@@ -283,10 +283,10 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
 |---|---|---|---|---|
 | `bandSubPct` | 5..55 | computable today | 0.03 | **FAIL** (off by 4.97) |
 | `bandBassPct` | 10..60 | computable today | 54.7 | **PASS** |
-| `bandMidsPct` | 10..70 | computable today | 44.2 | **PASS** |
+| `bandMidsPct` | 10..70 | computable today | 44.21 | **PASS** |
 | `centroidLog2` | 5.5..8.5 | computable today | 8.99 | **FAIL** (off by 0.49) |
 | `crestDb` | 8..17 | computable today | 23.27 | **FAIL** (off by 6.27) |
-| `stereoWidthDb` | -100..-18 | computable today | -17.26 | **FAIL** (off by 0.74) |
+| `stereoWidthDb` | -100..-18 | computable today | -17.21 | **FAIL** (off by 0.79) |
 
 *Gates mined from docs/research/131 §7 P1 widened for a mid-forward acid voice (this recipe deliberately does NOT chase the 30% sub share — the corpus high-passes the acid line at 150 Hz to protect the kick) — packs-ref bassline bands, sub floor relaxed to match the source's own EQ instruction, as of 2026-07-26.*
 
@@ -329,7 +329,7 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
     - *[consensus (3+ sources)]* docs/priors/bass-basseries.md consensus 6 — 808 design consistently uses a sine oscillator, a downward pitch envelope at note-on, glide/portamento between notes, and post-distortion EQ to carve space against the kick
     - *[measured — patch files]* docs/research/141 §3.1/§3.2 — bass row — bass amp attack median 3.91 ms with 83% ≤12.5 ms; the long DECAY is the shaping stage (median 621 ms, IQR 250–1080) — which matches Unison's 550–650 ms exactly and contradicts nothing
 
-**Clip gates** (checked on the summed render) — last verified run: **INCOMPLETE**:
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
@@ -387,7 +387,7 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
     - *[consensus (3+ sources)]* docs/priors/layering.md §6 — cross-source consensus — the clearest agreement in the whole vein is a WARNING: 'only layer when there is a good reason for doing so'; 'poor layering occurs when multiple sounds try to do the same thing'; 'three well-crafted layers usually sound better than seven fighting for space'. Hence every layer here states its job, and there are three, not seven
     - *[measured — owned refs]* docs/research/131 §3.2 + §5 (bassline row) — gate numbers, and the reason this shape exists: even ELITE engineplus bass keeps 2× the sub-band crest (22.6 vs 10.9 dB), half the spectral movement (fluxMean 0.09 vs 0.20) and is 30 dB wider than the dead-mono elite refs — properties of a stack, not of any single patch
 
-**Clip gates** (checked on the summed render) — last verified run: **INCOMPLETE**:
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
@@ -453,12 +453,12 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
-| `bandBassPct` | 8..42 | computable today | 74.7 | **FAIL** (off by 32.7) |
-| `bandMidsPct` | 40..85 | computable today | 24.94 | **FAIL** (off by 15.06) |
-| `bandPresencePct` | 1..20 | computable today | 0.32 | **FAIL** (off by 0.68) |
+| `bandBassPct` | 8..42 | computable today | 72.7 | **FAIL** (off by 30.7) |
+| `bandMidsPct` | 40..85 | computable today | 26.93 | **FAIL** (off by 13.07) |
+| `bandPresencePct` | 1..20 | computable today | 0.33 | **FAIL** (off by 0.67) |
 | `bandAirPct` | 0.3..9 | computable today | 0.04 | **FAIL** (off by 0.26) |
-| `crestDb` | 9..19 | computable today | 14.16 | **PASS** |
-| `stereoWidthDb` | -16..-1 | computable today | -7.62 | **PASS** |
+| `crestDb` | 9..19 | computable today | 13.95 | **PASS** |
+| `stereoWidthDb` | -16..-1 | computable today | -7.54 | **PASS** |
 | `fluxMean` | 0.1..0.4 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 | `attackMedMs` | 200..1400 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
@@ -509,10 +509,10 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
-| `bandBassPct` | 10..42 | computable today | 8.28 | **FAIL** (off by 1.72) |
-| `bandMidsPct` | 40..85 | computable today | 89.27 | **FAIL** (off by 4.27) |
-| `crestDb` | 11..20 | computable today | 19.62 | **PASS** |
-| `stereoWidthDb` | -16..-1 | computable today | -21.59 | **FAIL** (off by 5.59) |
+| `bandBassPct` | 10..42 | computable today | 8.17 | **FAIL** (off by 1.83) |
+| `bandMidsPct` | 40..85 | computable today | 89.35 | **FAIL** (off by 4.35) |
+| `crestDb` | 11..20 | computable today | 19.64 | **PASS** |
+| `stereoWidthDb` | -16..-1 | computable today | -21.7 | **FAIL** (off by 5.7) |
 | `attackMedMs` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 | `onsetRatePerSec` | 4..12 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
@@ -548,10 +548,10 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
-| `bandMidsPct` | 35..92 | computable today | 27.14 | **FAIL** (off by 7.86) |
-| `bandPresencePct` | 1..30 | computable today | 0.91 | **FAIL** (off by 0.09) |
-| `crestDb` | 11..21 | computable today | 22.8 | **FAIL** (off by 1.8) |
-| `stereoWidthDb` | -18..-1 | computable today | -16.3 | **PASS** |
+| `bandMidsPct` | 35..92 | computable today | 26.98 | **FAIL** (off by 8.02) |
+| `bandPresencePct` | 1..30 | computable today | 0.92 | **FAIL** (off by 0.08) |
+| `crestDb` | 11..21 | computable today | 22.82 | **FAIL** (off by 1.82) |
+| `stereoWidthDb` | -18..-1 | computable today | -16.27 | **PASS** |
 | `attackMedMs` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §2.2 + §7 P2 (packs chords ref rows) — packs-ref medians as p25–p75 bands, as of 2026-07-26.*
@@ -601,12 +601,12 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
-| `bandMidsPct` | 35..90 | computable today | 78.63 | **PASS** |
-| `bandBassPct` | 0.5..22 | computable today | 12.76 | **PASS** |
-| `bandPresencePct` | 2..28 | computable today | 4.73 | **PASS** |
-| `bandAirPct` | 0.2..10 | computable today | 3.03 | **PASS** |
-| `stereoWidthDb` | -14..-1 | computable today | -9.08 | **PASS** |
-| `crestDb` | 10..20 | computable today | 14.05 | **PASS** |
+| `bandMidsPct` | 35..90 | computable today | 79.12 | **PASS** |
+| `bandBassPct` | 0.5..22 | computable today | 12.21 | **PASS** |
+| `bandPresencePct` | 2..28 | computable today | 4.75 | **PASS** |
+| `bandAirPct` | 0.2..10 | computable today | 3.02 | **PASS** |
+| `stereoWidthDb` | -14..-1 | computable today | -9.11 | **PASS** |
+| `crestDb` | 10..20 | computable today | 14.06 | **PASS** |
 | `attackMedMs` | 0..8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 | `flatnessHiDb` | -16..-8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
@@ -652,11 +652,11 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
-| `bandMidsPct` | 35..92 | computable today | 70.22 | **PASS** |
-| `bandBassPct` | 0.5..22 | computable today | 23.91 | **FAIL** (off by 1.91) |
+| `bandMidsPct` | 35..92 | computable today | 70.17 | **PASS** |
+| `bandBassPct` | 0.5..22 | computable today | 23.98 | **FAIL** (off by 1.98) |
 | `bandPresencePct` | 1.5..28 | computable today | 4.22 | **PASS** |
-| `stereoWidthDb` | -16..-1 | computable today | -21.2 | **FAIL** (off by 5.2) |
-| `crestDb` | 11..21 | computable today | 16.42 | **PASS** |
+| `stereoWidthDb` | -16..-1 | computable today | -21.26 | **FAIL** (off by 5.26) |
+| `crestDb` | 11..21 | computable today | 16.36 | **PASS** |
 | `attackMedMs` | 0..8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 | `flatnessHiDb` | -16..-8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
@@ -699,11 +699,11 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
-| `bandMidsPct` | 30..90 | computable today | 82.7 | **PASS** |
-| `bandBassPct` | 2..40 | computable today | 11.7 | **PASS** |
-| `bandPresencePct` | 1..30 | computable today | 5.2 | **PASS** |
-| `stereoWidthDb` | -18..-1 | computable today | -18.66 | **FAIL** (off by 0.66) |
-| `crestDb` | 8..19 | computable today | 13.08 | **PASS** |
+| `bandMidsPct` | 30..90 | computable today | 82.78 | **PASS** |
+| `bandBassPct` | 2..40 | computable today | 11.72 | **PASS** |
+| `bandPresencePct` | 1..30 | computable today | 5.1 | **PASS** |
+| `stereoWidthDb` | -18..-1 | computable today | -18.26 | **FAIL** (off by 0.26) |
+| `crestDb` | 8..19 | computable today | 13.01 | **PASS** |
 | `fluxMean` | 0.1..0.45 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §7 P2/P4/P5 (packs lead ref rows), band-share gates widened for a deliberately mid-heavy drone — packs-ref lead medians as p25–p75 bands, as of 2026-07-26.*
@@ -751,12 +751,12 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
-| `bandMidsPct` | 30..88 | computable today | 84.14 | **PASS** |
+| `bandMidsPct` | 30..88 | computable today | 84.07 | **PASS** |
 | `bandBassPct` | 0.5..22 | computable today | 0.25 | **FAIL** (off by 0.25) |
-| `bandPresencePct` | 2..30 | computable today | 8.93 | **PASS** |
-| `bandAirPct` | 0.3..12 | computable today | 6.2 | **PASS** |
-| `stereoWidthDb` | -12..-1 | computable today | -9.82 | **PASS** |
-| `crestDb` | 10..20 | computable today | 14.58 | **PASS** |
+| `bandPresencePct` | 2..30 | computable today | 9.03 | **PASS** |
+| `bandAirPct` | 0.3..12 | computable today | 6.16 | **PASS** |
+| `stereoWidthDb` | -12..-1 | computable today | -9.95 | **PASS** |
+| `crestDb` | 10..20 | computable today | 14.56 | **PASS** |
 | `attackMedMs` | 0..8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 | `flatnessHiDb` | -16..-8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
@@ -807,10 +807,10 @@ A failure here is a FINDING, kept verbatim — the bands are never widened to ma
 
 | gate | band | key status | measured | verdict |
 |---|---|---|---|---|
-| `bandSubPct` | 18..55 | computable today | 70.29 | **FAIL** (off by 15.29) |
-| `bandMidsPct` | 4..45 | computable today | 0.69 | **FAIL** (off by 3.31) |
-| `bandAirPct` | 1.5..12 | computable today | 5.08 | **PASS** |
-| `crestDb` | 9..18 | computable today | 16.44 | **PASS** |
+| `bandSubPct` | 18..55 | computable today | 70.31 | **FAIL** (off by 15.31) |
+| `bandMidsPct` | 4..45 | computable today | 0.7 | **FAIL** (off by 3.3) |
+| `bandAirPct` | 1.5..12 | computable today | 5.01 | **PASS** |
+| `crestDb` | 9..18 | computable today | 16.91 | **PASS** |
 | `sustainPct` | 45..100 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 | `envRangeDb` | 0..25 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 | `onsetLevelCv` | 0..0.6 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
