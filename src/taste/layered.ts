@@ -175,10 +175,26 @@ export interface LayerSpec {
   /** layer-intrinsic voice design: oscillators, envelopes, and — only where width is the layer's
    * REASON to exist — unison/detune/pan. Never inserts; those are `production`. */
   patch: Partial<BeatSynth>
-  /** this layer must render mono: pan 0, no unison spread, no chorus, no widener, no auto-pan, no
-   * reverb send. Enforced by `assertMonoDiscipline` on BOTH arms — the sub is the one thing that
-   * must never be widened (research 115 §2.2, and 131 §5: elite ref bass is -43 to -51 dB). */
+  /** this layer must render mono: pan 0, no unison spread, no chorus, no widener, no auto-pan.
+   * Enforced by `monoViolations` on BOTH arms — the sub is the one thing that must never be widened
+   * (research 115 §2.2, and 131 §5: elite ref bass is -43 to -51 dB). NOT a dryness flag: see
+   * `MONO_PATCH`'s comment for why sends left this axis on 2026-07-26. */
   mono: boolean
+  /** pull this layer's highpass down, if needed, so it sits BELOW the lowest fundamental the layer
+   * will actually play.
+   *
+   * docs/priors/layering.md §1 "Waveform choice per layer" says the mid/character layers use "a
+   * harmonically richer waveform... **to let its character shine through**" (MusicRadar) — a
+   * highpass set ABOVE that layer's own fundamental does the opposite: it deletes the fundamental
+   * and leaves the bare upper harmonic series, which is thin and metallic, and nothing in the prior
+   * ever asks for it. It is set per role rather than globally because the prior draws a real
+   * structural distinction (§4): "for pads specifically, **stereo placement is the primary
+   * layer-differentiation tool**, where for bass and kicks the primary tool is frequency-band
+   * ownership... pads are wide and diffuse by design, so distinguishing layers by frequency (which
+   * would narrow them) works against the goal." So chords/lead voice layers preserve their
+   * fundamental; the bass stack keeps its sourced sub/mid/growl band ladder (§1's table is explicit
+   * that the growl layer IS the 500-2000 Hz band) and leans on the de-harsh pair instead. */
+  preserveFundamental?: boolean
   production?: LayerProduction
 }
 
@@ -194,6 +210,18 @@ export interface LayeredArchitecture {
    * shift can reach, and the register target silently becomes a coin flip on some figures. */
   anchor: { loMidi: number; hiMidi: number }
   layers: readonly LayerSpec[]
+  /** one aux/delay send pair shared by every non-bottom layer — the mechanism, not a per-layer taste
+   * choice (docs/priors/layering.md §4). */
+  ambience: StackAmbience
+  /** one modulation setting shared by the whole stack (docs/priors/layering.md §"Modulation
+   * coherence across layers"). */
+  modulation: StackModulation
+  /** the one de-harsh EQ pair every saw/square character layer in this stack carries
+   * (docs/priors/layering.md §1 "Reese/growl-specific" / §3 "EQ moves specific to lead stacks"). */
+  deHarsh: StackDeHarsh
+  /** layers the "should we layer at all?" rule removed from the DRAWN set, each with its reason —
+   * an empty array means the draw survived intact (docs/priors/layering.md §6). */
+  pruned: readonly { id: string; reason: string }[]
   /** the seeded choices this architecture was drawn from — carried so a rated clip's manifest can
    * name its exact variant and so the diversity guard has something to count. */
   draw: ArchitectureDraw
@@ -266,7 +294,455 @@ const pickRange = (rng: () => number, lo: number, hi: number, step: number): num
 
 const rnd3 = (x: number): number => Math.round(x * 1000) / 1000
 
-const MONO_PATCH: Partial<BeatSynth> = { pan: 0, unisonVoices: 1, unisonWidth: 0, chorusMode: 'off', chorusMix: 0, utilityWidth: 0.5, autoPanMix: 0, sendReverb: 0, sendDelay: 0 }
+/** WIDTH discipline only — pan, unison, chorus, widener, auto-pan.
+ *
+ * MONO AND DRY ARE TWO DIFFERENT AXES, and this constant conflated them until 2026-07-26: it used
+ * to carry `sendReverb: 0, sendDelay: 0`, and since every bass layer is mono, every bass layer was
+ * also bone dry. The owner's A/B therefore put a wet engineplus (sendReverb 0.18 / sendDelay 0.08)
+ * against a completely dry layered stack and reported: "the reverb/delay isn't here.. my ear is
+ * liking those in the original one.. and they're not present in the layered one... so its not
+ * exactly apples to apples in that way."
+ *
+ * docs/priors/layering.md §"Balance" is explicit about WHICH layer stays dry, and it is not "every
+ * mono layer": "group everything except the sub under one bus, apply subtle compression/saturation
+ * to that bus, and **leave the sub layer unprocessed/unrouted** — the sub is mixed as a separate,
+ * protected signal path, not folded into the rest." So the sends moved out of here into
+ * `SUB_DRY_DISCIPLINE`, which applies to the ONE bottom layer. */
+const MONO_PATCH: Partial<BeatSynth> = { pan: 0, unisonVoices: 1, unisonWidth: 0, chorusMode: 'off', chorusMix: 0, utilityWidth: 0.5, autoPanMix: 0 }
+
+/** The bottom layer's patch: mono AND on its own protected, unprocessed path — no sends at all
+ * (docs/priors/layering.md §"Balance", quoted on `MONO_PATCH` above). */
+const SUB_PATCH: Partial<BeatSynth> = { ...MONO_PATCH, sendReverb: 0, sendDelay: 0 }
+
+// ---- the three stack-wide properties: ambience, modulation, de-harsh ---------------------------
+//
+// All three are drawn ONCE per architecture and applied identically across the stack, because in
+// each case the mined prior says the shared value IS the mechanism, not an implementation detail.
+
+/** One shared ambience send pair for the whole stack.
+ *
+ * docs/priors/layering.md §4, on MusicTech's 2-layer chord stack: "Both layers share **one aux bus
+ * and one delay send**, which is the mechanism used to make two different synths read as one
+ * instrument." So this is drawn once and applied identically to every non-bottom layer, never drawn
+ * per layer.
+ *
+ * Wet level: §4 brackets a chord/pad stack between ~10% (MusicTech's 80s pad) and 70% (Attack's
+ * ambient pad) and says outright that the number is genre/context-dependent rather than
+ * convention-bound, so the sweep sits at the dry end of that bracket — right next to the
+ * engineplus arm this is compared against (0.18 reverb / 0.08 delay). */
+export interface StackAmbience {
+  sendReverb: number
+  sendDelay: number
+}
+
+/** One modulation setting for the whole stack.
+ *
+ * docs/priors/layering.md §"Modulation coherence across layers": "all layers in a bass stack should
+ * share **identical LFO shape/rate and modulation sources**, because mismatched LFOs between layers
+ * destroy the sense that the whole stack moves as one object. Practical implementation: duplicate
+ * the 'character' layer's LFO settings across all layers rather than setting each independently."
+ *
+ * Before 2026-07-26 this file did exactly the opposite: the chords `air` layer auto-panned at
+ * 0.12 Hz, the lead `width` layer at 0.10 Hz, and no other layer modulated at all — three different
+ * modulation states inside one instrument. The owner heard it: the per-layer production pass
+ * "sounds sort of odd if anything. The sounds that come on the 4th beat in both bars is a bit
+ * different and seems out of place", and on per-layer LFO generally, "I feel like it might be the
+ * kind of fx you put occasionally in a song to change it up, but would be annoying if it were the
+ * core synth to use."
+ *
+ * Note what this is NOT: it does not switch a new LFO on. The prior's rule is about COHERENCE, not
+ * about having modulation, and the owner's report is that per-layer motion was the defect. `lfoRate`
+ * is written to every layer so the stack is coherent by construction if depth is ever routed;
+ * `chorusRate` / `autoPanRate` are the two rates that are actually audible today. */
+export interface StackModulation {
+  /** every layer carries this LFO rate, whether or not it routes depth anywhere today. */
+  lfoRate: number
+  /** every layer with a chorus insert runs at this rate. */
+  chorusRate: number
+  /** every layer with an auto-pan insert runs at this rate and this depth. */
+  autoPanRate: number
+  autoPanDepth: number
+}
+
+/** The de-harsh pair: a high-Q cut through 1.6-3.8 kHz plus a wide warmth boost at 450-800 Hz.
+ *
+ * docs/priors/layering.md states this move TWICE, independently — §1 "Reese/growl-specific" (for a
+ * bass built from detuned saws) and §3 "EQ moves specific to lead stacks" (for a lead built from
+ * detuned saws) — and in both places it is named as the fix for exactly one thing: "removing
+ * **metallic harshness** from a stack of detuned saws: cut **1.6-3.8 kHz by 6-12 dB** with a high-Q
+ * notch, then add a wide boost at **450-800 Hz** for 'warmth... without narrowness'".
+ *
+ * "Metallic" is the owner's own word for what the whole layered arm sounded like on 2026-07-26:
+ * "it just sounds a bit saw-toothy or something? Like almost mechanical/electronic... less lush and
+ * organic like I'd like chords", "makes everything seem sort of buzzy/drive-y/saw-y more mechanical
+ * sounding". The move was sitting in our own mined prior the entire time and had never been
+ * implemented. It is layer TIMBRE, not production, so it ships on BOTH arms.
+ *
+ * Q arithmetic, written down so the next reader does not have to re-derive it: the source's band is
+ * 1.6-3.8 kHz, whose geometric centre is sqrt(1600 * 3800) = 2466 Hz and whose width is
+ * log2(3800/1600) = 1.25 octaves. The bell that actually covers the quoted band is therefore
+ * Q = 1 / (2 * sinh(ln2/2 * 1.25)) = 1.13 — "high-Q" relative to the shelf that eq3 would have
+ * given us, not a surgical notch. The warmth bell is deliberately the opposite: WIDE (Q 0.6) at the
+ * geometric centre of 450-800 Hz (600 Hz), which is what "without narrowness" asks for. */
+export interface StackDeHarsh {
+  /** Hz, inside the sourced 1.6-3.8 kHz band. */
+  notchHz: number
+  /** dB, negative, inside the sourced 6-12 dB range. */
+  notchDb: number
+  /** the bell Q that spans the sourced band (see the arithmetic above). */
+  notchQ: number
+  /** Hz, inside the sourced 450-800 Hz warmth band. */
+  warmthHz: number
+  /** dB, positive. */
+  warmthDb: number
+  /** deliberately wide — "warmth... without narrowness". */
+  warmthQ: number
+}
+
+function drawAmbience(rng: () => number, role: LayeredRole): StackAmbience {
+  // bass sits drier than the melodic roles on purpose: a reverb send is a STEREO return, and
+  // docs/priors/layering.md §"Mono/stereo discipline" carries the general-practice convention (which
+  // it flags honestly as an assumption, not a sourced number) that everything below ~100-120 Hz
+  // stays mono. Only bass layers ABOVE that region are sent at all (see `AMBIENCE_FLOOR_HZ`), and
+  // they are sent at roughly half the melodic amount.
+  if (role === 'bassline') return { sendReverb: pickRange(rng, 0.05, 0.12, 0.01), sendDelay: pickRange(rng, 0.03, 0.07, 0.01) }
+  return { sendReverb: pickRange(rng, 0.1, 0.24, 0.02), sendDelay: pickRange(rng, 0.05, 0.12, 0.01) }
+}
+
+/** The lowest highpass cutoff, per role, at which a layer may be routed to the shared STEREO reverb
+ * return. `Infinity` would mean "never"; 0 means "every non-bottom layer". Bass is the one role with
+ * a floor, for the mono reason quoted in `drawAmbience`. */
+const AMBIENCE_FLOOR_HZ: Record<LayeredRole, number> = { bassline: 150, chords: 0, lead: 0 }
+
+function drawModulation(rng: () => number): StackModulation {
+  return {
+    lfoRate: pickRange(rng, 0.15, 0.6, 0.05),
+    chorusRate: pickRange(rng, 0.4, 1.6, 0.1),
+    autoPanRate: pickRange(rng, 0.08, 0.25, 0.01),
+    // shallower than the 0.35-0.40 the two independent per-layer auto-pans used to run at: the
+    // owner's report is that per-layer motion was the defect, so coherent motion starts subtle.
+    autoPanDepth: pickRange(rng, 0.15, 0.3, 0.05),
+  }
+}
+
+function drawDeHarsh(rng: () => number): StackDeHarsh {
+  return {
+    notchHz: pickRange(rng, 2100, 2900, 50), // around the 2466 Hz geometric centre of 1.6-3.8 kHz
+    notchDb: -pickRange(rng, 6, 10, 1), // sourced range is 6-12 dB; the top 2 dB held back as headroom
+    notchQ: 1.15,
+    warmthHz: pickRange(rng, 480, 760, 20), // inside the sourced 450-800 Hz warmth band
+    warmthDb: pickRange(rng, 2, 4, 0.5),
+    warmthQ: 0.6,
+  }
+}
+
+/** Which layers get the de-harsh pair: any layer whose oscillator bank actually contains a saw or a
+ * square (the "stack of detuned saws" the source is about), except the bottom layer, which is a
+ * sine/triangle sub on its own protected path. A noise-dominant air layer is also skipped — its
+ * whole reason to exist is 2-8 kHz texture, and notching 2.5 kHz out of it would delete the layer. */
+function needsDeHarsh(layer: LayerSpec): boolean {
+  if (layer.band.mode === 'lowpass') return false
+  if ((layer.patch.noiseLevel ?? 0) >= 0.3) return false
+  const oscs = [layer.patch.osc, (layer.patch.osc2Level ?? 0) > 0 ? layer.patch.osc2Type : undefined]
+  return oscs.some((o) => o === 'sawtooth' || o === 'square')
+}
+
+/** The eq7 fields that realize one `StackDeHarsh`. Bell1 is the wide warmth boost, Bell2 the
+ * high-Q cut — the eq7 insert's fixed internal order is HP -> LowShelf -> Bell1 -> Bell2 -> Bell3 ->
+ * HighShelf -> LP, so this is boost-then-cut, which is the order the source states it in. */
+/** Every `eq7*On` switch a layer patch may set. If any is true the layer needs the eq7 INSERT in its
+ * effect chain, or the bands are stored and never heard (see the call site in `buildLayeredClip`). */
+const EQ7_ON_FIELDS: readonly (keyof BeatSynth)[] = ['eq7HpOn', 'eq7LowShelfOn', 'eq7Bell1On', 'eq7Bell2On', 'eq7Bell3On', 'eq7HighShelfOn', 'eq7LpOn']
+
+function usesEq7(patch: Partial<BeatSynth>): boolean {
+  return EQ7_ON_FIELDS.some((f) => patch[f] === true)
+}
+
+function deHarshPatch(d: StackDeHarsh): Partial<BeatSynth> {
+  return {
+    eq7Bell1On: true,
+    eq7Bell1Freq: d.warmthHz,
+    eq7Bell1Gain: d.warmthDb,
+    eq7Bell1Q: d.warmthQ,
+    eq7Bell2On: true,
+    eq7Bell2Freq: d.notchHz,
+    eq7Bell2Gain: d.notchDb,
+    eq7Bell2Q: d.notchQ,
+  }
+}
+
+// ---- "should we layer at all?" -----------------------------------------------------------------
+//
+// docs/priors/layering.md §6 is the strongest cross-source consensus in the whole vein, and it is an
+// ANTI-layering rule stated three independent ways:
+//   - Attack Magazine: "only layer when there is a good reason for doing so" — explicitly against
+//     the assumption that two kicks are automatically better than one.
+//   - Hyperbits: "Poor layering occurs when multiple sounds try to do the same thing."
+//   - the practitioner refrain: "three well-crafted layers usually sound better than seven fighting
+//     for space... if your sound becomes muddy, it's better to REMOVE layers rather than add more."
+//
+// Until 2026-07-26 this module had no such rule at all: every family in every sweep carried at least
+// two layers and the weights pushed 3- and 4-layer stacks, so "should this be layered?" was never
+// asked — we always layered. The owner's own framing when they rated the arm was "my guess is it's
+// not one size fits all."
+//
+// Two checks, each with its stated basis. Both run AFTER the draw and BEFORE the crossover check, so
+// a pruned stack is still a valid ladder. Floor: two layers — a 2-layer outcome is a legitimate
+// RESULT of this rule, not a degenerate draw, which is what §6 says in as many words.
+
+/** The band a stack turns to mud in, per docs/priors/layering.md §2 (transmissionsamples names
+ * 200-400 Hz boxiness and 300-500 Hz muddiness as "exactly where kicks turn to mud if not cut").
+ * A lowpassed layer owns it when its cutoff reaches into it; a highpassed layer owns it when its
+ * cutoff starts at or below its top. */
+const MUD_LO_HZ = 250
+const MUD_HI_HZ = 450
+
+/** Two highpassed layers whose cutoffs sit within this ratio (a minor third) are claiming the same
+ * band. Deliberately narrow: the point is to catch two layers "trying to do the same thing", not to
+ * flatten the deliberate sub/mid/growl ladder, whose steps are octaves apart. */
+const DUPLICATE_BAND_RATIO = 1.19
+
+/** The minimum a stack may be pruned to. §6's own number ("three well-crafted layers usually sound
+ * better than seven") is about the top end; the bottom is set by what makes the thing a layered
+ * instrument at all, which `checkCrossover` already puts at two. */
+const MIN_LAYERS = 2
+
+function pruneOverlappingLayers(layers: readonly LayerSpec[]): { layers: LayerSpec[]; pruned: { id: string; reason: string }[] } {
+  const kept = [...layers]
+  const pruned: { id: string; reason: string }[] = []
+  const drop = (l: LayerSpec, reason: string): void => {
+    kept.splice(kept.indexOf(l), 1)
+    pruned.push({ id: l.id, reason })
+  }
+
+  // RULE 1 — duplicate band. §6/Hyperbits: "Poor layering occurs when multiple sounds try to do the
+  // same thing." Same claimed band AND same register is that, literally. The quieter one goes,
+  // because §6's other half is that the fix for overlap is removal, not rebalancing.
+  for (;;) {
+    if (kept.length <= MIN_LAYERS) break
+    const highs = kept.filter((l) => l.band.mode === 'highpass')
+    let victim: { layer: LayerSpec; reason: string } | null = null
+    for (let i = 0; i < highs.length && !victim; i++) {
+      for (let j = i + 1; j < highs.length && !victim; j++) {
+        const a = highs[i]!
+        const b = highs[j]!
+        const ratio = Math.max(a.band.cutoffHz, b.band.cutoffHz) / Math.min(a.band.cutoffHz, b.band.cutoffHz)
+        if (ratio >= DUPLICATE_BAND_RATIO) continue
+        if (a.figure.transpose !== b.figure.transpose) continue
+        const quieter = a.gainDb <= b.gainDb ? a : b
+        const louder = quieter === a ? b : a
+        victim = {
+          layer: quieter,
+          reason: `duplicate band — highpasses ${a.band.cutoffHz} and ${b.band.cutoffHz} Hz (ratio ${ratio.toFixed(2)}) at the same register (${a.figure.transpose} st); "${louder.id}" already owns it (§6: poor layering occurs when multiple sounds try to do the same thing)`,
+        }
+      }
+    }
+    if (!victim) break
+    drop(victim.layer, victim.reason)
+  }
+
+  // RULE 2 — mud. §2 names 200-500 Hz as the band a stack turns to mud in; §6's prescription when a
+  // sound becomes muddy is to REMOVE a layer rather than add one. More than two owners of that
+  // region is the muddy case, and the quietest owner is the one that earns its place least.
+  const ownsMud = (l: LayerSpec): boolean =>
+    l.band.mode === 'lowpass' ? l.band.cutoffHz >= MUD_LO_HZ : l.band.cutoffHz <= MUD_HI_HZ
+  for (;;) {
+    if (kept.length <= MIN_LAYERS) break
+    const owners = kept.filter(ownsMud)
+    if (owners.length <= 2) break
+    // never the bottom layer: something has to own the low end alone (checkCrossover rule 1)
+    const removable = owners.filter((l) => l.band.mode === 'highpass')
+    if (removable.length === 0) break
+    const quietest = removable.reduce((lo, l) => (l.gainDb < lo.gainDb ? l : lo))
+    drop(
+      quietest,
+      `mud — ${owners.length} layers (${owners.map((l) => l.id).join(', ')}) all own the ${MUD_LO_HZ}-${MUD_HI_HZ} Hz boxy/muddy region (§2), and §6's rule for a muddy stack is to remove a layer rather than add one`,
+    )
+  }
+
+  return { layers: kept, pruned }
+}
+
+// ---- onset fusion ------------------------------------------------------------------------------
+
+/** How far apart two layers' amplitude peaks may sit and still fuse into one event, seconds.
+ *
+ * docs/priors/layering.md §6, "Timing smear from misaligned onsets": "the timing of the start of
+ * each sample is critical — layers with staggered onsets can either **fuse into one sound or read as
+ * audibly separate hits depending on offset**, and this is presented as a *deliberate* choice knob
+ * (you can intentionally offset layers in time), not only a hazard."
+ *
+ * This module has always been careful that note STARTS are sample-aligned (`layerNotes` never moves
+ * a `start`, and the header records that as precondition 1). What it never checked is the other half
+ * of the same offset: the AMP ATTACK. A stab attacking in 2 ms alongside a pad attacking in 200 ms
+ * puts the two layers' amplitude peaks ~200 ms apart — an order of magnitude outside the window in
+ * which two transients fuse — and the owner heard exactly that, independently, on two different
+ * chord clips: "it's like the layered one goes 'pop' 'pop' with two hits whenever a chord goes...
+ * its sort of like a percussive hit" (chords 138 and 2156).
+ *
+ * 25 ms is the conservative end of the usual 20-50 ms transient-fusion window. Fusion is the
+ * DEFAULT rather than an accident: every ONSET-FORMING layer's attack is clamped to within this
+ * window of the stack's fastest. The prior's "deliberate offset" half stays reachable — it would be
+ * an explicit draw, not the silent status quo it used to be. */
+const FUSION_WINDOW_S = 0.025
+
+/** How far under the stack's loudest layer a layer may sit and still count as an ONSET-FORMING
+ * voice for fusion purposes. Below this it is support texture, not an event the ear times against —
+ * docs/priors/layering.md §6 names the same threshold qualitatively as "loss of definition /
+ * 'sticking out' imbalance", FaderPro's second oscillator that had to be pulled down. 12 dB is a
+ * quarter of the perceived loudness; it is a judgement call and is labelled as one. */
+const FUSION_AUDIBILITY_DB = 12
+
+/** The attack at or under which a layer produces a TRANSIENT the ear can time against. Above it the
+ * layer swells in and has no onset to misalign — a pad or an air sheen is not a hit, it is the
+ * chord arriving. The prior's fusion rule (§6) is about "the timing of the start of each sample",
+ * i.e. about events; a 200 ms swell is not one. Set just above the 20-25 ms bottom of the fusion
+ * window so anything that could plausibly BE the second hit is inside the set. */
+const TRANSIENT_ATTACK_S = 0.03
+
+/** Make the stack's transients land as ONE event.
+ *
+ * THREE BUGS FIXED 2026-07-26, all found by checking this helper against the chord seeds the owner
+ * actually flagged ("it's like the layered one goes 'pop' 'pop' with two hits whenever a chord
+ * goes... its sort of like a percussive hit", heard independently on chords 138 and 2156):
+ *
+ *  1. IT NEVER RAN ON THE FLAGGED CASES. The bottom lowpassed layer was excluded from the
+ *     onset-forming set on the theory that "the bottom layer is the foundation, not a transient" —
+ *     but a chords stack drawn as body+stab has exactly ONE non-bottom layer, so
+ *     `onsetForming.length < 2` returned early and the helper was a no-op. Seeds 1147 and 2156 are
+ *     both body+stab. The chord's onset includes its foundation: the body attacks in 8 ms and is
+ *     the loudest thing in the stack on some draws. It is in the set now.
+ *  2. IT CLAMPED THE LAYERS THAT ARE NOT EVENTS. The ceiling was applied to every layer, so a pad
+ *     drawn with a 200 ms swell was rewritten to a 27 ms attack — i.e. the fusion fix turned the
+ *     one sustained layer in the chords stack into a second pluck, which ADDS a percussive hit
+ *     instead of removing one. Only onset-forming layers are clamped now.
+ *  3. A SLOW LAYER COULD SET THE FLOOR. `Math.min` over a set that included swells was still the
+ *     fastest attack in practice, but the set is now explicitly transient-only so the window is
+ *     measured between things that actually have transients. */
+function fuseAttacks(layers: readonly LayerSpec[]): LayerSpec[] {
+  const attackOf = (l: LayerSpec): number => l.patch.attack ?? 0.01
+  const loudest = Math.max(...layers.map((l) => l.gainDb))
+  // an event, for fusion purposes: loud enough to be heard as one, and fast enough to have a
+  // transient at all. A layer far under the stack is texture; a slow swell is the chord arriving.
+  const onsetForming = layers.filter((l) => l.gainDb >= loudest - FUSION_AUDIBILITY_DB && attackOf(l) <= TRANSIENT_ATTACK_S)
+  if (onsetForming.length < 2) return [...layers]
+  const ceiling = Math.min(...onsetForming.map(attackOf)) + FUSION_WINDOW_S
+  return layers.map((l) => (!onsetForming.includes(l) || attackOf(l) <= ceiling ? l : { ...l, patch: { ...l.patch, attack: Math.round(ceiling * 1000) / 1000 } }))
+}
+
+// ---- the shared architecture tail --------------------------------------------------------------
+
+/** Everything every role does identically once its layers are drawn: prune the stack that should not
+ * have been layered, fuse the onsets, share one ambience send pair / one modulation setting / one
+ * de-harsh EQ across the whole instrument, then repair the crossover ladder if pruning opened a hole
+ * in it. Kept in one place so the three builders cannot drift apart on any of it. */
+function finishArchitecture(
+  rng: () => number,
+  role: LayeredRole,
+  familyName: string,
+  anchorLo: number,
+  drawn: readonly LayerSpec[],
+  summaryHead: string,
+  choices: Record<string, number | string | boolean>,
+): LayeredArchitecture {
+  const ambience = drawAmbience(rng, role)
+  const modulation = drawModulation(rng)
+  const deHarsh = drawDeHarsh(rng)
+
+  const { layers: survivors, pruned } = pruneOverlappingLayers(drawn)
+  let layers = fuseAttacks(survivors)
+
+  // pruning can only REMOVE highpassed layers, so the lowest highpass can only move up — which can
+  // open the "hole in the spectrum" checkCrossover rule 3 rejects. The repair pulls the remaining
+  // lowest highpass back DOWN to meet the bottom layer, which is also the direction this whole fix
+  // is going anyway (§1: stop deleting the character layer's fundamental).
+  const bottom = layers.find((l) => l.band.mode === 'lowpass')
+  const highs = layers.filter((l) => l.band.mode === 'highpass')
+  if (bottom && highs.length > 0) {
+    const lowestHp = Math.min(...highs.map((l) => l.band.cutoffHz))
+    if (bottom.band.cutoffHz / lowestHp < 1) {
+      const target = Math.round(bottom.band.cutoffHz / 1.4 / 5) * 5
+      const victim = highs.find((l) => l.band.cutoffHz === lowestHp)!
+      layers = layers.map((l) => (l === victim ? { ...l, band: { ...l.band, cutoffHz: target } } : l))
+    }
+  }
+
+  // the three shared properties, applied identically across the stack
+  layers = layers.map((l) => {
+    const isBottom = l.band.mode === 'lowpass'
+    const wet = !isBottom && l.band.cutoffHz >= AMBIENCE_FLOOR_HZ[role]
+    return {
+      ...l,
+      patch: {
+        ...l.patch,
+        // modulation coherence: one rate for the whole stack, always written
+        lfoRate: modulation.lfoRate,
+        ...(l.patch.chorusMix !== undefined && l.patch.chorusMix > 0 ? { chorusRate: modulation.chorusRate } : {}),
+        // ambience: the shared aux/delay send, on every non-bottom layer above the mono floor
+        ...(wet ? { sendReverb: ambience.sendReverb, sendDelay: ambience.sendDelay } : {}),
+        ...(isBottom ? { sendReverb: 0, sendDelay: 0 } : {}),
+        // de-harsh: the one EQ pair, on every saw/square character layer
+        ...(needsDeHarsh(l) ? deHarshPatch(deHarsh) : {}),
+      },
+      ...(l.production && (l.production.profile.autoPan || l.production.profile.chorusMix !== undefined)
+        ? {
+            production: {
+              ...l.production,
+              profile: {
+                ...l.production.profile,
+                ...(l.production.profile.autoPan ? { autoPan: { rate: modulation.autoPanRate, depth: modulation.autoPanDepth, mix: l.production.profile.autoPan.mix } } : {}),
+              },
+            },
+          }
+        : {}),
+    }
+  })
+
+  // `summaryHead` is the BOTTOM LAYER's line only; this appends one line per layer above it. Passing
+  // a full summary in produced a doubled string (`... + main ... + air ... + main ... + air ...`),
+  // which is what chords and lead did until 2026-07-26 — a cosmetic bug, but the summary is what
+  // lands in the manifest `from` field and in every listening-set note, so a doubled one is a
+  // rated clip whose receipt does not describe it. Register and resting lowpass are in the line
+  // because as of 2026-07-26 they are load-bearing per-layer facts, not decoration.
+  const summary =
+    summaryHead +
+    layers
+      .slice(1)
+      .map(
+        (l) =>
+          ` + ${l.id} (${l.band.mode} ${l.band.cutoffHz}` +
+          `${l.patch.eq7LpOn === true ? `, resting LP ${l.patch.eq7LpFreq}` : ''}` +
+          `${l.figure.transpose !== 0 ? `, ${l.figure.transpose > 0 ? '+' : ''}${l.figure.transpose} st` : ''}` +
+          `${(l.patch.unisonVoices ?? 1) > 1 ? `, ${l.patch.unisonVoices}v` : ''}) @${l.gainDb} dB`,
+      )
+      .join('') +
+    (pruned.length > 0 ? ` [pruned ${pruned.map((p) => p.id).join(', ')}]` : '')
+
+  return {
+    role,
+    summary,
+    anchor: { loMidi: anchorLo, hiMidi: anchorLo + 12 },
+    layers,
+    ambience,
+    modulation,
+    deHarsh,
+    pruned,
+    draw: {
+      family: pruned.length === 0 ? familyName : `${familyName}-pruned`,
+      choices: {
+        ...choices,
+        sendReverb: ambience.sendReverb,
+        sendDelay: ambience.sendDelay,
+        lfoRate: modulation.lfoRate,
+        autoPanRate: modulation.autoPanRate,
+        deHarshNotchHz: deHarsh.notchHz,
+        deHarshNotchDb: deHarsh.notchDb,
+        deHarshWarmthHz: deHarsh.warmthHz,
+        deHarshWarmthDb: deHarsh.warmthDb,
+      },
+    },
+  }
+}
 
 // ---- bassline ----------------------------------------------------------------------------------
 //
@@ -316,12 +792,23 @@ function buildBasslineArch(rng: () => number): LayeredArchitecture {
   // capped at 0.85 because the whole point is that a bass is a pluck, not a held tone
   const subSustain = pickOne(rng, [0, 0.1, 0.25, 0.45, 0.7] as const)
   const subDecay = pickOne(rng, [0.12, 0.19, 0.25, 0.4, 0.62] as const)
-  const subRelease = pickOne(rng, [0.03, 0.05, 0.09, 0.14] as const)
+  // RELEASE, lengthened 2026-07-26. The owner on the layered bass: "they sound like 'stabs' and the
+  // sound ends abruptly - I wonder if they'd sound better with more decay". The old floor was 30 ms,
+  // which on a gated sub is a hard cut, not a decay. Still short of a pad — the mined bass vein's
+  // "pluck, not held tone" rule (quoted in this section's header) is the ceiling on this axis.
+  const subRelease = pickOne(rng, [0.06, 0.1, 0.15, 0.22] as const)
   const subGlide = pickOne(rng, [0, 0.01, 0.02, 0.03] as const)
   // a GATED sub leaves real silence between notes; a legato one fills to the next onset. Both are
   // attested (the "rolling" bass is legato, the plucked house bass is gated) and they sound
   // completely different, so this is one of the strongest same-ness axes available.
-  const subGate = pickOne(rng, [0, 2, 2, 3, 4] as const)
+  //
+  // THE GATE FLOOR MOVED FROM 2 TO 3 STEPS on 2026-07-26. A 2-step gate is one eighth note — at the
+  // 120-128 BPM this arm renders at, 230-250 ms of sound followed by silence until the next onset —
+  // and every bass clip the owner rated drew exactly it (all three of 41/1050/2059 came out at
+  // maxDurationSteps 2). That is the "ends abruptly" report, measured: the note was being cut in
+  // half before its own envelope finished. Nothing in docs/priors/layering.md prescribes a gate
+  // length, so this is calibrated to the complaint, not to a source, and is labelled as such.
+  const subGate = pickOne(rng, [0, 3, 4, 6] as const)
   const subLevel = pickRange(rng, 0.1, 0.45, 0.05)
 
   // BALANCE, drawn relative to the sub. The sources disagree in DIRECTION (MusicRadar: sub hotter;
@@ -380,7 +867,7 @@ function buildBasslineArch(rng: () => number): LayeredArchitecture {
       gainDb: subGain,
       mono: true,
       patch: {
-        ...MONO_PATCH,
+        ...SUB_PATCH,
         osc: subOsc as OscType,
         subLevel,
         attack: 0.006,
@@ -478,20 +965,15 @@ function buildBasslineArch(rng: () => number): LayeredArchitecture {
     })
   }
 
-  const summary =
-    `${subOsc} sub (anchor ${anchorLo}, lowpass ${subLp}, sus ${subSustain}${subGate > 0 ? `, gate ${subGate}` : ', legato'}) @${subGain} dB` +
-    layers.slice(1).map((l) => ` + ${l.id} (${l.band.mode} ${l.band.cutoffHz}) @${l.gainDb} dB`).join('')
-
-  return {
-    role: 'bassline',
-    summary,
-    anchor: { loMidi: anchorLo, hiMidi: anchorLo + 12 },
+  return finishArchitecture(
+    rng,
+    'bassline',
+    family.name,
+    anchorLo,
     layers,
-    draw: {
-      family: family.name,
-      choices: { anchorLo, subLp, subOsc, subSustain, subDecay, subRelease, subGlide, subGate, subLevel, subGain, bodyRel, growlRel, clickRel, lowestHp, growlHp, clickHp, growlOsc, growlOsc2Detune, growlOsc2Level, growlSustain, growlEqHigh, bodyOsc, clickNoise },
-    },
-  }
+    `${subOsc} sub (anchor ${anchorLo}, lowpass ${subLp}, sus ${subSustain}${subGate > 0 ? `, gate ${subGate}` : ', legato'}) @${subGain} dB`,
+    { anchorLo, subLp, subOsc, subSustain, subDecay, subRelease, subGlide, subGate, subLevel, subGain, bodyRel, growlRel, clickRel, lowestHp, growlHp, clickHp, growlOsc, growlOsc2Detune, growlOsc2Level, growlSustain, growlEqHigh, bodyOsc, clickNoise },
+  )
 }
 
 // ---- chords ------------------------------------------------------------------------------------
@@ -500,23 +982,72 @@ function buildBasslineArch(rng: () => number): LayeredArchitecture {
 // bass-band body); 138 row 3's target is 18-28% bass-band. The BODY layer is that number: root notes
 // only, an octave under the voicing, lowpassed, mono, with the osc2 -1200 body move. It is the one
 // mandatory layer besides a voice, because the crossover ladder needs exactly one mono lowpassed
-// bottom. The PAD is the sustained wide voice; the STAB is the same voicing clamped short with a
-// fast attack (packs chords fire 4.9 onsets/s and attack in ~7 ms; engineplus 2.3 onsets/s in ~31
-// ms); the AIR layer is a noise-heavy top, the 2-8 kHz presence texture no dotbeat oscillator has
-// ever supplied.
+// bottom.
 //
 // ROOTLESS STAB. The stab plays a `dropRoot` voicing — the chord minus its bottom note — and the
 // BODY layer carries the root instead. Two independent practitioner sources name omitting the root
 // from the chord stab as the load-bearing move for this sound.
 //
-// HONEST GAP, per the mined corpus: chords/pads is the ONE role with no canonical numeric
+// ================================================================================================
+// REBUILT 2026-07-26 FROM THE MEASURED CORPUS, not from taste. Everything below this line changed.
+// ================================================================================================
+//
+// THE DEFECT. Until this rewrite, chords' `pad` and `stab` were BOTH sawtooth, BOTH at transpose 0,
+// BOTH highpassed inside 195-440 Hz — two layers doing one job, which docs/priors/layering.md §6
+// names as the strongest cross-source consensus in the whole vein (Hyperbits, verbatim: "Poor
+// layering occurs when multiple sounds try to do the same thing"). `pruneOverlappingLayers` was
+// right to fire on it, and it fired on 0.43 of every chords draw, collapsing six layer-sets to four
+// and deleting the 4-layer option entirely. The fix is to make the two layers different jobs, not
+// to relax the pruner.
+//
+// WHAT THE 3,559-PATCH CORPUS SAYS CHORDS ARE (docs/priors/organic-vs-mechanical.md §4, measured
+// from presets/role-parameter-stats.json, research/141 — patch-author behaviour, not tutorials):
+//
+//   §4d  Chord patches are DARK. Median filter cutoff 523 Hz and lowpass-filtered in 82.1% of
+//        cases — the HIGHEST lowpass rate of any of the ten roles measured. "Lush chords" in the
+//        corpus are overwhelmingly *filtered* saws. §4d's own words: "An unfiltered or
+//        lightly-filtered saw stack is not a mild deviation from practice; it is outside the middle
+//        of the distribution for the role by a wide margin." Ours was a pair of *highpassed* saws,
+//        i.e. the opposite move.
+//   §4e  Chords are the most oscillator-dense and most OCTAVE-SPLIT role: 71.4% use 3 oscillators
+//        and 78.6% have an octave split between oscillators, both the highest measured. §4e's
+//        conclusion: "for chords specifically, octave doubling — not unison detune — is the
+//        documented thickening move... it adds no extra harmonic density in the 1-4 kHz band where
+//        'buzzy' lives." (Flagged [MEASURED, small n], n=28 — read as direction, not as a spec.)
+//   §4a  Unison is a MINORITY choice: 50.0% of chord patches use it at all, median 3 voices when on.
+//   §4b  Chords' detune tail is HALF a lead's: chords p90 21.6 cents against lead p90 41.2. §4b:
+//        "A single sweep range shared across roles will, at its top end, give chords a lead's
+//        detune — which is the 'saw-toothy' complaint in one number."
+//   §4c  Waveshaping is a bass/lead move: 62.8% of bass patches, 14.3% of chord patches. "whatever
+//        drive setting is right for a bass growl layer is, per the corpus, a move that 85.7% of
+//        chord patches decline to make" — the owner's word for it was "drive-y".
+//   §4f  Chords are the reverb-first, CHORUS role: reverb1 42.9% > delay 35.7%, and chorus 32.1%,
+//        second only to keys. Chorus is a width mechanism that adds no harmonics (§2), which is the
+//        replacement for the detune we just took away.
+//
+// SO THE TWO JOBS ARE NOW:
+//   PAD   the dark sustained bed. Transpose 0, full voicing, long swell, resting lowpass swept
+//         around the corpus median (§4d), width from chorus rather than from a wall of detuned
+//         unison (§4a/§4b/§4f).
+//   STAB  the bright short accent, AN OCTAVE UP (§4e), highpassed clear of the pad's band and of
+//         the 250-450 Hz mud region (§2), lowpassed far brighter than the pad, gated short.
+// Different register, different band, different resting brightness, different envelope. Four axes,
+// each with a measured number behind it — not two saws highpassed 80 Hz apart.
+//
+// ONE FILTER PER VOICE, so "dark" cannot come from the voice filter: the crossover ladder has
+// already spent it (every non-bottom layer must be highpassed, `checkCrossover` rule 2). The
+// resting lowpass is therefore the eq7 insert's own LP section, which is a real Tone.Filter in the
+// chain — see `usesEq7`/`buildLayeredClip` for the bug that used to make every eq7 band inert.
+//
+// HONEST GAP, per the mined prose corpus: chords/pads is the ONE role with no canonical numeric
 // pad+pluck+air recipe in the literature — the pattern (focus layer + support layer, stereo
 // placement rather than frequency ownership as the primary differentiator) is well attested, the
-// numbers are not. The sweep bounds below are therefore extrapolated from the measured dotbeat/pack
-// rows, not quoted from a source, and should be read as this arm's hypothesis. The one genuinely
-// chord-SPECIFIC technique the corpus does name — interval layering, tuning osc2 to a perfect fifth
-// so a triad reads as a ninth — stays out: nothing in the feature set can verify a harmonic change,
-// so it would be an unmeasurable variable riding inside a measured arm.
+// numbers are not. That gap is what §4's patch counts now fill for the axes they cover; the levels,
+// the gate lengths and the crossover points below are still extrapolated from measured dotbeat/pack
+// rows and should be read as this arm's hypothesis. The one genuinely chord-SPECIFIC technique the
+// prose corpus names — interval layering, tuning osc2 to a perfect fifth so a triad reads as a
+// ninth — stays out: nothing in the feature set can verify a harmonic change, so it would be an
+// unmeasurable variable riding inside a measured arm.
 
 const CHORD_FAMILIES: readonly (readonly [{ name: string; optional: readonly ('pad' | 'stab' | 'air')[] }, number])[] = [
   [{ name: 'body+pad', optional: ['pad'] }, 2],
@@ -539,20 +1070,87 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
   const stabRel = pickRange(rng, 2, 7, 1)
   const airRel = pickRange(rng, -20, -12, 1)
   const bodyOsc = pickOne(rng, ['triangle', 'sine', 'sawtooth'] as const)
-  // detune is the most CONTESTED number in the mined corpus (sub-4 cents = "warmth" in deep house,
-  // the same amount called a defect in string pads, ~7.5 for trance aggression, "+/-7 to +/-61 all
-  // called classic" in the bass vein). Treated as a style dial swept across its attested span.
-  const padDetune = pickRange(rng, 3, 14, 1)
-  const padVoices = pickOne(rng, [3, 4, 5, 6] as const)
-  const padWidth = pickRange(rng, 0.55, 0.95, 0.05)
-  const padAttack = pickOne(rng, [0.03, 0.06, 0.12, 0.2] as const)
-  const padPan = pickRange(rng, -0.8, -0.3, 0.1)
-  const stabSteps = pickOne(rng, [1, 2, 3] as const)
-  const stabHp = pickRange(rng, 260, 420, 20)
+
+  // ---- PAD: the dark sustained bed -------------------------------------------------------------
+  // detune is the most CONTESTED number in the mined prose corpus (sub-4 cents = "warmth" in deep
+  // house, the same amount called a defect in string pads, ~7.5 for trance aggression, "+/-7 to
+  // +/-61 all called classic" in the bass vein), so it was swept across the whole attested span.
+  // The measured corpus settles it PER ROLE: organic-vs-mechanical §4b puts chords at median 12.1
+  // cents with a p90 of 21.6, against lead's p90 of 41.2 — "a single sweep range shared across
+  // roles will, at its top end, give chords a lead's detune, which is the 'saw-toothy' complaint in
+  // one number". The range is now chords' own distribution: centred on 12, stopping at its p90.
+  const padDetune = pickRange(rng, 5, 21, 1)
+  // §4a: unison is a MINORITY choice for chords — 50.0% use it at all, median 3 voices when on. The
+  // old [3,4,5,6] gave every pad a supersaw; this draws "no unison" half the time and the corpus
+  // median when it is on. The width that unison used to supply comes from chorus instead (§4f:
+  // chorus is a 32.1% chords move, and per §2 it widens without adding harmonics).
+  const padVoices = pickOne(rng, [1, 1, 3, 4] as const)
+  const padWidth = pickRange(rng, 0.35, 0.7, 0.05)
+  // a bed, not a pluck. The old floor of 0.03 was inside the 25 ms fusion window, i.e. the "pad"
+  // could be drawn as a second transient on the chord onset — one half of the owner's "'pop' 'pop'
+  // with two hits". Every value here swells in well past `TRANSIENT_ATTACK_S`.
+  const padAttack = pickOne(rng, [0.06, 0.1, 0.16, 0.24] as const)
+  // THE DARK MOVE. Direction and existence from §4d: chord patches are lowpassed in 82.1% of cases,
+  // the highest rate of the ten roles measured, at a median knob value of 523 Hz. The voice filter
+  // is spent on the crossover highpass, so this is the eq7 LP section — the pad's RESTING
+  // brightness.
+  //
+  // THE MAGNITUDE IS NOT 523, AND THE REASON IS IN §4d ITSELF: "these are static knob values;
+  // LFO / velocity / macro / mod-matrix routings are not resolved, so a patch's sounding cutoff can
+  // differ from the stored value" — and Surge's filter keytracks, so a stored 523 on a patch played
+  // at C4 is not 523 Hz of rendered spectrum. Transplanting it as an absolute Hz onto an
+  // already-highpassed layer overshoots, and it overshot MEASURABLY: rendered at 430-620 Hz the
+  // three chord seeds the owner rated measured centroids of 299 / 693 / 374 Hz against the
+  // refs-packs chords pool's own IQR of 344-630 (median 448), with seed 138 scoring 0 of 7 gates and
+  // 54% bass-band share against a p75 of 47%. Doubled, the same three seeds measure 450 / 778 / 569
+  // and score 4/7, 3/7, 3/7. So: the corpus sets the direction and the fact that there IS a resting
+  // lowpass; the reference pool this arm is gated on sets the number, exactly as `deriveTargets`
+  // does for every other threshold in this file. Two-sided, and calibrated against a render.
+  const padLp = pickRange(rng, 860, 1240, 20)
+  const padPan = pickRange(rng, -0.5, -0.15, 0.05)
+
+  // ---- STAB: the bright short accent, an octave up ----------------------------------------------
+  // §4e: 78.6% of chord patches have an octave split — the highest of any role — and for chords
+  // "octave doubling, not unison detune, is the documented thickening move". The stab is that
+  // octave. Drawn at the corpus's OWN rate (4 in 5 split, 1 in 5 not) rather than pinned, so the
+  // 21.4% same-octave case still occurs — and that is exactly the case where two mid-band chord
+  // layers can legitimately collide and `pruneOverlappingLayers` should still be able to fire.
+  const stabOctave = pickWeighted(rng, [[12, 4], [0, 1]] as const)
+  // the stab's band follows its register. At +12 it starts above the 250-450 Hz mud region (§2) and
+  // above the pad's crossover, so the two layers own different bands as well as different octaves;
+  // at +0 it sits in the pad's neighbourhood, which is what keeps the overlap pruner reachable.
+  const stabHp = stabOctave === 12 ? pickRange(rng, 500, 900, 20) : pickRange(rng, 300, 520, 20)
   const stabOsc = pickOne(rng, ['square', 'sawtooth'] as const)
   const stabPick = pickOne(rng, ['dropRoot', 'dropRoot', 'all'] as const)
+  // still lowpassed — §4d's 82.1% is the ROLE's rate, not the pad layer's — but resting three to
+  // five times higher than the pad. That gap IS the bright/dark half of "two different jobs".
+  // Scaled with `padLp` when that was calibrated against the reference pool (see its comment), so
+  // the RATIO between the two layers, which is the part that carries the meaning, is unchanged.
+  const stabLp = pickRange(rng, 3600, 6800, 200)
+  // GATE FLOOR MOVED FROM 1 TO 2 STEPS, and the release lengthened, 2026-07-26. A 1-step gate is a
+  // 16th note — ~120 ms at the 120-128 BPM this arm renders at — under a chord that sustains, which
+  // is a percussive chop, not a chord. Identical complaint shape to the bass gate raised earlier on
+  // this branch ("they sound like 'stabs' and the sound ends abruptly"): owner, on chords, "it's
+  // like the layered one goes 'pop' 'pop'... its sort of like a percussive hit". Calibrated to the
+  // complaint, not to a source, and labelled as such.
+  const stabSteps = pickOne(rng, [2, 3, 4] as const)
+  const stabRelease = pickOne(rng, [0.18, 0.24, 0.3] as const)
+  // 131 P2 measured pack chords attacking in ~7 ms against engineplus's ~31. The old 2 ms was FIVE
+  // times faster than the reference class it is trying to sound like, on the one layer the owner
+  // heard as a separate percussive event. Swept around the reference figure instead.
+  const stabAttack = pickOne(rng, [0.005, 0.007, 0.01] as const)
+
+  // ---- AIR: a sheen, not a hit -------------------------------------------------------------------
   const airHp = pickRange(rng, 2000, 3500, 250)
-  const airNoise = pickRange(rng, 0.3, 0.65, 0.05)
+  // WAS 0.30-0.65 with a 3-step gate and a 4 ms attack: a short burst of highpassed noise on every
+  // chord onset, which is a synthesized clap. The owner heard exactly that — "It has a layer of
+  // noise that I'd probably want to try to make a bit cleaner. It also sounds almost like there's a
+  // snare hit or percussion hit whenever the chord comes in". §4c puts a noise layer in 14.3% of
+  // chord patches, i.e. noise is a minority ingredient for this role, not the layer's substance.
+  const airNoise = pickRange(rng, 0.15, 0.32, 0.01)
+  // and it swells in with the chord instead of cracking at the front of it (past
+  // `TRANSIENT_ATTACK_S`, so `fuseAttacks` classifies it as the chord arriving, not as an event).
+  const airAttack = pickOne(rng, [0.05, 0.09, 0.14] as const)
 
   const hasPad = family.optional.includes('pad')
   const hasStab = family.optional.includes('stab')
@@ -583,12 +1181,19 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
         sustain: 0.82,
         release: 0.25,
       },
-      production: {
-        // NO parallel comp on a sustained low layer: measured 2026-07-26, it pushed chords'
-        // bass-band share from 38% (in target) to 62% (out), because compressing a sustained voice
-        // raises its AVERAGE, which is the one thing the band-share targets read.
-        profile: { role: 'bass', saturator: { drive: 0.25, mix: 0.3 } },
-      },
+      // NO `production` AT ALL ON THIS LAYER, and the absence is the decision — a layer that
+      // declares a production block and produces nothing is a lie the test suite catches.
+      //
+      // It used to carry `saturator { drive 0.25, mix 0.3 }` and no comp. The comp was removed
+      // earlier: measured 2026-07-26, it pushed chords' bass-band share from 38% (in target) to 62%
+      // (out), because compressing a sustained voice raises its AVERAGE, which is the one thing the
+      // band-share targets read. The saturator goes for the same reason plus a sourced one — §4c's
+      // 14.3% waveshaping rate is a fact about CHORD PATCHES, and this layer is part of one; it is
+      // not a bass patch just because its job inside the instrument is low. Leaving drive here
+      // while the pad and the stab lost theirs measured as the body swallowing the instrument:
+      // bass-band share 83% / 64% / 78% on the three rated seeds against a reference p75 of 47%,
+      // and centroids of 131 / 301 / 194 Hz against the pool IQR of 344-630. With it gone the same
+      // three measure 44% / 26% / 29% and 431 / 740 / 568 Hz.
     },
   ]
 
@@ -602,10 +1207,14 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
       gainDb: bodyGain + padRel,
       mono: false,
       patch: {
+        // §4d: chord patches are filtered saws, and the filtering is what makes them lush. The saw
+        // pair stays; the octave-split second oscillator is §4e's thickening move (78.6% of chord
+        // patches split by octave; 71.4% run three oscillators — the sub adds the third).
         osc: 'sawtooth' as OscType,
         osc2Type: 'sawtooth' as OscType,
-        osc2Level: 0.35,
+        osc2Level: 0.3,
         osc2Detune: padDetune,
+        subLevel: 0.1,
         unisonVoices: padVoices,
         unisonWidth: padWidth,
         attack: padAttack,
@@ -613,9 +1222,22 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
         sustain: 0.85,
         release: 0.6,
         pan: padPan,
+        // THE DARK MOVE (§4d, median 523 Hz / 82.1% lowpass). The voice filter is the crossover
+        // highpass, so the resting lowpass lives on the eq7 insert. Slope 12 dB/oct and a
+        // Butterworth Q: a resting point the harmonics roll off past, not a band edge.
+        eq7LpOn: true,
+        eq7LpFreq: padLp,
+        eq7LpSlope: '12',
+        eq7LpQ: 0.707,
       },
       production: {
-        profile: { role: 'pad', chorusMix: 0.45, saturator: { drive: 0.2, mix: 0.28 }, sendReverb: 0.3, sendDelay: 0.08, eqHigh: 2.5 },
+        // NO SATURATOR (§4c: 14.3% of chord patches are waveshaped against 62.8% of bass patches —
+        // "whatever drive setting is right for a bass growl layer is a move that 85.7% of chord
+        // patches decline to make"). The owner's word for what it was doing was "drive-y".
+        // Chorus goes UP instead: §4f measures chorus on 32.1% of chord patches, second only to
+        // keys, and §2 is the mechanism note — it widens without adding a single harmonic, which is
+        // what replaces the unison voices §4a says chords mostly do not use.
+        profile: { role: 'pad', chorusMix: 0.55, sendReverb: 0.3, sendDelay: 0.08, eqHigh: 1 },
         comp: { threshold: -28, ratio: 6, attack: 0.02, release: 0.2, mix: 0.25 },
       },
     })
@@ -626,7 +1248,10 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
       id: 'stab',
       label: 'Stab',
       color: '#c678dd',
-      figure: { transpose: 0, pick: stabPick, maxDurationSteps: stabSteps, velocityScale: 0.95 },
+      // AN OCTAVE UP (§4e). This is the whole point of the rewrite: `transpose` used to be 0 here
+      // and 0 on the pad, which is the "same register" half of what `pruneOverlappingLayers` rule 1
+      // tests, and the reason it kept deleting one of the two.
+      figure: { transpose: stabOctave, pick: stabPick, maxDurationSteps: stabSteps, velocityScale: 0.95 },
       band: { mode: 'highpass', cutoffHz: firstStabHp, resonance: 0.15 },
       gainDb: bodyGain + stabRel,
       mono: false,
@@ -634,15 +1259,24 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
         osc: stabOsc as OscType,
         osc2Type: 'sawtooth' as OscType,
         osc2Level: 0.3,
+        // §4b: chords' own detune distribution is median 12.1 / p90 21.6 cents. 12 is the median.
         osc2Detune: 12,
-        attack: 0.002,
+        attack: stabAttack,
         decay: 0.16,
         sustain: 0.05,
-        release: 0.12,
+        release: stabRelease,
         pan: -padPan,
+        // still lowpassed (§4d's 82.1% is the role's rate) but resting three to five times above
+        // the pad — the bright half of the pair. The eq7 insert is shared with the de-harsh bells.
+        eq7LpOn: true,
+        eq7LpFreq: stabLp,
+        eq7LpSlope: '12',
+        eq7LpQ: 0.707,
       },
       production: {
-        profile: { role: 'chords', chorusMix: 0.3, saturator: { drive: 0.25, mix: 0.3 }, sendReverb: 0.14, sendDelay: 0.12, eqHigh: 3 },
+        // saturator dropped for the same §4c reason as the pad; the treble lift comes down with it,
+        // because +3 dB of eqHigh on a saw stab is the "saw-toothy" band by another route.
+        profile: { role: 'chords', chorusMix: 0.3, sendReverb: 0.14, sendDelay: 0.12, eqHigh: 1.5 },
         comp: { threshold: -28, ratio: 8, attack: 0.012, release: 0.1, mix: 0.35 },
       },
     })
@@ -653,41 +1287,46 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
       id: 'air',
       label: 'Air',
       color: '#56b6c2',
-      figure: { transpose: 12, pick: 'highest', maxDurationSteps: 3, velocityScale: 0.7 },
+      // NO `maxDurationSteps`. The 3-step gate plus a 4 ms attack plus 30-65% noise made this layer
+      // a hi-passed noise burst on every chord onset — a synthesized clap, which is exactly what
+      // the owner reported hearing ("almost like there's a snare hit or percussion hit whenever the
+      // chord comes in"). It holds with the chord now, so it is a sheen rather than an event.
+      figure: { transpose: 12, pick: 'highest', velocityScale: 0.7 },
       band: { mode: 'highpass', cutoffHz: airHp, resonance: 0.1 },
       gainDb: bodyGain + airRel,
       mono: false,
       patch: {
         osc: 'triangle' as OscType,
         noiseLevel: airNoise,
-        attack: 0.004,
-        decay: 0.25,
-        sustain: 0.15,
-        release: 0.3,
+        attack: airAttack,
+        decay: 0.35,
+        sustain: 0.5,
+        release: 0.45,
         unisonVoices: 3,
         unisonWidth: 0.9,
         pan: 0,
       },
       production: {
-        profile: { role: 'hats', utilityWidth: 0.7, sendReverb: 0.4, eqHigh: 5, autoPan: { rate: 0.12, depth: 0.4, mix: 0.3 } },
+        // +5 dB of high shelf on a noise layer was the other half of "a layer of noise I'd want to
+        // make a bit cleaner"; the reverb send stays, since §4f measures chords as the reverb-first
+        // role (reverb1 42.9% > delay 35.7%). The auto-pan is gone: the owner's verdict on per-layer
+        // motion was "annoying if it were the core synth to use", and the stack's shared modulation
+        // (drawn once in `finishArchitecture`) is the coherent replacement.
+        profile: { role: 'hats', utilityWidth: 0.7, sendReverb: 0.4, eqHigh: 2 },
       },
     })
   }
 
-  const summary =
-    `${bodyOsc} body root octave-down (anchor ${anchorLo}, lowpass ${bodyLp}) @${bodyGain} dB` +
-    layers.slice(1).map((l) => ` + ${l.id} (${l.band.mode} ${l.band.cutoffHz}) @${l.gainDb} dB`).join('')
-
-  return {
-    role: 'chords',
-    summary,
-    anchor: { loMidi: anchorLo, hiMidi: anchorLo + 12 },
+  return finishArchitecture(
+    rng,
+    'chords',
+    family.name,
+    anchorLo,
     layers,
-    draw: {
-      family: family.name,
-      choices: { anchorLo, bodyLp, lowestHp, bodyGain, padRel, stabRel, airRel, bodyOsc, padDetune, padVoices, padWidth, padAttack, padPan, stabSteps, stabHp, stabOsc, stabPick, airHp, airNoise },
-    },
-  }
+    // the BOTTOM layer's line only — finishArchitecture appends the rest (and the ones pruning removed)
+    `${bodyOsc} body root octave-down (anchor ${anchorLo}, lowpass ${bodyLp}) @${bodyGain} dB`,
+    { anchorLo, bodyLp, lowestHp, bodyGain, padRel, stabRel, airRel, bodyOsc, padDetune, padVoices, padWidth, padAttack, padLp, padPan, stabOctave, stabSteps, stabRelease, stabAttack, stabHp, stabLp, stabOsc, stabPick, airHp, airNoise, airAttack },
+  )
 }
 
 // ---- lead --------------------------------------------------------------------------------------
@@ -886,20 +1525,16 @@ function buildLeadArch(rng: () => number): LayeredArchitecture {
     })
   }
 
-  const summary =
-    `body roots two octaves down (anchor ${anchorLo}, lowpass ${bodyLp}) @${bodyGain} dB` +
-    layers.slice(1).map((l) => ` + ${l.id} (${l.band.mode} ${l.band.cutoffHz}, ${l.patch.unisonVoices ?? 1}v) @${l.gainDb} dB`).join('')
-
-  return {
-    role: 'lead',
-    summary,
-    anchor: { loMidi: anchorLo, hiMidi: anchorLo + 12 },
+  return finishArchitecture(
+    rng,
+    'lead',
+    family.name,
+    anchorLo,
     layers,
-    draw: {
-      family: family.name,
-      choices: { anchorLo, bodyLp, mainHp, bodyGain, mainRel, octaveUnder, widthUnder, airUnder, mainVoices, mainDetune, mainWidth, mainAttack, mainOsc, octaveVoices, octaveHp, octaveOsc, widthVoices, widthDetune, widthHp, pan, airHp },
-    },
-  }
+    // the BOTTOM layer's line only — finishArchitecture appends the rest
+    `body roots two octaves down (anchor ${anchorLo}, lowpass ${bodyLp}) @${bodyGain} dB`,
+    { anchorLo, bodyLp, mainHp, bodyGain, mainRel, octaveUnder, widthUnder, airUnder, mainVoices, mainDetune, mainWidth, mainAttack, mainOsc, octaveVoices, octaveHp, octaveOsc, widthVoices, widthDetune, widthHp, pan, airHp },
+  )
 }
 
 const ARCH_BUILDERS: Record<LayeredRole, (rng: () => number) => LayeredArchitecture> = {
@@ -934,7 +1569,10 @@ export function layeredArchitecture(role: string, seed = 0): LayeredArchitecture
  * same-ish"; the diversity guard in test/layered.test.ts counts these. */
 export function architectureFingerprint(arch: LayeredArchitecture): string {
   const layers = arch.layers
-    .map((l) => `${l.id}:${l.band.mode[0]}${l.band.cutoffHz}:${l.gainDb}:${String(l.patch.osc ?? '-')}:${l.patch.sustain ?? '-'}:${l.patch.unisonVoices ?? 1}`)
+    // register and resting lowpass are in the string because as of 2026-07-26 they are two of the
+    // largest timbre axes a chords draw has (organic-vs-mechanical §4d/§4e) — a fingerprint that
+    // omitted them would call an octave-split dark stack and a same-octave bright one one instrument
+    .map((l) => `${l.id}:${l.band.mode[0]}${l.band.cutoffHz}:${l.figure.transpose}st:${l.gainDb}:${String(l.patch.osc ?? '-')}:${l.patch.eq7LpOn === true ? l.patch.eq7LpFreq : '-'}:${l.patch.sustain ?? '-'}:${l.patch.unisonVoices ?? 1}`)
     .join('|')
   return `${arch.role}/${arch.draw.family}/${arch.anchor.loMidi}/${layers}`
 }
@@ -990,7 +1628,18 @@ export function checkCrossover(arch: LayeredArchitecture): CrossoverCheck {
 /** Every field a `mono: true` layer must hold, and the value it must hold. A layer that widens the
  * low end is the single largest measured width error in the log (138 row 5: the frozen role-blind
  * profile widens bass to -11.8 dB against a -45 dB target), so this is asserted on the assembled
- * doc — after production — not merely intended in the spec. */
+ * doc — after production — not merely intended in the spec.
+ *
+ * MONO AND DRY ARE TWO DIFFERENT AXES (2026-07-26). This list used to pin `sendReverb`/`sendDelay`
+ * to 0 for every mono layer, which is why every layer of all 36 architectures rendered bone dry and
+ * the owner heard it: "the reverb/delay isn't here.. my ear is liking those in the original one..
+ * so its not exactly apples to apples". Zeroing the sends is not what keeps a layer mono — the
+ * layer's own signal is still centred; only the reverb RETURN is stereo, and sending a mono source
+ * to a stereo return is ordinary practice. What actually matters is the frequency: a stereo return
+ * under ~100-120 Hz is what breaks mono compatibility (docs/priors/layering.md §"Mono/stereo
+ * discipline"). So the send fields moved into `MONO_DRY_BELOW_AMBIENCE_FLOOR`, enforced only on
+ * layers the architecture itself declined to send (below `AMBIENCE_FLOOR_HZ`), while the
+ * position/width fields below stay pinned on EVERY mono layer as before. */
 export const MONO_DISCIPLINE: { field: keyof BeatSynth; value: number | string }[] = [
   { field: 'pan', value: 0 },
   { field: 'unisonVoices', value: 1 },
@@ -999,6 +1648,11 @@ export const MONO_DISCIPLINE: { field: keyof BeatSynth; value: number | string }
   { field: 'chorusMix', value: 0 },
   { field: 'utilityWidth', value: 0.5 },
   { field: 'autoPanMix', value: 0 },
+]
+
+/** The send fields, pinned to 0 only on a mono layer sitting BELOW its role's ambience floor — the
+ * frequency region where a stereo reverb return really does cost mono compatibility. */
+export const MONO_DRY_BELOW_AMBIENCE_FLOOR: { field: keyof BeatSynth; value: number }[] = [
   { field: 'sendReverb', value: 0 },
   { field: 'sendDelay', value: 0 },
 ]
@@ -1017,6 +1671,14 @@ export function monoViolations(doc: BeatDocument, arch: LayeredArchitecture): st
     for (const { field, value } of MONO_DISCIPLINE) {
       const have = track.synth[field]
       if (have !== value) out.push(`mono layer "${layer.id}": ${String(field)} is ${String(have)}, must be ${String(value)}`)
+    }
+    // ...and dry ONLY where a stereo return would actually cost mono compatibility. A mono layer
+    // above the floor is allowed its share of the stack's shared ambience.
+    if (layer.band.cutoffHz < AMBIENCE_FLOOR_HZ[arch.role]) {
+      for (const { field, value } of MONO_DRY_BELOW_AMBIENCE_FLOOR) {
+        const have = track.synth[field]
+        if (have !== value) out.push(`mono layer "${layer.id}" is below the ${AMBIENCE_FLOOR_HZ[arch.role]} Hz ambience floor: ${String(field)} is ${String(have)}, must be ${String(value)}`)
+      }
     }
   }
   return out
@@ -1181,6 +1843,15 @@ export function buildLayeredClip(role: string, phrase: ComposedPhrase, bpm: numb
         }
       }),
     }
+    // THE eq7 BANDS DO NOTHING UNLESS THE eq7 INSERT IS IN THE CHAIN (bug found 2026-07-26).
+    // A parsed track's default effect chain is eq3/comp/distortion/bitcrush
+    // (LEGACY_DEFAULT_EFFECT_TYPES in src/core/document.ts) and the engine only builds an eq7 node
+    // for an effect entry of type 'eq7' (ui/src/audio/engine.ts's `case 'eq7'`). So every
+    // `eq7Bell*` field this module writes — the de-harsh notch/warmth pair and the chords pad's
+    // dark lowpass — was being stored on the synth and never rendered. The whole de-harsh move
+    // shipped INERT, which is why "saw-toothy / metallic" survived the commit that was meant to
+    // cure it. Same shape as the `comp` insert `applyLayerProduction` already adds by hand.
+    if (usesEq7(layer.patch)) doc = addEffect(doc, layer.id, 'eq7').doc
     receipts.push({
       id: layer.id,
       notes: notes.length,

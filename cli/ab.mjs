@@ -637,6 +637,10 @@ export async function abCommand(argv) {
   }
 
   // ---- the server ------------------------------------------------------------------------------
+  // src/taste/features.ts moved to src/metrics/features.ts and this path was left behind, so EVERY
+  // `beat ab <dir>` (the server path — the whole command) died with ERR_MODULE_NOT_FOUND before
+  // opening. Caught 2026-07-26 independently by test/feedback-ab.test.ts while preparing a listening
+  // set, and by test/dist-imports.test.ts, which now scans every dist path the CLI imports.
   const { computeBatchFeatures } = await import(pathToFileURL(join(repoRoot, 'dist/src/metrics/features.js')).href)
   const { createReviewServer, listenReviewServer, ReviewHttpError } = await import(
     pathToFileURL(join(repoRoot, 'dist/src/serve/review-server.js')).href

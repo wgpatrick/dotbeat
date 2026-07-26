@@ -1,0 +1,85 @@
+{
+  "id": "2026-07-26-layered-chords-sawtoothy-and-popping",
+  "date": "2026-07-26",
+  "kind": "defect-and-fix",
+  "role": "chords",
+  "title": "The layered CHORDS stack read as saw-toothy and went 'pop pop' on every chord — two saws doing one job, plus a gated noise burst",
+
+  "verdict": {
+    "ownerWords": [
+      "it just sounds a bit saw-toothy or something? Like almost mechanical/electronic... less lush and organic like I'd like chords",
+      "it's like the layered one goes 'pop' 'pop' with two hits whenever a chord goes. Which just seems odd? ... its sort of like a percussive hit.",
+      "It has a layer of noise that I'd probably want to try to make a bit cleaner. It also sounds almost like there's a snare hit or percussion hit whenever the chord comes in"
+    ],
+    "heardOn": "chords seeds 138 and 2156 independently — two different figures at two different tempos, which is why both pairs are banked rather than one",
+    "confidence": "stated plainly and unprompted on a set the owner chose to listen to; treated as ground truth (D27)",
+    "fixConfirmed": false,
+    "fixConfirmedNote": "case-22 and case-24 are the CANDIDATE fixes, banked in the same session as the defect per CLAUDE.md's rule, and NOT yet listened to by the owner. They are labelled `pass` in answers.json on the strength of the measurements below; if the listening pass disagrees, the label is what moves, not the measurement."
+  },
+
+  "clips": [
+    {
+      "id": "case-21.wav",
+      "arm": "layered (before)",
+      "label": "REJECTED",
+      "path": "taste-dataset/listen-bench/cases/case-21.wav",
+      "sha256": "6bdac3985ce3b5231dc7ae18a457727b29bd6f893fc224f8050c0264fc871a31",
+      "producedBy": "scripts/layered-oldnew-ab.mjs against a reference build at ca393a99, chords seed 138, 4 bars, normalized in one batch with case-22",
+      "alsoAt": "taste-dataset/layered-fix2/chords-138/layered-old.wav",
+      "stack": "triangle body root octave-down (lowpass 360) @-17 dB + pad (highpass 330) @-13 dB + stab (highpass 300) @-15 dB + air (highpass 2250) @-34 dB"
+    },
+    {
+      "id": "case-22.wav",
+      "arm": "layered (after)",
+      "label": "CANDIDATE FIX",
+      "path": "taste-dataset/listen-bench/cases/case-22.wav",
+      "sha256": "d1ebdf0e2057cd50cc0816de69a2fd6a94b1b3d45dbac47b3e47c6237849e0e7",
+      "producedBy": "same script, same figure/key/tempo, working tree at 47324dc1, normalized in the SAME batch as case-21",
+      "alsoAt": "taste-dataset/layered-fix2/chords-138/layered-new.wav",
+      "stack": "triangle body root octave-down (lowpass 360) @-17 dB + pad (highpass 330, resting LP 1080, 4v) @-13 dB + stab (highpass 660, resting LP 4800, +12 st) @-15 dB + air (highpass 3250, +12 st, 3v) @-34 dB"
+    },
+    {
+      "id": "case-23.wav",
+      "arm": "layered (before)",
+      "label": "REJECTED",
+      "path": "taste-dataset/listen-bench/cases/case-23.wav",
+      "sha256": "045d9bf8a6b322b9b531096258d71ed51de04e9d7d9fa0b24486874d4d821962",
+      "producedBy": "same script/reference build, chords seed 2156, 90 BPM, normalized in one batch with case-24",
+      "alsoAt": "taste-dataset/layered-fix2/chords-2156/layered-old.wav",
+      "stack": "sawtooth body root octave-down (lowpass 420) @-14 dB + pad (highpass 350) @-12 dB + stab (highpass 320) @-8 dB"
+    },
+    {
+      "id": "case-24.wav",
+      "arm": "layered (after)",
+      "label": "CANDIDATE FIX",
+      "path": "taste-dataset/listen-bench/cases/case-24.wav",
+      "sha256": "30146dfbe8a339743354f242c297da3eb1561496de1a57d8a7cc6caf2a98e29d",
+      "producedBy": "same script, same figure/key/tempo, working tree at 47324dc1, normalized in the SAME batch as case-23",
+      "alsoAt": "taste-dataset/layered-fix2/chords-2156/layered-new.wav",
+      "stack": "sawtooth body root octave-down (lowpass 420) @-14 dB + pad (highpass 350, resting LP 960) @-12 dB + stab (highpass 640, resting LP 6000, +12 st) @-8 dB"
+    }
+  ],
+
+  "measured": {
+    "note": "Each before/after pair was rendered from the same figure, key and tempo and loudness-normalized TOGETHER in one vary batch, so these deltas are the treatment and not gain. 'harsh 1.6-3.8 kHz %' is the share of total spectral energy in the band docs/priors/layering.md §1/§3 names as the metallic-harshness band — the band the de-harsh EQ pair exists to cut, and the band the owner's word 'saw-toothy' points at.",
+    "case-21.wav": { "harsh1638kHzPct": 3.53, "centroidHz": 946, "bandBassPct": 41.2, "bandMidsPct": 48.2, "crestDb": 18.3, "gatesPassed": "1/7" },
+    "case-22.wav": { "harsh1638kHzPct": 0.2, "centroidHz": 450, "bandBassPct": 40.2, "bandMidsPct": 56.5, "crestDb": 15.8, "gatesPassed": "4/7" },
+    "case-23.wav": { "harsh1638kHzPct": 3.66, "centroidHz": 1311, "bandBassPct": 19.2, "bandMidsPct": 69.3, "crestDb": 23.4, "gatesPassed": "3/7" },
+    "case-24.wav": { "harsh1638kHzPct": 0.09, "centroidHz": 569, "bandBassPct": 19.3, "bandMidsPct": 79.2, "crestDb": 19.6, "gatesPassed": "3/7" },
+    "refsPacksChordsQuartiles": {
+      "centroidHz": { "p25": 344, "p50": 448, "p75": 630 },
+      "bandBassPct": { "p25": 2.69, "p50": 23.15, "p75": 47.19 },
+      "bandMidsPct": { "p25": 50.35, "p50": 66.55, "p75": 93.78 },
+      "crestDb": { "p25": 15.0, "p50": 16.66, "p75": 18.32 }
+    }
+  },
+
+  "cause": {
+    "sawToothy": "The pad and the stab were both sawtooth, both at transpose 0, both highpassed within 30-80 Hz of each other, and NEITHER was lowpassed at all. docs/priors/organic-vs-mechanical.md §4d measured 3,559 professional patches and found chord patches are the most heavily lowpassed role there is (82.1%, median knob 523 Hz); a raw saw pair is outside the middle of that distribution by a wide margin. §4c adds that chord patches waveshape at 14.3% against bass's 62.8%, and dotbeat was driving every layer of every role identically.",
+    "popPop": "Two short percussive events per chord. (a) The stab: 2 ms attack, gated to one or two 16th notes under a chord that sustains — a chop, not a chord. 131 P2 measured pack chords attacking in ~7 ms, so 2 ms was five times faster than the reference class. (b) The air layer: 30-65% noise, 4 ms attack, gated to 3 steps, highpassed 2-3.5 kHz — that is the construction of a clap, fired on every chord onset.",
+    "fuseAttacksDidNotCatchIt": "The helper written for exactly this excluded the bottom lowpassed layer from its onset-forming set, so a 2-layer body+stab draw (which is what seed 2156 is) had one member and the function returned early. It also clamped non-onset-forming layers, i.e. it rewrote a 200 ms pad swell to a 27 ms attack, manufacturing a second pluck.",
+    "andItWasDry": "Every layer's reverb/delay send was being zeroed by a rule that pinned sends to 0 on every mono layer — conflating mono discipline with dry discipline. Fixed one commit earlier on the same branch; measured here at a return sitting 21.5 dB under the mix on case-22, against 18.5 dB for the engineplus arm the owner said had the ambience he liked."
+  },
+
+  "whyThisPairMatters": "research/122 §8 and research/123 §6 both call a matched before/after pair the single most valuable asset in the taste program, because the roughness signal only exists BETWEEN matched renders of the same material — commercial reference loops score 77% above the owner's own fail clip on Daniel-Weber, so no absolute threshold can work. Before this case the bank held n=1 such pair (case-19/20). It now holds n=3, which is the threshold every 'soft until n>=3 pairs' comment in the codebase is waiting on — though two of the three are the same defect family and only one is owner-confirmed on BOTH sides, so treat n=3 as a floor reached, not a calibration earned."
+}
