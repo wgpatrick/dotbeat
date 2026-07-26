@@ -211,7 +211,7 @@ function finalizeSeed(rawText: string, seed: number, curated: EngineCuratedFile 
 // batches cover the sound-design axes (what kind of sound) x style axes (what treatment), and
 // the scores log's per-type splits can answer where generated taste signal actually lives.
 
-const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
+export const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
   { id: 'kick', subject: 'a punchy kick drum one-shot', seconds: 1 },
   { id: 'snare', subject: 'a tight snare drum one-shot', seconds: 1 },
   { id: 'clap', subject: 'a layered hand clap one-shot', seconds: 1 },
@@ -249,7 +249,7 @@ const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
  * picked). Only ids that need real musical variety are listed; one-shot subjects (kick, bass,
  * etc.) aren't — a "punchy kick drum" doesn't have a genre. Each list's first entry is the
  * original fixed subject (kept so nothing that reads GEN_SUBJECTS directly changes meaning). */
-const PHRASE_VARIANTS: Record<string, string[]> = {
+export const PHRASE_VARIANTS: Record<string, string[]> = {
   melody: [
     'a melodic synth lead phrase, 4 bar loop, catchy and emotive',
     'a dark minor-key arpeggio lead phrase, 4 bars, moody and driving',
@@ -293,7 +293,7 @@ const PHRASE_VARIANTS: Record<string, string[]> = {
  * clip is supposed to be ONE role). Appended to every phrase prompt by genSubjectVaried, so all
  * consumers inherit it. If prompts prove insufficient by ear, v2 is Demucs stem-extraction on
  * gen clips (the T3 pipeline already runs Demucs). */
-const PHRASE_ISOLATION: Record<string, string> = {
+export const PHRASE_ISOLATION: Record<string, string> = {
   melody: 'isolated solo lead melody stem only, no drums, no other instruments',
   bassline: 'isolated solo bassline stem only, absolutely no drums, no percussion, no other instruments',
   chords: 'isolated chords stem only, no drums, no bass, no other instruments',
