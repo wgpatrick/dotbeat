@@ -24,15 +24,16 @@ measured in the cited repo analyses or verified by code read / primary fetch thi
 design inference. Research only — no code changes; this doc proposes, 138's ladder disposes.*
 
 > **Completion note, 2026-07-26.** The original pass was cut short mid-run: five section bodies
-> (§2.2, §2.3, §2.4, §3.1, §3.3) and the trailing sources block shipped as empty
-> `<!-- WEBPASS:* -->` placeholders that a planned second web pass never filled. They are filled
+> (§2.2, §2.3, §2.4, §3.1, §3.3) and the trailing sources block shipped as empty HTML-comment
+> placeholders that a planned second web pass never filled. They are filled
 > here, the same day, and **not by re-running the web pass** — because by the time anyone came
 > back, the content had already shipped through other streams. The mined corpus this doc was
 > going to transcribe is `docs/priors/` (10 vein files, ~90 recipes, 165 URL citations — landed
 > 08:33–08:52); the executable half is `presets/recipes.json` + `src/recipes/` + `beat recipe
 > list|show|build|check` (merged to main as `recipe-library`, 09:26); the layered arm is
 > `src/taste/layered.ts` + `beat showdown --with-layered`, and its owner-ear correction is branch
-> `layered-fix` (not yet merged at the time of writing). So §2.2 and §2.3 now **point** rather
+> `layered-fix` (merging into main as this was written — check `git log` rather than trusting the
+> parenthesis). So §2.2 and §2.3 now **point** rather
 > than duplicate, and §3.1/§3.3 are rewritten from **measured** evidence — code, renders and one
 > banked listening case — rather than from the tutorial prose they were originally scoped to
 > summarise. Parts of this doc's plan were overtaken by what actually shipped, and where that
@@ -415,8 +416,8 @@ corpus now lives in `docs/priors/layering.md` (§1 bass, §2 drums/kick, §3 lea
 question instead: what architectures does dotbeat actually build, and what does the code say when
 it disagrees with a source?** All of it reads `src/taste/layered.ts` — the module the mined
 architectures were compiled into — plus `test/layered.test.ts`. The seeded-sweep form described
-below is branch `layered-fix`, which was **not yet merged to main at the time of writing**; main
-still carries the earlier three-frozen-architectures form. Both are described, because the
+below arrived on branch `layered-fix`, which was **merging into main while this was written** —
+the form it replaces is three frozen architectures, one per role. Both are described, because the
 difference between them is §3.3's second measured problem.
 
 **Three roles, and one deliberate exclusion.** `LayeredRole` is `bassline | chords | lead`.
@@ -541,7 +542,121 @@ distribution (132 §5). (High — all cited numbers measured.)
 
 ### 3.3 The problems layering creates
 
-<!-- WEBPASS:PROBLEMS -->
+**This section was scoped to summarise the tutorial corpus's warnings. It can now be written from
+evidence instead, because between this doc's morning and its completion the layered arm was
+built, rated by the owner, and diagnosed — and all three of the failures the corpus warns about
+happened, in measurable form, on our own renders.** The prose warnings survive intact and live in
+`docs/priors/layering.md` §6 ("When NOT to layer / problems layering creates" — the vein's single
+clearest cross-source agreement: *only layer when there is a good reason*, *poor layering occurs
+when multiple sounds try to do the same thing*, *if it's getting muddy, remove a layer rather than
+adding one*). What follows is what we measured, and it is the most useful thing in this document.
+
+The setup: `scripts/layered-check.mjs` built layered and single-voice-engineplus clips from the
+same figure, key, tempo and loudness. The layered arm **passed 19 of 24 measured targets against
+engineplus's 3 — the largest measured jump in the taste program.** The owner listened and said,
+verbatim: *"the bassline layering doesn't sound great from my POV... I liked the unlayered one
+better,"* and *"one thing I noticed with all the layering... is it makes everything sort of sound
+the same-ish."* The full case, both clips' feature vectors, the reference medians beside them and
+the per-layer diagnosis are banked at
+`listen-bench/cases/2026-07-26-layered-bass-preferred-unlayered.json` (branch `layered-fix`) —
+the first banked case where the owner's ranking is the exact inverse of the measured one.
+
+**Problem 1 — inaudible layers. A nominal offset in the spec is not audibility, and nothing in the
+gate battery could tell the difference.** The frozen three-layer bass nominally balanced sub −4 /
+growl −9 / click −20 dB. Rendered **per layer** at the stack's own gain staging
+(`scripts/layered-diagnose.mjs`) the contributions were:
+
+| layer | RMS vs the full mix | nominal offset from sub | what it owns |
+|---|---|---|---|
+| sub | **−0.05 dB** | 0 | 99.67% sub band |
+| growl | **−14.07 dB** | −5 dB | 84.43% bass band |
+| click | **−49.06 dB** | −16 dB | 38.85% mids |
+
+Sub-alone RMS came within 0.05 dB of the whole instrument. **The "three-layer bass" was measurably
+a one-layer sine sub with two inaudible passengers** — which is simultaneously why the owner
+preferred the unlayered clip and why every layered clip in the round sounded alike. The general
+lesson is not about bass: a stack's balance must be drawn against **measured contribution**, never
+against fader values, because filtering, envelope shape and masking all sit between the two. The
+fix on `layered-fix` draws relative levels across ranges calibrated against measured contribution
+and floors the loudest character layer at the sub's own level; the diagnostic itself is still only
+a render-time tool, because per-layer audibility **cannot run inside a gate** (you would have to
+re-render each layer alone). `characterLevelDb` — RMS of everything above the sub band minus the
+sub band's RMS — is the band proxy that ships in its place, and it reads bands, not layers.
+
+**Problem 2 — homogenization. Identical architecture on every clip makes everything sound the
+same, and the sameness is invisible to any per-clip metric.** The owner's own report is the
+evidence: *"all the layering... makes everything sort of sound the same-ish."* The cause was
+structural rather than subtle — three frozen `LayeredArchitecture` constants meant every layered
+bassline in every round was the same three voices at the same three cutoffs at the same three
+levels, differing only in which notes the composer drew (§3.1). No per-clip feature can see this,
+because each clip is individually fine; the defect only exists **across** a round. The fix is the
+seeded sweep of §3.1 — the identical move `src/taste/theory.ts` had already made one level down at
+the note layer — and the guard is a *distributional* test (repeats per sliding 15-draw window),
+not a per-clip gate. The general lesson for the recipe library: a recipe that is a single point in
+parameter space is a homogenization hazard by construction, and the library's answer has to be
+that a recipe defines a **region** with seeded draws inside it, with a round-level diversity check
+beside the clip-level gates.
+
+**Problem 3 — metrics that rank backwards from the ear. The most expensive of the three, and the
+one with the cleanest general lesson.** The gate battery of the day was `bandSubPct >= 30`,
+`centroidHz <= 90`, `stereoWidthDb <= -40`, `stereoCorrelation >= 0.98`. Scores: the clip the
+owner **rejected** passed **4 of 4**; the clip he **preferred** passed **0 of 4**. Backwards,
+unanimously, by a wide margin. Measured against the reference pool it was aiming at:
+
+| feature | preferred (engineplus) | rejected (layered) | refs-packs bassline median |
+|---|---|---|---|
+| bandSubPct | 0.27% | **96.10%** | 50.14% |
+| centroidHz | 140.65 | **38.52** | 76.21 |
+| crestSubDb | 19.35 | 6.68 | 8.13 |
+| articulationDb | 8.98 | **8.74** | **20.59** |
+| characterLevelDb | +19.62 | **−13.04** | +0.43 |
+
+Two causes, both general:
+
+*(a) A one-sided gate cannot express "too much."* A floor of `bandSubPct >= 30%` **cannot fail
+96.1%**, and its ceiling-less companion cannot fail a 38.5 Hz centroid. The reference class's own
+median is 50.1% sub at 76.2 Hz, so the rejected clip sat roughly an octave and a half past the
+middle of the class it was aiming at, **scoring perfectly the whole way**. This is the precise
+counterexample to §1.3's "gates are band-membership checks, not maximization targets" — the
+principle was right and the implementation was a floor, and a floor is a maximization target
+wearing a gate's clothes. The fix derives every target two-sided from `REF_POOL_QUANTILES` (each
+pool's p25–p75, carrying the median so a run reports how far from the middle of the class it sits,
+not merely whether it cleared a line), and `test/layered.test.ts` guards it with *"EVERY derived
+target is two-sided and fails BOTH directions"* plus a replay of the exact numbers above asserting
+that **both** clips now fail, for opposite reasons.
+
+*(b) A target derived from a floor picks the wrong side of a genuine source disagreement — and
+then causes the sound.* `src/taste/layered.ts` had recorded a real disagreement about bass balance
+(MusicRadar's worked example puts the sub hotter than the transient layer; the mined bass-house
+vein's Recipe 2 puts the sub **9 dB under** the mid layer) and resolved it with the reasoning
+*"our own measured target — `bandSubPct >= 30%` — only reaches with the sub carrying the stack."*
+That is a one-sided gate reaching back through the design and dictating the architecture. The
+honest encoding of a real disagreement is a sweep across both readings, which is what the branch
+now does.
+
+*(c) The missing sense underneath both.* `MixMetrics` is whole-file and whole-band — five band
+shares, one crest, one centroid, one width — so it cannot distinguish *a bass with a strong sub
+layer* from *a bass that is nothing but a sub layer*, and it cannot see note boundaries at all.
+The layered sub ran sustain 0.95 with legato note-filling: one continuous tone whose only
+variation was pitch. `src/taste/articulation.ts` (written in response to this case) adds per-band
+crest, per-band level and envelope swing. **`articulationDb` — p95 minus p05 of the 20 ms RMS
+envelope — is the only single feature that ranks this pair the owner's way**, 8.98 preferred
+against 8.74 rejected; on the companion clip from the same session (seed 1050) the margin is
+decisive, engineplus **17.17** against layered **6.64**, both against a reference median of
+**20.59** and a p10 of 8.75. `characterLevelDb` shows the honest reading a one-sided gate hid:
+**both** arms are wrong, in opposite directions (+19.62 and −13.04 against a pool median of
++0.43, IQR −8.18…+6.38). Still missing, and stated as missing: per-**layer** audibility as a
+gateable feature, and onset-level attack timing / spectral flux (131 P2/P3).
+
+**The generalized reading.** Layering does not fail the way the tutorials warn (mud, phase
+cancellation) so much as it fails the way an *unmeasured* variable always fails: it introduces
+three new degrees of freedom — per-layer audibility, cross-clip variety, and a balance the metrics
+score one-sidedly — none of which the existing instrument could see, and a gate battery that
+cannot see a variable will happily be maximized along it. §1.3's four-way division still holds and
+this is the sharpest test it has had: the metrics verified truthfully (the clip really did have
+96% sub energy), the owner ranked correctly, and the damage came from the one place the division
+warns about — a *target* derived from a verifier. (High — every number in this section is from a
+banked case file, a per-layer render, or a test assertion read this pass.)
 
 ### 3.4 Is a layered clip expressible in dotbeat today? Yes — definitively, by construction
 
@@ -1001,4 +1116,28 @@ call sites; `soloForShowdown`/`isolateTrack`/`writeShowdownBatch` — the layeri
 `src/analysis/produce.ts` (ProductionProfile), `src/taste/features.ts` (FEATURE_KEYS);
 `taste-dataset/refs-packs/` counts re-verified on disk.
 
-<!-- WEBPASS:SOURCES -->
+**Web sources — held in `docs/priors/`, not here.** This slot was reserved for the second web
+pass's URL list, which was never run (see the completion note at the head of this doc). The web
+corpus this doc describes was instead mined by the nine-agent fleet the same morning, and **each
+vein file carries its own citations inline, per claim, with confidence labels** — which is
+strictly better than a flat URL list at the end of a research doc, because a citation next to the
+claim it supports cannot be orphaned by an edit. Research 143 counted the corpus: **165 URL
+citations across 44 domains, 402 lines carrying a number with a unit**, across 3,355 lines in ten
+files. Start at `docs/priors/README.md` for the vein table; `layering.md` is the one this doc's §3
+draws on most, and `pack-production.md` is the standards vein behind §5. Per-recipe citations for
+the 13 encoded recipes are in `presets/recipes.json` (`sources[]`, each with a
+`SOURCE_CONFIDENCE` of `measured-refs | measured-patches | consensus | corroborated |
+single-source`) and rendered into `docs/recipes-reference.md`.
+
+Sources added by the completion pass (all read this pass): `src/taste/layered.ts` (module header,
+`ARCHITECTURES`/`*_FAMILIES`, `checkCrossover`, `MONO_DISCIPLINE`, `REF_POOL_QUANTILES`,
+`LAYERED_TARGETS`), `src/taste/articulation.ts`, `test/layered.test.ts` (the diversity and
+two-sided-gate guards), `scripts/layered-diagnose.mjs` + `scripts/layered-variety.mjs` +
+`scripts/ref-pool-stats.mjs`, `listen-bench/cases/2026-07-26-layered-bass-preferred-unlayered.json`
+and `listen-bench/README.md` — the last six read on branch `layered-fix` while it was merging;
+`presets/recipes.json`, `src/recipes/{schema,build,verify,format}.ts`,
+`docs/recipes-reference.md`, `scripts/verify-recipes.mjs` and the `beat recipe` verbs in
+`cli/beat.mjs` (merged); `docs/priors/*.md`; `docs/research/141-preset-parameter-ground-truth.md`
+(the 3,559-patch measurements behind §2.4), `143-prior-mining-system.md` (the corpus measurement
+and the claims-store design that supersedes §5.3/§6.3), `144-critic-instruments.md` (the B0
+feature upgrade the gate caveats throughout this doc were waiting on).

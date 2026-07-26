@@ -1,0 +1,122 @@
+{
+  "id": "2026-07-26-layered-bass-preferred-unlayered",
+  "date": "2026-07-26",
+  "kind": "preference",
+  "role": "bassline",
+  "title": "The owner preferred the UNLAYERED bass over the layered arm that beat it 19-to-3 on measured targets",
+
+  "verdict": {
+    "ownerWords": "One thing I noticed with all the layering... is it makes everything sort of sound the same-ish. Something to watch out for. The bassline layering doesn't sound great from my POV... I liked the unlayered one better.",
+    "preferred": "case-19.wav",
+    "rejected": "case-20.wav",
+    "confidence": "stated plainly and unprompted, on a set he chose to listen to; treated as ground truth (D27)"
+  },
+
+  "clips": [
+    {
+      "id": "case-19.wav",
+      "arm": "engineplus",
+      "label": "PREFERRED",
+      "path": "taste-dataset/listen-bench/cases/case-19.wav",
+      "sha256": "93433bc98efdf946ac06b819af2571c06b1529d97d5bd705c1672eecdf69d722",
+      "producedBy": "scripts/layered-check.mjs at dc2af524, bassline seed 41, figure \"rolling-8ths\", 126 BPM — the frozen single-voice engineplus production ablation",
+      "alsoAt": "taste-dataset/layered-check-prefix/bassline-41/engineplus.wav"
+    },
+    {
+      "id": "case-20.wav",
+      "arm": "layered",
+      "label": "REJECTED",
+      "path": "taste-dataset/listen-bench/cases/case-20.wav",
+      "sha256": "8c0fa356e7467306aa34b1eade4162d3dfce3f85370b2d78db5badf20a8b0336",
+      "producedBy": "scripts/layered-check.mjs at dc2af524, bassline seed 41, SAME figure/key/tempo/loudness — the frozen 3-layer stack (mono sine sub lowpass 90 + saw/square growl highpass 80 + 1-step click highpass 1600, gains -4/-9/-20)",
+      "alsoAt": "taste-dataset/layered-check-prefix/bassline-41/layered.wav"
+    }
+  ],
+
+  "measured": {
+    "note": "Re-measured 2026-07-26 on the banked files. The clips reproduce byte-for-byte from dc2af524 (bandSubPct 96.10097 here against 96.10091 in the original results.json; the deltas are render variance).",
+    "case-19.wav": {
+      "bandSubPct": 0.27, "bandBassPct": 94.74, "bandMidsPct": 5.0,
+      "centroidHz": 140.65, "stereoWidthDb": -11.62, "stereoCorrelation": 0.872,
+      "crestDb": 9.16, "crestSubDb": 19.35,
+      "levelSubDb": -19.67, "levelBassDb": -0.27, "levelMidsDb": -13.02,
+      "modDepthDb": 6.4, "articulationDb": 8.98, "characterLevelDb": 19.62
+    },
+    "case-20.wav": {
+      "bandSubPct": 96.1, "bandBassPct": 3.53, "bandMidsPct": 0.34,
+      "centroidHz": 38.52, "stereoWidthDb": -56.06, "stereoCorrelation": 1.0,
+      "crestDb": 8.56, "crestSubDb": 6.68,
+      "levelSubDb": -0.21, "levelBassDb": -13.64, "levelMidsDb": -24.15,
+      "modDepthDb": 5.73, "articulationDb": 8.74, "characterLevelDb": -13.04
+    },
+    "refsPacksBasslineMedian": {
+      "bandSubPct": 50.14, "bandBassPct": 18.79, "bandMidsPct": 0.22,
+      "centroidHz": 76.21, "stereoWidthDb": -56.76, "stereoCorrelation": 1.0,
+      "crestDb": 7.83, "crestSubDb": 8.13,
+      "levelSubDb": -3.24, "levelBassDb": -6.57, "levelMidsDb": -23.23,
+      "modDepthDb": 11.24, "articulationDb": 20.59, "characterLevelDb": 0.43
+    },
+    "perLayerSolos": {
+      "note": "scripts/layered-diagnose.mjs renders each layer of case-20's stack alone at the stack's own gain staging. This is the measurement that named the cause.",
+      "sub": { "rmsVsFullMixDb": -0.05, "bandSubPct": 99.67 },
+      "growl": { "rmsVsFullMixDb": -14.07, "bandBassPct": 84.43, "nominalOffsetFromSubDb": -5 },
+      "click": { "rmsVsFullMixDb": -49.06, "bandMidsPct": 38.85, "nominalOffsetFromSubDb": -16 }
+    }
+  },
+
+  "whatTheMetricsSaid": {
+    "gateAtTheTime": "LAYERED_TARGETS as of dc2af524 — bandSubPct >= 30, centroidHz <= 90, stereoWidthDb <= -40, stereoCorrelation >= 0.98",
+    "scores": { "case-19.wav": "0 of 4", "case-20.wav": "4 of 4" },
+    "ranking": "BACKWARDS. Every gate preferred the clip the owner rejected, unanimously and by a wide margin.",
+    "whyItFailed": [
+      "Three of the four gates were ONE-SIDED. A floor of 30% sub share cannot fail 96.1%; a ceiling-less companion cannot fail a 38.5 Hz centroid. The reference class's own median is 50.1% sub at 76.2 Hz, so the rejected clip was roughly an octave and a half past the middle of the class it was aiming at, scoring perfectly the whole way.",
+      "The one-sided gate CAUSED the sound rather than merely missing it: src/taste/layered.ts recorded a genuine source disagreement about bass balance (MusicRadar puts the sub hotter than the transient layer; the mined bass-house vein's Recipe 2 puts the sub 9 dB UNDER the mid layer) and resolved it with 'our own measured target — bandSubPct >= 30% — only reaches with the sub carrying the stack.'",
+      "No gate could see per-LAYER contribution. Measured, the growl arrived 14.07 dB under the mix and the click 49.06 dB under, against nominal offsets of -5 and -16 dB — and sub-alone RMS came within 0.05 dB of the whole instrument. The 'three-layer bass' was a one-layer sine sub with two inaudible passengers, which is also why every layered clip in the round sounded alike.",
+      "No gate could see note boundaries at all. The sub layer ran sustain 0.95 with legato note-filling, i.e. one continuous tone whose only variation was pitch."
+    ]
+  },
+
+  "metricGap": {
+    "existedAtTheTime": false,
+    "addedAs": "src/taste/articulation.ts, written 2026-07-26 in response to this case",
+    "features": [
+      {
+        "name": "characterLevelDb",
+        "definition": "RMS of everything above the sub band minus the sub band's RMS",
+        "case-19.wav": 19.62,
+        "case-20.wav": -13.04,
+        "refMedian": 0.43,
+        "refIqr": [-8.18, 6.38],
+        "ranksThisCase": "correctly-by-distance — the rejected clip is 13.5 dB from the reference median and outside the pool's p10 (-9.96); the preferred clip is also outside, in the other direction (above p90, 18.92). Neither arm was right, which is the honest reading and the one a single-sided gate hid."
+      },
+      {
+        "name": "articulationDb",
+        "definition": "p95 minus p05 of the 20 ms RMS envelope — how far the sound moves between note and gap",
+        "case-19.wav": 8.98,
+        "case-20.wav": 8.74,
+        "refMedian": 20.59,
+        "refIqr": [9.33, 33.98],
+        "ranksThisCase": "correctly, and it is the ONLY feature that does so on its own. Both clips sit under the reference p25, and the preferred one is higher. On the companion clip the owner heard the same day (seed 1050) the margin is decisive: engineplus 17.17 against layered 6.64."
+      }
+    ],
+    "stillMissing": [
+      "PER-LAYER audibility as a first-class feature. characterLevelDb is a band proxy for it and gets this case right, but it reads bands, not layers: a stack whose character layer happens to sit in the same band as its sub would still read fine. The direct measurement exists only as a render-time diagnostic (scripts/layered-diagnose.mjs, which re-renders each layer alone) and cannot run inside a gate.",
+      "onset-level attack timing and spectral flux (131 P2/P3) — still nowhere in the codebase, still listed in UNMEASURABLE_TARGETS."
+    ]
+  },
+
+  "resolution": {
+    "branch": "layered-fix",
+    "changes": [
+      "LAYERED_TARGETS derived two-sided from REF_POOL_QUANTILES (each pool's p25..p75, carrying the median) instead of hand-written one-sided thresholds.",
+      "src/taste/articulation.ts adds the per-band crest / per-band level / envelope-swing family, and layeredFeatures now REQUIRES the audio so the articulation gates cannot be silently skipped.",
+      "The three frozen architectures became seeded sweeps, so a round no longer converges on one instrument.",
+      "The bass balance is calibrated against measured per-layer contribution, and the loudest character layer is floored at the sub's own level."
+    ],
+    "regressionGuards": [
+      "test/layered.test.ts 'the measured layered-bass overshoot of 2026-07-26 now FAILS the gate' — replays the exact numbers above and asserts both clips fail, for opposite reasons.",
+      "test/layered.test.ts 'a simulated round does not repeat layered architectures'.",
+      "test/layered.test.ts 'EVERY derived target is two-sided and fails BOTH directions'."
+    ]
+  }
+}

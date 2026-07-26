@@ -1,4 +1,7 @@
-# Research 142 — The measurement instruments 138 and 140 said to ship first: critic upgrade, rolecheck, grind detector, and the two gates that never fired
+# Research 144 — The measurement instruments 138 and 140 said to ship first: critic upgrade, rolecheck, grind detector, and the two gates that never fired
+
+> Numbered 142 when written; renumbered to 144 on 2026-07-26 because `142-sampling-toolkit.md`
+> had already claimed that number in a parallel stream. Cross-references elsewhere point at 144.
 
 *Run 2026-07-26. Commissioned to build the instruments docs 138 and 140 name as rung 0 — the
 things every later experiment is scored BY, which were all still unbuilt. Four items, all from
