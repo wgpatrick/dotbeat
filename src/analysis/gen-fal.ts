@@ -21,6 +21,7 @@ import { execFile } from 'node:child_process'
 import { BeatGenError, type GenMeta } from './gen.js'
 import { decodeWav } from '../metrics/wav.js'
 import { downbeatAlignedTrim, encodeWav16 } from './gen-trim.js'
+import { extractStem, type StemExtractor, type StemName } from './stems.js'
 
 export const FAL_DEFAULT_PROVIDER = 'fal-ai/stable-audio-3/medium/text-to-audio'
 
@@ -159,6 +160,17 @@ export interface RunGenFalOptions {
   bpm?: number
   bars?: number
   rawOutPath?: string
+  /** OPT-IN stem isolation (the Lyria guarantee, 2026-07-25). When set, the download is separated
+   * with Demucs and outPath is REPLACED by this stem; the full mix is preserved at `mixOutPath` (or
+   * `<outPath>.mix.wav`). Runs BEFORE the downbeat trim on purpose — Demucs separates far better
+   * with the whole 30 s of context than with a 4-bar excerpt, so extract first, then cut the stem.
+   * Off by default, so every existing caller is byte-identical. */
+  stemExtract?: StemName
+  mixOutPath?: string
+  /** test hook — defaults to the real python/stem_extract.py spawn */
+  stemExtractImpl?: StemExtractor
+  /** forwarded to the sidecar's near-silence guard (default: its own 25 dB) */
+  stemSilenceMarginDb?: number
 }
 
 /** Generate one audio file via fal.ai into outPath and return the same GenMeta shape the local
@@ -231,9 +243,48 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
   // step later, sniffing the real container from the bytes regardless of this file's name. Only
   // read a sample rate straight from a WAV header when the bytes actually are WAV; for anything
   // else, report the 44.1kHz rate prep normalizes every registered one-shot to.
-  const head = readFileSync(opts.outPath).subarray(0, 12)
-  const isWav = head.length >= 12 && head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE'
+  let head = readFileSync(opts.outPath).subarray(0, 12)
+  let isWav = head.length >= 12 && head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE'
   let sampleRate = isWav ? readFileSync(opts.outPath).readUInt32LE(24) : 44100
+
+  // ---- Stem isolation (opt-in) ---------------------------------------------------------------
+  // Lyria is a FULL-TRACK model — Google's own prompt guide leads with genre/era, and three
+  // escalating prompt-side isolation attempts (prose, negative_prompt, instrument-first framing)
+  // all still returned a band (owner rating passes, 2026-07-25). So when the caller needs a
+  // guaranteed single-instrument clip, take it by force: separate the download with Demucs and keep
+  // the requested stem. This happens BEFORE the trim so Demucs sees the full generation.
+  //
+  // A failure here THROWS. Falling back to the un-separated mix would quietly ship exactly the
+  // contamination this step exists to remove — a loud failure (which the showdown turns into
+  // warn-and-skip for that role) is the honest outcome.
+  const stem: Pick<GenMeta, 'stemExtract'> = {}
+  if (opts.stemExtract !== undefined) {
+    const extractor = opts.stemExtractImpl ?? extractStem
+    const mixPath = opts.mixOutPath ?? `${opts.outPath}.mix.wav`
+    writeFileSync(mixPath, readFileSync(opts.outPath))
+    const res = await extractor({
+      input: mixPath,
+      stem: opts.stemExtract,
+      outPath: opts.outPath,
+      ...(opts.stemSilenceMarginDb !== undefined ? { silenceMarginDb: opts.stemSilenceMarginDb } : {}),
+    })
+    stem.stemExtract = {
+      stem: res.stem,
+      stemUsed: res.stemUsed,
+      model: res.model,
+      device: res.device,
+      mixRmsDb: res.mixRmsDb,
+      keptRmsDb: res.keptRmsDb,
+      residualRmsDb: res.residualRmsDb,
+      fallback: res.fallback,
+      mixPath,
+    }
+    // The sidecar always writes 16-bit PCM WAV, so a non-WAV download (an mp3) becomes decodable
+    // here — re-sniff so the trim below can run on a generation that previously had to skip it.
+    head = readFileSync(opts.outPath).subarray(0, 12)
+    isWav = head.length >= 12 && head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE'
+    sampleRate = isWav ? readFileSync(opts.outPath).readUInt32LE(24) : res.sampleRate
+  }
 
   // Downbeat-aligned trim (research/127 §4.2, Part A2): when the caller asked for a bar-count trim
   // and the download is decodable WAV, cut it to `bars` bars at the prompted BPM starting on a
@@ -267,6 +318,7 @@ export async function runGenFal(opts: RunGenFalOptions): Promise<GenMeta> {
     sampleRate,
     ...(adapter.watermark !== undefined ? { watermark: adapter.watermark } : {}),
     ...(adapter.trainingExcluded ? { trainingExcluded: true } : {}),
+    ...stem,
     ...trim,
   }
 }

@@ -47,6 +47,7 @@ import { shuffledOrder } from '../vary/audition.js'
 import { genSubject } from './seeds.js'
 import { SPLIT_SMOKE_MIN_BATCHES, mulberry32 } from './eval.js'
 import { curatedKey } from './surgeCuration.js'
+import type { StemName } from '../analysis/stems.js'
 
 export type ShowdownSourceKind = 'engine' | 'engineplus' | 'gen' | 'keymap' | 'ref' | 'surge' | 'surgeplus'
 
@@ -74,6 +75,29 @@ export const SHOWDOWN_ROLES: ShowdownRoleSpec[] = [
   { role: 'lead', seedTrack: 'arp', phraseSubjectId: 'melody', keymap: { kind: 'pitched', oneShotSubjectId: 'pluck' } },
   { role: 'drum-loop', seedTrack: 'drums', phraseSubjectId: 'drumloop', keymap: { kind: 'kit', laneSubjects: { kick: 'kick', snare: 'snare', hat: 'hat' } } },
 ]
+
+/** Which htdemucs stem carries each role's gen clip (`beat showdown --gen-stem-extract`).
+ *
+ * htdemucs separates exactly four sources — drums / bass / other / vocals — so `other` is the
+ * catch-all for every pitched non-bass instrument: chord keys, synth leads, guitars, pads. That is
+ * not a compromise for this eval, it is the right target: what the chords/lead arms need removed is
+ * the DRUM KIT and the bass, and `other` is precisely the mix minus those (minus vocals, which an
+ * instrumental generation has none of anyway).
+ *
+ * Keyed by phraseSubjectId rather than role id because the subject is what the gen prompt actually
+ * asked for — the two happen to line up today, and this way they cannot silently drift apart. */
+export const GEN_STEM_BY_SUBJECT: Record<string, StemName> = {
+  bassline: 'bass',
+  chords: 'other',
+  melody: 'other',
+  drumloop: 'drums',
+}
+
+/** The stem to keep for a role's gen clip, or undefined when the role has no mapping (a new role
+ * added to the bank without a stem opinion — the caller then just skips extraction for it). */
+export function genStemForRole(spec: ShowdownRoleSpec): StemName | undefined {
+  return GEN_STEM_BY_SUBJECT[spec.phraseSubjectId]
+}
 
 export function showdownRole(role: string): ShowdownRoleSpec {
   const spec = SHOWDOWN_ROLES.find((r) => r.role === role)

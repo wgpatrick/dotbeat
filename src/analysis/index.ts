@@ -51,10 +51,29 @@ export {
   BeatGenError,
   type GenBackend,
   type GenMeta,
+  type GenStemExtract,
   type RunGenOptions,
   type RunGenResult,
 } from './gen.js'
 // ==== Phase 39 Stream UB end ====
+// ==== stem isolation (gen guarantee, 2026-07-25) ====
+// python/stem_extract.py's TS half: Demucs-separate a full-mix generation and keep ONE stem, so the
+// showdown's gen arm gets a single-instrument clip from a full-track model (Lyria) that no amount
+// of prompting will solo. Opt-in on the fal path via RunGenOptions.stemExtract.
+export {
+  extractStem,
+  stemDoctor,
+  parseStemResult,
+  resolveStemPython,
+  isStemName,
+  STEM_NAMES,
+  BeatStemError,
+  type StemName,
+  type StemExtractor,
+  type StemExtractResult,
+  type ExtractStemOptions,
+} from './stems.js'
+// ==== stem isolation end ====
 // ==== Phase 40 Stream VC ====
 // `beat regen`: rebuild generated media from the provenance sidecars alone — the executable form of
 // "a fully-generated .beat project is a recipe". Imports source-lib.mjs; never modifies it (see
