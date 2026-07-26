@@ -1,5 +1,6 @@
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError } from './document.js'
+import { formatNumber } from './format.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -44,10 +45,29 @@ function isAutomationInterpolation(s: string): s is AutomationInterpolation {
   return (AUTOMATION_INTERPOLATIONS as readonly string[]).includes(s)
 }
 
+/** Snaps a value to the format's canonical 4-decimal precision (format.ts) — the same helper
+ * edit.ts uses on the writer side. */
+const canon = (n: number): number => Number(formatNumber(n))
+
+/** CANON-THEN-VALIDATE (adversarial hunt #2, findings 5 and 8). Every number in a `.beat` file is
+ * written back through formatNumber, which rounds to 4 decimals — so the value the document really
+ * carries is the ROUNDED one, and that is what every range check below has to see. Reading the raw
+ * token instead broke two invariants at once:
+ *
+ *   - `note n1 60 0 0.00001 0.5` parsed (duration 0.00001 > 0 ✓) and then re-serialized as
+ *     `note n1 60 0 0 0.5`, which the very same parser rejects — load a file, save it untouched,
+ *     and it's bricked.
+ *   - `groove 0.00001 1` parsed to shuffleAmount 0.00001 but serialized as `groove 0 1`, so
+ *     parse(serialize(x)) != x for one generation, against D4's canonical-bytes guarantee.
+ *
+ * Rounding here makes both go away structurally: a token whose canonical form is out of range now
+ * fails LOUDLY at parse (it could never have been produced by serialize in the first place), and a
+ * token that is merely spelled non-canonically ("0.50", "0.500001") lands on exactly the value a
+ * round-trip would give it, so parse -> serialize -> parse is a fixed point at generation 1. */
 function parseFloatStrict(tok: string, lineNo: number, field: string): number {
   const n = Number(tok)
   if (tok.trim() === '' || !Number.isFinite(n)) throw new BeatParseError(`"${field}" expected a number, got "${tok}"`, lineNo)
-  return n
+  return canon(n)
 }
 
 function parseIntStrict(tok: string, lineNo: number, field: string): number {
@@ -168,6 +188,7 @@ export function parse(text: string): BeatDocument {
       legacyClipPatterns.delete(currentClip)
     }
     if (currentTrack.kind === 'drums') assertUniqueHitIds(currentClip.hits, `clip "${currentClip.id}"`, lineNo)
+    assertUniqueNoteIds(currentClip.notes, `clip "${currentClip.id}"`, lineNo)
     // Phase 22 Stream AE: an audio-track clip with no `audio` line is meaningless (an empty
     // region) — same fail-loudly stance as an instrument track missing its soundfont line.
     if (currentTrack.kind === 'audio' && !currentClip.audio) throw new BeatParseError(`clip "${currentClip.id}" on audio track "${currentTrack.id}" has no audio line`, lineNo)
@@ -185,6 +206,7 @@ export function parse(text: string): BeatDocument {
       legacyTrackPatterns.delete(currentTrack)
     }
     if (currentTrack.kind === 'drums') assertUniqueHitIds(currentTrack.hits, `drum track "${currentTrack.id}"`, lineNo)
+    assertUniqueNoteIds(currentTrack.notes, `track "${currentTrack.id}"`, lineNo)
     if (currentTrack.kind === 'instrument' && !currentTrack.instrument) {
       throw new BeatParseError(`instrument track "${currentTrack.id}" is missing its soundfont line`, lineNo)
     }
@@ -273,6 +295,11 @@ export function parse(text: string): BeatDocument {
     const duration = parseFloatStrict(durTok, lineNo, 'note duration')
     if (duration <= 0) throw new BeatParseError(`note duration must be > 0 steps, got ${duration}`, lineNo)
     const velocity = parseFloatStrict(velTok, lineNo, 'note velocity')
+    // Adversarial hunt #2 finding 6: note velocity was the one unvalidated field on this line —
+    // `note n1 60 0 1 5` and `... -3` both parsed and round-tripped, while addNote has always
+    // required 0..1 and the drum-hit line right below has always range-checked ITS velocity. Same
+    // writer/reader asymmetry hunt #1 found on lane tuning; closed the same way.
+    if (velocity < 0 || velocity > 1) throw new BeatParseError(`note velocity must be 0..1, got ${velocity}`, lineNo)
     const optional = parseNoteOptionalFields(tokens.slice(6), lineNo)
     return { id, pitch, start, duration, velocity, ...optional }
   }
@@ -482,6 +509,20 @@ export function parse(text: string): BeatDocument {
     }
   }
 
+  /** Adversarial hunt #2 finding 6: hits have rejected duplicate ids since v0.8, notes never did —
+   * so `note n1 ...` twice on one track parsed fine and made `beat set <track>.note.n1.<field>`
+   * (and every id-addressed GUI/daemon edit) silently ambiguous: first-match wins, the other note
+   * unreachable. Scoped per note LIST, exactly like assertUniqueHitIds: a clip is a snapshot of its
+   * track's notes and legitimately reuses their ids, so document-global uniqueness would reject
+   * every file saveClip has ever written. */
+  function assertUniqueNoteIds(notes: BeatNote[], what: string, lineNo: number) {
+    const seen = new Set<string>()
+    for (const n of notes) {
+      if (seen.has(n.id)) throw new BeatParseError(`duplicate note id "${n.id}" in ${what}`, lineNo)
+      seen.add(n.id)
+    }
+  }
+
   for (let i = 0; i < rawLines.length; i++) {
     const lineNo = i + 1
     const raw = (rawLines[i] ?? '').replace(/\r$/, '')
@@ -500,15 +541,27 @@ export function parse(text: string): BeatDocument {
       closeSurgeIfOpen(lineNo)
       if (keyword === 'format_version') {
         if (tokens.length !== 2) throw new BeatParseError('format_version expects exactly 1 value', lineNo)
+        if (formatVersion !== null) throw new BeatParseError('duplicate format_version line', lineNo)
         formatVersion = tokens[1]!
       } else if (keyword === 'bpm') {
+        // Adversarial hunt #2 finding 6: these bounds are the WRITERS' bounds (document.ts, cited
+        // by initDocument and setValue). Without them parse accepted `bpm 0` / `bpm -100` —
+        // documents no writer can produce, round-trip-stable so they persist, and fatal downstream
+        // (offline render divides by bpm and dies exposing raw internals). A repeated header line
+        // is rejected for the same "silently discarded data" reason: last-wins meant serialize
+        // dropped the earlier value without a word.
         if (tokens.length !== 2) throw new BeatParseError('bpm expects exactly 1 value', lineNo)
+        if (bpm !== null) throw new BeatParseError('duplicate bpm line', lineNo)
         bpm = parseIntStrict(tokens[1]!, lineNo, 'bpm')
+        if (bpm < BPM_MIN || bpm > BPM_MAX) throw new BeatParseError(`bpm must be an integer ${BPM_MIN}-${BPM_MAX}, got ${bpm}`, lineNo)
       } else if (keyword === 'loop_bars') {
         if (tokens.length !== 2) throw new BeatParseError('loop_bars expects exactly 1 value', lineNo)
+        if (loopBars !== null) throw new BeatParseError('duplicate loop_bars line', lineNo)
         loopBars = parseIntStrict(tokens[1]!, lineNo, 'loop_bars')
+        if (loopBars < LOOP_BARS_MIN || loopBars > LOOP_BARS_MAX) throw new BeatParseError(`loop_bars must be an integer ${LOOP_BARS_MIN}-${LOOP_BARS_MAX}, got ${loopBars}`, lineNo)
       } else if (keyword === 'selected_track') {
         if (tokens.length !== 2) throw new BeatParseError('selected_track expects exactly 1 value', lineNo)
+        if (selectedTrack !== null) throw new BeatParseError('duplicate selected_track line', lineNo)
         selectedTrack = tokens[1]!
       } else if (keyword === 'media') {
         if (tracks.length > 0 || scenes.length > 0 || song !== null) throw new BeatParseError('the media block must come before track/scene/song blocks (canonical order)', lineNo)
@@ -1067,6 +1120,15 @@ export function parse(text: string): BeatDocument {
   if (bpm === null) throw new BeatParseError('missing bpm', 1)
   if (loopBars === null) throw new BeatParseError('missing loop_bars', 1)
   if (selectedTrack === null) throw new BeatParseError('missing selected_track', 1)
+  // Adversarial hunt #2 finding 6: the last unchecked reference in the header. Every OTHER
+  // cross-reference in the file is resolved above (soundfont/lane/audio -> media, scene -> clip,
+  // group -> track), and setValue's `selected_track` path has always required a real track — but a
+  // hand-edited or externally-generated file could name a track that doesn't exist, round-trip
+  // stably, and leave every surface that dereferences it (inspect, the GUI's selected strip, vary's
+  // default scope) pointing at nothing.
+  if (!trackIds.has(selectedTrack)) {
+    throw new BeatParseError(`selected_track "${selectedTrack}" is not a track in this file (have: ${tracks.map((t) => t.id).join(', ') || 'none'})`, eof)
+  }
 
   return { formatVersion, bpm, loopBars, selectedTrack, media, tracks, groups, scenes, song }
 }

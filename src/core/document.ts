@@ -1278,6 +1278,18 @@ export function defaultSynthFields(): Omit<BeatSynth, (typeof SYNTH_PARAM_ORDER)
 
 export const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument', 'audio', 'surge']
 
+/** Header-field bounds — ONE source of truth shared by the writers (initDocument, setValue's
+ * `bpm`/`loop_bars` paths) and the reader (parse.ts). Both header fields are INTEGERS in the
+ * `.beat` text (parse.ts's parseIntStrict), so a writer that accepted a float wrote a file its own
+ * parser rejected; and a parser that accepted values no writer can produce (bpm 0, negative
+ * loop_bars) let a hand-edited file smuggle in a document that breaks offline render with raw
+ * internals. Adversarial hunt #2 found both directions — hence one constant, cited from both
+ * sides, rather than two independently-drifting range checks. */
+export const BPM_MIN = 20
+export const BPM_MAX = 999
+export const LOOP_BARS_MIN = 1
+export const LOOP_BARS_MAX = 64
+
 /** The format's standard init patch for a newly-created track (`beat init` / `beat add-track`).
  * A format-level default, not a copy of any host app's: a mellow filtered saw that sounds
  * reasonable for bass, chords, or lead until edited. */

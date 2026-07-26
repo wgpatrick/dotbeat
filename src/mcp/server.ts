@@ -133,7 +133,7 @@ interface JsonRpcRequest {
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean }
 
-interface ToolDef {
+export interface ToolDef {
   name: string
   description: string
   inputSchema: Record<string, unknown>
@@ -2370,8 +2370,119 @@ function toolResultText(text: string, isError = false): ToolResult {
   return { content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) }
 }
 
-export async function runMcpServer(input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout): Promise<void> {
+// ---- concurrency + per-tool timeout (adversarial hunt #2, 2026-07-26) ---------------------------
+//
+// The loop below used to `await` each tool inside `for await (const line of rl)`, which made the
+// whole server STRICTLY SEQUENTIAL: one `beat_source_gen` running a local model for minutes held
+// up every later call — measured, ~20 unrelated tool calls queued behind a single generation. One
+// agent's render froze every other caller, including read-only ones like beat_show.
+//
+// THE DECISION: dispatch tool calls CONCURRENTLY off the accept loop, serialized per target FILE,
+// with a per-call timeout on top. Both halves are needed and neither alone is enough:
+//
+//   * A timeout alone does not fix it. The slow tools here are legitimately slow (a local
+//     text-to-audio model, a real-time render), so their timeout has to be minutes — which just
+//     bounds the head-of-line block at "minutes" instead of removing it.
+//   * Unrestricted concurrency is not safe. Nearly every mutating tool is a read-modify-write of a
+//     .beat file, so two calls on the SAME file must not interleave. A per-file lock keeps those
+//     in arrival order — exactly today's semantics for the case that needs it — while calls on
+//     different files (or none) run in parallel.
+//
+// THE TRADEOFFS, stated plainly:
+//   * Responses can now arrive out of request order. That is legal JSON-RPC (every response
+//     carries its id) and every MCP client already correlates by id.
+//   * A slow call still blocks later calls ON THE SAME FILE. That is the point, not a gap.
+//   * A timeout ABANDONS, it does not cancel: an in-process handler cannot be interrupted, so the
+//     work keeps running and keeps its file lock until it really finishes. The caller gets a clean
+//     isError instead of hanging forever, which is the part that matters to an agent, and the lock
+//     means a later call on that file still cannot observe a half-written state.
+
+/** Per-call wall clock. Defaults to the 600s ceiling beat_render/beat_feedback already use for
+ * their child processes; `BEAT_MCP_TOOL_TIMEOUT_MS` overrides it (and makes it testable in ms). */
+export function mcpToolTimeoutMs(): number {
+  const raw = process.env.BEAT_MCP_TOOL_TIMEOUT_MS
+  const n = raw === undefined || raw.trim() === '' ? NaN : Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : 600_000
+}
+
+/** The file a call takes ownership of, absolute so `./song.beat` and `song.beat` share one lock.
+ * `undefined` means "touches no project file" (beat_source_search, beat_theory…) — those run
+ * unserialized. `out_file`/`out` cover the two tools that name their target as an output. */
+function lockKey(args: Record<string, unknown>): string | undefined {
+  for (const k of ['file', 'out_file', 'out'] as const) {
+    const v = args[k]
+    if (typeof v === 'string' && v !== '') return pathResolve(v)
+  }
+  return undefined
+}
+
+/** Chain `fn` behind anything already running for `key`, in arrival order. */
+function withFileLock<T>(locks: Map<string, Promise<unknown>>, key: string | undefined, fn: () => Promise<T>): Promise<T> {
+  if (key === undefined) return fn()
+  const prev = locks.get(key) ?? Promise.resolve()
+  // `.then(fn, fn)` deliberately: a failed call must not wedge the file forever.
+  const run = prev.then(fn, fn)
+  const released = run.then(() => {}, () => {})
+  locks.set(key, released)
+  void released.then(() => {
+    if (locks.get(key) === released) locks.delete(key)
+  })
+  return run
+}
+
+/**
+ * @param tools the tool table to serve; defaults to the real one. Injectable ONLY so the dispatch
+ * behaviour above — concurrency, the per-file lock, the timeout — can be tested against handlers
+ * whose timing the test controls, instead of against a local text-to-audio model. Everything else
+ * (the accept loop, the lock, the timeout, the isError shape) is the production code path.
+ */
+export async function runMcpServer(input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout, tools: ToolDef[] = TOOLS): Promise<void> {
   const send = (msg: unknown) => output.write(JSON.stringify(msg) + '\n')
+  /** one lock per target .beat file; see the block comment above toolResultText's neighbours */
+  const locks = new Map<string, Promise<unknown>>()
+  /** tool calls still running — awaited before the server is considered finished */
+  const inFlight = new Set<Promise<void>>()
+
+  const runTool = async (id: unknown, tool: ToolDef, args: Record<string, unknown>): Promise<void> => {
+    const timeoutMs = mcpToolTimeoutMs()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const work = withFileLock(locks, lockKey(args), async () => {
+      // Edit telemetry (research/116 §4): one dispatch-level hook covers the whole MCP surface
+      // without touching a single handler — every mutation tool takes a `file` arg and rewrites
+      // it, so snapshotting that file's parsed state around the handler and diffing gives the
+      // edit list. Gated on editLogEnabled() so a disabled log reads/parses nothing (zero cost);
+      // tools that don't touch a .beat file, or leave it unchanged, produce an empty diff. It sits
+      // INSIDE the file lock, so the before/after snapshots can never straddle another call's write.
+      const telemetryFile = editLogEnabled() && typeof args.file === 'string' ? args.file : undefined
+      const beforeDoc = telemetryFile ? tryParseBeat(telemetryFile) : null
+      const text = await tool.handler(args)
+      if (telemetryFile && beforeDoc) {
+        const afterDoc = tryParseBeat(telemetryFile)
+        if (afterDoc) recordEdits(beforeDoc, afterDoc, { surface: 'mcp', file: telemetryFile })
+      }
+      return text
+    })
+    // The abandoned promise still owns its file lock; swallow its eventual rejection so a timed-out
+    // call cannot surface as an unhandled rejection minutes later.
+    void work.catch(() => {})
+    try {
+      const text = await Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          // Deliberately NOT unref'd: we have accepted this call and owe the client a response, so
+          // the timer that guarantees one must keep the process alive. `finally` always clears it.
+          timer = setTimeout(() => reject(new Error(`${tool.name} exceeded the ${timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)}s` : `${timeoutMs}ms`} tool timeout and was abandoned (it may still be running; set BEAT_MCP_TOOL_TIMEOUT_MS to change the limit)`)), timeoutMs)
+        }),
+      ])
+      send({ jsonrpc: '2.0', id, result: toolResultText(text) })
+    } catch (err) {
+      // tool-level failures are results with isError (per MCP), not protocol errors —
+      // the agent should see the message and self-correct
+      send({ jsonrpc: '2.0', id, result: toolResultText(err instanceof Error ? err.message : String(err), true) })
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 
   const rl = createInterface({ input })
   for await (const line of rl) {
@@ -2406,14 +2517,14 @@ export async function runMcpServer(input: NodeJS.ReadableStream = process.stdin,
       send({
         jsonrpc: '2.0',
         id,
-        result: { tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) },
+        result: { tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) },
       })
       continue
     }
     if (method === 'tools/call') {
       const name = (params as { name?: string }).name
       const args = ((params as { arguments?: Record<string, unknown> }).arguments ?? {}) as Record<string, unknown>
-      const tool = TOOLS.find((t) => t.name === name)
+      const tool = tools.find((t) => t.name === name)
       if (!tool) {
         send({ jsonrpc: '2.0', id, error: { code: -32602, message: `unknown tool "${String(name)}"` } })
         continue
@@ -2437,29 +2548,17 @@ export async function runMcpServer(input: NodeJS.ReadableStream = process.stdin,
         })
         continue
       }
-      try {
-        // Edit telemetry (research/116 §4): one dispatch-level hook covers the whole MCP surface
-        // without touching a single handler — every mutation tool takes a `file` arg and rewrites
-        // it, so snapshotting that file's parsed state around the handler and diffing gives the
-        // edit list. Gated on editLogEnabled() so a disabled log reads/parses nothing (zero cost);
-        // tools that don't touch a .beat file, or leave it unchanged, produce an empty diff.
-        const telemetryFile = editLogEnabled() && typeof args.file === 'string' ? args.file : undefined
-        const beforeDoc = telemetryFile ? tryParseBeat(telemetryFile) : null
-        const text = await tool.handler(args)
-        if (telemetryFile && beforeDoc) {
-          const afterDoc = tryParseBeat(telemetryFile)
-          if (afterDoc) recordEdits(beforeDoc, afterDoc, { surface: 'mcp', file: telemetryFile })
-        }
-        send({ jsonrpc: '2.0', id, result: toolResultText(text) })
-      } catch (err) {
-        // tool-level failures are results with isError (per MCP), not protocol errors —
-        // the agent should see the message and self-correct
-        send({ jsonrpc: '2.0', id, result: toolResultText(err instanceof Error ? err.message : String(err), true) })
-      }
+      // Dispatch WITHOUT awaiting: the accept loop goes straight back to reading the next request,
+      // so a minutes-long beat_source_gen no longer freezes every other caller.
+      const call = runTool(id, tool, args)
+      inFlight.add(call)
+      void call.finally(() => inFlight.delete(call))
       continue
     }
     if (id !== undefined) {
       send({ jsonrpc: '2.0', id, error: { code: -32601, message: `method not found: ${method}` } })
     }
   }
+  // stdin closed — but calls already accepted still owe a response.
+  await Promise.all(inFlight)
 }
