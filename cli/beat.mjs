@@ -104,7 +104,10 @@ import { runAnalysis, sidecarDoctor, defaultAnalysisPath } from '../dist/src/ana
 // ==== Phase 38 Stream SB end ====
 // ==== production tricks (research 118) ====
 import {
-  parseTrickLibrary,
+  loadTrickLibrary,
+  trickByName,
+  knobsForTrick,
+  formatSuggestions,
   applyTrick,
   suggestForDocument,
   siblingRenderFeatures,
@@ -1875,10 +1878,7 @@ function macroCmd(argv) {
 // validates the trick library against the live format vocabulary. BEAT_TRICKS overrides the path,
 // same convention as BEAT_PRESETS/BEAT_MACROS/BEAT_DRUM_KITS.
 function loadTricks() {
-  const dir = resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets')
-  const macros = parseMacroLibrary(readFileSync(resolve(dir, 'macros.json'), 'utf8'))
-  const path = process.env.BEAT_TRICKS ?? resolve(dir, 'tricks.json')
-  return { tricks: parseTrickLibrary(readFileSync(path, 'utf8'), macros), macros }
+  return loadTrickLibrary(resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets'))
 }
 
 function trickListCmd(argv) {
@@ -1895,8 +1895,7 @@ function trickShowCmd(argv) {
   const name = argv.find((a) => !a.startsWith('--'))
   if (!name) throw new BeatEditError('trick show needs a trick name (see `beat trick list`)')
   const { tricks } = loadTricks()
-  const trick = tricks.find((t) => t.name === name)
-  if (!trick) throw new BeatEditError(`no trick "${name}" (have: ${tricks.map((t) => t.name).join(', ')})`)
+  const trick = trickByName(tricks, name)
   process.stdout.write(argv.includes('--json') ? JSON.stringify(trick, null, 2) + '\n' : formatTrickCard(trick))
 }
 
@@ -1910,17 +1909,10 @@ function trickApplyCmd(argv) {
   const clipId = flagValue(argv, '--clip')
   const knobStr = flagValue(argv, '--knob')
   const { tricks, macros } = loadTricks()
-  const trick = tricks.find((t) => t.name === name)
-  if (!trick) throw new BeatEditError(`no trick "${name}" (have: ${tricks.map((t) => t.name).join(', ')})`)
+  const trick = trickByName(tricks, name)
   // --knob fills the trick's (single) declared knob slot
-  const knobs = {}
-  if (knobStr !== undefined) {
-    const v = Number(knobStr)
-    if (!Number.isFinite(v)) throw new BeatEditError(`--knob must be a number, got "${knobStr}"`)
-    const slot = (trick.slots.knobs ?? [])[0]
-    if (!slot) throw new BeatEditError(`trick "${name}" has no knob slot to fill with --knob`)
-    knobs[slot.name] = v
-  }
+  if (knobStr !== undefined && !Number.isFinite(Number(knobStr))) throw new BeatEditError(`--knob must be a number, got "${knobStr}"`)
+  const knobs = knobsForTrick(trick, knobStr === undefined ? undefined : Number(knobStr))
   const before = readDoc(file)
   const features = siblingRenderFeatures(file) // sibling <file>.wav metrics if present, else null
   const result = applyTrick(trick, { doc: before, trackId: track, features }, { ...(clipId ? { clipId } : {}), knobs, macros, force })
@@ -1951,19 +1943,7 @@ function trickSuggestCmd(argv) {
     process.stdout.write(JSON.stringify({ render: hasWav ? wav : null, suggestions: suggestions.map((s) => ({ trick: s.trick.name, track: s.trackId, axis: s.trick.axis, gap: s.gap, unverified: s.unverified })) }, null, 2) + '\n')
     return
   }
-  const src = hasWav ? `metrics from ${basename(wav)}` : 'document state only (no sibling render — metric preconditions unverified)'
-  process.stdout.write(`suggested tricks for ${basename(file)} — ${src}:\n`)
-  if (suggestions.length === 0) {
-    process.stdout.write('  (nothing applicable — every trick either fails a precondition, is counter-indicated, or is already applied)\n')
-    return
-  }
-  const nameW = Math.max(...suggestions.map((s) => s.trick.name.length))
-  const trackW = Math.max(...suggestions.map((s) => s.trackId.length))
-  for (const s of suggestions) {
-    const flag = s.unverified ? '  (needs a render to confirm)' : s.gap > 0 ? `  (gap ${s.gap.toFixed(1)})` : ''
-    process.stdout.write(`  ${s.trackId.padEnd(trackW)}  ${s.trick.name.padEnd(nameW)}  [${s.trick.axis}]${flag}\n`)
-  }
-  process.stdout.write(`then: beat trick show <name>, then beat trick apply ${basename(file)} <track> <name>\n`)
+  process.stdout.write(formatSuggestions(file, hasWav ? wav : null, suggestions))
 }
 
 function trickCmd(argv) {

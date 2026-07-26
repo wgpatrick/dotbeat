@@ -99,6 +99,24 @@ import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM, 
 // Track 1b: produced-track authoring — the same produce.ts primitives the CLI's `add-track
 // --produced` / `beat produce` and gen-kit use, so the MCP surface composes from identical values.
 import { applyProducedDefaults, resolveProducedProfile } from '../analysis/index.js'
+// ==== production tricks (research 118) — D11 ====
+// `beat_produce`'s description advertised `beat_trick` while zero tools by that name existed
+// (research/140 D11, the "lying affordance" research/121 measured as costing more than a missing
+// feature). These four are thin wrappers over src/analysis/trick.ts — the SAME loader, resolver,
+// knob-filler and formatters cli/beat.mjs's `beat trick` calls, not a twin implementation.
+import {
+  loadTrickLibrary,
+  trickByName,
+  knobsForTrick,
+  formatSuggestions,
+  applyTrick,
+  suggestForDocument,
+  siblingRenderFeatures,
+  formatTrickList,
+  formatTrickCard,
+  TRICK_AXES,
+} from '../analysis/index.js'
+// ==== end production tricks ====
 import { buildKeymap, noteToMidi, midiToNote, rateForPitch } from '../core/keymap.js'
 // ==== end Phase 40 Stream VA ====
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
@@ -372,7 +390,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_produce',
     description:
-      'Retrofit an EXISTING synth/drums track with its role\'s PRODUCTION profile — "make this track engineplus" as one step. Applies the same role-aware width/air/glue/space/motion layer gen-kit ships and beat_add_track\'s produced flag applies (src/analysis/produce.ts, research/115): lead/pad/keys get the full osc2-detune + unison + chorus + utility-width + reverb/delay sends + air shelf stack; bass/sub get saturation + a sidechain duck under a kick-carrying drums track (mono-anchored — NO width, NO reverb); the drum bus (drums) gets an air shelf + light glue but no width (it carries the kick); hats/perc get air + reverb + auto-pan. INTENSIFY-ONLY: every move is a Math.max against the patch\'s own value, so it never weakens a track that already carries production and re-running is a no-op — safe to apply repeatedly. The role is inferred from the track id unless role overrides it (bass|lead|pad|keys|drums and produce.ts synonyms). Refuses on instrument/audio tracks (production reads the synth patch / drum bus). Returns the edit list plus an honest applied-moves receipt. Composes with beat_trick (a named single move) and the vary->score taste loop.',
+      'Retrofit an EXISTING synth/drums track with its role\'s PRODUCTION profile — "make this track engineplus" as one step. Applies the same role-aware width/air/glue/space/motion layer gen-kit ships and beat_add_track\'s produced flag applies (src/analysis/produce.ts, research/115): lead/pad/keys get the full osc2-detune + unison + chorus + utility-width + reverb/delay sends + air shelf stack; bass/sub get saturation + a sidechain duck under a kick-carrying drums track (mono-anchored — NO width, NO reverb); the drum bus (drums) gets an air shelf + light glue but no width (it carries the kick); hats/perc get air + reverb + auto-pan. INTENSIFY-ONLY: every move is a Math.max against the patch\'s own value, so it never weakens a track that already carries production and re-running is a no-op — safe to apply repeatedly. The role is inferred from the track id unless role overrides it (bass|lead|pad|keys|drums and produce.ts synonyms). Refuses on instrument/audio tracks (production reads the synth patch / drum bus). Returns the edit list plus an honest applied-moves receipt. Composes with beat_trick (ONE named single move — see beat_trick_list/beat_trick_suggest) and the vary->score taste loop.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1340,6 +1358,104 @@ const TOOLS: ToolDef[] = [
       const doc = applyPreset(before, str(args, 'track'), preset)
       writeFileSync(file, serialize(doc))
       return formatDiff(diffDocuments(before, doc))
+    },
+  },
+  {
+    name: 'beat_trick_list',
+    description:
+      'List the production-trick catalog (docs/research/118-production-bag-of-tricks.md): named, validated production MOVES over the four measured gaps between dotbeat renders and commercial references — width, air, motion, glue. A trick is smaller than beat_produce (which applies a whole role profile in one step) and bigger than beat_set: one named move, with machine-readable preconditions, a closed-vocabulary recipe of ordinary edits, and a declared expected metric delta. Filter by axis to answer "my render is too narrow" directly. Then beat_trick_show for the full card, or beat_trick_suggest to rank the ones that actually apply to a project.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        axis: { type: 'string', enum: [...TRICK_AXES], description: 'only tricks on this production axis' },
+      },
+    },
+    handler: (args) => {
+      const { tricks } = loadTrickLibrary(join(repoRoot, 'presets'))
+      const axis = typeof args.axis === 'string' ? args.axis : undefined
+      return formatTrickList(axis ? tricks.filter((t) => t.axis === axis) : tricks)
+    },
+  },
+  {
+    name: 'beat_trick_show',
+    description:
+      "The full card for one trick: which track kinds/roles it applies to, its preconditions (`when` — metric thresholds against the sibling render plus document-state checks), the exact recipe it will run, the metric delta it expects, its counter-indications (when NOT to use it), and why it works. Read this before beat_trick: the counter list is the part that stops a widener being applied to a bass. Names come from beat_trick_list.",
+    inputSchema: {
+      type: 'object',
+      properties: { trick: { type: 'string', description: 'a name from beat_trick_list, e.g. "detune-double"' } },
+      required: ['trick'],
+    },
+    handler: (args) => {
+      const { tricks } = loadTrickLibrary(join(repoRoot, 'presets'))
+      return formatTrickCard(trickByName(tricks, str(args, 'trick')))
+    },
+  },
+  {
+    name: 'beat_trick_suggest',
+    description:
+      'Rank the tricks whose preconditions actually PASS for a project — the "what should I do to this?" entry point. Reads the sibling render (<file>.wav, whatever beat_render last wrote) for the metric preconditions; with no sibling render it still ranks on document state alone and says so, and every such suggestion is flagged "needs a render to confirm" rather than presented as measured. Pass a track to narrow to one. Counter-indicated and already-applied tricks are excluded, so an empty result is a real answer.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string', description: 'optional — narrow to one track instead of the whole document' },
+      },
+      required: ['file'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const { tricks } = loadTrickLibrary(join(repoRoot, 'presets'))
+      const doc = parse(readFileSync(file, 'utf8'))
+      const track = typeof args.track === 'string' ? args.track : undefined
+      if (track !== undefined && !doc.tracks.some((t) => t.id === track)) {
+        throw new Error(`no track "${track}" (have: ${doc.tracks.map((t) => t.id).join(', ')})`)
+      }
+      const wav = file.replace(/\.beat$/, '.wav')
+      const hasWav = existsSync(wav)
+      return formatSuggestions(file, hasWav ? wav : null, suggestForDocument(tricks, doc, hasWav ? wav : null, track))
+    },
+  },
+  {
+    name: 'beat_trick',
+    description:
+      "Apply ONE named production trick to a track — a trick's recipe runs as ordinary edits (beat_set / beat_effect_add / beat_add_hit / beat_automate calls), so the result is a plain .beat file with no trick reference stored, and the returned edit list is exactly what changed. Refuses when the track's kind or inferred production role is wrong for the trick, or when a counter-indication fires, and says which; force overrides a refusal (it is reported in the receipt, never silent). knob fills the trick's single declared knob slot when it has one (see beat_trick_show). dry_run prints the diff without writing. Preconditions that need audio are checked against the sibling <file>.wav if one exists and reported as unverified if not. Composes with beat_produce (a whole role profile at once) and the vary->score taste loop.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string', description: 'the track id to apply the trick to' },
+        trick: { type: 'string', description: 'a name from beat_trick_list, e.g. "detune-double"' },
+        clip: { type: 'string', description: 'clip id, for tricks whose recipe writes clip automation (beat_trick_show says which need one)' },
+        knob: { type: 'number', description: "fills the trick's single declared knob slot; omitted means the slot's default" },
+        force: { type: 'boolean', description: 'apply despite a failing precondition or a firing counter-indication (reported in the receipt)' },
+        dry_run: { type: 'boolean', description: 'print the diff without writing the file' },
+      },
+      required: ['file', 'track', 'trick'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const track = str(args, 'track')
+      const { tricks, macros } = loadTrickLibrary(join(repoRoot, 'presets'))
+      const trick = trickByName(tricks, str(args, 'trick'))
+      const knobs = knobsForTrick(trick, typeof args.knob === 'number' ? args.knob : undefined)
+      const before = parse(readFileSync(file, 'utf8'))
+      const features = siblingRenderFeatures(file) // sibling <file>.wav metrics if present, else null
+      const clipId = typeof args.clip === 'string' ? args.clip : undefined
+      const result = applyTrick(
+        trick,
+        { doc: before, trackId: track, features },
+        { ...(clipId ? { clipId } : {}), knobs, macros, force: args.force === true },
+      )
+      const notes = [
+        ...result.warnings.map((w) => `warning: ${w}`),
+        ...(result.overridden.length ? [`force overrode: ${result.overridden.join('; ')}`] : []),
+      ]
+      const diff = formatDiff(diffDocuments(before, result.doc))
+      if (args.dry_run === true) {
+        return [...notes, `dry-run — ${trick.name} on "${track}" would apply:`, diff].join('\n')
+      }
+      writeFileSync(file, serialize(result.doc))
+      return [...notes, diff].join('\n')
     },
   },
   {

@@ -149,6 +149,10 @@ export {
 // live format tables at load (parseTrickLibrary). See src/analysis/trick.ts and docs/tricks.md.
 export {
   parseTrickLibrary,
+  loadTrickLibrary,
+  trickByName,
+  knobsForTrick,
+  formatSuggestions,
   applyTrick,
   suggestForTrack,
   suggestForDocument,

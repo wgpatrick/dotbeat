@@ -19,6 +19,8 @@
 // sketch) because the metric-precondition half binds to metrics/features.ts FEATURE_KEYS, and core
 // must not depend upward on taste/metrics — exactly the layer produce.ts already occupies.
 
+import { readFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import {
   applyMacro,
   addEffect,
@@ -32,6 +34,7 @@ import {
   AUTOMATABLE_SYNTH_PARAMS,
   DEFAULT_DRUM_KIT,
   DRUM_LANES,
+  parseMacroLibrary,
   type BeatDocument,
   type BeatMacro,
   type EffectType,
@@ -712,4 +715,57 @@ export function formatTrickCard(t: BeatTrick): string {
     `  why         ${t.why}`,
   ]
   return lines.join('\n') + '\n'
+}
+
+// ---- the shared surface layer (CLI + MCP) -------------------------------------------------------
+//
+// D11 (research/118 §3.3): `beat_produce`'s MCP description advertised `beat_trick` for months
+// while zero tools by that name existed — the "lying affordance" class research/121 measured as
+// costing MORE than a missing feature (an agent burned ~45 calls discovering one). Implementing it
+// meant giving the two surfaces ONE library loader and ONE suggest formatter to share, per
+// CLAUDE.md's "parity is structural, never disciplinary": the CLI had both inline, so an MCP twin
+// written against them would have been the seventh measured copy-and-vow-to-sync.
+
+/** Load + validate the trick catalog against the live format vocabulary, with the macro library as
+ * the validation context (a trick's `macro` step calls a factory macro). `BEAT_TRICKS` overrides
+ * the catalog path — the same convention BEAT_PRESETS/BEAT_MACROS/BEAT_DRUM_KITS use. */
+export function loadTrickLibrary(presetsDir: string): { tricks: BeatTrick[]; macros: BeatMacro[] } {
+  const macros = parseMacroLibrary(readFileSync(join(presetsDir, 'macros.json'), 'utf8'))
+  const path = process.env.BEAT_TRICKS ?? join(presetsDir, 'tricks.json')
+  return { tricks: parseTrickLibrary(readFileSync(path, 'utf8'), macros), macros }
+}
+
+/** Resolve a trick by name, with the catalog listed on a miss (the agent's next call is then
+ * `trick show`, not another blind guess). */
+export function trickByName(tricks: BeatTrick[], name: string): BeatTrick {
+  const trick = tricks.find((t) => t.name === name)
+  if (!trick) throw new BeatTrickError(`no trick "${name}" (have: ${tricks.map((t) => t.name).join(', ')})`)
+  return trick
+}
+
+/** Fill a trick's (single) declared knob slot from a surface's `--knob` / `knob` argument. */
+export function knobsForTrick(trick: BeatTrick, value: number | undefined): Record<string, number> {
+  if (value === undefined) return {}
+  if (!Number.isFinite(value)) throw new BeatTrickError(`knob must be a finite number, got ${value}`)
+  const slot = (trick.slots.knobs ?? [])[0]
+  if (!slot) throw new BeatTrickError(`trick "${trick.name}" has no knob slot to fill`)
+  return { [slot.name]: value }
+}
+
+/** The `trick suggest` report, identical on both surfaces. `wavPath` is the sibling render the
+ * metric preconditions were (or weren't) checked against — saying which is half the value, since a
+ * suggestion made without a render is a document-state guess and must not read as measured. */
+export function formatSuggestions(beatFile: string, wavPath: string | null, suggestions: Suggestion[]): string {
+  const src = wavPath ? `metrics from ${basename(wavPath)}` : 'document state only (no sibling render — metric preconditions unverified)'
+  let out = `suggested tricks for ${basename(beatFile)} — ${src}:\n`
+  if (suggestions.length === 0) {
+    return out + '  (nothing applicable — every trick either fails a precondition, is counter-indicated, or is already applied)\n'
+  }
+  const nameW = Math.max(...suggestions.map((s) => s.trick.name.length))
+  const trackW = Math.max(...suggestions.map((s) => s.trackId.length))
+  for (const s of suggestions) {
+    const flag = s.unverified ? '  (needs a render to confirm)' : s.gap > 0 ? `  (gap ${s.gap.toFixed(1)})` : ''
+    out += `  ${s.trackId.padEnd(trackW)}  ${s.trick.name.padEnd(nameW)}  [${s.trick.axis}]${flag}\n`
+  }
+  return out + `then: beat trick show <name>, then beat trick apply ${basename(beatFile)} <track> <name>\n`
 }
