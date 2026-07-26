@@ -20,6 +20,7 @@ agent can both execute and VERIFY (measured gates from `docs/research/131`'s dis
 | `layering.md` | per-role layer architectures | the structural vein |
 | `transients.md` | punch, compression, transient design | technique vein |
 | `pack-production.md` | how commercial loops are made to ship | standards vein |
+| `sample-manipulation.md` | chopping, resampling, warp abuse, granular, the "flip" | sampling vein |
 
 Each file marks cross-source CONSENSUS (implement first) separately from CONTRADICTIONS (style
 dials, not physics — e.g. "classic" Reese detune spans ±7 to ±61 cents across sources). Claims carry
