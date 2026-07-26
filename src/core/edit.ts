@@ -4,7 +4,7 @@
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatPlacement, BeatSongSection, BeatSurgeOverride, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
 import { automationShapePoints, type AutomationShape } from './automation-shape.js'
 
@@ -35,6 +35,21 @@ function parseNum(value: string, what: string): number {
   return n
 }
 
+/** The two header ints (bpm, loop_bars). These are stored as INTEGERS in the `.beat` text —
+ * parse.ts's parseIntStrict rejects anything with a decimal point — and initDocument has always
+ * bounded them (20-999 / 1-64), so accepting a bare float here wrote a file that the project's own
+ * parser could no longer load: adversarial hunt #2 confirmed `beat set song.beat bpm 60.5`
+ * succeeding and then EVERY subsequent command on that file failing with `line 2: bpm expected an
+ * integer`. Same hole via MCP beat_set. A fractional bpm also isn't a value to silently round —
+ * it's a caller bug worth surfacing, the same stance `program`/`surge.sampleRate`/clip signatures
+ * already take — so this fails loudly rather than snapping to the nearest integer. */
+function parseHeaderInt(value: string, what: string, min: number, max: number): number {
+  const n = parseNum(value, what)
+  if (!Number.isInteger(n)) throw new BeatEditError(`${what} must be a whole number (the .beat file stores it as an integer), got "${value}"`)
+  if (n < min || n > max) throw new BeatEditError(`${what} must be an integer ${min}-${max}, got ${n}`)
+  return n
+}
+
 /** Applies one `path = value` edit. Paths (the same names the file itself uses — no second
  * vocabulary to learn):
  *
@@ -47,8 +62,8 @@ function parseNum(value: string, what: string): number {
  * Returns a new document; never mutates. */
 export function setValue(doc: BeatDocument, path: string, value: string): BeatDocument {
   // header fields
-  if (path === 'bpm') return { ...doc, bpm: parseNum(value, 'bpm') }
-  if (path === 'loop_bars') return { ...doc, loopBars: parseNum(value, 'loop_bars') }
+  if (path === 'bpm') return { ...doc, bpm: parseHeaderInt(value, 'bpm', BPM_MIN, BPM_MAX) }
+  if (path === 'loop_bars') return { ...doc, loopBars: parseHeaderInt(value, 'loop_bars', LOOP_BARS_MIN, LOOP_BARS_MAX) }
   if (path === 'selected_track') {
     findTrack(doc, value) // must reference a real track
     return { ...doc, selectedTrack: value }
@@ -1210,8 +1225,8 @@ export function clearLegacyLaneSamples(doc: BeatDocument, trackId: string): { do
 export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: string } = {}): BeatDocument {
   const bpm = opts.bpm ?? 120
   const loopBars = opts.loopBars ?? 2
-  if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
-  if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
+  if (!Number.isInteger(bpm) || bpm < BPM_MIN || bpm > BPM_MAX) throw new BeatEditError(`bpm must be an integer ${BPM_MIN}-${BPM_MAX}, got ${bpm}`)
+  if (!Number.isInteger(loopBars) || loopBars < LOOP_BARS_MIN || loopBars > LOOP_BARS_MAX) throw new BeatEditError(`loop_bars must be an integer ${LOOP_BARS_MIN}-${LOOP_BARS_MAX}, got ${loopBars}`)
   // v0.11 (Phase 36): fresh documents stamp the current format version — the established bump
   // convention (see format-spec.md's v0.10 note): initDocument / the BeatLab-bridge converter
   // stamp NEW documents with the new version; existing files keep their own version string and
