@@ -2149,7 +2149,9 @@ const TOOLS: ToolDef[] = [
         lines.push(`${outDir}/: ${variants.length} variants of ${track}.${group} (amount ${amount}, seed ${seed})`)
         for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.edits!.join(', ')}`)
         if (render) {
-          const norm = renderVaryBatch(outDir, variants.length, args.normalize === false ? { normalize: false } : {})
+          // Pilot 111's fix, mirrored (review R1 found the CLI got it and this branch didn't):
+          // without linkMediaFrom, sample-backed lanes render silent in param-vary batches.
+          const norm = renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...(args.normalize === false ? { normalize: false } : {}) })
           lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
           if (norm) lines.push(formatNormalizationResult(norm).trimEnd())
           if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
