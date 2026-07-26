@@ -7,13 +7,13 @@
 // trace each assertion back to the failure it encodes.
 
 import assert from 'node:assert/strict'
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { applyWavGain, assertWavGainable, normalizeBatchLoudness } from '../src/vary/batch.js'
+import { applyWavGain, assertWavGainable, normalizeBatchLoudness, markBatchComplete, isBatchComplete, discardIncompleteBatch, BATCH_COMPLETE_MARKER } from '../src/vary/batch.js'
 import { decodeWav, readWavFormat } from '../src/metrics/index.js'
-import { matchClipDurations } from '../src/taste/showdown.js'
+import { matchClipDurations, writeShowdownBatch } from '../src/taste/showdown.js'
 
 const tmp = (name: string) => mkdtempSync(join(tmpdir(), `beat-evalint-${name}-`))
 
@@ -185,4 +185,54 @@ test('M5: a trimmed clip is faded out in every supported encoding (24-bit includ
     const mid = Math.max(...Array.from(ch.slice(ch.length >> 1, (ch.length >> 1) + 64)).map(Math.abs))
     assert.ok(tail < 0.1 * mid, `${bits}-bit${float ? ' float' : ''} clip ends in a hard cut (tail peak ${tail.toFixed(3)} vs mid ${mid.toFixed(3)})`)
   }
+})
+
+// ---- H2: a failed batch must not stay rateable ---------------------------------------------------
+// cli/beat.mjs wrote manifest.json BEFORE matchClipDurations/normalizeBatchLoudness, and its
+// failure handler deleted the out-dir only `if (!existsSync(manifest.json))`. A throw in exactly
+// those three confound-removing steps therefore left a dir with a manifest, clips of mismatched
+// length and level, and nothing recording that assembly had failed — `beat rate` queues it and the
+// owner rates a broken comparison as a real one.
+
+test('H2: a manifest alone does not mean a batch is assembled', () => {
+  const dir = tmp('h2')
+  writeFileSync(join(dir, 'v1.wav'), sineWav({ seconds: 1, amp: 0.3 }))
+  writeFileSync(join(dir, 'v2.wav'), sineWav({ seconds: 0.5, amp: 0.6 }))
+  writeShowdownBatch(dir, 'bassline', [
+    { file: 'v1.wav', source: { kind: 'engine' } },
+    { file: 'v2.wav', source: { kind: 'gen' } },
+  ])
+  assert.ok(existsSync(join(dir, 'manifest.json')))
+  assert.equal(isBatchComplete(dir), false, 'the manifest is written BEFORE the confound-removing steps — it cannot be the completion signal')
+  matchClipDurations(dir, ['v1.wav', 'v2.wav'])
+  normalizeBatchLoudness(dir, 2)
+  markBatchComplete(dir)
+  assert.equal(isBatchComplete(dir), true)
+  assert.ok(readFileSync(join(dir, BATCH_COMPLETE_MARKER), 'utf8').length > 0, 'the marker explains itself to whoever finds it')
+})
+
+test('H2: cleanup discards a batch that never completed and keeps one that did', () => {
+  const halfBuilt = tmp('h2half')
+  writeFileSync(join(halfBuilt, 'v1.wav'), sineWav({ seconds: 1 }))
+  writeFileSync(join(halfBuilt, 'v2.wav'), sineWav({ seconds: 0.5 }))
+  writeShowdownBatch(halfBuilt, 'bassline', [
+    { file: 'v1.wav', source: { kind: 'engine' } },
+    { file: 'v2.wav', source: { kind: 'gen' } },
+  ])
+  // the old gate — `existsSync(manifest.json)` — would have KEPT this dir
+  assert.equal(discardIncompleteBatch(halfBuilt), true)
+  assert.equal(existsSync(halfBuilt), false, 'a batch that failed mid-assembly is still on disk for beat rate to queue')
+
+  const complete = tmp('h2done')
+  writeFileSync(join(complete, 'v1.wav'), sineWav({ seconds: 1 }))
+  writeFileSync(join(complete, 'v2.wav'), sineWav({ seconds: 0.5 }))
+  writeShowdownBatch(complete, 'bassline', [
+    { file: 'v1.wav', source: { kind: 'engine' } },
+    { file: 'v2.wav', source: { kind: 'gen' } },
+  ])
+  matchClipDurations(complete, ['v1.wav', 'v2.wav'])
+  normalizeBatchLoudness(complete, 2)
+  markBatchComplete(complete)
+  assert.equal(discardIncompleteBatch(complete), false)
+  assert.ok(existsSync(join(complete, 'manifest.json')))
 })

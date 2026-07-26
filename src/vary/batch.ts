@@ -685,6 +685,51 @@ export interface ScoreBatchResult {
   previousPicks?: string
 }
 
+// ---- batch completion marker (2026-07-26 eval-integrity hunt, H2) -----------------------------
+// A showdown/prodtask/pilot batch is only comparable once the three CONFOUND-REMOVING steps have
+// run: manifest, duration match, loudness normalization. The assembly CLI wrote manifest.json
+// FIRST and its failure handler deleted the out-dir only `if (!existsSync(manifest.json))`, so a
+// throw in exactly those three steps left behind a dir with a manifest, N clips of mismatched
+// length and level, and no record that anything went wrong — `beat rate` queues it and the owner
+// rates a broken comparison as if it were a real one.
+//
+// Chosen fix: an explicit `.complete` marker written LAST, with cleanup gated on IT rather than on
+// the manifest. Considered and rejected: writing the manifest last. normalizeBatchLoudness records
+// its per-variant loudness INTO the manifest, so deferring the manifest would mean either losing
+// that record or staging it under a second filename that every reader would have to know about.
+// The marker is additive, inert to every existing reader (`beat rate` still scans for
+// manifest.json — untouched, so no sibling surface has to change), and states exactly the fact
+// that was missing: "assembly finished".
+
+/** Marker file written into a batch dir once assembly fully succeeded. */
+export const BATCH_COMPLETE_MARKER = '.complete'
+
+/** Mark a batch dir fully assembled — call AFTER the last confound-removing step. */
+export function markBatchComplete(dir: string): void {
+  writeFileSync(
+    resolve(dir, BATCH_COMPLETE_MARKER),
+    `# batch assembly finished ${new Date().toISOString()} — manifest + duration match + loudness normalization all succeeded.\n` +
+      `# A batch dir WITHOUT this marker is half-built: its clips are not level- or length-matched, so rating it would score a confound.\n`,
+  )
+}
+
+export function isBatchComplete(dir: string): boolean {
+  return existsSync(resolve(dir, BATCH_COMPLETE_MARKER))
+}
+
+/** The failure-path cleanup every batch-assembly loop shares: delete a batch dir that never
+ * reached markBatchComplete, so a half-built batch can never be queued for rating. Best-effort by
+ * design — cleanup must never mask the original assembly error. Returns true when it removed one. */
+export function discardIncompleteBatch(dir: string): boolean {
+  try {
+    if (!existsSync(dir) || isBatchComplete(dir)) return false
+    rmSync(dir, { recursive: true, force: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Read + parse a batch dir's manifest.json — shared by scoreBatch and adoptVariant so the
  * missing-batch error text stays identical across every verb that takes a batch dir. */
 export function readBatchManifest(dir: string): VaryBatchManifest {

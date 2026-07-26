@@ -2269,7 +2269,7 @@ async function showdownCmd(argv) {
   if (!dir) throw new BeatEditError('showdown needs the taste-seeds directory: beat showdown <dir> [--roles r1,r2] [--rounds 1] [--with-produced] [--ref-dir <path>] (or --report)')
   const { mulberry32 } = await import('../dist/src/taste/eval.js')
   const { genSubject, genSubjectVaried, genStyles, PHRASE_NEGATIVE } = await import('../dist/src/taste/seeds.js')
-  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
+  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch } = await import('../dist/src/vary/batch.js')
   const { mkdirSync, copyFileSync } = await import('node:fs')
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
   // Engine preset provenance + role-mapped draw (docs/engine-presets.md E0/E1/E2).
@@ -2938,7 +2938,6 @@ async function showdownCmd(argv) {
           copyFileSync(clip.wav, join(outDir, `v${v + 1}.wav`))
           files[v] = { file: `v${v + 1}.wav`, source: { kind: clip.kind, from: clip.from } }
         }
-        rmSync(workDir, { recursive: true }) // never leave a scoreable work batch for beat rate to find
         // figureSource: 'midi' when ANY composed clip drew a midi figure (a partial bank
         // fallback still taints the batch's composition provenance) — gitignore-gates the dir
         // and puts the label (nothing else) in the scores log via scoreBatch. 'ca2' when
@@ -2954,14 +2953,20 @@ async function showdownCmd(argv) {
         process.stdout.write(adjusted.length > 0 ? ` (${adjusted.map((c) => `${c.file} ${c.action} ${c.fromSeconds}s -> ${c.toSeconds}s`).join(', ')})\n` : '\n')
         const norm = normalizeBatchLoudness(outDir, files.length)
         if (norm) process.stdout.write(formatNormalizationResult(norm))
+        // LAST: the batch is only comparable once the manifest, the duration match AND the
+        // loudness normalization have all landed (hunt H2 — the old cleanup gated on
+        // manifest.json, which is written BEFORE those two confound-removing steps).
+        markBatchComplete(outDir)
         made += 1
       } catch (err) {
         failed += 1
         process.stderr.write(`warning: showdown ${spec.role} failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; --gen-backend stub builds placeholder audio)' : ''} (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
-        // never leave a half-built batch for beat rate to queue
-        try {
-          if (existsSync(outDir) && !existsSync(join(outDir, 'manifest.json'))) rmSync(outDir, { recursive: true })
-        } catch { /* best-effort cleanup */ }
+        discardIncompleteBatch(outDir) // never leave a half-built batch for beat rate to queue
+      } finally {
+        // the work batch is a scoreable manifest+wavs dir of its own: `beat rate` would queue it
+        // (a leaked showdown-*/work entry is already in the real scores log). Clean it up on EVERY
+        // exit from the assembly, not just the success path.
+        try { rmSync(workDir, { recursive: true, force: true }) } catch { /* best-effort cleanup */ }
       }
     }
   }
@@ -3005,7 +3010,7 @@ async function prodtaskCmd(argv) {
 
   const showdown = await import('../dist/src/taste/showdown.js')
   const { mulberry32 } = await import('../dist/src/taste/eval.js')
-  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
+  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch } = await import('../dist/src/vary/batch.js')
   const { mkdirSync, copyFileSync } = await import('node:fs')
   const { tricks, macros } = loadTricks()
 
@@ -3120,19 +3125,19 @@ async function prodtaskCmd(argv) {
           copyFileSync(clip.wav, join(outDir, `v${v + 1}.wav`))
           files[v] = { file: `v${v + 1}.wav`, source: clip.source }
         }
-        rmSync(workDir, { recursive: true }) // never leave a scoreable work batch for beat rate to find
         prodtask.writeProdtaskBatch(outDir, spec.role, files, { seed: batchSeed, task: 'transform' })
         const match = showdown.matchClipDurations(outDir, files.map((f) => f.file), targetSeconds !== undefined ? { targetSeconds } : {})
         process.stdout.write(`${outDir}/: ${files.length} arms (${built.map((b) => b.kind).sort().join(' vs ')}), duration-matched to ${match.targetSeconds}s\n`)
         const norm = normalizeBatchLoudness(outDir, files.length)
         if (norm) process.stdout.write(formatNormalizationResult(norm))
+        markBatchComplete(outDir) // hunt H2: assembly finished — see the showdown loop above
         made += 1
       } catch (err) {
         failed += 1
         process.stderr.write(`warning: prodtask transform ${spec.role} failed — skipping (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
-        try {
-          if (existsSync(outDir) && !existsSync(join(outDir, 'manifest.json'))) rmSync(outDir, { recursive: true })
-        } catch { /* best-effort cleanup */ }
+        discardIncompleteBatch(outDir)
+      } finally {
+        try { rmSync(workDir, { recursive: true, force: true }) } catch { /* best-effort cleanup */ }
       }
     }
   }
@@ -3174,7 +3179,7 @@ async function pilotCmd(argv) {
   const { criticWithUncertainty } = await import('../dist/src/taste/eval.js')
   const { embedAudioFile } = await import('../dist/src/taste/embeddings.js')
   const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
-  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
+  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch } = await import('../dist/src/vary/batch.js')
   const showdown = await import('../dist/src/taste/showdown.js')
   const { copyFileSync } = await import('node:fs')
 
@@ -3308,6 +3313,7 @@ async function pilotCmd(argv) {
       }
       lineageIdx++
       const outDir = join(dir, `pilot-${result.role}-${seed}-l${lineageIdx}`)
+      const workDir = join(outDir, 'work') // hoisted: the finally below cleans it up on every exit
       try {
       // trajectory arms (owner, 2026-07-22): the lineage's BEST elite also contributes its seed
       // original and ~1/3 / ~2/3 mutation-depth checkpoints, so the blind ranking tests whether
@@ -3332,7 +3338,6 @@ async function pilotCmd(argv) {
         process.stderr.write(`warning: ${result.role} lineage ${seedFile} produced <2 frontier items — skipping\n`)
         continue
       }
-      const workDir = join(outDir, 'work')
       mkdirSync(workDir, { recursive: true })
       // frontier clips solo the mutated track too — the audit must hear what the search optimized
       const variants = items.map((it, i) => ({ doc: showdown.soloForShowdown(it.doc, result.spec.seedTrack), recipe: `pilot ${result.role} ${it.kind} ${i + 1}` }))
@@ -3354,18 +3359,18 @@ async function pilotCmd(argv) {
         copyFileSync(join(workDir, `v${order[v] + 1}.wav`), join(outDir, `v${v + 1}.wav`))
         files[v] = { file: `v${v + 1}.wav`, source: { kind: it.kind, from: it.from } }
       }
-      rmSync(workDir, { recursive: true, force: true })
       pilot.writePilotBatch(outDir, result.role, files, { seed })
       const match = showdown.matchClipDurations(outDir, files.map((f) => f.file))
       process.stdout.write(`${outDir}/: ${files.length} clips (${g.elites.length} elite vs ${g.controls.length} control + trajectory arms), duration-matched to ${match.targetSeconds}s\n`)
       const norm = normalizeBatchLoudness(outDir, files.length)
       if (norm) process.stdout.write(formatNormalizationResult(norm))
+      markBatchComplete(outDir) // hunt H2: assembly finished — see the showdown loop above
       batchesLanded += 1
       } catch (err) {
         process.stderr.write(`warning: frontier assembly for ${result.role} lineage ${seedFile} failed — ${err instanceof Error ? err.message.split('\n')[0] : err}\n`)
-        try {
-          if (existsSync(outDir) && !existsSync(join(outDir, 'manifest.json'))) rmSync(outDir, { recursive: true, force: true })
-        } catch { /* best-effort */ }
+        discardIncompleteBatch(outDir)
+      } finally {
+        try { rmSync(workDir, { recursive: true, force: true }) } catch { /* best-effort */ }
       }
     }
   }
