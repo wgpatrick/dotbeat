@@ -8,7 +8,7 @@
 
 import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, symlinkSync, copyFileSync, rmSync, accessSync, constants } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse, serialize, setMediaSample, type BeatDocument } from '../core/index.js'
@@ -685,7 +685,21 @@ export interface RenderBatchOptions {
  * levels (measureBatchLoudness — pilot 113: an opt-out run says so and leaves a loudness trail).
  * The returned result is the loudness summary for the caller to print via
  * formatNormalizationResult (null when nothing was measurable). Audition stitching happens AFTER
- * this in every caller, so audition.wav is built from the normalized renders. */
+ * this in every caller, so audition.wav is built from the normalized renders.
+ *
+ * THE CHILD'S STDERR IS CAPTURED, NOT INHERITED (2026-07-26). It used to be `stdio: [ignore,
+ * ignore, 'inherit']`, which printed the render's real error to the terminal but left it OUT of the
+ * Error the parent throws — Node's exec wrapper message is only `Command failed: <node> <render.mjs>
+ * --batch <dir>`, carrying none of the child's words. Every caller that classifies a failure was
+ * therefore classifying that empty string. Measured, not theorised: with ui/node_modules moved
+ * aside, a 3-batch `beat showdown` run printed render.mjs's exact "ui/node_modules is missing" text
+ * three times, `isEnvironmentFault` matched NONE of it, and all three batches were counted as
+ * ordinary skips with exit code 0 — bit for bit the rounds 5 and 6 failure the environment-fault
+ * abort was built to end, still happening after it shipped.
+ *
+ * The trade is that a long render's progress lines now arrive in one block when the child exits
+ * instead of live. That is worth it: the lines are still all printed, in order, and the alternative
+ * is an abort guard that provably cannot see the faults it lists. */
 export function renderVaryBatch(outDir: string, count: number, opts: RenderBatchOptions = {}): NormalizeBatchResult | null {
   if (count < 1) return null
   if (opts.linkMediaFrom !== undefined) {
@@ -702,12 +716,29 @@ export function renderVaryBatch(outDir: string, count: number, opts: RenderBatch
   const renderCli = join(repoRoot, 'cli', 'render.mjs')
   const args = [renderCli, '--batch', resolve(outDir)]
   if (opts.mode !== undefined) args.push(`--${opts.mode}`)
-  execFileSync(process.execPath, args, {
-    stdio: ['ignore', 'ignore', 'inherit'],
+  const res = spawnSync(process.execPath, args, {
+    stdio: ['ignore', 'ignore', 'pipe'],
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
   })
+  // forward everything the child said, so nothing an operator used to see is lost
+  if (res.stderr) process.stderr.write(res.stderr)
+  if (res.error) throw res.error
+  if (res.status !== 0) {
+    const tail = (res.stderr ?? '').trim().split('\n').slice(-RENDER_STDERR_TAIL_LINES).join('\n')
+    throw new BeatBatchError(
+      `the batch render failed (exit ${res.status ?? 'signal ' + res.signal}) for ${resolve(outDir)}` +
+        (tail === '' ? ' — the render printed nothing' : `:\n${tail}`),
+    )
+  }
   if (opts.normalize === false) return measureBatchLoudness(outDir, count)
   return normalizeBatchLoudness(outDir, count)
 }
+
+/** How much of a failed render's stderr travels in the thrown Error. Enough to carry render.mjs's
+ * multi-line fatal messages (the ui/node_modules one is 3 lines plus a stack) without pasting a
+ * whole render log into a one-line warning. */
+const RENDER_STDERR_TAIL_LINES = 40
 
 export interface ScoreEntry {
   t: string

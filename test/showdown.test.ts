@@ -61,7 +61,7 @@ import {
   type ComposedPhrase,
 } from '../src/taste/showdown.js'
 import { variantTypeOf } from '../src/taste/eval.js'
-import { scoreBatch, recordNoneGood, adoptVariant, normalizeBatchLoudness, readBatchManifest, BeatBatchError, isEnvironmentFault, environmentFaultReason } from '../src/vary/batch.js'
+import { scoreBatch, recordNoneGood, adoptVariant, normalizeBatchLoudness, readBatchManifest, renderVaryBatch, BeatBatchError, isEnvironmentFault, environmentFaultReason } from '../src/vary/batch.js'
 import { loadTasteBatches } from '../src/taste/eval.js'
 
 // ---- synthetic audio helper (same shape as test/taste.test.ts) ---------------------------------
@@ -1197,4 +1197,29 @@ test('isEnvironmentFault: the rest of the allowlist, and that ordinary per-batch
     assert.equal(isEnvironmentFault(message), false, `should only skip the batch: ${message}`)
     assert.equal(environmentFaultReason(message), null)
   }
+})
+
+test('renderVaryBatch puts the CHILD render\'s own words in the error it throws', () => {
+  // The two tests above assert the CLASSIFIER on hand-typed strings. Nothing asserted that those
+  // strings ever REACH it — and they did not. renderVaryBatch spawned cli/render.mjs with
+  // `stdio: [ignore, ignore, 'inherit']`, so the child's fatal message was printed to the terminal
+  // and left out of the Error: Node's exec wrapper message is only
+  // `Command failed: <node> <render.mjs> --batch <dir>`, which matches no signature in the
+  // allowlist. Measured 2026-07-26 with ui/node_modules moved aside: a 3-batch `beat showdown` run
+  // printed render.mjs's exact "ui/node_modules is missing" text three times, isEnvironmentFault
+  // matched none of it, and all three batches were counted as ordinary skips with exit code 0 —
+  // the rounds 5 and 6 failure the abort was built to end, still happening after it shipped.
+  //
+  // An empty dir is render.mjs's fastest deterministic failure (~0.2s, no chromium boot).
+  const dir = mkdtempSync(join(tmpdir(), 'beat-render-fault-'))
+  assert.throws(
+    () => renderVaryBatch(dir, 1),
+    (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err)
+      assert.match(message, /manifest\.json/, `the child's own message must survive into the Error, got: ${message}`)
+      assert.doesNotMatch(message, /^Command failed:/, 'the exec wrapper message alone tells a classifier nothing')
+      assert.match(message, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'the failing batch dir must be named')
+      return true
+    },
+  )
 })

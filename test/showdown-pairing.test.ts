@@ -24,7 +24,17 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
-import { drawShowdownBatchPlan, composePitchedPhrase, inferSeedKey, type ShowdownBatchPlan } from '../src/taste/showdown.js'
+import {
+  drawShowdownBatchPlan,
+  composePitchedPhrase,
+  inferSeedKey,
+  applyComposedPhrase,
+  applyProductionTreatment,
+  engineplusProfile,
+  soloForShowdown,
+  surgeplusProfile,
+  type ShowdownBatchPlan,
+} from '../src/taste/showdown.js'
 import { composeTheoryPhrase } from '../src/taste/theory.js'
 import { pickEnginePreset } from '../src/taste/enginePresets.js'
 import { parsePresetLibrary } from '../src/core/preset.js'
@@ -151,4 +161,48 @@ test('showdownCmd draws no randomness of its own — every nuisance value comes 
   for (const expr of ['styles[plan.styleIndex]', 'styles[plan.kmStyleIndex]', 'candidates[plan.seedIndex]']) {
     assert.ok(body.includes(expr), `showdownCmd does not take ${expr} from the plan`)
   }
+})
+
+
+test('the PRODUCTION treatment is arm-blind too — same sends and effects whatever the figure', () => {
+  // Asked for directly after the 2026-07-26 layered A/B, where the owner heard an unpaired
+  // ambience difference ("the reverb/delay isn't here.. my ear is liking those in the original
+  // one.. and they're not present in the layered one... so its not exactly apples to apples") —
+  // the same class of confound as the round-6 seed problem, found by ear rather than by a test.
+  // For the engineplus/surgeplus arms the property holds by construction and this pins it: both
+  // profiles are pure functions of (track kind) / (role), taking NO seed and NO figure, so two
+  // figure-source arms at one --seed produce byte-identical production.
+  assert.deepEqual(engineplusProfile('synth'), engineplusProfile('synth'))
+  assert.deepEqual(engineplusProfile('drums'), engineplusProfile('drums'))
+  for (const role of ['bassline', 'chords', 'lead']) assert.deepEqual(surgeplusProfile(role), surgeplusProfile(role))
+  // the frozen ambience the layered arm was compared against, spelled out so an unpaired change
+  // to EITHER side of that comparison has to break a test naming the reason
+  assert.equal(engineplusProfile('synth').sendReverb, 0.18)
+  assert.equal(engineplusProfile('synth').sendDelay, 0.08)
+
+  // and end-to-end: the same host doc produced under two DIFFERENT composed figures gets the same
+  // treatment. Production must not read the notes, or the arm's figure would move the ambience.
+  const doc = parse(generateSeedBeat(3).text)
+  const key = inferSeedKey(doc)
+  const produce = (seed: number) => {
+    const phrased = applyComposedPhrase(doc, 'bass', composePitchedPhrase('bassline', key, seed))
+    return applyProductionTreatment(soloForShowdown(phrased, 'bass'), 'bass')
+  }
+  const a = produce(11)
+  const b = produce(99)
+  assert.notDeepEqual(
+    a.doc.tracks.find((t) => t.id === 'bass'),
+    b.doc.tracks.find((t) => t.id === 'bass'),
+    'the two figures were identical — this test would prove nothing',
+  )
+  assert.deepEqual(a.applied, b.applied, 'the production pass changed with the figure')
+  const synth = (r: typeof a) => r.doc.tracks.find((t) => t.id === 'bass')?.synth
+  for (const field of ['sendReverb', 'sendDelay', 'chorusMix', 'saturatorDrive', 'saturatorMix', 'eqHigh'] as const) {
+    assert.equal(synth(a)?.[field], synth(b)?.[field], `${field} moved with the figure — production must be arm-blind`)
+  }
+  assert.deepEqual(
+    a.doc.tracks.find((t) => t.id === 'bass')?.effects,
+    b.doc.tracks.find((t) => t.id === 'bass')?.effects,
+    'the effect chain moved with the figure',
+  )
 })
