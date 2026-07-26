@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { parse, serialize, parseMacroLibrary, initDocument, addTrack, addNote, addHit, saveClip, setScene, setSong } from '../src/core/index.js'
+import { FEATURE_KEYS, type FeatureVector } from '../src/taste/features.js'
 import {
   parseTrickLibrary,
   applyTrick,
@@ -246,6 +247,7 @@ test('with a render, a passing metric gate marks the suggestion verified and com
   const doc = projectWithRoles()
   // synthesize a mono, dark, dry feature vector (well inside every width/air precondition)
   const features = {
+    ...(Object.fromEntries(FEATURE_KEYS.map((k) => [k, 0])) as FeatureVector),
     lufs: -14, samplePeakDb: -1, truePeakDb: -1, crestDb: 12, rmsDb: -20,
     bandSubPct: 4, bandBassPct: 30, bandMidsPct: 50, bandPresencePct: 5, bandAirPct: 0.1,
     centroidLog2: 9, stereoCorrelation: 1, stereoWidthDb: -52,

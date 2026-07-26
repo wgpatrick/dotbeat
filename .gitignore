@@ -26,3 +26,8 @@ python/venv-roughness
 # CLI render outputs inside example projects — regenerable from the .beat + media.
 examples/*/render-*.wav
 examples/media/*.sf2
+
+# Per-render feature-vector cache (src/taste/features.ts). Unlike the embedding/aesthetics
+# sidecars next to it, this one is pure deterministic DSP — recomputable in milliseconds from the
+# wav alone — so it is a speed cache, not a record. It is invalidated by FEATURE_SET_VERSION.
+*.features.json

@@ -13,7 +13,7 @@
 
 import { readFileSync, existsSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
-import { computeBatchFeatures, type FeatureVector } from './features.js'
+import { computeBatchFeatures, featureSetVersionOf, FEATURE_SET_VERSION, type FeatureVector } from './features.js'
 import { trainingExcludedFiles, type VaryBatchManifest } from '../vary/batch.js'
 import { pairsFromRanking, standardizeBatch, zScoreColumns, trainBT, scoreVector, describeWeights, trainBTEnsemble, scoreVectorEnsemble, pessimisticScore, type TrainPair, type BTModel, type BTEnsemble } from './ranker.js'
 import { embedAudioFile, BeatEmbedError, fitPCA, projectPCA, AES_AXES, type EmbedBackend, type AesBackend } from './embeddings.js'
@@ -55,6 +55,10 @@ export interface LoadResult {
    * judgment per batch, the LATEST wins. Counting a contradictory re-score as an extra eval fold
    * silently corrupted the harness (a 4-batch log reported 5 usable batches). */
   superseded: number
+  /** records whose stored feature vectors predated FEATURE_SET_VERSION and were recomputed from
+   * their still-present renders (features.ts's upgrade-on-read). A nonzero count on a repeat run
+   * means renders are missing, not that the upgrade failed. */
+  upgraded: number
 }
 
 interface RawEntry {
@@ -133,11 +137,12 @@ export function loadTasteBatches(logPath: string): LoadResult {
   const batches: TasteBatch[] = []
   const skipped: LoadResult['skipped'] = []
   let superseded = 0
+  let upgraded = 0
   let text: string
   try {
     text = readFileSync(logPath, 'utf8')
   } catch {
-    return { batches, skipped, superseded }
+    return { batches, skipped, superseded, upgraded }
   }
   // Pilot 108: one judgment per batch — a re-score supersedes earlier entries for the same batch
   // dir (the append-only log keeps them; the harness must not count them as extra folds).
@@ -170,7 +175,20 @@ export function loadTasteBatches(logPath: string): LoadResult {
     let featuresStored = true
     if (features === undefined) {
       featuresStored = false
-      features = existsSync(batchDir) ? computeBatchFeatures(batchDir, allFiles) : {}
+      features = existsSync(batchDir) ? computeBatchFeatures(batchDir, allFiles, { cache: true }) : {}
+    } else if (Object.values(features).some((v) => featureSetVersionOf(v) < FEATURE_SET_VERSION) && existsSync(batchDir)) {
+      // UPGRADE-ON-READ (the fix for hazard (2) in features.ts's ruling). A record written under
+      // an older FEATURE_SET_VERSION carries only the v1 keys; using it verbatim alongside v2
+      // records is exactly the mixed-population case that used to silently zero the new columns.
+      // The renders are still on disk, so recompute rather than degrade — cached in a
+      // <wav>.features.json sidecar so a whole-log pass is a one-time cost. Records whose renders
+      // are gone keep their stored v1 vector and are carried by zScoreColumns's imputation.
+      const recomputed = computeBatchFeatures(batchDir, allFiles, { cache: true })
+      const merged: Record<string, FeatureVector> = { ...features }
+      for (const [file, vec] of Object.entries(recomputed)) merged[file] = vec
+      features = merged
+      featuresStored = Object.values(merged).every((v) => featureSetVersionOf(v) === FEATURE_SET_VERSION) ? true : featuresStored
+      upgraded += 1
     }
     const featured = allFiles.filter((f) => features![f] !== undefined)
     const trainingExcluded = holdoutFiles(batchDir, raw.trainingExcluded, raw.sources)
@@ -194,7 +212,7 @@ export function loadTasteBatches(logPath: string): LoadResult {
     }
     batches.push(batch)
   }
-  return { batches, skipped, superseded }
+  return { batches, skipped, superseded, upgraded }
 }
 
 /** A scorer ranks one held-out batch given every other batch as training data. Returns a score

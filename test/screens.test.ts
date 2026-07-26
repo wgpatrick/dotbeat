@@ -165,3 +165,68 @@ test('every finding carries the unified schema (kind, severity, source, detail)'
     assert.ok(f.detail.length > 0)
   }
 })
+
+// ---- bass-grind (research 121 §3.7 / 122 §4.1; D18) --------------------------------------------
+//
+// The founding owner complaint (2026-07-24, "the bass at ~1:11-1:16 is grindy/noisy") had no
+// standing check for two years of docs. These tests pin its calibration.
+//
+// The calibration audio (taste-dataset/covers/solo-bass-stabs.wav vs solo-bs2.wav — a matched pair
+// differing ONLY in the offending patch params) lives OUTSIDE the repo and is not committed, so
+// the gate here is the MEASURED FEATURE VECTOR of each stem, which is what the rule actually reads.
+// Both sets of numbers are published in research 121 §1.3 and 122 §1 and are reproduced exactly by
+// src/metrics/rich.ts. The end-to-end run against the real wavs is in the branch report.
+
+/** MixMetrics + RichMetrics stand-ins carrying only what the grind rule reads. */
+function grindInputs(m: { crestDb: number; sub: number; bass: number; flatnessLoDb: number }) {
+  const metrics = {
+    durationSeconds: 8, sampleRate: FS, channels: 2, integratedLufs: -14,
+    samplePeakDbfs: -1, truePeakDbtp: -1, crestDb: m.crestDb, rmsDbfs: -1 - m.crestDb,
+    spectral: { bandsPct: { sub: m.sub, bass: m.bass, mids: Math.max(0, 100 - m.sub - m.bass), presence: 0, air: 0 }, centroidHz: 77 },
+    stereo: { correlation: 1, widthDb: -60 },
+  }
+  const rich = { flatnessLoDb: m.flatnessLoDb } as unknown as import('../src/metrics/rich.js').RichMetrics
+  return { metrics, rich }
+}
+const grindFindings = (m: Parameters<typeof grindInputs>[0]): PathologyFinding[] => {
+  const { metrics, rich } = grindInputs(m)
+  // A silent buffer keeps every other screen quiet; the grind rule reads only metrics+rich.
+  return screen([new Float64Array(FS), new Float64Array(FS)], FS, { metrics: metrics as never, rich }).filter((f) => f.kind === 'bass-grind')
+}
+
+// The exact measured vectors of the owner's matched A/B pair (2026-07-26, src/metrics/rich.ts).
+const GRINDY_BASS = { crestDb: 9.65, sub: 67.71, bass: 28.58, flatnessLoDb: -8.19 }
+const FIXED_BASS = { crestDb: 11.39, sub: 59.36, bass: 36.83, flatnessLoDb: -11.56 }
+
+test('bass-grind flags the owner-flagged stem and passes its fix', () => {
+  const bad = grindFindings(GRINDY_BASS)
+  assert.equal(bad.length, 1, 'the 2026-07-24 grindy bass must FLAG — this is the complaint the screen exists for')
+  assert.equal(bad[0]!.kind, 'bass-grind')
+  assert.ok(bad[0]!.severity >= 1 && bad[0]!.severity <= 5)
+  assert.match(bad[0]!.detail, /resonance/, 'the finding must name the fix that worked, not just complain')
+  assert.equal(bad[0]!.band, '100-500 Hz')
+
+  assert.deepEqual(grindFindings(FIXED_BASS), [], 'solo-bs2 is the owner-accepted FIX and must PASS')
+})
+
+test('bass-grind needs all four clauses — each one alone lets the fixed stem through', () => {
+  // Every clause is load-bearing; research 121's three-clause version (no flatness) fired on 37.5%
+  // of the packs commercial bass references. Flipping any single clause of the bad stem toward the
+  // good one must silence the rule.
+  for (const [name, patch] of [
+    ['crest', { crestDb: FIXED_BASS.crestDb }],
+    ['sub share', { sub: FIXED_BASS.sub }],
+    ['definition band', { bass: FIXED_BASS.bass }],
+    ['bass-band flatness', { flatnessLoDb: FIXED_BASS.flatnessLoDb }],
+  ] as const) {
+    assert.deepEqual(grindFindings({ ...GRINDY_BASS, ...patch }), [], `clause "${name}" is not load-bearing — the rule still fires with it healthy`)
+  }
+})
+
+test('bass-grind stays out of scope on anything that is not a bass-dominant stem', () => {
+  // A full mix or a lead can carry a flat crest and a noisy low-mid band without being "grindy
+  // bass"; the rule must decline rather than guess (research 134 §5 — a screen fired outside its
+  // competence is how the ring gate came to reject 22% of the owner's own leads).
+  assert.deepEqual(grindFindings({ ...GRINDY_BASS, sub: 40, bass: 20 }), [], 'a mix with only 60% below 250 Hz is out of scope')
+  assert.deepEqual(grindFindings({ ...GRINDY_BASS, sub: 66, bass: 18 }), [], 'still out of scope at 84% low share')
+})

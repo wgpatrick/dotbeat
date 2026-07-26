@@ -8,12 +8,12 @@ import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { FEATURE_KEYS, metricsToFeatures, computeBatchFeatures, type FeatureVector } from '../src/taste/features.js'
+import { FEATURE_KEYS, FEATURE_KEYS_V1, FEATURE_SET_VERSION, featureSetVersionOf, metricsToFeatures, computeBatchFeatures, type FeatureVector } from '../src/taste/features.js'
 import { standardizeBatch, pairsFromRanking, trainBT, scoreVector, describeWeights, trainBTEnsemble, scoreVectorEnsemble, pessimisticScore, type BTEnsemble, type BTModel } from '../src/taste/ranker.js'
 import { loadTasteBatches, evaluate, mulberry32, variantTypeOf, formatEvalReport } from '../src/taste/eval.js'
 import { stitchAudition, shuffledOrder } from '../src/vary/audition.js'
 import { scoreBatch, writeClipSetBatch, adoptVariant, formatScoreResult, BeatBatchError, type VaryBatchManifest } from '../src/vary/batch.js'
-import { analyze, decodeWav } from '../src/metrics/index.js'
+import { analyze, analyzeRich, decodeWav } from '../src/metrics/index.js'
 
 // ---- synthetic audio helpers -------------------------------------------------------------------
 
@@ -66,9 +66,71 @@ function darkTasteEntry(batchNo: number, n = 5): string {
 
 // ---- features ------------------------------------------------------------------------------------
 
+// ---- the FEATURE_KEYS snapshot gate ------------------------------------------------------------
+//
+// research 140 §4.4 and 136 §5 both asked for exactly this test and neither got it; the missing
+// snapshot is the reason two agents declined to rule on whether appending was safe, and the reason
+// a third forked a parallel extractor instead. The key list is the critic's ABI: it decides what
+// every stored feature vector means, and a silent change to it re-scores every historical batch.
+// If this test fails, you changed the critic's inputs. That is allowed — but it requires bumping
+// FEATURE_SET_VERSION in the same commit (so stale stored vectors become detectable rather than
+// silently zeroing their column) and re-baselining the numbers in docs/research/131 §4 and 142.
+// See the ruling comment at the top of src/taste/features.ts.
+
+const FEATURE_KEYS_SNAPSHOT_V2 = [
+  // v1, frozen 2026-07-17 — every historical beat-scores.jsonl record has exactly these
+  'lufs', 'samplePeakDb', 'truePeakDb', 'crestDb', 'rmsDb',
+  'bandSubPct', 'bandBassPct', 'bandMidsPct', 'bandPresencePct', 'bandAirPct',
+  'centroidLog2', 'stereoCorrelation', 'stereoWidthDb',
+  // v2, appended 2026-07-26 — research 131 §4's measured discriminators (D16 / 138 rung 0)
+  'fluxMean', 'fluxP95', 'fluxStd',
+  'flatnessDb', 'flatnessHiDb', 'flatnessLoDb', 'slopeDbPerOct',
+  'crestSubDb', 'crestBassDb', 'crestMidsDb', 'crestPresenceDb', 'crestAirDb',
+  'envStdDb', 'envRangeDb', 'sustainPct', 'envFluxDb',
+  'onsetRatePerSec', 'attackMedMs', 'attackP25Ms', 'attackCv', 'onsetLevelCv',
+  'widthMeanDb', 'widthStdDb',
+]
+
+test('FEATURE_KEYS matches its snapshot, and v1 is frozen inside it', () => {
+  assert.deepEqual([...FEATURE_KEYS], FEATURE_KEYS_SNAPSHOT_V2,
+    'FEATURE_KEYS changed. Bump FEATURE_SET_VERSION in the same commit and re-baseline the critic accuracy numbers (docs/research/142), then update this snapshot.')
+  assert.equal(FEATURE_SET_VERSION, 2, 'FEATURE_SET_VERSION must move with FEATURE_KEYS')
+  // v1's order and membership are load-bearing for every stored vector ever written.
+  assert.deepEqual([...FEATURE_KEYS_V1], FEATURE_KEYS_SNAPSHOT_V2.slice(0, 13))
+  assert.deepEqual([...FEATURE_KEYS].slice(0, FEATURE_KEYS_V1.length), [...FEATURE_KEYS_V1],
+    'v2 keys must be APPENDED — never inserted among or ahead of the frozen v1 keys')
+  assert.equal(new Set(FEATURE_KEYS).size, FEATURE_KEYS.length, 'duplicate feature key')
+})
+
+test('featureSetVersionOf distinguishes a stale stored vector from a current one', () => {
+  const v2 = Object.fromEntries(FEATURE_KEYS.map((k) => [k, 1])) as FeatureVector
+  const v1 = Object.fromEntries(FEATURE_KEYS_V1.map((k) => [k, 1])) as Record<string, number>
+  assert.equal(featureSetVersionOf(v2), 2)
+  assert.equal(featureSetVersionOf(v1), 1, 'a 13-key record written before 2026-07-26 reads as v1')
+  assert.equal(featureSetVersionOf({ lufs: 0 }), 0)
+  assert.equal(featureSetVersionOf(undefined), 0)
+  // A NaN is not coverage: a v2 vector with one broken new key degrades to v1, so upgrade-on-read
+  // recomputes it rather than feeding a NaN into the z-scoring.
+  assert.equal(featureSetVersionOf({ ...v2, fluxMean: Number.NaN }), 1)
+  assert.equal(featureSetVersionOf({ ...v2, lufs: Number.NaN }), 0)
+})
+
+test('a stale v1 vector cannot zero a new column for the whole batch (the append-safety bug)', () => {
+  // The pre-2026-07-26 zScoreColumns summed every entry unconditionally: one `undefined` made
+  // mean and std NaN, `NaN > 1e-9` was false, and the column stayed 0 for EVERY row — deleting a
+  // real feature from the fresh vectors too. This is the regression guard for that.
+  const fresh = (fluxMean: number) => ({ ...Object.fromEntries(FEATURE_KEYS.map((k) => [k, 0])), fluxMean }) as FeatureVector
+  const stale = Object.fromEntries(FEATURE_KEYS_V1.map((k) => [k, 0])) as unknown as FeatureVector
+  const z = standardizeBatch([fresh(0.05), fresh(0.30), stale])
+  const col = FEATURE_KEYS.indexOf('fluxMean')
+  assert.notEqual(z[0]![col], z[1]![col], 'two different fluxMean values must not standardize to the same number')
+  assert.ok(z[0]![col]! < 0 && z[1]![col]! > 0, `the fresh vectors keep their real fluxMean signal, got ${z[0]![col]} / ${z[1]![col]}`)
+  assert.equal(z[2]![col], 0, 'the stale vector is imputed at the batch mean, not NaN')
+})
+
 test('metricsToFeatures is finite, stable-keyed, and log-scales the centroid', () => {
   const decoded = decodeWav(toneWav(1000, 0.5))
-  const f = metricsToFeatures(analyze(decoded.channels, decoded.sampleRate))
+  const f = metricsToFeatures(analyze(decoded.channels, decoded.sampleRate), analyzeRich(decoded.channels, decoded.sampleRate))
   for (const k of FEATURE_KEYS) {
     assert.ok(Number.isFinite(f[k]), `${k} must be finite, got ${f[k]}`)
   }
