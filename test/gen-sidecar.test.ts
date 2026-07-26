@@ -153,3 +153,45 @@ test('beat source gen --doctor JSON parses reporting stub ok / stableaudio missi
   assert.equal(report.backends.stableaudio.ok, false)
   assert.ok(report.backends.stableaudio.missing.includes('torch'))
 })
+
+// ---- R4-4: the downbeat trim is reachable from `beat source gen` ---------------------------------
+// Until research/130 W0.4/W0.5, RunGenOptions carried no bpm/bars, so src/analysis/gen-trim.ts —
+// fully implemented and fully tested — could only be reached by scripts/gen-bakeoff-run.mjs calling
+// runGenFal directly. `beat source gen` could never trim, which is backwards: the trim exists
+// because Lyria's fixed 30 s and MiniMax's multi-minute output need cutting, and those are exactly
+// the models this command selects. These assert the wiring (CLI flag -> source-lib -> runGen) and
+// the loud-not-silent validation; the trim MATH is covered by test/gen-trim.test.ts and the
+// runGenFal integration by test/gen-fal.test.ts.
+
+test('source gen --bpm/--bars reach runGen: a non-fal backend is refused, not silently ignored', () => {
+  const { beatFile, dir } = freshProject()
+  const out = beat(['source', 'gen', beatFile, 'gentrim', 'a loop', '--backend', 'stub', '--seconds', '1', '--seed', '3', '--bpm', '120', '--bars', '4'])
+  assert.notEqual(out.status, 0, 'the flags must not be accepted-and-ignored')
+  const combined = out.stdout + out.stderr
+  assert.match(combined, /--bpm\/--bars .*only apply to --backend fal/)
+  assert.ok(!existsSync(join(dir, 'media', 'gentrim.wav')), 'nothing registered when the request is rejected')
+})
+
+test('source gen --bpm without --bars errors (the trim needs both to know a bar length)', () => {
+  const { beatFile } = freshProject()
+  const out = beat(['source', 'gen', beatFile, 'gentrim2', 'a loop', '--backend', 'fal', '--bpm', '120'])
+  assert.notEqual(out.status, 0)
+  assert.match(out.stdout + out.stderr, /--bpm and --bars go together/)
+})
+
+test('source gen rejects a non-positive --bpm and a fractional --bars before spending a generation', () => {
+  const { beatFile } = freshProject()
+  const bad = beat(['source', 'gen', beatFile, 'gentrim3', 'a loop', '--backend', 'fal', '--bpm', '0', '--bars', '4'])
+  assert.notEqual(bad.status, 0)
+  assert.match(bad.stdout + bad.stderr, /--bpm must be positive/)
+  const frac = beat(['source', 'gen', beatFile, 'gentrim4', 'a loop', '--backend', 'fal', '--bpm', '120', '--bars', '2.5'])
+  assert.notEqual(frac.status, 0)
+  assert.match(frac.stdout + frac.stderr, /--bars must be a positive integer/)
+})
+
+test('source gen --count batches accept the same trim flags (the batch path forwards them too)', () => {
+  const { beatFile } = freshProject()
+  const out = beat(['source', 'gen', beatFile, 'gentrim5', 'a loop', '--count', '2', '--backend', 'stub', '--seconds', '1', '--bpm', '120', '--bars', '4'])
+  assert.notEqual(out.status, 0, 'the batch path must validate identically to the single-shot path')
+  assert.match(out.stdout + out.stderr, /--bpm\/--bars .*only apply to --backend fal/)
+})

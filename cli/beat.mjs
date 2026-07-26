@@ -480,7 +480,7 @@ const HELP = [
                                                           GATED: fetch a specific CC0 sound from Freesound by id and
                                                           register it (label "CC0-1.0"); needs the key + egress. CC0
                                                           is the only license ever fetched (zero redistribution risk)
-  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio|fal] [--provider P] [--license L]
+  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio|fal] [--provider P] [--license L] [--bpm N --bars N]
                                                           GENERATE a one-shot with Stable Audio Open (local text-to-audio)
                                                           and register it as media with a provenance sidecar. Default
                                                           --backend stableaudio (needs torch + the model, owner-side;
@@ -492,11 +492,17 @@ const HELP = [
                                                           under the Community License); --provider picks others:
                                                           fal-ai/stable-audio (Open, the local backend's model) or
                                                           fal-ai/stable-audio-25/text-to-audio (2.5, Stability
-                                                          platform terms). "Powered by Stability AI"
+                                                          platform terms). "Powered by Stability AI".
+                                                          --bpm N --bars N (fal only, both required) cuts the
+                                                          download to N bars at that tempo, starting on a DETECTED
+                                                          DOWNBEAT — so Lyria's fixed 30s or MiniMax's multi-minute
+                                                          track becomes a loop that begins on a strong beat. The cut
+                                                          is recorded in the provenance sidecar
+                                                          (generated.downbeatTrim)
   beat source gen --doctor                                report which generative backends are installed (JSON)` +
     // ==== Phase 40 Stream VB ====
     `
-  beat source gen <file.beat> <sample-id> "<prompt>" --count N [--seed-from S] [--out-dir d] [--audition]
+  beat source gen <file.beat> <sample-id> "<prompt>" --count N [--seed-from S] [--out-dir d] [--audition] [--bpm N --bars N]
                                                           BATCH: generate N candidates of ONE prompt across seeds
                                                           S..S+N-1 into gen-<sample-id>-<S>/ next to the .beat and
                                                           register NOTHING — then rank them with \`beat score\` and
@@ -4197,6 +4203,8 @@ async function sourceCmd(argv) {
     // ==== Phase 40 Stream VB ==== (gen batches)
     '--count', '--seed-from',
     // ==== end Phase 40 Stream VB ====
+    // R4-4: the downbeat trim (fal only, both required together)
+    '--bpm', '--bars',
   ])
   const positionals = rest.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(rest[i - 1]))
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
@@ -4278,6 +4286,12 @@ async function sourceCmd(argv) {
         backend: flag('--backend', 'stableaudio'),
         provider: flag('--provider', 'stable-audio-open'),
         ...(flag('--license') !== undefined ? { license: flag('--license') } : {}),
+        // R4-4: the downbeat-aligned trim was reachable only from scripts/gen-bakeoff-run.mjs
+        // until now — RunGenOptions simply had no bpm/bars to forward. Opt-in and validated
+        // (both-or-neither, fal-only) in runGen, so a wrong combination errors instead of being
+        // silently ignored.
+        ...(flag('--bpm') !== undefined ? { bpm: Number(flag('--bpm')) } : {}),
+        ...(flag('--bars') !== undefined ? { bars: Number(flag('--bars')) } : {}),
       })
       process.stdout.write(
         `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +
@@ -4322,6 +4336,9 @@ async function sourceGenBatch(lib, { file, id, prompt, rest, flag }) {
     provider: flag('--provider', 'stable-audio-open'),
     ...(flag('--license') !== undefined ? { license: flag('--license') } : {}),
     ...(flag('--out-dir') !== undefined ? { outDir: flag('--out-dir') } : {}),
+    // R4-4: same downbeat trim as the single-shot path, applied to every candidate.
+    ...(flag('--bpm') !== undefined ? { bpm: Number(flag('--bpm')) } : {}),
+    ...(flag('--bars') !== undefined ? { bars: Number(flag('--bars')) } : {}),
     onProgress: (i, n, seed) => process.stdout.write(`generating v${i}/${n} (seed ${seed})...\n`),
   })
   const last = result.seedFrom + result.candidates.length - 1
