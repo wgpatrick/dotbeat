@@ -4,12 +4,22 @@
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatPlacement, BeatSongSection, BeatSurgeOverride, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
 import { automationShapePoints, type AutomationShape } from './automation-shape.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
- * in a document survive a serialize→parse round-trip deep-equal. */
+ * in a document survive a serialize→parse round-trip deep-equal.
+ *
+ * CANON-THEN-VALIDATE. Every range check in this file must run on the CANONICAL value, never on
+ * the caller's raw one — the document stores (and the file carries) the rounded number, so
+ * checking the raw one checks a value that never gets written. Adversarial hunt #2 found four
+ * writers doing it backwards (addHit velocity/duration, setClipLoop, shuffleGrid, addNote's
+ * ratchetLength): each range-checked the raw input, then rounded it straight THROUGH the boundary
+ * it had just validated, so `--velocity 0.00001` was accepted as "in (0, 1]" and stored 0, and the
+ * saved file no longer parsed. addNote's `duration` guard was the one that already had it right;
+ * it is now the shape all of them use. Where a value can't be made valid, the edit FAILS rather
+ * than writing an unloadable file. */
 const canon = (n: number): number => Number(formatNumber(n))
 
 export class BeatEditError extends Error {
@@ -35,6 +45,21 @@ function parseNum(value: string, what: string): number {
   return n
 }
 
+/** The two header ints (bpm, loop_bars). These are stored as INTEGERS in the `.beat` text —
+ * parse.ts's parseIntStrict rejects anything with a decimal point — and initDocument has always
+ * bounded them (20-999 / 1-64), so accepting a bare float here wrote a file that the project's own
+ * parser could no longer load: adversarial hunt #2 confirmed `beat set song.beat bpm 60.5`
+ * succeeding and then EVERY subsequent command on that file failing with `line 2: bpm expected an
+ * integer`. Same hole via MCP beat_set. A fractional bpm also isn't a value to silently round —
+ * it's a caller bug worth surfacing, the same stance `program`/`surge.sampleRate`/clip signatures
+ * already take — so this fails loudly rather than snapping to the nearest integer. */
+function parseHeaderInt(value: string, what: string, min: number, max: number): number {
+  const n = parseNum(value, what)
+  if (!Number.isInteger(n)) throw new BeatEditError(`${what} must be a whole number (the .beat file stores it as an integer), got "${value}"`)
+  if (n < min || n > max) throw new BeatEditError(`${what} must be an integer ${min}-${max}, got ${n}`)
+  return n
+}
+
 /** Applies one `path = value` edit. Paths (the same names the file itself uses — no second
  * vocabulary to learn):
  *
@@ -47,8 +72,8 @@ function parseNum(value: string, what: string): number {
  * Returns a new document; never mutates. */
 export function setValue(doc: BeatDocument, path: string, value: string): BeatDocument {
   // header fields
-  if (path === 'bpm') return { ...doc, bpm: parseNum(value, 'bpm') }
-  if (path === 'loop_bars') return { ...doc, loopBars: parseNum(value, 'loop_bars') }
+  if (path === 'bpm') return { ...doc, bpm: parseHeaderInt(value, 'bpm', BPM_MIN, BPM_MAX) }
+  if (path === 'loop_bars') return { ...doc, loopBars: parseHeaderInt(value, 'loop_bars', LOOP_BARS_MIN, LOOP_BARS_MAX) }
   if (path === 'selected_track') {
     findTrack(doc, value) // must reference a real track
     return { ...doc, selectedTrack: value }
@@ -73,11 +98,14 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     const step = Number(patternMatch[2]!)
     const maxStep = doc.loopBars * 16
     if (step >= maxStep) throw new BeatEditError(`step ${step} out of range (loop is ${maxStep} steps, 0-${maxStep - 1}); use beat add-hit for an off-grid hit past the loop`)
-    const vel = parseNum(value, `pattern.${lane}[${step}]`)
-    if (vel < 0 || vel > 1) throw new BeatEditError(`step velocities must be 0..1, got ${vel}`)
+    // canon-then-validate (see canon's doc comment): the "is this step on?" test has to read the
+    // canonical velocity too, or a raw 0.00001 counts as ON and then stores a velocity-0 hit line
+    // that the parser rejects. At canonical precision it is simply off, which is the honest answer.
+    const vel = canon(parseNum(value, `pattern.${lane}[${step}]`))
+    if (vel < 0 || vel > 1) throw new BeatEditError(`step velocities must be 0..1, got ${value}`)
     const id = `${lane}${step}`
     const rest2 = track.hits.filter((h) => h.id !== id && !(h.lane === lane && h.start === step))
-    const nextHits = vel > 0 ? [...rest2, { id, lane, start: step, velocity: canon(vel) }] : rest2
+    const nextHits = vel > 0 ? [...rest2, { id, lane, start: step, velocity: vel }] : rest2
     return replaceTrack(doc, { ...track, hits: nextHits })
   }
 
@@ -253,7 +281,7 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
 
   // track metadata
   if (rest === 'name') {
-    if (/\s/.test(value)) throw new BeatEditError(singleTokenNameError(value))
+    validateSingleTokenName(value, 'track')
     return replaceTrack(doc, { ...track, name: value })
   }
   if (rest === 'color') {
@@ -264,14 +292,16 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   // BeatTrack.shuffleAmount/shuffleGrid) — same `beat set <track>.<field> <value>` grammar as
   // name/color, so no new CLI verb or daemon route is needed to dial groove in.
   if (rest === 'shuffleAmount') {
-    const amount = parseNum(value, 'shuffleAmount')
-    if (amount < 0 || amount > 1) throw new BeatEditError(`shuffleAmount must be 0..1, got ${amount}`)
-    return replaceTrack(doc, { ...track, shuffleAmount: canon(amount) })
+    const amount = canon(parseNum(value, 'shuffleAmount'))
+    if (amount < 0 || amount > 1) throw new BeatEditError(`shuffleAmount must be 0..1, got ${value}`)
+    return replaceTrack(doc, { ...track, shuffleAmount: amount })
   }
   if (rest === 'shuffleGrid') {
-    const grid = parseNum(value, 'shuffleGrid')
-    if (grid <= 0) throw new BeatEditError(`shuffleGrid must be > 0, got ${grid}`)
-    return replaceTrack(doc, { ...track, shuffleGrid: canon(grid) })
+    // canon-then-validate (see canon's doc comment): a raw 0.00001 passed "> 0" and then stored
+    // 0, writing a `groove <amount> 0` line the parser rejects.
+    const grid = canon(parseNum(value, 'shuffleGrid'))
+    if (grid <= 0) throw new BeatEditError(`shuffleGrid must be > 0 at the format's 4-decimal precision, got ${value}`)
+    return replaceTrack(doc, { ...track, shuffleGrid: grid })
   }
 
   // Track 1a surge tracks: the sound-source block's addressable fields. patch/sampleRate live on
@@ -298,18 +328,18 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     const param = surgeOverrideMatch[1]!
     const others = track.surge!.overrides.filter((o) => o.param !== param)
     if (value.trim() === '') return replaceTrack(doc, { ...track, surge: { ...track.surge!, overrides: others } })
-    const v = parseNum(value, `surge.override.${param}`)
-    if (v < 0 || v > 1) throw new BeatEditError(`surge override value must be normalized 0..1, got ${v}`)
-    return replaceTrack(doc, { ...track, surge: { ...track.surge!, overrides: [...others, { param, value: canon(v) }] } })
+    const v = canon(parseNum(value, `surge.override.${param}`))
+    if (v < 0 || v > 1) throw new BeatEditError(`surge override value must be normalized 0..1, got ${value}`)
+    return replaceTrack(doc, { ...track, surge: { ...track.surge!, overrides: [...others, { param, value: v }] } })
   }
 
   // v0.6 instrument tracks: their small field set, validated in place
   if (track.kind === 'instrument') {
     const inst = track.instrument!
-    if (rest === 'volume') return replaceTrack(doc, { ...track, instrument: { ...inst, volume: parseNum(value, 'volume') } })
+    if (rest === 'volume') return replaceTrack(doc, { ...track, instrument: { ...inst, volume: canon(parseNum(value, 'volume')) } })
     if (rest === 'pan') {
-      const p = parseNum(value, 'pan')
-      if (p < -1 || p > 1) throw new BeatEditError(`pan must be -1..1, got ${p}`)
+      const p = canon(parseNum(value, 'pan'))
+      if (p < -1 || p > 1) throw new BeatEditError(`pan must be -1..1, got ${value}`)
       return replaceTrack(doc, { ...track, instrument: { ...inst, pan: p } })
     }
     if (rest === 'program') {
@@ -330,7 +360,7 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
       const def = SYNTH_FIELD_BY_KEY.get(rest)!
       switch (def.kind) {
         case 'number':
-          return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: parseNum(value, rest) } })
+          return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: canon(parseNum(value, rest)) } })
         case 'enum':
           if (!def.values!.includes(value)) throw new BeatEditError(`${rest} must be one of ${def.values!.join('|')}, got "${value}"`)
           return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: value } })
@@ -342,14 +372,18 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     throw new BeatEditError(`unknown field "${rest}" on instrument track "${trackId}" (have: soundfont, program, volume, pan, name, color; effect-chain params: ${[...INSTRUMENT_EFFECT_FIELD_KEYS].join(', ')})`)
   }
 
-  // required core synth params
+  // required core synth params. canon() on the way in for the same reason as everywhere else in
+  // this file: the file can only carry 4 decimals, so `beat set lead.cutoff 0.00005` stored
+  // 0.00005 and reloaded as 0.0001 — the document changed under a no-op save, D4's canonical-bytes
+  // guarantee broken by one generation. (Found by core-serialize.test.ts's property test, not by
+  // hand — which is the argument for having it.)
   if ((SYNTH_PARAM_ORDER as readonly string[]).includes(rest)) {
     const param = rest as keyof BeatSynth
     if (param === 'osc') {
       if (!(OSC_TYPES as readonly string[]).includes(value)) throw new BeatEditError(`osc must be one of ${OSC_TYPES.join('|')}, got "${value}"`)
       return replaceTrack(doc, { ...track, synth: { ...track.synth, osc: value as OscType } })
     }
-    return replaceTrack(doc, { ...track, synth: { ...track.synth, [param]: parseNum(value, rest) } })
+    return replaceTrack(doc, { ...track, synth: { ...track.synth, [param]: canon(parseNum(value, rest)) } })
   }
 
   // v0.3 optional synth fields, table-driven
@@ -357,7 +391,7 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   if (def) {
     switch (def.kind) {
       case 'number':
-        return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: parseNum(value, rest) } })
+        return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: canon(parseNum(value, rest)) } })
       case 'enum':
         if (!def.values!.includes(value)) throw new BeatEditError(`${rest} must be one of ${def.values!.join('|')}, got "${value}"`)
         return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: value } })
@@ -404,19 +438,24 @@ export function addNote(
   // v0.7: fractional steps are legal — live/tapped input lands between grid lines. Values are
   // snapped to the canonical 4-decimal precision on the way in (see format.ts) so a stored doc
   // always deep-equals parse(serialize(doc)).
-  if (!Number.isFinite(note.start) || note.start < 0) throw new BeatEditError(`start must be a step position >= 0, got ${note.start}`)
-  if (!Number.isFinite(note.duration) || note.duration <= 0) throw new BeatEditError(`duration must be > 0 steps, got ${note.duration}`)
-  if (note.velocity < 0 || note.velocity > 1) throw new BeatEditError(`velocity must be 0..1, got ${note.velocity}`)
+  // canon-then-validate (see canon's doc comment): every one of these is checked at the precision
+  // it will actually be STORED at, so no value can round through a boundary it just passed.
+  const start = canon(note.start)
+  const duration = canon(note.duration)
+  const velocity = canon(note.velocity)
+  if (!Number.isFinite(start) || start < 0) throw new BeatEditError(`start must be a step position >= 0, got ${note.start}`)
+  if (!Number.isFinite(duration) || duration <= 0) throw new BeatEditError(`duration must be > 0 steps at canonical precision (4 decimals), got ${note.duration}`)
+  if (!Number.isFinite(velocity) || velocity < 0 || velocity > 1) throw new BeatEditError(`velocity must be 0..1, got ${note.velocity}`)
   const chance = note.chance ?? NOTE_FIELD_DEFAULTS.chance
   if (!Number.isInteger(chance) || chance < 0 || chance > 100) throw new BeatEditError(`chance must be an integer 0-100, got ${note.chance}`)
-  const cent = note.cent ?? NOTE_FIELD_DEFAULTS.cent
+  const cent = canon(note.cent ?? NOTE_FIELD_DEFAULTS.cent)
   if (!Number.isFinite(cent) || cent < -50 || cent > 50) throw new BeatEditError(`cent must be -50..50, got ${note.cent}`)
   const ratchetCount = note.ratchetCount ?? NOTE_FIELD_DEFAULTS.ratchetCount
   if (!Number.isInteger(ratchetCount) || ratchetCount < 1 || ratchetCount > 16) throw new BeatEditError(`ratchetCount must be an integer 1-16, got ${note.ratchetCount}`)
-  const ratchetCurve = note.ratchetCurve ?? NOTE_FIELD_DEFAULTS.ratchetCurve
+  const ratchetCurve = canon(note.ratchetCurve ?? NOTE_FIELD_DEFAULTS.ratchetCurve)
   if (!Number.isFinite(ratchetCurve) || ratchetCurve < -1 || ratchetCurve > 1) throw new BeatEditError(`ratchetCurve must be -1..1, got ${note.ratchetCurve}`)
-  const ratchetLength = note.ratchetLength ?? NOTE_FIELD_DEFAULTS.ratchetLength
-  if (!Number.isFinite(ratchetLength) || ratchetLength <= 0 || ratchetLength > 1) throw new BeatEditError(`ratchetLength must be >0..1, got ${note.ratchetLength}`)
+  const ratchetLength = canon(note.ratchetLength ?? NOTE_FIELD_DEFAULTS.ratchetLength)
+  if (!Number.isFinite(ratchetLength) || ratchetLength <= 0 || ratchetLength > 1) throw new BeatEditError(`ratchetLength must be >0..1 at canonical precision (4 decimals), got ${note.ratchetLength}`)
 
   let id = note.id
   if (id === undefined) {
@@ -430,20 +469,7 @@ export function addNote(
     throw new BeatEditError(`note id "${id}" already exists`)
   }
 
-  const duration = canon(note.duration)
-  if (duration <= 0) throw new BeatEditError(`duration must be > 0 steps at canonical precision (4 decimals), got ${note.duration}`)
-  const added: BeatNote = {
-    id,
-    pitch: note.pitch,
-    start: canon(note.start),
-    duration,
-    velocity: canon(note.velocity),
-    chance,
-    cent: canon(cent),
-    ratchetCount,
-    ratchetCurve: canon(ratchetCurve),
-    ratchetLength: canon(ratchetLength),
-  }
+  const added: BeatNote = { id, pitch: note.pitch, start, duration, velocity, chance, cent, ratchetCount, ratchetCurve, ratchetLength }
   return { doc: replaceTrack(doc, { ...track, notes: [...track.notes, added] }), note: added }
 }
 
@@ -665,9 +691,24 @@ function singleTokenNameError(name: string): string {
   return `track names are single tokens — the .beat text grammar has no quoting, so a name can't contain whitespace; try "${name.trim().replace(/\s+/g, '_')}"`
 }
 
+/** A name has to be exactly ONE token: not whitespace-containing (it would split into extra
+ * tokens) and not EMPTY (it would vanish and leave one token too FEW). Adversarial hunt #2 found
+ * the empty half unguarded on every name-writing path — `beat set <track>.name ""`, addTrack,
+ * addGroup, renameGroup — each of which happily wrote `track t1  #ff0000 synth`, a 4-token line
+ * where the parser demands 5, bricking the project on the next load. Two ways to be un-round-
+ * trippable, so both are checked in one place. */
+function validateSingleTokenName(name: string, what: 'track' | 'group') {
+  if (name === '') {
+    throw new BeatEditError(
+      `${what} names can't be empty — the .beat \`${what}\` line is whitespace-separated with no quoting, so an empty name writes a line with a missing token that no longer parses; pass a name (the id itself is a fine default)`,
+    )
+  }
+  if (/\s/.test(name)) throw new BeatEditError(what === 'track' ? singleTokenNameError(name) : 'group names are single tokens (no whitespace)')
+}
+
 function validateTrackIdentity(id: string, name: string, color: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new BeatEditError(`track ids are single alphanumeric/_/- tokens, got "${id}"`)
-  if (/\s/.test(name)) throw new BeatEditError(singleTokenNameError(name))
+  validateSingleTokenName(name, 'track')
   if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatEditError(`color must be a lowercase hex color like #c678dd, got "${color}"`)
 }
 
@@ -744,9 +785,14 @@ export function addHit(
   if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — hits only belong on drum tracks`)
   const laneNames = declaredLaneNames(track)
   if (!laneNames.includes(hit.lane)) throw new BeatEditError(`unknown drum lane "${hit.lane}" (expected one of ${laneNames.join('|')})`)
-  if (!Number.isFinite(hit.start) || hit.start < 0) throw new BeatEditError(`hit start must be a step position >= 0, got ${hit.start}`)
-  if (hit.velocity <= 0 || hit.velocity > 1) throw new BeatEditError(`hit velocity must be in (0, 1], got ${hit.velocity}`)
-  if (hit.duration !== undefined && (!Number.isFinite(hit.duration) || hit.duration <= 0)) throw new BeatEditError(`hit duration must be > 0 steps, got ${hit.duration}`)
+  // canon-then-validate (see canon's doc comment): a raw velocity of 0.00001 passed "in (0, 1]"
+  // and then stored 0, writing a `hit` line whose velocity the parser rejects.
+  const start = canon(hit.start)
+  const velocity = canon(hit.velocity)
+  const duration = hit.duration === undefined ? undefined : canon(hit.duration)
+  if (!Number.isFinite(start) || start < 0) throw new BeatEditError(`hit start must be a step position >= 0, got ${hit.start}`)
+  if (!Number.isFinite(velocity) || velocity <= 0 || velocity > 1) throw new BeatEditError(`hit velocity must be in (0, 1] at canonical precision (4 decimals), got ${hit.velocity}`)
+  if (duration !== undefined && (!Number.isFinite(duration) || duration <= 0)) throw new BeatEditError(`hit duration must be > 0 steps at canonical precision (4 decimals), got ${hit.duration}`)
   let id = hit.id
   if (id === undefined) {
     let max = 0
@@ -758,8 +804,8 @@ export function addHit(
   } else if (track.hits.some((h) => h.id === id)) {
     throw new BeatEditError(`hit id "${id}" already exists on track "${trackId}"`)
   }
-  const added: BeatDrumHit = { id, lane: hit.lane, start: canon(hit.start), velocity: canon(hit.velocity) }
-  if (hit.duration !== undefined) added.duration = canon(hit.duration)
+  const added: BeatDrumHit = { id, lane: hit.lane, start, velocity }
+  if (duration !== undefined) added.duration = duration
   return { doc: replaceTrack(doc, { ...track, hits: [...track.hits, added] }), hit: added }
 }
 
@@ -1039,7 +1085,7 @@ export function removeTrack(doc: BeatDocument, trackId: string): { doc: BeatDocu
  * hex). */
 function validateGroupIdentity(id: string, name: string, color: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new BeatEditError(`group ids are single alphanumeric/_/- tokens, got "${id}"`)
-  if (/\s/.test(name)) throw new BeatEditError('group names are single tokens (no whitespace)')
+  validateSingleTokenName(name, 'group')
   if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatEditError(`color must be a lowercase hex color like #c678dd, got "${color}"`)
 }
 
@@ -1210,8 +1256,8 @@ export function clearLegacyLaneSamples(doc: BeatDocument, trackId: string): { do
 export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: string } = {}): BeatDocument {
   const bpm = opts.bpm ?? 120
   const loopBars = opts.loopBars ?? 2
-  if (!Number.isInteger(bpm) || bpm < 20 || bpm > 999) throw new BeatEditError(`bpm must be an integer 20-999, got ${bpm}`)
-  if (!Number.isInteger(loopBars) || loopBars < 1 || loopBars > 64) throw new BeatEditError(`loop_bars must be an integer 1-64, got ${loopBars}`)
+  if (!Number.isInteger(bpm) || bpm < BPM_MIN || bpm > BPM_MAX) throw new BeatEditError(`bpm must be an integer ${BPM_MIN}-${BPM_MAX}, got ${bpm}`)
+  if (!Number.isInteger(loopBars) || loopBars < LOOP_BARS_MIN || loopBars > LOOP_BARS_MAX) throw new BeatEditError(`loop_bars must be an integer ${LOOP_BARS_MIN}-${LOOP_BARS_MAX}, got ${loopBars}`)
   // v0.11 (Phase 36): fresh documents stamp the current format version — the established bump
   // convention (see format-spec.md's v0.10 note): initDocument / the BeatLab-bridge converter
   // stamp NEW documents with the new version; existing files keep their own version string and
@@ -1486,9 +1532,13 @@ export function setClipLoop(doc: BeatDocument, trackId: string, clipId: string, 
   const track = findTrack(doc, trackId)
   const clip = findClip(track, clipId)
   if (loop === null) return replaceClip(doc, trackId, { ...clip, loop: null })
-  if (!Number.isFinite(loop.start) || loop.start < 0) throw new BeatEditError(`clip loop start must be >= 0, got ${loop.start}`)
-  if (!Number.isFinite(loop.end) || loop.end <= loop.start) throw new BeatEditError(`clip loop end must be > start, got start ${loop.start} end ${loop.end}`)
-  return replaceClip(doc, trackId, { ...clip, loop: { start: canon(loop.start), end: canon(loop.end) } })
+  // canon-then-validate (see canon's doc comment): a raw 0..0.00003 range passed "end > start"
+  // and then stored 0..0, writing a `loop 0 0` line the parser rejects.
+  const start = canon(loop.start)
+  const end = canon(loop.end)
+  if (!Number.isFinite(start) || start < 0) throw new BeatEditError(`clip loop start must be >= 0, got ${loop.start}`)
+  if (!Number.isFinite(end) || end <= start) throw new BeatEditError(`clip loop end must be > start at canonical precision (4 decimals), got start ${loop.start} end ${loop.end}`)
+  return replaceClip(doc, trackId, { ...clip, loop: { start, end } })
 }
 
 /** v0.10: sets or clears a clip's own time signature (metadata only — the audio engine is still
