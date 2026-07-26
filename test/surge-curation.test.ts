@@ -5,7 +5,7 @@
 // exercised by the owner-gated pilot, not here.
 
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -22,6 +22,11 @@ import {
   loadCuratedFile,
   SURGE_ROLE_CATEGORIES_V2,
   surgeRoleCategoriesV2,
+  bandFit,
+  paramFit,
+  roleParamTargets,
+  PARAM_FIT_WEIGHTS,
+  SHOWDOWN_ROLE_TO_STAT_ROLE,
   type CurationCandidate,
   type CurationRawScores,
 } from '../src/taste/surgeCuration.js'
@@ -281,4 +286,61 @@ test('SURGE_ROLE_CATEGORIES_V2 covers exactly the roles showdown knows about', (
       `${role}: a role that skips surge must skip it in both mappings`,
     )
   }
+})
+
+// ---- target-aware selection (research 141 §8) -----------------------------------------------------
+
+test('bandFit: 1.0 inside the band, decaying outside, neutral on a missing measurement', () => {
+  const b = { lo: 0, hi: 10, scale: 'log' } as const
+  assert.equal(bandFit(5, b), 1)
+  assert.equal(bandFit(10, b), 1)
+  assert.equal(bandFit(null, b), 0.5, 'unknown is neutral — never a free pass, never a veto')
+  assert.equal(bandFit(undefined, b), 0.5)
+  assert.equal(bandFit(NaN, b), 0.5)
+  assert.ok(bandFit(20, b) < 1 && bandFit(20, b) > 0, 'one octave out is penalised, not zeroed')
+  assert.ok(bandFit(40, b) < bandFit(20, b), 'further out scores worse')
+  assert.equal(bandFit(80, b), 0, 'three octaves out scores zero')
+  const lin = { lo: 0.6, hi: 0.9, scale: 'linear' } as const
+  assert.equal(bandFit(0.7, lin), 1)
+  assert.ok(Math.abs(bandFit(0.4, lin) - 0.8) < 1e-9, 'linear params are penalised by absolute distance')
+})
+
+test('paramFit: the professional profile scores near 1, our measured banks score much lower', () => {
+  // lead targets, straight from research 141 §3: attack <= p75 9.77 ms, release p10..p75 6..332 ms
+  const targets = {
+    attackMs: { lo: 0, hi: 9.77, scale: 'log' as const },
+    releaseMs: { lo: 6.19, hi: 331.51, scale: 'log' as const },
+    sustain: { lo: 0.659, hi: 1, scale: 'linear' as const },
+    cutoffHz: { lo: 147, hi: 1258, scale: 'log' as const },
+  }
+  // the corpus's own median lead
+  const professional = { attackMs: 3.91, releaseMs: 31.25, sustain: 1, cutoffHz: 419, activeOscCount: 2, effectSlots: 2 }
+  // engine-curated's measured lead median (141 §7.1): 13 ms attack, 1,213 ms release, 1 oscillator
+  const ours = { attackMs: 13, releaseMs: 1213, sustain: 0.67, cutoffHz: 1172, activeOscCount: 1, effectSlots: 0 }
+  const good = paramFit(professional, targets)
+  const bad = paramFit(ours, targets)
+  assert.ok(good > 0.99, `the corpus median should score ~1, got ${good}`)
+  assert.ok(bad < 0.8, `our measured lead profile should score well below it, got ${bad}`)
+  assert.ok(good - bad > 0.2, 'the screen must actually separate the two profiles')
+})
+
+test('paramFit: weights sum to 1 so the score stays a 0..1 quantity', () => {
+  const sum = Object.values(PARAM_FIT_WEIGHTS).reduce((a, b) => a + b, 0)
+  assert.ok(Math.abs(sum - 1) < 1e-9, `weights sum to ${sum}`)
+})
+
+test('roleParamTargets: reads the real stats artifact, and throws rather than inventing defaults', () => {
+  const stats = JSON.parse(readFileSync(new URL('../presets/role-parameter-stats.json', import.meta.url), 'utf8')) as { roles?: Record<string, unknown> }
+  for (const role of ['bassline', 'chords', 'lead']) {
+    const t = roleParamTargets(stats, role)
+    assert.ok(t.attackMs.hi > 0 && t.attackMs.hi < 100, `${role}: attack band top ${t.attackMs.hi} ms should be a transient-role number`)
+    assert.ok(t.releaseMs.hi > t.releaseMs.lo)
+    assert.ok(t.cutoffHz.hi > t.cutoffHz.lo)
+  }
+  // chords now targets Surge's own chords role, NOT pads — the §7.3 fix restated as data
+  assert.equal(SHOWDOWN_ROLE_TO_STAT_ROLE.chords, 'chords')
+  assert.ok(roleParamTargets(stats, 'chords').attackMs.hi <= 12.5, 'chords targets a <= 12 ms attack band')
+  assert.throws(() => roleParamTargets(stats, 'drum-loop'), /no parameter targets/)
+  assert.throws(() => roleParamTargets({ roles: {} }, 'lead'), /has no "lead" role/)
+  assert.throws(() => roleParamTargets({ roles: { lead: {} } }, 'lead'), /missing ampEnv/)
 })

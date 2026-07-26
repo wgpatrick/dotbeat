@@ -94,6 +94,126 @@ export const CURATION_BLEND = { aesQuality: 0.45, critic: 0.3, ringHeadroom: 0.1
 export type CurationBlend = typeof CURATION_BLEND
 export type CurationGates = typeof CURATION_GATES
 
+// ---- target-aware selection (research 141 §8) ----------------------------------------------------
+//
+// The OLD screens scored a patch on sustained-tone prettiness (Audiobox aesthetics + the ensemble
+// critic) and gated on cleanliness. Nothing in them asked "does this patch behave like the
+// professional distribution for its role", and the result is measurable: 141 §7.1 found our curated
+// leads at a 13 ms attack median against the corpus's 3.91 ms (p81 of the distribution) and our
+// releases 16–39x too long. These targets close that loop — they are read from
+// `presets/role-parameter-stats.json`, i.e. from 3,559 professionally designed patches, not from
+// anybody's taste.
+
+/** One parameter's acceptable band, in the parameter's natural units. */
+export interface ParamBand {
+  lo: number
+  hi: number
+  /** log-scale distance outside the band (times, frequencies) vs linear (0..1 quantities) */
+  scale: 'log' | 'linear'
+}
+
+/** The bands a role's patches should sit inside, plus the categorical preferences. */
+export interface RoleParamTargets {
+  attackMs: ParamBand
+  releaseMs: ParamBand
+  sustain: ParamBand
+  cutoffHz: ParamBand
+}
+
+/** Which `role-parameter-stats.json` role supplies each showdown role's targets. `chords` uses
+ * Surge's own `chords` role (n = 28, Medium confidence in 141) rather than `pad` — that swap IS
+ * the §7.3 fix, restated as data. */
+export const SHOWDOWN_ROLE_TO_STAT_ROLE: Record<string, string> = {
+  bassline: 'bass',
+  chords: 'chords',
+  lead: 'lead',
+}
+
+/** Weights over the fit terms. Attack and release carry the most because they are the two largest
+ * measured deviations of our banks from the corpus (141 §7.1: attack 3.3–6.9x slow, release
+ * 16–39x long) and 131 measured attack as directly predictive of pairwise wins. Sums to 1.0. */
+export const PARAM_FIT_WEIGHTS = {
+  attack: 0.3,
+  release: 0.25,
+  sustain: 0.1,
+  cutoff: 0.1,
+  oscCount: 0.15,
+  effects: 0.1,
+} as const
+
+/** 1.0 inside the band, decaying outside it; 3 octaves (log) or the full 0..1 range (linear) out
+ * scores 0. A missing measurement scores 0.5 — neutral, never a free pass and never a veto. */
+export function bandFit(value: number | null | undefined, band: ParamBand): number {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 0.5
+  if (value >= band.lo && value <= band.hi) return 1
+  const ref = value < band.lo ? band.lo : band.hi
+  if (band.scale === 'linear') return Math.max(0, 1 - Math.abs(value - ref))
+  const octaves = Math.abs(Math.log2(Math.max(value, 1e-6) / Math.max(ref, 1e-6)))
+  return Math.max(0, 1 - octaves / 3)
+}
+
+/** The measured parameters of one candidate patch, as scripts/surge-fxp-params.mjs reads them. */
+export interface PatchParamMeasurement {
+  attackMs: number | null
+  releaseMs: number | null
+  sustain: number | null
+  cutoffHz: number | null
+  activeOscCount: number
+  effectSlots: number
+}
+
+/** 0..1: how closely this patch sits inside its role's professional distribution. */
+export function paramFit(m: PatchParamMeasurement, t: RoleParamTargets): number {
+  // 51-57% of professional patches in every pitched role are multi-oscillator (141 §5.3), and only
+  // 9.5% of the corpus uses no effects at all (§6) — so these are preferences, not gates.
+  const oscTerm = m.activeOscCount >= 2 ? 1 : m.activeOscCount === 1 ? 0.6 : 0.2
+  const fxTerm = m.effectSlots >= 2 ? 1 : m.effectSlots === 1 ? 0.85 : 0.6
+  return (
+    PARAM_FIT_WEIGHTS.attack * bandFit(m.attackMs, t.attackMs) +
+    PARAM_FIT_WEIGHTS.release * bandFit(m.releaseMs, t.releaseMs) +
+    PARAM_FIT_WEIGHTS.sustain * bandFit(m.sustain, t.sustain) +
+    PARAM_FIT_WEIGHTS.cutoff * bandFit(m.cutoffHz, t.cutoffHz) +
+    PARAM_FIT_WEIGHTS.oscCount * oscTerm +
+    PARAM_FIT_WEIGHTS.effects * fxTerm
+  )
+}
+
+/** Shape of the per-role block in `presets/role-parameter-stats.json` this module reads. */
+interface StatQuantiles {
+  min?: number
+  p10?: number
+  p25?: number
+  median?: number
+  p75?: number
+  p90?: number
+  max?: number
+}
+
+/** Build a role's targets out of the stats artifact. Bands: attack `[floor, p75]` (one-sided — the
+ * whole finding is that fast is the baseline, so there is no "too fast"), release `[p10, p75]`,
+ * sustain `[p25, p75]`, cutoff knob `[p25, p75]`. Throws on a missing role rather than inventing a
+ * default: silently curating against made-up targets is the failure this replaces. */
+export function roleParamTargets(stats: { roles?: Record<string, unknown> }, showdownRole: string): RoleParamTargets {
+  const statRole = SHOWDOWN_ROLE_TO_STAT_ROLE[showdownRole]
+  if (statRole === undefined) throw new Error(`no parameter targets defined for role "${showdownRole}"`)
+  const block = stats.roles?.[statRole] as { ampEnv?: Record<string, StatQuantiles>; filter?: Record<string, StatQuantiles> } | undefined
+  if (block === undefined) {
+    throw new Error(`role-parameter-stats.json has no "${statRole}" role (needed for showdown role "${showdownRole}")`)
+  }
+  const amp = block.ampEnv ?? {}
+  const need = (q: StatQuantiles | undefined, key: keyof StatQuantiles, what: string): number => {
+    const v = q?.[key]
+    if (typeof v !== 'number') throw new Error(`role-parameter-stats.json ${statRole}: missing ${what}.${String(key)}`)
+    return v
+  }
+  return {
+    attackMs: { lo: 0, hi: need(amp.attackMs, 'p75', 'ampEnv.attackMs'), scale: 'log' },
+    releaseMs: { lo: need(amp.releaseMs, 'p10', 'ampEnv.releaseMs'), hi: need(amp.releaseMs, 'p75', 'ampEnv.releaseMs'), scale: 'log' },
+    sustain: { lo: need(amp.sustain, 'p25', 'ampEnv.sustain'), hi: need(amp.sustain, 'p75', 'ampEnv.sustain'), scale: 'linear' },
+    cutoffHz: { lo: need(block.filter?.cutoffHzKnob, 'p25', 'filter.cutoffHzKnob'), hi: need(block.filter?.cutoffHzKnob, 'p75', 'filter.cutoffHzKnob'), scale: 'log' },
+  }
+}
+
 /** True iff the render clears both hard gates. */
 export function passesGates(s: CurationRawScores, gates: CurationGates = CURATION_GATES): boolean {
   return s.ringDb <= gates.ringDbMax && s.activeFraction >= gates.activeFractionMin
