@@ -82,7 +82,20 @@ export const VERIFY_SCRIPTS = [
   { script: 'ui/verify-focus-deeplinks.mjs', area: 'daemon-sync', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase16-velocity.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase17-arrangement.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
-  { script: 'ui/verify-phase18-layout.mjs', area: 'layout', tier: 'gui', status: 'live' },
+  {
+    script: 'ui/verify-phase18-layout.mjs',
+    area: 'layout',
+    tier: 'gui',
+    status: 'legacy',
+    note:
+      'A TENTH dead script, found by actually running it during W1.5 rather than by grep. R6-8 kept it because ' +
+      'its Q1 check asserts the four-tab .view-tab switcher is ABSENT — true and still passing. But Q3 onward ' +
+      'wait on `[data-testid="bottom-pane"] .stepseq`, the StepSequencer that Phase 22 Stream AB deleted ' +
+      '(0 hits for "stepseq" anywhere in ui/src; the component file is gone), so the run blocks 5s and throws ' +
+      'at Q3 — pre-existing, reproducible against origin/main. Kept, not deleted: Q1/Q2 are the only assertions ' +
+      'anywhere that the Phase 18 layout rewrite stayed rewritten. Reviving it means repointing Q3-Q4 at the ' +
+      'unified drum editor that replaced the step sequencer.',
+  },
   { script: 'ui/verify-phase19-length.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase20-automation.mjs', area: 'automation', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase20-tracks.mjs', area: 'project-tracks', tier: 'gui', status: 'live' },

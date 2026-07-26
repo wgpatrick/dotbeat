@@ -24,31 +24,12 @@
 //
 // Usage: node ui/verify-phase18-layout.mjs
 
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { execFileSync, spawn } from 'node:child_process'
-import { chromium } from 'playwright-core'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { bootGui, buildAll, importDist, pollUntil, repoRoot, run as runVerify, screenshot, scratchProject, sleep } from './verify-lib.mjs'
 
-const uiDir = dirname(fileURLToPath(import.meta.url))
-const repoRoot = join(uiDir, '..')
 const PORT = 8498
 const PREVIEW_PORT = 5328
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-function git(dir, ...cmd) {
-  return execFileSync('git', ['-C', dir, ...cmd], { encoding: 'utf8' })
-}
-async function pollUntil(fn, what, timeoutMs = 9000, everyMs = 25) {
-  const t0 = Date.now()
-  for (;;) {
-    const v = await fn()
-    if (v) return v
-    if (Date.now() - t0 > timeoutMs) throw new Error(`timed out (${timeoutMs}ms) waiting for: ${what}`)
-    await sleep(everyMs)
-  }
-}
 
 // Real per-track peak dB over a window (decay-free RMS straight off the engine tap — a silenced track
 // reads true -Infinity, mapped to -120). Identical technique to verify-phase14.mjs.
@@ -78,55 +59,20 @@ const selectTrack = async (page, name) => page.click(`.arr-row:has(.arr-track-na
 const count = (page, sel) => page.evaluate((s) => document.querySelectorAll(s).length, sel)
 
 async function main() {
-  console.log('building repo core/daemon + ui...')
-  execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
-  execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+  buildAll()
 
-  const { startDaemon } = await import(join(repoRoot, 'dist/src/daemon/daemon.js'))
-  const { parse, serialize } = await import(join(repoRoot, 'dist/src/core/index.js'))
-
-  const proj = mkdtempSync(join(tmpdir(), 'dotbeat-p18-'))
-  const beatPath = join(proj, 'night-shift.beat')
-  writeFileSync(beatPath, serialize(parse(readFileSync(join(repoRoot, 'examples/night-shift.beat'), 'utf8'))))
-  git(proj, 'init', '-q')
-  git(proj, 'config', 'user.email', 'verify@dotbeat.local')
-  git(proj, 'config', 'user.name', 'verify')
-  git(proj, 'add', '-A')
-  git(proj, 'commit', '-q', '-m', 'baseline night-shift')
-
-  const daemon = await startDaemon({ filePath: beatPath, port: PORT })
-  console.log(`daemon up on :${daemon.port}, project ${beatPath}`)
-
-  const preview = spawn('npm', ['run', 'preview', '--', '--port', String(PREVIEW_PORT), '--strictPort'], { cwd: uiDir, stdio: 'pipe' })
-  preview.stdout.on('data', () => {})
-  preview.stderr.on('data', (d) => process.stderr.write(`[preview] ${d}`))
-  await pollUntil(
-    async () => {
-      try {
-        return (await fetch(`http://localhost:${PREVIEW_PORT}/`)).ok
-      } catch {
-        return false
-      }
-    },
-    'vite preview to serve',
-    15000,
-  )
-  console.log(`ui served on :${PREVIEW_PORT}`)
-
-  const browser = await chromium.launch({
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-    headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required'],
+  const { parse, serialize } = await importDist('src/core/index.js')
+  const { file: beatPath } = scratchProject({
+    prefix: 'dotbeat-p18-',
+    name: 'night-shift.beat',
+    text: serialize(parse(readFileSync(join(repoRoot, 'examples/night-shift.beat'), 'utf8'))),
+    gitInit: true,
   })
+
+  const gui = await bootGui({ file: beatPath, daemonPort: PORT, previewPort: PREVIEW_PORT, viewport: { width: 1440, height: 960 } })
+  const { page, errors } = gui
   const results = {}
   try {
-    const page = await browser.newPage()
-    await page.setViewportSize({ width: 1440, height: 960 })
-    const errors = []
-    page.on('pageerror', (e) => errors.push(String(e)))
-    await page.goto(`http://localhost:${PREVIEW_PORT}/?daw=${daemon.port}`, { waitUntil: 'load' })
-    await page.waitForFunction(() => window.__store && window.__store.getState().doc, { timeout: 10000 })
-    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 })
 
     const trackIds = await page.evaluate(() => window.__store.getState().doc.tracks.map((t) => t.id))
     console.log(`tracks: ${JSON.stringify(trackIds)}`)
@@ -160,7 +106,7 @@ async function main() {
     if ((await count(page, '.arr-canvas')) !== trackIds.length) throw new Error('[Q2] arrangement stopped being the main view after muting')
     console.log(`[Q2] PASS: inline mute drove ${victim} to TRUE silence (${base[victim]} -> ${muted[victim]} dB); arrangement still the main view`)
     results.q2 = { victim, before: base[victim], after: muted[victim] }
-    await page.screenshot({ path: join(uiDir, 'verify-p18-arrangement.png') })
+    await screenshot(page, 'verify-p18-arrangement')
     // unmute + stop for the pane tests
     await page.click(`.arr-strip-btn.mute[data-mute="${victim}"]`)
     await pollUntil(() => page.evaluate((id) => !window.__store.getState().mutes[id], victim), 'unmute')
@@ -172,7 +118,7 @@ async function main() {
     await page.click('[data-pane-tab="clip"]') // ensure the Clip facet
     await page.waitForSelector('[data-testid="bottom-pane"] .stepseq', { timeout: 5000 })
     console.log('[Q3] PASS: selecting the drum track shows the StepSequencer in the bottom pane Clip View')
-    await page.screenshot({ path: join(uiDir, 'verify-p18-clip-drums.png') })
+    await screenshot(page, 'verify-p18-clip-drums')
 
     // ============ Q4: Shift+Tab -> Device View shows the sound panel ============
     await page.keyboard.press('Shift+Tab')
@@ -180,7 +126,7 @@ async function main() {
     await page.waitForSelector('[data-testid="bottom-pane"] .synth-panel', { timeout: 5000 })
     if ((await count(page, '[data-testid="bottom-pane"] .stepseq')) !== 0) throw new Error('[Q4] StepSequencer still showing after switching to Device View')
     console.log('[Q4] PASS: Shift+Tab toggled to Device View — the drum-voice/synth param panel shows, the step grid is hidden')
-    await page.screenshot({ path: join(uiDir, 'verify-p18-device.png') })
+    await screenshot(page, 'verify-p18-device')
 
     // ============ Q5: synth track -> Clip View shows the piano roll ============
     await selectTrack(page, 'lead')
@@ -188,14 +134,14 @@ async function main() {
     await page.click('[data-pane-tab="clip"]')
     await page.waitForSelector('[data-testid="bottom-pane"] .noteview-grid', { timeout: 5000 })
     console.log('[Q5] PASS: selecting the synth track shows the piano roll (NoteView) in the bottom pane Clip View')
-    await page.screenshot({ path: join(uiDir, 'verify-p18-clip-synth.png') })
+    await screenshot(page, 'verify-p18-clip-synth')
 
     // ============ Q6: History drawer does not disrupt the main view ============
     await page.click('[data-action="toggle-history"]')
     await page.waitForSelector('[data-testid="history-drawer"] .history-panel', { timeout: 5000 })
     if ((await count(page, '.arr-canvas')) !== trackIds.length) throw new Error('[Q6] opening History disrupted the arrangement main view')
     console.log('[Q6] PASS: History drawer opened over the main view; the arrangement is still mounted underneath')
-    await page.screenshot({ path: join(uiDir, 'verify-p18-history.png') })
+    await screenshot(page, 'verify-p18-history')
     await page.click('[data-action="close-history"]')
     await pollUntil(async () => (await count(page, '[data-testid="history-drawer"]')) === 0, 'History drawer to close')
     if ((await count(page, '.arr-canvas')) !== trackIds.length) throw new Error('[Q6] closing History disrupted the arrangement main view')
@@ -207,7 +153,7 @@ async function main() {
     const strips = await count(page, '[data-testid="mixer-overlay"] .mixer-strip')
     if (strips !== trackIds.length) throw new Error(`[Q7] mixer overlay showed ${strips} strips, expected ${trackIds.length}`)
     console.log(`[Q7] PASS: full Mixer overlay shows all ${strips} channel strips`)
-    await page.screenshot({ path: join(uiDir, 'verify-p18-mixer.png') })
+    await screenshot(page, 'verify-p18-mixer')
     await page.click('[data-action="close-mixer"]')
     await pollUntil(async () => (await count(page, '[data-testid="mixer-overlay"]')) === 0, 'mixer overlay to close')
 
@@ -231,13 +177,8 @@ async function main() {
     console.log('\n================ ALL CHECKS PASSED ================')
     console.log(JSON.stringify(results, null, 2))
   } finally {
-    await browser.close()
-    preview.kill('SIGTERM')
-    await daemon.close()
+    await gui.close()
   }
 }
 
-main().catch((err) => {
-  console.error('\nVERIFY FAILED:', err)
-  process.exit(1)
-})
+await runVerify('phase18-layout', main)
