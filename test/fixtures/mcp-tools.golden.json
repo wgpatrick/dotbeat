@@ -1,0 +1,982 @@
+[
+  {
+    "name": "beat_add_hit",
+    "required": [
+      "file",
+      "lane",
+      "start",
+      "track",
+      "velocity"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "lane": "string",
+      "start": "number",
+      "velocity": "number",
+      "duration": "number"
+    }
+  },
+  {
+    "name": "beat_add_note",
+    "required": [
+      "duration",
+      "file",
+      "pitch",
+      "start",
+      "track",
+      "velocity"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "pitch": "number",
+      "start": "number",
+      "duration": "number",
+      "velocity": "number"
+    }
+  },
+  {
+    "name": "beat_add_track",
+    "required": [
+      "file",
+      "id",
+      "kind"
+    ],
+    "args": {
+      "file": "string",
+      "id": "string",
+      "kind": "string(synth|drums|instrument|audio)",
+      "name": "string",
+      "color": "string",
+      "soundfont_sample": "string",
+      "soundfont_program": "number",
+      "produced": "boolean",
+      "produced_role": "string"
+    }
+  },
+  {
+    "name": "beat_adopt",
+    "required": [
+      "dir",
+      "pick"
+    ],
+    "args": {
+      "dir": "string",
+      "pick": "string",
+      "force": "boolean"
+    }
+  },
+  {
+    "name": "beat_analyze_audio",
+    "required": [],
+    "args": {
+      "file": "string",
+      "backend": "string",
+      "force": "boolean",
+      "out": "string",
+      "json": "boolean",
+      "doctor": "boolean"
+    }
+  },
+  {
+    "name": "beat_analyze_structure",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "root": "number",
+      "scale": "string",
+      "json": "boolean"
+    }
+  },
+  {
+    "name": "beat_audio_clip",
+    "required": [
+      "clip",
+      "file",
+      "in",
+      "media",
+      "out",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "clip": "string",
+      "media": "string",
+      "in": "number",
+      "out": "number",
+      "gain_db": "number",
+      "warp": "string(off|repitch|complex)",
+      "rate": "number"
+    }
+  },
+  {
+    "name": "beat_audio_pitch",
+    "required": [
+      "clip",
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "clip": "string",
+      "to": "string",
+      "root": "string",
+      "semitones": "number",
+      "force": "boolean"
+    }
+  },
+  {
+    "name": "beat_audio_split",
+    "required": [
+      "at",
+      "clip",
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "clip": "string",
+      "at": "number",
+      "new_clip_id": "string"
+    }
+  },
+  {
+    "name": "beat_automate",
+    "required": [
+      "clip",
+      "file",
+      "param",
+      "time",
+      "track",
+      "value"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "clip": "string",
+      "param": "string",
+      "time": "number",
+      "value": "number",
+      "id": "string",
+      "interpolation": "string"
+    }
+  },
+  {
+    "name": "beat_automate_shape",
+    "required": [
+      "clip",
+      "file",
+      "from",
+      "param",
+      "shape",
+      "to",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "clip": "string",
+      "param": "string",
+      "shape": "string",
+      "from": "number",
+      "to": "number",
+      "cycles": "number",
+      "points": "number",
+      "bars": "number"
+    }
+  },
+  {
+    "name": "beat_checkpoint",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "label": "string",
+      "intent": "string"
+    }
+  },
+  {
+    "name": "beat_consolidate",
+    "required": [
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "note_ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_diff",
+    "required": [
+      "file_a",
+      "file_b"
+    ],
+    "args": {
+      "file_a": "string",
+      "file_b": "string"
+    }
+  },
+  {
+    "name": "beat_drum_kit",
+    "required": [
+      "file",
+      "kit",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "kit": "string"
+    }
+  },
+  {
+    "name": "beat_drum_kits",
+    "required": [],
+    "args": {}
+  },
+  {
+    "name": "beat_effect_add",
+    "required": [
+      "file",
+      "track",
+      "type"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "type": "string",
+      "id": "string",
+      "index": "number",
+      "bypassed": "boolean"
+    }
+  },
+  {
+    "name": "beat_effect_bypass",
+    "required": [
+      "effect_id",
+      "enabled",
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "effect_id": "string",
+      "enabled": "boolean"
+    }
+  },
+  {
+    "name": "beat_effect_move",
+    "required": [
+      "effect_id",
+      "file",
+      "index",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "effect_id": "string",
+      "index": "number"
+    }
+  },
+  {
+    "name": "beat_effect_rm",
+    "required": [
+      "effect_id",
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "effect_id": "string"
+    }
+  },
+  {
+    "name": "beat_feedback",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "sections": "boolean",
+      "ref": "string",
+      "json": "boolean"
+    }
+  },
+  {
+    "name": "beat_fit_scale",
+    "required": [
+      "file",
+      "root",
+      "scale",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "root": "number",
+      "scale": "string",
+      "note_ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_group",
+    "required": [
+      "file",
+      "id",
+      "track_ids"
+    ],
+    "args": {
+      "file": "string",
+      "id": "string",
+      "track_ids": "array<string>",
+      "name": "string",
+      "color": "string"
+    }
+  },
+  {
+    "name": "beat_group_set",
+    "required": [
+      "file",
+      "id"
+    ],
+    "args": {
+      "file": "string",
+      "id": "string",
+      "name": "string",
+      "color": "string",
+      "track_ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_history",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "limit": "number",
+      "collapsed": "boolean"
+    }
+  },
+  {
+    "name": "beat_humanize",
+    "required": [
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "timing": "number",
+      "velocity": "number",
+      "push_late": "number",
+      "swing": "number",
+      "seed": "number",
+      "ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_init",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "bpm": "number",
+      "loop_bars": "number"
+    }
+  },
+  {
+    "name": "beat_inspect",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string"
+    }
+  },
+  {
+    "name": "beat_invert",
+    "required": [
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "axis": "number",
+      "note_ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_keymap",
+    "required": [
+      "file",
+      "from",
+      "sample_id",
+      "scale",
+      "to",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "sample_id": "string",
+      "scale": "string",
+      "from": "string",
+      "to": "string",
+      "root": "string",
+      "key": "string",
+      "gain_db": "number",
+      "force": "boolean",
+      "dry_run": "boolean"
+    }
+  },
+  {
+    "name": "beat_lane",
+    "required": [
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "lane": "string",
+      "sample_id": "string",
+      "gain_db": "number",
+      "tune": "number",
+      "clear_legacy": "boolean"
+    }
+  },
+  {
+    "name": "beat_legato",
+    "required": [
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "gap": "number",
+      "note_ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_lint",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "target_lufs": "number",
+      "ref": "string"
+    }
+  },
+  {
+    "name": "beat_macro_apply",
+    "required": [
+      "file",
+      "macro",
+      "track",
+      "value"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "macro": "string",
+      "value": "number"
+    }
+  },
+  {
+    "name": "beat_macro_list",
+    "required": [],
+    "args": {}
+  },
+  {
+    "name": "beat_metrics",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "save_profile": "string"
+    }
+  },
+  {
+    "name": "beat_pin",
+    "required": [
+      "file",
+      "name",
+      "ref"
+    ],
+    "args": {
+      "file": "string",
+      "ref": "string",
+      "name": "string"
+    }
+  },
+  {
+    "name": "beat_pins",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string"
+    }
+  },
+  {
+    "name": "beat_place",
+    "required": [
+      "at",
+      "clip",
+      "file",
+      "scene",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "scene": "string",
+      "track": "string",
+      "clip": "string",
+      "at": "number"
+    }
+  },
+  {
+    "name": "beat_preset",
+    "required": [
+      "file",
+      "preset",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "preset": "string"
+    }
+  },
+  {
+    "name": "beat_presets",
+    "required": [],
+    "args": {
+      "category": "string"
+    }
+  },
+  {
+    "name": "beat_produce",
+    "required": [
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "role": "string"
+    }
+  },
+  {
+    "name": "beat_quantize",
+    "required": [
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "grid": "number",
+      "amount": "number",
+      "starts": "boolean",
+      "ends": "boolean",
+      "note_ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_regen",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "verify": "boolean",
+      "sample_id": "string"
+    }
+  },
+  {
+    "name": "beat_render",
+    "required": [
+      "file",
+      "out"
+    ],
+    "args": {
+      "file": "string",
+      "out": "string",
+      "tail_seconds": "number"
+    }
+  },
+  {
+    "name": "beat_restore",
+    "required": [
+      "file",
+      "ref"
+    ],
+    "args": {
+      "file": "string",
+      "ref": "string"
+    }
+  },
+  {
+    "name": "beat_reverse",
+    "required": [
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "note_ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_rm_group",
+    "required": [
+      "file",
+      "id"
+    ],
+    "args": {
+      "file": "string",
+      "id": "string"
+    }
+  },
+  {
+    "name": "beat_rm_hit",
+    "required": [
+      "file",
+      "hit_id",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "hit_id": "string"
+    }
+  },
+  {
+    "name": "beat_rm_note",
+    "required": [
+      "file",
+      "note_id",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "note_id": "string"
+    }
+  },
+  {
+    "name": "beat_rm_track",
+    "required": [
+      "file",
+      "id"
+    ],
+    "args": {
+      "file": "string",
+      "id": "string"
+    }
+  },
+  {
+    "name": "beat_sample",
+    "required": [
+      "file",
+      "path",
+      "sample_id"
+    ],
+    "args": {
+      "file": "string",
+      "sample_id": "string",
+      "path": "string"
+    }
+  },
+  {
+    "name": "beat_sample_info",
+    "required": [
+      "file",
+      "sample_id"
+    ],
+    "args": {
+      "file": "string",
+      "sample_id": "string",
+      "partials": "number"
+    }
+  },
+  {
+    "name": "beat_scene",
+    "required": [
+      "file",
+      "id",
+      "slots"
+    ],
+    "args": {
+      "file": "string",
+      "id": "string",
+      "slots": "object"
+    }
+  },
+  {
+    "name": "beat_scene_set",
+    "required": [
+      "file",
+      "id"
+    ],
+    "args": {
+      "file": "string",
+      "id": "string",
+      "name": "string"
+    }
+  },
+  {
+    "name": "beat_score",
+    "required": [
+      "dir",
+      "picks"
+    ],
+    "args": {
+      "dir": "string",
+      "picks": "array<string>",
+      "log": "string"
+    }
+  },
+  {
+    "name": "beat_selection",
+    "required": [
+      "port"
+    ],
+    "args": {
+      "port": "number",
+      "set": "string",
+      "clear": "boolean"
+    }
+  },
+  {
+    "name": "beat_set",
+    "required": [
+      "edits",
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "edits": "array<object>"
+    }
+  },
+  {
+    "name": "beat_skeleton",
+    "required": [],
+    "args": {
+      "out_file": "string",
+      "analysis_file": "string",
+      "section_bars": "number",
+      "out": "string",
+      "analysis": "string"
+    }
+  },
+  {
+    "name": "beat_song",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "clips": "array<object>",
+      "scenes": "array<object>",
+      "song": "array<object>"
+    }
+  },
+  {
+    "name": "beat_song_insert",
+    "required": [
+      "bars",
+      "file",
+      "index"
+    ],
+    "args": {
+      "file": "string",
+      "index": "number",
+      "bars": "number"
+    }
+  },
+  {
+    "name": "beat_song_move",
+    "required": [
+      "file",
+      "from_index",
+      "to_index"
+    ],
+    "args": {
+      "file": "string",
+      "from_index": "number",
+      "to_index": "number"
+    }
+  },
+  {
+    "name": "beat_source_add",
+    "required": [
+      "file",
+      "sample_id"
+    ],
+    "args": {
+      "file": "string",
+      "sample_id": "string",
+      "audio_file": "string",
+      "freesound_id": "string",
+      "license": "string",
+      "note": "string"
+    }
+  },
+  {
+    "name": "beat_source_gen",
+    "required": [
+      "file",
+      "prompt",
+      "sample_id"
+    ],
+    "args": {
+      "file": "string",
+      "sample_id": "string",
+      "prompt": "string",
+      "seconds": "number",
+      "seed": "number",
+      "backend": "string",
+      "provider": "string",
+      "license": "string",
+      "count": "number",
+      "seed_from": "number",
+      "out_dir": "string",
+      "audition": "boolean"
+    }
+  },
+  {
+    "name": "beat_source_search",
+    "required": [
+      "query"
+    ],
+    "args": {
+      "query": "string",
+      "max": "number",
+      "dur_min": "number",
+      "dur_max": "number",
+      "out_dir": "string"
+    }
+  },
+  {
+    "name": "beat_suggest",
+    "required": [
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "target": "string",
+      "log": "string"
+    }
+  },
+  {
+    "name": "beat_time_scale",
+    "required": [
+      "factor",
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "factor": "number",
+      "note_ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_transpose",
+    "required": [
+      "file",
+      "semitones",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "semitones": "number",
+      "note_ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_unpin",
+    "required": [
+      "file",
+      "name"
+    ],
+    "args": {
+      "file": "string",
+      "name": "string"
+    }
+  },
+  {
+    "name": "beat_unplace",
+    "required": [
+      "clip",
+      "file",
+      "scene",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "scene": "string",
+      "track": "string",
+      "clip": "string",
+      "at": "number"
+    }
+  },
+  {
+    "name": "beat_vary",
+    "required": [
+      "file",
+      "group",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "group": "string",
+      "count": "number",
+      "amount": "number",
+      "seed": "number",
+      "out_dir": "string",
+      "timing": "number",
+      "velocity": "number",
+      "push_late": "number",
+      "swing": "number",
+      "points": "number",
+      "bars": "number",
+      "clip": "string",
+      "lanes": "array<string>",
+      "ids": "array<string>",
+      "scope": "string",
+      "port": "number",
+      "render": "boolean",
+      "audition": "boolean",
+      "normalize": "boolean",
+      "mode": "string",
+      "exclude": "array<string>"
+    }
+  }
+]
