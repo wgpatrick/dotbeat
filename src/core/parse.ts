@@ -1,5 +1,6 @@
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError } from './document.js'
+import { formatNumber } from './format.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -44,10 +45,29 @@ function isAutomationInterpolation(s: string): s is AutomationInterpolation {
   return (AUTOMATION_INTERPOLATIONS as readonly string[]).includes(s)
 }
 
+/** Snaps a value to the format's canonical 4-decimal precision (format.ts) — the same helper
+ * edit.ts uses on the writer side. */
+const canon = (n: number): number => Number(formatNumber(n))
+
+/** CANON-THEN-VALIDATE (adversarial hunt #2, findings 5 and 8). Every number in a `.beat` file is
+ * written back through formatNumber, which rounds to 4 decimals — so the value the document really
+ * carries is the ROUNDED one, and that is what every range check below has to see. Reading the raw
+ * token instead broke two invariants at once:
+ *
+ *   - `note n1 60 0 0.00001 0.5` parsed (duration 0.00001 > 0 ✓) and then re-serialized as
+ *     `note n1 60 0 0 0.5`, which the very same parser rejects — load a file, save it untouched,
+ *     and it's bricked.
+ *   - `groove 0.00001 1` parsed to shuffleAmount 0.00001 but serialized as `groove 0 1`, so
+ *     parse(serialize(x)) != x for one generation, against D4's canonical-bytes guarantee.
+ *
+ * Rounding here makes both go away structurally: a token whose canonical form is out of range now
+ * fails LOUDLY at parse (it could never have been produced by serialize in the first place), and a
+ * token that is merely spelled non-canonically ("0.50", "0.500001") lands on exactly the value a
+ * round-trip would give it, so parse -> serialize -> parse is a fixed point at generation 1. */
 function parseFloatStrict(tok: string, lineNo: number, field: string): number {
   const n = Number(tok)
   if (tok.trim() === '' || !Number.isFinite(n)) throw new BeatParseError(`"${field}" expected a number, got "${tok}"`, lineNo)
-  return n
+  return canon(n)
 }
 
 function parseIntStrict(tok: string, lineNo: number, field: string): number {
