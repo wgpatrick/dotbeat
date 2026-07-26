@@ -139,7 +139,7 @@ test('prep: renders a surge track to a cached WAV + provenance and desugars to a
   }
 })
 
-test('prep: a bank/category-qualified patch name resolves, and the tempo reaches the provenance', { skip: !hasSurgepy }, async () => {
+test('prep: a bank/category-qualified patch name resolves, and the tempo reaches the provenance', { skip: !hasSurgepy ? 'no surgepy (see python/README.md: surge XT python bindings)' : false }, async () => {
   // 88 patch names are carried by more than one patch now that both pools are enumerated, so a bare
   // name can be ambiguous. A "<Bank>/<Category>/<Name>" (or "<Category>/<Name>") form pins one.
   const { prepareSurgeTracks } = await import(prepUrl)

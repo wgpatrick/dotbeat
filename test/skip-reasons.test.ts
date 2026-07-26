@@ -46,6 +46,9 @@ const SANCTIONED_REASONS = [
   'beatthis installed — degrade path not exercisable here',
   'stableaudio installed — degrade path not exercisable here',
   'surgepy installed — the unavailable-path assertion is not exercisable here',
+  'this build HAS the tempo binding, so the degrade path cannot fire here',
+  // --- the surgepy TEMPO binding (a local patch on top of the surgepy source build) ---
+  'needs surgepy built WITH python/surge-patches/0001-surgepy-expose-host-tempo.patch (see `beat showdown --surge-doctor`)',
   // --- environment shape ---
   'running as root (or on a permissionless filesystem): a read-only file is still writable, so the mid-batch-failure precondition cannot be created',
 ]

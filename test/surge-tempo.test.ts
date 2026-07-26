@@ -57,7 +57,7 @@ function runPython(snippet: string): string {
   return execFileSync(resolvePython(), ['-c', snippet], { cwd: repoRoot, encoding: 'utf8' })
 }
 
-test('surge_render._apply_tempo: a build without setTempo is a LOUD failure, never a silent 120', { skip: !hasPython ? 'no python interpreter' : false }, () => {
+test('surge_render._apply_tempo: a build without setTempo is a LOUD failure, never a silent 120', { skip: !hasPython ? 'no python3' : false }, () => {
   const out = runPython(`
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("sr", ${JSON.stringify(SIDECAR)})
@@ -115,7 +115,7 @@ print("range-ok")
   assert.match(out, /range-ok/)
 })
 
-test('surge render request: a non-numeric tempo is rejected before the synth is constructed', { skip: !hasPython ? 'no python interpreter' : false }, () => {
+test('surge render request: a non-numeric tempo is rejected before the synth is constructed', { skip: !hasPython ? 'no python3' : false }, () => {
   const out = runPython(`
 import importlib.util
 spec = importlib.util.spec_from_file_location("sr", ${JSON.stringify(SIDECAR)})
@@ -245,7 +245,7 @@ test(
 
 test(
   'D6: an explicit tempo on a build without the binding fails the whole render, loudly',
-  { skip: !hasSurgepy ? 'needs a surgepy build' : hasTempoBinding ? 'this build HAS the tempo binding, so the degrade path cannot fire here' : false },
+  { skip: !hasSurgepy ? 'no surgepy (see python/README.md: surge XT python bindings)' : hasTempoBinding ? 'this build HAS the tempo binding, so the degrade path cannot fire here' : false },
   async () => {
     await assert.rejects(
       () => runSurgeRender({ patch: '/nonexistent.fxp', notes: [{ midi: 48, startSeconds: 0, durationSeconds: 1, velocity: 100 }], sampleRate: 44100, outPath: join(tmpdir(), 'x.wav'), tempo: 128 }),
@@ -256,7 +256,7 @@ test(
 
 // ---- the patch pools are explicit and testable ---------------------------------------------------
 
-test('patch_roots / enumerate_pool: both pools are declared, and provenance comes back per patch', { skip: !hasPython ? 'no python interpreter' : false }, (t) => {
+test('patch_roots / enumerate_pool: both pools are declared, and provenance comes back per patch', { skip: !hasPython ? 'no python3' : false }, (t) => {
   // A synthetic content tree, so this runs with no Surge install at all.
   const dir = mkdtempSync(join(tmpdir(), 'surge-pools-'))
   t.after(() => rmSync(dir, { recursive: true, force: true }))
@@ -302,7 +302,7 @@ print(json.dumps(len(sr.enumerate_patches(${JSON.stringify(join(dir, 'patches_fa
   assert.equal(JSON.parse(legacy), 4, 'a legacy patches_factory path still resolves the whole library')
 })
 
-test('the installed library really is both pools (doctor)', { skip: !hasSurgepy ? 'needs a surgepy build' : false }, () => {
+test('the installed library really is both pools (doctor)', { skip: !hasSurgepy ? 'no surgepy (see python/README.md: surge XT python bindings)' : false }, () => {
   const pools = doctorReport.pools as { pool: string; exists: boolean; patchCount: number }[] | null
   assert.ok(Array.isArray(pools), 'the doctor reports per-pool counts so a missing pool is visible')
   assert.deepEqual(pools.map((p) => p.pool), ['factory', 'thirdparty'])
