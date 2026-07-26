@@ -1350,8 +1350,8 @@ export const rows = [
   },
   {
     area: 'Taste loop', feature: 'Rate UI: explicit "none are good" verdict',
-    description: 'Owner skipped a prodtask batch because every option sounded bad and the UI only supports picking a best — the skip silently discarded a real batch-level signal (a quality floor). Add an explicit all-bad verdict to beat rate: recorded in the scores log as a batch-level judgment (no pairwise pairs — BT needs a winner — but reportable in prodtask/showdown scoreboards and usable as a quality-floor feature). Owner, 2026-07-22, during the first prodtask transform round.',
-    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    description: 'SHIPPED — row corrected 2026-07-26 (research/140 §5.5: it read not-started while the feature was fully built, and a stale not-started row is why nobody looked again). Owner skipped a prodtask batch because every option sounded bad and the UI only supported picking a best — the skip silently discarded a real batch-level signal (a quality floor). `beat rate` now carries an explicit all-bad verdict: the "none are good" button (cli/rate.mjs:75), its confirm-and-post handler (:126) and the `n` key (:158), posting to /api/none-good -> recordNoneGood (src/vary/batch.ts:1009), which records a batch-level judgment in the scores log. It is deliberately EXCLUDED from the taste model and the win-rate math (no pick means no pairwise pairs — BT needs a winner) and surfaced separately by noneGoodByRole (src/taste/showdown.ts:1346) on the showdown scoreboard, which is exactly the reporting the original ask described. Owner, 2026-07-22, during the first prodtask transform round.',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: 'research/119-production-task-evals.md', plan: null,
   },
   {
@@ -2079,8 +2079,14 @@ export const rows = [
   },
   {
     area: 'Machine listening, composition & gen providers (taste program)', feature: 'Gen-provider adapters + bake-off (`--gen-provider`)',
-    description: 'A per-provider request/response adapter table on the fal backend (src/analysis/gen-fal.ts PROVIDER_ADAPTERS) so a stronger hosted model is "a provider-param mapping, not a new backend," each adapter carrying its rights verdict (watermark; training-ban -> taste-training holdout tag): lyria2 (fal-ai/lyria2, native 48 kHz, SynthID watermark, trainable), minimax-music (is_instrumental, training-excluded), elevenlabs-music (music_length_ms 3000 ms floor \u2014 the only native short-duration control, training-excluded), stable-audio (incumbent default/fallback, 422 duration-alias retry). Plus a dependency-free downbeat-aligned trim module (gen-trim.ts \u2014 cuts fixed-length Lyria/MiniMax outputs to the requested bars starting at a detected downbeat over the known BPM grid) and a resumable real-fal-spend bake-off harness (scripts/gen-bakeoff-run.mjs + gen-bakeoff-metrics.mjs \u2014 DSP + Audiobox-Aesthetics scorer, resumes by on-disk file so a paid clip is never re-spent). `beat showdown --gen-provider <fal model path>` selects the model for the gen + keymap clips (research 127 arms). Verdict rule: a backend replaces the default provider only if it beats Stable Audio 3 in blind pairwise.',
+    description: 'A per-provider request/response adapter table on the fal backend (src/analysis/gen-fal.ts PROVIDER_ADAPTERS) so a stronger hosted model is "a provider-param mapping, not a new backend," each adapter carrying its rights verdict (watermark; training-ban -> taste-training holdout tag): lyria2 (fal-ai/lyria2, native 48 kHz, SynthID watermark, trainable), minimax-music (is_instrumental, training-excluded), elevenlabs-music (music_length_ms 3000 ms floor \u2014 the only native short-duration control, training-excluded), stable-audio (incumbent default/fallback, 422 duration-alias retry). Plus a dependency-free downbeat-aligned trim module (gen-trim.ts \u2014 cuts fixed-length Lyria/MiniMax outputs to the requested bars starting at a detected downbeat over the known BPM grid) and a resumable real-fal-spend bake-off harness (scripts/gen-bakeoff-run.mjs + gen-bakeoff-metrics.mjs \u2014 DSP + Audiobox-Aesthetics scorer, resumes by on-disk file so a paid clip is never re-spent). `beat showdown --gen-provider <fal model path>` selects the model for the gen + keymap clips (research 127 arms). This row is the BUILD only — it was split from the experiment on 2026-07-26 (research/140 D15) because one row meaning two things is what let an unrun experiment read as done. The verdict rule (a backend replaces the default provider only if it beats Stable Audio 3 in blind pairwise) HAS since been applied: see the separate outcome row below, which records that it did not fire.',
     core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/127-gen-backend-bakeoff.md', plan: null,
+  },
+  {
+    area: 'Machine listening, composition & gen providers (taste program)', feature: 'Gen-provider bake-off — RAN; Stable Audio 3 retained',
+    description: 'DECIDED, not pending — split out of the adapters row on 2026-07-26 and closed the same day. Outcome: stable-audio-3 native BEAT Lyria+Demucs on owner ratings, and MiniMax and ElevenLabs failed on reliability, so the verdict rule ("a backend replaces the default only if it beats Stable Audio 3 in blind pairwise") did NOT fire and Stable Audio 3 stays the default. PROVENANCE, stated precisely because research/140 D15 lists this row as the audit\'s sharpest process finding and a wrongly-`done` row is what caused it: the Lyria arm running and losing is corroborated in-repo by commit c1446b40, whose message records that an "Owner rating pass caught every Lyria-arm gen clip carrying drums... and every Lyria-arm keymap clip sounding sped-up/crazy", and by 7fe5a57f, which added opt-in Demucs stem extraction (src/analysis/stems.ts) specifically to isolate Lyria\'s 30 s full-mix output — work that only exists because the arm was run. MiniMax eliminated itself on reliability with 9 of 10 calls failing through fal (owner, 2026-07-26). The MiniMax/ElevenLabs reliability failures are owner-reported and NOT reconstructible from this repo: examples/taste-t1/beat-scores.jsonl contains zero lyria/minimax/elevenlabs strings, because the log records the source KIND only and never the provider. That gap is worth closing before the next provider comparison — log the provider alongside `figureSource`, the same one-string-field fix research/120 §4 asked for and D12 still wants for the ref pool.',
+    core: 'na', cli: 'done', gui: 'na', status: 'done',
     research: 'research/127-gen-backend-bakeoff.md', plan: null,
   },
   {
@@ -2359,5 +2365,197 @@ export const rows = [
     description: 'Research 128 §2.5, decision D29: the GUI-era hand-off loop codified as a FILE protocol in the produce-song skill, so a dead session\'s successor reconstructs it from files alone. At every checkpoint-listen milestone the agent writes workshop/BRIEF.md — what finished + which checks passed, the listening packet, option-board URLs (`beat board` intended surface with a list-and-pick-by-reply fallback), copy-pasteable `beat open` deep links presenting the GUI as the owner\'s home surface, the uncertainty triage list, and a literal `state: awaiting-owner @ <ref>` turn token. The owner picks on boards (decision.json), fine-tunes in the GUI, and/or writes workshop/FEEDBACK.md, ending with a checkpoint. The agent\'s wake-up ritual is a fixed checklist: read decisions → `beat diff --since <ref> --rollup` (with a `beat diff --git` fallback) → read FEEDBACK.md → interpret owner edits into NOTES.md → NEVER revert an owner edit (the ground-truth rule: flag with measurements, propose never apply) → mine repeated corrections into PREFERENCES.md → adopt winners → update the state line. Prompt/docs only.',
     core: 'na', cli: 'na', gui: 'na', status: 'done',
     research: 'research/128-agent-owner-gui-loop.md', plan: '.claude/skills/produce-song/SKILL.md',
+  },
+  // ── Research 130-139 backlog (filed 2026-07-26, research/140 §1.1) ──────
+  // The tracking habit lapsed exactly when the current wave started: docs 130-139 produced ZERO
+  // roadmap rows between them, while 80-113 got 29 of 34 and 114-129 got 13 of 16. Not sloppiness
+  // in this file — the row above carrying a dated UPDATE note shows someone was maintaining it
+  // properly two days earlier. The research kept coming and the filing stopped, so the tail of
+  // every list had nowhere to live. These rows are that tail.
+  {
+    area: 'Research 130-139 backlog', feature: 'Rule on FEATURE_KEYS: append, fork, or freeze (131 P0 / 138 B0)',
+    description: 'THE BLOCKER UNDER THE WHOLE LADDER, and it needs a ruling before it needs a build. Research 131 §7-P0 measured an APPEND-ONLY extension of src/taste/features.ts\'s FEATURE_KEYS at 0.676 -> 0.795 held-out (0.688 -> 0.776 synth-only); 138 B0 says ship it first because "EVERY screen, curation pass, rolecheck and future automated search" depends on it and "nothing else in the ladder is interpretable without this". It collides with CLAUDE.md\'s frozen-constants guardrail, and TWO agents have independently declined to resolve the collision — the preset-retarget branch computes all 26 axes in src/retarget/features.ts and its commit message explicitly refuses the ask ("Deliberately NOT an edit to src/taste/features.ts"). Three options: (a) append + retrain + re-baseline under a key-set snapshot test; (b) a second frozen vector CRITIC_KEYS_V2 alongside; (c) the critic stays at 0.676 and src/retarget is the only consumer. Live hazard while it sits: two feature extractors whose UNITS DISAGREE — retarget documents its flux running ~4-5x higher and attackMedMs ~2x slower than 131\'s pipeline — which compounds daily. Research 136 §5 independently named the same hazard from the other end ("new taste FEATURE_KEY: ~3 files and silently changes the critic") and proposed the missing key-set snapshot; neither doc cites the other.',
+    core: 'missing', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/131-quality-gap-empirical.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Surge renders ignore batch tempo — every rated surge clip was 120 BPM',
+    description: 'A correctness bug that silently qualifies every surge rating in the log. `grep -ci "tempo|bpm|time_data" python/surge_render.py` returns 0: the sidecar never sets a host tempo, so every tempo-synced modulation (synced LFOs, delays, the whole Sequences patch category) rendered at Surge\'s 120 BPM default no matter what tempo the batch asked for. Research 131 §6 measured the fingerprint without knowing the cause — surge chords fire 1.3 onsets/s against a reference 4.9. Two separate pieces of work: the real fix is a pybind tempo binding (S); the INTERIM MITIGATION 132 §2.3 also specified — screen out tempo-synced patches, pure TS, XS — was not done either, so neither exists. Worth an owner-visible caveat on the scoreboard independent of the fix, since it qualifies data already collected. Blocks 138\'s rung 4 entirely.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/132-sound-source-expansion.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Plugin-host probe (pedalboard) — one afternoon that gates five preset ecosystems',
+    description: 'The highest expected-value-per-hour item in research/132, and it depends on NOTHING. `grep -rli "pedalboard|dawdreamer|sfizz" src/ python/ cli/ scripts/` returns nothing. 132 §5 calls it "one probe that gates five sources" — Dexed, OB-Xf, Vaporizer2, Six Sines, Odin 2 — at roughly `pip install pedalboard` into the existing venv plus one render. OB-Xf alone ships ~300 professionally-designed presets aimed at the chords role, which is currently the worst on the board at 11% pairwise. WHY IT WAS MISSED, worth recording because it is a scheduling pathology not a judgement: 132 ranked it THIRD, below two arms nobody built either, so it inherited their queue position despite having no dependency on them. RE-TRIGGER: the layered-clip arm and the preset-retargeting arm both report — if NEITHER moves a pitched role above the gen band, this probe becomes the next timbre lever and should be scheduled immediately.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/132-sound-source-expansion.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Keymap root verification (a correctness bug, not an enhancement)',
+    description: 'src/core/keymap.ts maps one root to one `tune`, clamped +/-24 semitones, with nothing downstream checking it. Research 132 §3: "a wrong root makes the whole instrument systematically out of tune... nothing downstream checks." The suspicious part is the evidence pattern — keymap sits at 31-38% pairwise DESPITE having the best bass-timbre match to refs of any source (sub 45.3% against ref 47.1%), which is the profile a tuning defect produces. Fix is small and self-contained: render one lane, re-run the existing pitch detector, refuse on mismatch.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/132-sound-source-expansion.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Four new tricks against the two biggest measured gaps (133 §7-A.2)',
+    description: 'Pure JSON against an existing declarative grammar and test harness, with the exact values already specified in the doc — no engine work at all. presets/tricks.json holds exactly 15 tricks and none of `octave-body`, `ny-glue`, `ghost-kick-pump`, `stab-articulation` is among them; two are literal four-line recipes. Targets the occupancy gap (mids 99% -> <=90) and density-without-crest-loss, which §1 measures as where engineplus actually collapses. Corroborating detail from the same pass: `compMix` — the comp insert\'s true dry/wet fan — is set by NO production profile anywhere and ships at 0. And `ghost-kick-pump` has now been independently requested by THREE research passes (118 as `sidechain-pump`, 133, and 138 row 9, the last noting "never used; duck reads kick hits, not audio, so this works today"). Three asks, zero builds, is the pattern this backlog exists to break.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/133-production-chain-depth.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: '`duckRelease` — one SYNTH_FIELDS number, asked for by three docs',
+    description: '`grep -rn duckRelease src/ ui/src/` returns zero hits. One field, default 0.16, byte-compatible with every existing document. It unblocks the 250-350 ms deep-house pump that the hardcoded 160 ms ramp cannot produce, and it unblocks the `sidechain-pump` trick the catalog currently lists as format-blocked. Flagged by 115 §4.2, 133 §7-B.3 and 138 §B6. Research/140\'s diagnosis of why it never landed is the useful part: "too small to be anyone\'s stream, too engine-adjacent to be anyone\'s trick" — and it was mis-filed into 138\'s LAST tier despite being one of the cheapest items in the whole program.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/133-production-chain-depth.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Replace the curation objective\'s measured-suspect terms (134 §5 / 131 §2.1)',
+    description: 'The GATES were recalibrated per role on 2026-07-26 (CURATION_GATES_BY_ROLE, research/140 D21). The BLEND was not, and 0.60 of it is measured-suspect: CURATION_BLEND = { aesQuality: 0.45, critic: 0.3, ringHeadroom: 0.15, active: 0.1 }, whose comment cites D26 as authority. Since then 131 §2.1 measured `aesPQ` at P(win|hi) = 0.415 — it votes AGAINST the owner\'s own winners — and `aesCE` inverts on bassline; 131 §7 lists "treating Audiobox PQ or CE as a target" under "Explicitly NOT on the path" and 138 §2 repeats the prohibition. Independently, 134 §5 found `ringHeadroom` "double-rewards darkness". So the pool is not merely gated wrong, it is SORTED wrong. Not a "later" item: any patch pool generated before this is resolved inherits the bias, which is exactly the trap 134 §7 warned about ("ship the gate recalibration BEFORE generating the M2 pool"). 131\'s proposed replacement (aesPC + the §4 DSP discriminators) and 134\'s (a role-target brightness/movement term) are compatible with each other. The `critic` term also still runs on the un-upgraded 13-key vector, so it is downstream of the FEATURE_KEYS ruling above.',
+    core: 'missing', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/134-patch-design-at-scale.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Fire the two pre-registered decision gates (133 packplus, 134 M1)',
+    description: 'Both docs pre-registered a gate whose OUTCOME WAS SUPPOSED TO RE-ORDER THE BUILD QUEUE, and neither ran — 133: "if packplus moves <10 points... the transient shaper + OTT jump the queue"; 134 §4.3-M1 prices whether the engine\'s per-voice timbre ceiling sits below pack quality at all. So the queue is currently ordered on untested inference, and the layered-arm branch is being built without the answer M1 was designed to provide. Related and cheaper: 138\'s own GLOBAL FALSIFIER ("if rungs 1-3 land their gates and pairwise moves <10 points, the thesis is false") lives only in prose — the doc says stating it "is what makes the ladder an experiment rather than a ratchet", and an unrecorded pre-registration is what ratchets are made of. That half is one decisions.md entry and should not wait for the runs.',
+    core: 'na', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/133-production-chain-depth.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Pick the canonical knowledge artifact: recipes.json vs role-targets.json (§4.9)',
+    description: 'A one-sentence ruling that stops the next agent building both or neither. Research 139 §4 proposes `presets/recipes.json` plus a generated reference doc as a SUPERSET, citing 135\'s `role-targets.json` pattern; research 138 B2 still lists role-targets + a `beat rolecheck` verb as its own build item. NEITHER EXISTS. Research/140\'s read — offered as a call, not a finding — is that 139\'s schema subsumes 135\'s and role-targets.json becomes an implementation detail of it. Blocks the `rolecheck` row below, since a verb needs to know which file it reads.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/139-recipe-library-and-layering.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Give 135\'s producer checklists a verify loop (or mark them advisory)',
+    description: 'Research 135 is honest that its dosage numbers are starting points rather than measured settings, which is the right posture — but without a `rolecheck`-style verify pass there is nothing that ever CONFIRMS a dosage, so the checklists are a reading assignment, not a procedure. Research/140 lists them under "recommendations too vague to action" for exactly this reason, alongside 131 §7-P4\'s "texture" (three levers, no dosage) and 138 row 8\'s articulation targets (outcome numbers with no named recipe — the #2-ranked cause in that doc and simultaneously its least buildable item). Two honest ways to close it and they are not the same size: wire the checklists into the rolecheck verb below so each dosage gets measured against the role target it claims to hit, or explicitly label them advisory in the doc so nobody mistakes a starting point for a setting. Do one; leaving them ambiguous is what produced the "vague" classification.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/135-producer-knowledge-layer.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: '`beat rolecheck` — a pre-batch pass/fail against per-role targets (138 B2)',
+    description: '`rg rolecheck` returns 0 matches across 1,963 files. A pre-batch pass/fail pass with named fixes, so a clip that misses its own role targets never reaches a rated batch. The hard part — mined, provenance-carrying per-role targets — ALREADY EXISTS on the preset-retarget branch; nobody owned the verb. Directly enables 138\'s design rule, which also does not exist and matters more than it sounds: "every arm\'s clips pass their feature gates BEFORE entering a batch (never spend owner ratings on a clip that missed its own targets)" — owner rating time is the program\'s scarcest resource, and without this it is being spent on clips already known to be off-target. Gated on the canonical-artifact ruling above.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/138-splice-parity-plan.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'The cheap rungs of 138\'s ladder (rungs 1-3, the one-variable arms)',
+    description: 'THE LADDER WAS CLIMBED FROM THE TOP. Free wins 1-7 were picked up only INSIDE the unmerged prototype for the ladder\'s most expensive rung (layered-arm\'s 979-line src/taste/layered.ts), while rungs 0-3 — the cheap, one-variable arms the ladder was designed around — went untouched: `bass2` (rows 1+2+5 only), `punch2` (rows 3+4+6+7+8) and the crafted-checklist arm do not exist, no new ShowdownSourceKind, no batches. Rung 1 is config-only by design. This matters beyond scheduling: a layered arm that WINS tells you nothing about which of its eight simultaneous changes did the work, which is the opposite of what the one-variable discipline was for. Rung 1 is the cheapest test of the biggest per-role effect (bassline is 17-4 in engineplus\'s wins), so it is now MORE valuable than when it was written, not less.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/138-splice-parity-plan.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Taste import-boundary test (136 §4 — its own top pick)',
+    description: 'Research 136 §4, verbatim: "the highest leverage-per-risk item in this review". The rule is "the DAW may not import the taste program"; the enforcement is a grep-shaped import-boundary test, exactly like the existing verify-manifest test, asserting that src/{core,metrics,analysis,vary,daemon,mcp} and ui/ never import src/taste. It does not exist and all four violations are live: analysis/genkit.ts:21,22, analysis/surge.ts:14, analysis/trick.ts:40, and vary/batch.ts -> taste/features. Three of the four fixes are one-liners. Bundle with 136 §5.10\'s XS module-hygiene batch, which are prerequisites for the same test: retarget the stale mulberry32 import in analysis/genkit.ts:21 to src/core/rng.ts, retarget the private mulberry32 copy in vary/vary.ts:254-262, move the SurgePatch/SurgeNote type declarations into analysis/surge.ts (type-only, safe), and move taste/features.ts into metrics/ (it is a DSP extractor, i.e. measurement), which dissolves two of the three cycles. That the review\'s own #1 pick lost anyway is the meta-finding research/140 exists to surface.',
+    core: 'missing', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/136-architecture-review.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Turn edit telemetry ON — the only item that destroys data every day it slips',
+    description: 'THE ONE ITEM WITH A DEADLINE SHAPE. src/telemetry/edit-log.ts shipped and is good; nothing turns it on. cli/beat.mjs:1072 still documents `--edit-log` as opt-in and the desktop sidecar\'s spawn args do not pass it. 137\'s framing is the whole point: "retrofitting loses those sessions forever" — every toy-run and every owner session that happens before this lands is permanently unrecoverable, and it unblocks the entire Part-4 flywheel. Cost is a flag in a launch line plus a paragraph. Ship it WITH the decisions.md entry that 116 §Honest-gaps and 128 §2.4 both explicitly required and neither got (116: "opt-in default matters even for a single owner"). Two research passes asked; neither got it.',
+    core: 'done', cli: 'partial', gui: 'missing', status: 'not-started',
+    research: 'research/137-producer-cockpit.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Produce board `.context.wav` renders (the toggle\'s missing producer)',
+    description: 'FILED 2026-07-26 alongside the honest-UI half, which shipped: the board now says "solo renders only — no in-context renders exist for this batch" where the toggle would be, instead of silently omitting it (cli/board.mjs). The producer itself needs a design ruling first, because the convention is under-specified in OPPOSITE directions for the two batch kinds. A vary batch\'s vN.beat is the whole parent document with one track varied, so vN.wav is already a FULL-MIX render — what board.mjs calls the "solo" render is in fact the in-context one, and the render actually missing is the isolated track, which cli/render.mjs\'s renderTrackSolosCommand already knows how to make; shipping a producer there means redefining which render the default player plays, a change to what the owner hears on a shipped surface. A gen batch\'s variants are bare wavs with no document at all, genuinely solo, with no surrounding material to stitch into — "context" would have to be invented as a backing bed, which no doc specifies. Research 128 §193 also puts real in-context audition in "v2, after the toy songs validate the surface". In-context audition was the single most-praised pattern in 128\'s whole survey, so this is worth doing properly rather than quickly.',
+    core: 'missing', cli: 'partial', gui: 'na', status: 'not-started',
+    research: 'research/137-producer-cockpit.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Un-rot produce-song/SKILL.md + move PREFERENCES.md out of workshop/',
+    description: 'D28 makes the produce-song skill MANDATORY for any agent asked to produce a song, and it currently tells those agents that shipped features may not exist: SKILL.md:94, :167 and :202 all still say features are "being built on a sibling branch — check `beat help`" with dead manual fallbacks, for `beat board` and `beat diff --since/--rollup`, both of which shipped (5cd20ccb, df1f3148). The audit-honesty branch un-rotted the *dotbeat* skill and never touched this one. Bundle two more XS items from 137 §5.2: make the cold-start ritual a literal numbered list, and move PREFERENCES.md from the per-song workshop/ dir to ~/Documents/dotbeat/. The argument for the move is structural rather than tidy — the evidence spans songs, so a per-song home structurally cannot accumulate the >=2-songs floor the preference lifecycle needs; leaving it costs nothing today and quietly makes the flywheel unbuildable later.',
+    core: 'na', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/137-producer-cockpit.md', plan: '.claude/skills/produce-song/SKILL.md',
+  },
+  {
+    area: 'Research 130-139 backlog', feature: '`GET /rollup` daemon route + session drawer readback',
+    description: 'src/core/rollup.ts is already pure and IO-free, so the route is a passthrough — and `rg rollup ui/src/` returns 0 files. It unblocks both the session drawer and any agent readback of what changed. Sibling from the same doc and the same shape: `GET /document` should return canonical .beat text alongside JSON (daemon.ts:1081 is `json(res, 200, doc)`), so "what the GUI has" and "what git sees" become byte-comparable — which is a diagnostic for the entire mirror class the surge track-kind crash belonged to.',
+    core: 'done', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/137-producer-cockpit.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'W1.4 + the two cheapest W2 pieces (130\'s dropped waves)',
+    description: 'Research 130\'s W2/W3 are the largest single dropped block: W0 landed 9/9, W1 landed 4/5, W2 landed 0/10 and W3 0/5, verified structurally — every module they would create is absent and every god-file they would break up is still full size, three having GROWN since the review (daemon.ts 2750 +109, beat.mjs 6140 +44, batch.ts 1195 +172). 140\'s recommendation, offered as judgement not plan, is NOT to replay W2 as a unit: the file lists are stale and 130 itself rates the wave ordering "medium confidence". Take W1.4 regardless (cli/lib/args.mjs + help extraction — it finishes something already started, and UNKNOWN_FLAG_HOLES is still exactly 75 entries, the ledger W0.2 built to shrink having not shrunk by one), plus the two cheapest high-certainty W2 pieces: W2.7, the engine\'s src/core leaf-import swap, which 130 calls "the single most elegant move... converts three untested mirrors into tested single-sources without writing one new test" and which retires the THIRD mulberry32 copy at ui/src/audio/engine.ts:1523; and W2.4, the MCP TOOLS split. Re-cut the rest rather than replaying it. Beware the reason the gap is invisible: pieces landed untagged (W2.8\'s Fisher-Yates fix shipped as F3, W2.9\'s substance partly as src/serve/review-server.ts) so a reader scanning git log concludes the wave ran.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/130-codebase-review-synthesis.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Effect-bypass polarity: land the additive `bypassed` alias (130 §6b)',
+    description: 'AN AGENT-FACING BUG WITH A PASSING TEST PROTECTING IT. test/mcp-effects.test.ts:16 pins the beat_effect_bypass polarity INVERSION as correct behaviour, with a comment saying the fix arrives "when W3.1 lands" — and W3.1 is dropped. So the codebase currently asserts both that this is correct and that it is temporary. Three names and two polarities across the three surfaces: cli/beat.mjs:4904 takes `bypassed=true`, server.ts:822 takes `{enabled}`, daemon.ts:1869 is `/effect-enabled`. Either land the additive `bypassed` alias — one schema field and one negation, no W3.1 needed — or accept the inversion permanently and drop the "pinned until" language. What is not acceptable is the current state, where a guardrail describing infrastructure that was never built reads as settled policy.',
+    core: 'missing', cli: 'partial', gui: 'na', status: 'not-started',
+    research: 'research/130-codebase-review-synthesis.md', plan: null,
+  },
+  {
+    area: 'Research 130-139 backlog', feature: 'Bank owner-flagged listening misses into listen-bench/',
+    description: 'Both 122 §8 and 123 §6.1 call this "the single most valuable asset" in them, and `rg listen-bench` returns zero references outside doc 123. The concrete cost of not having it: the DW roughness thresholds are "soft until n>=3 pairs" and n is STILL 1 — and 123 §7\'s own instruction ("log-not-gate until 2-3 more pairs confirm") was overridden by the ship, which followed §5 instead: roughness.ts:132 returns severity 3 at exactly the single measured +25% margin and cli/beat.mjs:5246 exits non-zero at severity >=3, so a roughness rise merely REPRODUCING the one calibration datapoint fails the build. Two fixes, different sizes: capping at severity 2 (or excluding roughness-dw from the exit-code rule) is XS but is the owner\'s call; the durable fix is one CLAUDE.md standing-practice paragraph making the banking a habit, which is what actually gets n above 1.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/123-perceptual-metrics.md', plan: null,
+  },
+
+  // ── Owner errands ───────────────────────────────────────────────────────
+  // research/140 §4.8: a structural hole that swallowed SIX items. The roadmap tracks features and
+  // decisions.md tracks decisions; a ten-minute human errand that BLOCKS A BUILD falls between them
+  // and disappears. CLAUDE.md already set the precedent that a second tracking system is the wrong
+  // answer, and the same reasoning puts errands here.
+  // Rows carry the VERDICT, not just the task. An errand the owner has already dispositioned stays
+  // here with its ruling and its re-trigger rather than being deleted — deleting it loses the
+  // answer and guarantees someone re-raises the question. Owner dispositions recorded 2026-07-26.
+  {
+    area: 'Owner errands', feature: 'm2m licensing email — DEFERRED (owner, 2026-07-26)',
+    description: 'VERDICT: deferred, low priority. Owner 2026-07-26: "let\'s just do this later. I think this a small repo... let\'s not worry about this for now." Not an open errand — do not re-raise it as awaiting-owner. Background: research/126 measured two Mac-feasible capabilities (`m2m_drummer` at note-F1 79.3 against CA2\'s 20.3, and `m2m_arranger`), but the models are unlicensed, i.e. all rights reserved by default, so nothing can be built without an email to the authors. TRIGGER: revisit only if a drum-arrangement or re-instrumentation capability becomes a priority.',
+    core: 'na', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/126-music2music-models.md', plan: null,
+  },
+  {
+    area: 'Owner errands', feature: 'Upstream surgepy issue — OPEN, needs explicit owner consent',
+    description: 'Still open, and deliberately narrow: the only thing needed is a yes/no. HISTORY, recorded because it is the reason for a standing rule: an upstream issue was filed once earlier in this project WITHOUT the owner\'s consent, the owner objected, and it was closed — that incident is the origin of dotbeat\'s no-external-publishing rule (outward-facing actions need per-instance consent, never plan-level approval). No agent should file this one either. The draft — a six-line repro and a one-line fix for the `getOutput()` stride bug — still sits in docs/research/surge-right-ear-ring-rootcause.md:99, and D23 calls it an "upstream issue DRAFT", so the word "draft" currently reads as a pending TODO. Two ways to close: file it WITH explicit consent, or edit D23 to say "declined to file". Note a SECOND upstream defect has since been confirmed — tempo hardcoded to 120 in the surgepy binding — which would be a separate report and a separate consent.',
+    core: 'na', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/136-architecture-review.md', plan: 'docs/decisions.md',
+  },
+  {
+    area: 'Owner errands', feature: 'Rights reads: Splice ToU (live); MiniMax/ElevenLabs (downgraded)',
+    description: 'LIVE: the Splice-ToU ruling from research/134 §4.3 — whether patches MATCHED to purchased loops inherit any restriction — which gates the whole match-to-owned direction. Also live: the Surge factory/third-party licensing re-verification (#6741), which D23 itself lists as an open "revisit when". DOWNGRADED to low value: the MiniMax ToS read (platform.minimax.io) and the ElevenLabs rights table. Reason recorded so they are not re-raised as blockers — MiniMax eliminated ITSELF on reliability during the gen bake-off (9 of 10 calls failed through fal), so its rights posture is academic; the bake-off is decided and Stable Audio 3 was retained. TRIGGER for both: only if that provider is re-evaluated.',
+    core: 'na', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/134-patch-design-at-scale.md', plan: null,
+  },
+  {
+    area: 'Owner errands', feature: 'Conditional watch items (the tracking system structurally cannot hold these)',
+    description: 'Parked here because they have nowhere else to live and would otherwise evaporate: research 122\'s "revisit immediately if NVIDIA ships a NIM" and research 124\'s "watch Moonbeam". Neither is a feature and neither is a decision — they are triggers, and the roadmap has no shape for a trigger. Filed as errands so a human sweeping this area sees them, per research/140 §4.8. Review when sweeping the backlog; delete when the trigger fires or the underlying need is met another way.',
+    core: 'na', cli: 'na', gui: 'na', status: 'not-started',
+    research: 'research/122-perceptual-quality-models.md', plan: null,
+  },
+  // ── Deferred with triggers ──────────────────────────────────────────────
+  // Owner-requested 2026-07-26, on research/140's core finding: a deferral with no written trigger
+  // is indistinguishable from a drop. Every row here states the specific evidence that promotes it.
+  {
+    area: 'Deferred (trigger stated)', feature: '`beat trick verify` — execute the catalog\'s expect clauses',
+    description: 'The trick catalog asserts 15 metric deltas and verifies none: every `expect` clause is unverified prose, and trick.ts:85 says so out loud ("not executed in v1"). Research 118 §1.3 specced the render loop that would check them. DEFERRED because with 15 hand-declared tricks the render matrix is over-engineering, per 118\'s own honest deferral. RE-TRIGGER, either of: the catalog goes one full round without a new trick being added (it has stabilised, so verification stops being a moving target), OR any measurement contradicts an `expect` clause (at which point the catalog is actively lying and verification is urgent, not nice-to-have).',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/118-production-bag-of-tricks.md', plan: null,
+  },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Proposal-outcome logging — the +/- reward half of the edit log',
+    description: 'Zero hits in src/telemetry/. `beat board` covers PICKING; nothing covers PROPOSING, so the reward signal is one-sided — the log records which candidate won but never that a proposal was made and declined. Research 116 §4.2 is link 2 of a three-link chain whose link 1 (the edit log, §4.1) shipped and whose link 3 (the feature that consumes outcomes, §4.3) was never built; 128 §2.4 and 137 §4.2 both re-ask for it. DEFERRED because there is nothing to log until real sessions produce board decisions. RE-TRIGGER: the first real session that produces board decisions, i.e. the toy-song runs. Note the ordering dependency — edit telemetry must be ON first (see the Research 130-139 backlog row), or this logs into a stream nobody is recording.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/116-agent-daw-interaction-models.md', plan: null,
+  },
+  {
+    area: 'Deferred (trigger stated)', feature: '8/16-bar phrase machinery — TRIGGER ALREADY FIRED',
+    description: 'RE-TRIGGER: ALREADY FIRED (2026-07-24). NOT an open-ended deferral — its precondition has been met and nothing re-triggered it, which is precisely the failure research/140 was written to catch. Research 124 §C.3 correctly deferred the 8/16-bar phrase machinery until composition fed whole tracks rather than 4-bar clips — and D28 met that condition on 2026-07-24. `buildChordTrack` still defaults to `bars: 4`. So this is scheduled work waiting on a slot, not a parked idea: it sits behind the toy-song runs and should be picked up as soon as they report. Filed this way deliberately — recording it as "deferred" would misrepresent it, since the thing it was waiting for already happened.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/124-composition-quality-layer.md', plan: null,
+  },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Board v2 set — hot-swap audition, surgepy worker, `beat session status`, Surge XT side-by-side',
+    description: 'Research 137 §6 items 5-8, deferred CORRECTLY and recorded here so the deferral is legible rather than silent. Four cockpit affordances: hot-swap in-context audition (clicking a candidate swaps its params through POST /edit while the GUI loops the phrase, XO-style zero-latency switching), a persistent surgepy worker, `beat session status`, and Surge XT side-by-side. Every one is explicitly gated on toy-run evidence that does not exist yet, and 128 §193 makes the same call for hot-swap specifically ("v2, after the toy songs validate the surface... both are real work (M/L) and both are wasted if the pre-rendered v1 already satisfies; let the runs decide"). RE-TRIGGER: toy-run evidence about which handoff frictions are actually real — build the ones the runs complain about, not the set.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/137-producer-cockpit.md', plan: null,
+  },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Exciter — filed so it stops being re-proposed',
+    description: 'Filed 2026-07-26 for one reason: it is the ONLY member of its family with no roadmap row, which is why it has now been proposed three times. Its siblings from research 115 P4/P5 — `utilityMonoBelow`, the side-shelf EQ, the master block — all have rows and were all demoted by 133\'s measurements. The exciter is demoted on the same evidence and should NOT be promoted: 133 measured melodic pack loops shipping ~0% air (pack chords 0.00%, pack lead 0.17%), so an air-adding primitive is chasing a gap the reference class does not have. Re-measured 2026-07-26 over the cleaned pools, which agrees: chords air p75 = 0.05%, lead p75 = 0.89%. RE-TRIGGER: a per-role air target that is actually non-zero for a melodic role — drum-loop is the only pool with real air (p50 2.4%), so an exciter scoped to drums is a different and possibly live proposal. Leave not-started; the point of the row is that the next proposal finds it already answered.',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: 'research/133-production-chain-depth.md', plan: null,
   },
 ]

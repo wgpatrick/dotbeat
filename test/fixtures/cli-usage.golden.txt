@@ -415,8 +415,9 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           skip with a warning; everything lands as ordinary
                                                           score-able batches.
   beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
-                [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--random-patches]
-                [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S] [--gen-stem-extract]
+                [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--with-layered]
+                [--random-patches] [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
+                [--gen-stem-extract]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
                                                           source — engine (the role's seed phrase, soloed, through
@@ -437,7 +438,19 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           factory patch via surgepy — pitched roles only,
                                                           drum-loop skipped; its own distinct figure unless
                                                           --shared-figure; needs a source-built surgepy, see
-                                                          beat showdown --surge-doctor). With --with-surge AND
+                                                          beat showdown --surge-doctor), optionally layered
+                                                          (--with-layered: the SAME composed figure rendered as a
+                                                          MULTI-TRACK instrument — 3-4 synth layers, each at its own
+                                                          register, in its own frequency-crossover slot, at its own
+                                                          level, mono-disciplined on the low layers — instead of one
+                                                          soloed voice; pitched roles only, drum-loop skipped since a
+                                                          kit is already multi-voice. Every other source renders a
+                                                          single patch while commercial loops are layered by
+                                                          construction, so this is the clip-SHAPE variable. With
+                                                          --with-produced it also emits layeredplus, the same stack
+                                                          through a per-layer production pass — the layered shape's
+                                                          engineplus. See src/taste/layered.ts for the per-role
+                                                          architectures and their measured targets). With --with-surge AND
                                                           --with-produced together, a surgeplus clip is added: the
                                                           SAME surge render through a dotbeat production pass
                                                           (hosted as a sample voice on a drums-kind track — the

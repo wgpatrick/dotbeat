@@ -19,6 +19,12 @@ import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 // button (its SceneLauncher scene-del). Rename/color write the existing `<track>.name`/`<track>.color`
 // setValue paths via postEdit; add/remove go through the new /add-track /remove-track daemon routes
 // (postAddTrack/postRemoveTrack) wrapping core's addTrack/removeTrack.
+// The kinds the GUI can CREATE — deliberately a subset of TrackKind, not a mirror of core's
+// TRACK_KINDS. 'surge' is absent because a surge track is defined by its patch name (BeatSurge.patch)
+// and the GUI has no patch-selection surface at all, so an added one would be unconfigurable here —
+// the same honesty as the instrument case below, which refuses when no SoundFont sample is
+// registered. Surge tracks are created with `beat track add --kind surge`; the GUI RENDERS them
+// (see AUTO_OPTIONS_BY_KIND.surge). Widen this only alongside a real patch picker.
 const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument', 'audio']
 
 // ── Arrangement length (Phase 19 Stream V) ───────────────────────────────────────────────────────
@@ -291,6 +297,7 @@ const AUTO_OPTIONS_BY_KIND: Record<TrackKind, { key: string; label: string }[]> 
   drums: [],
   instrument: [],
   audio: [{ key: 'gain', label: 'Clip Gain' }],
+  surge: [],
 }
 for (const g of PARAM_GROUPS) {
   for (const kind of g.kinds) {
@@ -300,6 +307,23 @@ for (const g of PARAM_GROUPS) {
       }
     }
   }
+}
+// A surge track carries a FULL synth block alongside its `surge` block — document.ts:961, "present
+// iff kind === 'surge' (the synth block is ALSO present, as production)". That block is the
+// surgeplus hosting layer's production stage (filter/env/effects/sends applied to the sidecar's
+// rendered audio), so every param automatable on a synth track is automatable here too. It can't
+// come from the loop above: synthParams.ts's ParamGroup.kinds is its own narrower 3-kind TrackKind
+// ('synth'|'drums'|'instrument') and no group declares 'surge'. Mirroring synth's list is the
+// honest answer — not `[]`, which would silently deny surge tracks automation they support.
+AUTO_OPTIONS_BY_KIND.surge = AUTO_OPTIONS_BY_KIND.synth.map((o) => ({ ...o }))
+
+/** Every read of AUTO_OPTIONS_BY_KIND goes through here. `track.kind` is whatever the daemon's
+ * JSON says — core's TrackKind, not necessarily this file's — so a kind added to core before the
+ * GUI mirrors it (research 137 §2.3: exactly what 'surge' did) must degrade to "no automatable
+ * params" rather than throwing a TypeError that takes the whole arrangement render down. The
+ * parity test makes the mirror drift loud; this keeps the failure mode soft in the meantime. */
+function autoOptionsFor(kind: string): { key: string; label: string }[] {
+  return AUTO_OPTIONS_BY_KIND[kind as TrackKind] ?? []
 }
 
 // Phase 22 Stream AE: 'gain' isn't a synth field (it's not in PARAM_GROUPS/SPEC_BY_KEY at all —
@@ -2002,7 +2026,7 @@ export function ArrangementView() {
       const primary = occ[0]?.clipId
       const clip = primary ? track.clips.find((c) => c.id === primary) : undefined
       const existing = clip ? clip.automation.map((l) => l.param) : []
-      const offered = new Set(AUTO_OPTIONS_BY_KIND[track.kind].map((o) => o.key))
+      const offered = new Set(autoOptionsFor(track.kind).map((o) => o.key))
       const out: string[] = []
       for (const p of [...existing, ...(addedLanes[track.id] ?? [])]) {
         if (offered.has(p) && !out.includes(p)) out.push(p)
@@ -2707,7 +2731,7 @@ export function ArrangementView() {
     const t = r.flat.track
     const lanes = visibleParamsFor(t).length
     const occ = occurrencesByTrack.get(t.id) ?? []
-    const pickerOpen = autoOpen[t.id] && occ.length > 0 && AUTO_OPTIONS_BY_KIND[t.kind].length > 0
+    const pickerOpen = autoOpen[t.id] && occ.length > 0 && autoOptionsFor(t.kind).length > 0
     return sum + lanes * AUTO_H + (pickerOpen ? PICKER_H : 0)
   }, 0)
   const contentRowsHeight = visibleTrackRows.length * ROW_H + groupHeaderRows * GROUP_HEADER_H
@@ -3226,7 +3250,7 @@ export function ArrangementView() {
           }
           const flat = row.flat
           const occ = occurrencesByTrack.get(flat.track.id) ?? []
-          const canAutomate = occ.length > 0 && AUTO_OPTIONS_BY_KIND[flat.track.kind].length > 0
+          const canAutomate = occ.length > 0 && autoOptionsFor(flat.track.kind).length > 0
           const visible = visibleParamsFor(flat.track)
           const primaryClip = occ[0]?.clipId
           const open = !!autoOpen[flat.track.id]
@@ -3277,7 +3301,7 @@ export function ArrangementView() {
               {open && canAutomate && (
                 <AutomationPicker
                   track={flat.track}
-                  available={AUTO_OPTIONS_BY_KIND[flat.track.kind].filter((o) => !visible.includes(o.key))}
+                  available={autoOptionsFor(flat.track.kind).filter((o) => !visible.includes(o.key))}
                   onAdd={(param) => addLane(flat.track.id, param)}
                 />
               )}
