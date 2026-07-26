@@ -130,6 +130,12 @@ test('level-dependent rows go advisory on un-normalized audio instead of failing
   assert.equal(r.verdict, 'pass', 'a clip at the reference median must not be failed by a row the tool itself says does not apply')
 })
 
+// Until 2026-07-26 "declined" was a banner over a fully-computed verdict: the comment at
+// src/taste/rolecheck.ts said "the verdict is withheld", the D26 commit message said a --role typo
+// "now declines", and the code computed `missed <= maxMisses` exactly as usual and printed "The
+// rows below are still printed." A drum loop checked as a bassline therefore printed a confident
+// PASS. The verdict is now genuinely withheld, and this test asserts the withholding rather than
+// just the presence of the banner.
 test('a clip that is nowhere near the role is declined, not confidently mis-reported', () => {
   const t = load()
   const v = atRefMedian(t, 'bassline')
@@ -137,7 +143,18 @@ test('a clip that is nowhere near the role is declined, not confidently mis-repo
   const r = rolecheckFeatures(v, 'bassline', t)
   assert.ok(r.applicability !== undefined, 'a 5.6 kHz-centroid clip checked as a bassline must say so')
   assert.match(r.applicability!, /does not look like a bassline/)
-  assert.match(formatRoleCheck(r), /!!/)
+
+  // The whole point: every other axis is ON the bassline reference median, so the miss budget would
+  // say PASS. It must not.
+  assert.ok(r.missed <= r.maxMisses, 'fixture check: the budget alone would have called this a pass')
+  assert.equal(r.verdict, 'declined', 'a clip the tool says it cannot judge must not carry a pass/fail verdict')
+
+  const text = formatRoleCheck(r)
+  assert.match(text, /!!/)
+  assert.match(text, /DECLINED/)
+  assert.doesNotMatch(text.split('\n')[0]!, /\bPASS\b|\bFAIL\b/, 'the headline must not state a verdict it withheld')
+  assert.match(text, /NO VERDICT/)
+  assert.doesNotMatch(text, /rows below are still printed/, 'the old wording invited the reader to trust the rows anyway')
 })
 
 test('every check names a bound, a fix, a lever and a source — D26\'s whole point', () => {
@@ -210,7 +227,12 @@ test('pushing one axis outside its bound misses on that axis alone, with its fix
     if (c.min !== undefined) (wrecked as Record<string, number>)[c.feature] = c.min - Math.max(1, Math.abs(c.min))
     else if (c.max !== undefined) (wrecked as Record<string, number>)[c.feature] = c.max + Math.max(1, Math.abs(c.max))
   }
+  // ...but leave the centroid on the role's median. Wrecking THAT axis too puts the clip outside
+  // the applicability window, and since 2026-07-26 that withholds the verdict rather than failing
+  // it — which would test the wrong branch. A bassline-shaped clip that is simply bad must FAIL.
+  ;(wrecked as Record<string, number>).centroidLog2 = t.roles[role]!.refDistribution.centroidLog2!.median
   const bad = rolecheckFeatures(wrecked, role, t)
+  assert.equal(bad.applicability, undefined, 'fixture check: this clip must still look like a bassline')
   assert.equal(bad.verdict, 'fail', `a clip outside every bound must FAIL, missed ${bad.missed} of ${bad.rows.length} with bar ${bad.maxMisses}`)
   assert.match(formatRoleCheck(bad), /FAIL/)
 })

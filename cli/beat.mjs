@@ -1034,6 +1034,9 @@ const HELP = [
                                                           over every check rejected 98.7% of the reference pool
                                                           itself. Exit 1 on FAIL so a batch script can gate on it;
                                                           takes one WAV, so loop for a batch.
+                                                          If the clip is nowhere near the role asked for (a --role
+                                                          typo), the verdict is WITHHELD, not guessed: DECLINED,
+                                                          exit 2, measurements printed but no pass/fail.
                                                           Rows that cannot mean what they say on the given audio
                                                           are marked (advisory) and NOT counted — truePeak/crest on
                                                           an un-normalized stem read level, not punch.
@@ -5451,7 +5454,10 @@ async function rolecheckCmd(argv) {
   }
   process.stdout.write(json ? `${JSON.stringify(result, null, 2)}\n` : `${formatRoleCheck(result)}\n`)
   // Exit 1 on FAIL so `beat rolecheck take.wav --role lead && beat showdown ...` gates correctly.
+  // Exit 2 on DECLINED — the tool reached no verdict (near-certainly a --role typo), and a `&&`
+  // chain must stop rather than read "not a fail" as "passed".
   if (result.verdict === 'fail') process.exitCode = 1
+  else if (result.verdict === 'declined') process.exitCode = 2
 }
 
 async function lintCmd(argv) {
