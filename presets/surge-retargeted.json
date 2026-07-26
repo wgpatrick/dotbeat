@@ -1,0 +1,724 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-26T12:10:33.604Z",
+  "note": "Surge preset RETARGETING. Each row is a curated factory patch plus a nativeOverrides list (Surge's own parameter units) that moves it toward the role's measured targets. Apply with python/surge_render.py's nativeOverrides field — NOT the older 0..1 `overrides` path, which reaches only a sliver of each range on this surgepy build. Patch CONTENT stays out of this file: it names patches by relPath, exactly as presets/surge-curated.json does, and the Surge factory-content license question (surge #6741) is unchanged by it.",
+  "lossVersion": 1,
+  "budget": 250,
+  "population": 10,
+  "seed": 41,
+  "figure": {
+    "bpm": 120,
+    "keyRootMidi": 48,
+    "minor": true,
+    "searchSeeds": {
+      "bassline": 12345,
+      "chords": 22334,
+      "lead": 31415
+    },
+    "heldOutSeeds": {
+      "bassline": 54321,
+      "chords": 43322,
+      "lead": 51413
+    }
+  },
+  "roles": {
+    "bassline": {
+      "retargeted": [
+        {
+          "id": "Theme-rt",
+          "name": "Theme",
+          "category": "Basses",
+          "relPath": "Basses/Theme.fxp",
+          "nativeOverrides": [
+            {
+              "param": "A Filter 1 Cutoff",
+              "value": -37.17
+            },
+            {
+              "param": "A Filter 1 Resonance",
+              "value": 0.0517
+            },
+            {
+              "param": "A Filter 2 Cutoff",
+              "value": 7.415
+            },
+            {
+              "param": "A Filter Balance",
+              "value": -0.3679
+            },
+            {
+              "param": "A Filter 1 FEG Mod Amount",
+              "value": 30.64
+            },
+            {
+              "param": "A Filter EG Attack",
+              "value": -7.836
+            },
+            {
+              "param": "A Filter EG Decay",
+              "value": -6.304
+            },
+            {
+              "param": "A Filter EG Sustain",
+              "value": 0.2616
+            },
+            {
+              "param": "A Amp EG Attack",
+              "value": -6.191
+            },
+            {
+              "param": "A Amp EG Decay",
+              "value": -4.559
+            },
+            {
+              "param": "A Amp EG Sustain",
+              "value": 0.8629
+            },
+            {
+              "param": "A Amp EG Release",
+              "value": -8
+            },
+            {
+              "param": "A Osc 1 Sub Mix",
+              "value": 1
+            },
+            {
+              "param": "A Osc 1 Unison Detune",
+              "value": 0
+            },
+            {
+              "param": "A Waveshaper Drive",
+              "value": 4.057
+            },
+            {
+              "param": "A Highpass",
+              "value": -69.37
+            },
+            {
+              "param": "A Osc 1 Volume",
+              "value": 0.9513
+            },
+            {
+              "param": "A FM Depth",
+              "value": -15.37
+            }
+          ],
+          "provenance": {
+            "from": "Theme",
+            "role": "bassline",
+            "lossVersion": 1,
+            "budget": 250,
+            "renders": 241,
+            "seed": 41,
+            "skippedMacros": [],
+            "targetsHit": "4/9 -> 5/9",
+            "gap": "0.8284 -> 0.6577",
+            "heldOutGap": "0.9536 -> 0.9013",
+            "moved": [
+              "A Osc 1 Sub Mix 0.5732->1",
+              "A Filter EG Sustain 0->0.2616",
+              "A Amp EG Decay -1.454->-4.559",
+              "A Osc 1 Unison Detune 0.2->0",
+              "A Amp EG Release -5.54->-8",
+              "A Filter Balance 0->-0.3679",
+              "A Filter EG Decay -4.253->-6.304",
+              "A Amp EG Attack -8->-6.191",
+              "A Amp EG Sustain 0.9997->0.8629",
+              "A FM Depth -24->-15.37",
+              "A Filter 1 Resonance 0->0.0517",
+              "A Osc 1 Volume 1->0.9513",
+              "A Filter 1 Cutoff -31.2->-37.17",
+              "A Waveshaper Drive 6.171->4.057",
+              "A Filter 2 Cutoff 3->7.415",
+              "A Highpass -72->-69.37",
+              "A Filter 1 FEG Mod Amount 33.67->30.64",
+              "A Filter EG Attack -8->-7.836"
+            ],
+            "unreachable": [
+              "crestSubDb <= 11 (at 24.94)",
+              "crestDb 6 .. 12 (at 13.6648)",
+              "centroidHz <= 90 (at 113.3391)",
+              "bandSubPct >= 30 (at 24.613)"
+            ]
+          }
+        },
+        {
+          "id": "FM Slap-rt",
+          "name": "FM Slap",
+          "category": "Basses",
+          "relPath": "Basses/FM Slap.fxp",
+          "nativeOverrides": [
+            {
+              "param": "A Filter 1 Cutoff",
+              "value": 2.596
+            },
+            {
+              "param": "A Filter 1 Resonance",
+              "value": 0.188
+            },
+            {
+              "param": "A Filter 2 Cutoff",
+              "value": 16
+            },
+            {
+              "param": "A Filter Balance",
+              "value": -0.0413
+            },
+            {
+              "param": "A Filter 1 FEG Mod Amount",
+              "value": -4.191
+            },
+            {
+              "param": "A Filter EG Attack",
+              "value": -6.336
+            },
+            {
+              "param": "A Filter EG Decay",
+              "value": -0.0824
+            },
+            {
+              "param": "A Filter EG Sustain",
+              "value": 0.1473
+            },
+            {
+              "param": "A Amp EG Attack",
+              "value": -4.75
+            },
+            {
+              "param": "A Amp EG Decay",
+              "value": -0.9504
+            },
+            {
+              "param": "A Amp EG Sustain",
+              "value": 1
+            },
+            {
+              "param": "A Amp EG Release",
+              "value": -1.402
+            },
+            {
+              "param": "A Waveshaper Drive",
+              "value": -5.107
+            },
+            {
+              "param": "A Highpass",
+              "value": -72
+            },
+            {
+              "param": "A Osc 1 Volume",
+              "value": 0.847
+            },
+            {
+              "param": "A FM Depth",
+              "value": -9.6
+            }
+          ],
+          "provenance": {
+            "from": "FM Slap",
+            "role": "bassline",
+            "lossVersion": 1,
+            "budget": 250,
+            "renders": 241,
+            "seed": 41,
+            "skippedMacros": [
+              "A Osc 1 Sub Mix",
+              "A Osc 1 Unison Detune"
+            ],
+            "targetsHit": "4/9 -> 4/9",
+            "gap": "1.5717 -> 0.5771",
+            "heldOutGap": "1.6770 -> 1.4077",
+            "moved": [
+              "A Amp EG Attack -8->-4.75",
+              "A Amp EG Release -4.652->-1.402",
+              "A FM Depth -24->-9.6",
+              "A Filter 1 Resonance 0->0.188",
+              "A Osc 1 Volume 1->0.847",
+              "A Filter EG Decay -2->-0.0824",
+              "A Filter EG Sustain 0->0.1473",
+              "A Filter EG Attack -8->-6.336",
+              "A Waveshaper Drive 0->-5.107",
+              "A Filter 2 Cutoff 3->16",
+              "A Amp EG Decay 0->-0.9504",
+              "A Filter 1 FEG Mod Amount 0->-4.191",
+              "A Filter Balance 0->-0.0413"
+            ],
+            "unreachable": [
+              "centroidHz <= 90 (at 157.0398)",
+              "bandSubPct >= 30 (at 23.6004)",
+              "truePeakDb >= -8 (at -8.6522)",
+              "crestMidsDb >= 6 (at 5.309)",
+              "bandMidsPct <= 10 (at 10.8415)"
+            ]
+          }
+        }
+      ]
+    },
+    "chords": {
+      "retargeted": [
+        {
+          "id": "Bright-rt",
+          "name": "Bright",
+          "category": "Pads",
+          "relPath": "Pads/Bright.fxp",
+          "nativeOverrides": [
+            {
+              "param": "A Filter 1 Cutoff",
+              "value": -1.744
+            },
+            {
+              "param": "A Filter 1 Resonance",
+              "value": 0.058
+            },
+            {
+              "param": "A Filter 2 Cutoff",
+              "value": -4.941
+            },
+            {
+              "param": "A Filter Balance",
+              "value": 0.1459
+            },
+            {
+              "param": "A Filter 1 FEG Mod Amount",
+              "value": 39.94
+            },
+            {
+              "param": "A Filter EG Attack",
+              "value": -7.423
+            },
+            {
+              "param": "A Filter EG Decay",
+              "value": 2.881
+            },
+            {
+              "param": "A Filter EG Sustain",
+              "value": 0.7091
+            },
+            {
+              "param": "A Amp EG Attack",
+              "value": 1.358
+            },
+            {
+              "param": "A Amp EG Decay",
+              "value": 2.451
+            },
+            {
+              "param": "A Amp EG Sustain",
+              "value": 0.9018
+            },
+            {
+              "param": "A Amp EG Release",
+              "value": 1.847
+            },
+            {
+              "param": "A Osc 1 Sub Mix",
+              "value": 0.3657
+            },
+            {
+              "param": "A Osc 1 Unison Detune",
+              "value": 0.0116
+            },
+            {
+              "param": "A Waveshaper Drive",
+              "value": -2.012
+            },
+            {
+              "param": "A Highpass",
+              "value": -19.3
+            },
+            {
+              "param": "A Osc 1 Volume",
+              "value": 0.9686
+            },
+            {
+              "param": "A FM Depth",
+              "value": -0.3145
+            }
+          ],
+          "provenance": {
+            "from": "Bright",
+            "role": "chords",
+            "lossVersion": 1,
+            "budget": 250,
+            "renders": 241,
+            "seed": 41,
+            "skippedMacros": [],
+            "targetsHit": "6/10 -> 10/10",
+            "gap": "0.3425 -> 0.0000",
+            "heldOutGap": "0.9719 -> 0.2791",
+            "moved": [
+              "A Osc 1 Sub Mix 0->0.3657",
+              "A Waveshaper Drive 6.771->-2.012",
+              "A Amp EG Release -0.1696->1.847",
+              "A Filter EG Sustain 0.5839->0.7091",
+              "A Amp EG Sustain 1->0.9018",
+              "A Filter Balance 0->0.1459",
+              "A Filter 2 Cutoff 3->-4.941",
+              "A Filter 1 Resonance 0->0.058",
+              "A Highpass -23.53->-19.3",
+              "A Osc 1 Unison Detune 0.0589->0.0116",
+              "A Filter EG Attack -8->-7.423",
+              "A Amp EG Decay 1.88->2.451",
+              "A Amp EG Attack 0.8446->1.358",
+              "A Filter EG Decay 3.293->2.881",
+              "A Osc 1 Volume 1->0.9686",
+              "A Filter 1 FEG Mod Amount 38.57->39.94"
+            ],
+            "unreachable": []
+          }
+        },
+        {
+          "id": "Verb Pad-rt",
+          "name": "Verb Pad",
+          "category": "Pads",
+          "relPath": "Pads/Verb Pad.fxp",
+          "nativeOverrides": [
+            {
+              "param": "A Filter 1 Cutoff",
+              "value": -10
+            },
+            {
+              "param": "A Filter 1 Resonance",
+              "value": 0.4866
+            },
+            {
+              "param": "A Filter 2 Cutoff",
+              "value": -0.9702
+            },
+            {
+              "param": "A Filter Balance",
+              "value": 0.0247
+            },
+            {
+              "param": "A Filter 1 FEG Mod Amount",
+              "value": -16.97
+            },
+            {
+              "param": "A Filter EG Attack",
+              "value": -7.8
+            },
+            {
+              "param": "A Filter EG Decay",
+              "value": 0.2532
+            },
+            {
+              "param": "A Filter EG Sustain",
+              "value": 0.1261
+            },
+            {
+              "param": "A Amp EG Attack",
+              "value": 0.6568
+            },
+            {
+              "param": "A Amp EG Decay",
+              "value": 0.4368
+            },
+            {
+              "param": "A Amp EG Sustain",
+              "value": 0.8729
+            },
+            {
+              "param": "A Amp EG Release",
+              "value": -4.485
+            },
+            {
+              "param": "A Osc 1 Sub Mix",
+              "value": 0.1179
+            },
+            {
+              "param": "A Osc 1 Unison Detune",
+              "value": 0.253
+            },
+            {
+              "param": "A Waveshaper Drive",
+              "value": -9.261
+            },
+            {
+              "param": "A Highpass",
+              "value": -69.41
+            },
+            {
+              "param": "A Osc 1 Volume",
+              "value": 0.9061
+            },
+            {
+              "param": "A FM Depth",
+              "value": -23.52
+            }
+          ],
+          "provenance": {
+            "from": "Verb Pad",
+            "role": "chords",
+            "lossVersion": 1,
+            "budget": 250,
+            "renders": 241,
+            "seed": 41,
+            "skippedMacros": [],
+            "targetsHit": "5/10 -> 5/10",
+            "gap": "1.3712 -> 0.2679",
+            "heldOutGap": "0.3821 -> 1.3682",
+            "moved": [
+              "A Filter 1 Resonance 0.7366->0.4866",
+              "A Waveshaper Drive 0->-9.261",
+              "A Filter EG Decay -2->0.2532",
+              "A Amp EG Sustain 1->0.8729",
+              "A Filter EG Sustain 0->0.1261",
+              "A Osc 1 Sub Mix 0->0.1179",
+              "A Filter 1 Cutoff 3->-10",
+              "A Osc 1 Volume 1->0.9061",
+              "A Filter 1 FEG Mod Amount 0->-16.97",
+              "A Osc 1 Unison Detune 0.2->0.253",
+              "A Amp EG Release -5->-4.485",
+              "A Amp EG Decay 0->0.4368",
+              "A Filter 2 Cutoff 3->-0.9702",
+              "A Highpass -72->-69.41",
+              "A Amp EG Attack 0.3571->0.6568",
+              "A Filter EG Attack -8->-7.8",
+              "A Filter Balance 0->0.0247",
+              "A FM Depth -24->-23.52"
+            ],
+            "unreachable": [
+              "bandBassPct >= 15 (at 3.3525)",
+              "bandMidsPct <= 90 (at 95.3364)",
+              "onsetRatePerSec >= 4 (at 3.493)",
+              "crestDb 14 .. 19 (at 13.3653)",
+              "truePeakDb >= -5 (at -5.3105)"
+            ]
+          }
+        }
+      ]
+    },
+    "lead": {
+      "retargeted": [
+        {
+          "id": "The 1980s-rt",
+          "name": "The 1980s",
+          "category": "Plucks",
+          "relPath": "Plucks/The 1980s.fxp",
+          "nativeOverrides": [
+            {
+              "param": "A Filter 1 Cutoff",
+              "value": -15.75
+            },
+            {
+              "param": "A Filter 1 Resonance",
+              "value": 0.1356
+            },
+            {
+              "param": "A Filter 2 Cutoff",
+              "value": 2.16
+            },
+            {
+              "param": "A Filter Balance",
+              "value": 0.2729
+            },
+            {
+              "param": "A Filter 1 FEG Mod Amount",
+              "value": 28.56
+            },
+            {
+              "param": "A Filter EG Attack",
+              "value": -6.995
+            },
+            {
+              "param": "A Filter EG Decay",
+              "value": -1.107
+            },
+            {
+              "param": "A Filter EG Sustain",
+              "value": 0.0918
+            },
+            {
+              "param": "A Amp EG Attack",
+              "value": -5.618
+            },
+            {
+              "param": "A Amp EG Decay",
+              "value": -2.172
+            },
+            {
+              "param": "A Amp EG Sustain",
+              "value": 0.9624
+            },
+            {
+              "param": "A Amp EG Release",
+              "value": 1.038
+            },
+            {
+              "param": "A Waveshaper Drive",
+              "value": 5.878
+            },
+            {
+              "param": "A Highpass",
+              "value": -14.16
+            },
+            {
+              "param": "A Osc 1 Volume",
+              "value": 0.9134
+            },
+            {
+              "param": "A FM Depth",
+              "value": -11.98
+            }
+          ],
+          "provenance": {
+            "from": "The 1980s",
+            "role": "lead",
+            "lossVersion": 1,
+            "budget": 250,
+            "renders": 241,
+            "seed": 41,
+            "skippedMacros": [
+              "A Osc 1 Sub Mix",
+              "A Osc 1 Unison Detune"
+            ],
+            "targetsHit": "2/9 -> 2/9",
+            "gap": "1.3910 -> 0.2386",
+            "heldOutGap": "1.5834 -> 0.5759",
+            "moved": [
+              "A Amp EG Attack -8->-5.618",
+              "A Amp EG Decay 0->-2.172",
+              "A FM Depth -24->-11.98",
+              "A Filter Balance 0->0.2729",
+              "A Highpass -25.28->-14.16",
+              "A Waveshaper Drive 0->5.878",
+              "A Filter EG Decay 0.2982->-1.107",
+              "A Filter EG Sustain 0->0.0918",
+              "A Osc 1 Volume 1->0.9134",
+              "A Filter EG Attack -8->-6.995",
+              "A Filter 1 Resonance 0.067->0.1356",
+              "A Filter 1 FEG Mod Amount 40.11->28.56",
+              "A Amp EG Sustain 0.9946->0.9624",
+              "A Filter 1 Cutoff -18.24->-15.75",
+              "A Amp EG Release 1.268->1.038",
+              "A Filter 2 Cutoff 3->2.16"
+            ],
+            "unreachable": [
+              "fluxMean >= 0.7 (at 0.5281)",
+              "bandMidsPct <= 90 (at 97.9122)",
+              "attackP25Ms <= 8 (at 13.9683)",
+              "flatnessHiDb -24 .. -8 (at -26.7956)",
+              "crestSubDb <= 15 (at 15.5965)",
+              "truePeakDb >= -5 (at -5.1528)",
+              "crestPresenceDb >= 9 (at 8.9908)"
+            ]
+          }
+        },
+        {
+          "id": "Frog-rt",
+          "name": "Frog",
+          "category": "Plucks",
+          "relPath": "Plucks/Frog.fxp",
+          "nativeOverrides": [
+            {
+              "param": "A Filter 1 Cutoff",
+              "value": -28.48
+            },
+            {
+              "param": "A Filter 1 Resonance",
+              "value": 0.2555
+            },
+            {
+              "param": "A Filter 2 Cutoff",
+              "value": 6.639
+            },
+            {
+              "param": "A Filter Balance",
+              "value": 0.1828
+            },
+            {
+              "param": "A Filter 1 FEG Mod Amount",
+              "value": 22.96
+            },
+            {
+              "param": "A Filter EG Attack",
+              "value": -6.85
+            },
+            {
+              "param": "A Filter EG Decay",
+              "value": 3.372
+            },
+            {
+              "param": "A Filter EG Sustain",
+              "value": 0.0325
+            },
+            {
+              "param": "A Amp EG Attack",
+              "value": -5.89
+            },
+            {
+              "param": "A Amp EG Decay",
+              "value": 1.739
+            },
+            {
+              "param": "A Amp EG Sustain",
+              "value": 0.9682
+            },
+            {
+              "param": "A Amp EG Release",
+              "value": 3.368
+            },
+            {
+              "param": "A Osc 1 Unison Detune",
+              "value": 0.0011
+            },
+            {
+              "param": "A Waveshaper Drive",
+              "value": 6.32
+            },
+            {
+              "param": "A Highpass",
+              "value": -27.45
+            },
+            {
+              "param": "A Osc 1 Volume",
+              "value": 0.823
+            },
+            {
+              "param": "A FM Depth",
+              "value": -32.22
+            }
+          ],
+          "provenance": {
+            "from": "Frog",
+            "role": "lead",
+            "lossVersion": 1,
+            "budget": 250,
+            "renders": 241,
+            "seed": 41,
+            "skippedMacros": [
+              "A Osc 1 Sub Mix"
+            ],
+            "targetsHit": "4/9 -> 5/9",
+            "gap": "1.0030 -> 0.0687",
+            "heldOutGap": "1.1757 -> 0.2362",
+            "moved": [
+              "A Filter EG Decay 0.1589->3.372",
+              "A Amp EG Release 0.5018->3.368",
+              "A Osc 1 Unison Detune 0.2->0.0011",
+              "A Osc 1 Volume 1->0.823",
+              "A Amp EG Decay 0->1.739",
+              "A Waveshaper Drive 0->6.32",
+              "A Highpass -38.44->-27.45",
+              "A Filter Balance 0->0.1828",
+              "A Filter 1 Resonance 0.1848->0.2555",
+              "A Filter EG Attack -6.05->-6.85",
+              "A Filter 1 Cutoff -34.13->-28.48",
+              "A Filter 1 FEG Mod Amount 15.43->22.96",
+              "A Filter EG Sustain 0->0.0325",
+              "A Amp EG Sustain 1->0.9682",
+              "A Filter 2 Cutoff 3->6.639",
+              "A FM Depth -33.99->-32.22",
+              "A Amp EG Attack -6.05->-5.89"
+            ],
+            "unreachable": [
+              "bandMidsPct <= 90 (at 93.5392)",
+              "fluxMean >= 0.7 (at 0.6607)",
+              "crestDb 14 .. 19 (at 13.9121)",
+              "truePeakDb >= -5 (at -5.0593)"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
