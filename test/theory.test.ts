@@ -9,6 +9,7 @@ import { test } from 'node:test'
 import {
   scalePitchClasses,
 } from '../src/taste/showdown.js'
+import { mulberry32 } from '../src/taste/eval.js'
 import {
   PROGRESSION_BANK,
   buildChordTrack,
@@ -29,6 +30,7 @@ import {
   registerRuleViolations,
   grooveConsistency,
   lintFigure,
+  bassBarSchedule,
 } from '../src/taste/theory.js'
 
 const MINOR = { root: 48, minor: true }
@@ -182,6 +184,79 @@ test('every theory bass figure carries ONLY root/5th/octave in the sub register'
       const notes = composeTheoryBass(archetype, track, seed)
       const violations = registerRuleViolations(notes, track)
       assert.equal(violations.length, 0, `${archetype} seed ${seed} must not violate the register rule`)
+    }
+  }
+})
+
+// ---- rhythm-skeleton variety (owner ear-report, 2026-07-26) ------------------------------------
+// Calibration: before this work the five bass archetypes produced EIGHT distinct onset skeletons
+// across 144 draws of a simulated 9-batch round (~9.6 same-skeleton repeats per 15 figures) — the
+// owner heard it in blind rating as "a lot of the same note patterns again". After: 99 skeletons,
+// 0.87 repeats per 15. These guards pin the mechanism, not the exact numbers.
+
+const onsetKey = (notes: readonly { start: number }[]): string =>
+  [...new Set(notes.map((n) => Math.round(n.start)))].sort((a, b) => a - b).join(',')
+
+test('each bass archetype has a FAMILY of rhythmic realizations, not one fixed slot list', () => {
+  for (const archetype of THEORY_BASS_ARCHETYPES) {
+    const skeletons = new Set<string>()
+    for (let seed = 0; seed < 40; seed++) {
+      const track = buildChordTrack(MINOR, seed)
+      skeletons.add(onsetKey(composeTheoryBass(archetype, track, seed)))
+    }
+    assert.ok(skeletons.size >= 6, `${archetype} produced only ${skeletons.size} distinct skeletons in 40 draws`)
+  }
+})
+
+test('bassBarSchedule states the pattern in bar 1 and restates it in full in the last bar', () => {
+  for (let seed = 0; seed < 60; seed++) {
+    const sched = bassBarSchedule(mulberry32(seed), [0, 4, 8, 10, 12, 14], 4)
+    assert.equal(sched.length, 4)
+    assert.equal(sched[0]!.kind, 'full', 'bar 1 states the pattern')
+    assert.equal(sched[3]!.kind, 'full', 'the last bar restates it in full')
+    // every middle bar carries at most ONE change, on a slot inside the bar
+    for (const c of sched.slice(1, 3)) {
+      if (c.kind === 'full') continue
+      assert.ok(c.slot >= 0 && c.slot < 16, 'a scheduled change stays inside its bar')
+      if (c.kind === 'push') assert.ok(c.slot < 15, 'a pushed note cannot cross the barline')
+    }
+  }
+})
+
+test("the Stussy recipe's OWN per-bar schedule survives the seeded variation", () => {
+  // §C.2 verbatim: bar 2 turns the slot-7 octave into a tonic; bar 3 skips slot 14; bar 4 is full.
+  for (let seed = 0; seed < 30; seed++) {
+    const track = buildChordTrack(MINOR, seed, { barsPerChord: 1 })
+    const notes = composeTheoryBass('stussy', track, seed)
+    const rootOf = (bar: number): number => track.key.root - 12 + chordAtStep(track, bar * 16).rootOffset
+    const at = (bar: number, slot: number): number[] => notes.filter((n) => Math.round(n.start) === bar * 16 + slot).map((n) => n.pitch)
+    for (const bar of [0, 1, 2, 3]) assert.ok(at(bar, 0).includes(rootOf(bar)), `bar ${bar + 1} keeps the slot-1 tonic`)
+    assert.deepEqual(at(1, 6), [rootOf(1)], 'bar 2: the slot-7 octave becomes the tonic')
+    assert.deepEqual(at(2, 14), [], 'bar 3: slot 14 is skipped')
+    assert.ok(at(3, 14).length > 0, 'bar 4: the full pattern returns')
+  }
+})
+
+test('a bass figure is never four copies of bar 1 — the per-bar schedule always changes something', () => {
+  let variedFigures = 0
+  let total = 0
+  for (const archetype of THEORY_BASS_ARCHETYPES) {
+    for (let seed = 0; seed < 40; seed++) {
+      const track = buildChordTrack(MINOR, seed, { barsPerChord: 4 }) // one chord: only RHYTHM can differ
+      const notes = composeTheoryBass(archetype, track, seed)
+      const bars = [0, 1, 2, 3].map((b) => onsetKey(notes.filter((n) => Math.floor(n.start / 16) === b).map((n) => ({ start: n.start - b * 16 }))))
+      total += 1
+      if (new Set(bars).size > 1) variedFigures += 1
+    }
+  }
+  assert.ok(variedFigures / total > 0.6, `only ${variedFigures}/${total} figures vary bar-to-bar`)
+})
+
+test('every bass archetype is deterministic in its seed across the new seeded realizations', () => {
+  for (const archetype of THEORY_BASS_ARCHETYPES) {
+    for (let seed = 0; seed < 20; seed++) {
+      const track = buildChordTrack(MINOR, seed)
+      assert.deepEqual(composeTheoryBass(archetype, track, seed), composeTheoryBass(archetype, track, seed))
     }
   }
 })

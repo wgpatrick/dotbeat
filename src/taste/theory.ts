@@ -23,7 +23,7 @@
 
 import { scalePitchClasses, degreePitch, chooseSeeded, type PhraseKey, type ScaleMode, type ComposedNote, type ComposedPhrase } from './phrase.js'
 import { mulberry32 } from './eval.js'
-import { contourInversion, transposeToNextChord, rhythmicDisplacement, oneChangePerRepeat, type MotifOperator } from './motif.js'
+import { contourInversion, transposeToNextChord, rhythmicDisplacement, oneChangePerRepeat, euclidSteps, type MotifOperator } from './motif.js'
 
 const rnd2 = (x: number): number => Math.round(x * 100) / 100
 const clampVel = (v: number): number => rnd2(Math.min(0.95, Math.max(0.05, v)))
@@ -282,9 +282,13 @@ export function enforceBassRegister(pitch: number, chordRootPitch: number): numb
 export const THEORY_BASS_ARCHETYPES = ['trance-roller', 'stussy', 'offbeat-root', 'sub-pulse', 'octave-drive'] as const
 
 /** Swing window for the Stussy tech-house recipe (§C.2: "56-58%, <54% stiff, >62% dragged").
- * Applied to offbeat 16ths as a fractional-step delay: shift = 2*(pct/100) - 1 steps. */
-const STUSSY_SWING_PCT = 57
+ * Applied to offbeat 16ths as a fractional-step delay: shift = 2*(pct/100) - 1 steps. The recipe
+ * gives a WINDOW, not a number — so the figure draws one, seeded, inside it. */
+const STUSSY_SWING_WINDOW: readonly number[] = [56, 56.5, 57, 57.5, 58]
 const swingShiftSteps = (pct: number): number => rnd2(2 * (pct / 100) - 1)
+
+/** Seeded pick of one item (exactly one rng draw). */
+const pickOne = <T>(rng: () => number, items: readonly T[]): T => items[Math.floor(rng() * items.length)]!
 
 interface BassContext {
   track: ChordTrack
@@ -298,101 +302,246 @@ function bassRootAt(ctx: BassContext, step: number): number {
   return ctx.key.root - 12 + chord.rootOffset
 }
 
-function tranceRoller(ctx: BassContext): ComposedNote[] {
-  // Myloops uplifting-trance rolling bass: kick on quarters, bass on the 16th offbeats "e-&-a" of
-  // every beat (12 notes/bar), all chord root, cut short (~40 ms decay -> ~0.5-step gate), -8..-12
-  // velocity on the "&"s.
-  const notes: ComposedNote[] = []
-  for (let bar = 0; bar < ctx.track.bars; bar++) {
-    for (const beat of [0, 4, 8, 12]) {
-      for (const k of [1, 2, 3]) {
-        const step = bar * 16 + beat + k
-        const root = bassRootAt(ctx, step)
-        const isAnd = k === 2 // the "&" — the 8th offbeat
-        notes.push({ pitch: root, start: step, duration: 0.5, velocity: clampVel(isAnd ? 0.72 : 0.82) })
-      }
+// ---- seeded rhythm-skeleton realization (owner ear-report, 2026-07-26) -------------------------
+// The archetypes above were defined by FIXED 16th-slot lists, so every draw of one was the same
+// groove with different pitches — measured at 8 distinct onset skeletons across 144 draws, i.e. ~10
+// same-skeleton repeats per 15 figures, which is what the owner heard in blind rating. The fix is
+// not more archetypes: it is a seeded FAMILY of rhythmic realizations inside each one, plus the
+// per-bar variation schedule the research already prescribes but only Stussy implemented.
+
+/** A rolling-bass bar as slot -> (interval above the chord root, gate, velocity), the representation
+ * the variation schedule edits before pitches are resolved. `shift` is a fractional-step delay
+ * (Chandler's groove-via-offset, §C.2). */
+interface BassSlot {
+  slot: number
+  /** semitones above the chord's sub-register root — 0/7/12 are register-safe by construction, and
+   * anything else (Stussy's b3) is lifted by `enforceBassRegister` at render time */
+  interval: number
+  gate: number
+  velocity: number
+  shift?: number
+}
+
+/** One bar's SINGLE change in a rolling-bass variation schedule (§C.2's literal Stussy schedule —
+ * "bar 2: slot-7 octave→tonic; bar 3: skip slot 14; bar 4: full pattern" — generalized by §C.3's
+ * "successful tracks change one element per repeat while holding the core"). */
+export type BassBarChange =
+  | { kind: 'full' }
+  | { kind: 'skip'; slot: number }
+  | { kind: 'tonic'; slot: number }
+  | { kind: 'octave'; slot: number }
+  | { kind: 'push'; slot: number }
+  | { kind: 'ghost'; slot: number }
+
+const BASS_CHANGE_KINDS = ['skip', 'tonic', 'octave', 'push', 'ghost'] as const
+
+/** Build the seeded one-change-per-bar schedule for a `bars`-bar figure over `slots`: the FIRST bar
+ * states the pattern and the LAST restates it in full (the Stussy schedule's own shape); each bar
+ * between them carries exactly one change, drawn seeded. Changes land in the back half of the bar,
+ * where a rolling bass's variations actually go. */
+export function bassBarSchedule(rng: () => number, slots: readonly number[], bars: number): BassBarChange[] {
+  const sched: BassBarChange[] = Array.from({ length: bars }, () => ({ kind: 'full' }) as BassBarChange)
+  if (slots.length === 0 || bars < 3) return sched
+  const late = slots.filter((s) => s >= 8)
+  const pool = late.length > 0 ? late : slots
+  const free: number[] = []
+  for (let s = 1; s < 16; s++) if (!slots.includes(s) && s % 4 !== 0) free.push(s)
+  for (let b = 1; b < bars - 1; b++) {
+    const kind = pickOne(rng, BASS_CHANGE_KINDS)
+    if (kind === 'ghost') {
+      sched[b] = free.length > 0 ? { kind, slot: pickOne(rng, free) } : { kind: 'full' }
+      continue
     }
+    // a pushed note must stay inside its own bar
+    const kindPool = kind === 'push' ? pool.filter((s) => s < 15) : pool
+    sched[b] = kindPool.length > 0 ? { kind, slot: pickOne(rng, kindPool) } : { kind: 'full' }
   }
+  return sched
+}
+
+/** Render one bar of a slot spec: apply that bar's single scheduled change, the figure's swing on
+ * offbeat 16ths, and the register rule on every note. */
+function renderBassBar(ctx: BassContext, bar: number, spec: readonly BassSlot[], change: BassBarChange, swing: number): ComposedNote[] {
+  let slots: BassSlot[] = spec.map((s) => ({ ...s }))
+  switch (change.kind) {
+    case 'skip':
+      slots = slots.filter((s) => s.slot !== change.slot)
+      break
+    case 'tonic':
+      slots = slots.map((s) => (s.slot === change.slot ? { ...s, interval: 0 } : s))
+      break
+    case 'octave':
+      // "this slot becomes the octave" — capped at the octave so the sub never climbs out of range
+      slots = slots.map((s) => (s.slot === change.slot ? { ...s, interval: 12 } : s))
+      break
+    case 'push':
+      slots = slots.map((s) => (s.slot === change.slot ? { ...s, shift: (s.shift ?? 0) + 1 } : s))
+      break
+    case 'ghost':
+      if (!slots.some((s) => s.slot === change.slot)) slots.push({ slot: change.slot, interval: 0, gate: 0.9, velocity: 0.42 })
+      break
+    default:
+      break
+  }
+  const o = bar * 16
+  const out: ComposedNote[] = []
+  for (const s of slots) {
+    const step = o + s.slot
+    const root = bassRootAt(ctx, step)
+    const start = rnd2(step + (s.shift ?? 0) + (s.slot % 2 === 1 ? swing : 0))
+    out.push({ pitch: enforceBassRegister(root + s.interval, root), start, duration: s.gate, velocity: clampVel(s.velocity) })
+  }
+  return out
+}
+
+/** Render a whole figure from one bar spec plus a seeded per-bar schedule. */
+function renderBassFigure(ctx: BassContext, spec: readonly BassSlot[], swing = 0): ComposedNote[] {
+  const sched = bassBarSchedule(ctx.rng, spec.map((s) => s.slot), ctx.track.bars)
+  const notes: ComposedNote[] = []
+  for (let bar = 0; bar < ctx.track.bars; bar++) notes.push(...renderBassBar(ctx, bar, spec, sched[bar] ?? { kind: 'full' }, swing))
   return notes
 }
+
+/** Seeded realizations of the Myloops rolling bass. The sourced pattern — all three 16th offbeats
+ * "e-&-a" of every beat, 12 notes/bar — carries three of the five slots, so it stays the dominant
+ * sound; the thinner sets are the same recipe at lower density (Attack's wider off-beat archetype,
+ * §C.2: notes BETWEEN the kicks). */
+const TRANCE_ROLLER_OFFBEATS: readonly (readonly number[])[] = [
+  [1, 2, 3],
+  [1, 2, 3],
+  [1, 2, 3],
+  [2, 3], // "&-a" — a more spacious roller
+  [1, 3], // "e-a" — a 16th gap on every "&"
+]
+
+function tranceRoller(ctx: BassContext): ComposedNote[] {
+  // Myloops uplifting-trance rolling bass: kick on quarters, bass on the 16th offbeats of every
+  // beat, all chord root, cut short (~40 ms decay -> a sub-1-step gate), -8..-12 velocity on one
+  // offbeat of each beat. Density, gate and WHICH offbeat carries the velocity dip are seeded; the
+  // recipe fixes none of the three (it says "optional -8-12 velocity on the &s").
+  const offbeats = pickOne(ctx.rng, TRANCE_ROLLER_OFFBEATS)
+  const gate = pickOne(ctx.rng, [0.4, 0.5, 0.6])
+  const dip = pickOne(ctx.rng, offbeats)
+  const spec: BassSlot[] = []
+  for (const beat of [0, 4, 8, 12]) {
+    for (const k of offbeats) spec.push({ slot: beat + k, interval: 0, gate, velocity: k === dip ? 0.72 : 0.82 })
+  }
+  return renderBassFigure(ctx, spec)
+}
+
+/** "Quiet tonic fillers elsewhere" is the one part of the Stussy spec left open — the recipe pins
+ * slots 1/9, 5/13 and 7/15 and then says only "elsewhere" for the fillers. These are the candidate
+ * filler sets, all on weak 16ths so the pinned slots keep their weight. */
+const STUSSY_FILLER_SETS: readonly (readonly number[])[] = [
+  [2, 10],
+  [2, 10, 13],
+  [3, 11],
+  [10],
+  [2, 7, 10],
+  [2, 10, 15],
+]
 
 function stussy(ctx: BassContext): ComposedNote[] {
   // The tech-house "Stussy 3-note pattern" (§C.2, the producer's school): pitch set 1-5-8 (root,
   // fifth, octave) or 1-b3-5; tonic on slots 1/9 (steps 0/8), fifth on 5/13 (steps 4/12), octave on
   // 7/15 (steps 6/14), quiet tonic fillers elsewhere; gate 60% on downbeats / 90-100% offbeats;
-  // velocities ~110/90/75 (of 127); swing 56-58%; a one-change-per-bar variation schedule.
+  // velocities ~110/90/75 (of 127); swing 56-58%.
+  //
+  // The recipe's OWN one-change-per-bar schedule (bar 2: slot-7 octave->tonic; bar 3: skip slot 14;
+  // bar 4: full pattern) is kept verbatim — so this archetype does NOT take the generic seeded
+  // schedule. Its seeded axes are the ones the recipe leaves open: the pitch-set variant, the swing
+  // percentage inside the stated 56-58 window, the gate values inside the stated ranges, and which
+  // weak 16ths carry the "quiet tonic fillers".
   const useMinorThird = ctx.rng() < 0.4 // the 1-b3-5 colour variant
-  const swing = swingShiftSteps(STUSSY_SWING_PCT)
-  const notes: ComposedNote[] = []
-  const add = (step: number, interval: number, gate: number, v: number): void => {
-    const root = bassRootAt(ctx, step)
-    // a b3 in the sub register is lifted an octave by enforceBassRegister below (register rule)
-    const pitch = enforceBassRegister(root + interval, root)
-    const start = step % 2 === 1 ? step + swing : step // swing the offbeat 16ths
-    notes.push({ pitch, start: rnd2(start), duration: gate, velocity: clampVel(v) })
-  }
+  const swing = swingShiftSteps(pickOne(ctx.rng, STUSSY_SWING_WINDOW))
+  const downGate = pickOne(ctx.rng, [0.55, 0.6, 0.65])
+  const offGate = pickOne(ctx.rng, [0.9, 0.95, 1])
+  const fillers = pickOne(ctx.rng, STUSSY_FILLER_SETS)
   const OCT = 12
   const FIFTH = 7
   const B3 = 3
+  const octInterval = useMinorThird ? B3 : OCT
+  const notes: ComposedNote[] = []
   for (let bar = 0; bar < ctx.track.bars; bar++) {
-    const o = bar * 16
     const barIx = bar % 4 // the schedule is a 4-bar cycle
-    // strong slots
-    add(o + 0, 0, 0.6, 0.87) // tonic on the downbeat (with the kick), short gate
-    add(o + 8, 0, 0.6, 0.87)
-    add(o + 4, FIFTH, 0.95, 0.71) // fifth, offbeat, long gate
-    add(o + 12, FIFTH, 0.95, 0.71)
-    // octave slots (steps 6/14) — bar 2 turns slot-7 (step 6) octave into a tonic; bar 3 skips
-    // slot 14; the b3 variant swaps the octave colour for a raised minor third
-    const octInterval = useMinorThird ? B3 : OCT
-    if (barIx === 1) add(o + 6, 0, 0.95, 0.59) // octave -> tonic
-    else add(o + 6, octInterval, 0.95, 0.59)
-    if (barIx !== 2) add(o + 14, octInterval, 0.95, 0.59) // bar 3 skips slot 14
-    // quiet tonic fillers on the remaining offbeat 16ths
-    for (const step of [2, 10]) add(o + step, 0, 0.9, 0.47)
+    const spec: BassSlot[] = [
+      { slot: 0, interval: 0, gate: downGate, velocity: 0.87 }, // tonic on the downbeat (with the kick)
+      { slot: 8, interval: 0, gate: downGate, velocity: 0.87 },
+      { slot: 4, interval: FIFTH, gate: offGate, velocity: 0.71 },
+      { slot: 12, interval: FIFTH, gate: offGate, velocity: 0.71 },
+      // bar 2 turns slot-7 (step 6) octave into a tonic
+      { slot: 6, interval: barIx === 1 ? 0 : octInterval, gate: offGate, velocity: 0.59 },
+    ]
+    if (barIx !== 2) spec.push({ slot: 14, interval: octInterval, gate: offGate, velocity: 0.59 }) // bar 3 skips slot 14
+    for (const slot of fillers) spec.push({ slot, interval: 0, gate: 0.9, velocity: 0.47 })
+    notes.push(...renderBassBar(ctx, bar, spec, { kind: 'full' }, swing))
   }
   return notes
 }
+
+/** Seeded off-beat root patterns (§C.2, Attack: notes BETWEEN the kicks). The plain 8th offbeats
+ * stay dominant; the rest add a 16th anticipation or a dropped/displaced onset without ever landing
+ * a note ON a quarter, which is what makes the archetype off-beat. */
+const OFFBEAT_ROOT_SETS: readonly (readonly number[])[] = [
+  [2, 6, 10, 14],
+  [2, 6, 10, 14],
+  [2, 6, 10, 13, 14],
+  [2, 6, 9, 10, 14],
+  [2, 7, 10, 14],
+  [2, 6, 10, 15],
+  [2, 6, 10, 11, 14],
+]
 
 function offbeatRoot(ctx: BassContext): ComposedNote[] {
-  // root on the offbeat 8ths (between the kicks), root + an occasional octave lift — register safe
-  const notes: ComposedNote[] = []
-  for (let bar = 0; bar < ctx.track.bars; bar++) {
-    for (const s of [2, 6, 10, 14]) {
-      const step = bar * 16 + s
-      const root = bassRootAt(ctx, step)
-      const oct = s === 14 && ctx.rng() < 0.4 ? 12 : 0
-      notes.push({ pitch: root + oct, start: step, duration: 2, velocity: clampVel(0.8) })
-    }
-  }
-  return notes
+  const slots = pickOne(ctx.rng, OFFBEAT_ROOT_SETS)
+  const lifted = ctx.rng() < 0.4 ? slots[slots.length - 1]! : -1 // an occasional octave lift on the tail
+  const spec: BassSlot[] = slots.map((slot, i) => ({
+    slot,
+    interval: slot === lifted ? 12 : 0,
+    gate: Math.max(0.5, Math.min(2, (slots[i + 1] ?? slot + 2) - slot)),
+    velocity: 0.8,
+  }))
+  return renderBassFigure(ctx, spec)
 }
+
+/** Seeded sparse-sub shapes (§C.2's DnB posture: roots and octaves "with breathing space"). Each is
+ * a long root plus at most two answers; only root/octave intervals appear, so the register rule is
+ * satisfied by construction rather than by correction. */
+const SUB_PULSE_SHAPES: readonly (readonly BassSlot[])[] = [
+  [{ slot: 0, interval: 0, gate: 6, velocity: 0.9 }, { slot: 10, interval: 0, gate: 3, velocity: 0.72 }],
+  [{ slot: 0, interval: 0, gate: 8, velocity: 0.9 }, { slot: 12, interval: 0, gate: 3, velocity: 0.7 }],
+  [{ slot: 0, interval: 0, gate: 4, velocity: 0.9 }, { slot: 6, interval: 0, gate: 2, velocity: 0.66 }, { slot: 11, interval: 12, gate: 4, velocity: 0.6 }],
+  [{ slot: 2, interval: 0, gate: 6, velocity: 0.86 }, { slot: 10, interval: 0, gate: 4, velocity: 0.72 }], // pushed off the downbeat
+  [{ slot: 0, interval: 0, gate: 10, velocity: 0.9 }], // one long root, nothing else
+  [{ slot: 0, interval: 0, gate: 5, velocity: 0.9 }, { slot: 7, interval: 12, gate: 2, velocity: 0.62 }, { slot: 14, interval: 0, gate: 2, velocity: 0.68 }],
+]
 
 function subPulse(ctx: BassContext): ComposedNote[] {
-  // sparse sub with breathing space (§C.2 DnB posture): long roots, an octave tail — root/octave only
-  const notes: ComposedNote[] = []
-  for (let bar = 0; bar < ctx.track.bars; bar++) {
-    const o = bar * 16
-    const root = bassRootAt(ctx, o)
-    notes.push({ pitch: root, start: o, duration: 6, velocity: clampVel(0.9) })
-    notes.push({ pitch: root, start: o + 10, duration: 3, velocity: clampVel(0.72) })
-    if (bar % 2 === 1 && ctx.rng() < 0.5) notes.push({ pitch: root + 12, start: o + 14, duration: 2, velocity: clampVel(0.6) })
-  }
-  return notes
+  return renderBassFigure(ctx, pickOne(ctx.rng, SUB_PULSE_SHAPES))
 }
 
+/** Seeded onset grids for the bass-as-lead driver: straight 8ths (the §C.2 recipe, weighted to stay
+ * dominant) plus three Euclidean timelines E(k,16) rotated so a downbeat onset is guaranteed — the
+ * §C.5 Toussaint generator, which the operator library has always exported and nothing used. */
+const OCTAVE_DRIVE_GRIDS: readonly (readonly number[])[] = [
+  [0, 2, 4, 6, 8, 10, 12, 14],
+  [0, 2, 4, 6, 8, 10, 12, 14],
+  [0, 2, 4, 6, 8, 10, 12, 14],
+  euclidSteps(5, 16, 1),
+  euclidSteps(6, 16, 1),
+  euclidSteps(7, 16, 1),
+  euclidSteps(9, 16, 1),
+]
+
 function octaveDrive(ctx: BassContext): ComposedNote[] {
-  // bass-as-lead: 8th-note root/octave alternation (§C.2), register safe by construction
-  const notes: ComposedNote[] = []
-  for (let bar = 0; bar < ctx.track.bars; bar++) {
-    for (let s = 0; s < 16; s += 2) {
-      const step = bar * 16 + s
-      const root = bassRootAt(ctx, step)
-      const high = (s / 2) % 2 === 1
-      notes.push({ pitch: high ? root + 12 : root, start: step, duration: 1, velocity: clampVel(high ? 0.62 : 0.82) })
-    }
-  }
-  return notes
+  // bass-as-lead: root/octave alternation over the grid (§C.2), register safe by construction
+  const grid = pickOne(ctx.rng, OCTAVE_DRIVE_GRIDS)
+  const phase = ctx.rng() < 0.3 ? 1 : 0 // which half of the alternation opens the bar
+  const spec: BassSlot[] = grid.map((slot, i) => {
+    const high = (i + phase) % 2 === 1
+    return { slot, interval: high ? 12 : 0, gate: 1, velocity: high ? 0.62 : 0.82 }
+  })
+  return renderBassFigure(ctx, spec)
 }
 
 /** One theory-aware bass figure over a chord track, deterministic in `rng`. Every note is passed
