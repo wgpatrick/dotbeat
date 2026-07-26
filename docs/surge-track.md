@@ -31,7 +31,10 @@ track lead Lead #e06c75 surge
 ```
 
 - **`surge` block** (level 1, right after the track line, before the synth block):
-  - `patch "<name>"` — the patch name (factory OR third-party — see "Patch pools" below). Double-quoted because factory names have spaces;
+  - `patch "<name>"` — the patch name (factory OR third-party — see "Patch pools" below). With
+    3,559 patches installed, **88 bare names are ambiguous**; a bare name resolves deterministically
+    to the first by (category, bank, name) and the prep warns, while
+    `patch "<Category>/<Name>"` or `patch "<Bank>/<Category>/<Name>"` pins one exactly. Double-quoted because factory names have spaces;
     this is the format's one quoted string (bare `patch Formant Pulse` also parses and
     re-serializes quoted). The patch is a **display/catalogue name**, resolved to a `.fxp` path at
     render time — a `.beat` with a surge track loads fine on a machine with no Surge build.
