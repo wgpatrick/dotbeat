@@ -233,8 +233,8 @@ const BASSLINE_ARCH: LayeredArchitecture = {
         glide: 0.02, // near-zero glide + monophonic voicing = the corpus's "rolling" bass feel
       },
       production: {
-        profile: { role: 'sub', saturator: { drive: 0.3, mix: 0.35 } },
-        comp: { threshold: -30, ratio: 6, attack: 0.015, release: 0.12, mix: 0.3 },
+        profile: { role: 'sub', saturator: { drive: 0.2, mix: 0.25 } },
+        comp: { threshold: -30, ratio: 6, attack: 0.015, release: 0.12, mix: 0.2 },
       },
     },
     {
@@ -260,7 +260,7 @@ const BASSLINE_ARCH: LayeredArchitecture = {
       },
       production: {
         profile: { role: 'bass', saturator: { drive: 0.4, mix: 0.45 }, eqHigh: 2 },
-        comp: { threshold: -28, ratio: 8, attack: 0.015, release: 0.12, mix: 0.3 },
+        comp: { threshold: -28, ratio: 8, attack: 0.015, release: 0.12, mix: 0.2 },
       },
     },
     {
@@ -328,7 +328,7 @@ const CHORDS_ARCH: LayeredArchitecture = {
       color: '#98c379',
       figure: { transpose: -12, pick: 'lowest', monophonic: true },
       band: { mode: 'lowpass', cutoffHz: 380, resonance: 0 },
-      gainDb: -12,
+      gainDb: -14,
       mono: true,
       patch: {
         ...MONO_PATCH,
@@ -343,8 +343,10 @@ const CHORDS_ARCH: LayeredArchitecture = {
         release: 0.25,
       },
       production: {
+        // NO parallel comp on a sustained low layer: measured 2026-07-26, it pushed chords'
+        // bass-band share from 38% (in target) to 62% (out), because compressing a sustained voice
+        // raises its AVERAGE, which is the one thing the band-share targets read.
         profile: { role: 'bass', saturator: { drive: 0.25, mix: 0.3 } },
-        comp: { threshold: -30, ratio: 6, attack: 0.015, release: 0.15, mix: 0.3 },
       },
     },
     {
@@ -370,10 +372,10 @@ const CHORDS_ARCH: LayeredArchitecture = {
         decay: 0.6,
         sustain: 0.85,
         release: 0.6,
-        pan: -0.15,
+        pan: -0.45,
       },
       production: {
-        profile: { role: 'pad', chorusMix: 0.35, utilityWidth: 0.72, saturator: { drive: 0.2, mix: 0.28 }, sendReverb: 0.3, sendDelay: 0.08, eqHigh: 2.5 },
+        profile: { role: 'pad', chorusMix: 0.35, utilityWidth: 0.78, saturator: { drive: 0.2, mix: 0.28 }, sendReverb: 0.3, sendDelay: 0.08, eqHigh: 2.5 },
         comp: { threshold: -28, ratio: 6, attack: 0.02, release: 0.2, mix: 0.25 },
       },
     },
@@ -394,10 +396,10 @@ const CHORDS_ARCH: LayeredArchitecture = {
         decay: 0.16,
         sustain: 0.05,
         release: 0.12,
-        pan: 0.15,
+        pan: 0.45,
       },
       production: {
-        profile: { role: 'chords', chorusMix: 0.2, utilityWidth: 0.66, saturator: { drive: 0.25, mix: 0.3 }, sendReverb: 0.14, sendDelay: 0.12, eqHigh: 3 },
+        profile: { role: 'chords', chorusMix: 0.2, utilityWidth: 0.75, saturator: { drive: 0.25, mix: 0.3 }, sendReverb: 0.14, sendDelay: 0.12, eqHigh: 3 },
         comp: { threshold: -28, ratio: 8, attack: 0.012, release: 0.1, mix: 0.35 },
       },
     },
@@ -457,7 +459,7 @@ const LEAD_ARCH: LayeredArchitecture = {
       color: '#98c379',
       figure: { transpose: -24, pick: 'lowest', monophonic: true },
       band: { mode: 'lowpass', cutoffHz: 400, resonance: 0 },
-      gainDb: -17,
+      gainDb: -19,
       mono: true,
       patch: {
         ...MONO_PATCH,
@@ -471,8 +473,8 @@ const LEAD_ARCH: LayeredArchitecture = {
         release: 0.2,
       },
       production: {
+        // no parallel comp on the sustained low layer — see the chords body layer's note
         profile: { role: 'bass', saturator: { drive: 0.3, mix: 0.35 } },
-        comp: { threshold: -30, ratio: 6, attack: 0.015, release: 0.15, mix: 0.3 },
       },
     },
     {
@@ -497,7 +499,7 @@ const LEAD_ARCH: LayeredArchitecture = {
         pan: 0,
       },
       production: {
-        profile: { role: 'lead', chorusMix: 0.2, utilityWidth: 0.66, saturator: { drive: 0.28, mix: 0.35 }, sendReverb: 0.2, sendDelay: 0.14, eqHigh: 3.5 },
+        profile: { role: 'lead', chorusMix: 0.2, utilityWidth: 0.75, saturator: { drive: 0.28, mix: 0.35 }, sendReverb: 0.2, sendDelay: 0.14, eqHigh: 3.5 },
         comp: { threshold: -28, ratio: 8, attack: 0.012, release: 0.1, mix: 0.35 },
       },
     },
@@ -521,10 +523,10 @@ const LEAD_ARCH: LayeredArchitecture = {
         decay: 0.18,
         sustain: 0.4,
         release: 0.15,
-        pan: 0.2,
+        pan: 0.45,
       },
       production: {
-        profile: { role: 'lead', utilityWidth: 0.7, sendReverb: 0.26, sendDelay: 0.16, eqHigh: 4 },
+        profile: { role: 'lead', utilityWidth: 0.78, sendReverb: 0.26, sendDelay: 0.16, eqHigh: 4 },
         comp: { threshold: -28, ratio: 6, attack: 0.015, release: 0.1, mix: 0.25 },
       },
     },
@@ -547,10 +549,10 @@ const LEAD_ARCH: LayeredArchitecture = {
         decay: 0.3,
         sustain: 0.6,
         release: 0.3,
-        pan: -0.2,
+        pan: -0.45,
       },
       production: {
-        profile: { role: 'lead', chorusMix: 0.5, utilityWidth: 0.9, saturator: { drive: 0.2, mix: 0.25 }, sendReverb: 0.35, sendDelay: 0.1, autoPan: { rate: 0.1, depth: 0.35, mix: 0.25 }, eqHigh: 3 },
+        profile: { role: 'lead', chorusMix: 0.5, utilityWidth: 0.85, saturator: { drive: 0.2, mix: 0.25 }, sendReverb: 0.35, sendDelay: 0.1, autoPan: { rate: 0.1, depth: 0.35, mix: 0.25 }, eqHigh: 3 },
       },
     },
   ],

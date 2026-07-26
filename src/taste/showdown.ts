@@ -17,6 +17,14 @@
 //             production pass, hosted as a sample voice on a drums-kind scratch host and rendered
 //             offline (see the surgeplus section below) — isolates production for surge exactly as
 //             engineplus does for engine
+//   layered — (opt-in, --with-layered) the SAME composed figure rendered as a MULTI-TRACK
+//             instrument: 3-4 synth layers (bass sub+growl+click / chords body+pad+stab+air / lead
+//             body+main+octave+width), each at its own register, in its own crossover slot, at its
+//             own level — the first non-solo clip SHAPE in the eval. src/taste/layered.ts;
+//             pitched roles only (a drum kit is already multi-voice). Isolates LAYERING.
+//   layeredplus — (opt-in, --with-layered AND --with-produced) the same stack plus a per-layer
+//             production pass (role-true width, parallel compression, glue, space, air) — the
+//             layered shape's answer to engineplus.
 //   ref     — (opt-in, private) a clip referenced from an external directory of commercial-music
 //             chops; see the licensing stance in the design doc — the tool references files under
 //             the given path, and nothing identifying them ever enters anything shared
@@ -80,7 +88,7 @@ import { readWavFormat, wavSampleCodec, type WavFormatInfo } from '../metrics/in
 import { curatedKey } from './surgeCuration.js'
 import type { StemName } from '../analysis/stems.js'
 
-export type ShowdownSourceKind = 'engine' | 'engineplus' | 'gen' | 'keymap' | 'ref' | 'surge' | 'surgeplus'
+export type ShowdownSourceKind = 'engine' | 'engineplus' | 'gen' | 'keymap' | 'layered' | 'layeredplus' | 'ref' | 'surge' | 'surgeplus'
 
 /** Volume levels shared with taste-collect's solo logic (owner feedback 2026-07-18: a quiet
  * varied track in a full mix is unratable — the showdown compares the SOUND of one role, so the
@@ -1530,9 +1538,9 @@ export const pct = (num: number, den: number) => (den === 0 ? '—' : `${Math.ro
 /** One scoreboard line for a kind's stats — shared by the showdown and prodtask reports (padded to
  * the longest kind name so mixed-kind scoreboards stay column-aligned). */
 export function statLine(s: SourceStat, indent: string): string {
-  // pad to the longest kind name ('engineplus') so mixed-kind scoreboards stay column-aligned
+  // pad to the longest kind name ('layeredplus') so mixed-kind scoreboards stay column-aligned
   return (
-    `${indent}${s.kind.padEnd(10)} win ${pct(s.wins, s.batches)} (${s.wins}/${s.batches})` +
+    `${indent}${s.kind.padEnd(11)} win ${pct(s.wins, s.batches)} (${s.wins}/${s.batches})` +
     `  top-half ${pct(s.topHalf, s.batches)} (${s.topHalf}/${s.batches})` +
     `  pairwise ${pct(s.pairsWon, s.pairCount)} of ${s.pairCount}\n`
   )

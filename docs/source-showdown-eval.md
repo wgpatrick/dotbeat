@@ -275,6 +275,58 @@ dead-mono / no-air deficit the whole showdown effort is chasing.
 same still-unresolved Surge XT factory-**content** license as `surge`, so a `surgeplus`-bearing batch
 gets the identical `.gitignore` (`*`) gate and the scores log stays kind-only (`"surgeplus"`).
 
+## The layered arm (`--with-layered`, + `layeredplus` with `--with-produced`)
+
+**The variable is the clip SHAPE, not the sound source.** Every other arm in this eval renders
+exactly one voice — `soloForShowdown` takes the composed doc and mutes every track but the role's.
+A commercial pack loop is the opposite by construction: 2–4 sound layers, registration decided,
+each in its own frequency slot, summed into one "instrument." Research 131 measured the
+consequences on the owner's own 1,612 preference pairs:
+
+| role | pack refs | engineplus (single voice) |
+|---|---|---|
+| bassline | 60.1% of energy below 60 Hz, centroid ~74 Hz | **0.22%** sub, centroid ~162 Hz |
+| chords | 78.4% mids, 9.5% bass-band body | **99.35%** mids, ~0 body |
+| lead | 81.2% mids, 5.0% body; elite width −4.6 dB | **99.19%** mids; width −10.7 dB |
+
+None of those are reachable by one voice with one filter and one pan position. `--with-layered`
+builds the alternative: `src/taste/layered.ts` assembles a MULTI-TRACK `.beat` (bass sub + growl +
+click; chords body + pad + rootless stab + air; lead body + main + octave + width) where every layer
+plays the SAME composed figure at its own register, in its own crossover slot, at its own level, and
+the engine renders the whole project as one clip. Pitched roles only — a drum kit is already a
+multi-voice instrument, so "layer it" is a different question (131 P6).
+
+**Two arms, one variable each.** `layered` is the ARCHITECTURE alone (register, crossover, balance,
+layer-intrinsic voice design, mono discipline on the low layers) with no insert-chain production at
+all — its single difference from engineplus is layering. `layeredplus` adds a per-layer production
+pass (role-true width, parallel/NY compression on the `compMix` fan that ships at 0 and no profile
+has ever touched, glue, space, air). Neither touches the frozen `engineplusProfile` /
+`surgeplusProfile` constants; the layered production lives on the layer specs.
+
+**Design rules the module enforces, not just intends** (all covered by `test/layered.test.ts`):
+
+- *One crossover, not four voices fighting.* Exactly one layer is lowpassed and owns the low end;
+  every other layer is highpassed at or above half that cutoff; the bottom lowpass and the lowest
+  highpass meet within one octave (no hole, no octave of mud). `checkCrossover` refuses an
+  architecture that breaks any of the three, and `buildLayeredClip` refuses to emit one.
+- *Mono discipline.* Every `mono: true` layer is asserted field-for-field on the ASSEMBLED doc —
+  after production — for pan, unison voices/width, chorus, utility width, auto-pan and both sends.
+  A widened low layer is the single largest measured width error in the log.
+- *Onsets never move.* A layer may change register, voice selection, note LENGTH and velocity; it
+  may never change a `start`. Layers are sample-aligned by construction.
+- *Anchored register.* Whatever register the composer drew, a whole-octave shift puts the figure's
+  median inside the role's anchor window, so the register target is not a coin flip on some figures.
+
+**Target gate.** `verifyLayeredTargets` checks a render against the measured per-role rows and
+reports PASS/FAIL **per feature** — never an aggregate, because 131 §5's finding is that the distance
+is many medium axes with role-specific signs. It reuses the existing `analyze()` metrics only. The
+targets it therefore CANNOT see — per-band crest, attack-time statistics, spectral flux, spectral
+flatness — are listed by name in every report rather than silently dropped; they are exactly the
+critic upgrade research 138 files as B0.
+
+**Licensing.** Layered clips are internally composed through dotbeat's own engine, so a
+layered-bearing batch carries no `.gitignore` gate (unlike ref / surge / midi batches).
+
 ## The midi figure source (`--midi-dir`)
 
 The archetype bank fixed the un-blinding problem, but it left a CONFOUND in every composed

@@ -750,8 +750,9 @@ const HELP = [
   {
     cmd: 'showdown',
     text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
-                [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--random-patches]
-                [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S] [--gen-stem-extract]
+                [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--with-layered]
+                [--random-patches] [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
+                [--gen-stem-extract]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
                                                           source — engine (the role's seed phrase, soloed, through
@@ -772,7 +773,19 @@ const HELP = [
                                                           factory patch via surgepy — pitched roles only,
                                                           drum-loop skipped; its own distinct figure unless
                                                           --shared-figure; needs a source-built surgepy, see
-                                                          beat showdown --surge-doctor). With --with-surge AND
+                                                          beat showdown --surge-doctor), optionally layered
+                                                          (--with-layered: the SAME composed figure rendered as a
+                                                          MULTI-TRACK instrument — 3-4 synth layers, each at its own
+                                                          register, in its own frequency-crossover slot, at its own
+                                                          level, mono-disciplined on the low layers — instead of one
+                                                          soloed voice; pitched roles only, drum-loop skipped since a
+                                                          kit is already multi-voice. Every other source renders a
+                                                          single patch while commercial loops are layered by
+                                                          construction, so this is the clip-SHAPE variable. With
+                                                          --with-produced it also emits layeredplus, the same stack
+                                                          through a per-layer production pass — the layered shape's
+                                                          engineplus. See src/taste/layered.ts for the per-role
+                                                          architectures and their measured targets). With --with-surge AND
                                                           --with-produced together, a surgeplus clip is added: the
                                                           SAME surge render through a dotbeat production pass
                                                           (hosted as a sample voice on a drums-kind track — the
@@ -2224,11 +2237,12 @@ function flagValue(argv, flag) {
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
   const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--gen-provider', '--ref-dir', '--midi-dir', '--seconds', '--log']
-  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--surge-doctor', '--shared-figure', '--random-patches', '--theory', '--ca2', '--ca2-doctor', '--gen-stem-extract', '--stem-doctor'])
+  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--with-layered', '--surge-doctor', '--shared-figure', '--random-patches', '--theory', '--ca2', '--ca2-doctor', '--gen-stem-extract', '--stem-doctor'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const dir = positional[0]
   const showdown = await import('../dist/src/taste/showdown.js')
+  const layeredMod = await import('../dist/src/taste/layered.js')
 
   // ---- surge diagnostics -----------------------------------------------------------------------
   // surgepy is a source-build artifact of Surge XT (no PyPI wheel); this surfaces exactly what's
@@ -2321,6 +2335,14 @@ async function showdownCmd(argv) {
   // (a kit through a synth patch is a different question). Degrades to warn-and-skip when surgepy
   // isn't built (CI/stub), never breaking the batch.
   const withSurge = argv.includes('--with-surge')
+  // the LAYERED clip source (research 138 §3 B4, src/taste/layered.ts): the same composed figure
+  // rendered as a MULTI-TRACK instrument — 3-4 synth layers, each at its own register, in its own
+  // frequency-crossover slot, at its own level — instead of one soloed voice. Every other source in
+  // this eval renders a single patch; commercial loops are layered by construction, and 131 measured
+  // the consequences (bass 0.22% vs 60.1% sub energy; chords/lead ~99% mids occupancy vs ~80%).
+  // Pitched roles only. With --with-produced it also emits `layeredplus` (the same stack through a
+  // per-layer production pass) — the layered shape's engineplus.
+  const withLayered = argv.includes('--with-layered')
   // Un-blinding fix (owner, 2026-07-21, mid-rating): a batch where every composed source shares one
   // figure reveals the dotbeat-rendered cluster by its repeated melody. By default EVERY composed
   // source (engine, engineplus, keymap, surge) draws its OWN distinct archetype figure
@@ -2500,7 +2522,8 @@ async function showdownCmd(argv) {
       const outDir = join(dir, `showdown-${spec.role}-${batchSeed}`)
       const workDir = join(outDir, 'work')
       const surgeThisRole = surgePatches !== null && showdown.surgeRoleCategories(spec.role) !== null
-      process.stderr.write(`\n=== showdown ${spec.role}: composed figure in ${seed.file}'s key — engine vs ${withProduced ? 'engineplus vs ' : ''}gen vs keymap${surgeThisRole ? ' vs surge' : ''}${surgeThisRole && withProduced ? ' vs surgeplus' : ''}${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
+      const layeredThisRole = withLayered && layeredMod.isLayeredRole(spec.role)
+      process.stderr.write(`\n=== showdown ${spec.role}: composed figure in ${seed.file}'s key — engine vs ${withProduced ? 'engineplus vs ' : ''}gen vs keymap${surgeThisRole ? ' vs surge' : ''}${surgeThisRole && withProduced ? ' vs surgeplus' : ''}${layeredThisRole ? ' vs layered' : ''}${layeredThisRole && withProduced ? ' vs layeredplus' : ''}${refDir !== undefined ? ' vs ref' : ''} (seed ${batchSeed}, ${genBackend}) ===\n`)
       try {
         mkdirSync(workDir, { recursive: true })
 
@@ -2691,6 +2714,10 @@ async function showdownCmd(argv) {
         const plusComposed = plusDrawn === null ? null : plusDrawn.composed
         const kmDrawn = sharedFigure ? engineDrawn : await drawFigure(202)
         const kmComposed = kmDrawn.composed
+        // the layered stack draws ONE figure that both its arms share: layered vs layeredplus is a
+        // production ablation, so the notes must be held constant across the pair (the same logic
+        // that makes surge/surgeplus share their render).
+        const layeredDrawn = layeredThisRole ? (sharedFigure ? engineDrawn : await drawFigure(303)) : null
         usedFigures.set(spec.role, [...runExclude, ...drawnFigures])
         process.stderr.write(`composed figure(s): ${drawnFigures.join(', ')}${sharedFigure ? ' (shared across composed sources)' : ''} (batch seed ${batchSeed})\n`)
 
@@ -2709,6 +2736,25 @@ async function showdownCmd(argv) {
         }
         const kmPhrased = kmComposed === engineComposed ? phrased : applyComposed(kmComposed)
         const kmFigure = kmComposed.archetype
+
+        // layered clip(s) (--with-layered): the figure assembled as a multi-track instrument. Built
+        // from scratch rather than from the seed doc — the stack IS the patch, so there is no seed
+        // voice to inherit. Degrades to warn-and-skip, never breaking the batch.
+        let layeredBuilt = null
+        if (layeredDrawn !== null) {
+          try {
+            const arch = layeredMod.layeredArchitecture(spec.role)
+            layeredBuilt = {
+              arch,
+              figure: layeredDrawn.composed.archetype,
+              plain: layeredMod.buildLayeredClip(spec.role, layeredDrawn.composed, batchBpm),
+              produced: withProduced ? layeredMod.buildLayeredClip(spec.role, layeredDrawn.composed, batchBpm, { produced: true }) : null,
+            }
+            process.stderr.write(`layered: ${arch.layers.length} layers — ${arch.summary} (shift ${layeredBuilt.plain.baseShift} semitones to the ${spec.role} anchor)\n`)
+          } catch (err) {
+            process.stderr.write(`layered skipped (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+          }
+        }
 
         // keymap clip: generated one-shot(s) registered into a scratch host, then played as an
         // instrument through the engine's sampler lanes
@@ -2756,7 +2802,13 @@ async function showdownCmd(argv) {
           { doc: engineDoc, recipe: withPatchProvenance(`engine ${spec.seedTrack} solo (composed ${figure})`, enginePatchProvenance) },
           ...(produced ? [{ doc: produced.doc, recipe: withPatchProvenance(`engine ${spec.seedTrack} solo + production pass (composed ${plusFigure})`, enginePatchProvenance) }] : []),
           { doc: kmDoc, recipe: `keymap phrase (composed ${kmFigure})` },
+          ...(layeredBuilt ? [{ doc: layeredBuilt.plain.doc, recipe: `layered ${spec.role} stack (composed ${layeredBuilt.figure}): ${layeredBuilt.arch.summary}` }] : []),
+          ...(layeredBuilt && layeredBuilt.produced ? [{ doc: layeredBuilt.produced.doc, recipe: `layered ${spec.role} stack + per-layer production (composed ${layeredBuilt.figure})` }] : []),
         ]
+        // v-numbers in the WORK batch, computed rather than hard-coded now that the tail is variable
+        const kmIdx = produced ? 3 : 2
+        const layeredIdx = kmIdx + 1
+        const layeredplusIdx = kmIdx + 2
         writeVaryBatch({
           parentPath: seedPath,
           parentText: readFileSync(seedPath, 'utf8'),
@@ -2926,7 +2978,13 @@ async function showdownCmd(argv) {
           ...(produced
             ? [{ kind: 'engineplus', wav: join(workDir, 'v2.wav'), from: withPatchProvenance(`${sharedFigure ? `same ${figDesc(plusDrawn)} and patch as the engine clip` : `${figDesc(plusDrawn)} through the engine patch`} + production pass: ${produced.applied.join(', ')} (dotbeat engine)`, enginePatchProvenance) }]
             : []),
-          { kind: 'keymap', wav: join(workDir, produced ? 'v3.wav' : 'v2.wav'), from: kmFrom },
+          { kind: 'keymap', wav: join(workDir, `v${kmIdx}.wav`), from: kmFrom },
+          ...(layeredBuilt
+            ? [{ kind: 'layered', wav: join(workDir, `v${layeredIdx}.wav`), from: `layered ${spec.role} instrument — ${layeredBuilt.arch.summary} — playing the composed ${layeredBuilt.figure} figure (${seed.file}'s key, dotbeat engine, no production pass)` }]
+            : []),
+          ...(layeredBuilt && layeredBuilt.produced
+            ? [{ kind: 'layeredplus', wav: join(workDir, `v${layeredplusIdx}.wav`), from: `layered ${spec.role} instrument + per-layer production pass (${layeredBuilt.produced.applied.length} moves: ${layeredBuilt.produced.applied.slice(0, 6).join(', ')}${layeredBuilt.produced.applied.length > 6 ? ', …' : ''}) — same stack and figure as the layered clip` }]
+            : []),
           { kind: 'gen', wav: join(genDir, 'v1.wav'), from: `"${genPrompt}" (${genProvider ?? genBackend})${genStemUsed ? ` + demucs:${genStemUsed.stemUsed}${genStemUsed.stemUsed !== genStemUsed.stem ? ` (guard fell back from ${genStemUsed.stem})` : ''}` : ''}` },
           ...(surgeClip ? [surgeClip] : []),
           ...(surgeplusClip ? [surgeplusClip] : []),
