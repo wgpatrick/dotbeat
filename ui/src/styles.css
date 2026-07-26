@@ -373,11 +373,7 @@ body {
   gap: 16px;
 }
 
-/* ---- track list ---- */
-.tracklist {
-  padding: 10px 8px;
-}
-.tracklist-title,
+/* ---- panel section titles ---- */
 .scope-title {
   color: var(--text-dim);
   font-size: 10px;
@@ -385,42 +381,12 @@ body {
   padding: 4px 6px;
   font-weight: 600;
 }
-.track-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  padding: 7px 8px;
-  cursor: pointer;
-  color: var(--text);
-  text-align: left;
-}
-.track-row:hover {
-  background: var(--panel-2);
-}
-.track-row.selected {
-  background: var(--panel-2);
-  border-color: var(--accent);
-}
-.track-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius-sm);
-  flex: none;
-}
-.track-name {
-  flex: 1;
-  font-weight: 500;
-}
-.track-kind {
-  font-size: 10px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: var(--label-tracking);
-}
+
+/* Track-kind accent colors. Applied dynamically as `kind-${track.kind}` — ArrangementView's
+   `arr-track-kind` badge and MixerView's channel-strip label — so they look unreferenced to a
+   plain grep. (The `.tracklist`/`.track-row`/`.track-swatch`/`.track-name`/`.track-kind` rules
+   that used to live here went with TrackList.tsx; the arrangement's own `arr-track-*` rules are
+   separate and live.) */
 .kind-drums {
   color: #56b6c2;
 }
