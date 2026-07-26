@@ -184,6 +184,37 @@ test('undo: the bare .note/.hit APPEND grammar never coalesces, even with a gest
   })
 })
 
+// Phase 30 (M8): coalescing identity includes the SURFACE, not just the key.
+test('undo: an agent edit never coalesces into a human GUI drag on the same path', async () => {
+  await withDaemon(async ({ edit, daemon, post, doc }) => {
+    // A GUI knob drag on lead.cutoff (no Origin header => surface 'cli' by daemonSurface's rules,
+    // so pin it explicitly to 'gui' via the body's self-attribution field).
+    await edit('lead.cutoff', '7000', { source: 'gui' })
+    await edit('lead.cutoff', '6000', { source: 'gui' })
+    assert.equal(daemon.getUndoDepth(), 1, 'the drag itself still coalesces into one step')
+
+    // An agent edits the SAME path 100ms later — well inside UNDO_COALESCE_MS, but a separate
+    // deliberate action on a different surface. Merging them would make one Ctrl+Z revert both.
+    await delay(100)
+    await edit('lead.cutoff', '2000', { source: 'mcp' })
+    assert.equal(daemon.getUndoDepth(), 2, 'the mcp edit is its OWN undo step, not a drag continuation')
+
+    await post('/undo')
+    assert.equal(
+      doc().tracks.find((t) => t.id === 'lead')!.synth.cutoff,
+      6000,
+      'one undo lands on where the human left the knob (6000), not all the way back past the drag',
+    )
+  })
+})
+
+test('undo: same-surface repeated edits still coalesce (the surface namespace is not a blanket split)', async () => {
+  await withDaemon(async ({ edit, daemon }) => {
+    for (const v of ['7000', '6000', '5000']) await edit('lead.cutoff', v, { source: 'mcp' })
+    assert.equal(daemon.getUndoDepth(), 1, 'an agent burst on one path is one gesture, same as a GUI drag')
+  })
+})
+
 // ---------------------------------------------------------------------------------------------
 // Undo / redo navigation
 // ---------------------------------------------------------------------------------------------
@@ -317,6 +348,122 @@ test('undo: an external write of UNPARSEABLE text neither adopts nor clears', as
     assert.equal((await get('/document')).bpm, 130, 'the last good document keeps being served')
     writeFileSync(filePath, good) // leave the file valid for teardown
     await delay(200)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// Phase 30 (M2): the external write that lands INSIDE the watcher's debounce window.
+//
+// The three tests above all wait 400ms for the 60ms-debounced watcher to notice. The bug was
+// everything that happens before that: an external write followed within ~0-80ms by a daemon write
+// was overwritten outright, and `lastFileText` was reset to the daemon's own text so the watcher
+// never fired the §3 invalidation either — undo stayed armed over a history that had diverged.
+// The daemon now re-reads before every write; on a mismatch it adopts the external state FIRST and
+// rejects the racing edit with 409 + {conflict:true} (documented choice: reject, never merge).
+// ---------------------------------------------------------------------------------------------
+
+/** POST that keeps the status code — the shared `post` helper only returns the parsed body. */
+async function postStatus(port: number, path: string, body?: unknown) {
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+}
+
+/** The external write the repro uses: bpm 90 plus an extra note nobody must be allowed to lose. */
+function externalEdit(filePath: string): string {
+  const cur = parse(readFileSync(filePath, 'utf8'))
+  const next = addHit({ ...cur, bpm: 90 }, 'beat', { lane: 'snare', start: 2, velocity: 1 }).doc
+  const text = serialize(next)
+  writeFileSync(filePath, text)
+  return text
+}
+
+// The repro's own timing sweep. Whether a given delay lands inside or outside the 60ms debounce is
+// a scheduling detail, so the assertion is the invariant that holds either way: the external write
+// is never destroyed and undo is never left armed across it. 0/30ms are additionally pinned to 409
+// (deterministically inside the window) — that is the branch the fix added.
+for (const raceMs of [0, 30, 55, 80, 150]) {
+  test(`undo: an external write ${raceMs}ms before a GUI edit is never clobbered`, async () => {
+    await withDaemon(async ({ edit, filePath, daemon, doc }) => {
+      await edit('bpm', '130') // arm the undo stack so the §3 clear is observable
+      assert.equal(daemon.getUndoDepth(), 1)
+
+      externalEdit(filePath)
+      if (raceMs > 0) await delay(raceMs)
+      const onDisk = readFileSync(filePath, 'utf8')
+
+      const res = await postStatus(daemon.port, '/edit', { path: 'lead.cutoff', value: '4000' })
+
+      // Invariant, both branches: the external musical content is still there.
+      assert.equal(doc().bpm, 90, 'the external bpm survived')
+      assert.equal(doc().tracks.find((t) => t.id === 'beat')!.hits.length, 2, 'the external hit survived')
+
+      if (res.status === 409) {
+        // Inside the debounce: the edit was computed against a document that no longer existed.
+        assert.equal(res.body.conflict, true, 'the rejection is machine-readable so a client can retry')
+        assert.equal(readFileSync(filePath, 'utf8'), onDisk, 'the external bytes are untouched on disk')
+        assert.equal(daemon.getUndoDepth(), 0, 'research/28 §3 fires INSIDE the debounce window too')
+        assert.equal(daemon.getRedoDepth(), 0)
+      } else {
+        // The watcher already adopted the external write, so this edit is honest work on top of it.
+        assert.equal(res.status, 200)
+        assert.equal(doc().tracks.find((t) => t.id === 'lead')!.synth.cutoff, 4000)
+        assert.equal(daemon.getUndoDepth(), 1, 'the pre-external stack was cleared; only this edit remains')
+      }
+      if (raceMs <= 30) assert.equal(res.status, 409, 'a same-tick race is always a conflict')
+    })
+  })
+}
+
+test('undo: after a 409 the retry succeeds against the adopted state', async () => {
+  await withDaemon(async ({ edit, filePath, daemon, doc }) => {
+    externalEdit(filePath)
+    assert.equal((await postStatus(daemon.port, '/edit', { path: 'lead.cutoff', value: '4000' })).status, 409)
+    // Second attempt: the daemon has already adopted the external document, so nothing is stale.
+    assert.equal((await edit('lead.cutoff', '4000')).written, true)
+    assert.equal(doc().tracks.find((t) => t.id === 'lead')!.synth.cutoff, 4000, 'the retried edit lands')
+    assert.equal(doc().bpm, 90, 'on top of the external change, not instead of it')
+    assert.equal(doc().tracks.find((t) => t.id === 'beat')!.hits.length, 2)
+  })
+})
+
+test('undo: a whole-document POST /state push cannot overwrite a racing external write either', async () => {
+  await withDaemon(async ({ get, filePath, daemon }) => {
+    const payload = await get('/doc') // the sandbox-shaped projection the GUI pushes back
+    externalEdit(filePath)
+    const before = readFileSync(filePath, 'utf8')
+    const res = await postStatus(daemon.port, '/state', { ...payload, bpm: 155 })
+    assert.equal(res.status, 409, 'the most destructive route gets the same guard')
+    assert.equal(res.body.conflict, true)
+    assert.equal(readFileSync(filePath, 'utf8'), before, 'external bytes untouched')
+  })
+})
+
+test('undo: /undo inside the debounce window invalidates instead of restoring over an external write', async () => {
+  await withDaemon(async ({ edit, filePath, daemon, post }) => {
+    await edit('bpm', '130')
+    assert.equal(daemon.getUndoDepth(), 1)
+    const before = externalEdit(filePath)
+
+    const undone = await post('/undo')
+    assert.equal(undone.undone, false, 'the stack was invalidated by the external write, so there is nothing to undo')
+    assert.equal(daemon.getUndoDepth(), 0)
+    assert.equal(readFileSync(filePath, 'utf8'), before, 'and no snapshot was written over the external state')
+  })
+})
+
+test('undo: a no-op edit computed against stale state still conflicts rather than reporting success', async () => {
+  await withDaemon(async ({ edit, filePath, daemon }) => {
+    await edit('bpm', '130')
+    externalEdit(filePath) // moves bpm to 90
+    // "bpm 130" is a no-op against the daemon's STALE canonical text but a real change against
+    // disk. Answering `{written:false}` here would be a lie the caller acts on.
+    const res = await postStatus(daemon.port, '/edit', { path: 'bpm', value: '130' })
+    assert.equal(res.status, 409)
+    assert.equal(daemon.getUndoDepth(), 0)
   })
 })
 

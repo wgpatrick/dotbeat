@@ -168,7 +168,7 @@ const sendTrack = (volume) => ({
   clips: [], laneSamples: {}, hits: [],
 })
 const mkSendDoc = (volume) => ({
-  formatVersion: '0.9', bpm: 120, loopBars: 2, selectedTrack: 't1', media: [], scenes: [], song: null,
+  formatVersion: '0.9', bpm: 120, loopBars: 2, selectedTrack: 't1', media: [], groups: [], scenes: [], song: null,
   tracks: [sendTrack(volume)],
 })
 
@@ -176,9 +176,21 @@ const mkSendDoc = (volume) => ({
 // whole 2-bar/32-step loop plus a `pan` automation lane ramping -0.8 -> +0.8 across those same 32
 // steps. `lfo2Depth` is the only difference between the two takes below (0 for the ground-truth
 // automation-only reference, >0 for the automation+LFO take under test).
+//
+// Phase 30 (M-pan): `slots` maps a track to an ARRAY OF PLACEMENTS ({clip, at}) since v0.11
+// (Phase 36 / D16 — see ui/src/types.ts's BeatPlacement and firstPlacementClip). This builder
+// still used the pre-v0.11 `slots: {t1: 'verse'}` bare-clip-id shape, so firstPlacementClip
+// spread the STRING into characters and sortPlacements threw on `a.clip.localeCompare` — the
+// track resolved no content and BOTH takes recorded digital silence. panSeries() returns exactly
+// 0 for a silent window and corr() divides by its `|| 1e-12` guard on a zero-variance series, so
+// the failure surfaced as a suspiciously clean "correlation 0.000" rather than as "nothing
+// played". Evidence that the ENGINE was never at fault: an offline render of the equivalent
+// fixture (cli/render.mjs --offline, the test/fixtures/clip-automation path) measures
+// corr(time, balance) = -0.915 with a real 5.5:1 L/R split, and a live take of this very doc with
+// the placements shape corrected records real, unequal L/R channels.
 const panDoc = (lfo2Depth) => ({
-  formatVersion: '0.9', bpm: 120, loopBars: 2, selectedTrack: 't1', media: [],
-  scenes: [{ id: 'main', slots: { t1: 'verse' } }],
+  formatVersion: '0.9', bpm: 120, loopBars: 2, selectedTrack: 't1', media: [], groups: [],
+  scenes: [{ id: 'main', slots: { t1: [{ clip: 'verse', at: 0 }] } }],
   song: [{ scene: 'main', bars: 2 }],
   tracks: [{
     id: 't1', name: 't1', color: '#61afef', kind: 'synth',
@@ -295,6 +307,24 @@ async function main() {
     const pageLfo = await freshPage()
     const decodedAutoLfo = await recordDoc(pageLfo)(panDoc(0.8), 3.7)
     await pageLfo.close()
+
+    // Silence tripwire, BEFORE any balance maths (Phase 30). panSeries() emits exactly 0 for a
+    // silent window, and corr() on a zero-variance series returns exactly 0 through its `|| 1e-12`
+    // guard — so a take that never played reads as "correlation 0.000", a plausible-looking number
+    // that hid a stale-document bug in this very script for as long as it existed. A recording with
+    // no audio in it must fail as "nothing played", loudly, and never be scored.
+    for (const [what, decoded] of [['automation-only', decodedAutoOnly], ['automation+LFO', decodedAutoLfo]]) {
+      const rms = windowRmsDb(decoded, 0.3, 3.5)
+      if (!(rms > -60)) {
+        throw new Error(
+          `[AUTOMATION-VS-LFO] the ${what} take recorded silence (${rms === -Infinity ? '-Infinity' : rms.toFixed(1)}dBFS) — nothing played, so no pan measurement below means anything. ` +
+            `Check the document this script hands to setDoc() against ui/src/types.ts (a scene slot is a BeatPlacement[], not a clip id).`,
+        )
+      }
+      if (decoded.channels.length < 2 || decoded.channels[0].every((v, i) => v === decoded.channels[1][i])) {
+        throw new Error(`[AUTOMATION-VS-LFO] the ${what} take is mono (identical L/R) — a pan measurement over it is vacuous`)
+      }
+    }
 
     const seriesAutoOnly = panSeries(decodedAutoOnly, winSeconds)
     const seriesAutoLfo = panSeries(decodedAutoLfo, winSeconds)

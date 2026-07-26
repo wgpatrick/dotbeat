@@ -4,10 +4,11 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { initDocument, setValue } from '../src/core/index.js'
+import { initDocument, setValue, serialize } from '../src/core/index.js'
+import { startDaemon } from '../src/daemon/daemon.js'
 import { recordEdits, noteDaemonEdit, flushEditLog, resetEditLogForTest, editLogEnabled } from '../src/telemetry/index.js'
 
 /** Run `fn` with the telemetry env pointed at a fresh temp log; returns the parsed JSONL entries.
@@ -105,6 +106,52 @@ test('disabled by default: no env, no file, no work', () => {
     assert.equal(existsSync(logPath), false, 'nothing should be written when disabled')
   })
   assert.equal(entries.length, 0)
+})
+
+// Phase 30 (M8): the coalescing identity the daemon hands this hook is namespaced by SURFACE, so
+// an agent's edit can never be recorded as a continuation of a human's in-flight GUI drag. Before
+// the fix, an mcp edit on the same path within the 700ms window arrived with `coalesced: true` and
+// was folded into the pending 'gui' gesture — the log then claimed the human made it. This is the
+// end-to-end version: a real daemon, real HTTP, real log file.
+test('an agent edit on a drag\'s path is logged as its OWN mcp entry, not a gui continuation', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-editlog-daemon-'))
+  const logPath = join(dir, 'edit-log.jsonl')
+  const filePath = join(dir, 'song.beat')
+  writeFileSync(filePath, serialize(initDocument({ bpm: 120, loopBars: 1, trackId: 'lead' })))
+  const prevEnabled = process.env.BEAT_EDIT_LOG
+  const prevFile = process.env.BEAT_EDIT_LOG_FILE
+  process.env.BEAT_EDIT_LOG = '1'
+  process.env.BEAT_EDIT_LOG_FILE = logPath
+  resetEditLogForTest()
+  const daemon = await startDaemon({ filePath, port: 0 })
+  try {
+    const edit = (value: string, source: string) =>
+      fetch(`http://127.0.0.1:${daemon.port}/edit`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: 'lead.cutoff', value, source }),
+      })
+    await edit('7000', 'gui') // human drag, tick 1
+    await edit('6000', 'gui') // human drag, tick 2 — coalesces into tick 1
+    await edit('2000', 'mcp') // an agent, same path, same window, different surface
+    flushEditLog()
+    const entries = readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>)
+    assert.equal(entries.length, 2, 'two gestures, two entries — the agent edit is not swallowed')
+    assert.equal(entries[0]!.surface, 'gui')
+    assert.equal(entries[0]!.before, 2000, 'the drag entry spans the whole drag: init cutoff…')
+    assert.equal(entries[0]!.after, 6000, '…to where the human left it')
+    assert.equal(entries[1]!.surface, 'mcp', 'the agent edit is attributed to the agent')
+    assert.equal(entries[1]!.before, 6000)
+    assert.equal(entries[1]!.after, 2000)
+  } finally {
+    await daemon.close()
+    if (prevEnabled === undefined) delete process.env.BEAT_EDIT_LOG
+    else process.env.BEAT_EDIT_LOG = prevEnabled
+    if (prevFile === undefined) delete process.env.BEAT_EDIT_LOG_FILE
+    else process.env.BEAT_EDIT_LOG_FILE = prevFile
+    resetEditLogForTest()
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('note-field edits log a beat-set-style dotted path per changed field', () => {

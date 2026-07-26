@@ -7,9 +7,8 @@
 // reads it with zero translation. No dependencies: node http + inline HTML.
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
-import { join, dirname, resolve, normalize } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { createServer } from 'node:http'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -45,7 +44,10 @@ function scoredBatchDirs(logPath) {
   return scored
 }
 
-const PAGE = `<!doctype html><meta charset="utf-8"><title>beat rate</title>
+// Exported so test/review-server.test.ts can assert the page's pick cap against the SCORER's cap
+// (src/vary/batch.ts) — a page that invites more picks than the scorer accepts is exactly the M6
+// bug, and a text-level constant nobody checks would drift straight back into it.
+export const PAGE = `<!doctype html><meta charset="utf-8"><title>beat rate</title>
 <style>
   body{font:16px/1.5 system-ui;margin:0;background:#181a1f;color:#e6e6e6;display:flex;min-height:100vh;align-items:center;justify-content:center}
   main{max-width:640px;width:100%;padding:24px}
@@ -64,23 +66,32 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>beat rate</title>
   #nonegood{background:#3a2c2c;color:#e6b0b0}
   #done{color:#98c379;font-size:18px;text-align:center}
   .hint{color:#6b7280;font-size:12px;margin-top:12px}
+  .capmsg{color:#e5c07b;font-size:12px;min-height:18px;margin-top:8px}
 </style>
 <main>
   <h1 id="title">loading…</h1><div class="prog" id="prog"></div>
   <div id="list"></div>
+  <div class="capmsg" id="capmsg"></div>
   <div class="bar"><button id="submit">save ranking</button><button id="clear">clear</button><button id="nonegood">none are good</button><button id="skip">skip batch</button></div>
-  <div class="hint">click "pick" in preference order (best first — rank as many as you can judge; a full ranking teaches the most, unranked clips just count as below every pick) — letters are shuffled per batch, so listen, don't pattern-match. keys: 1-9 pick, enter save, n none-good, s skip.</div>
+  <div class="hint" id="caphint">click "pick" in preference order — <b>your top 3, best first</b> (that's all the scorer records; every unranked clip counts as below all three). letters are shuffled per batch, so listen, don't pattern-match. keys: 1-9 pick, enter save, n none-good, s skip.</div>
   <div class="hint">"none are good" records a verdict (all variants rejected) instead of forcing a pick or silently skipping — it's excluded from the taste model and win-rate math, and counted in the showdown report.</div>
   <div class="hint" id="sinkrow">output: <select id="sink"><option value="">system default</option></select>
     <button id="sinkbtn" title="list this machine's outputs (asks a one-time permission so device names show)">find headphones…</button>
     — moves ONLY this page's audio; the rest of the system stays where it was.</div>
 </main>
 <script>
+// The scorer (src/vary/batch.ts scoreBatch) records AT MOST 3 ranked picks — the Edisyn (3,16)
+// pattern. The page used to bind keys 1-9 and invite "rank as many as you can judge", so a rater
+// working a 6-7 clip showdown would rank 4+, hit a 400 from /api/score, and see "save failed" with
+// the whole batch's listening discarded. The cap now lives in ONE place on each side and they
+// agree; lifting it is a data-math decision (see the report), not a UI tweak.
+const MAX_PICKS=3
 let queue=[],idx=0,picks=[]
 const $=(id)=>document.getElementById(id)
 async function load(){queue=await (await fetch('/api/queue')).json();idx=0;show()}
 function show(){
   picks=[]
+  if($('capmsg'))$('capmsg').textContent=''
   if(idx>=queue.length){document.querySelector('main').innerHTML='<div id="done">all '+queue.length+' batches rated — thank you, the taste model appreciates it. safe to close.</div>';return}
   const b=queue[idx]
   $('title').textContent=b.label
@@ -98,8 +109,11 @@ function paint(){
 }
 function togglePick(i){
   const at=picks.indexOf(i)
-  if(at!==-1)picks.splice(at,1)
-  else if(picks.length<Math.min(queue[idx].order.length,9))picks.push(i)
+  if(at!==-1){picks.splice(at,1);$('capmsg').textContent=''}
+  else if(picks.length<Math.min(queue[idx].order.length,MAX_PICKS))picks.push(i)
+  // At the cap, say so instead of swallowing the click — the old page ignored it silently and the
+  // rater only found out at save time, after the batch was already listened through.
+  else{$('capmsg').textContent='top '+MAX_PICKS+' only — unpick one to change your ranking. everything you don\\'t rank counts as below all '+MAX_PICKS+'.'}
   paint()
 }
 async function submit(){
@@ -118,7 +132,7 @@ async function noneGood(){
   idx++;show()
 }
 $('submit').onclick=submit
-$('clear').onclick=()=>{picks=[];paint()}
+$('clear').onclick=()=>{picks=[];$('capmsg').textContent='';paint()}
 $('nonegood').onclick=noneGood
 $('skip').onclick=()=>{idx++;show()}
 // Per-page audio output (setSinkId): rate through Bluetooth headphones while the system default
@@ -170,6 +184,12 @@ export async function rateCommand(argv) {
   }
   const { scoreBatch, recordNoneGood } = await import(pathToFileURL(join(repoRoot, 'dist/src/vary/batch.js')).href)
   const { shuffledOrder } = await import(pathToFileURL(join(repoRoot, 'dist/src/vary/audition.js')).href)
+  // The shared server shell `beat board` uses too (src/serve/review-server.ts): page + /audio +
+  // routing + the path-containment and CSRF guards, in ONE place so a fix can't land on one twin
+  // and miss the other (research/130 T9/W2.9).
+  const { createReviewServer, listenReviewServer, isInside, ReviewHttpError } = await import(
+    pathToFileURL(join(repoRoot, 'dist/src/serve/review-server.js')).href
+  )
 
   const buildQueue = () => {
     const scored = scoredBatchDirs(logPath)
@@ -181,74 +201,54 @@ export async function rateCommand(argv) {
     }))
   }
 
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url, `http://localhost:${port}`)
-    try {
-      if (url.pathname === '/') {
-        res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE)
-      } else if (url.pathname === '/api/queue') {
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(buildQueue()))
-      } else if (url.pathname === '/audio') {
-        const batchDir = resolve(url.searchParams.get('b') ?? '')
-        const file = normalize(url.searchParams.get('f') ?? '')
-        const full = resolve(batchDir, file)
-        // path discipline: only wavs inside a batch dir inside the scanned root
-        if (!batchDir.startsWith(root) || !full.startsWith(batchDir) || !full.endsWith('.wav') || !existsSync(full)) {
-          res.writeHead(404).end('not found')
-          return
-        }
-        res.writeHead(200, { 'content-type': 'audio/wav' }).end(readFileSync(full))
-      } else if (url.pathname === '/api/score' && req.method === 'POST') {
-        let body = ''
-        for await (const chunk of req) body += chunk
-        const { id, picks } = JSON.parse(body)
-        const batchDir = resolve(id)
-        if (!batchDir.startsWith(root)) {
-          res.writeHead(400).end('batch outside root')
-          return
-        }
-        if (!Array.isArray(picks) || picks.length === 0) {
-          res.writeHead(400).end('picks must be a non-empty array')
-          return
-        }
-        // picks arrive as wav filenames in preference order; scoreBatch wants variant refs.
-        // A bad pick is the CLIENT's error (pilot 112: it used to 500) — scoreBatch's own
-        // message is already the useful part.
-        let result
-        try {
-          result = scoreBatch(batchDir, picks.map((w) => String(w).replace(/\.wav$/, '')), logPath)
-        } catch (scoreErr) {
-          res.writeHead(400).end(String(scoreErr?.message ?? scoreErr))
-          return
-        }
-        console.error(`scored ${batchDir}: ${picks.join(' > ')}`)
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, log: result.logPath ?? logPath }))
-      } else if (url.pathname === '/api/none-good' && req.method === 'POST') {
+  /** A batch id from a POST body, checked for real containment in the scanned root. */
+  const batchDirFrom = (id) => {
+    const batchDir = resolve(String(id ?? ''))
+    if (!isInside(root, batchDir)) throw new ReviewHttpError(400, 'batch outside root')
+    return batchDir
+  }
+
+  const server = createReviewServer({
+    root,
+    page: PAGE,
+    routes: {
+      '/api/queue': { method: 'GET', handler: () => buildQueue() },
+      '/api/score': {
+        method: 'POST',
+        handler: (body) => {
+          const { id, picks } = body ?? {}
+          const batchDir = batchDirFrom(id)
+          if (!Array.isArray(picks) || picks.length === 0) throw new ReviewHttpError(400, 'picks must be a non-empty array')
+          // picks arrive as wav filenames in preference order; scoreBatch wants variant refs.
+          // A bad pick is the CLIENT's error (pilot 112: it used to 500) — scoreBatch's own
+          // message is already the useful part.
+          let result
+          try {
+            result = scoreBatch(batchDir, picks.map((w) => String(w).replace(/\.wav$/, '')), logPath)
+          } catch (scoreErr) {
+            throw new ReviewHttpError(400, String(scoreErr?.message ?? scoreErr))
+          }
+          console.error(`scored ${batchDir}: ${picks.join(' > ')}`)
+          return { ok: true, log: result.logPath ?? logPath }
+        },
+      },
+      '/api/none-good': {
         // "None of these are good" verdict: no pick, all variants rejected — recorded instead of
         // a silent skip so the signal survives. Same batch-dir path discipline as /api/score.
-        let body = ''
-        for await (const chunk of req) body += chunk
-        const { id } = JSON.parse(body)
-        const batchDir = resolve(id)
-        if (!batchDir.startsWith(root)) {
-          res.writeHead(400).end('batch outside root')
-          return
-        }
-        let result
-        try {
-          result = recordNoneGood(batchDir, logPath)
-        } catch (ngErr) {
-          res.writeHead(400).end(String(ngErr?.message ?? ngErr))
-          return
-        }
-        console.error(`none-good ${batchDir}: no pick, ${result.entry.rejected.length} variants rejected`)
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, log: result.logPath ?? logPath }))
-      } else {
-        res.writeHead(404).end('not found')
-      }
-    } catch (err) {
-      res.writeHead(500).end(String(err?.message ?? err))
-    }
+        method: 'POST',
+        handler: (body) => {
+          const batchDir = batchDirFrom((body ?? {}).id)
+          let result
+          try {
+            result = recordNoneGood(batchDir, logPath)
+          } catch (ngErr) {
+            throw new ReviewHttpError(400, String(ngErr?.message ?? ngErr))
+          }
+          console.error(`none-good ${batchDir}: no pick, ${result.entry.rejected.length} variants rejected`)
+          return { ok: true, log: result.logPath ?? logPath }
+        },
+      },
+    },
   })
   const initial = buildQueue()
   if (initial.length === 0) {
@@ -257,17 +257,14 @@ export async function rateCommand(argv) {
     console.error(`generate some first: beat taste-seeds <dir> && beat taste-collect <dir> — or point at a dir of rendered vary batches`)
     process.exit(1)
   }
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`error: port ${port} is already in use — pass --port <other> (is another beat rate still running?)`)
-      process.exit(2)
-    }
-    console.error(`error: ${err.message}`)
-    process.exit(1)
-  })
-  server.listen(port, '127.0.0.1', () => {
-    console.error(`rating ${initial.length} unscored batch(es) under ${root}`)
-    console.error(`scores -> ${logPath}`)
-    console.error(`open http://localhost:${port} — ctrl-c here when done`)
-  })
+  listenReviewServer(
+    server,
+    port,
+    () => {
+      console.error(`rating ${initial.length} unscored batch(es) under ${root}`)
+      console.error(`scores -> ${logPath}`)
+      console.error(`open http://localhost:${port} — ctrl-c here when done`)
+    },
+    'is another beat rate still running?',
+  )
 }
