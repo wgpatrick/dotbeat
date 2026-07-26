@@ -40,7 +40,12 @@ import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const PROBE_VERSION = 1 // bump when a role probe or the roll space changes → cache entries re-render
+// Bump when a role probe or the roll space changes → cache entries re-render. ALSO bumped by a
+// FEATURE_SET_VERSION change: this cache stores a whole FeatureVector per candidate, and a run
+// that mixes cached v1 vectors with freshly-computed v2 ones is the mixed-population case the
+// 2026-07-26 append-safety audit found (see the ruling in src/taste/features.ts). The version
+// check below is belt-and-braces on top of this number.
+const PROBE_VERSION = 2
 const CHUNK = 48 // candidates per one-boot render batch (amortizes the engine boot)
 
 // ---- CLI args ----------------------------------------------------------------------------------
@@ -145,7 +150,7 @@ async function main() {
   const showdown = await import('../dist/src/taste/showdown.js')
   const { ringDb } = await import('../dist/src/metrics/ring.js')
   const metrics = await import('../dist/src/metrics/index.js')
-  const features = await import('../dist/src/taste/features.js')
+  const features = await import('../dist/src/metrics/features.js')
   const embeddings = await import('../dist/src/taste/embeddings.js')
   const evalMod = await import('../dist/src/taste/eval.js')
   const curation = await import('../dist/src/taste/surgeCuration.js')
@@ -193,7 +198,7 @@ async function main() {
       if (!force && existsSync(cp)) {
         try {
           const prev = JSON.parse(readFileSync(cp, 'utf8'))
-          if (prev.probeVersion === PROBE_VERSION && typeof prev.ringDb === 'number' && Array.isArray(prev.aes) && prev.dsp) {
+          if (prev.probeVersion === PROBE_VERSION && typeof prev.ringDb === 'number' && Array.isArray(prev.aes) && features.featureSetVersionOf(prev.dsp) === features.FEATURE_SET_VERSION) {
             scored.set(c.id, { ringDb: prev.ringDb, activeFraction: prev.activeFraction, dsp: prev.dsp, aes: prev.aes })
             continue
           }

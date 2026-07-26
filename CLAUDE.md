@@ -124,6 +124,31 @@ area's named test files, THEN push. On 2026-07-25 a merge with unresolved confli
 reached origin because this order was skipped; a second merge "verified" tests on a file that
 didn't exist because only pass/fail totals were grepped — confirm the specific test file ran.
 
+**Bank every owner-flagged listening miss.** When the owner says a render sounds wrong — grindy,
+flat, muddy, whatever the word is — bank it into `~/Documents/dotbeat/taste-dataset/listen-bench/`
+as a labeled case *in that session*: the flagged render, the fixed render once there is one, the
+owner's own words for what was wrong, and a row in `answers.json` under a neutral `case-NN` name.
+Both research/122 §8 and research/123 §6 call this "the single most valuable asset" in them, and it
+is the one recommendation of theirs with zero uptake — `rg listen-bench` finds nothing outside doc
+123. It matters because the roughness signal only exists BETWEEN matched renders of the same
+material: the Daniel-Weber margin that separates the owner's fail clip from its fix is +25%, while
+commercial reference loops score 77% *above* the fail clip, so no absolute threshold can ever work
+and every threshold dotbeat has is explicitly "soft until n≥3 pairs" — with n still 1. A miss that
+isn't banked when it is flagged is unrecoverable: the pre-fix render is usually gone by the next
+session. Bank it even when the fix is obvious and even when nobody is measuring anything today.
+
+**Deferrals need triggers, and tails need owners.** research/140 measured that 49% of ~200
+recommendations across docs 114-130 were silently dropped, and the failure has a shape: **lists get
+their heads eaten.** Doc 118 shipped 15 of 22 tricks and all 7 missing are motion tricks; doc 116
+built link 1 of a 3-link chain; doc 130's plan shipped waves 0 and 1 and never scheduled 2 and 3;
+doc 127 built every gen adapter and never ran the experiment they existed for. Separately, docs
+130-139 produced ZERO roadmap rows between them — the tracking habit lapsed exactly when research
+output peaked. So: **when a research doc lands, its recommendations become `scripts/roadmap-data.mjs`
+rows in the same session** — including the ones being deferred, each carrying the specific evidence
+that would un-defer it. A deferral without a written trigger is a drop with better manners. And
+**when a plan is executed partially, the unscheduled tail gets rows before the stream closes**, not
+"next time" — the tail is exactly what nobody comes back for.
+
 **Agent survival in worktrees.** Work in tiny increments; commit each step; push the branch to
 origin after EVERY commit (`git push -u origin HEAD`). Harness stalls are routine; pushed commits
 are the only work that survives. Never park on a background watcher — they die with the agent;

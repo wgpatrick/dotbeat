@@ -114,6 +114,9 @@ export const VERIFY_SCRIPTS = [
 
   // ---- gui tier: DOM + on-disk .beat assertions ------------------------------------------------
   { script: 'ui/verify-focus-deeplinks.mjs', area: 'daemon-sync', tier: 'gui', status: 'live' },
+  // Not the daemon GUI — the `beat ab` feedback page, a self-contained node:http app like
+  // `beat rate`/`beat board`. It still needs a browser, so it belongs in the gui tier.
+  { script: 'ui/verify-ab-page.mjs', area: 'owner-feedback', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase16-velocity.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase17-arrangement.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
   {
@@ -194,6 +197,10 @@ export const VERIFY_SCRIPTS = [
   { script: 'scripts/verify-phase33-stream-mc.mjs', area: 'cli-errors', tier: 'cli', status: 'live' },
   { script: 'scripts/verify-phase33-stream-md.mjs', area: 'cli-correctness', tier: 'cli', status: 'live' },
   { script: 'scripts/verify-phase33-stream-me.mjs', area: 'macros', tier: 'cli', status: 'live' },
+  // D20: two --offline renders of an all-noise project must be sample-identical. Tier `cli`
+  // because it drives `beat render` rather than asserting inside the page, but what it gates is
+  // engine audio — pilot 109's HIGH finding, which had been closed by editing the help text.
+  { script: 'scripts/verify-offline-noise-reproducible.mjs', area: 'render-determinism', tier: 'cli', status: 'live' },
 ]
 
 export const TIERS = ['engine', 'gui', 'both', 'cli']

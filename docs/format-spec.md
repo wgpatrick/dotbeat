@@ -253,7 +253,8 @@ the ~50 store-level params the format couldn't express. v0.3 exposes them:
   BE, see the v0.10 effect-chain section below), scheduling-layer beat-repeat stutter
   (`beatRepeat*` — grid/gate/chance/mode; note/hit
   re-scheduling in the engine's tick loop, not an audio-graph insert), sends
-  (`sendReverb/sendDelay`), sidechain (`duckSource` — a track id or `none` — plus `duckAmount`),
+  (`sendReverb/sendDelay`), sidechain (`duckSource` — a track id or `none` — plus `duckAmount` and
+  `duckRelease`, the seconds the dip takes to recover; default 0.16),
   and drum-voice shaping (`kickTune/kickPunch/kickDecay`, `snareTone/snareDecay`,
   `hatTone/hatDecay/openHatDecay`, audible on drum tracks). The full table, with types, enum
   values, and frozen defaults, is

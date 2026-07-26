@@ -80,7 +80,7 @@ const soloWav = (file) => (file.endsWith('.wav') ? file : file.replace(/\.beat$/
  * songs validate the surface". Tracked as a roadmap row rather than guessed at here. */
 const contextWav = (file) => file.replace(/\.(beat|wav)$/, '') + '.context.wav'
 
-/** Human-readable projection of a variant's DSP feature vector (src/taste/features.ts) — the
+/** Human-readable projection of a variant's DSP feature vector (src/metrics/features.ts) — the
  * measured features table the board shows (LUFS / crest / centroid / width / band shares). Keeps
  * the GUI's units: dB and Hz, not the training-space log2. */
 function displayFeatures(fv) {
@@ -374,7 +374,7 @@ export async function boardCommand(argv) {
     process.exit(2)
   }
 
-  const { computeBatchFeatures } = await import(pathToFileURL(join(repoRoot, 'dist/src/taste/features.js')).href)
+  const { computeBatchFeatures } = await import(pathToFileURL(join(repoRoot, 'dist/src/metrics/features.js')).href)
   const { recordPick, recordRejectAll, decidedBatchDirs, readDecisionFile } = await import(pathToFileURL(join(repoRoot, 'dist/src/board/decisions.js')).href)
   // The shared server shell `beat rate` uses too — see src/serve/review-server.ts for why these
   // two twins now import one shell instead of carrying two copies of the same guards.

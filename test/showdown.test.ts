@@ -61,7 +61,7 @@ import {
   type ComposedPhrase,
 } from '../src/taste/showdown.js'
 import { variantTypeOf } from '../src/taste/eval.js'
-import { scoreBatch, recordNoneGood, adoptVariant, normalizeBatchLoudness, readBatchManifest, BeatBatchError } from '../src/vary/batch.js'
+import { scoreBatch, recordNoneGood, adoptVariant, normalizeBatchLoudness, readBatchManifest, BeatBatchError, isEnvironmentFault, environmentFaultReason } from '../src/vary/batch.js'
 import { loadTasteBatches } from '../src/taste/eval.js'
 
 // ---- synthetic audio helper (same shape as test/taste.test.ts) ---------------------------------
@@ -1135,4 +1135,66 @@ test('writeShowdownBatch: a surge clip gates the whole batch dir behind .gitigno
   ])
   assert.ok(existsSync(join(dir, '.gitignore')), 'a surge clip forces a .gitignore')
   assert.ok(readFileSync(join(dir, '.gitignore'), 'utf8').includes('*'), 'everything in a surge-bearing batch dir is ignored')
+})
+
+// ---- environment faults vs per-batch faults (src/vary/batch.ts) --------------------------------
+// `beat showdown`'s batch loop counts a failure, warns, and continues. That is right for a
+// per-batch fault and catastrophically wrong for a broken checkout: on 2026-07-25 (round 5) and
+// again on 2026-07-26 (round 6) one TypeScript error in ui/src/components/ArrangementView.tsx made
+// `npm run build` fail inside cli/render.mjs, so all 18 batches of each round failed identically
+// while the warning blamed "fal needs FAL_KEY + network" — a hint that was unconditional on the
+// backend rather than derived from the error. These assert the classifier that now aborts the run
+// (environmental) versus skips the batch (per-batch), using the VERBATIM message text of the error
+// sites they classify, so a reworded error site fails here rather than silently in a 6-hour run.
+
+test('isEnvironmentFault: a broken ui/ build aborts the run; a fal timeout only skips the batch', () => {
+  // cli/render.mjs's exact wording — this is the round 5 / round 6 message.
+  const uiBuild =
+    'the ui/ build failed (Command failed: npm run build)\n' +
+    '  run it by hand to see the full compiler output: cd ui && npm run build'
+  assert.equal(isEnvironmentFault(uiBuild), true, 'a broken ui/ build is a property of the checkout, not of one batch')
+  assert.equal(environmentFaultReason(uiBuild), 'the ui/ build is broken')
+
+  // Per-batch: one gen request that timed out. Batch N+1 has a fresh request and may well succeed,
+  // so this must NOT abort — and it is exactly what the old unconditional hint claimed every
+  // failure was.
+  assert.equal(isEnvironmentFault('fal request timed out after 600s (fal-ai/lyria2)'), false)
+  assert.equal(environmentFaultReason('fal request timed out after 600s (fal-ai/lyria2)'), null)
+})
+
+test('isEnvironmentFault: the rest of the allowlist, and that ordinary per-batch failures stay skips', () => {
+  const environmental: [string, string][] = [
+    // cli/render.mjs, pilot 113
+    ['ui/ needs building (ui/dist/index.html missing) but ui/node_modules is missing — install the UI\'s dependencies first:\n    cd ui && npm install', 'ui/node_modules is missing'],
+    // cli/render.mjs Phase 40 Stream VC layer (b)
+    ['the served ui/dist bundle has no engine.pendingMediaCount() — it predates the media-readiness probe,', 'ui/dist is stale'],
+    // an uncompiled/half-compiled repo, both spellings node uses
+    ["Cannot find module '/repo/dist/src/taste/showdown.js' imported from /repo/cli/beat.mjs", 'dist/ is missing or stale'],
+    ['Error [ERR_MODULE_NOT_FOUND]: Cannot find package', 'dist/ is missing or stale'],
+    ['MODULE_NOT_FOUND', 'dist/ is missing or stale'],
+    // src/analysis/{sidecar,gen,stems}.ts + src/taste/{ca2,midifig}.ts, via spawnSidecar's enoent
+    ['no Python interpreter found. Install the analysis backend: python3 -m venv python/.venv', 'no Python interpreter'],
+    ['no Python interpreter found for ca2_figures (tried "python3")', 'no Python interpreter'],
+    // src/analysis/surge.ts SURGE_SETUP_HINT — a source build with no wheel, so an install task
+    ['Surge render needs surgepy (a source-build of Surge XT — no PyPI wheel). Run `beat showdown --surge-doctor`', 'surgepy is not installed'],
+  ]
+  for (const [message, reason] of environmental) {
+    assert.equal(isEnvironmentFault(message), true, `should abort the run: ${message.split('\n')[0]}`)
+    assert.equal(environmentFaultReason(message), reason)
+  }
+
+  // Per-batch faults: different inputs next time round, so the loop keeps going. Anything the
+  // allowlist does not recognize lands here too, which is the safe default — a missed environment
+  // fault costs one wasted run, a false positive kills a run that would have produced good batches.
+  const perBatch = [
+    'FAL_KEY is not set',
+    'fetch failed (ECONNRESET)',
+    'the ref chop is 0.4s of near-silence (-71 LUFS) — below the audibility floor',
+    'no surge patch in the bassline categories',
+    'render produced a silent wav',
+  ]
+  for (const message of perBatch) {
+    assert.equal(isEnvironmentFault(message), false, `should only skip the batch: ${message}`)
+    assert.equal(environmentFaultReason(message), null)
+  }
 })

@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { parse, serialize, parseMacroLibrary, initDocument, addTrack, addNote, addHit, saveClip, setScene, setSong } from '../src/core/index.js'
+import { FEATURE_KEYS, type FeatureVector } from '../src/metrics/features.js'
 import {
   parseTrickLibrary,
   applyTrick,
@@ -21,6 +22,14 @@ import {
   TRICK_AXES,
   type BeatTrick,
 } from '../src/analysis/index.js'
+
+// A complete FeatureVector with every key zeroed, overlaid with the few this test reasons about.
+// Built from FEATURE_KEYS so appending a feature can never silently make this fixture partial —
+// exactly the mixed-population hazard D30 versions FEATURE_KEYS to prevent.
+function fullFeatures(overlay: Partial<FeatureVector>): FeatureVector {
+  const base = Object.fromEntries(FEATURE_KEYS.map((k) => [k, 0])) as FeatureVector
+  return { ...base, ...overlay }
+}
 
 const macrosJson = readFileSync(fileURLToPath(new URL('../presets/macros.json', import.meta.url)), 'utf8')
 const tricksJson = readFileSync(fileURLToPath(new URL('../presets/tricks.json', import.meta.url)), 'utf8')
@@ -201,7 +210,7 @@ test('produced targets are per-role: the same width reads as a gap on lead and a
   // For a BASSLINE it is exactly what the reference class does (21 of 32 pack basslines measure at
   // or below -40 dB), so it must NOT read as a gap. The old role-blind table scored both identically
   // and, being one-sided, could not express "too wide" for bass at all.
-  const feats = (widthDb: number) => ({
+  const feats = (widthDb: number) => fullFeatures({
     lufs: -14, samplePeakDb: -1, truePeakDb: -1, crestDb: 12, rmsDb: -20,
     bandSubPct: 4, bandBassPct: 30, bandMidsPct: 50, bandPresencePct: 5, bandAirPct: 0.1,
     centroidLog2: 9, stereoCorrelation: 1, stereoWidthDb: widthDb,
@@ -225,11 +234,11 @@ test('produced ranges are two-sided, so "too much" is as visible as "too little"
   // The one-sided predecessor returned 0 for every over-range value, which is why 133 could report
   // an air-shelf firing on a chords track whose reference class ships 0.00% air.
   const doc = projectWithRoles()
-  const overWide = {
+  const overWide = fullFeatures({
     lufs: -14, samplePeakDb: -1, truePeakDb: -1, crestDb: 12, rmsDb: -20,
     bandSubPct: 4, bandBassPct: 30, bandMidsPct: 50, bandPresencePct: 5, bandAirPct: 0.1,
     centroidLog2: 9, stereoCorrelation: 0, stereoWidthDb: 6, // +6 dB: wider than any pack loop
-  }
+  })
   const s = suggestForTrack(TRICKS, { doc, trackId: 'lead', features: overWide }).find((x) => x.trick.name === 'unison-spread')
   if (s) assert.ok(s.gap > 0, 'a +6 dB width is far ABOVE the pack lead band and must score a nonzero gap')
 })
@@ -246,6 +255,7 @@ test('with a render, a passing metric gate marks the suggestion verified and com
   const doc = projectWithRoles()
   // synthesize a mono, dark, dry feature vector (well inside every width/air precondition)
   const features = {
+    ...(Object.fromEntries(FEATURE_KEYS.map((k) => [k, 0])) as FeatureVector),
     lufs: -14, samplePeakDb: -1, truePeakDb: -1, crestDb: 12, rmsDb: -20,
     bandSubPct: 4, bandBassPct: 30, bandMidsPct: 50, bandPresencePct: 5, bandAirPct: 0.1,
     centroidLog2: 9, stereoCorrelation: 1, stereoWidthDb: -52,

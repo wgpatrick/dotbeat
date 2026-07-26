@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { parse, serialize } from '../src/core/index.js'
 import { generateSeedBeat } from '../src/taste/seeds.js'
-import { FEATURE_KEYS, type FeatureVector } from '../src/taste/features.js'
+import { FEATURE_KEYS, type FeatureVector } from '../src/metrics/features.js'
 import { variantTypeOf } from '../src/taste/eval.js'
 import { scoreBatch } from '../src/vary/batch.js'
 import { makeRng } from '../src/vary/vary.js'
@@ -80,7 +80,11 @@ function hash01(s: string): number {
 function fakeFeatures(id: string): FeatureVector {
   const r = hash01(id)
   const r2 = hash01(id + 'x')
+  // Neutral filler for every declared key, then the axes this fixture actually varies. Built off
+  // FEATURE_KEYS so a FEATURE_SET_VERSION bump does not require editing a fixture; the real gate
+  // on the key set is the snapshot test in taste.test.ts.
   const base: FeatureVector = {
+    ...(Object.fromEntries(FEATURE_KEYS.map((k) => [k, 0])) as FeatureVector),
     lufs: -14, samplePeakDb: -1, truePeakDb: -1, crestDb: 4 + r * 8, rmsDb: -18,
     bandSubPct: 10, bandBassPct: 20, bandMidsPct: 30, bandPresencePct: 20, bandAirPct: 5,
     centroidLog2: 7 + r2 * 4, stereoCorrelation: 0.9,

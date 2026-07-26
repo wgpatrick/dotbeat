@@ -19,6 +19,8 @@ import {
   pickEnginePreset,
   loadEngineCuratedFile,
   engineCuratedForRole,
+  retargetedProvenance,
+  isRetargetedPatch,
 } from '../src/taste/enginePresets.js'
 import { parsePresetLibrary } from '../src/core/preset.js'
 import { parse, serialize } from '../src/core/index.js'
@@ -223,4 +225,58 @@ test('taste-seeds: with a curated bank, output is deterministic per seed and dif
   const doc = parse(generateSeedBeat(3, { curated: SYNTH_CURATED as never }).text)
   const bass = doc.tracks.find((t) => t.id === 'bass')!
   assert.ok(bass.synth!.cutoff >= 640 * 0.9 - 1 && bass.synth!.cutoff <= 640 * 1.1 + 1, `bass cutoff ${bass.synth!.cutoff} near curated 640`)
+})
+
+
+// ---- E3: the retargeted bank (presets/engine-retargeted.json) ----------------------------------
+// The file shipped 2026-07-26 announcing "same shape as presets/engine-curated.json so a showdown
+// arm can draw from it" — and then nothing in src/taste/showdown.ts or cli/beat.mjs referenced it,
+// so 6 CMA-ES-optimized engine presets were unreachable from any batch. These tests pin that the
+// bank is now readable through the SAME loader and that its picks are tagged as a distinct era.
+
+const RETARGETED_PATH = new URL('../presets/engine-retargeted.json', import.meta.url).pathname
+
+test('the retargeted bank loads through the shared curated loader', () => {
+  const file = loadEngineCuratedFile(RETARGETED_PATH)
+  assert.ok(file !== null, 'presets/engine-retargeted.json did not load — regenerate with scripts/retarget-presets.mjs')
+  for (const role of ['bassline', 'chords', 'lead']) {
+    const rows = engineCuratedForRole(file, role)
+    assert.ok(rows.length > 0, `no retargeted rows for ${role} — the loader is reading the wrong key`)
+    for (const r of rows) {
+      assert.equal(typeof r.id, 'string')
+      assert.ok(Object.keys(r.params).length > 0, `${r.id} has no param vector to apply`)
+      assert.ok(isRetargetedPatch(r), `${r.id} is not tagged as a retargeting product (source "${r.source}")`)
+    }
+  }
+})
+
+test('a retargeted pick is tagged as its own patch era, not as curated', () => {
+  const file = loadEngineCuratedFile(RETARGETED_PATH)
+  const pick = pickEnginePreset({ role: 'bassline', seed: 7, presets: FACTORY, curated: file })
+  assert.ok(pick !== null)
+  assert.match(pick.provenance, /^retargeted:/, 'a retargeted draw must not be labelled curated: — the tag is how a report splits engine ratings by era')
+  assert.equal(pick.provenance, retargetedProvenance(pick.name))
+  // and it really is a different voicing than the curated bank's draw at the same seed
+  const curated = loadEngineCuratedFile(new URL('../presets/engine-curated.json', import.meta.url).pathname)
+  if (curated !== null) {
+    const curatedPick = pickEnginePreset({ role: 'bassline', seed: 7, presets: FACTORY, curated })
+    assert.notEqual(curatedPick?.provenance, pick.provenance)
+  }
+})
+
+test('a bank carrying both keys reads curated first, then retargeted — neither shadows the other', () => {
+  const rows = engineCuratedForRole(
+    {
+      version: 1,
+      generatedAt: 'x',
+      roles: {
+        bassline: {
+          kept: [{ id: 'c1', source: 'random-roll', category: 'roll', params: { cutoff: 100 }, composite: 1 }],
+          retargeted: [{ id: 'r1', source: 'retarget:curated:c1', category: 'roll', params: { cutoff: 200 } }],
+        },
+      },
+    },
+    'bassline',
+  )
+  assert.deepEqual(rows.map((r) => r.id), ['c1', 'r1'])
 })

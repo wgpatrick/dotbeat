@@ -15,6 +15,8 @@ import {
   BeatParseError,
   BeatEditError,
   SYNTH_FIELDS,
+  SYNTH_FIELD_BY_KEY,
+  AUTOMATABLE_SYNTH_PARAMS,
   defaultSynthFields,
 } from '../src/core/index.js'
 
@@ -46,6 +48,21 @@ test('a synth block with only the core 9 parses with every optional field at its
   for (const def of SYNTH_FIELDS) {
     assert.equal(synth[def.key], def.default, def.key)
   }
+})
+
+// D19 (research/115 §4.2, 133 §7-B.3, 138 §B6): the sidechain's recovery time became a field so a
+// deep-house pump (250-350 ms) is reachable. The default is pinned to the exact number the engine
+// hardcoded before the field existed — if this moves, every project ever rendered changes sound
+// without a single file changing bytes, which is the one thing this field must never do.
+test('duckRelease defaults to the engine\'s old hardcoded 0.16 s, and is elided at that value', () => {
+  assert.equal(SYNTH_FIELD_BY_KEY.get('duckRelease')?.default, 0.16)
+  assert.equal(parse(MINIMAL).tracks[0]!.synth.duckRelease, 0.16)
+  assert.ok(!serialize(parse(MINIMAL)).includes('duckRelease'))
+  const pumped = setValue(parse(MINIMAL), 'a.duckRelease', '0.3')
+  assert.equal(pumped.tracks[0]!.synth.duckRelease, 0.3)
+  assert.ok(serialize(pumped).includes('    duckRelease 0.3'))
+  // it is a plain numeric field, so clip automation can reach it for free
+  assert.ok(AUTOMATABLE_SYNTH_PARAMS.includes('duckRelease'))
 })
 
 test('optional fields at their default are never serialized (elision)', () => {

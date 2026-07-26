@@ -22,7 +22,7 @@
 import { resolve } from 'node:path'
 import { existsSync, writeFileSync, readFileSync } from 'node:fs'
 import { setValue, type BeatDocument } from '../core/index.js'
-import { type FeatureVector, type FeatureKey } from './features.js'
+import { type FeatureVector, type FeatureKey } from '../metrics/features.js'
 import { varyTrack, legalGroupsForKind, makeRng, BeatVaryError } from '../vary/vary.js'
 import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { SPLIT_SMOKE_MIN_BATCHES } from './eval.js'

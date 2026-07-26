@@ -332,7 +332,11 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           percussion are exactly where detection is weakest, so expect to
                                                           use it. Refuses on a low-confidence detection (quoting the
                                                           partials and a ready-to-paste --root) rather than building a
-                                                          wrong keymap; --force takes the detection anyway.
+                                                          wrong keymap, and then VERIFIES the confident root against the
+                                                          sound's own spectrum before minting lanes — a root that is an
+                                                          octave off transposes the whole clip, and confidence cannot see
+                                                          that. A stated --root is verified too but only warns, never
+                                                          refuses. --force takes the root either way.
                                                           --key sets the scale's root (default: --from's pitch class).
                                                           --scale names: see beat fit-scale --list-scales.
                                                           --dry-run prints the lanes without writing.
@@ -453,7 +457,7 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           score-able batches.
   beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
                 [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--with-layered]
-                [--random-patches] [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
+                [--random-patches | --retargeted-patches] [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
                 [--gen-stem-extract]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
@@ -462,7 +466,15 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           preset — docs/engine-presets.md; --random-patches keeps the
                                                           seed's historical random patch for era comparison, and the
                                                           engine/engineplus manifest from-strings record the patch
-                                                          source [patch: random-seed-patch|factory:<name>|curated:<id>]),
+                                                          source [patch: random-seed-patch|factory:<name>|curated:<id>|
+                                                          retargeted:<id>]; --retargeted-patches draws instead from
+                                                          presets/engine-retargeted.json — the same curated presets
+                                                          after a CMA-ES local search toward the per-role scalar
+                                                          targets in src/retarget/targets.ts, inside a per-parameter
+                                                          trust region (docs/preset-retargeting.md). Hold every other
+                                                          flag AND --seed constant against a default run and the
+                                                          engine patch is the only thing that moves, so the two
+                                                          rounds pair batch-for-batch),
                                                           gen (a fal-generated phrase from
                                                           the prompt bank's phrase tier), keymap (a generated
                                                           one-shot played as an instrument through the engine's
@@ -641,6 +653,29 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           never merged. --status [--json]: no server, print per-batch
                                                           decided/undecided + decisions (how the produce loop polls).
                                                           Adopt a winner with: beat adopt <batch> <pick>
+  beat ab <dir> [--port 4323] [--log f] [--all]         owner-FEEDBACK UI over a folder of renders: A/B(/C)
+                                                          players that all play IN SYNC so 1-9 switches which one
+                                                          you hear at the same instant and the same moment. Captures
+                                                          a preference AND free text ("what did you hear?") — the
+                                                          free text is the point. Reads <dir>/feedback.json if the
+                                                          agent wrote one ({question, comparisons:[{id, label,
+                                                          question?, options:[{name, wav, note?}], measurements?}]}),
+                                                          otherwise INFERS comparisons from the folder: <case>/
+                                                          <arm>.wav sets and <stem>--before/--after.wav pairs.
+                                                          Writes ONE beat-feedback.jsonl at <dir> + one answer file
+                                                          per comparison under feedback-answers/ — a SEPARATE log
+                                                          from blind beat-scores.jsonl and from beat-decisions.jsonl,
+                                                          never merged. --status [--json]: no server, poll answers.
+                                                          --digest [--json]: preferences + the owner's VERBATIM
+                                                          words (relay those, never a paraphrase).
+                                                          --bank-listen-bench: turn flagged complaints into matched
+                                                          fail/pass listening-case candidates. --all: re-answer.
+                                                          --answer <id> --prefer <name> [--note "..."] [--flag]:
+                                                          record an answer with NO browser — the channel for an owner
+                                                          who replied in chat (transcribe their exact words).
+                                                          also reachable as: beat ask
+                                                          NOTE: beat feedback is the opposite direction of this loop
+                                                          (DSP analysis, no human) — this is the owner's own ears.
   beat audition <dir> [--group G] [--seed N] [--no-shuffle]
                                                           stitch a blind audition.wav from ANY directory of wavs
                                                           (stem chops, one-shots) or re-stitch an existing batch.
@@ -663,6 +698,33 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           Prints the arc table (paste into NOTES.md); with
                                                           --save-profile also writes it for feedback --sections
                                                           --ref to verify the render against
+  beat rolecheck <file.wav> --role <bassline|chords|lead|drum-loop> [--json] [--targets <file.json>]
+                                                          PRE-BATCH screen for ONE rendered clip against the
+                                                          per-role audio targets mined from the owner's own
+                                                          packs-era Splice reference clips (presets/
+                                                          role-targets.json, regenerated by scripts/
+                                                          build-role-targets.mjs). Prints measured / target /
+                                                          reference-median / verdict per axis, then for every MISS
+                                                          the lever that owns it (composition / patch /
+                                                          production / sound source), a named fix, and the research
+                                                          doc behind it. The fixes name the KIND of change and the
+                                                          knob family, not a ready-to-paste beat-set line.
+                                                          The verdict is a MISS BUDGET, not an all-must-pass AND:
+                                                          a clip FAILS only when it misses more checks than the
+                                                          role's own reference clips typically do (the bar, and the
+                                                          share of references that clear it, are printed). An AND
+                                                          over every check rejected 98.7% of the reference pool
+                                                          itself. Exit 1 on FAIL so a batch script can gate on it;
+                                                          takes one WAV, so loop for a batch.
+                                                          Rows that cannot mean what they say on the given audio
+                                                          are marked (advisory) and NOT counted — truePeak/crest on
+                                                          an un-normalized stem read level, not punch.
+                                                          NOT a quality verdict and NOT a ranker: it does not order
+                                                          clips (use beat rank), and no feature here hears harmony,
+                                                          voicing or groove (131 §8). Roughness is absent by design
+                                                          — it has no valid ABSOLUTE threshold (123, 131 §4); use
+                                                          beat lint --roughness-baseline for the pair-relative
+                                                          grind screen.
   beat lint <file.wav> [--target <LUFS> | --ref <ref.json>] [--screens [--sections <file.beat>] [--roughness-baseline <baseline.wav>]] [--json] [--doc <file.beat>]
                                                           deterministic mix findings (default target -14);
                                                           --ref compares against a saved reference profile
@@ -698,10 +760,14 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           (headless Chromium driving ui/; no BeatLab needed)
   beat render <file> --offline [-o out.wav]               compute the mix through an offline context instead
                                                           of capturing the realtime clock — same engine, no
-                                                          lossy recorder step. Repeatable to ~1 LSB for
-                                                          oscillator content; noise-based voices (e.g. the
-                                                          default kit's snare/hats) vary per run, exactly as
-                                                          they do live. CPU-bound: fast for short/small
+                                                          lossy recorder step. REPRODUCIBLE to ~1 LSB: every
+                                                          stochastic element is seeded from the DOCUMENT, not
+                                                          the clock or process state — the kit's noise voices
+                                                          per (track, lane) with a read offset that is a
+                                                          function of the hit's time, and the shared reverb
+                                                          send's impulse response from a fixed seed. The ~1 LSB
+                                                          residual is float-rounding in the offline mix, not
+                                                          randomness. CPU-bound: fast for short/small
                                                           projects, can be SLOWER than live capture for long
                                                           dense songs (the measured ratio is printed).
                                                           Refuses soundfont (instrument/sf-lane) projects;
@@ -748,7 +814,9 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           (the phase-6 dynamics-plan check).
                                                           Honest limits: per-section STATIC metrics only — this
                                                           does NOT hear masking, arrangement, or transitions,
-                                                          only how sections differ as isolated static mixes
+                                                          only how sections differ as isolated static mixes.
+                                                          This is DSP ANALYSIS, not a human. To get the OWNER's
+                                                          own reaction to a folder of renders, use: beat ab
   beat daemon <file> [--port 8420] [--edit-log]           two-way sync with a running dotbeat GUI;
                                                           --edit-log appends every edit (GUI/CLI/MCP) to
                                                           ~/.dotbeat/edit-log.jsonl (research/116 log-don't-train

@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse, serialize, setMediaSample, type BeatDocument } from '../core/index.js'
-import { computeBatchFeatures } from '../taste/features.js'
+import { computeBatchFeatures } from '../metrics/features.js'
 import { decodeWav, integratedLoudness, truePeak, readWavFormat, wavSampleCodec, type WavFormatInfo } from '../metrics/index.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..') // dist/src/vary -> repo root
@@ -57,6 +57,68 @@ export class BeatBatchError extends Error {
     super(message)
     this.name = 'BeatBatchError'
   }
+}
+
+// ---- environment faults vs per-batch faults --------------------------------------------------
+// Every batch loop in this project (`beat showdown`, `beat taste-collect`'s vary + gen passes,
+// `beat prodtask`) is a for-loop with a try/catch that counts a failure, warns, and moves on.
+// That is the right shape for a PER-BATCH fault — one bad reference chop, one gen request that
+// timed out, one role whose figure bank came up empty. Batch N+1 has different inputs and a fair
+// chance of succeeding, so skipping is cheap and correct.
+//
+// It is exactly the wrong shape for a fault that is a property of the MACHINE or the CHECKOUT.
+// `beat showdown` renders each batch by shelling out to cli/render.mjs --batch, which builds ui/
+// first. On 2026-07-25 (round 5) and again on 2026-07-26 09:03-09:07 (round 6, first pass), one
+// TypeScript error in ui/src/components/ArrangementView.tsx made `npm run build` fail inside
+// render.mjs — so all 18 batches of round 5 and all 18 of round 6 failed identically, and each
+// time the warning claimed the cause was "fal needs FAL_KEY + network". That hint was
+// unconditional on the backend rather than derived from the error, and it sent the investigation
+// after a network/credential problem that did not exist, for hours. 36 batches of compute were
+// spent proving the same broken build 36 times.
+//
+// So: when the message matches one of these signatures the caller ABORTS the run instead of
+// skipping, because batch N+1 provably cannot succeed where batch N failed for that reason — the
+// only fix is a human action outside the loop (build ui/, npm install, npm run build, install a
+// venv). A per-batch fault still only skips.
+//
+// This is a deliberately SMALL allowlist of exact strings the repo's own error sites emit, not a
+// heuristic. Anything unrecognized is treated as per-batch, which is the safe default: the cost of
+// a missed environment fault is the status quo (a wasted run), while the cost of a false positive
+// is aborting a run that would have produced good batches.
+const ENVIRONMENT_FAULT_SIGNATURES: { pattern: RegExp; what: string }[] = [
+  // cli/render.mjs: `npm run build` in ui/ exited non-zero. The round 5 / round 6 case above.
+  { pattern: /the ui\/ build failed/i, what: 'the ui/ build is broken' },
+  // cli/render.mjs: ui/ needs building but `npm install` has never run there.
+  { pattern: /ui\/node_modules is missing/i, what: 'ui/node_modules is missing' },
+  // cli/render.mjs: the served bundle predates engine.pendingMediaCount(), i.e. ui/dist is a stale
+  // artifact of this checkout. Every render from it is unverifiable (and probably silent).
+  { pattern: /bundle has no engine\.pendingMediaCount/i, what: 'ui/dist is stale' },
+  // The compiled repo is missing or half-built: any `await import('../dist/src/...')` in the CLI,
+  // or a require inside a sidecar's own child process. Node spells these two ways.
+  { pattern: /ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND/, what: 'dist/ is missing or stale' },
+  { pattern: /Cannot find module/i, what: 'dist/ is missing or stale' },
+  // src/analysis/{sidecar,gen,stems}.ts, src/taste/{ca2,midifig}.ts all raise this exact phrase
+  // via spawnSidecar's `enoent` result — there is no interpreter at the resolved path at all.
+  { pattern: /no Python interpreter found/i, what: 'no Python interpreter' },
+  // src/analysis/surge.ts SURGE_SETUP_HINT: surgepy is a source build of Surge XT with no wheel,
+  // so a missing one is an install task, never something the next batch resolves.
+  { pattern: /needs surgepy/i, what: 'surgepy is not installed' },
+]
+
+/**
+ * Is this failure a property of the machine/checkout rather than of one batch?
+ *
+ * True means every remaining iteration of the batch loop will hit the identical failure, so the
+ * caller should abort the whole run and say why, rather than counting a skip and continuing. See
+ * the block comment above for the two rounds of showdown compute that motivated this.
+ */
+export function isEnvironmentFault(message: string): boolean {
+  return ENVIRONMENT_FAULT_SIGNATURES.some((s) => s.pattern.test(message))
+}
+
+/** The short reason `isEnvironmentFault` matched on, for the abort message. Null when it didn't. */
+export function environmentFaultReason(message: string): string | null {
+  return ENVIRONMENT_FAULT_SIGNATURES.find((s) => s.pattern.test(message))?.what ?? null
 }
 
 // ==== Phase 40 Stream VB ====
@@ -693,6 +755,23 @@ export interface ScoreEntry {
    * records which pool a deleted batch's ref came from, so eval.ts treats a ref variant with no
    * manifest and no logged list as UNKNOWN => EXCLUDED. */
   trainingExcluded?: string[]
+  /** Ref variants only: which POOL each ref clip came from, keyed by the same variant file names
+   * `sources` uses. Its sibling `figureSource` has ridden the log entry since it existed; the ref
+   * POOL did not, so every pool-split analysis had to re-read the batch dir's own manifest — and
+   * `showdown.ts`'s own tally says as much out loud ("the pool split is computed at report time
+   * from the batch dir's own manifest"), skipping any entry whose manifest is gone. Deleting batch
+   * dirs after a round is the DOCUMENTED lifecycle, so every historical pool breakdown silently
+   * under-counted. This is the same failure the D25 holdout fix (hunt H3) closed for
+   * `trainingExcluded` in this same file, and the pool label did not get the same treatment then.
+   *
+   * Same absent-means-old-entry discipline as `trainingExcluded`: written — possibly EMPTY —
+   * on every entry whose batch carries source records, because "looked, no refs in this batch"
+   * and "written before this field existed" must stay distinguishable. BACK-FILL IS IMPOSSIBLE
+   * for older entries: once the dir is gone nothing on disk records which pool its ref came from.
+   *
+   * Leaks nothing new: the value is one of five enum labels (see `refPoolOf`) — the ref's origin
+   * PATH still never leaves the batch dir, exactly as with `sources`. */
+  refPools?: Record<string, RefPool>
   /** Showdown batches only: where the composed figures came from — 'midi' (commercial MIDI
    * transcriptions, private), 'theory' (the deterministic theory-aware layer), 'ca2' (Composer's
    * Assistant 2 over that layer's chord track) or 'bank' (internal archetypes). The label is the
@@ -811,13 +890,52 @@ export function canonicalBatchKey(dir: string): string {
  *   - an explicit `trainingExcluded` flag on the source or on a gen candidate's provenance
  *     sidecar (providers whose ToS bans training on outputs).
  * Returned in manifest order, deduped. */
+export type RefPool = 'ref:familiar' | 'ref:unfamiliar' | 'ref:packs' | 'ref:cc0' | 'ref:other'
+
+/** Classify a ref clip's origin POOL from its manifest `from` path — the taste-dataset convention:
+ *
+ *   refs-familiar/    chops of songs the owner loves
+ *   refs-unfamiliar/  competent-but-unknown tracks
+ *   refs-packs/       purchased pro sample-pack loops (the eval bar; D25 holds these out of critic
+ *                     training until the vendor's ML clause is verified clean)
+ *   refs-cc0/         curated Freesound CC0 loops (training-safe by construction)
+ *
+ * "my taste is unreachable" and "any commercial track is unreachable" are different findings, which
+ * is the whole reason the split is worth carrying.
+ *
+ * This is the DAW-side definition, and it is deliberately where the refs-packs test that
+ * `trainingExcludedFiles` already needed now lives, so this file has ONE pool rule rather than two.
+ * `src/taste/showdown.ts` still carries its own `classifyRefPool` twin; `test/ref-pool.test.ts`
+ * asserts the two agree on a shared path table, and the follow-up is to delete showdown's copy and
+ * import this one (it was owned by a concurrent stream when this landed). */
+export function refPoolOf(fromPath: string): RefPool {
+  if (/refs-familiar\b/.test(fromPath)) return 'ref:familiar'
+  if (/refs-unfamiliar\b/.test(fromPath)) return 'ref:unfamiliar'
+  if (/refs-packs\b/.test(fromPath)) return 'ref:packs'
+  if (/refs-cc0\b/.test(fromPath)) return 'ref:cc0'
+  return 'ref:other'
+}
+
+/** Every ref variant's pool, keyed by variant file — what `ScoreEntry.refPools` freezes into the
+ * log so the split outlives the batch dir. Non-ref variants are absent, not 'ref:other'. */
+export function refPoolsOf(manifest: VaryBatchManifest): Record<string, RefPool> {
+  const out: Record<string, RefPool> = {}
+  for (const v of manifest.variants ?? []) {
+    if (typeof v.file !== 'string') continue
+    const source = v.source as { kind?: string; from?: string } | undefined
+    if (source?.kind !== 'ref' || typeof source.from !== 'string') continue
+    out[v.file] = refPoolOf(source.from)
+  }
+  return out
+}
+
 export function trainingExcludedFiles(manifest: VaryBatchManifest): string[] {
   const out: string[] = []
   for (const v of manifest.variants ?? []) {
     if (typeof v.file !== 'string') continue
     const source = v.source as { kind?: string; from?: string; trainingExcluded?: boolean } | undefined
     const media = v.media as (VariantMedia & { sidecar?: { generated?: { trainingExcluded?: boolean } } }) | undefined
-    const refsPack = source?.kind === 'ref' && typeof source.from === 'string' && /refs-packs\b/.test(source.from)
+    const refsPack = source?.kind === 'ref' && typeof source.from === 'string' && refPoolOf(source.from) === 'ref:packs'
     const banned = source?.trainingExcluded === true || media?.sidecar?.generated?.trainingExcluded === true
     if ((refsPack || banned) && !out.includes(v.file)) out.push(v.file)
   }
@@ -963,6 +1081,10 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   // found nothing to exclude" is a different fact from "this entry predates the field", and only
   // the first lets a training-safe ref (refs-cc0) stay trainable after its dir is deleted.
   if (Object.keys(sources).length > 0) entry.trainingExcluded = trainingExcludedFiles(manifest)
+  // D12: freeze the ref POOL split into the entry, on the same trigger and with the same
+  // absent-means-old-entry discipline as trainingExcluded above — see the field comment. An empty
+  // object on a ref-less batch is the point, not noise.
+  if (Object.keys(sources).length > 0) entry.refPools = refPoolsOf(manifest)
   // Midi-figure showdown batches: carry the figure-source LABEL (see the ScoreEntry field
   // comment — 'midi'/'bank' only, never what the midi transcribes).
   if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
@@ -1034,6 +1156,7 @@ export function recordNoneGood(dir: string, logPath?: string): NoneGoodResult {
   const sources = Object.fromEntries(manifest.variants.filter((v) => v.source !== undefined).map((v) => [v.file, v.source!.kind]))
   if (Object.keys(sources).length > 0) entry.sources = sources
   if (Object.keys(sources).length > 0) entry.trainingExcluded = trainingExcludedFiles(manifest) // see scoreBatch
+  if (Object.keys(sources).length > 0) entry.refPools = refPoolsOf(manifest) // see scoreBatch
   if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
   return { dir, logPath: resolvedLog, manifest, entry }

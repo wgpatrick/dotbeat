@@ -1171,3 +1171,80 @@ test('POST /vary-feel/commit can scope to specific drum lanes, leaving every oth
     assert.notDeepEqual(after.hits.filter((h) => h.lane === 'kick').map((h) => h.start), kickBefore)
   })
 })
+
+// ---- D32: GET /rollup ---------------------------------------------------------------------------
+// research/137 §3.2 wanted the "what happened while I was away" read reachable over the daemon —
+// `rg rollup ui/src/` was 0 files, so the session drawer had a design and no data source and an
+// agent driving the daemon had no readback of a GUI session at all. src/core/rollup.ts is pure and
+// IO-free, so the route is a passthrough; these tests exist to keep it one, i.e. to assert the
+// route's answer IS the CLI's answer rather than a daemon-side reimplementation that drifts.
+
+test('GET /rollup collapses checkpoint -> working tree, and defaults ref to the latest checkpoint', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const { checkpoint } = await import('../src/history/index.js')
+    const saved = checkpoint(filePath, { label: 'before the session' })
+    assert.ok(!saved.skipped, 'the fixture project should be checkpointable')
+
+    // Two edits to ONE param (the tweakCount case the rollup exists for) plus a second track's param.
+    await postJSON(daemon.port, '/edit', { path: 'bass.cutoff', value: '900' })
+    await postJSON(daemon.port, '/edit', { path: 'bass.cutoff', value: '1400' })
+    await postJSON(daemon.port, '/edit', { path: 'bass.resonance', value: '3' })
+
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/rollup`)
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as {
+      ref: string
+      label: string
+      entryCount: number
+      rollup: { tracks: { trackId: string; params: { path: string; before: unknown; after: unknown }[]; editMass: number }[] }
+    }
+    assert.equal(body.ref, saved.ref, 'omitting ?ref must default to the most recent checkpoint')
+    assert.ok(body.label.includes('working tree'))
+
+    const bass = body.rollup.tracks.find((t) => t.trackId === 'bass')
+    assert.ok(bass, `no bass track in the rollup (got ${body.rollup.tracks.map((t) => t.trackId).join(', ')})`)
+    const cutoff = bass.params.find((p) => p.path === 'bass.cutoff')
+    assert.ok(cutoff, 'the twice-tweaked param is missing from the rollup')
+    // NET, not a log: two edits to one param collapse to one before -> after.
+    assert.equal(cutoff.after, 1400)
+    assert.notEqual(cutoff.before, 1400)
+  })
+})
+
+test('GET /rollup?format=text is byte-identical to `beat diff --since <ref> --rollup`', async () => {
+  await withDaemon(async (daemon, filePath) => {
+    const { checkpoint } = await import('../src/history/index.js')
+    const { diffDocuments, rollupDiff, formatRollup, parse: parseDoc } = await import('../src/core/index.js')
+    const { showFileAt } = await import('../src/history/index.js')
+    const saved = checkpoint(filePath, { label: 'base' })
+    assert.ok(!saved.skipped, 'the fixture project should be checkpointable')
+
+    await postJSON(daemon.port, '/edit', { path: 'bass.cutoff', value: '777' })
+
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/rollup?ref=${saved.ref}&format=text`)
+    assert.equal(res.status, 200)
+    const viaRoute = await res.text()
+
+    // The exact call chain cli/beat.mjs's `diff --since ... --rollup` makes. If these ever differ,
+    // someone has reimplemented the collapse on one side (CLAUDE.md: parity is structural).
+    const entries = diffDocuments(parseDoc(showFileAt(filePath, saved.ref)), parseDoc(readFileSync(filePath, 'utf8')))
+    const expected = `# ${'song.beat'}: ${saved.ref} -> working tree (rollup)\n` + formatRollup(rollupDiff(entries))
+    assert.equal(viaRoute, expected)
+  })
+})
+
+test('GET /rollup answers honestly with no checkpoints, and 400s on an unknown ref', async () => {
+  await withDaemon(async (daemon) => {
+    // "Nothing saved yet" is a state a session drawer must render, not an error to swallow.
+    const fresh = await fetch(`http://127.0.0.1:${daemon.port}/rollup`)
+    assert.equal(fresh.status, 200)
+    const body = (await fresh.json()) as { ref: string | null; rollup: { totalEntries: number } }
+    assert.equal(body.ref, null)
+    assert.equal(body.rollup.totalEntries, 0)
+
+    const bad = await fetch(`http://127.0.0.1:${daemon.port}/rollup?ref=definitely-not-a-ref`)
+    assert.equal(bad.status, 400, 'a typo\'d ref is the caller\'s fault, not a 500')
+    const err = (await bad.json()) as { error: string }
+    assert.match(err.error, /could not resolve/)
+  })
+})

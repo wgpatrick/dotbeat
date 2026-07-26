@@ -40,6 +40,20 @@ export function curatedProvenance(id: string): string {
   return `curated:${id}`
 }
 
+/** `retargeted:<id>` — an E3 draw from presets/engine-retargeted.json (`beat showdown
+ * --retargeted-patches`). A DISTINCT tag from `curated:` on purpose: the two banks are two patch
+ * ERAS, and the whole point of the provenance tag is that a report can split engine ratings by era
+ * instead of blurring the comparison. Derived from the row's own `source` field (retargeting writes
+ * `retarget:<what it came from>`), so no flag has to be threaded down into the pick. */
+export function retargetedProvenance(id: string): string {
+  return `retargeted:${id}`
+}
+
+/** Whether a bank row came out of the retargeting search rather than the curation filter. */
+export function isRetargetedPatch(patch: { source?: string }): boolean {
+  return typeof patch.source === 'string' && patch.source.startsWith('retarget:')
+}
+
 /** Append the patch-provenance tag to a manifest `from` / work-recipe string (`… [patch: <tag>]`).
  * One spelling so the batch recipe and the final manifest carry an identical, greppable tag. */
 export function withPatchProvenance(base: string, provenance: string): string {
@@ -92,13 +106,24 @@ export interface EngineCuratedPatch {
   source: string
   category: string
   params: Record<string, number | string | boolean>
-  composite: number
+  /** the curation blend score. Absent on a RETARGETED row (see `retargeted` below), which is scored
+   * by target-gap rather than by the curation blend — nothing in the pick path reads it. */
+  composite?: number
 }
 
 export interface EngineCuratedRole {
-  pool: number
-  survivors: number
-  kept: EngineCuratedPatch[]
+  pool?: number
+  survivors?: number
+  /** the curated bank's kept patches (presets/engine-curated.json) */
+  kept?: EngineCuratedPatch[]
+  /** the RETARGETED bank's rows (presets/engine-retargeted.json). Same patch shape — an id and a
+   * param vector — differing only in how the vector was arrived at: a CMA-ES local search toward
+   * the per-role scalar targets in src/retarget/targets.ts, inside a per-parameter trust region,
+   * rather than a curation filter over random rolls. That file shipped 2026-07-26 announcing "same
+   * shape as presets/engine-curated.json so a showdown arm can draw from it", but nothing in
+   * showdown.ts or cli/beat.mjs referenced it and its 6 presets were unreachable from any batch.
+   * Accepting the key here is the whole wiring; `beat showdown --retargeted-patches` selects it. */
+  retargeted?: EngineCuratedPatch[]
 }
 
 export interface EngineCuratedFile {
@@ -123,13 +148,17 @@ export function loadEngineCuratedFile(path: string): EngineCuratedFile | null {
   }
 }
 
-/** The role's curated patches (deterministic order), or [] when the role has none — the pick then
- * uses the factory pool. */
+/** The role's bank patches (deterministic order), or [] when the role has none — the pick then uses
+ * the factory pool. Reads `kept` (engine-curated.json) or `retargeted` (engine-retargeted.json);
+ * both are lists of {id, params} and the pick path uses nothing else, so one reader serves both
+ * banks rather than a parallel loader that would drift. A file carrying both keys is read as
+ * curated-then-retargeted, so the two can never silently shadow each other. */
 export function engineCuratedForRole(file: EngineCuratedFile | null, role: string): EngineCuratedPatch[] {
   if (!file) return []
   const r = file.roles?.[role]
-  if (!r || !Array.isArray(r.kept)) return []
-  return r.kept
+  if (!r) return []
+  const rows = [...(Array.isArray(r.kept) ? r.kept : []), ...(Array.isArray(r.retargeted) ? r.retargeted : [])]
+  return rows
 }
 
 // ---- the pick ----------------------------------------------------------------------------------
@@ -197,7 +226,8 @@ export function pickEnginePreset(opts: {
     const pick = drawFrom(curatedRole.map((c) => ({ ...c, name: c.id })))
     if (pick) {
       const preset = curatedAsPreset(pick)
-      return { provenance: curatedProvenance(pick.id), name: pick.id, apply: (doc, trackId) => applyPreset(doc, trackId, preset) }
+      const provenance = isRetargetedPatch(pick) ? retargetedProvenance(pick.id) : curatedProvenance(pick.id)
+      return { provenance, name: pick.id, apply: (doc, trackId) => applyPreset(doc, trackId, preset) }
     }
   }
 

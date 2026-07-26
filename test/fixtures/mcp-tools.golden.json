@@ -920,6 +920,49 @@
     }
   },
   {
+    "name": "beat_trick",
+    "required": [
+      "file",
+      "track",
+      "trick"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "trick": "string",
+      "clip": "string",
+      "knob": "number",
+      "force": "boolean",
+      "dry_run": "boolean"
+    }
+  },
+  {
+    "name": "beat_trick_list",
+    "required": [],
+    "args": {
+      "axis": "string(width|air|motion|glue)"
+    }
+  },
+  {
+    "name": "beat_trick_show",
+    "required": [
+      "trick"
+    ],
+    "args": {
+      "trick": "string"
+    }
+  },
+  {
+    "name": "beat_trick_suggest",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string"
+    }
+  },
+  {
     "name": "beat_unpin",
     "required": [
       "file",

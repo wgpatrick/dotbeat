@@ -28,8 +28,9 @@ import {
   generateGenPrompts,
   generateGenStyleBatches,
   generateStyleContrasts,
-  stylePromptsFor,
 } from '../src/taste/seeds.js'
+// Moved DAW-side for research/136's import boundary; seeds.ts re-exports the bank as genStyles().
+import { stylePromptsFor } from '../src/analysis/gen-styles.js'
 import { mulberry32 } from '../src/taste/eval.js'
 
 // ---- bank snapshots ----------------------------------------------------------------------------

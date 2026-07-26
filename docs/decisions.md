@@ -9,6 +9,60 @@ A running log of the load-bearing choices, so future-us remembers *why*. Newest 
 
 ---
 
+## D30 — the two pre-registered gates are RESOLVED, and `FEATURE_KEYS` is versioned, not frozen (2026-07-26)
+
+**Why this entry exists.** Research 140 D23 makes the argument better than a summary can: *"a
+pre-registered gate that never fires is worse than no gate, because it launders an unmade decision
+as a made one."* Two gates were designed to re-order the build queue and neither ran, while work
+proceeded as if they had. Research 140 §4.4 separately asked for a ruling on `FEATURE_KEYS` that
+two agents had declined to give. All three are settled here. Evidence and full numbers:
+[`research/142`](research/144-critic-instruments.md).
+
+**Gate A — the `packplus` arm (133 §7). Verdict: ELSE branch. The transient shaper and OTT jump
+the queue.** The arm was never built and `packplus` appears nowhere, so the gate as written can
+never fire — but the log already answers its question. Adding a production chain to the same figure
+and patch wins 97.6% head-to-head (engineplus over raw engine, 42 batches, all four roles), and
+after buying all of that the reference still beats engineplus **87.3%** and gen beats it 83.1%. A
+*second* chain on a different source buys nothing (surgeplus over surge: 46.2%, below chance).
+**Production-chain depth is not where the remaining gap lives.** Independently corroborated by
+131 §3.1, where `truePeakDb` (paired d +1.38) is the strongest head-to-head discriminator in the
+log and nothing in any dotbeat profile shortens an envelope or shapes an attack. Note also that
+133's secondary prediction is **inverted**: it expected bassline to move least, and bassline is the
+role closest to the refs (75.6% vs chords 92.5%, drums 95.5%).
+
+**Gate B — the match ceiling run, M1 (134 §4.3). Verdict: redirect confirmed, on the evidence that
+exists.** All three completed match runs sit at or past the "≥2× the 15.3 self-match floor ⇒ the
+engine's per-voice timbre ceiling is real" bar: lead 2.06×, chords 3.10×, bass 3.78×. Recorded with
+its confound stated: these are the same numbers 134 §4.2 already cites as the *pre-M1* result, at
+budget 800 rather than 500→2000, and `src/match/` still has no chord-note candidate — which 134
+itself required "before concluding anything about pads". So: **confirmed on lead** (the cleanest
+target, the case 134 said would be decisive), **confounded on chords**, and past the bar by a wide
+margin on bass. The decision it gates had already been taken de facto — 138 §5 reaches 134 §6's
+redirect independently, and `layered-arm` was built on that assumption. Running M1 as specified is
+now a live task, not an open pre-registration.
+
+**The standing rule this sets.** A pre-registered gate is closed out in this log with a verdict —
+*fired*, *not fired*, or *unfirable, and here is what the available data says instead* — at the
+point where either the experiment runs or the queue moves without it. Leaving it open while
+building on its assumed answer is the failure D23 names.
+
+**`FEATURE_KEYS` is versioned, not frozen (140 §4.4, option (a)).** The ruling: it was **not**
+append-only-safe, despite its own docstring saying so — a blind append would have silently degraded
+the critic through a `NaN`-guard in `zScoreColumns` that zeroed the new column for an entire
+population whenever one stale vector was present, a backfill path that refused to upgrade the
+records that would trigger it, and a curation cache that re-admitted stale vectors. Now:
+`FEATURE_KEYS_V1` is a frozen prefix, `FEATURE_SET_VERSION` makes staleness detectable, stale
+records upgrade on read, and a **key-set snapshot test** enforces the invariant that 136 §5 and
+140 §4.4 both asked for and neither got. **Appending is permitted if and only if
+`FEATURE_SET_VERSION` moves in the same commit and the snapshot is updated** — which also means
+re-baselining the accuracy numbers, since every model score changes. This draws the boundary
+CLAUDE.md's "frozen eval constants" rule was reaching for: `engineplusProfile`/`surgeplusProfile`
+pin *treatments whose effects were measured in blind ratings* and stay frozen; `FEATURE_KEYS` is a
+*measurement vector*, and the right protection for a measurement vector is a version plus a
+snapshot, not a taboo.
+
+---
+
 ## D29 — the owner–agent session rhythm is a file protocol, and owner GUI edits are ground truth (2026-07-25)
 
 **The decision.** The hand-off loop between the agent's phase work and the owner's GUI/board

@@ -40,6 +40,8 @@ const SANCTIONED_REASONS = [
   'no mido in python/.venv (pip install -r python/requirements-midi.txt)',
   'no roughness sidecar (pip install -r python/requirements-roughness.txt into python/venv-roughness)',
   'no surgepy (see python/README.md: surge XT python bindings)',
+  'surgepy not built here (no PyPI wheel — see python/README.md)',
+  'no surge factory patches found',
   'no CA2 install (set BEAT_CA2_DIR / BEAT_CA2_PYTHON)',
   'demucs not installed — python/.venv/bin/pip install -r python/requirements-demucs.txt',
   // --- the INVERSE gates: a degrade path can only be exercised when the dep is ABSENT ---
@@ -53,8 +55,11 @@ const SANCTIONED_REASONS = [
   'running as root (or on a permissionless filesystem): a read-only file is still writable, so the mid-batch-failure precondition cannot be created',
 ]
 
-/** Reason constants referenced by name rather than inlined — allowed, but only these. */
-const SANCTIONED_REASON_CONSTS = ['SETUP_HINT']
+/** Reason constants referenced by name rather than inlined — allowed, but only these. A const
+ * whose definition fits on one line is RESOLVED to that definition below, so naming a reason
+ * buys readability, not an exemption from the sanctioned list. `SETUP_HINT` spans several lines
+ * and stays unresolved (named-but-unenforced), which is the older, weaker contract. */
+const SANCTIONED_REASON_CONSTS = ['SETUP_HINT', 'skipReason']
 
 const testFiles = readdirSync(testDir).filter((f) => f.endsWith('.ts'))
 
@@ -68,16 +73,30 @@ function code(file: string): string {
     .join('\n')
 }
 
-/** Every skip declaration in the suite: `t.skip(<arg>)` and `{ skip: <expr> }`. */
+/** Single-line `const NAME = <expr>` definitions in one file, for resolving named reasons back to
+ * the strings they stand for. Multi-line definitions are deliberately not matched. */
+function reasonConstDefs(src: string): Map<string, string> {
+  const defs = new Map<string, string>()
+  for (const m of src.matchAll(/^const (\w+) = (.+)$/gm)) {
+    if (SANCTIONED_REASON_CONSTS.includes(m[1]!)) defs.set(m[1]!, m[2]!)
+  }
+  return defs
+}
+
+/** Every skip declaration in the suite: `t.skip(<arg>)` and `{ skip: <expr> }`. An arg that is a
+ * bare sanctioned const resolves to that const's single-line definition, so the reason strings it
+ * holds are checked against SANCTIONED_REASONS like any inlined one. */
 function skipSites(): { file: string; form: string; arg: string }[] {
   const out: { file: string; form: string; arg: string }[] = []
   for (const file of testFiles) {
     const src = code(file)
+    const defs = reasonConstDefs(src)
+    const resolve = (arg: string) => defs.get(arg.trim()) ?? arg
     for (const m of src.matchAll(/t\.skip\(\s*([^\n]+?)\s*\)\s*$/gm)) {
-      out.push({ file, form: 't.skip', arg: m[1]! })
+      out.push({ file, form: 't.skip', arg: resolve(m[1]!) })
     }
     for (const m of src.matchAll(/\{\s*skip:\s*([\s\S]+?)\s*\}\s*,/g)) {
-      out.push({ file, form: '{ skip }', arg: m[1]! })
+      out.push({ file, form: '{ skip }', arg: resolve(m[1]!) })
     }
   }
   return out
@@ -129,8 +148,9 @@ test('the skip surface stays small', () => {
   // for, not absorbed. Raise deliberately with the reason in the commit.
   const sites = skipSites().length
   assert.ok(
-    sites <= 70,
-    `${sites} skip declarations — 63 when this guard was written (2026-07-26). Adding ` +
+    sites <= 80,
+    `${sites} skip declarations — 63 when this guard was written (2026-07-26), raised to 80 the ` +
+      `same day when the retarget-surge-sidecar suite (4, all surgepy) merged in. Adding ` +
       `env-gated tests is fine; adding a lot of them at once usually means a dependency should be ` +
       `made mandatory in CI instead.`,
   )

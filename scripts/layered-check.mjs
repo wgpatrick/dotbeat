@@ -30,6 +30,7 @@ const arg = (name, fallback) => {
 const outDir = resolve(arg('--out', join(process.env.HOME, 'Documents/dotbeat/taste-dataset/layered-check')))
 const perRole = Number(arg('--per-role', '2'))
 const metaSeed = Number(arg('--seed', '41'))
+const onlyRoles = arg('--roles', '').split(',').filter(Boolean)
 
 const { parse, serialize } = await import(`${repoRoot}/dist/src/core/index.js`)
 const { generateSeedBeat } = await import(`${repoRoot}/dist/src/taste/seeds.js`)
@@ -65,11 +66,10 @@ const rows = []
 process.stdout.write(`layered check -> ${outDir}\n`)
 process.stdout.write(`arms: ${ARMS.join(' vs ')} (same figure, same key, same bpm, normalized together)\n\n`)
 
-for (const role of LAYERED_ROLES) {
-  const arch = layeredArchitecture(role)
-  const cross = checkCrossover(arch)
-  process.stdout.write(`=== ${role} — ${arch.summary}\n`)
-  process.stdout.write(`    crossover ${cross.ok ? 'OK' : 'BROKEN: ' + cross.problems.join('; ')}: ${cross.ladder.map((l) => `${l.id}(${l.mode} ${l.cutoffHz})`).join(' -> ')}\n`)
+const ROLES = onlyRoles.length > 0 ? LAYERED_ROLES.filter((r) => onlyRoles.includes(r)) : LAYERED_ROLES
+
+for (const role of ROLES) {
+  process.stdout.write(`=== ${role}\n`)
 
   for (let n = 0; n < perRole; n++) {
     const batchSeed = metaSeed + n * 1009 + LAYERED_ROLES.indexOf(role) * 97
@@ -91,9 +91,13 @@ for (const role of LAYERED_ROLES) {
     const soloed = soloForShowdown(applyComposedPhrase(extended, SEED_TRACK[role], phrase), SEED_TRACK[role])
     const engineplus = applyProductionTreatment(soloed, SEED_TRACK[role])
 
-    // arms 2 + 3: the layered stack, without and with the per-layer production pass
-    const layered = buildLayeredClip(role, phrase, bpm)
-    const layeredplus = buildLayeredClip(role, phrase, bpm, { produced: true })
+    // arms 2 + 3: the layered stack, without and with the per-layer production pass. The
+    // architecture is DRAWN from the batch seed (2026-07-26 owner ear report: a frozen architecture
+    // made every clip in a round the same instrument), so each clip below is a different stack.
+    const arch = layeredArchitecture(role, batchSeed)
+    const cross = checkCrossover(arch)
+    const layered = buildLayeredClip(role, phrase, bpm, { arch })
+    const layeredplus = buildLayeredClip(role, phrase, bpm, { arch, produced: true })
 
     writeVaryBatch({
       parentPath: seedPath,
@@ -115,6 +119,8 @@ for (const role of LAYERED_ROLES) {
     normalizeBatchLoudness(clipDir, 3)
 
     process.stdout.write(`\n--- ${role} seed ${batchSeed} — figure "${phrase.archetype}" in ${key.minor ? 'minor' : 'major'} root ${key.root}, ${bpm} BPM, ${phrase.notes.length} notes\n`)
+    process.stdout.write(`    architecture [${arch.draw.family}] ${arch.summary}\n`)
+    process.stdout.write(`    crossover ${cross.ok ? 'OK' : 'BROKEN: ' + cross.problems.join('; ')}: ${cross.ladder.map((l) => `${l.id}(${l.mode} ${l.cutoffHz})`).join(' -> ')}\n`)
     process.stdout.write(`    layers: ${layered.layers.map((l) => `${l.id} ${l.loMidi}-${l.hiMidi} @${l.gainDb}dB ${l.band}${l.mono ? ' MONO' : ''}`).join(' | ')}\n`)
 
     for (let i = 0; i < ARMS.length; i++) {
@@ -126,9 +132,9 @@ for (const role of LAYERED_ROLES) {
       const named = join(clipDir, `${ARMS[i]}.wav`)
       copyFileSync(src, named)
       const { channels, sampleRate } = decodeWav(readFileSync(src))
-      const f = layeredFeatures(analyze(channels, sampleRate))
+      const f = layeredFeatures(analyze(channels, sampleRate), channels, sampleRate)
       const v = verifyLayeredTargets(role, f)
-      rows.push({ role, seed: batchSeed, arm: ARMS[i], features: f, passed: v.passed, total: v.total, results: v.results })
+      rows.push({ role, seed: batchSeed, arm: ARMS[i], features: f, architecture: ARMS[i] === 'engineplus' ? null : { family: arch.draw.family, summary: arch.summary, layers: arch.layers.length }, passed: v.passed, total: v.total, results: v.results })
       process.stdout.write(formatTargetVerification(v, `    ${ARMS[i]}`).replace(/^/gm, ''))
     }
   }
@@ -136,12 +142,12 @@ for (const role of LAYERED_ROLES) {
 }
 
 // ---- roll-up ------------------------------------------------------------------------------------
-const FEATURES = ['bandSubPct', 'bandBassPct', 'bandMidsPct', 'bandPresencePct', 'bandAirPct', 'centroidHz', 'stereoWidthDb', 'stereoCorrelation', 'crestDb', 'truePeakDb']
+const FEATURES = ['bandSubPct', 'bandBassPct', 'bandMidsPct', 'bandPresencePct', 'bandAirPct', 'centroidHz', 'stereoWidthDb', 'stereoCorrelation', 'crestDb', 'truePeakDb', 'crestSubDb', 'modDepthDb', 'articulationDb', 'characterLevelDb']
 const num = (x) => (Number.isFinite(x) ? (Math.abs(x) >= 100 ? x.toFixed(0) : x.toFixed(2)) : 'n/a')
 const mean = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length
 
 process.stdout.write('\n==== FEATURE TABLE — per role, mean over clips, by arm ====\n')
-for (const role of LAYERED_ROLES) {
+for (const role of ROLES) {
   process.stdout.write(`\n${role}\n`)
   process.stdout.write(`  ${'feature'.padEnd(18)}${ARMS.map((a) => a.padStart(13)).join('')}\n`)
   for (const key of FEATURES) {

@@ -494,3 +494,209 @@ export function formatPitchLine(p: PitchDetection): string {
     `method     ${p.method}`
   )
 }
+
+// ---- root verification (D22 / research/132 §3) --------------------------------------------------
+//
+// 132's diagnosis of the keymap source, verbatim: *"a wrong root makes the whole instrument
+// systematically out of tune with the batch, and nothing downstream checks."* `src/core/keymap.ts`
+// maps one root to one `tune` per lane, clamped +/-24 semitones, and every lane's tune is computed
+// from that single number — so a root that is an octave off transposes the ENTIRE clip, silently,
+// and the arm still renders and still gets rated. keymap sits at 31-38% in the source showdown
+// *despite* having the best bass-timbre match to the references of any source (sub 45.3% vs ref
+// 47.1%), which is the profile of a tuning defect rather than a timbre one.
+//
+// Confidence alone cannot catch this. Confidence answers "is there a single periodic pitch here",
+// and the dangerous failure is a CONFIDENT reading of the wrong member of a harmonic series —
+// classically an octave error, where a strong second harmonic is taken for the fundamental. So the
+// check is independent of the estimator that produced the root: it re-reads the SPECTRUM.
+//
+// Two questions, both asked of the partial table:
+//   1. Is there prominent energy an octave (or a twelfth, or two octaves) BELOW the claimed root?
+//      If so the claimed root is a harmonic and the true fundamental is lower — the octave error.
+//   2. Do the partials actually form a harmonic series ON the claimed root? A root the series
+//      does not support is not a root, however confidently it was detected.
+//   3. Is there any energy AT the claimed root itself? Found by the 2026-07-26 CLI/MCP pilot as a
+//      hole in checks 1-2: `--root a3` on an unambiguous a4 sample passed both, because a3's
+//      harmonic series trivially CONTAINS the real a4, so support reads 100% and there is nothing
+//      below a3 to trip check 1 — and the keymap came out an octave sharp, silently. Octave-DOWN
+//      is the likelier human error (under-guessing the root of a bright sound), which made this the
+//      more dangerous of the two directions to have missed. It is a WARNING and not a refusal
+//      because a real instrument may genuinely lack its own fundamental (a filtered bass, a
+//      missing-fundamental tone), and refusing those would break material that keymaps fine.
+//
+// This does NOT re-render and re-detect. That was the first design and it is circular: repitching
+// by `tune` is a frequency scaling, so a detector with a systematic octave error reproduces the
+// same error on the repitched audio and reports agreement. Only an independent reading of the
+// original spectrum can catch a wrong root, which is what this is.
+
+/** How far off an exact ratio a partial may sit and still count as "at" it. 60 cents is a hair over
+ * a quartertone: wide enough for the inharmonicity of a real struck/plucked sound and for the
+ * parabolic peak interpolation's own error (measured under a few cents on the synthesized tones in
+ * test/pitch.test.ts), narrow enough that a genuinely different pitch class never qualifies. */
+const RATIO_TOLERANCE_CENTS = 60
+
+/** A partial this far down from the strongest is not evidence of anything. Deliberately looser than
+ * `PROMINENCE_DB` (6): a true fundamental frequently IS quieter than its own second harmonic —
+ * that asymmetry is exactly what makes octave errors happen — so demanding equal prominence of the
+ * sub-octave would make check 1 unable to fire on the case it exists for. Calibrated on
+ * examples/recipe-song/media/bell_a.wav, whose 1748.6 Hz root sits 0.8 dB under the 3187 Hz partial
+ * that "loudest" would have chosen. */
+const SUBHARMONIC_EVIDENCE_DB = -18
+
+/** Below this share of partial magnitude sitting on integer multiples of the claimed root, the
+ * series does not support the root. 0.35 is deliberately permissive — this check must fire on "the
+ * root is not in this sound at all", not on "this sound is inharmonic", because inharmonic sounds
+ * (bells, the whole reason `--root` exists) are legitimate keymap material and already gated by
+ * the confidence path. Measured: a synthesized sawtooth scores ~1.0 on its true root and ~0.3 on a
+ * root a semitone away; bell_a scores ~0.5 on its own hand-verified a6 root. */
+const HARMONIC_SUPPORT_MIN = 0.35
+
+export interface RootVerification {
+  /** Hard fail: do not build a keymap on this root without an explicit override. */
+  ok: boolean
+  /** Soft signals that must be REPORTED but do not refuse — currently the phantom-root check (3).
+   * Separate from `reason` because "this is wrong" and "this is unconfirmable" are different
+   * answers, and collapsing them would either refuse legitimate material or hide a real defect. */
+  warnings: string[]
+  /** 'octave-error' = a prominent partial sits an octave/twelfth/two octaves BELOW the claimed
+   * root, so the root is a harmonic of something lower. 'unsupported' = the partials do not form a
+   * series on the claimed root. 'no-evidence' = no usable partial table (nothing to check against;
+   * `ok` is true, because refusing on absence of evidence would block every quiet one-shot). */
+  reason: 'ok' | 'octave-error' | 'unsupported' | 'no-evidence'
+  /** The root the spectrum points at instead, when there is one — ready to hand back as `--root`. */
+  alternateRootMidi: number | null
+  alternateRootNote: string | null
+  /** Share of partial magnitude landing on an integer multiple of the claimed root, 0..1. */
+  harmonicSupport: number
+  /** One line, already phrased for a user. */
+  detail: string
+}
+
+/** Does `hz` sit within RATIO_TOLERANCE_CENTS of `target`? */
+function atRatio(hz: number, target: number): boolean {
+  if (hz <= 0 || target <= 0) return false
+  return Math.abs(1200 * Math.log2(hz / target)) <= RATIO_TOLERANCE_CENTS
+}
+
+/**
+ * Check a claimed keymap root against the sound's own spectrum. Independent of how the root was
+ * arrived at — pass a detected root, a `--root` the user stated, or a gen-kit pick; the check is
+ * the same, because the question ("does this sound actually have its fundamental here") is.
+ */
+export function verifyRoot(rootMidi: number, pitch: PitchDetection): RootVerification {
+  const rootHz = 440 * Math.pow(2, (rootMidi - 69) / 12)
+  const partials = pitch.partials
+  if (partials.length === 0) {
+    return {
+      ok: true,
+      warnings: [],
+      reason: 'no-evidence',
+      alternateRootMidi: null,
+      alternateRootNote: null,
+      harmonicSupport: 0,
+      detail: 'no partial table to verify against — the root is unchecked, not confirmed',
+    }
+  }
+
+  // ---- check 1: energy below the claimed root (the octave error) ------------------------------
+  // Sub-multiples in the order a listener would hear them: an octave down is by far the common
+  // failure, then the twelfth (root taken for the 3rd harmonic), then two octaves.
+  for (const divisor of [2, 3, 4]) {
+    const target = rootHz / divisor
+    const found = partials.find((p) => p.relDb >= SUBHARMONIC_EVIDENCE_DB && atRatio(p.hz, target))
+    if (!found) continue
+    const altMidi = hzToMidi(found.hz)
+    const interval = divisor === 2 ? 'an octave' : divisor === 3 ? 'a twelfth' : 'two octaves'
+    return {
+      ok: false,
+      warnings: [],
+      reason: 'octave-error',
+      alternateRootMidi: altMidi,
+      alternateRootNote: midiToNote(altMidi),
+      harmonicSupport: harmonicSupportFor(rootHz, partials),
+      detail:
+        `a prominent partial sits at ${found.hz.toFixed(1)} Hz (${midiToNote(altMidi)}, ${found.relDb.toFixed(1)} dB) — ` +
+        `${interval} BELOW the claimed root ${midiToNote(rootMidi)}. The claimed root is a harmonic of it, so every ` +
+        `lane would be tuned ${interval} sharp and the whole clip would play out of key.`,
+    }
+  }
+
+  // ---- check 2: is there a harmonic series ON the claimed root? -------------------------------
+  const support = harmonicSupportFor(rootHz, partials)
+  if (support < HARMONIC_SUPPORT_MIN) {
+    const alt = pitch.suggestedRootHz
+    const altMidi = alt === null ? null : hzToMidi(alt)
+    return {
+      ok: false,
+      warnings: [],
+      reason: 'unsupported',
+      alternateRootMidi: altMidi,
+      alternateRootNote: altMidi === null ? null : midiToNote(altMidi),
+      harmonicSupport: support,
+      detail:
+        `only ${(support * 100).toFixed(0)}% of the partial energy lands on an integer multiple of ${midiToNote(rootMidi)} ` +
+        `(needs ${(HARMONIC_SUPPORT_MIN * 100).toFixed(0)}%) — the spectrum does not carry a harmonic series on that root.`,
+    }
+  }
+
+  // ---- check 3: is there anything AT the claimed root? (the octave-DOWN hole) -----------------
+  // A root an octave (or more) BELOW the true fundamental cannot fail checks 1 or 2 by
+  // construction: nothing sits below it, and the true fundamental is one of its own harmonics, so
+  // support reads high. The tell is that the claimed root frequency itself is EMPTY.
+  const warnings: string[] = []
+  const atRootItself = partials.find((p) => atRatio(p.hz, rootHz))
+  if (!atRootItself) {
+    const lowestProminent = partials
+      .filter((p) => p.relDb >= -PROMINENCE_DB)
+      .reduce<SpectralPartial | null>((lo, p) => (lo === null || p.hz < lo.hz ? p : lo), null)
+    if (lowestProminent && lowestProminent.hz > rootHz) {
+      const mult = lowestProminent.hz / rootHz
+      const altMidi = hzToMidi(lowestProminent.hz)
+      warnings.push(
+        `no partial sits at ${midiToNote(rootMidi)} itself — the lowest prominent partial is ` +
+          `${lowestProminent.hz.toFixed(1)} Hz (${midiToNote(altMidi)}), ${mult.toFixed(2)}x above it. ` +
+          `The claimed root passes the harmonic-series check only because the real fundamental is one of ` +
+          `ITS harmonics, so every lane would be tuned ${(12 * Math.log2(mult)).toFixed(0)} semitones flat. ` +
+          `Unless this sample deliberately lacks its own fundamental, the root is probably ${midiToNote(altMidi)}.`,
+      )
+    }
+  }
+
+  return {
+    ok: true,
+    warnings,
+    reason: 'ok',
+    alternateRootMidi: null,
+    alternateRootNote: null,
+    harmonicSupport: support,
+    detail: `${(support * 100).toFixed(0)}% of the partial energy sits on integer multiples of ${midiToNote(rootMidi)}`,
+  }
+}
+
+/** Magnitude-weighted share of the partial table landing within tolerance of n*rootHz. Weighted,
+ * not counted, so one loud partial on the series outvotes three quiet strays — the same reason
+ * `harmonicity` is a magnitude share and not a peak count. */
+function harmonicSupportFor(rootHz: number, partials: SpectralPartial[]): number {
+  let total = 0
+  let onSeries = 0
+  for (const p of partials) {
+    total += p.magnitude
+    const n = Math.round(p.hz / rootHz)
+    if (n >= 1 && atRatio(p.hz, n * rootHz)) onSeries += p.magnitude
+  }
+  return total === 0 ? 0 : onSeries / total
+}
+
+/** The refusal/warning body both `beat keymap` and gen-kit print — one wording for one defect. */
+export function formatRootVerification(rootMidi: number, v: RootVerification): string {
+  // "OK" and "SUSPECT" must never appear together — a reader who sees OK first stops reading, which
+  // is precisely how the octave-DOWN case stayed invisible.
+  const lines = !v.ok
+    ? [`root check ${midiToNote(rootMidi)}: FAILED (${v.reason}) — ${v.detail}`]
+    : v.warnings.length > 0
+      ? []
+      : [`root check ${midiToNote(rootMidi)}: OK — ${v.detail}`]
+  if (!v.ok && v.alternateRootNote !== null) lines.push(`the spectrum points at ${v.alternateRootNote} instead.`)
+  for (const w of v.warnings) lines.push(`root check ${midiToNote(rootMidi)}: SUSPECT — ${w}`)
+  return lines.join('\n')
+}

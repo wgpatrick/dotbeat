@@ -150,7 +150,7 @@ async function main() {
 
   const surge = await import('../dist/src/analysis/surge.js')
   const showdown = await import('../dist/src/taste/showdown.js')
-  const features = await import('../dist/src/taste/features.js')
+  const features = await import('../dist/src/metrics/features.js')
   const embeddings = await import('../dist/src/taste/embeddings.js')
   const evalMod = await import('../dist/src/taste/eval.js')
   const curation = await import('../dist/src/taste/surgeCuration.js')

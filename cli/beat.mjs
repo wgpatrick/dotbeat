@@ -105,7 +105,10 @@ import { runAnalysis, sidecarDoctor, defaultAnalysisPath } from '../dist/src/ana
 // ==== Phase 38 Stream SB end ====
 // ==== production tricks (research 118) ====
 import {
-  parseTrickLibrary,
+  loadTrickLibrary,
+  trickByName,
+  knobsForTrick,
+  formatSuggestions,
   applyTrick,
   suggestForDocument,
   siblingRenderFeatures,
@@ -132,7 +135,7 @@ import {
 // Pitch-aware sampling: detection (pure TS, no Python — decisions.md D20) and the tune arithmetic
 // that turns a root into a keymap. keymap.js is deep-imported rather than routed through
 // core/index.js so this stream adds no line to a file two sibling streams are also editing.
-import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
+import { detectPitch, formatPartials, formatPitchLine, verifyRoot, formatRootVerification, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
 // The executable recipe library (docs/research/139 §4) — one altitude above tricks: a named,
 // layered, gate-carrying procedure per clip role. Deliberately NOT re-exported through
 // src/analysis/index.js (`RecipeStep` already means the trick step vocabulary there).
@@ -167,13 +170,14 @@ const HELP_FAMILIES = [
   ['produce', 'add-track', 'trick', 'gen-kit'], // composing produced: retrofit a track / create one produced / pull a named move / generate a whole produced kit (docs/producing.md)
   ['pilot', 'taste-eval', 'rate', 'score'], // the T5 overnight critic-guided QD search (docs/pilot.md, research/117)
   ['board', 'vary', 'adopt', 'rate'], // the NON-BLIND production picking loop (research/128): vary candidates -> board pick -> adopt (rate is the blind sibling)
+  ['ab', 'board', 'rate', 'render'], // the owner-FEEDBACK loop (research/128 §2.5, 137): render a listening set -> ab for the owner's words -> digest back to the agent
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['daemon', 'open', 'selection'], // the running-GUI surface: serve a file, deep-link into it, read/set its selection
 
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
   ['add-note', 'rm-note', 'add-hit', 'rm-hit'],
-  ['render', 'feedback', 'metrics', 'lint'], // Phase 37 Stream RA: the render -> listen loop
+  ['render', 'feedback', 'metrics', 'lint', 'ab'], // Phase 37 Stream RA: the render -> listen loop (feedback = the machine's ears, ab = the owner's)
   // ==== Phase 38 Stream SA begin ====
   ['analyze', 'skeleton', 'analyze-structure', 'source'], // Phase 38: audio import -> skeleton -> critique
   // ==== Phase 38 Stream SA end ====
@@ -652,7 +656,11 @@ const HELP = [
                                                           percussion are exactly where detection is weakest, so expect to
                                                           use it. Refuses on a low-confidence detection (quoting the
                                                           partials and a ready-to-paste --root) rather than building a
-                                                          wrong keymap; --force takes the detection anyway.
+                                                          wrong keymap, and then VERIFIES the confident root against the
+                                                          sound's own spectrum before minting lanes — a root that is an
+                                                          octave off transposes the whole clip, and confidence cannot see
+                                                          that. A stated --root is verified too but only warns, never
+                                                          refuses. --force takes the root either way.
                                                           --key sets the scale's root (default: --from's pitch class).
                                                           --scale names: see beat fit-scale --list-scales.
                                                           --dry-run prints the lanes without writing.
@@ -813,7 +821,7 @@ const HELP = [
     cmd: 'showdown',
     text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
                 [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--with-layered]
-                [--random-patches] [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
+                [--random-patches | --retargeted-patches] [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
                 [--gen-stem-extract]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
@@ -822,7 +830,15 @@ const HELP = [
                                                           preset — docs/engine-presets.md; --random-patches keeps the
                                                           seed's historical random patch for era comparison, and the
                                                           engine/engineplus manifest from-strings record the patch
-                                                          source [patch: random-seed-patch|factory:<name>|curated:<id>]),
+                                                          source [patch: random-seed-patch|factory:<name>|curated:<id>|
+                                                          retargeted:<id>]; --retargeted-patches draws instead from
+                                                          presets/engine-retargeted.json — the same curated presets
+                                                          after a CMA-ES local search toward the per-role scalar
+                                                          targets in src/retarget/targets.ts, inside a per-parameter
+                                                          trust region (docs/preset-retargeting.md). Hold every other
+                                                          flag AND --seed constant against a default run and the
+                                                          engine patch is the only thing that moves, so the two
+                                                          rounds pair batch-for-batch),
                                                           gen (a fal-generated phrase from
                                                           the prompt bank's phrase tier), keymap (a generated
                                                           one-shot played as an instrument through the engine's
@@ -1015,6 +1031,33 @@ const HELP = [
                                                           Adopt a winner with: beat adopt <batch> <pick>`,
   },
   {
+    cmd: 'ab',
+    aliases: ['ask'],
+    text: `  beat ab <dir> [--port 4323] [--log f] [--all]         owner-FEEDBACK UI over a folder of renders: A/B(/C)
+                                                          players that all play IN SYNC so 1-9 switches which one
+                                                          you hear at the same instant and the same moment. Captures
+                                                          a preference AND free text ("what did you hear?") — the
+                                                          free text is the point. Reads <dir>/feedback.json if the
+                                                          agent wrote one ({question, comparisons:[{id, label,
+                                                          question?, options:[{name, wav, note?}], measurements?}]}),
+                                                          otherwise INFERS comparisons from the folder: <case>/
+                                                          <arm>.wav sets and <stem>--before/--after.wav pairs.
+                                                          Writes ONE beat-feedback.jsonl at <dir> + one answer file
+                                                          per comparison under feedback-answers/ — a SEPARATE log
+                                                          from blind beat-scores.jsonl and from beat-decisions.jsonl,
+                                                          never merged. --status [--json]: no server, poll answers.
+                                                          --digest [--json]: preferences + the owner's VERBATIM
+                                                          words (relay those, never a paraphrase).
+                                                          --bank-listen-bench: turn flagged complaints into matched
+                                                          fail/pass listening-case candidates. --all: re-answer.
+                                                          --answer <id> --prefer <name> [--note "..."] [--flag]:
+                                                          record an answer with NO browser — the channel for an owner
+                                                          who replied in chat (transcribe their exact words).
+                                                          also reachable as: beat ask
+                                                          NOTE: beat feedback is the opposite direction of this loop
+                                                          (DSP analysis, no human) — this is the owner's own ears.`,
+  },
+  {
     cmd: 'audition',
     text: `  beat audition <dir> [--group G] [--seed N] [--no-shuffle]
                                                           stitch a blind audition.wav from ANY directory of wavs
@@ -1041,6 +1084,36 @@ const HELP = [
                                                           Prints the arc table (paste into NOTES.md); with
                                                           --save-profile also writes it for feedback --sections
                                                           --ref to verify the render against`,
+  },
+  {
+    cmd: 'rolecheck',
+    text: `  beat rolecheck <file.wav> --role <bassline|chords|lead|drum-loop> [--json] [--targets <file.json>]
+                                                          PRE-BATCH screen for ONE rendered clip against the
+                                                          per-role audio targets mined from the owner's own
+                                                          packs-era Splice reference clips (presets/
+                                                          role-targets.json, regenerated by scripts/
+                                                          build-role-targets.mjs). Prints measured / target /
+                                                          reference-median / verdict per axis, then for every MISS
+                                                          the lever that owns it (composition / patch /
+                                                          production / sound source), a named fix, and the research
+                                                          doc behind it. The fixes name the KIND of change and the
+                                                          knob family, not a ready-to-paste beat-set line.
+                                                          The verdict is a MISS BUDGET, not an all-must-pass AND:
+                                                          a clip FAILS only when it misses more checks than the
+                                                          role's own reference clips typically do (the bar, and the
+                                                          share of references that clear it, are printed). An AND
+                                                          over every check rejected 98.7% of the reference pool
+                                                          itself. Exit 1 on FAIL so a batch script can gate on it;
+                                                          takes one WAV, so loop for a batch.
+                                                          Rows that cannot mean what they say on the given audio
+                                                          are marked (advisory) and NOT counted — truePeak/crest on
+                                                          an un-normalized stem read level, not punch.
+                                                          NOT a quality verdict and NOT a ranker: it does not order
+                                                          clips (use beat rank), and no feature here hears harmony,
+                                                          voicing or groove (131 §8). Roughness is absent by design
+                                                          — it has no valid ABSOLUTE threshold (123, 131 §4); use
+                                                          beat lint --roughness-baseline for the pair-relative
+                                                          grind screen.`,
   },
   {
     cmd: 'lint',
@@ -1085,10 +1158,14 @@ const HELP = [
                                                           (headless Chromium driving ui/; no BeatLab needed)
   beat render <file> --offline [-o out.wav]               compute the mix through an offline context instead
                                                           of capturing the realtime clock — same engine, no
-                                                          lossy recorder step. Repeatable to ~1 LSB for
-                                                          oscillator content; noise-based voices (e.g. the
-                                                          default kit's snare/hats) vary per run, exactly as
-                                                          they do live. CPU-bound: fast for short/small
+                                                          lossy recorder step. REPRODUCIBLE to ~1 LSB: every
+                                                          stochastic element is seeded from the DOCUMENT, not
+                                                          the clock or process state — the kit's noise voices
+                                                          per (track, lane) with a read offset that is a
+                                                          function of the hit's time, and the shared reverb
+                                                          send's impulse response from a fixed seed. The ~1 LSB
+                                                          residual is float-rounding in the offline mix, not
+                                                          randomness. CPU-bound: fast for short/small
                                                           projects, can be SLOWER than live capture for long
                                                           dense songs (the measured ratio is printed).
                                                           Refuses soundfont (instrument/sf-lane) projects;
@@ -1139,7 +1216,9 @@ const HELP = [
                                                           (the phase-6 dynamics-plan check).
                                                           Honest limits: per-section STATIC metrics only — this
                                                           does NOT hear masking, arrangement, or transitions,
-                                                          only how sections differ as isolated static mixes`,
+                                                          only how sections differ as isolated static mixes.
+                                                          This is DSP ANALYSIS, not a human. To get the OWNER's
+                                                          own reaction to a folder of renders, use: beat ab`,
   },
   // ---- Phase 37 Stream RA end -------------------------------------------------------------
   {
@@ -2092,10 +2171,7 @@ function macroCmd(argv) {
 // validates the trick library against the live format vocabulary. BEAT_TRICKS overrides the path,
 // same convention as BEAT_PRESETS/BEAT_MACROS/BEAT_DRUM_KITS.
 function loadTricks() {
-  const dir = resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets')
-  const macros = parseMacroLibrary(readFileSync(resolve(dir, 'macros.json'), 'utf8'))
-  const path = process.env.BEAT_TRICKS ?? resolve(dir, 'tricks.json')
-  return { tricks: parseTrickLibrary(readFileSync(path, 'utf8'), macros), macros }
+  return loadTrickLibrary(resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets'))
 }
 
 function trickListCmd(argv) {
@@ -2112,8 +2188,7 @@ function trickShowCmd(argv) {
   const name = argv.find((a) => !a.startsWith('--'))
   if (!name) throw new BeatEditError('trick show needs a trick name (see `beat trick list`)')
   const { tricks } = loadTricks()
-  const trick = tricks.find((t) => t.name === name)
-  if (!trick) throw new BeatEditError(`no trick "${name}" (have: ${tricks.map((t) => t.name).join(', ')})`)
+  const trick = trickByName(tricks, name)
   process.stdout.write(argv.includes('--json') ? JSON.stringify(trick, null, 2) + '\n' : formatTrickCard(trick))
 }
 
@@ -2127,17 +2202,10 @@ function trickApplyCmd(argv) {
   const clipId = flagValue(argv, '--clip')
   const knobStr = flagValue(argv, '--knob')
   const { tricks, macros } = loadTricks()
-  const trick = tricks.find((t) => t.name === name)
-  if (!trick) throw new BeatEditError(`no trick "${name}" (have: ${tricks.map((t) => t.name).join(', ')})`)
+  const trick = trickByName(tricks, name)
   // --knob fills the trick's (single) declared knob slot
-  const knobs = {}
-  if (knobStr !== undefined) {
-    const v = Number(knobStr)
-    if (!Number.isFinite(v)) throw new BeatEditError(`--knob must be a number, got "${knobStr}"`)
-    const slot = (trick.slots.knobs ?? [])[0]
-    if (!slot) throw new BeatEditError(`trick "${name}" has no knob slot to fill with --knob`)
-    knobs[slot.name] = v
-  }
+  if (knobStr !== undefined && !Number.isFinite(Number(knobStr))) throw new BeatEditError(`--knob must be a number, got "${knobStr}"`)
+  const knobs = knobsForTrick(trick, knobStr === undefined ? undefined : Number(knobStr))
   const before = readDoc(file)
   const features = siblingRenderFeatures(file) // sibling <file>.wav metrics if present, else null
   const result = applyTrick(trick, { doc: before, trackId: track, features }, { ...(clipId ? { clipId } : {}), knobs, macros, force })
@@ -2168,19 +2236,7 @@ function trickSuggestCmd(argv) {
     process.stdout.write(JSON.stringify({ render: hasWav ? wav : null, suggestions: suggestions.map((s) => ({ trick: s.trick.name, track: s.trackId, axis: s.trick.axis, gap: s.gap, unverified: s.unverified })) }, null, 2) + '\n')
     return
   }
-  const src = hasWav ? `metrics from ${basename(wav)}` : 'document state only (no sibling render — metric preconditions unverified)'
-  process.stdout.write(`suggested tricks for ${basename(file)} — ${src}:\n`)
-  if (suggestions.length === 0) {
-    process.stdout.write('  (nothing applicable — every trick either fails a precondition, is counter-indicated, or is already applied)\n')
-    return
-  }
-  const nameW = Math.max(...suggestions.map((s) => s.trick.name.length))
-  const trackW = Math.max(...suggestions.map((s) => s.trackId.length))
-  for (const s of suggestions) {
-    const flag = s.unverified ? '  (needs a render to confirm)' : s.gap > 0 ? `  (gap ${s.gap.toFixed(1)})` : ''
-    process.stdout.write(`  ${s.trackId.padEnd(trackW)}  ${s.trick.name.padEnd(nameW)}  [${s.trick.axis}]${flag}\n`)
-  }
-  process.stdout.write(`then: beat trick show <name>, then beat trick apply ${basename(file)} <track> <name>\n`)
+  process.stdout.write(formatSuggestions(file, hasWav ? wav : null, suggestions))
 }
 
 // ---- recipe library (docs/research/139 §4) ------------------------------------------------------
@@ -2427,6 +2483,7 @@ async function tasteCollectCmd(argv) {
   const genBackend = flagValue(argv, '--gen-backend') ?? 'fal'
   const { mulberry32 } = await import('../dist/src/taste/eval.js')
   const { generateGenStyleBatches } = await import('../dist/src/taste/seeds.js')
+  const { isEnvironmentFault, environmentFaultReason } = await import('../dist/src/vary/batch.js')
   const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
   if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
   // 'feel' rides in the synth pool so timing/velocity taste gets sampled too (its own round type
@@ -2530,15 +2587,26 @@ async function tasteCollectCmd(argv) {
         genMade += 1
       } catch (err) {
         failed += 1
-        // Pilot 112 (MEDIUM): own the message rather than leaking a child command line / a flag
-        // THIS command rejects (ours is --gen-backend, not --backend).
-        process.stderr.write(`warning: gen "${batch.id}" failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; retry with --gen-backend stub for placeholder audio, or --gen-backend stableaudio for local generation)' : ''} (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+        const detail = err instanceof Error ? err.message : String(err)
         // a failed gen can leave its empty batch dir behind — remove it so `beat rate` never
-        // queues a wav-less husk
+        // queues a wav-less husk. Do it BEFORE the environment-fault abort below, which leaves
+        // the loop for good.
         try {
           const husk = join(dir, `gen-${batch.id}-${seedFrom}`)
           if (existsSync(husk) && !readdirSync(husk).some((x) => x.endsWith('.wav'))) rmSync(husk, { recursive: true })
         } catch { /* best-effort cleanup */ }
+        // Same bug the showdown loop had (see the comment there): this hint was unconditional on
+        // the backend rather than derived from the error, so a broken ui/ build, a missing dist/
+        // or an absent venv all reported themselves as "fal needs FAL_KEY + network" — a wrong
+        // remedy in the only message anyone reads. Attribute from the error, and abort the run on
+        // an environment fault instead of burning the remaining batches on the same failure.
+        if (isEnvironmentFault(detail)) {
+          throw new BeatEditError(`gen "${batch.id}" failed for a reason every remaining batch will hit too (${environmentFaultReason(detail)}):\n  ${detail.split('\n').join('\n  ')}`)
+        }
+        // Pilot 112 (MEDIUM): own the message rather than leaking a child command line / a flag
+        // THIS command rejects (ours is --gen-backend, not --backend).
+        const falHint = genBackend === 'fal' && /fal|FAL_KEY|fetch|network|ECONN|timed out/i.test(detail)
+        process.stderr.write(`warning: gen "${batch.id}" failed — skipping${falHint ? ' (fal needs FAL_KEY + network; retry with --gen-backend stub for placeholder audio, or --gen-backend stableaudio for local generation)' : ''} (${detail.split('\n')[0]})\n`)
       }
     }
   }
@@ -2560,7 +2628,7 @@ function flagValue(argv, flag) {
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
   const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--gen-provider', '--ref-dir', '--midi-dir', '--seconds', '--log']
-  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--with-layered', '--surge-doctor', '--shared-figure', '--random-patches', '--theory', '--ca2', '--ca2-doctor', '--gen-stem-extract', '--stem-doctor'])
+  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--with-layered', '--surge-doctor', '--shared-figure', '--random-patches', '--retargeted-patches', '--theory', '--ca2', '--ca2-doctor', '--gen-stem-extract', '--stem-doctor'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const dir = positional[0]
@@ -2614,9 +2682,11 @@ async function showdownCmd(argv) {
 
   // ---- collection ------------------------------------------------------------------------------
   if (!dir) throw new BeatEditError('showdown needs the taste-seeds directory: beat showdown <dir> [--roles r1,r2] [--rounds 1] [--with-produced] [--ref-dir <path>] (or --report)')
-  const { mulberry32 } = await import('../dist/src/taste/eval.js')
+  // NOTE: showdownCmd deliberately imports NO rng. Every seeded choice a batch makes comes either
+  // from showdown.drawShowdownBatchPlan (the nuisance draws) or from a module seeded with that
+  // plan's batchSeed — so no arm-conditional branch can shift another batch's draws.
   const { genSubject, genSubjectVaried, genStyles, PHRASE_NEGATIVE } = await import('../dist/src/taste/seeds.js')
-  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch } = await import('../dist/src/vary/batch.js')
+  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch, isEnvironmentFault, environmentFaultReason } = await import('../dist/src/vary/batch.js')
   const { mkdirSync, copyFileSync } = await import('node:fs')
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
   // Engine preset provenance + role-mapped draw (docs/engine-presets.md E0/E1/E2).
@@ -2678,6 +2748,15 @@ async function showdownCmd(argv) {
   // instead of the seed's randomly rolled patch. --random-patches restores the historical behavior
   // (the seed's own random synthBlock) so the two patch eras stay directly comparable in one report.
   const randomPatches = argv.includes('--random-patches')
+  // E3 (docs/preset-retargeting.md): draw the engine/engineplus voicing from presets/engine-
+  // retargeted.json — curated presets locally optimized by CMA-ES toward the per-role scalar targets
+  // in src/retarget/targets.ts — instead of presets/engine-curated.json. The retargeting run shipped
+  // 2026-07-26 claiming "same shape ... so a showdown arm can draw from it", and then no showdown arm
+  // did: nothing referenced the file, so 6 engine presets of search were unreachable from any batch.
+  // This flag IS the arm. Hold every other flag and --seed constant against a default run and the
+  // engine patch is the only thing that moves (see drawShowdownBatchPlan in src/taste/showdown.ts).
+  const retargetedPatches = argv.includes('--retargeted-patches')
+  if (retargetedPatches && randomPatches) throw new BeatEditError('--retargeted-patches and --random-patches both choose the engine voicing — pick one')
   const refDir = flagValue(argv, '--ref-dir')
   if (refDir !== undefined && !existsSync(refDir)) throw new BeatEditError(`no directory at --ref-dir ${refDir}`)
 
@@ -2806,16 +2885,22 @@ async function showdownCmd(argv) {
   if (!randomPatches) {
     try {
       enginePresets = loadPresets()
-      const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', 'engine-curated.json')
+      const bankFile = retargetedPatches ? 'engine-retargeted.json' : 'engine-curated.json'
+      const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', bankFile)
       engineCurated = loadEngineCuratedFile(curatedPath)
-      const bankSize = Object.entries(engineCurated?.roles ?? {}).map(([r, v]) => `${r} ${v.kept?.length ?? 0}`).join(', ')
-      process.stderr.write(`engine patches: factory (${enginePresets.length} presets)${engineCurated ? ` + curated bank (${bankSize || 'no roles'})` : ''} — engine/engineplus draw a role-mapped voicing (--random-patches for the historical random-seed-patch era)\n`)
+      if (retargetedPatches && engineCurated === null) {
+        // --retargeted-patches names an ARM. Falling back to the curated bank would label the batch
+        // as retargeted in the run header while rendering curated patches — silently corrupting the
+        // very comparison the flag exists for, which is the --ca2 posture (fail, never substitute).
+        throw new BeatEditError(`--retargeted-patches: no readable preset bank at ${curatedPath} — regenerate it with scripts/retarget-presets.mjs`)
+      }
+      const bankSize = Object.entries(engineCurated?.roles ?? {}).map(([r, v]) => `${r} ${(v.kept?.length ?? 0) + (v.retargeted?.length ?? 0)}`).join(', ')
+      process.stderr.write(`engine patches: factory (${enginePresets.length} presets)${engineCurated ? ` + ${retargetedPatches ? 'RETARGETED' : 'curated'} bank from ${bankFile} (${bankSize || 'no roles'})` : ''} — engine/engineplus draw a role-mapped voicing (--random-patches for the historical random-seed-patch era)\n`)
     } catch (err) {
       process.stderr.write(`warning: engine preset pool failed to load (${err instanceof Error ? err.message.split('\n')[0] : err}) — falling back to random-seed-patch\n`)
     }
   }
 
-  const rng = mulberry32(metaSeed)
   let made = 0
   let failed = 0
   // per-role archetypes already composed this session — threaded into the composer's exclude
@@ -2826,13 +2911,7 @@ async function showdownCmd(argv) {
   const usedPresets = new Map()
   for (let round = 0; round < rounds; round++) {
     for (const spec of roles) {
-      const batchSeed = Math.floor(rng() * 100000)
-      const genSeed = Math.floor(rng() * 100000)
-      const kmSeed = Math.floor(rng() * 100000)
       const styles = genStyles()
-      const style = styles[Math.floor(rng() * styles.length)]
-      const kmStyle = styles[Math.floor(rng() * styles.length)]
-      const refPick = Math.floor(rng() * 100000) // drawn unconditionally so --ref-dir never shifts the other seeds
       // a seed song that actually carries this role's track (the arp track is optional per seed)
       const candidates = seeds.filter((s) => s.doc.tracks.some((t) => t.id === spec.seedTrack))
       if (candidates.length === 0) {
@@ -2840,7 +2919,21 @@ async function showdownCmd(argv) {
         process.stderr.write(`warning: no seed song has a "${spec.seedTrack}" track for role ${spec.role} — skipping (generate more seeds: beat taste-seeds ${dir})\n`)
         continue
       }
-      const seed = candidates[Math.floor(rng() * candidates.length)]
+      // EVERY nuisance variable for this batch comes from ONE pure draw keyed on (--seed, round,
+      // role) — see showdown.ts's "per-batch nuisance draws" section. Nothing below may call an
+      // rng: an arm-conditional draw here is exactly how a figure-source comparison stops being a
+      // comparison (round 6, 2026-07-25). test/showdown-pairing.test.ts asserts both halves.
+      const plan = showdown.drawShowdownBatchPlan({
+        metaSeed,
+        round,
+        role: spec.role,
+        styleCount: styles.length,
+        candidateCount: candidates.length,
+      })
+      const { batchSeed, genSeed, kmSeed, refPick } = plan
+      const style = styles[plan.styleIndex]
+      const kmStyle = styles[plan.kmStyleIndex]
+      const seed = candidates[plan.seedIndex]
       const seedPath = join(dir, seed.file)
       const outDir = join(dir, `showdown-${spec.role}-${batchSeed}`)
       const workDir = join(outDir, 'work')
@@ -3066,14 +3159,18 @@ async function showdownCmd(argv) {
         let layeredBuilt = null
         if (layeredDrawn !== null) {
           try {
-            const arch = layeredMod.layeredArchitecture(spec.role)
+            // PASS THE BATCH SEED. The architecture is DRAWN, seeded, from the sweep space in
+            // src/taste/layered.ts; leaving the seed at its default would give every clip in a
+            // round the identical stack, which is exactly the homogenization the owner reported on
+            // 2026-07-26 ("all the layering... makes everything sort of sound the same-ish").
+            const arch = layeredMod.layeredArchitecture(spec.role, batchSeed)
             layeredBuilt = {
               arch,
               figure: layeredDrawn.composed.archetype,
-              plain: layeredMod.buildLayeredClip(spec.role, layeredDrawn.composed, batchBpm),
-              produced: withProduced ? layeredMod.buildLayeredClip(spec.role, layeredDrawn.composed, batchBpm, { produced: true }) : null,
+              plain: layeredMod.buildLayeredClip(spec.role, layeredDrawn.composed, batchBpm, { arch }),
+              produced: withProduced ? layeredMod.buildLayeredClip(spec.role, layeredDrawn.composed, batchBpm, { arch, produced: true }) : null,
             }
-            process.stderr.write(`layered: ${arch.layers.length} layers — ${arch.summary} (shift ${layeredBuilt.plain.baseShift} semitones to the ${spec.role} anchor)\n`)
+            process.stderr.write(`layered: ${arch.layers.length} layers (${arch.draw.family}) — ${arch.summary} (shift ${layeredBuilt.plain.baseShift} semitones to the ${spec.role} anchor)\n`)
           } catch (err) {
             process.stderr.write(`layered skipped (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
           }
@@ -3351,7 +3448,17 @@ async function showdownCmd(argv) {
         made += 1
       } catch (err) {
         failed += 1
-        process.stderr.write(`warning: showdown ${spec.role} failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; --gen-backend stub builds placeholder audio)' : ''} (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+        const detail = err instanceof Error ? err.message : String(err)
+        // Round 5 and the first half of round 6 both lost EVERY batch to one broken `ui/` build,
+        // and both times this warning blamed fal — the hint was unconditional on the backend, not
+        // derived from the error. A wrong remedy in the only message anyone reads is worse than no
+        // remedy: it cost two rounds of chasing FAL_KEY. So: attribute from the error, and treat
+        // an environment fault as fatal for the whole run rather than a per-batch skip, because
+        // batch 2 cannot possibly succeed where batch 1 failed for that reason.
+        if (isEnvironmentFault(detail)) {
+          throw new BeatEditError(`showdown ${spec.role} failed for a reason every remaining batch will hit too (${environmentFaultReason(detail)}):\n  ${detail.split('\n').join('\n  ')}`)
+        }
+        process.stderr.write(`warning: showdown ${spec.role} failed — skipping${genBackend === 'fal' && /fal|FAL_KEY|fetch|network|ECONN|timed out/i.test(detail) ? ' (fal needs FAL_KEY + network; --gen-backend stub builds placeholder audio)' : ''} (${detail.split('\n')[0]})\n`)
         discardIncompleteBatch(outDir) // never leave a half-built batch for beat rate to queue
       } finally {
         // the work batch is a scoreable manifest+wavs dir of its own: `beat rate` would queue it
@@ -3569,7 +3676,7 @@ async function pilotCmd(argv) {
 
   const { criticWithUncertainty } = await import('../dist/src/taste/eval.js')
   const { embedAudioFile } = await import('../dist/src/taste/embeddings.js')
-  const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+  const { computeBatchFeatures } = await import('../dist/src/metrics/features.js')
   const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch } = await import('../dist/src/vary/batch.js')
   const showdown = await import('../dist/src/taste/showdown.js')
   const { copyFileSync } = await import('node:fs')
@@ -4144,7 +4251,7 @@ async function tasteEvalCmd(argv) {
     // Rewrite entries that lack features but whose batch renders still exist — making the log
     // self-contained before batch dirs get cleaned up. A .bak of the original is kept.
     const lines = readFileSync(logPath, 'utf8').split('\n')
-    const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+    const { computeBatchFeatures } = await import('../dist/src/metrics/features.js')
     let filled = 0
     const rewritten = lines.map((line) => {
       const trimmed = line.trim()
@@ -4242,7 +4349,7 @@ async function tasteSuggestCmd(argv) {
   const logPath = explicitLog ?? (existsSync(siblingLog) ? siblingLog : null)
   if (logPath === null || !existsSync(logPath)) throw new BeatEditError(`no scores log found next to ${dir} — pass --log <beat-scores.jsonl> (the taste model needs YOUR past ratings to rank with)`)
   const { loadTasteBatches, trainOnBatches } = await import('../dist/src/taste/eval.js')
-  const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+  const { computeBatchFeatures } = await import('../dist/src/metrics/features.js')
   const { standardizeBatch, scoreVector } = await import('../dist/src/taste/ranker.js')
   const { batches } = loadTasteBatches(logPath)
   const training = batches.filter((b) => resolve(b.dir) !== resolve(dir)) // never train on the batch being ranked
@@ -4938,7 +5045,11 @@ async function genKitCmd(argv) {
     for (const h of hits) doc = addHit(doc, role, h).doc
     doc = saveClip(doc, role, clipId).doc
     slots[role] = [{ clip: clipId, at: 0 }]
-    process.stdout.write(`${role}: keymapped ${laneNames.length} lanes (${laneNames[0]}..${laneNames[laneNames.length - 1]}, ${scale} in ${pitchClassName(keyMidi)}) — root ${p.pick.rootSource} ${midiToNote(p.pick.rootMidi)}; starter phrase written (clip "${clipId}")\n`)
+    // D22: say when the root could not be verified. gen-kit never refuses on it (a playable start
+    // is the contract), so an unverified root must be LOUD here or it reaches a rating round
+    // looking like bad timbre rather than a transposed instrument.
+    const rootNote = `root ${p.pick.rootSource} ${midiToNote(p.pick.rootMidi)}${p.pick.rootVerified ? '' : ' (UNVERIFIED — tuning suspect, see the batch)'}`
+    process.stdout.write(`${role}: keymapped ${laneNames.length} lanes (${laneNames[0]}..${laneNames[laneNames.length - 1]}, ${scale} in ${pitchClassName(keyMidi)}) — ${rootNote}; starter phrase written (clip "${clipId}")\n`)
   }
   // Produced defaults (docs/research/115-production-layer-techniques.md, plan A1): every registered
   // track ships with role-appropriate production (width / air / glue / space) instead of the dry,
@@ -5083,6 +5194,34 @@ function sampleInfoCmd(argv) {
  * low-confidence detection stops here — but it must leave the user ONE copy-paste from success,
  * not with a research project. So it quotes the measured confidence, the whole partial table, and
  * the original command line with a `--root` derived from the strongest low partial appended. */
+/** D22 (research/132 §3) — the root the detector was confident about is still checked against the
+ * sound's own spectrum before six lanes are minted on it, because a CONFIDENT wrong root is the
+ * failure mode confidence cannot catch (a strong second harmonic taken for the fundamental) and it
+ * transposes the WHOLE clip, not one note. Same shape as the confidence refusal above: quote the
+ * measurement, hand back a ready-to-paste --root, keep --force available. */
+function keymapRootRefusal(argv, sampleId, pitch, verification) {
+  const lines = [
+    `the detected root for "${sampleId}" does not survive verification — refusing rather than transposing the whole clip.`,
+    '',
+    formatPitchLine(pitch),
+    '',
+    formatRootVerification(pitch.midi, verification),
+    '',
+    formatPartials(pitch.partials),
+    '',
+  ]
+  if (verification.alternateRootNote) {
+    lines.push(
+      `If the table agrees, state that root and re-run:`,
+      '',
+      `  beat keymap ${argv.join(' ')} --root ${verification.alternateRootNote}`,
+      '',
+    )
+  }
+  lines.push('Or pass --force to build the keymap on the detected root anyway.')
+  return lines.join('\n')
+}
+
 function keymapRefusal(argv, sampleId, pitch) {
   const lines = [
     `pitch detection is not confident enough to root a keymap on "${sampleId}" — refusing rather than minting six lanes of wrong tuning.`,
@@ -5138,14 +5277,42 @@ function keymapCmd(argv) {
   if (rootFlag !== undefined) {
     rootMidi = noteToMidi(rootFlag)
     rootSource = `--root ${rootFlag} (stated, not detected)`
+    // A stated root is the user's call and is never refused — `--root` exists precisely for the
+    // sounds detection cannot read (bells, found percussion). But a silent disagreement between
+    // the stated root and the spectrum is the D22 defect wearing a different hat, so say it once.
+    try {
+      const { channels, sampleRate } = readSampleAudio(file, before, sampleId)
+      const check = verifyRoot(rootMidi, detectPitch(channels, sampleRate))
+      // Both directions must be reported here. The CLI/MCP pilot (2026-07-26) found `--root a3` on
+      // an unambiguous a4 sample passing silently: octave-DOWN cannot fail the hard checks, so it
+      // arrives as a WARNING, and a warning nobody prints is the defect all over again.
+      if (!check.ok || check.warnings.length > 0) {
+        process.stderr.write(`warning: ${formatRootVerification(rootMidi, check)}\nBuilding the keymap on your stated root anyway.\n`)
+      }
+    } catch {
+      // An unreadable/unregistered sample is buildKeymap's error to raise, with its own message.
+    }
   } else {
     const { channels, sampleRate } = readSampleAudio(file, before, sampleId)
     const pitch = detectPitch(channels, sampleRate)
     if (pitch.hz === null || (pitch.confidence < PITCH_CONFIDENCE_MEDIUM && !argv.includes('--force'))) {
       throw new BeatEditError(keymapRefusal(argv, sampleId, pitch))
     }
+    // Confidence says "there is a single periodic pitch here"; verification says "and it is THIS
+    // one" — two different questions, and only the second catches an octave error (D22).
+    const verification = verifyRoot(pitch.midi, pitch)
+    if (!verification.ok && !argv.includes('--force')) {
+      throw new BeatEditError(keymapRootRefusal(argv, sampleId, pitch, verification))
+    }
+    for (const w of verification.warnings) process.stderr.write(`warning: root check ${pitch.note}: SUSPECT — ${w}\n`)
     rootMidi = pitch.midi
-    rootSource = `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)})`
+    rootSource =
+      `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)}); ` +
+      (!verification.ok
+        ? `root check FAILED (${verification.reason}) and --force overrode it`
+        : verification.warnings.length > 0
+          ? 'root SUSPECT — see the warning above'
+          : `root verified — ${verification.detail}`)
   }
 
   // --dry-run runs the REAL build and simply doesn't write it. Computing the plan alone would skip
@@ -5502,6 +5669,45 @@ function sectionSpecsFromDoc(doc, path) {
 // pays for real per-track audio (one solo render per track, via render.mjs's headless-chromium
 // path — the same real engine `beat render` uses, no cheaper synthetic shortcut exists) when both
 // a doc was given AND the plain mix already has at least one finding worth naming a track for.
+// research 138 §3-B2 / 140 D26. All the logic lives in src/taste/rolecheck.ts so the CLI and any
+// future MCP tool share ONE implementation (CLAUDE.md: "parity is structural, never disciplinary").
+async function rolecheckCmd(argv) {
+  const { loadRoleTargets, rolecheckFile, formatRoleCheck, knownRoles, resolveRoleTargetsPath, BeatRoleCheckError } =
+    await import('../dist/src/taste/rolecheck.js')
+  // R1-F2 ledger: a new command must reject unknown flags, not silently ignore them.
+  const known = new Set(['--role', '--targets', '--json'])
+  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
+  const json = argv.includes('--json')
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !['--role', '--targets'].includes(argv[i - 1]))
+  const file = positional[0]
+  const roleIdx = argv.indexOf('--role')
+  const role = roleIdx !== -1 ? argv[roleIdx + 1] : undefined
+  const targetsIdx = argv.indexOf('--targets')
+  const targetsPath = targetsIdx !== -1 ? argv[targetsIdx + 1] : undefined
+  if (!file) throw new BeatEditError('rolecheck needs a rendered WAV, e.g. beat rolecheck take.wav --role bassline')
+  if (targetsIdx !== -1 && (!targetsPath || targetsPath.startsWith('--'))) {
+    throw new BeatEditError('--targets needs a role-targets JSON path (default: presets/role-targets.json)')
+  }
+  let targets
+  try {
+    targets = loadRoleTargets(resolveRoleTargetsPath(targetsPath))
+  } catch (err) {
+    throw new BeatEditError(err instanceof BeatRoleCheckError ? err.message : String(err))
+  }
+  if (!role || role.startsWith('--')) {
+    throw new BeatEditError(`rolecheck needs --role <${knownRoles(targets).join('|')}>`)
+  }
+  let result
+  try {
+    result = rolecheckFile(resolve(file), role, targets)
+  } catch (err) {
+    throw new BeatEditError(err instanceof BeatRoleCheckError ? err.message : String(err))
+  }
+  process.stdout.write(json ? `${JSON.stringify(result, null, 2)}\n` : `${formatRoleCheck(result)}\n`)
+  // Exit 1 on FAIL so `beat rolecheck take.wav --role lead && beat showdown ...` gates correctly.
+  if (result.verdict === 'fail') process.exitCode = 1
+}
+
 async function lintCmd(argv) {
   const json = argv.includes('--json')
   const targetIdx = argv.indexOf('--target')
@@ -6498,6 +6704,12 @@ async function main() {
       await boardCommand(rest)
       return // the picking server runs until ctrl-c (--status returns instead)
     }
+    case 'ask':
+    case 'ab': {
+      const { abCommand } = await import('./ab.mjs')
+      await abCommand(rest)
+      return // the feedback server runs until ctrl-c (--status/--digest return instead)
+    }
     case 'taste-eval':
       await tasteEvalCmd(rest)
       break
@@ -6535,6 +6747,9 @@ async function main() {
       break
     case 'lint':
       await lintCmd(rest)
+      break
+    case 'rolecheck':
+      await rolecheckCmd(rest)
       break
     case 'mcp': {
       const { runMcpServer } = await import('../dist/src/mcp/server.js')
