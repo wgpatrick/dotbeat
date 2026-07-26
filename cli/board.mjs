@@ -55,7 +55,29 @@ export function batchLabel(manifest) {
 const soloWav = (file) => (file.endsWith('.wav') ? file : file.replace(/\.beat$/, '.wav'))
 /** Optional in-context render, by convention next to the solo render: "v3.beat" -> "v3.context.wav".
  * Present only if a caller has rendered the candidate stitched into its surrounding bars; the
- * solo/in-context toggle appears only when EVERY candidate has one. */
+ * solo/in-context toggle appears only when EVERY candidate has one.
+ *
+ * NOTHING PRODUCES THESE FILES (audit 140 D5, from 137 §6). Grepping src/, cli/ and scripts/ for a
+ * writer returns only this reader, so the toggle has never once appeared — and 128's survey called
+ * in-context audition the single most-praised pattern it found. The board now SAYS so rather than
+ * silently rendering nothing (see the `hasContext` branch in the page script).
+ *
+ * Filing a producer needs a design ruling first, because the convention is under-specified in a way
+ * that is not obvious until you look at what the batch dirs actually hold:
+ *
+ *   - A VARY batch's `vN.beat` is the whole parent document with one track varied
+ *     (src/vary/batch.ts writes `serialize(variants[i].doc)`), so `vN.wav` is already a FULL-MIX
+ *     render. What this file calls the "solo" render is in fact the in-context one, and the render
+ *     that is actually missing is the isolated track — which `cli/render.mjs`'s
+ *     renderTrackSolosCommand already knows how to make.
+ *   - A GEN batch's variants are bare `vN.wav` clips with no document at all. They are genuinely
+ *     solo, and there is no surrounding material to stitch them into; "context" would have to be
+ *     invented (a backing bed), which no doc specifies.
+ *
+ * So the two batch kinds need opposite work, and for vary batches shipping a producer would mean
+ * redefining which render the default player plays — a change to what the owner hears on a shipped
+ * surface, not an additive one. 128 §193 also puts real in-context audition in "v2, after the toy
+ * songs validate the surface". Tracked as a roadmap row rather than guessed at here. */
 const contextWav = (file) => file.replace(/\.(beat|wav)$/, '') + '.context.wav'
 
 /** Human-readable projection of a variant's DSP feature vector (src/taste/features.ts) — the
@@ -189,6 +211,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>beat board</title>
   .toggle{display:flex;gap:6px;margin:10px 0 4px}
   .toggle button{background:var(--surface-recessed);color:var(--text-dim);border:1px solid var(--line);border-radius:var(--radius-sm);padding:4px 10px;font-size:11px;cursor:pointer;letter-spacing:var(--label-tracking)}
   .toggle button.on{background:var(--accent);color:#1a1509;border-color:var(--accent);font-weight:700}
+  .ctx-missing{margin:10px 0 4px;font-size:11px;color:var(--text-dim);letter-spacing:var(--label-tracking)}
   .section-heading{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:var(--label-tracking);color:var(--text-dim);margin:20px 0 6px}
   table.feat{width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:12px;background:var(--surface-recessed);border-radius:var(--radius-md);overflow:hidden}
   table.feat th,table.feat td{padding:6px 9px;text-align:right;border-bottom:1px solid var(--line)}
@@ -264,6 +287,12 @@ function render(){
   $('feat').innerHTML=featHtml(b)
   if(b.hasContext){
     $('list').insertAdjacentHTML('beforebegin','<div class="toggle" id="tg"><button id="tSolo" class="'+(audMode==='solo'?'on':'')+'" onclick="setMode(\\'solo\\')">solo</button><button id="tCtx" class="'+(audMode==='context'?'on':'')+'" onclick="setMode(\\'context\\')">in-context</button></div>')
+  }else{
+    // Say the affordance is missing instead of just not drawing it. A toggle that never appears
+    // reads as "this batch happens not to have one" when the truth is that nothing has ever
+    // produced a .context.wav (audit 140 D5) — and a silent absence is exactly why the gap
+    // survived a roadmap row describing the toggle as shipped.
+    $('list').insertAdjacentHTML('beforebegin','<div class="ctx-missing" id="tg">solo renders only — no in-context renders exist for this batch</div>')
   }
   applySink()
 }

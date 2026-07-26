@@ -195,3 +195,25 @@ test('beat board rejects an unknown flag loudly (pilot 112 stance)', () => {
   const out = beat(['board', dir, '--prot', '4322'], { expectExit: 2 })
   assert.match(out, /unknown flag "--prot"/)
 })
+
+// ---- the in-context toggle's missing producer (audit 140 D5 / research 137 §6) ------------------
+
+test('the in-context toggle stays OFF, and the page says so rather than silently omitting it', () => {
+  // `.context.wav` has a consumer (cli/board.mjs) and no producer anywhere: grepping src/, cli/ and
+  // scripts/ for a writer returns only the reader. The toggle is gated on every candidate having
+  // one, so it has never appeared — while the roadmap row described it as shipped. Until a producer
+  // exists this asserts the honest state: no toggle, and a visible reason.
+  const board = readFileSync(join(repoRoot, 'cli', 'board.mjs'), 'utf8')
+
+  // 1. still no producer. Any line that WRITES a .context.wav would break this.
+  const writers = board.match(/writeFileSync\([^)]*context\.wav/g) ?? []
+  assert.deepEqual(writers, [], 'a producer appeared — delete this test and re-enable the toggle path')
+
+  // 2. the absence is explicit in the page, not a silently skipped branch.
+  assert.match(
+    board,
+    /ctx-missing/,
+    'the else-branch that tells the owner why there is no in-context audio has gone missing',
+  )
+  assert.match(board, /no in-context renders exist/, 'the explicit-absence copy changed unexpectedly')
+})
