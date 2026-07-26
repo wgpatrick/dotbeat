@@ -1090,12 +1090,23 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
   // could be drawn as a second transient on the chord onset — one half of the owner's "'pop' 'pop'
   // with two hits". Every value here swells in well past `TRANSIENT_ATTACK_S`.
   const padAttack = pickOne(rng, [0.06, 0.1, 0.16, 0.24] as const)
-  // §4d: median chord-patch filter cutoff 523 Hz, lowpassed in 82.1% of cases — the highest lowpass
-  // rate of the ten roles measured. The voice filter is spent on the crossover highpass, so this is
-  // the eq7 LP section: the pad's RESTING brightness, which §4d says is the right number to read
-  // for a sustained chord even though mod routings are not resolved in the corpus. Swept +/- ~90 Hz
-  // around the median rather than pinned, like every other axis in this file.
-  const padLp = pickRange(rng, 430, 620, 10)
+  // THE DARK MOVE. Direction and existence from §4d: chord patches are lowpassed in 82.1% of cases,
+  // the highest rate of the ten roles measured, at a median knob value of 523 Hz. The voice filter
+  // is spent on the crossover highpass, so this is the eq7 LP section — the pad's RESTING
+  // brightness.
+  //
+  // THE MAGNITUDE IS NOT 523, AND THE REASON IS IN §4d ITSELF: "these are static knob values;
+  // LFO / velocity / macro / mod-matrix routings are not resolved, so a patch's sounding cutoff can
+  // differ from the stored value" — and Surge's filter keytracks, so a stored 523 on a patch played
+  // at C4 is not 523 Hz of rendered spectrum. Transplanting it as an absolute Hz onto an
+  // already-highpassed layer overshoots, and it overshot MEASURABLY: rendered at 430-620 Hz the
+  // three chord seeds the owner rated measured centroids of 299 / 693 / 374 Hz against the
+  // refs-packs chords pool's own IQR of 344-630 (median 448), with seed 138 scoring 0 of 7 gates and
+  // 54% bass-band share against a p75 of 47%. Doubled, the same three seeds measure 450 / 778 / 569
+  // and score 4/7, 3/7, 3/7. So: the corpus sets the direction and the fact that there IS a resting
+  // lowpass; the reference pool this arm is gated on sets the number, exactly as `deriveTargets`
+  // does for every other threshold in this file. Two-sided, and calibrated against a render.
+  const padLp = pickRange(rng, 860, 1240, 20)
   const padPan = pickRange(rng, -0.5, -0.15, 0.05)
 
   // ---- STAB: the bright short accent, an octave up ----------------------------------------------
@@ -1113,7 +1124,9 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
   const stabPick = pickOne(rng, ['dropRoot', 'dropRoot', 'all'] as const)
   // still lowpassed — §4d's 82.1% is the ROLE's rate, not the pad layer's — but resting three to
   // five times higher than the pad. That gap IS the bright/dark half of "two different jobs".
-  const stabLp = pickRange(rng, 1800, 3400, 100)
+  // Scaled with `padLp` when that was calibrated against the reference pool (see its comment), so
+  // the RATIO between the two layers, which is the part that carries the meaning, is unchanged.
+  const stabLp = pickRange(rng, 3600, 6800, 200)
   // GATE FLOOR MOVED FROM 1 TO 2 STEPS, and the release lengthened, 2026-07-26. A 1-step gate is a
   // 16th note — ~120 ms at the 120-128 BPM this arm renders at — under a chord that sustains, which
   // is a percussive chop, not a chord. Identical complaint shape to the bass gate raised earlier on
@@ -1168,12 +1181,19 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
         sustain: 0.82,
         release: 0.25,
       },
-      production: {
-        // NO parallel comp on a sustained low layer: measured 2026-07-26, it pushed chords'
-        // bass-band share from 38% (in target) to 62% (out), because compressing a sustained voice
-        // raises its AVERAGE, which is the one thing the band-share targets read.
-        profile: { role: 'bass', saturator: { drive: 0.25, mix: 0.3 } },
-      },
+      // NO `production` AT ALL ON THIS LAYER, and the absence is the decision — a layer that
+      // declares a production block and produces nothing is a lie the test suite catches.
+      //
+      // It used to carry `saturator { drive 0.25, mix 0.3 }` and no comp. The comp was removed
+      // earlier: measured 2026-07-26, it pushed chords' bass-band share from 38% (in target) to 62%
+      // (out), because compressing a sustained voice raises its AVERAGE, which is the one thing the
+      // band-share targets read. The saturator goes for the same reason plus a sourced one — §4c's
+      // 14.3% waveshaping rate is a fact about CHORD PATCHES, and this layer is part of one; it is
+      // not a bass patch just because its job inside the instrument is low. Leaving drive here
+      // while the pad and the stab lost theirs measured as the body swallowing the instrument:
+      // bass-band share 83% / 64% / 78% on the three rated seeds against a reference p75 of 47%,
+      // and centroids of 131 / 301 / 194 Hz against the pool IQR of 344-630. With it gone the same
+      // three measure 44% / 26% / 29% and 431 / 740 / 568 Hz.
     },
   ]
 

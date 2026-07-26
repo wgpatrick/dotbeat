@@ -35,6 +35,7 @@ if (oldRoot === '') throw new Error('--old <dir> is required: a built checkout o
 const outDir = resolve(arg('--out', join(process.env.HOME, 'Documents/dotbeat/taste-dataset/layered-fix2')))
 const perRole = Number(arg('--per-role', '3'))
 const metaSeed = Number(arg('--seed', '41'))
+const onlyRoles = arg('--roles', '').split(',').filter(Boolean)
 
 const { parse } = await import(`${repoRoot}/dist/src/core/index.js`)
 const { generateSeedBeat } = await import(`${repoRoot}/dist/src/taste/seeds.js`)
@@ -109,7 +110,7 @@ const ARMS = [
 const comparisons = []
 const report = []
 
-for (const role of LAYERED_ROLES) {
+for (const role of onlyRoles.length > 0 ? LAYERED_ROLES.filter((r) => onlyRoles.includes(r)) : LAYERED_ROLES) {
   for (let n = 0; n < perRole; n++) {
     const batchSeed = metaSeed + n * 1009 + LAYERED_ROLES.indexOf(role) * 97
     const clipDir = join(outDir, `${role}-${batchSeed}`)
