@@ -693,6 +693,23 @@ export interface ScoreEntry {
    * records which pool a deleted batch's ref came from, so eval.ts treats a ref variant with no
    * manifest and no logged list as UNKNOWN => EXCLUDED. */
   trainingExcluded?: string[]
+  /** Ref variants only: which POOL each ref clip came from, keyed by the same variant file names
+   * `sources` uses. Its sibling `figureSource` has ridden the log entry since it existed; the ref
+   * POOL did not, so every pool-split analysis had to re-read the batch dir's own manifest — and
+   * `showdown.ts`'s own tally says as much out loud ("the pool split is computed at report time
+   * from the batch dir's own manifest"), skipping any entry whose manifest is gone. Deleting batch
+   * dirs after a round is the DOCUMENTED lifecycle, so every historical pool breakdown silently
+   * under-counted. This is the same failure the D25 holdout fix (hunt H3) closed for
+   * `trainingExcluded` in this same file, and the pool label did not get the same treatment then.
+   *
+   * Same absent-means-old-entry discipline as `trainingExcluded`: written — possibly EMPTY —
+   * on every entry whose batch carries source records, because "looked, no refs in this batch"
+   * and "written before this field existed" must stay distinguishable. BACK-FILL IS IMPOSSIBLE
+   * for older entries: once the dir is gone nothing on disk records which pool its ref came from.
+   *
+   * Leaks nothing new: the value is one of five enum labels (see `refPoolOf`) — the ref's origin
+   * PATH still never leaves the batch dir, exactly as with `sources`. */
+  refPools?: Record<string, RefPool>
   /** Showdown batches only: where the composed figures came from — 'midi' (commercial MIDI
    * transcriptions, private), 'theory' (the deterministic theory-aware layer), 'ca2' (Composer's
    * Assistant 2 over that layer's chord track) or 'bank' (internal archetypes). The label is the
@@ -811,13 +828,52 @@ export function canonicalBatchKey(dir: string): string {
  *   - an explicit `trainingExcluded` flag on the source or on a gen candidate's provenance
  *     sidecar (providers whose ToS bans training on outputs).
  * Returned in manifest order, deduped. */
+export type RefPool = 'ref:familiar' | 'ref:unfamiliar' | 'ref:packs' | 'ref:cc0' | 'ref:other'
+
+/** Classify a ref clip's origin POOL from its manifest `from` path — the taste-dataset convention:
+ *
+ *   refs-familiar/    chops of songs the owner loves
+ *   refs-unfamiliar/  competent-but-unknown tracks
+ *   refs-packs/       purchased pro sample-pack loops (the eval bar; D25 holds these out of critic
+ *                     training until the vendor's ML clause is verified clean)
+ *   refs-cc0/         curated Freesound CC0 loops (training-safe by construction)
+ *
+ * "my taste is unreachable" and "any commercial track is unreachable" are different findings, which
+ * is the whole reason the split is worth carrying.
+ *
+ * This is the DAW-side definition, and it is deliberately where the refs-packs test that
+ * `trainingExcludedFiles` already needed now lives, so this file has ONE pool rule rather than two.
+ * `src/taste/showdown.ts` still carries its own `classifyRefPool` twin; `test/ref-pool.test.ts`
+ * asserts the two agree on a shared path table, and the follow-up is to delete showdown's copy and
+ * import this one (it was owned by a concurrent stream when this landed). */
+export function refPoolOf(fromPath: string): RefPool {
+  if (/refs-familiar\b/.test(fromPath)) return 'ref:familiar'
+  if (/refs-unfamiliar\b/.test(fromPath)) return 'ref:unfamiliar'
+  if (/refs-packs\b/.test(fromPath)) return 'ref:packs'
+  if (/refs-cc0\b/.test(fromPath)) return 'ref:cc0'
+  return 'ref:other'
+}
+
+/** Every ref variant's pool, keyed by variant file — what `ScoreEntry.refPools` freezes into the
+ * log so the split outlives the batch dir. Non-ref variants are absent, not 'ref:other'. */
+export function refPoolsOf(manifest: VaryBatchManifest): Record<string, RefPool> {
+  const out: Record<string, RefPool> = {}
+  for (const v of manifest.variants ?? []) {
+    if (typeof v.file !== 'string') continue
+    const source = v.source as { kind?: string; from?: string } | undefined
+    if (source?.kind !== 'ref' || typeof source.from !== 'string') continue
+    out[v.file] = refPoolOf(source.from)
+  }
+  return out
+}
+
 export function trainingExcludedFiles(manifest: VaryBatchManifest): string[] {
   const out: string[] = []
   for (const v of manifest.variants ?? []) {
     if (typeof v.file !== 'string') continue
     const source = v.source as { kind?: string; from?: string; trainingExcluded?: boolean } | undefined
     const media = v.media as (VariantMedia & { sidecar?: { generated?: { trainingExcluded?: boolean } } }) | undefined
-    const refsPack = source?.kind === 'ref' && typeof source.from === 'string' && /refs-packs\b/.test(source.from)
+    const refsPack = source?.kind === 'ref' && typeof source.from === 'string' && refPoolOf(source.from) === 'ref:packs'
     const banned = source?.trainingExcluded === true || media?.sidecar?.generated?.trainingExcluded === true
     if ((refsPack || banned) && !out.includes(v.file)) out.push(v.file)
   }
@@ -963,6 +1019,10 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   // found nothing to exclude" is a different fact from "this entry predates the field", and only
   // the first lets a training-safe ref (refs-cc0) stay trainable after its dir is deleted.
   if (Object.keys(sources).length > 0) entry.trainingExcluded = trainingExcludedFiles(manifest)
+  // D12: freeze the ref POOL split into the entry, on the same trigger and with the same
+  // absent-means-old-entry discipline as trainingExcluded above — see the field comment. An empty
+  // object on a ref-less batch is the point, not noise.
+  if (Object.keys(sources).length > 0) entry.refPools = refPoolsOf(manifest)
   // Midi-figure showdown batches: carry the figure-source LABEL (see the ScoreEntry field
   // comment — 'midi'/'bank' only, never what the midi transcribes).
   if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
@@ -1034,6 +1094,7 @@ export function recordNoneGood(dir: string, logPath?: string): NoneGoodResult {
   const sources = Object.fromEntries(manifest.variants.filter((v) => v.source !== undefined).map((v) => [v.file, v.source!.kind]))
   if (Object.keys(sources).length > 0) entry.sources = sources
   if (Object.keys(sources).length > 0) entry.trainingExcluded = trainingExcludedFiles(manifest) // see scoreBatch
+  if (Object.keys(sources).length > 0) entry.refPools = refPoolsOf(manifest) // see scoreBatch
   if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
   return { dir, logPath: resolvedLog, manifest, entry }
