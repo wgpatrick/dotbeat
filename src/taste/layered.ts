@@ -450,6 +450,14 @@ function needsDeHarsh(layer: LayerSpec): boolean {
 /** The eq7 fields that realize one `StackDeHarsh`. Bell1 is the wide warmth boost, Bell2 the
  * high-Q cut — the eq7 insert's fixed internal order is HP -> LowShelf -> Bell1 -> Bell2 -> Bell3 ->
  * HighShelf -> LP, so this is boost-then-cut, which is the order the source states it in. */
+/** Every `eq7*On` switch a layer patch may set. If any is true the layer needs the eq7 INSERT in its
+ * effect chain, or the bands are stored and never heard (see the call site in `buildLayeredClip`). */
+const EQ7_ON_FIELDS: readonly (keyof BeatSynth)[] = ['eq7HpOn', 'eq7LowShelfOn', 'eq7Bell1On', 'eq7Bell2On', 'eq7Bell3On', 'eq7HighShelfOn', 'eq7LpOn']
+
+function usesEq7(patch: Partial<BeatSynth>): boolean {
+  return EQ7_ON_FIELDS.some((f) => patch[f] === true)
+}
+
 function deHarshPatch(d: StackDeHarsh): Partial<BeatSynth> {
   return {
     eq7Bell1On: true,
@@ -1638,6 +1646,15 @@ export function buildLayeredClip(role: string, phrase: ComposedPhrase, bpm: numb
         }
       }),
     }
+    // THE eq7 BANDS DO NOTHING UNLESS THE eq7 INSERT IS IN THE CHAIN (bug found 2026-07-26).
+    // A parsed track's default effect chain is eq3/comp/distortion/bitcrush
+    // (LEGACY_DEFAULT_EFFECT_TYPES in src/core/document.ts) and the engine only builds an eq7 node
+    // for an effect entry of type 'eq7' (ui/src/audio/engine.ts's `case 'eq7'`). So every
+    // `eq7Bell*` field this module writes — the de-harsh notch/warmth pair and the chords pad's
+    // dark lowpass — was being stored on the synth and never rendered. The whole de-harsh move
+    // shipped INERT, which is why "saw-toothy / metallic" survived the commit that was meant to
+    // cure it. Same shape as the `comp` insert `applyLayerProduction` already adds by hand.
+    if (usesEq7(layer.patch)) doc = addEffect(doc, layer.id, 'eq7').doc
     receipts.push({
       id: layer.id,
       notes: notes.length,
