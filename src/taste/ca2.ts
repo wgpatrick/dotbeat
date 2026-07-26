@@ -453,7 +453,9 @@ export async function composeCA2Phrase(
   const bpm = opts.bpm ?? 124
 
   let best: { notes: ComposedNote[]; lint: LintReport; corrections: CA2Corrections; payload: CA2Payload; attempt: number } | null = null
+  let attemptsSpent = 0
   for (let attempt = 0; attempt <= CA2_MAX_RESEEDS; attempt++) {
+    attemptsSpent = attempt
     const attemptSeed = seed + attempt * RESEED_STRIDE
     const request = buildCA2Request(role, track, ask, attemptSeed, bpm)
     const payload = await runCA2(request)
@@ -472,7 +474,9 @@ export async function composeCA2Phrase(
       ask: ask.name,
       model: chosen.payload.model,
       device: chosen.payload.device,
-      reseeds: chosen.attempt,
+      // budget SPENT (not the chosen attempt's index): a figure whose flags never cleared
+      // reports the full budget even when an earlier attempt was kept as the least-bad one.
+      reseeds: attemptsSpent,
       acceptedSeed: seed + chosen.attempt * RESEED_STRIDE,
       unresolvedFlags: chosen.lint.flags,
       corrections: chosen.corrections,
