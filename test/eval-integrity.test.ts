@@ -7,7 +7,7 @@
 // trace each assertion back to the failure it encodes.
 
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -273,7 +273,9 @@ test('M3: every blind-eval report reads the ONE latest-per-batch loader', () => 
 })
 
 test('M1: ./x, x, /abs/x and x/ are the same batch, not four phantom ones', () => {
-  const root = tmp('m1')
+  // realpath the temp root up front: mkdtemp hands back a symlinked path on macOS (/var ->
+  // /private/var), and the batch key is deliberately resolve-only, matching `beat rate`'s dedupe.
+  const root = realpathSync(tmp('m1'))
   const log = join(root, 'beat-scores.jsonl')
   const dir = makeShowdownBatch(join(root, 'showdown-bassline-3'), ['engine', 'gen', 'ref'])
   scoreBatch(dir, ['3'], log)

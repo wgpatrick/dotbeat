@@ -6,7 +6,7 @@
 // once instead of being re-shaped per surface (phase-34-plan.md NA item 5: "extract the shared
 // shaping into src/ helpers both surfaces import, so the next drift can't happen").
 
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, symlinkSync, copyFileSync, rmSync, accessSync, realpathSync, constants } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, symlinkSync, copyFileSync, rmSync, accessSync, constants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
@@ -789,17 +789,16 @@ export function discardIncompleteBatch(dir: string): boolean {
   }
 }
 
-/** The canonical key for a batch dir in the scores log (2026-07-26 hunt, M1). `resolve` collapses
- * `./x`, `x` and `x/` against the cwd; `realpathSync` additionally collapses symlinked parents,
- * which is how the SAME dir reached the log under two spellings on macOS (where /tmp and
- * /var/folders are symlinks). Falls back to `resolve` when the path does not exist — callers that
- * reach here have already read the manifest, so that is a race, not the normal path. */
+/** The canonical key for a batch dir in the scores log (2026-07-26 hunt, M1): `resolve`, which
+ * collapses `./x`, `x`, `x/` and a bare relative name against the cwd — the four spellings that
+ * each used to mint a phantom batch.
+ *
+ * Deliberately NOT `realpathSync`: `beat rate`'s already-rated dedupe compares its own
+ * `resolve(dir)` against `resolve(entry.batch)`, so canonicalizing symlinks HERE and not there
+ * would make every batch rated under a symlinked root (e.g. anything below /tmp or /var/folders on
+ * macOS) reappear in the rate queue. One rule, both surfaces. */
 export function canonicalBatchKey(dir: string): string {
-  try {
-    return realpathSync(resolve(dir))
-  } catch {
-    return resolve(dir)
-  }
+  return resolve(dir)
 }
 
 /** The D25 training holdout for one batch, read from its manifest — the ONE definition both the
