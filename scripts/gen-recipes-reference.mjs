@@ -8,7 +8,7 @@
 //
 // NEVER hand-edit docs/recipes-reference.md — edit presets/recipes.json and re-run this.
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { parseRecipeLibrary, isPatchSource, isPendingGateKey } from '../dist/src/recipes/index.js'
@@ -16,6 +16,13 @@ import { parseRecipeLibrary, isPatchSource, isPendingGateKey } from '../dist/src
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
 const recipes = parseRecipeLibrary(readFileSync(join(root, 'presets', 'recipes.json'), 'utf8'))
+
+// The last real verification run, if one has been recorded (scripts/verify-recipes.mjs). Optional
+// by design: the reference doc is readable before anything has been rendered, and gains the
+// measured column once it has.
+const receiptPath = join(root, 'presets', 'recipe-verify-receipts.json')
+const receipts = existsSync(receiptPath) ? JSON.parse(readFileSync(receiptPath, 'utf8')) : null
+const receiptFor = (name) => receipts?.entries?.find((e) => e.recipe === name) ?? null
 
 const ROLE_TITLE = {
   bassline: 'Bassline — register and low-end steadiness (research 131 §7 P1, the largest single per-role gap)',
@@ -63,18 +70,44 @@ function describeFeel(feel) {
   return out
 }
 
-function gateTable(gates) {
+const MARK = { pass: '**PASS**', fail: '**FAIL**', pending: '`pending`', unmeasured: '—' }
+
+function gateTable(gates, receipt) {
   const rows = Object.entries(gates).map(([metric, b]) => {
+    const measured = receipt?.gates?.find((g) => g.scope === '' && g.metric === metric)
     const status = isPendingGateKey(metric) ? '`pending` — 131 §4 key, waits on 138 B0' : 'computable today'
-    return `| \`${metric}\` | ${band(b)} | ${status} |`
+    const value = measured ? (measured.measured === null ? '—' : String(Math.round(measured.measured * 100) / 100)) : 'not yet rendered'
+    const verdict = measured ? MARK[measured.status] + (measured.status === 'fail' ? ` (off by ${Math.round(measured.distance * 100) / 100})` : '') : '—'
+    return `| \`${metric}\` | ${band(b)} | ${status} | ${value} | ${verdict} |`
   })
-  return ['| gate | band | status |', '|---|---|---|', ...rows].join('\n')
+  return ['| gate | band | key status | measured | verdict |', '|---|---|---|---|---|', ...rows].join('\n')
 }
 
 const totalLayers = recipes.reduce((s, r) => s + r.layers.length, 0)
 const layered = recipes.filter((r) => r.layers.length > 1).length
 const pendingGates = recipes.reduce((s, r) => s + Object.keys(r.gates).filter(isPendingGateKey).length, 0)
 const allGates = recipes.reduce((s, r) => s + Object.keys(r.gates).length, 0)
+
+function verificationSection() {
+  const t = receipts.totals
+  const rows = receipts.entries.map((e) => {
+    const failed = e.gates.filter((g) => g.status === 'fail').map((g) => `\`${g.scope ? g.scope + '.' : ''}${g.metric}\` ${Math.round(g.measured * 100) / 100} vs ${band(g.target)}`)
+    return `| \`${e.recipe}\` | ${e.verdict.toUpperCase()} | ${e.counts.pass} | ${e.counts.fail} | ${e.counts.pending} | ${failed.length ? failed.join('; ') : '—'} |`
+  })
+  return `## Last verification run — every recipe built, rendered and checked
+
+*From \`presets/recipe-verify-receipts.json\`, generated ${receipts.generatedAt} by
+\`${receipts.regenerate}\` (seed ${receipts.build.seed}, key ${receipts.build.key}, ${receipts.build.bpm} BPM,
+${receipts.build.mode} render${receipts.build.layerSolos ? ', per-layer solo renders included' : ''}).
+**${t.gatesPass} gates passed, ${t.gatesFail} FAILED, ${t.gatesPending} pending on 138's B0 feature upgrade.**
+${t.pass} recipes are clean on every computable gate; ${t.fail} have at least one real failure.
+A failure here is a FINDING, kept verbatim — the bands are never widened to make this table green.*
+
+| recipe | verdict | pass | fail | pending | what failed |
+|---|---|---|---|---|---|
+${rows.join('\n')}
+
+`}
 
 const parts = []
 parts.push(`# dotbeat — executable recipe reference
@@ -118,6 +151,7 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
 |---|---|---|---|---|
 ${recipes.flatMap((r) => (r.dials ?? []).map((d) => `| \`${r.name}\` | ${esc(d.name)} | ${d.field ? `\`${d.field}\`` : '—'} | **${d.value}** | ${band(d.range)} |`)).join('\n')}
 
+${receipts ? verificationSection() : ''}
 ## The expressibility gaps — what the corpus asks for that dotbeat cannot do
 
 | recipe | gap |
@@ -164,8 +198,9 @@ for (const role of ROLE_ORDER) {
     parts.push(`- **sources**`)
     for (const s of r.sources) parts.push(`    - *[${CONFIDENCE_LABEL[s.confidence]}]* ${s.url ? `[${s.cite}](${s.url})` : s.cite} — ${s.claim}`)
     parts.push('')
-    parts.push('**Clip gates** (checked on the summed render):\n')
-    parts.push(gateTable(r.gates))
+    const receipt = receiptFor(r.name)
+    parts.push(`**Clip gates** (checked on the summed render)${receipt ? ` — last verified run: **${receipt.verdict.toUpperCase()}**` : ''}:\n`)
+    parts.push(gateTable(r.gates, receipt))
     parts.push('')
     parts.push(`*Gates mined from ${r.provenance.gatesMinedFrom.refs} — ${r.provenance.gatesMinedFrom.stat}, as of ${r.provenance.gatesMinedFrom.asOf}.*`)
     parts.push('')

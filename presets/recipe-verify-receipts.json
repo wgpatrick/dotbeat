@@ -1,0 +1,1972 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-26",
+  "note": "REGENERATED, never hand-edited. Each entry is one recipe built, rendered through dotbeat's own engine, and checked against its own declared gates. A `fail` row is a FINDING (the recipe is wrong for this engine, or this engine cannot express what the corpus describes) — never a reason to widen the band. A `pending` row names a research 131 §4 discriminator FEATURE_KEYS does not compute yet (138 B0).",
+  "regenerate": "npm run build && node scripts/verify-recipes.mjs --seed 11 --key Am --bpm 124 --layers",
+  "build": {
+    "seed": 11,
+    "key": "Am",
+    "bpm": 124,
+    "mode": "offline",
+    "layerSolos": true
+  },
+  "totals": {
+    "recipes": 13,
+    "pass": 0,
+    "fail": 12,
+    "incomplete": 1,
+    "gatesPass": 78,
+    "gatesFail": 32,
+    "gatesPending": 24,
+    "gatesUnmeasured": 0
+  },
+  "entries": [
+    {
+      "recipe": "rolling-sub-bass",
+      "version": 1,
+      "role": "bassline",
+      "archetype": "rolling-8ths",
+      "tracks": 3,
+      "verdict": "fail",
+      "counts": {
+        "pass": 8,
+        "fail": 1,
+        "pending": 3,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -23.667911786915255,
+        "samplePeakDb": -9.667104438136313,
+        "truePeakDb": -9.665877515705649,
+        "crestDb": 12.971053560617037,
+        "rmsDb": -22.63815799875335,
+        "bandSubPct": 51.79101442999657,
+        "bandBassPct": 46.858265558310706,
+        "bandMidsPct": 1.3505739458969472,
+        "bandPresencePct": 0.00014070350035104139,
+        "bandAirPct": 0.000005362295675125724,
+        "centroidLog2": 6.105921187299543,
+        "stereoCorrelation": 0.99999926741063,
+        "stereoWidthDb": -64.32749692272556
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "attackMedMs",
+          "target": [
+            0,
+            15
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            8,
+            50
+          ],
+          "measured": 46.858265558310706,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandSubPct",
+          "target": [
+            30,
+            78
+          ],
+          "measured": 51.79101442999657,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "centroidLog2",
+          "target": [
+            5,
+            6.8
+          ],
+          "measured": 6.105921187299543,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            7,
+            16
+          ],
+          "measured": 12.971053560617037,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crest_subDb",
+          "target": [
+            0,
+            12
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "fluxMean",
+          "target": [
+            0.08,
+            0.35
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -100,
+            -35
+          ],
+          "measured": -64.32749692272556,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "sub",
+          "metric": "bandSubPct",
+          "target": [
+            45,
+            100
+          ],
+          "measured": 89.00704054726273,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "sub",
+          "metric": "stereoWidthDb",
+          "target": [
+            -100,
+            -35
+          ],
+          "measured": -68.53515261832956,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "mid",
+          "metric": "bandBassPct",
+          "target": [
+            25,
+            75
+          ],
+          "measured": 92.74168271508276,
+          "status": "fail",
+          "distance": 17.74168271508276
+        },
+        {
+          "scope": "mid",
+          "metric": "bandSubPct",
+          "target": [
+            0,
+            25
+          ],
+          "measured": 4.158508494652493,
+          "status": "pass",
+          "distance": 0
+        }
+      ],
+      "gaps": [
+        "the source minimises the sub layer's attack with a TRANSIENT SHAPER; dotbeat has no such node (research 138 B1 prices it). A 4 ms amp attack is the nearest available move and is not the same thing — a shaper reshapes an existing transient, an envelope only gates it.",
+        "the source drives only the mid band (MDMX Screamer at ~35% wet on a band-limited layer). dotbeat's saturator is full-band, so band-selective drive is expressed by driving the mid LAYER and leaving the sub layer clean — the layered equivalent, not the multiband one.",
+        "'glue-compress the group' has no expression: BeatGroup is a visual fold with no volume, chain or sends (research 115 §1.2), so cross-layer bus compression needs the two-stage re-host (133 §4d) and a second render pass."
+      ]
+    },
+    {
+      "recipe": "reese-bass",
+      "version": 1,
+      "role": "bassline",
+      "archetype": "sparse-sub",
+      "tracks": 2,
+      "verdict": "fail",
+      "counts": {
+        "pass": 5,
+        "fail": 4,
+        "pending": 2,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -17.47531103538184,
+        "samplePeakDb": -7.78766996148766,
+        "truePeakDb": -7.7865729191632465,
+        "crestDb": 10.203737596809956,
+        "rmsDb": -17.991407558297617,
+        "bandSubPct": 38.17162395524948,
+        "bandBassPct": 51.97318324132244,
+        "bandMidsPct": 9.776387236448265,
+        "bandPresencePct": 0.07821179480695926,
+        "bandAirPct": 0.0005937721728457062,
+        "centroidLog2": 7.164056341940942,
+        "stereoCorrelation": 0.9841330982670894,
+        "stereoWidthDb": -20.970779798595814
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            8,
+            50
+          ],
+          "measured": 51.97318324132244,
+          "status": "fail",
+          "distance": 1.9731832413224382
+        },
+        {
+          "scope": "",
+          "metric": "bandSubPct",
+          "target": [
+            30,
+            78
+          ],
+          "measured": 38.17162395524948,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "centroidLog2",
+          "target": [
+            5,
+            6.9
+          ],
+          "measured": 7.164056341940942,
+          "status": "fail",
+          "distance": 0.2640563419409414
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            6,
+            16
+          ],
+          "measured": 10.203737596809956,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crest_subDb",
+          "target": [
+            0,
+            12
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "fluxMean",
+          "target": [
+            0.08,
+            0.4
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -100,
+            -30
+          ],
+          "measured": -20.970779798595814,
+          "status": "fail",
+          "distance": 9.029220201404186
+        },
+        {
+          "scope": "sub",
+          "metric": "bandSubPct",
+          "target": [
+            45,
+            100
+          ],
+          "measured": 93.07213930020475,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "sub",
+          "metric": "stereoWidthDb",
+          "target": [
+            -100,
+            -35
+          ],
+          "measured": -68.49642667554839,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "reese",
+          "metric": "bandBassPct",
+          "target": [
+            20,
+            75
+          ],
+          "measured": 82.63531266130892,
+          "status": "fail",
+          "distance": 7.635312661308916
+        },
+        {
+          "scope": "reese",
+          "metric": "bandSubPct",
+          "target": [
+            0,
+            22
+          ],
+          "measured": 0.7619596040363349,
+          "status": "pass",
+          "distance": 0
+        }
+      ],
+      "gaps": [
+        "every Reese source that mentions it requires PHASE RESET on note-on ('turn phase randomization down so both oscillators start at the exact same point' — FutureProof; 'note-on reset enabled' — MusicRadar), because a free-running pair gives inconsistent per-note attack. dotbeat's oscillators expose no per-note phase control.",
+        "multiband saturation split at 400 Hz (Twin 3: low band 30% drive, high band 65%) or 123 Hz (the 808 recipe) is the corpus's near-universal drive strategy. dotbeat's saturator is full-band; the sub/reese layer split is the available approximation.",
+        "'legato with portamento' is a voice-allocation mode, not a parameter — dotbeat's `glide` applies to every note transition, not only overlapping ones."
+      ]
+    },
+    {
+      "recipe": "acid-303",
+      "version": 1,
+      "role": "bassline",
+      "archetype": "octave-bounce",
+      "tracks": 1,
+      "verdict": "fail",
+      "counts": {
+        "pass": 3,
+        "fail": 4,
+        "pending": 0,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -34.75555240241149,
+        "samplePeakDb": -13.952404704282246,
+        "truePeakDb": -13.890249058911532,
+        "crestDb": 23.270838664092096,
+        "rmsDb": -37.22324336837434,
+        "bandSubPct": 0.027152936269534952,
+        "bandBassPct": 54.69505116396098,
+        "bandMidsPct": 44.21297111170397,
+        "bandPresencePct": 1.0120062227581397,
+        "bandAirPct": 0.0528185653073634,
+        "centroidLog2": 8.992760089820026,
+        "stereoCorrelation": 0.9631924083838845,
+        "stereoWidthDb": -17.206314317232824
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            10,
+            60
+          ],
+          "measured": 54.69505116396098,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandMidsPct",
+          "target": [
+            10,
+            70
+          ],
+          "measured": 44.21297111170397,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandSubPct",
+          "target": [
+            5,
+            55
+          ],
+          "measured": 0.027152936269534952,
+          "status": "fail",
+          "distance": 4.972847063730465
+        },
+        {
+          "scope": "",
+          "metric": "centroidLog2",
+          "target": [
+            5.5,
+            8.5
+          ],
+          "measured": 8.992760089820026,
+          "status": "fail",
+          "distance": 0.4927600898200257
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            8,
+            17
+          ],
+          "measured": 23.270838664092096,
+          "status": "fail",
+          "distance": 6.270838664092096
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -100,
+            -18
+          ],
+          "measured": -17.206314317232824,
+          "status": "fail",
+          "distance": 0.7936856827671761
+        },
+        {
+          "scope": "acid",
+          "metric": "bandBassPct",
+          "target": [
+            10,
+            70
+          ],
+          "measured": 54.70961223129967,
+          "status": "pass",
+          "distance": 0
+        }
+      ],
+      "gaps": [
+        "filter SLOPE is unexpressible and the corpus disagrees about it anyway (Roland: the real TB-303 is 18 dB/oct; MusicRadar: 24; the Sylenth recipe deliberately switches to 12). dotbeat's `filterType` selects lowpass/bandpass/highpass with no slope control, so the disagreement is moot rather than resolved.",
+        "per-step TIE/SLIDE flags — the defining 303 gesture (Sylenth's own sequence ties steps 3, 4, 5 and 8; MusicRadar activates hold on 'certain steps'). dotbeat's `glide` is a voice-level setting, so EVERY note slides here, not only the flagged ones.",
+        "odd-length sequencing (13 or 15 steps against a 16-step grid — MusicTech's Chicago-style trick) is not expressible: a .beat figure loops on whole bars.",
+        "two credentialed sources argue acid should not be captured as a static patch at all (Native Instruments: 'parameter automation over static settings'; Attack Magazine: 'preferably done hands-on in real time'). The v1 step vocabulary has no `automate`, and clip automation renders only in song mode (133 §3) — so the genre's own experts would call this recipe the wrong shape for the sound."
+      ]
+    },
+    {
+      "recipe": "808-glide-bass",
+      "version": 1,
+      "role": "bassline",
+      "archetype": "sparse-sub",
+      "tracks": 2,
+      "verdict": "fail",
+      "counts": {
+        "pass": 8,
+        "fail": 1,
+        "pending": 1,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -29.283204279038618,
+        "samplePeakDb": -12.255889194835841,
+        "truePeakDb": -11.140888268034486,
+        "crestDb": 16.56646530191989,
+        "rmsDb": -28.822354496755732,
+        "bandSubPct": 81.19612679257415,
+        "bandBassPct": 18.350631426309853,
+        "bandMidsPct": 0.4122751765033629,
+        "bandPresencePct": 0.0281814316837403,
+        "bandAirPct": 0.012785172929101824,
+        "centroidLog2": 5.8147505143170655,
+        "stereoCorrelation": 0.999999577939861,
+        "stereoWidthDb": -66.72919036780792
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            5,
+            45
+          ],
+          "measured": 18.350631426309853,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandSubPct",
+          "target": [
+            30,
+            85
+          ],
+          "measured": 81.19612679257415,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "centroidLog2",
+          "target": [
+            4.8,
+            6.6
+          ],
+          "measured": 5.8147505143170655,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            7,
+            18
+          ],
+          "measured": 16.56646530191989,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crest_subDb",
+          "target": [
+            0,
+            14
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -100,
+            -35
+          ],
+          "measured": -66.72919036780792,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "sub-808",
+          "metric": "bandSubPct",
+          "target": [
+            45,
+            100
+          ],
+          "measured": 87.26999328004175,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "sub-808",
+          "metric": "stereoWidthDb",
+          "target": [
+            -100,
+            -35
+          ],
+          "measured": -69.01434873826639,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "body",
+          "metric": "bandBassPct",
+          "target": [
+            12,
+            75
+          ],
+          "measured": 96.39613246244788,
+          "status": "fail",
+          "distance": 21.39613246244788
+        },
+        {
+          "scope": "body",
+          "metric": "bandSubPct",
+          "target": [
+            0,
+            30
+          ],
+          "measured": 0.7630130422588135,
+          "status": "pass",
+          "distance": 0
+        }
+      ],
+      "gaps": [
+        "THE 808's DEFINING MOVE IS NOT EXPRESSIBLE: every source specifies a downward PITCH ENVELOPE at note-on (Unison: 24 semitones over 40–60 ms, exponential; Attack: 'a decaying pitch drop'). dotbeat has no pitch envelope — `lfoDest: 'pitch'` is a cyclic LFO, not a one-shot decay — so this recipe ships the sine, the glide and the long decay WITHOUT the dive. That is an audible, identity-level difference from every 808 in the corpus, and it is the single strongest engine-gap finding in this library.",
+        "multiband saturation split at 123 Hz (Attack) — full-band saturator only; the sub/body layer split is the layered approximation.",
+        "the −7 ¢ octave-up detune rides on `osc2`, which shares the layer's filter and envelope; Unison's version is a separate voice with its own processing.",
+        "the click/transient layer (1–5 kHz, a filtered rimshot under 50 ms) is a SAMPLE in every source; expressing it needs a drums-kind sample host, which is a cross-source stack (139 §3.4 tier 3), not a synth layer."
+      ]
+    },
+    {
+      "recipe": "warm-pad-with-air",
+      "version": 1,
+      "role": "chords",
+      "archetype": "sustained-pad",
+      "tracks": 2,
+      "verdict": "fail",
+      "counts": {
+        "pass": 5,
+        "fail": 5,
+        "pending": 2,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -24.624222052009067,
+        "samplePeakDb": -13.03065116003715,
+        "truePeakDb": -13.02647928482984,
+        "crestDb": 13.900437429117526,
+        "rmsDb": -26.931088589154676,
+        "bandSubPct": 0.0011293199937344703,
+        "bandBassPct": 74.54246909220704,
+        "bandMidsPct": 25.093360355704743,
+        "bandPresencePct": 0.32068704669813264,
+        "bandAirPct": 0.04235418539661769,
+        "centroidLog2": 8.351467105128648,
+        "stereoCorrelation": 0.6980892598893689,
+        "stereoWidthDb": -7.499483481525456
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "attackMedMs",
+          "target": [
+            200,
+            1400
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandAirPct",
+          "target": [
+            0.3,
+            9
+          ],
+          "measured": 0.04235418539661769,
+          "status": "fail",
+          "distance": 0.2576458146033823
+        },
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            8,
+            42
+          ],
+          "measured": 74.54246909220704,
+          "status": "fail",
+          "distance": 32.54246909220704
+        },
+        {
+          "scope": "",
+          "metric": "bandMidsPct",
+          "target": [
+            40,
+            85
+          ],
+          "measured": 25.093360355704743,
+          "status": "fail",
+          "distance": 14.906639644295257
+        },
+        {
+          "scope": "",
+          "metric": "bandPresencePct",
+          "target": [
+            1,
+            20
+          ],
+          "measured": 0.32068704669813264,
+          "status": "fail",
+          "distance": 0.6793129533018674
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            9,
+            19
+          ],
+          "measured": 13.900437429117526,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "fluxMean",
+          "target": [
+            0.1,
+            0.4
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -16,
+            -1
+          ],
+          "measured": -7.499483481525456,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "pad",
+          "metric": "bandMidsPct",
+          "target": [
+            30,
+            95
+          ],
+          "measured": 24.596970307527926,
+          "status": "fail",
+          "distance": 5.403029692472074
+        },
+        {
+          "scope": "pad",
+          "metric": "stereoWidthDb",
+          "target": [
+            -16,
+            -1
+          ],
+          "measured": -7.534750282442354,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "air",
+          "metric": "bandAirPct",
+          "target": [
+            0.5,
+            70
+          ],
+          "measured": 31.59565678931773,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "air",
+          "metric": "bandPresencePct",
+          "target": [
+            2,
+            70
+          ],
+          "measured": 40.47617005030349,
+          "status": "pass",
+          "distance": 0
+        }
+      ],
+      "gaps": [
+        "the per-chord EXPRESSION SWELL (an automated CC ramp from ~50% to maximum into every chord change) appears independently in two Attack Magazine pad recipes and is the corpus's main source of pad movement. It needs clip automation, which renders only in song mode (133 §3) and has no v1 recipe step.",
+        "sample-and-hold random pitch drift (Sound on Sound's string-machine mechanism, chosen specifically to avoid periodic modulation) — `lfoShape` offers sine or custom, with no S&H/random option.",
+        "reverb PRE-DELAY is named in three pad recipes; dotbeat's reverb is a fixed shared bus with a send level and no predelay control (research 139 §2.3's named gap).",
+        "Kerri Chandler's root-omission rule ('the keys are not playing the root note, because the bass line has the roots covered') is a VOICING requirement the composed-figure generator does not implement."
+      ]
+    },
+    {
+      "recipe": "house-chord-stab",
+      "version": 1,
+      "role": "chords",
+      "archetype": "offbeat-house",
+      "tracks": 2,
+      "verdict": "fail",
+      "counts": {
+        "pass": 4,
+        "fail": 3,
+        "pending": 2,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -29.593997120323714,
+        "samplePeakDb": -13.135849017378202,
+        "truePeakDb": -13.135849017378202,
+        "crestDb": 19.639215045887152,
+        "rmsDb": -32.775064063265354,
+        "bandSubPct": 0.8868042416933805,
+        "bandBassPct": 8.038916313630768,
+        "bandMidsPct": 89.47595517842272,
+        "bandPresencePct": 1.5703102989878066,
+        "bandAirPct": 0.02801396726547531,
+        "centroidLog2": 9.584233998879773,
+        "stereoCorrelation": 0.986138189440973,
+        "stereoWidthDb": -21.560373282402466
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "attackMedMs",
+          "target": [
+            0,
+            12
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            10,
+            42
+          ],
+          "measured": 8.038916313630768,
+          "status": "fail",
+          "distance": 1.961083686369232
+        },
+        {
+          "scope": "",
+          "metric": "bandMidsPct",
+          "target": [
+            40,
+            85
+          ],
+          "measured": 89.47595517842272,
+          "status": "fail",
+          "distance": 4.475955178422723
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            11,
+            20
+          ],
+          "measured": 19.639215045887152,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "onsetRatePerSec",
+          "target": [
+            4,
+            12
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -16,
+            -1
+          ],
+          "measured": -21.560373282402466,
+          "status": "fail",
+          "distance": 5.560373282402466
+        },
+        {
+          "scope": "stab",
+          "metric": "bandMidsPct",
+          "target": [
+            25,
+            92
+          ],
+          "measured": 90.7267786044318,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "body",
+          "metric": "bandBassPct",
+          "target": [
+            8,
+            80
+          ],
+          "measured": 56.525664668944245,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "body",
+          "metric": "bandSubPct",
+          "target": [
+            0,
+            30
+          ],
+          "measured": 0.41216934928693416,
+          "status": "pass",
+          "distance": 0
+        }
+      ],
+      "gaps": [
+        "Kerri Chandler's two load-bearing voicing rules — 3rd-inversion 7th chords, and omitting the root entirely because the bassline covers it — are figure-level requirements the composed-phrase generator does not implement. Multiple sources call voicing MORE decisive than any synthesis parameter for this genre's identity.",
+        "'the chord part deliberately leaves out beats occupied by the main drum hits' — a rhythmic complement to the kit that a role-solo clip has no kit to complement.",
+        "the 'chord baked into oscillator tuning' architecture (0/+3/+7 semitone oscillators, so one key plays a triad) is not expressible: `osc2Detune` is a cents field the GUI narrows to ±100, and there is no third oscillator."
+      ]
+    },
+    {
+      "recipe": "techno-stab",
+      "version": 1,
+      "role": "chords",
+      "archetype": "half-bar-hits",
+      "tracks": 1,
+      "verdict": "fail",
+      "counts": {
+        "pass": 2,
+        "fail": 3,
+        "pending": 1,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -26.398358178582466,
+        "samplePeakDb": -7.5568532891017535,
+        "truePeakDb": -7.552604430584334,
+        "crestDb": 22.777397853202377,
+        "rmsDb": -30.33425114230413,
+        "bandSubPct": 3.5867688886571965,
+        "bandBassPct": 68.37518335154965,
+        "bandMidsPct": 27.069259019898983,
+        "bandPresencePct": 0.9105767542686664,
+        "bandAirPct": 0.058211985625747656,
+        "centroidLog2": 8.396923674115715,
+        "stereoCorrelation": 0.9526771648165775,
+        "stereoWidthDb": -16.092520860959112
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "attackMedMs",
+          "target": [
+            0,
+            12
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandMidsPct",
+          "target": [
+            35,
+            92
+          ],
+          "measured": 27.069259019898983,
+          "status": "fail",
+          "distance": 7.930740980101017
+        },
+        {
+          "scope": "",
+          "metric": "bandPresencePct",
+          "target": [
+            1,
+            30
+          ],
+          "measured": 0.9105767542686664,
+          "status": "fail",
+          "distance": 0.08942324573133364
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            11,
+            21
+          ],
+          "measured": 22.777397853202377,
+          "status": "fail",
+          "distance": 1.7773978532023769
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -18,
+            -1
+          ],
+          "measured": -16.092520860959112,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "stab",
+          "metric": "bandMidsPct",
+          "target": [
+            25,
+            92
+          ],
+          "measured": 27.024236152191556,
+          "status": "pass",
+          "distance": 0
+        }
+      ],
+      "gaps": [
+        "the source places REVERB FIRST in the DAW chain, ahead of the drive stages, deliberately. dotbeat's reverb is a shared return bus fed after the insert chain, so reverb-before-drive is not expressible at any order.",
+        "'Drum Buss at 26% drive' used as a bus saturator on a melodic part has no equivalent node; the saturator insert is the nearest move.",
+        "the source automates mod-envelope attack/decay and reverb wet on the FINAL note of the phrase as a deliberate phrase-ending device — per-note parameter automation is not in the step vocabulary."
+      ]
+    },
+    {
+      "recipe": "supersaw-trance-lead",
+      "version": 1,
+      "role": "lead",
+      "archetype": "arp-16ths",
+      "tracks": 2,
+      "verdict": "incomplete",
+      "counts": {
+        "pass": 10,
+        "fail": 0,
+        "pending": 2,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -16.18698365053868,
+        "samplePeakDb": -4.87913665548123,
+        "truePeakDb": -4.87913665548123,
+        "crestDb": 14.192950755611072,
+        "rmsDb": -19.0720874110923,
+        "bandSubPct": 0.9189419667495934,
+        "bandBassPct": 12.338252362398155,
+        "bandMidsPct": 78.90538136149856,
+        "bandPresencePct": 4.782805221091767,
+        "bandAirPct": 3.054619088261727,
+        "centroidLog2": 9.94353892170042,
+        "stereoCorrelation": 0.7749963045728946,
+        "stereoWidthDb": -8.963618304610065
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "attackMedMs",
+          "target": [
+            0,
+            8
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandAirPct",
+          "target": [
+            0.2,
+            10
+          ],
+          "measured": 3.054619088261727,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            0.5,
+            22
+          ],
+          "measured": 12.338252362398155,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandMidsPct",
+          "target": [
+            35,
+            90
+          ],
+          "measured": 78.90538136149856,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandPresencePct",
+          "target": [
+            2,
+            28
+          ],
+          "measured": 4.782805221091767,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            10,
+            20
+          ],
+          "measured": 14.192950755611072,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "flatnessHiDb",
+          "target": [
+            -16,
+            -8
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -14,
+            -1
+          ],
+          "measured": -8.963618304610065,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "saws",
+          "metric": "bandMidsPct",
+          "target": [
+            25,
+            92
+          ],
+          "measured": 79.07735175508387,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "saws",
+          "metric": "stereoWidthDb",
+          "target": [
+            -14,
+            -1
+          ],
+          "measured": -9.01038152374079,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "octave",
+          "metric": "bandBassPct",
+          "target": [
+            0,
+            25
+          ],
+          "measured": 0.001057530629111253,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "octave",
+          "metric": "bandPresencePct",
+          "target": [
+            2,
+            70
+          ],
+          "measured": 6.089829072712902,
+          "status": "pass",
+          "distance": 0
+        }
+      ],
+      "gaps": [
+        "Syntorial's noise layer is a white-noise OSCILLATOR pitched up four octaves with its own unison and its own high-pass. dotbeat's `noiseLevel` is an unpitched noise mix into the layer's own filter — see `layered-lead-stack` for the three-track form that gets closer.",
+        "the lead-bus sidechain (2–3 dB gain reduction per kick, ratio 2:1–3:1, attack 5–10 ms, release 100–150 ms — Myloops's only fully-numbered mix move) needs a ghost-kick track and would duck both layers; omitted so the recipe's only variable is the stack.",
+        "the corpus's 24-bar filter-automation timeline (cutoff creeping open bar by bar, landing fully open on the drop) is arrangement-scale automation — clip automation renders only in song mode and is not a v1 step.",
+        "band-limiting the reverb SEND (HPF 500 Hz / LPF 8 kHz on the send input, an independently-repeated move in three lead sources) is not expressible: sends are a single scalar into a shared bus."
+      ]
+    },
+    {
+      "recipe": "pluck-delay-lead",
+      "version": 1,
+      "role": "lead",
+      "archetype": "motif-repeat",
+      "tracks": 2,
+      "verdict": "fail",
+      "counts": {
+        "pass": 4,
+        "fail": 3,
+        "pending": 2,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -25.5521461803789,
+        "samplePeakDb": -12.426001763835917,
+        "truePeakDb": -12.420424006969748,
+        "crestDb": 16.48867320825032,
+        "rmsDb": -28.914674972086235,
+        "bandSubPct": 0.7538093684913866,
+        "bandBassPct": 23.841561945782573,
+        "bandMidsPct": 70.29938660880525,
+        "bandPresencePct": 4.195590527342281,
+        "bandAirPct": 0.9096515495784349,
+        "centroidLog2": 9.650965838446899,
+        "stereoCorrelation": 0.9856939232246459,
+        "stereoWidthDb": -21.41738998390744
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "attackMedMs",
+          "target": [
+            0,
+            8
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            0.5,
+            22
+          ],
+          "measured": 23.841561945782573,
+          "status": "fail",
+          "distance": 1.8415619457825727
+        },
+        {
+          "scope": "",
+          "metric": "bandMidsPct",
+          "target": [
+            35,
+            92
+          ],
+          "measured": 70.29938660880525,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandPresencePct",
+          "target": [
+            1.5,
+            28
+          ],
+          "measured": 4.195590527342281,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            11,
+            21
+          ],
+          "measured": 16.48867320825032,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "flatnessHiDb",
+          "target": [
+            -16,
+            -8
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -16,
+            -1
+          ],
+          "measured": -21.41738998390744,
+          "status": "fail",
+          "distance": 5.417389983907441
+        },
+        {
+          "scope": "pluck",
+          "metric": "bandMidsPct",
+          "target": [
+            25,
+            94
+          ],
+          "measured": 68.53603537287776,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "shimmer",
+          "metric": "bandPresencePct",
+          "target": [
+            2,
+            70
+          ],
+          "measured": 0.6951051006804162,
+          "status": "fail",
+          "distance": 1.3048948993195837
+        }
+      ],
+      "gaps": [
+        "the Zebra 3 recipe's secondary, velocity-sensitive envelope driving the OVERDRIVE stage ~40 ms behind the filter envelope — dotbeat has one filter envelope and one amp envelope, with no third envelope to route at a drive stage.",
+        "the corpus's band-passed pluck (1–3 kHz bandpass) is expressible via `filterType: 'bandpass'`, but then the SAME filter carries the pluck envelope, so the bandpass and the pluck shape cannot be independent as they are in the source.",
+        "delay TIME is quoted as a tempo-synced division (dotted eighth) in every source; `pingPongTime` and the shared delay bus are in seconds, so the sync is an unsourced BPM conversion."
+      ]
+    },
+    {
+      "recipe": "hoover-lead",
+      "version": 1,
+      "role": "lead",
+      "archetype": "long-tones",
+      "tracks": 2,
+      "verdict": "fail",
+      "counts": {
+        "pass": 4,
+        "fail": 3,
+        "pending": 1,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -18.408391819389195,
+        "samplePeakDb": -8.923778973499427,
+        "truePeakDb": -8.908203201640006,
+        "crestDb": 12.969434720674442,
+        "rmsDb": -21.89321369417387,
+        "bandSubPct": 0.06706566199959654,
+        "bandBassPct": 11.409344980305997,
+        "bandMidsPct": 83.16620608952896,
+        "bandPresencePct": 5.0326595636920075,
+        "bandAirPct": 0.32472370447331217,
+        "centroidLog2": 9.656965718396346,
+        "stereoCorrelation": 0.9716756683355634,
+        "stereoWidthDb": -18.42204161142757
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            2,
+            40
+          ],
+          "measured": 11.409344980305997,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandMidsPct",
+          "target": [
+            30,
+            90
+          ],
+          "measured": 83.16620608952896,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandPresencePct",
+          "target": [
+            1,
+            30
+          ],
+          "measured": 5.0326595636920075,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            8,
+            19
+          ],
+          "measured": 12.969434720674442,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "fluxMean",
+          "target": [
+            0.1,
+            0.45
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -18,
+            -1
+          ],
+          "measured": -18.42204161142757,
+          "status": "fail",
+          "distance": 0.42204161142757
+        },
+        {
+          "scope": "swirl",
+          "metric": "bandMidsPct",
+          "target": [
+            20,
+            92
+          ],
+          "measured": 92.7829120468608,
+          "status": "fail",
+          "distance": 0.7829120468608011
+        },
+        {
+          "scope": "weight",
+          "metric": "bandBassPct",
+          "target": [
+            5,
+            80
+          ],
+          "measured": 81.86850193895322,
+          "status": "fail",
+          "distance": 1.8685019389532158
+        }
+      ],
+      "gaps": [
+        "THE HOOVER'S SIGNATURE IS NOT EXPRESSIBLE: both sources route a PITCH ENVELOPE (8 semitones in one, ~an octave at maximum amount in the other) to produce the upward 'yawn' on every note-on. dotbeat has no pitch envelope; `lfoDest: 'pitch'` is a cyclic LFO, not a one-shot. What ships here is a PWM swirl with a wide detuned pair — recognisably hoover-adjacent, and missing the move that names the sound.",
+        "the source runs THREE PWM oscillators; `osc2Type` has no 'wavetable' entry (engine.ts falls a wavetable osc2 back to a plain sawtooth — ui/src/components/synthParams.ts's own note), so each layer here is one PWM oscillator plus a saw partner, not a PWM pair.",
+        "the source pans the three unison voices individually across the stereo field; `unisonWidth` is a single spread scalar with no per-voice placement."
+      ]
+    },
+    {
+      "recipe": "layered-house-kit",
+      "version": 1,
+      "role": "drum-loop",
+      "archetype": "four-floor",
+      "tracks": 1,
+      "verdict": "fail",
+      "counts": {
+        "pass": 4,
+        "fail": 2,
+        "pending": 4,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -22.109918364401604,
+        "samplePeakDb": -7.561283412514958,
+        "truePeakDb": -7.419822364477274,
+        "crestDb": 17.52819891031909,
+        "rmsDb": -25.089482322834048,
+        "bandSubPct": 1.4920335702845975,
+        "bandBassPct": 43.31245050321381,
+        "bandMidsPct": 44.39209088037361,
+        "bandPresencePct": 0.8513837943280258,
+        "bandAirPct": 9.952041251799818,
+        "centroidLog2": 10.507031097452996,
+        "stereoCorrelation": 0.9027216072976121,
+        "stereoWidthDb": -12.913586217668499
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "bandAirPct",
+          "target": [
+            1.5,
+            12
+          ],
+          "measured": 9.952041251799818,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandMidsPct",
+          "target": [
+            4,
+            45
+          ],
+          "measured": 44.39209088037361,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandSubPct",
+          "target": [
+            18,
+            55
+          ],
+          "measured": 1.4920335702845975,
+          "status": "fail",
+          "distance": 16.507966429715403
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            9,
+            18
+          ],
+          "measured": 17.52819891031909,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crest_subDb",
+          "target": [
+            0,
+            20
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "envRangeDb",
+          "target": [
+            0,
+            25
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "onsetLevelCv",
+          "target": [
+            0,
+            0.6
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "sustainPct",
+          "target": [
+            45,
+            100
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "kit",
+          "metric": "bandAirPct",
+          "target": [
+            1,
+            15
+          ],
+          "measured": 10.034555586525235,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "kit",
+          "metric": "bandSubPct",
+          "target": [
+            15,
+            60
+          ],
+          "measured": 1.4747455610324045,
+          "status": "fail",
+          "distance": 13.525254438967595
+        }
+      ],
+      "gaps": [
+        "the corpus's actual kick/clap/hat construction is 2–5 SAMPLES per hit with complementary EQ carving per layer (Attack's tech-house kick is three tuned layers; its snare stack is five). dotbeat's drums track is ONE voice bus over five lanes, so the 'layering' expressible here is per-lane voice tuning, not per-hit sample stacking — the biggest structural gap in this recipe.",
+        "per-layer MICRO-TIMING offsets of 5–20 ms, named across three sources as the glue that fuses a multi-sample stack into one perceived hit — hits sit on a 16th grid and `humanize` is a CLI verb, not a v1 recipe step.",
+        "'ghost notes at 40–60% velocity' and hat velocity ALTERNATION (~80/~100 out of 127, the 'tick-TOCK' wrist-stroke feel) are per-hit patterns; the builder applies velocity by metrical position only.",
+        "there is no group bus (research 115 §1.2), so the ~4 dB glue compression is the track's own comp insert rather than a real drum-bus compressor."
+      ]
+    },
+    {
+      "recipe": "three-layer-bass-stack",
+      "version": 1,
+      "role": "bassline",
+      "archetype": "rolling-8ths",
+      "tracks": 4,
+      "verdict": "fail",
+      "counts": {
+        "pass": 11,
+        "fail": 1,
+        "pending": 2,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -23.711579240546406,
+        "samplePeakDb": -7.408179898453882,
+        "truePeakDb": -7.40601214146146,
+        "crestDb": 15.104043751260647,
+        "rmsDb": -22.512223649714528,
+        "bandSubPct": 64.39098423656868,
+        "bandBassPct": 32.070572957264496,
+        "bandMidsPct": 3.4793605208442595,
+        "bandPresencePct": 0.04726370840051668,
+        "bandAirPct": 0.011818576922324056,
+        "centroidLog2": 6.392287937995626,
+        "stereoCorrelation": 0.9996605971588803,
+        "stereoWidthDb": -37.701600651537895
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            8,
+            50
+          ],
+          "measured": 32.070572957264496,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandMidsPct",
+          "target": [
+            2,
+            40
+          ],
+          "measured": 3.4793605208442595,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandSubPct",
+          "target": [
+            30,
+            78
+          ],
+          "measured": 64.39098423656868,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "centroidLog2",
+          "target": [
+            5,
+            7.2
+          ],
+          "measured": 6.392287937995626,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            6,
+            16
+          ],
+          "measured": 15.104043751260647,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crest_subDb",
+          "target": [
+            0,
+            12
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "fluxMean",
+          "target": [
+            0.08,
+            0.4
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -100,
+            -25
+          ],
+          "measured": -37.701600651537895,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "sub",
+          "metric": "bandSubPct",
+          "target": [
+            50,
+            100
+          ],
+          "measured": 85.94825300568154,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "sub",
+          "metric": "stereoWidthDb",
+          "target": [
+            -100,
+            -35
+          ],
+          "measured": -67.69371356025266,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "body",
+          "metric": "bandBassPct",
+          "target": [
+            20,
+            85
+          ],
+          "measured": 91.40757677429468,
+          "status": "fail",
+          "distance": 6.407576774294682
+        },
+        {
+          "scope": "body",
+          "metric": "bandSubPct",
+          "target": [
+            0,
+            25
+          ],
+          "measured": 0.6106821805353084,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "growl",
+          "metric": "bandPresencePct",
+          "target": [
+            0.5,
+            70
+          ],
+          "measured": 2.6863826648798406,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "growl",
+          "metric": "bandSubPct",
+          "target": [
+            0,
+            15
+          ],
+          "measured": 6.098848453107585e-8,
+          "status": "pass",
+          "distance": 0
+        }
+      ],
+      "gaps": [
+        "ProducerHive's central routing instruction — bus everything except the sub and glue-compress that bus — needs a group bus, which BeatGroup is not (research 115 §1.2). The two-stage re-host (133 §4d) can do it in a second render pass; this single-pass recipe cannot.",
+        "the corpus's fourth 'highs/air' layer above 2 kHz is omitted deliberately: at 2 kHz+ over a bass fundamental it is a texture source, and the same three sources that name it give no numbers for it. Adding a fourth layer would be exactly the 'seven fighting for space' failure §6 warns about.",
+        "the light glue compression the corpus specifies (3–6 dB gain reduction across the stack — ModeAudio, corroborated) is applied per-layer here, which is a different sound from bus compression on the sum."
+      ]
+    },
+    {
+      "recipe": "layered-lead-stack",
+      "version": 1,
+      "role": "lead",
+      "archetype": "call-response",
+      "tracks": 3,
+      "verdict": "fail",
+      "counts": {
+        "pass": 10,
+        "fail": 2,
+        "pending": 2,
+        "unmeasured": 0
+      },
+      "clipFeatures": {
+        "lufs": -17.272496692335285,
+        "samplePeakDb": -6.425929975892383,
+        "truePeakDb": -6.425929975892383,
+        "crestDb": 14.772531158788027,
+        "rmsDb": -21.19846113468041,
+        "bandSubPct": 0.5074739555465381,
+        "bandBassPct": 0.24468161880249178,
+        "bandMidsPct": 84.21022520921204,
+        "bandPresencePct": 8.855652343427009,
+        "bandAirPct": 6.181966873011836,
+        "centroidLog2": 10.708420114173764,
+        "stereoCorrelation": 0.8176648358665313,
+        "stereoWidthDb": -9.980285560670913
+      },
+      "gates": [
+        {
+          "scope": "",
+          "metric": "attackMedMs",
+          "target": [
+            0,
+            8
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandAirPct",
+          "target": [
+            0.3,
+            12
+          ],
+          "measured": 6.181966873011836,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandBassPct",
+          "target": [
+            0.5,
+            22
+          ],
+          "measured": 0.24468161880249178,
+          "status": "fail",
+          "distance": 0.2553183811975082
+        },
+        {
+          "scope": "",
+          "metric": "bandMidsPct",
+          "target": [
+            30,
+            88
+          ],
+          "measured": 84.21022520921204,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "bandPresencePct",
+          "target": [
+            2,
+            30
+          ],
+          "measured": 8.855652343427009,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "crestDb",
+          "target": [
+            10,
+            20
+          ],
+          "measured": 14.772531158788027,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "flatnessHiDb",
+          "target": [
+            -16,
+            -8
+          ],
+          "measured": null,
+          "status": "pending",
+          "distance": 0
+        },
+        {
+          "scope": "",
+          "metric": "stereoWidthDb",
+          "target": [
+            -12,
+            -1
+          ],
+          "measured": -9.980285560670913,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "main",
+          "metric": "bandMidsPct",
+          "target": [
+            25,
+            92
+          ],
+          "measured": 85.19239936973064,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "main",
+          "metric": "stereoWidthDb",
+          "target": [
+            -14,
+            -1
+          ],
+          "measured": -9.900716587538591,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "octave-up",
+          "metric": "bandBassPct",
+          "target": [
+            0,
+            20
+          ],
+          "measured": 0.0000010905520686894215,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "octave-up",
+          "metric": "bandPresencePct",
+          "target": [
+            2,
+            70
+          ],
+          "measured": 11.900097905727147,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "air",
+          "metric": "bandAirPct",
+          "target": [
+            1,
+            80
+          ],
+          "measured": 4.4020438871464185,
+          "status": "pass",
+          "distance": 0
+        },
+        {
+          "scope": "air",
+          "metric": "bandPresencePct",
+          "target": [
+            2,
+            80
+          ],
+          "measured": 95.37622131553677,
+          "status": "fail",
+          "distance": 15.376221315536768
+        }
+      ],
+      "gaps": [
+        "Syntorial's noise layer is PITCHED white noise (up four octaves) with its own unison stack. dotbeat's `noiseLevel` mixes unpitched noise into the layer's own oscillator path, so what ships here is a high-passed triangle+noise voice two octaves up — closer than a single-voice patch can get, and still not the same generator.",
+        "'the same unison settings as Osc 1–3' cannot be honoured exactly: the noise mix rides the layer's single oscillator bank, so its unison spread is the layer's, not a per-source setting.",
+        "the corpus's band-split compression on lead stacks (KVR: ~12 dB gain reduction on a frequency-split HIGH band while the low end of the same stack is 'kept mostly untouched') is a multiband move; the per-layer split here is the layered approximation."
+      ]
+    }
+  ]
+}

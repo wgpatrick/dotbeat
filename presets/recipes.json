@@ -1476,7 +1476,7 @@
     },
     {
       "name": "layered-house-kit",
-      "version": 1,
+      "version": 2,
       "role": "drum-loop",
       "tags": ["house", "tech-house", "swing", "kit"],
       "character": "A swung four-to-the-floor kit tuned against 131's measured density targets: kick pulled back so it stops drowning the loop, open hats carrying air, and light bus glue rather than heavy compression.",
@@ -1503,6 +1503,12 @@
           "confidence": "consensus"
         },
         {
+          "cite": "Futureproof Music School — How to Make Hard Techno (via docs/priors/bass-techno.md A5)",
+          "url": "https://futureproofmusicschool.com/blog/making-hard-techno-a-path-to-unique-sound-design",
+          "claim": "the main kick's pitch envelope drops from a higher pitch to the fundamental over the first 10–20 ms for punch, with the kick tuned to the track key",
+          "confidence": "single-source"
+        },
+        {
           "cite": "docs/research/131 §5 + §7 P6",
           "claim": "gate numbers — winning drum loops are FULLER and STEADIER, not spikier: sustainPct ≥45% (ref 51 vs engineplus 27), envRangeDb ≤25 (vs 44), onsetLevelCv ≤0.6 (ref 0.59 vs 0.87), crest_subDb ≤20 (ref 16.5 vs 43.4), broadband crest 12–15 dB",
           "confidence": "measured-refs"
@@ -1526,7 +1532,8 @@
         "the corpus's actual kick/clap/hat construction is 2–5 SAMPLES per hit with complementary EQ carving per layer (Attack's tech-house kick is three tuned layers; its snare stack is five). dotbeat's drums track is ONE voice bus over five lanes, so the 'layering' expressible here is per-lane voice tuning, not per-hit sample stacking — the biggest structural gap in this recipe.",
         "per-layer MICRO-TIMING offsets of 5–20 ms, named across three sources as the glue that fuses a multi-sample stack into one perceived hit — hits sit on a 16th grid and `humanize` is a CLI verb, not a v1 recipe step.",
         "'ghost notes at 40–60% velocity' and hat velocity ALTERNATION (~80/~100 out of 127, the 'tick-TOCK' wrist-stroke feel) are per-hit patterns; the builder applies velocity by metrical position only.",
-        "there is no group bus (research 115 §1.2), so the ~4 dB glue compression is the track's own comp insert rather than a real drum-bus compressor."
+        "there is no group bus (research 115 §1.2), so the ~4 dB glue compression is the track's own comp insert rather than a real drum-bus compressor.",
+        "MEASURED TRAP, found by verifying v1: `kickPunch` is not a 0–1 'amount' despite the GUI rendering it as a percentage knob (ui/src/components/synthParams.ts: `k('kickPunch','KickPch',0,1,fmt.pct)`) — it is Tone.MembraneSynth's `pitchDecay` in SECONDS, over a 7-octave pitch sweep (ui/src/audio/engine.ts:2179/3390). v1 shipped 0.35, i.e. a 350 ms fall from ~5.8 kHz to 45 Hz under a 320 ms amp decay, and the loop measured 1.49% sub share against an 18–55% gate — a kick with essentially no sub. v2 uses 0.015, the sourced 10–20 ms drop. Any recipe or preset author reading the GUI will make the same mistake."
       ],
       "figure": {
         "archetype": "four-floor",
@@ -1548,7 +1555,7 @@
           "why": "one drums track carrying all five lanes: the kick tuned to 45 Hz with a shortened decay so it stops taking 60% of the loop's energy, open hats given a long decay to carry the air band, and light parallel bus compression rather than the heavy squash the corpus explicitly warns against.",
           "patch": {
             "kickTune": 45,
-            "kickPunch": 0.35,
+            "kickPunch": 0.015,
             "kickDecay": 0.32,
             "snareTone": 0.35,
             "snareDecay": 0.16,
@@ -1591,7 +1598,7 @@
         "status": "sourced",
         "gatesMinedFrom": {
           "refs": "docs/research/131 §5/§7 P6 (packs drum-loop ref rows) + 138 §2 row 13",
-          "stat": "packs-ref medians as p25–p75 bands; the sustain/envRange/onsetLevelCv/crest_sub rows are 131 P6's explicit targets",
+          "stat": "packs-ref medians as p25–p75 bands; the sustain/envRange/onsetLevelCv/crest_sub rows are 131 P6's explicit targets. GATES ARE UNCHANGED from v1 — v2 bumps only because a PATCH value changed (kickPunch 0.35 -> 0.015, see gaps), which is what mints a version under the frozen-science rule.",
           "asOf": "2026-07-26"
         },
         "verifyReceipt": null,

@@ -142,6 +142,7 @@ import {
   formatGateReport,
   formatRecipeList,
   formatRecipeCard,
+  soloLayer,
   BeatRecipeError,
 } from '../dist/src/recipes/index.js'
 import { buildKeymap, planKeymap, noteToMidi, midiToNote, rateForPitch } from '../dist/src/core/keymap.js'
@@ -2036,7 +2037,7 @@ function recipeKey(spec) {
 }
 
 function recipeBuildCmd(argv) {
-  const known = new Set(['--seed', '--bpm', '--key', '--bars'])
+  const known = new Set(['--seed', '--bpm', '--key', '--bars', '--solo'])
   const positional = argv.filter((a, i) => !a.startsWith('--') && !known.has(argv[i - 1]))
   const [name, out] = positional
   if (!name || !out) throw new BeatRecipeError('recipe build needs <name> <out.beat> (see `beat recipe list`)')
@@ -2052,7 +2053,11 @@ function recipeBuildCmd(argv) {
     ...(bpmFlag === undefined ? {} : { bpm: Number(bpmFlag) }),
     ...(barsFlag === undefined ? {} : { bars: Number(barsFlag) }),
   })
-  writeFileSync(out, serialize(doc))
+  const solo = flagValue(argv, '--solo')
+  // A per-layer SOLO document: the render the recipe's per-layer gates are checked against
+  // (research 139 §4.2). Same doc, every sibling muted to the showdown floor.
+  const written = solo === undefined ? doc : soloLayer(doc, solo)
+  writeFileSync(out, serialize(written))
   if (argv.includes('--json')) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n')
     return
@@ -2088,7 +2093,7 @@ function recipeCheckCmd(argv) {
 const RECIPE_FLAGS = {
   list: ['--json', '--role'],
   show: ['--json'],
-  build: ['--json', '--seed', '--bpm', '--key', '--bars'],
+  build: ['--json', '--seed', '--bpm', '--key', '--bars', '--solo'],
   check: ['--json', '--layer'],
 }
 
