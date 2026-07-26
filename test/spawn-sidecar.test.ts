@@ -8,14 +8,17 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  SPAWN_DRAIN_MS,
+  SPAWN_KILL_GRACE_MS,
   SPAWN_MAX_BUFFER,
   SPAWN_TIMEOUT_MS,
   lastNonEmptyLine,
+  liveSidecarCount,
   repoRoot,
   resolvePython,
   sidecarDoctor,
@@ -102,6 +105,141 @@ test('spawnSidecar closes stdin even when no payload is given (no sidecar hangs 
   const script = stub('read-stdin.mjs', 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{process.stdout.write("eof:"+s.length)})')
   const res = await spawnSidecar({ python: process.execPath, args: [script], cwd: dir })
   assert.equal(res.stdout, 'eof:0')
+})
+
+// ---- process lifecycle: the three confirmed hangs (2026-07-26) ---------------------------------
+//
+// Every stub here is a JS "sidecar" run under `node`, standing in for what torch/demucs actually
+// do: fork a worker that inherits stdout, trap SIGTERM, or simply outlive the caller.
+
+/** Is this pid still around? (signal 0 = existence probe, the shell's `kill -0`.) */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Poll a predicate at 50ms until it holds or `ms` elapses; returns whether it held. */
+async function until(predicate: () => boolean, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  return predicate()
+}
+
+test('the lifecycle constants are the measured ones', () => {
+  assert.equal(SPAWN_DRAIN_MS, 250)
+  assert.equal(SPAWN_KILL_GRACE_MS, 5_000)
+})
+
+test('a sidecar whose forked worker inherits stdout settles when the SIDECAR exits, not the worker', async () => {
+  // Regression, measured 2026-07-26: the only settle path was `close`, i.e. stdio EOF, and EOF
+  // waits for every holder of the inherited pipe. This exact shape (child exits at ~0.3s, worker
+  // holds stdout for 10s) settled at 10.1s — the owner's "python sidecar at 0% CPU while the
+  // caller waits forever". torch and demucs both fork workers with inherited stdio.
+  const script = stub('forker.mjs', `
+    import { spawn } from 'node:child_process'
+    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], { stdio: 'inherit' }).unref()
+    process.stdout.write('sidecar done')
+    setTimeout(() => process.exit(0), 200)
+  `)
+  const t0 = Date.now()
+  const res = await spawnSidecar({ python: process.execPath, args: [script], cwd: dir })
+  const elapsed = Date.now() - t0
+  assert.equal(res.code, 0)
+  assert.equal(res.stdout, 'sidecar done', 'output written before exit must still be captured')
+  assert.ok(elapsed < 3_000, `settled after ${elapsed}ms — the worker's 10s lifetime is leaking into the caller again`)
+})
+
+test('the drain window restarts on every chunk, so a big payload still arrives whole', async () => {
+  // The grandchild fix must not truncate: SPAWN_DRAIN_MS is silence-after-exit, not a hard cap.
+  // 8MB in 64KB chunks takes many event-loop turns to drain out of the pipe.
+  const script = stub('big.mjs', `
+    const chunk = 'x'.repeat(65536)
+    for (let i = 0; i < 128; i++) process.stdout.write(chunk)
+    process.stdout.end()
+  `)
+  const res = await spawnSidecar({ python: process.execPath, args: [script], cwd: dir })
+  assert.equal(res.code, 0)
+  assert.equal(res.stdout.length, 128 * 65536)
+})
+
+test('a timeout ALWAYS settles, even against a child that traps SIGTERM', async () => {
+  // Regression, measured 2026-07-26: the timeout sent one SIGTERM to the direct child and then
+  // waited for `close`. A child that ignores SIGTERM meant the promise resolved never — observed
+  // still parked at 12s with a 2s timeout, and it would have stayed parked forever.
+  const pidFile = join(dir, 'trapper.pid')
+  const script = stub('trapper.mjs', `
+    import { writeFileSync } from 'node:fs'
+    process.on('SIGTERM', () => {})
+    writeFileSync(${JSON.stringify(pidFile)}, String(process.pid))
+    setInterval(() => {}, 1000)
+  `)
+  const t0 = Date.now()
+  const res = await spawnSidecar({ python: process.execPath, args: [script], cwd: dir, timeoutMs: 1_000 })
+  const elapsed = Date.now() - t0
+  assert.equal(res.timedOut, true)
+  assert.equal(res.code, 4, 'a timeout reports the sidecars\' own "failure" exit so callers need no new branch')
+  assert.equal(lastNonEmptyLine(res.stderr), 'sidecar timed out after 1s and was killed')
+  assert.ok(elapsed < 3_000, `settled after ${elapsed}ms — the timeout is waiting on the child again`)
+
+  // ...and the kill escalates rather than giving up after the ignored SIGTERM.
+  const pid = Number(readFileSync(pidFile, 'utf8'))
+  assert.ok(await until(() => !alive(pid), SPAWN_KILL_GRACE_MS + 5_000), `pid ${pid} survived the SIGKILL escalation`)
+})
+
+test('a killed parent takes the sidecar AND its forked worker with it', async () => {
+  // Regression, measured 2026-07-26: the python child survived SIGTERM of the calling node
+  // process, so every Ctrl-C'd `beat analyze` / `beat source gen`, daemon restart or killed MCP
+  // server leaked a multi-minute model render (the hunt found a real orphaned model.py at 370%
+  // CPU with eight multiprocessing forks). SIGINT is the Ctrl-C case specifically: the sidecar is
+  // detached now, so it no longer gets the terminal's signal for free — the exit hook has to do it.
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    const kidFile = join(dir, `kid-${signal}.pid`)
+    const workerFile = join(dir, `worker-${signal}.pid`)
+    const script = stub(`outliver-${signal}.mjs`, `
+      import { spawn } from 'node:child_process'
+      import { writeFileSync } from 'node:fs'
+      const worker = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' })
+      writeFileSync(${JSON.stringify(workerFile)}, String(worker.pid))
+      writeFileSync(${JSON.stringify(kidFile)}, String(process.pid))
+      setTimeout(() => {}, 60000)
+    `)
+    const mod = new URL('../src/analysis/spawn-sidecar.js', import.meta.url).href
+    const src = `const { spawnSidecar } = await import(${JSON.stringify(mod)});
+      await spawnSidecar({ python: ${JSON.stringify(process.execPath)}, args: [${JSON.stringify(script)}], cwd: ${JSON.stringify(dir)} })`
+    const parent = spawn(process.execPath, ['--input-type=module', '-e', src], { stdio: 'ignore' })
+    const exited = new Promise<number | null>((r) => parent.on('exit', (_c, s) => r(s === null ? 0 : 1)))
+
+    assert.ok(await until(() => existsSync(kidFile) && existsSync(workerFile), 15_000), 'sidecar never started')
+    const kid = Number(readFileSync(kidFile, 'utf8'))
+    const worker = Number(readFileSync(workerFile, 'utf8'))
+    assert.ok(alive(kid) && alive(worker), 'fixture is wrong: sidecar/worker not running')
+
+    parent.kill(signal)
+    await exited
+    assert.ok(await until(() => !alive(kid), 10_000), `${signal}: sidecar ${kid} outlived its parent`)
+    assert.ok(await until(() => !alive(worker), 10_000), `${signal}: worker ${worker} outlived its parent (process group not killed)`)
+  }
+})
+
+test('the shutdown hooks are installed only while a sidecar is live, and removed after', async () => {
+  // Detaching means we take over Ctrl-C handling — but only for processes that actually spawn a
+  // sidecar. A program that never does must see node's stock signal behaviour, so the hooks go on
+  // with the first live child and come off with the last.
+  const before = process.listenerCount('SIGINT')
+  const script = stub('quiet.mjs', 'process.stdout.write("ok")')
+  const pending = spawnSidecar({ python: process.execPath, args: [script], cwd: dir })
+  assert.equal(liveSidecarCount(), 1)
+  assert.ok(process.listenerCount('SIGINT') > before, 'no shutdown hook while a sidecar is live')
+  await pending
+  assert.equal(liveSidecarCount(), 0)
+  assert.equal(process.listenerCount('SIGINT'), before, 'shutdown hooks outlived the last sidecar')
 })
 
 // ---- resolvePython: all five hand-forked chains, from one function -----------------------------

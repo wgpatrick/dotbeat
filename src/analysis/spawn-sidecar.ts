@@ -212,6 +212,12 @@ export function spawnSidecar(opts: SpawnSidecarOptions): Promise<SpawnResult> {
       child.stdout?.destroy()
       child.stderr?.destroy()
       child.stdin?.destroy()
+      // And let go of the child handle itself. Once we have answered, a sidecar we already gave up
+      // on (timeout, over-buffer) must not be the reason node cannot exit — it stays in `live`, so
+      // the exit hook SIGKILLs its group on the way out. Found while mutation-testing the fix: with
+      // the group kill disabled, a SIGTERM-trapping child kept the whole test runner alive after
+      // its test had already failed.
+      child.unref()
       resolvePromise(res)
     }
 
