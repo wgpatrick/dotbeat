@@ -19,6 +19,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   parse,
+  serializeLaneBacking,
   saveClip,
   setScene,
   placeClip,
@@ -1104,6 +1105,9 @@ const HELP = [
                                                           over every check rejected 98.7% of the reference pool
                                                           itself. Exit 1 on FAIL so a batch script can gate on it;
                                                           takes one WAV, so loop for a batch.
+                                                          If the clip is nowhere near the role asked for (a --role
+                                                          typo), the verdict is WITHHELD, not guessed: DECLINED,
+                                                          exit 2, measurements printed but no pass/fail.
                                                           Rows that cannot mean what they say on the given audio
                                                           are marked (advisory) and NOT counted — truePeak/crest on
                                                           an un-normalized stem read level, not punch.
@@ -1251,12 +1255,13 @@ const HELP = [
   { cmd: 'selection', text: `  beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon` },
   {
     cmd: 'mcp',
-    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (~58,
+    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (75,
                                                           covering track/note/hit/effect/scene/place/song/preset/macro/
                                                           drum-kit/vary/score/adopt/sample/lane/checkpoint/render/metrics editing) —
-                                                          only daemon (a long-running process, structurally not a
-                                                          tool call) stays CLI-only; send tools/list on a running
-                                                          'beat mcp' for the exact, current set`,
+                                                          the orchestration and eval verbs stay CLI-only (daemon,
+                                                          showdown, pilot, board, recipe, rolecheck and friends);
+                                                          send tools/list on a running 'beat mcp' for the exact,
+                                                          current set`,
   },
   {
     cmd: 'mcp-init',
@@ -1852,6 +1857,7 @@ async function chopCmd(argv) {
   if (indexChops.length > shown.length) out.push(`    … ${indexChops.length - shown.length} more (see chops.json)`)
   out.push(`  raw cuts: no normalize, no silence trim — the level and timing relationships BETWEEN chops are what you are listening for`)
   out.push(`  provenance: one <chop>.wav.json per chop (license "${license}"); nothing was registered into any project`)
+  out.push(`  scoring: beat score/rate/board number these v1..vN in file order — c001.wav is v1 (pilot L2)`)
   out.push(`  next: beat board ${outDir}        # listen and pick, provenance shown`)
   out.push(`        beat audition ${outDir}     # or one stitched straight-through listen`)
   process.stdout.write(out.join('\n') + '\n')
@@ -5323,7 +5329,17 @@ function keymapCmd(argv) {
   process.stdout.write(
     `keymap${dryRun ? ' (dry run)' : ''}: ${plan.length} lane${plan.length === 1 ? '' : 's'} on ${track} backed by ${sampleId} — ${scale} in ${pitchClassName(scaleRootMidi)}, ${midiToNote(fromMidi)}..${midiToNote(toMidi)}\n` +
     `root ${midiToNote(rootMidi)}: ${rootSource}\n` +
-    plan.map((l) => `  lane ${l.name} sample ${sampleId} ${formatNumber(gainDb)} ${formatNumber(l.tune)}\n`).join('') +
+    // Print the lane lines from the RESULTING DOCUMENT, not from the plan (raw-file-as-ground-truth
+    // doctrine — same serializeLaneBacking `beat inspect` uses). The plan-derived version was a
+    // lie whenever re-backing was involved: setLaneSample deliberately KEEPS an existing lane's
+    // Start/Length/AHD/filter shaping (lane character, not sample identity), so a lane could carry
+    // a stale `length=0.7` from a previous sample while this printed a clean uniform table.
+    // The 2026-07-26 sampling CLI pilot (finding H2) hit exactly that and measured the cost: two
+    // of six "playable" notes rendered 11 and 23 dB down, with nothing on screen saying so.
+    (doc.tracks.find((t) => t.id === track)?.lanes ?? [])
+      .filter((l) => plan.some((p) => p.name === l.name))
+      .map((l) => `  lane ${l.name} ${serializeLaneBacking(l.backing)}\n`)
+      .join('') +
     (dryRun
       ? `nothing written (--dry-run) — ${added.length} lane${added.length === 1 ? '' : 's'} would be added, ${rebacked.length} re-backed\n`
       : (added.length > 0 ? `added ${added.length}: ${added.join(', ')}\n` : '') +
@@ -5693,7 +5709,10 @@ async function rolecheckCmd(argv) {
   }
   process.stdout.write(json ? `${JSON.stringify(result, null, 2)}\n` : `${formatRoleCheck(result)}\n`)
   // Exit 1 on FAIL so `beat rolecheck take.wav --role lead && beat showdown ...` gates correctly.
+  // Exit 2 on DECLINED — the tool reached no verdict (near-certainly a --role typo), and a `&&`
+  // chain must stop rather than read "not a fail" as "passed".
   if (result.verdict === 'fail') process.exitCode = 1
+  else if (result.verdict === 'declined') process.exitCode = 2
 }
 
 async function lintCmd(argv) {
@@ -6027,8 +6046,13 @@ async function resampleCmd(argv) {
   out.push(`  committed chain: ${chain.length ? chain.join(' → ') : '(none — the track carries no enabled inserts)'}`)
   out.push(`  provenance: ${res.sidecarPath} (doc ${res.provenance.docSha256.slice(0, 12)}…, licence "${res.license}")`)
   out.push(`  the chain above is now BAKED IN — that is the point, and it cannot be undone from the sample`)
-  out.push(`  next: beat keymap ${file} <track> ${res.id}   # play it chromatically`)
-  out.push(`        beat lane ${file} <drums> <lane> ${res.id}   # or slice/trim it on a drum lane`)
+  // Runnable, not suggestive (pilot finding L1: the old hint omitted keymap's required
+  // --scale/--from/--to, so copy-pasting it errored immediately).
+  out.push(`  next: beat keymap ${file} <drums-track> ${res.id} --scale minorPentatonic --from c3 --to c5`)
+  out.push(`        beat lane ${file} <drums-track> <lane> sample ${res.id} 0 0   # or trim/slice it on one lane`)
+  out.push(`  note: this bounced the WHOLE project (${res.provenance.seconds.toFixed(1)}s). For a one-shot to keymap,`)
+  out.push(`        resample a project holding a single long note — a keymap of a multi-note phrase plays`)
+  out.push(`        the whole phrase on every key.`)
   process.stdout.write(out.join('\n') + '\n')
   process.exit(0) // render leaves chromium/vite event-loop stragglers — see render.mjs footer
 }

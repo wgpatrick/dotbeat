@@ -39,7 +39,7 @@ BACKEND_REQUIREMENTS = {
 STUB_VERSION = "0.1.0"
 
 SAMPLE_RATE = 44100  # 44.1 kHz stereo throughout — matches dotbeat's render + prep-oneshot format.
-STABLEAUDIO_MAX_SECONDS = 47  # Stable Audio Open 1.0 tops out around 47 s (research 103).
+STABLEAUDIO_MAX_SECONDS = 47  # Stable Audio Open 1.0 tops out around 47 s (research 145).
 
 
 class UsageError(Exception):
@@ -152,7 +152,7 @@ def run_stub(prompt, seconds, seed, output_path):
 
 
 # ---------------------------------------------------------------------------------------------
-# stableaudio backend — Stable Audio Open 1.0 (Stability AI), run LOCALLY (research 103). Lazily
+# stableaudio backend — Stable Audio Open 1.0 (Stability AI), run LOCALLY (research 145). Lazily
 # imports stable-audio-tools + torch; generates from the prompt/seconds/seed and writes a 44.1 kHz
 # stereo WAV. Confirmed owner-side 2026-07-14 end-to-end (venv build, HF auth, a real generation
 # played back and sanity-checked: non-silent, non-clipping, correct duration) — see

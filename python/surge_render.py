@@ -192,7 +192,7 @@ PATCH_POOLS = (
     {"pool": "thirdparty", "dir": "patches_3rdparty", "bankDepth": 1, "bank": None},
 )
 
-# D23 licensing posture, restated where the code acts on it: bank NAMES are provenance metadata and
+# D31 licensing posture, restated where the code acts on it: bank NAMES are provenance metadata and
 # stay in local manifests; the third-party patch CONTENT carries the same unresolved upstream
 # licence question as the factory set (surge#6741), so rendered audio remains eval-private and
 # gitignore-gated exactly as before. Enumerating more patches changes nothing about that.
