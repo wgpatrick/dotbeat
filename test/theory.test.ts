@@ -439,6 +439,51 @@ test('composeTheoryPhrase honours the exclude chain (consecutive draws avoid a u
   assert.notEqual(second.archetype, first.archetype)
 })
 
+// ---- round-level variety: the owner's actual complaint, as a gate -------------------------------
+//
+// Calibration (2026-07-26). The owner in blind rating: "I'm hearing a lot of the same note patterns
+// again in the showdown". Simulating a round the way cli/beat.mjs draws one — a run rng producing
+// batch seeds, four composed sources per batch at seed offsets 0/101/202/977, the per-role exclude
+// chain accumulating across the whole run — and counting how many of every 15 consecutive figures
+// repeat an onset skeleton already heard in that window:
+//
+//              before   after
+//   bassline    9.57     0.87
+//   chords      6.74     0.69
+//   lead        7.60     0.36
+//
+// The gate is set at 3.0: comfortably above the after numbers (which will drift as archetypes are
+// added) and far below every before number, so it fails if the fixed-skeleton regression returns.
+
+test('a simulated round does not repeat onset skeletons — the 2026-07-26 ear-report gate', () => {
+  const OFFSETS = [0, 101, 202, 977]
+  for (const role of ['bassline', 'chords', 'lead'] as const) {
+    const skeletons: string[] = []
+    for (const key of [MINOR, { root: 51, minor: true }, MAJOR]) {
+      const rng = mulberry32(7000 + key.root)
+      const used: string[] = []
+      for (let batch = 0; batch < 6; batch++) {
+        const batchSeed = Math.floor(rng() * 100000)
+        const drawn: string[] = []
+        for (const off of OFFSETS) {
+          const p = composeTheoryPhrase(role, key, batchSeed + off, { exclude: [...used, ...drawn] })
+          drawn.push(p.archetype)
+          skeletons.push(onsetKey(p.notes))
+        }
+        used.push(...drawn)
+      }
+    }
+    let repeats = 0
+    let windows = 0
+    for (let i = 0; i + 15 <= skeletons.length; i++) {
+      repeats += 15 - new Set(skeletons.slice(i, i + 15)).size
+      windows += 1
+    }
+    const perWindow = repeats / Math.max(1, windows)
+    assert.ok(perWindow < 3, `${role}: ${perWindow.toFixed(2)} same-skeleton repeats per 15 draws (was 6.7-9.6 before the fix, gate 3.0)`)
+  }
+})
+
 // ---- pre-render lint (§B.7) --------------------------------------------------------------------
 
 test('lint: scaleConsistency, registerRuleViolations, grooveConsistency behave as gross-error gates', () => {
