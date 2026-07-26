@@ -119,11 +119,15 @@ export interface FeedbackEntry {
 export interface AnswerFile {
   answered_at: string
   comparisonId: string
+  /** The human label of the comparison, so the file explains itself. */
+  label?: string
   question: string
   preference: AbPreference
   freeText: string
   flagged?: boolean
-  options: { name: string; wav: string }[]
+  /** Full options INCLUDING each one's provenance note — see `recordFeedback` for why. */
+  options: { name: string; wav: string; note?: string }[]
+  measurements?: Record<string, Record<string, number | string>>
 }
 
 // ---- bare-folder inference --------------------------------------------------------------------
@@ -387,6 +391,29 @@ export function loadAbSet(dir: string): AbSet {
 /** The question actually asked for one comparison (per-comparison override wins). */
 export const questionFor = (set: AbSet, c: AbComparison): string => c.question ?? set.question ?? GENERIC_QUESTION
 
+/**
+ * Options whose wav is not on disk, per comparison.
+ *
+ * CLI pilot 2026-07-26, the one HIGH finding: a manifest with a typo'd path passed every check.
+ * `--status` reported the comparison healthy, the server started happily, and the page — whose
+ * readiness wait falls back to a timeout — simply played nothing for that arm. In a sync-A/B
+ * transport "press 2 and hear silence" reads to the owner as *that render is silent*, so they
+ * answer in good faith about a file that never loaded and the tool records it as real data. That
+ * is the only failure mode here that produces WRONG data rather than no data, so it is checked at
+ * every entry point: `--status`, `--digest`, server startup, and per-option in the page.
+ */
+export function missingOptions(set: AbSet): { comparisonId: string; missing: string[]; total: number }[] {
+  const out: { comparisonId: string; missing: string[]; total: number }[] = []
+  for (const c of set.comparisons) {
+    const missing = c.options.filter((o) => !existsSync(resolve(set.dir, o.wav))).map((o) => o.wav)
+    if (missing.length > 0) out.push({ comparisonId: c.id, missing, total: c.options.length })
+  }
+  return out
+}
+
+/** True when this option's render is actually on disk. */
+export const optionExists = (dir: string, wav: string): boolean => existsSync(resolve(dir, wav))
+
 // ---- recording --------------------------------------------------------------------------------
 
 /** `<root>/feedback-answers/<id>.json`, with `/` folded so a nested comparison id stays one file. */
@@ -395,6 +422,7 @@ export const answerPathFor = (root: string, id: string): string =>
 
 export interface RecordFeedbackInput {
   comparisonId: string
+  label?: string
   question: string
   preference: AbPreference
   freeText: string
@@ -443,14 +471,20 @@ export function recordFeedback(dir: string, input: RecordFeedbackInput, logPath?
   const resolvedLog = resolve(logPath ?? join(root, DEFAULT_FEEDBACK_LOG))
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
 
+  // The answer file carries the SAME facts as the log row, not a subset. CLI pilot 2026-07-26: it
+  // used to drop the label, the per-option provenance notes and the measurements, so the one
+  // artifact named after the comparison was the one that could not explain what "layered" was —
+  // an agent reading it saw a preference for a bare string.
   const answer: AnswerFile = {
     answered_at: entry.t,
     comparisonId: entry.comparisonId,
+    ...(input.label !== undefined ? { label: input.label } : {}),
     question: entry.question,
     preference: entry.preference,
     freeText: entry.freeText,
     ...(entry.flagged === true ? { flagged: true } : {}),
-    options: entry.options.map((o) => ({ name: o.name, wav: o.wav })),
+    options: entry.options,
+    ...(entry.measurements !== undefined ? { measurements: entry.measurements } : {}),
   }
   const answerPath = answerPathFor(root, input.comparisonId)
   mkdirSync(join(root, ANSWERS_DIR), { recursive: true })
@@ -514,11 +548,15 @@ export interface AbStatus {
     label: string
     question: string
     options: string[]
+    /** Option wavs that are NOT on disk — a comparison with any of these must not be auditioned. */
+    missing: string[]
     answered: boolean
     preference?: AbPreference
     freeText?: string
     flagged?: boolean
   }[]
+  /** Total options missing across the whole set — the number a caller decides to refuse on. */
+  missingCount: number
 }
 
 /** The `--status` report (no server): what was asked, what came back, in the owner's own words.
@@ -533,6 +571,7 @@ export function buildAbStatus(dir: string, logPath: string): AbStatus {
       label: c.label ?? c.id,
       question: questionFor(set, c),
       options: c.options.map((o) => o.name),
+      missing: c.options.filter((o) => !optionExists(set.dir, o.wav)).map((o) => o.wav),
       answered: a !== null && a !== undefined,
       ...(a ? { preference: a.preference, freeText: a.freeText } : {}),
       ...(a?.flagged === true ? { flagged: true } : {}),
@@ -547,6 +586,7 @@ export function buildAbStatus(dir: string, logPath: string): AbStatus {
     answered: comparisons.filter((c) => c.answered).length,
     unanswered: comparisons.filter((c) => !c.answered).length,
     comparisons,
+    missingCount: comparisons.reduce((n, c) => n + c.missing.length, 0),
   }
 }
 
@@ -597,6 +637,22 @@ export interface ListenBenchCandidate {
   failWavs: string[]
   /** The preferred wav, when there is one — the matched "pass" side of the pair. */
   passWav?: string
+  /** A pre-filled answer-key entry in the bench's own shape, so promoting a candidate is a paste
+   * and a listen rather than a re-modelling job (CLI pilot 2026-07-26: the banking step used to
+   * end in a sentence of homework). `finding` is the owner's words, untouched; the fields the
+   * bench needs but this surface cannot know are present and empty. */
+  answerKeyStub: {
+    family: 'owner-flagged'
+    finding: string
+    fail: string
+    pass: string | null
+    /** MM:SS-MM:SS, for the human to fill from the listen. */
+    span: ''
+    /** 1-5, for the human to fill. */
+    severity: ''
+    band: ''
+    source: string
+  }
 }
 
 /** Turn answered comparisons into listen-bench case proposals. Pure — takes entries, returns
@@ -614,16 +670,29 @@ export function listenBenchCandidates(entries: FeedbackEntry[]): ListenBenchCand
     if (e.freeText.trim() === '') continue // a complaint with no words is not a case
     const pass = e.options.find((o) => o.name === e.preference)
     const fail = e.options.filter((o) => o.name !== e.preference)
+    const failWavs = fail.map((o) => join(resolve(e.dir), o.wav))
+    const passWav = pass === undefined ? null : join(resolve(e.dir), pass.wav)
+    const id = `${basename(resolve(e.dir))}--${e.comparisonId.replace(/[/\\]/g, '__')}`
     out.push({
       t: e.t,
-      id: `${basename(resolve(e.dir))}--${e.comparisonId.replace(/[/\\]/g, '__')}`,
+      id,
       sourceDir: e.dir,
       comparisonId: e.comparisonId,
       question: e.question,
       quote: e.freeText,
       trigger,
-      failWavs: fail.map((o) => join(resolve(e.dir), o.wav)),
-      ...(pass !== undefined ? { passWav: join(resolve(e.dir), pass.wav) } : {}),
+      failWavs,
+      ...(passWav !== null ? { passWav } : {}),
+      answerKeyStub: {
+        family: 'owner-flagged',
+        finding: e.freeText,
+        fail: failWavs[0] ?? '',
+        pass: passWav,
+        span: '',
+        severity: '',
+        band: '',
+        source: `beat ab ${e.dir} — ${e.comparisonId} (${e.t})`,
+      },
     })
   }
   return out
@@ -640,8 +709,12 @@ export interface AbDigest {
   total: number
   answered: number
   unanswered: number
-  /** option name (or 'neither') -> how many comparisons preferred it */
+  /** option name (or 'neither') -> how many comparisons preferred it. Only populated when the
+   * answered comparisons SHARE an option vocabulary; see `buildDigest`. */
   preferences: { name: string; count: number }[]
+  /** Set when the answered comparisons do not share an option vocabulary, so a tally would be
+   * meaningless. The digest then prints per-comparison instead. */
+  preferencesNote?: string
   /** Every answer with words, newest last — verbatim, for relaying. */
   quotes: { comparisonId: string; label: string; preference: AbPreference; freeText: string; flagged: boolean }[]
   candidates: ListenBenchCandidate[]
@@ -672,15 +745,27 @@ export function buildDigest(dir: string, logPath: string): AbDigest {
     }
   }
   const answeredEntries = set.comparisons.map((c) => answers.get(c.id)).filter((a): a is FeedbackEntry => a !== undefined)
+
+  // A tally of arm names only means something when the answered comparisons are asking the SAME
+  // question of the SAME arms (layered-check: every case is engineplus/layered/layeredplus). Over a
+  // mixed set it would present a row of unrelated single votes as a preference — CLI pilot
+  // 2026-07-26, LOW. When the vocabularies differ, say so and let the quotes carry the report.
+  const vocab = answeredEntries.map((e) => e.options.map((o) => o.name).sort().join(' '))
+  const sharedVocab = vocab.length <= 1 || vocab.every((v) => v === vocab[0])
+  const preferences = sharedVocab
+    ? [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+    : []
+
   return {
     dir: set.dir,
     question: set.question ?? GENERIC_QUESTION,
     total: set.comparisons.length,
     answered: answeredEntries.length,
     unanswered: set.comparisons.length - answeredEntries.length,
-    preferences: [...counts.entries()]
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    preferences,
+    ...(sharedVocab
+      ? {}
+      : { preferencesNote: 'these comparisons do not share an option vocabulary — a tally across them would be meaningless, so the per-comparison verdicts below are the report' }),
     quotes,
     candidates: listenBenchCandidates(answeredEntries),
     unansweredIds: set.comparisons.filter((c) => !answers.has(c.id)).map((c) => c.id),
@@ -694,14 +779,20 @@ export function formatDigest(d: AbDigest): string {
   lines.push(`question: ${d.question}`)
   lines.push(`${d.total} comparison(s): ${d.answered} answered, ${d.unanswered} unanswered`)
   lines.push('')
-  if (d.preferences.length === 0) {
+  if (d.answered === 0) {
     lines.push('no answers yet — run: beat ab ' + d.dir)
     return lines.join('\n') + '\n'
   }
-  lines.push('PREFERENCES')
-  const width = Math.max(...d.preferences.map((p) => p.name.length))
-  for (const p of d.preferences) {
-    lines.push(`  ${p.name.padEnd(width)}  ${String(p.count).padStart(3)}  ${'#'.repeat(p.count)}`)
+  if (d.preferences.length > 0) {
+    lines.push('PREFERENCES')
+    const width = Math.max(...d.preferences.map((p) => p.name.length))
+    for (const p of d.preferences) {
+      lines.push(`  ${p.name.padEnd(width)}  ${String(p.count).padStart(3)}  ${'#'.repeat(p.count)}`)
+    }
+  } else if (d.preferencesNote !== undefined) {
+    lines.push('PREFERENCES')
+    lines.push(`  (not tallied — ${d.preferencesNote})`)
+    for (const q of d.quotes) lines.push(`  ${q.label}: ${q.preference}`)
   }
   lines.push('')
   lines.push('VERBATIM — the owner\'s actual words. RELAY THESE, do not paraphrase.')
@@ -722,7 +813,8 @@ export function formatDigest(d: AbDigest): string {
       if (c.passWav !== undefined) lines.push(`    pass: ${c.passWav}`)
       lines.push(`    "${c.quote}"`)
     }
-    lines.push(`  bank them: beat ab ${d.dir} --bank-listen-bench`)
+    lines.push(`  bank them (writes ${LISTEN_BENCH_CANDIDATES_FILE} with a pre-filled answer-key stub per pair):`)
+    lines.push(`    beat ab ${d.dir} --bank-listen-bench`)
   }
   if (d.unansweredIds.length > 0) {
     lines.push('')

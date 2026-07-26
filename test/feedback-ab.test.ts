@@ -12,7 +12,7 @@
 //     and a feedback row is not shaped like a score row (mirrors test/board.test.ts's invariant)
 
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -29,6 +29,7 @@ import {
   answerPathFor,
   buildAbStatus,
   buildDigest,
+  missingOptions,
   formatDigest,
   listenBenchCandidates,
   AbError,
@@ -44,14 +45,14 @@ import { DEFAULT_DECISIONS_LOG } from '../src/board/decisions.js'
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..') // dist/test -> repo root
 const beatCli = join(repoRoot, 'cli', 'beat.mjs')
 
-function beat(args: string[], opts: { expectExit?: number } = {}): string {
-  try {
-    return execFileSync(process.execPath, [beatCli, ...args], { encoding: 'utf8' })
-  } catch (err) {
-    const e = err as { status?: number; stdout?: string; stderr?: string }
-    if (opts.expectExit !== undefined && e.status === opts.expectExit) return (e.stdout ?? '') + (e.stderr ?? '')
-    throw new Error(`beat ${args.join(' ')} exited ${e.status}:\n${e.stderr ?? ''}${e.stdout ?? ''}`)
-  }
+/** Run the CLI. Returns stdout; `all: true` returns stdout+stderr, for the warnings that
+ * deliberately go to stderr so they never contaminate a `--json` pipe. */
+function beat(args: string[], opts: { expectExit?: number; all?: boolean } = {}): string {
+  const r = spawnSync(process.execPath, [beatCli, ...args], { encoding: 'utf8' })
+  const out = opts.all === true ? (r.stdout ?? '') + (r.stderr ?? '') : (r.stdout ?? '')
+  if (r.status === 0) return out
+  if (opts.expectExit !== undefined && r.status === opts.expectExit) return (r.stdout ?? '') + (r.stderr ?? '')
+  throw new Error(`beat ${args.join(' ')} exited ${r.status}:\n${r.stderr ?? ''}${r.stdout ?? ''}`)
 }
 
 /** A minimal valid 44-byte WAV — enough for inference (which only reads names) and for the feature
@@ -409,6 +410,136 @@ test('beat ab on a folder with nothing to compare says so and exits non-zero', (
   const out = beat(['ab', scratch()], { expectExit: 1 })
   assert.match(out, /nothing to compare/)
   assert.match(out, /feedback\.json/)
+})
+
+// ---- 6b. CLI pilot 2026-07-26 fixes -----------------------------------------------------------
+
+/** A listening set whose manifest points at two renders that are not on disk. */
+function makeBrokenSet(): string {
+  const root = scratch()
+  mkdirSync(join(root, 'case-a'))
+  touchWav(join(root, 'case-a', 'good.wav'))
+  writeFileSync(
+    join(root, FEEDBACK_MANIFEST),
+    JSON.stringify({
+      question: 'which?',
+      comparisons: [{
+        id: 'case-a', label: 'Case A',
+        options: [
+          { name: 'good', wav: 'case-a/good.wav' },
+          { name: 'typo', wav: 'case-a/does-not-exist.wav' },
+          { name: 'abs', wav: '/tmp/definitely-not-here/absolute.wav' },
+        ],
+      }],
+    }),
+  )
+  return root
+}
+
+test('a missing render is reported, not silently played as silence (pilot HIGH)', () => {
+  const root = makeBrokenSet()
+  const set = loadAbSet(root)
+  const gaps = missingOptions(set)
+  assert.equal(gaps.length, 1)
+  assert.deepEqual(gaps[0]!.missing, ['case-a/does-not-exist.wav', '/tmp/definitely-not-here/absolute.wav'])
+  assert.equal(gaps[0]!.total, 3)
+
+  const status = buildAbStatus(root, join(root, DEFAULT_FEEDBACK_LOG))
+  assert.equal(status.missingCount, 2, 'the status an agent polls carries the count')
+  assert.equal(status.comparisons[0]!.missing.length, 2)
+
+  const out = beat(['ab', root, '--status'], { all: true })
+  assert.match(out, /2 of 3 missing/, 'and the CLI says so loudly')
+  assert.match(out, /MISSING RENDER/)
+})
+
+test('beat ab --answer records without a browser — the transcribe-from-chat channel', () => {
+  const root = makeLayeredCheck()
+  const quote = 'the layering makes everything sound same-ish'
+  const out = beat(['ab', root, '--answer', 'bassline-41', '--prefer', 'engineplus', '--note', quote, '--flag'])
+  assert.match(out, /recorded bassline-41: engineplus/)
+
+  const rows = readFeedbackLog(join(root, DEFAULT_FEEDBACK_LOG))
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0]!.freeText, quote, 'the owner\'s words go in exactly as typed')
+  assert.equal(rows[0]!.flagged, true)
+  assert.equal(rows[0]!.preference, 'engineplus')
+  // Identical to what the browser writes: same log, same answer file, same shape.
+  assert.equal(readAnswerFile(root, 'bassline-41')!.freeText, quote)
+
+  const unknown = beat(['ab', root, '--answer', 'no-such-case', '--prefer', 'x'], { expectExit: 2 })
+  assert.match(unknown, /no comparison "no-such-case"/)
+  assert.match(unknown, /known ids:/, 'and it lists what it does know')
+})
+
+test('the answer file carries the same facts as the log row (pilot MEDIUM)', () => {
+  const root = makeLayeredCheck()
+  writeFileSync(
+    join(root, FEEDBACK_MANIFEST),
+    JSON.stringify({
+      question: 'q',
+      comparisons: [{
+        id: 'bassline-41', label: 'bassline (seed 41)',
+        options: [
+          { name: 'engineplus', wav: 'bassline-41/engineplus.wav', note: 'unlayered, one voice' },
+          { name: 'layered', wav: 'bassline-41/layered.wav', note: 'sub + growl + click' },
+        ],
+        measurements: { engineplus: { LUFS: -14.1 }, layered: { LUFS: -12.8 } },
+      }],
+    }),
+  )
+  beat(['ab', root, '--answer', 'bassline-41', '--prefer', 'layered', '--note', 'fuller'])
+  const answer = readAnswerFile(root, 'bassline-41')!
+  assert.equal(answer.label, 'bassline (seed 41)', 'the file explains which comparison it is')
+  assert.equal(answer.options[0]!.note, 'unlayered, one voice', 'and what the option names MEANT')
+  assert.equal(answer.measurements!['layered']!['LUFS'], -12.8)
+})
+
+test('the digest refuses to tally preferences across comparisons with different options (pilot LOW)', () => {
+  const root = scratch()
+  const log = join(root, DEFAULT_FEEDBACK_LOG)
+  recordFeedback(root, {
+    comparisonId: 'a', question: 'q', preference: 'alpha', freeText: 'this one',
+    options: [{ name: 'alpha', wav: 'a/alpha.wav' }, { name: 'beta', wav: 'a/beta.wav' }],
+  }, log)
+  recordFeedback(root, {
+    comparisonId: 'b', question: 'q', preference: 'after', freeText: 'that one',
+    options: [{ name: 'before', wav: 'b/before.wav' }, { name: 'after', wav: 'b/after.wav' }],
+  }, log)
+  writeFileSync(join(root, FEEDBACK_MANIFEST), JSON.stringify({
+    comparisons: [
+      { id: 'a', options: [{ name: 'alpha', wav: 'a/alpha.wav' }, { name: 'beta', wav: 'a/beta.wav' }] },
+      { id: 'b', options: [{ name: 'before', wav: 'b/before.wav' }, { name: 'after', wav: 'b/after.wav' }] },
+    ],
+  }))
+  const d = buildDigest(root, log)
+  assert.deepEqual(d.preferences, [], 'no tally of unrelated arm names')
+  assert.match(d.preferencesNote ?? '', /do not share an option vocabulary/)
+  assert.match(formatDigest(d), /not tallied/)
+  // The quotes still carry the whole report.
+  assert.equal(d.quotes.length, 2)
+})
+
+test('the two modes cannot be combined silently (pilot LOW)', () => {
+  const root = makeLayeredCheck()
+  const out = beat(['ab', root, '--status', '--digest'], { expectExit: 2 })
+  assert.match(out, /separate modes/)
+})
+
+test('a banked candidate carries a pre-filled answer-key stub, not homework', () => {
+  const root = makeLayeredCheck()
+  const log = join(root, DEFAULT_FEEDBACK_LOG)
+  const quote = 'the two voices beat against each other around 100-120hz'
+  recordFeedback(root, {
+    comparisonId: 'bassline-41', question: 'does the layering help?', preference: 'engineplus',
+    freeText: quote, flagged: true, options: OPTIONS,
+  }, log)
+  const c = buildDigest(root, log).candidates[0]!
+  assert.equal(c.answerKeyStub.finding, quote, 'the finding starts as the owner\'s exact words')
+  assert.ok(c.answerKeyStub.fail.endsWith('layered.wav'))
+  assert.ok(c.answerKeyStub.pass!.endsWith('engineplus.wav'))
+  assert.equal(c.answerKeyStub.span, '', 'the fields only a listen can fill are present and empty')
+  assert.match(c.answerKeyStub.source, /beat ab .*bassline-41/)
 })
 
 // ---- 7. the SEPARATION invariant --------------------------------------------------------------

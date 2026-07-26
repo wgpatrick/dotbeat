@@ -71,7 +71,15 @@ export function buildComparisonDetail(set, comparison, computeBatchFeatures) {
     id: comparison.id,
     label: comparison.label ?? comparison.id,
     question,
-    options: comparison.options.map((o, i) => ({ n: i + 1, name: o.name, wav: o.wav, note: o.note ?? null })),
+    // `missing` travels to the page so a dead option is shown as dead rather than played as
+    // silence — CLI pilot 2026-07-26's one HIGH finding (see missingOptions in src/feedback/ab.ts).
+    options: comparison.options.map((o, i) => ({
+      n: i + 1,
+      name: o.name,
+      wav: o.wav,
+      note: o.note ?? null,
+      missing: !existsSync(resolve(set.dir, o.wav)),
+    })),
     measurements,
     measurementSource,
     warnLarge: comparison.options.length > 4,
@@ -116,6 +124,8 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>beat ab</title>
   .opts{display:grid;gap:10px;margin:0 0 12px}
   .opt{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);padding:11px 13px;display:flex;align-items:center;gap:12px;cursor:pointer}
   .opt.hearing{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .opt.gone{border-color:var(--danger);opacity:0.65;cursor:not-allowed}
+  .opt.gone .key,.opt.gone .name{color:var(--danger)}
   .opt.chosen{background:rgba(110,201,124,0.10)}
   .opt.chosen .prefbtn{background:var(--good);color:#12140f;border-color:var(--good)}
   .opt .key{font-family:var(--font-mono);font-size:15px;font-weight:700;color:var(--text-dim);min-width:18px}
@@ -218,11 +228,23 @@ async function show(){
   $('prog').textContent='comparison '+(idx+1)+' of '+queue.length
   $('case').textContent=detail.label
   $('question').textContent=detail.question
-  $('warn').innerHTML=detail.warnLarge?'<div class="warn">'+detail.options.length+' options &mdash; comparisons read best at 2-4 (fatigue is the documented failure mode).</div>':''
+  var warn=detail.warnLarge?'<div class="warn">'+detail.options.length+' options &mdash; comparisons read best at 2-4 (fatigue is the documented failure mode).</div>':''
+  // A missing render must SHOUT. Playing silence for it would let the owner judge — in good faith —
+  // a file that was never loaded, and that answer would be recorded as real data.
+  var gone=detail.options.filter(function(o){return o.missing})
+  if(gone.length)warn+='<div class="warn" style="border-color:var(--danger);background:rgba(224,108,117,0.14)">'+
+    gone.length+' of '+detail.options.length+' renders are MISSING from disk ('+gone.map(function(o){return esc(o.wav)}).join(', ')+
+    '). They are not loaded and cannot be picked &mdash; do not judge this comparison until the agent re-renders them.</div>'
+  $('warn').innerHTML=warn
   renderOptions();renderFeatures();buildAudio()
 }
 function renderOptions(){
   $('opts').innerHTML=detail.options.map(function(o){
+    if(o.missing){
+      return '<div class="opt gone" id="o'+o.n+'"><span class="key">'+o.n+'</span>'+
+        '<div class="body"><div class="name">'+esc(o.name)+'</div>'+
+        '<div class="prov">'+esc(o.wav)+' &mdash; FILE MISSING, not loaded</div></div></div>'
+    }
     return '<div class="opt" id="o'+o.n+'" onclick="switchTo('+o.n+')">'+
       '<span class="key">'+o.n+'</span>'+
       '<div class="body"><div class="name">'+esc(o.name)+'</div>'+
@@ -248,17 +270,29 @@ function renderFeatures(){
 }
 
 // ---- the transport: every option preloaded and playing at once, all but one muted -------------
-function teardown(){auds.forEach(function(a){try{a.pause()}catch(e){}a.src=''});auds=[];hearing=0;$('play').textContent='play';$('seek').value=0;$('time').textContent='0:00 / 0:00'}
+function live(){return auds.filter(function(a){return a!==null})}
+function teardown(){live().forEach(function(a){try{a.pause()}catch(e){}a.src=''});auds=[];hearing=0;$('play').textContent='play';$('seek').value=0;$('time').textContent='0:00 / 0:00'}
 function buildAudio(){
+  // auds stays index-parallel with detail.options, with null where the render is missing, so the
+  // number keys keep meaning the same option whether or not one of them failed to render.
   auds=detail.options.map(function(o){
+    if(o.missing)return null
     var a=new Audio('/audio?b='+encodeURIComponent(setInfo.dir)+'&f='+encodeURIComponent(o.wav))
     a.preload='auto';a.loop=$('loop').checked;a.muted=true
+    // A render that 404s or fails to decode is the same hazard as one missing from disk: silence
+    // the owner would read as a verdict. Say so instead.
+    a.addEventListener('error',function(){
+      var el=$('o'+(auds.indexOf(a)+1))
+      if(el&&!el.classList.contains('gone')){el.classList.add('gone');el.innerHTML+='<div class="prov">FAILED TO LOAD &mdash; not audible</div>'}
+    })
     return a
   })
-  hearing=1;paint();applySink()
-  auds[0].addEventListener('loadedmetadata',updateTime)
+  hearing=auds.findIndex(function(a){return a!==null})+1
+  paint();applySink()
+  var first=live()[0]
+  if(first)first.addEventListener('loadedmetadata',updateTime)
 }
-function activeAud(){return auds[hearing-1]}
+function activeAud(){return hearing>0?auds[hearing-1]:null}
 function ready(a){
   // HAVE_FUTURE_DATA. Starting before every element can play is what staggers them: each one
   // begins whenever its own buffering finishes, so pressing 2 a second later drops you somewhere
@@ -271,21 +305,21 @@ function ready(a){
   })
 }
 async function play(){
-  if(auds.length===0)return
+  if(live().length===0)return
   $('play').textContent='\\u2026'
   var mine=auds
-  await Promise.all(auds.map(ready))
+  await Promise.all(live().map(ready))
   if(mine!==auds)return // comparison changed while buffering
   var at=activeAud().currentTime
-  auds.forEach(function(a){a.currentTime=at;a.muted=true})
-  await Promise.all(auds.map(function(a){return a.play().catch(function(){})}))
+  live().forEach(function(a){a.currentTime=at;a.muted=true})
+  await Promise.all(live().map(function(a){return a.play().catch(function(){})}))
   if(mine!==auds)return
   resync()
   activeAud().muted=false
   $('play').textContent='pause'
 }
-function pause(){auds.forEach(function(a){a.pause()});$('play').textContent='play'}
-function toggle(){if(auds.length===0)return;activeAud().paused?play():pause()}
+function pause(){live().forEach(function(a){a.pause()});$('play').textContent='play'}
+function toggle(){var a=activeAud();if(!a)return;a.paused?play():pause()}
 /**
  * The sync watchdog — deliberately a COARSE safety net, not a fine controller. It only acts on a
  * gap big enough to be real: a stalled element, or a loop wrap against an option of a different
@@ -312,13 +346,13 @@ var SYNC_HARD=0.25
 function resync(){
   var act=activeAud()
   if(!act||act.paused)return
-  auds.forEach(function(a){
+  live().forEach(function(a){
     if(a===act||a.seeking||a.paused)return
     if(Math.abs(act.currentTime-a.currentTime)>SYNC_HARD)a.currentTime=act.currentTime
   })
 }
 function switchTo(n){
-  if(!detail||n<1||n>auds.length)return
+  if(!detail||n<1||n>auds.length||auds[n-1]===null)return // a missing render is not switchable-to
   var was=activeAud()
   // The position the owner was actually HEARING is the truth to carry across.
   var at=was&&!was.paused&&!was.seeking?was.currentTime:null
@@ -327,17 +361,21 @@ function switchTo(n){
   // Instant: swap which element is audible, normally with no seek at all — the watchdog has been
   // keeping them aligned all along. This guard only fires on a real desync.
   if(at!==null&&Math.abs(now.currentTime-at)>SYNC_HARD)now.currentTime=at
-  auds.forEach(function(a){a.muted=true})
+  live().forEach(function(a){a.muted=true})
   now.muted=false
   paint()
   resync()
 }
-function setPref(n){pref=n;armed=false;$('record').classList.remove('armed');$('msg').textContent='';paint()}
+function setPref(n){
+  // A missing render can never be the preference — a "pick" over a file nobody heard is the
+  // wrong-data failure this whole guard exists to prevent.
+  if(detail&&detail.options[n-1]&&detail.options[n-1].missing){$('msg').textContent='that render is missing from disk — it was never loaded, so it cannot be preferred.';return}
+  pref=n;armed=false;$('record').classList.remove('armed');$('msg').textContent='';paint()}
 function paint(){
   detail.options.forEach(function(o){
     var el=$('o'+o.n)
     if(!el)return
-    el.className='opt'+(o.n===hearing?' hearing':'')+(o.n===pref?' chosen':'')
+    el.className='opt'+(o.missing?' gone':'')+(o.n===hearing?' hearing':'')+(o.n===pref?' chosen':'')
     var b=el.querySelector('.prefbtn')
     if(b)b.textContent=o.n===pref?'preferred':'prefer this'
   })
@@ -348,13 +386,13 @@ function updateTime(){
   $('seek').value=d?Math.round((a.currentTime/d)*1000):0
   $('time').textContent=fmtTime(a.currentTime)+' / '+fmtTime(d)
 }
-setInterval(function(){if(auds.length){updateTime();resync()}},120)
+setInterval(function(){if(live().length){updateTime();resync()}},120)
 $('play').onclick=toggle
-$('loop').onchange=function(){auds.forEach(function(a){a.loop=$('loop').checked})}
+$('loop').onchange=function(){live().forEach(function(a){a.loop=$('loop').checked})}
 $('seek').oninput=function(){
   var a=activeAud();if(!a||!a.duration)return
   var t=(Number($('seek').value)/1000)*a.duration
-  auds.forEach(function(x){x.currentTime=t})
+  live().forEach(function(x){x.currentTime=t})
 }
 
 // ---- recording --------------------------------------------------------------------------------
@@ -398,7 +436,7 @@ async function populateSinks(unlock){
       return '<option value="'+d.deviceId+'"'+(d.deviceId===sinkId?' selected':'')+'>'+esc(d.label||('output '+d.deviceId.slice(0,6)))+'</option>'}).join('')
   }catch(e){}
 }
-function applySink(){auds.forEach(function(a){if(a.setSinkId)a.setSinkId(sinkId).catch(function(){})})}
+function applySink(){live().forEach(function(a){if(a.setSinkId)a.setSinkId(sinkId).catch(function(){})})}
 $('sink').onchange=function(){sinkId=$('sink').value;localStorage.setItem('abSink',sinkId);applySink()}
 $('sinkbtn').onclick=function(){populateSinks(true)}
 if(navigator.mediaDevices&&navigator.mediaDevices.addEventListener)navigator.mediaDevices.addEventListener('devicechange',function(){populateSinks(false)})
@@ -427,7 +465,15 @@ load()
 
 // ---- the command ------------------------------------------------------------------------------
 
-const KNOWN_FLAGS = ['--port', '--log', '--status', '--json', '--digest', '--bank-listen-bench', '--all']
+const KNOWN_FLAGS = [
+  '--port', '--log', '--all', '--json',
+  '--status', '--digest', '--bank-listen-bench',
+  '--answer', '--prefer', '--note', '--flag',
+]
+/** Flags that take a value, so the positional <dir> scan doesn't eat their argument. */
+const VALUE_FLAGS = new Set(['--port', '--log', '--answer', '--prefer', '--note'])
+/** The mutually-exclusive modes. Combining them used to silently run one and drop the other. */
+const MODES = ['--status', '--digest', '--bank-listen-bench', '--answer']
 
 export async function abCommand(argv) {
   // Loud unknown-flag stance, same as rate/board/render/vary (pilots 109-112).
@@ -437,10 +483,21 @@ export async function abCommand(argv) {
       process.exit(2)
     }
   }
-  const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--port' && argv[i - 1] !== '--log')
+  // CLI pilot 2026-07-26 (LOW): `--status --digest` printed only the digest and never said the
+  // other flag had been dropped. Silently honouring one of two requests is the same class of bug
+  // as silently ignoring a typo'd flag.
+  const modesGiven = MODES.filter((m) => argv.includes(m))
+  if (modesGiven.length > 1) {
+    console.error(`error: ${modesGiven.join(' and ')} are separate modes — run one at a time`)
+    process.exit(2)
+  }
+  const valueOf = (flag) => {
+    const i = argv.indexOf(flag)
+    return i === -1 ? undefined : argv[i + 1]
+  }
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]))
   const root = resolve(positional[0] ?? '.')
-  const portIdx = argv.indexOf('--port')
-  const port = portIdx !== -1 ? Number(argv[portIdx + 1]) : 4323
+  const port = argv.includes('--port') ? Number(valueOf('--port')) : 4323
   const logIdx = argv.indexOf('--log')
 
   const ab = await import(pathToFileURL(join(repoRoot, 'dist/src/feedback/ab.js')).href)
@@ -461,8 +518,67 @@ export async function abCommand(argv) {
     process.exit(2)
   }
 
+  /** Report every option wav that is not on disk. Called by every mode; see missingOptions(). */
+  const reportMissing = () => {
+    const gaps = ab.missingOptions(set)
+    if (gaps.length === 0) return 0
+    let n = 0
+    console.error(`WARNING: ${gaps.length} comparison(s) reference renders that are not on disk:`)
+    for (const g of gaps) {
+      n += g.missing.length
+      console.error(`  ${g.comparisonId}: ${g.missing.length} of ${g.total} missing — ${g.missing.join(', ')}`)
+    }
+    console.error('a missing option is shown as dead and cannot be picked — re-render before asking the owner.')
+    return n
+  }
+
+  // ---- --answer: record an answer WITHOUT a browser ---------------------------------------------
+  // The channel that would have saved the 2026-07-26 round trip: the owner replies in chat, and the
+  // coordinator transcribes their exact words into the same log the UI writes, instead of
+  // hand-translating them into a work order. Also what makes the loop scriptable and testable at
+  // all — CLI pilot 2026-07-26 found there was no non-browser write path and had to reverse-engineer
+  // POST /api/answer out of the served page's JavaScript.
+  if (argv.includes('--answer')) {
+    const id = valueOf('--answer')
+    const comparison = set.comparisons.find((c) => c.id === id)
+    if (comparison === undefined) {
+      console.error(`error: no comparison "${id ?? ''}" in ${root}`)
+      console.error(`known ids: ${set.comparisons.map((c) => c.id).join(', ') || '(none)'}`)
+      process.exit(2)
+    }
+    const preference = valueOf('--prefer') ?? 'neither'
+    const note = valueOf('--note') ?? ''
+    if (preference === 'neither' && note.trim() === '' && !argv.includes('--flag')) {
+      console.error('error: --prefer is required, or pass --note "..." to record what the owner said')
+      process.exit(2)
+    }
+    try {
+      const result = ab.recordFeedback(
+        root,
+        {
+          comparisonId: comparison.id,
+          ...(comparison.label !== undefined ? { label: comparison.label } : {}),
+          question: comparison.question ?? set.question,
+          preference,
+          freeText: note,
+          flagged: argv.includes('--flag'),
+          options: comparison.options,
+          ...(comparison.measurements !== undefined ? { measurements: comparison.measurements } : {}),
+        },
+        logPath,
+      )
+      process.stdout.write(`recorded ${comparison.id}: ${preference}${note ? ` — "${note}"` : ''}\n`)
+      process.stdout.write(`  ${result.logPath}\n  ${result.answerPath}\n`)
+    } catch (err) {
+      console.error(`error: ${String(err?.message ?? err)}`)
+      process.exit(2)
+    }
+    return
+  }
+
   // ---- --digest: the agent-facing summary (preferences + VERBATIM quotes + bench candidates) ----
   if (argv.includes('--digest')) {
+    reportMissing()
     const digest = ab.buildDigest(root, logPath)
     if (argv.includes('--json')) {
       process.stdout.write(JSON.stringify(digest, null, 2) + '\n')
@@ -500,16 +616,18 @@ export async function abCommand(argv) {
       process.stdout.write(JSON.stringify(status, null, 2) + '\n')
       return
     }
+    reportMissing()
     process.stdout.write(`feedback under ${status.dir} (${status.source}): ${status.answered} answered, ${status.unanswered} unanswered (${status.total} total)\n`)
     process.stdout.write(`question: ${status.question}\n`)
     process.stdout.write(`feedback log: ${status.log}\n`)
     for (const c of status.comparisons) {
+      const gap = c.missing.length > 0 ? `  !! ${c.missing.length} MISSING RENDER(S): ${c.missing.join(', ')}` : ''
       if (!c.answered) {
-        process.stdout.write(`  [ ] ${c.label}  —  ${c.options.join(' vs ')}\n`)
+        process.stdout.write(`  [ ] ${c.label}  —  ${c.options.join(' vs ')}${gap}\n`)
       } else {
         const flag = c.flagged ? ' (flagged)' : ''
         const text = c.freeText ? `  "${c.freeText}"` : '  (no words)'
-        process.stdout.write(`  [x] ${c.label}  —  ${c.preference}${flag}${text}\n`)
+        process.stdout.write(`  [x] ${c.label}  —  ${c.preference}${flag}${text}${gap}\n`)
       }
     }
     return
@@ -566,6 +684,7 @@ export async function abCommand(argv) {
               set.dir,
               {
                 comparisonId: c.id,
+                ...(c.label !== undefined ? { label: c.label } : {}),
                 question: c.question ?? set.question,
                 preference: String(preference),
                 freeText: String(freeText ?? ''),
@@ -602,7 +721,10 @@ export async function abCommand(argv) {
     server,
     port,
     () => {
-      console.error(`ab: ${initial.length} unanswered comparison(s) under ${root} (${set.source})`)
+      reportMissing()
+      // The PID, because an agent has no ctrl-c. CLI pilot 2026-07-26 found a sibling review server
+      // still listening 24 hours after the session that started it died.
+      console.error(`ab: ${initial.length} unanswered comparison(s) under ${root} (${set.source}) [pid ${process.pid}]`)
       console.error(`question: ${set.question}`)
       console.error(`feedback -> ${logPath}`)
       console.error(`open http://localhost:${port} — ctrl-c here when done`)

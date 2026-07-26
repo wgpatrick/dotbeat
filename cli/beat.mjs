@@ -160,7 +160,7 @@ const HELP_FAMILIES = [
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
   ['add-note', 'rm-note', 'add-hit', 'rm-hit'],
-  ['render', 'feedback', 'metrics', 'lint'], // Phase 37 Stream RA: the render -> listen loop
+  ['render', 'feedback', 'metrics', 'lint', 'ab'], // Phase 37 Stream RA: the render -> listen loop (feedback = the machine's ears, ab = the owner's)
   // ==== Phase 38 Stream SA begin ====
   ['analyze', 'skeleton', 'analyze-structure', 'source'], // Phase 38: audio import -> skeleton -> critique
   // ==== Phase 38 Stream SA end ====
@@ -955,6 +955,7 @@ const HELP = [
   },
   {
     cmd: 'ab',
+    aliases: ['ask'],
     text: `  beat ab <dir> [--port 4323] [--log f] [--all]         owner-FEEDBACK UI over a folder of renders: A/B(/C)
                                                           players that all play IN SYNC so 1-9 switches which one
                                                           you hear at the same instant and the same moment. Captures
@@ -971,7 +972,13 @@ const HELP = [
                                                           --digest [--json]: preferences + the owner's VERBATIM
                                                           words (relay those, never a paraphrase).
                                                           --bank-listen-bench: turn flagged complaints into matched
-                                                          fail/pass listening-case candidates. --all: re-answer.`,
+                                                          fail/pass listening-case candidates. --all: re-answer.
+                                                          --answer <id> --prefer <name> [--note "..."] [--flag]:
+                                                          record an answer with NO browser — the channel for an owner
+                                                          who replied in chat (transcribe their exact words).
+                                                          also reachable as: beat ask
+                                                          NOTE: beat feedback is the opposite direction of this loop
+                                                          (DSP analysis, no human) — this is the owner's own ears.`,
   },
   {
     cmd: 'audition',
@@ -1098,7 +1105,9 @@ const HELP = [
                                                           (the phase-6 dynamics-plan check).
                                                           Honest limits: per-section STATIC metrics only — this
                                                           does NOT hear masking, arrangement, or transitions,
-                                                          only how sections differ as isolated static mixes`,
+                                                          only how sections differ as isolated static mixes.
+                                                          This is DSP ANALYSIS, not a human. To get the OWNER's
+                                                          own reaction to a folder of renders, use: beat ab`,
   },
   // ---- Phase 37 Stream RA end -------------------------------------------------------------
   {
@@ -6091,6 +6100,7 @@ async function main() {
       await boardCommand(rest)
       return // the picking server runs until ctrl-c (--status returns instead)
     }
+    case 'ask':
     case 'ab': {
       const { abCommand } = await import('./ab.mjs')
       await abCommand(rest)
