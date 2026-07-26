@@ -604,6 +604,23 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           never merged. --status [--json]: no server, print per-batch
                                                           decided/undecided + decisions (how the produce loop polls).
                                                           Adopt a winner with: beat adopt <batch> <pick>
+  beat ab <dir> [--port 4323] [--log f] [--all]         owner-FEEDBACK UI over a folder of renders: A/B(/C)
+                                                          players that all play IN SYNC so 1-9 switches which one
+                                                          you hear at the same instant and the same moment. Captures
+                                                          a preference AND free text ("what did you hear?") — the
+                                                          free text is the point. Reads <dir>/feedback.json if the
+                                                          agent wrote one ({question, comparisons:[{id, label,
+                                                          question?, options:[{name, wav, note?}], measurements?}]}),
+                                                          otherwise INFERS comparisons from the folder: <case>/
+                                                          <arm>.wav sets and <stem>--before/--after.wav pairs.
+                                                          Writes ONE beat-feedback.jsonl at <dir> + one answer file
+                                                          per comparison under feedback-answers/ — a SEPARATE log
+                                                          from blind beat-scores.jsonl and from beat-decisions.jsonl,
+                                                          never merged. --status [--json]: no server, poll answers.
+                                                          --digest [--json]: preferences + the owner's VERBATIM
+                                                          words (relay those, never a paraphrase).
+                                                          --bank-listen-bench: turn flagged complaints into matched
+                                                          fail/pass listening-case candidates. --all: re-answer.
   beat audition <dir> [--group G] [--seed N] [--no-shuffle]
                                                           stitch a blind audition.wav from ANY directory of wavs
                                                           (stem chops, one-shots) or re-stitch an existing batch.

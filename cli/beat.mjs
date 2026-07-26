@@ -153,6 +153,7 @@ const HELP_FAMILIES = [
   ['produce', 'add-track', 'trick', 'gen-kit'], // composing produced: retrofit a track / create one produced / pull a named move / generate a whole produced kit (docs/producing.md)
   ['pilot', 'taste-eval', 'rate', 'score'], // the T5 overnight critic-guided QD search (docs/pilot.md, research/117)
   ['board', 'vary', 'adopt', 'rate'], // the NON-BLIND production picking loop (research/128): vary candidates -> board pick -> adopt (rate is the blind sibling)
+  ['ab', 'board', 'rate', 'render'], // the owner-FEEDBACK loop (research/128 §2.5, 137): render a listening set -> ab for the owner's words -> digest back to the agent
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['daemon', 'open', 'selection'], // the running-GUI surface: serve a file, deep-link into it, read/set its selection
 
@@ -951,6 +952,26 @@ const HELP = [
                                                           never merged. --status [--json]: no server, print per-batch
                                                           decided/undecided + decisions (how the produce loop polls).
                                                           Adopt a winner with: beat adopt <batch> <pick>`,
+  },
+  {
+    cmd: 'ab',
+    text: `  beat ab <dir> [--port 4323] [--log f] [--all]         owner-FEEDBACK UI over a folder of renders: A/B(/C)
+                                                          players that all play IN SYNC so 1-9 switches which one
+                                                          you hear at the same instant and the same moment. Captures
+                                                          a preference AND free text ("what did you hear?") — the
+                                                          free text is the point. Reads <dir>/feedback.json if the
+                                                          agent wrote one ({question, comparisons:[{id, label,
+                                                          question?, options:[{name, wav, note?}], measurements?}]}),
+                                                          otherwise INFERS comparisons from the folder: <case>/
+                                                          <arm>.wav sets and <stem>--before/--after.wav pairs.
+                                                          Writes ONE beat-feedback.jsonl at <dir> + one answer file
+                                                          per comparison under feedback-answers/ — a SEPARATE log
+                                                          from blind beat-scores.jsonl and from beat-decisions.jsonl,
+                                                          never merged. --status [--json]: no server, poll answers.
+                                                          --digest [--json]: preferences + the owner's VERBATIM
+                                                          words (relay those, never a paraphrase).
+                                                          --bank-listen-bench: turn flagged complaints into matched
+                                                          fail/pass listening-case candidates. --all: re-answer.`,
   },
   {
     cmd: 'audition',
@@ -6069,6 +6090,11 @@ async function main() {
       const { boardCommand } = await import('./board.mjs')
       await boardCommand(rest)
       return // the picking server runs until ctrl-c (--status returns instead)
+    }
+    case 'ab': {
+      const { abCommand } = await import('./ab.mjs')
+      await abCommand(rest)
+      return // the feedback server runs until ctrl-c (--status/--digest return instead)
     }
     case 'taste-eval':
       await tasteEvalCmd(rest)
