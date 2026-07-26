@@ -281,7 +281,7 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
 
   // track metadata
   if (rest === 'name') {
-    if (/\s/.test(value)) throw new BeatEditError(singleTokenNameError(value))
+    validateSingleTokenName(value, 'track')
     return replaceTrack(doc, { ...track, name: value })
   }
   if (rest === 'color') {
@@ -687,9 +687,24 @@ function singleTokenNameError(name: string): string {
   return `track names are single tokens — the .beat text grammar has no quoting, so a name can't contain whitespace; try "${name.trim().replace(/\s+/g, '_')}"`
 }
 
+/** A name has to be exactly ONE token: not whitespace-containing (it would split into extra
+ * tokens) and not EMPTY (it would vanish and leave one token too FEW). Adversarial hunt #2 found
+ * the empty half unguarded on every name-writing path — `beat set <track>.name ""`, addTrack,
+ * addGroup, renameGroup — each of which happily wrote `track t1  #ff0000 synth`, a 4-token line
+ * where the parser demands 5, bricking the project on the next load. Two ways to be un-round-
+ * trippable, so both are checked in one place. */
+function validateSingleTokenName(name: string, what: 'track' | 'group') {
+  if (name === '') {
+    throw new BeatEditError(
+      `${what} names can't be empty — the .beat \`${what}\` line is whitespace-separated with no quoting, so an empty name writes a line with a missing token that no longer parses; pass a name (the id itself is a fine default)`,
+    )
+  }
+  if (/\s/.test(name)) throw new BeatEditError(what === 'track' ? singleTokenNameError(name) : 'group names are single tokens (no whitespace)')
+}
+
 function validateTrackIdentity(id: string, name: string, color: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new BeatEditError(`track ids are single alphanumeric/_/- tokens, got "${id}"`)
-  if (/\s/.test(name)) throw new BeatEditError(singleTokenNameError(name))
+  validateSingleTokenName(name, 'track')
   if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatEditError(`color must be a lowercase hex color like #c678dd, got "${color}"`)
 }
 
@@ -1066,7 +1081,7 @@ export function removeTrack(doc: BeatDocument, trackId: string): { doc: BeatDocu
  * hex). */
 function validateGroupIdentity(id: string, name: string, color: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new BeatEditError(`group ids are single alphanumeric/_/- tokens, got "${id}"`)
-  if (/\s/.test(name)) throw new BeatEditError('group names are single tokens (no whitespace)')
+  validateSingleTokenName(name, 'group')
   if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatEditError(`color must be a lowercase hex color like #c678dd, got "${color}"`)
 }
 
