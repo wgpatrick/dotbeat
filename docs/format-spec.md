@@ -619,7 +619,7 @@ the format-spec-level summary.
   and precision rules as `start`/`BeatNote.duration`.
 - **The 12-lane default kit** (research 19 Part VII): `kick`/`snare`/`rimshot`/`clap`/`hat`/
   `openhat`/`tom_lo`/`tom_mid`/`tom_hi`/`crash`/`ride`/`cowbell`, each carrying its GM note number —
-  a strict superset of the old 5 (same names, same meanings). `beat add-track --kind drums` writes
+  a strict superset of the old 5 (same names, same meanings). `beat add-track <file> <id> drums` writes
   this by default going forward; the low-level `addTrack()` core primitive keeps its old
   zero-lanes default for every other/internal caller (existing tests, `vary`/`humanize`/`quantize`
   internals) so nothing that doesn't ask for the new kit is affected.

@@ -121,14 +121,13 @@ The proven loop (worked, real example: `references/render-metrics-loop.md`, mirr
 `docs/sessions/2026-07-10-claude-over-mcp.md`): render, read the deterministic DSP numbers, propose
 a `.beat` edit from those numbers (never from "how it probably sounds"), re-render, re-measure,
 accept or iterate. `beat metrics`/`beat lint` (or `beat_metrics`/`beat_lint`) are ground truth —
-trust them over any impression of the audio. **Current environment caveat**: `beat render` (both
-the Chromium and `--offline` paths) requires a BeatLab checkout (`--beatlab-dir`/`BEATLAB_DIR`) as
-of this writing, and `--offline` is known to render **silence with no error** in environments
-without a locally-patched `node-web-audio-api` build (confirmed: neither is present in this
-checkout). `docs/decisions.md` D15 / `docs/phase-17-plan.md` Stream L is retargeting `beat render`
-to dotbeat's own `ui/` engine (no BeatLab dependency) — check whether that has landed before
-assuming render "just works" in a given environment; if it hasn't, treat a silent/short WAV or a
-`--beatlab-dir` error as expected, not a mystery bug.
+trust them over any impression of the audio. **Environment**: `beat render` drives dotbeat's own
+engine (`ui/src/audio/engine.ts`) headless — D15 landed, so there is **no** BeatLab dependency and
+no `--beatlab-dir` (the flag is accepted as a swallowed no-op; `BEATLAB_DIR` does nothing). All you
+need is `npm run build` and a Chromium (bundled Playwright, or `CHROME_PATH`). `--offline` computes
+through the same `Engine` on an `OfflineAudioContext` (D22/D23) and no longer has the old
+silent-WAV failure mode; it refuses soundfont projects *by name* and prints its caveats to stderr —
+read them. Details and the live-vs-offline comparison rules: `references/render-metrics-loop.md`.
 
 ## Learn from a real song: `beat analyze` → `beat skeleton`
 

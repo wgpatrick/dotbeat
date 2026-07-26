@@ -5,7 +5,8 @@ DSP measurements (LUFS, spectral balance, crest, stereo width) are ground truth;
 the deltas and proposes a `.beat` edit from them, but never judges loudness/balance "by ear" or
 invents a number. The loop:
 
-1. `beat render <file> -o out.wav [--beatlab-dir <p> | --offline]` (or `beat_render`).
+1. `beat render <file> -o out.wav [--offline]` (or `beat_render`). There is no `--beatlab-dir`
+   any more — see "Current environment" below.
 2. `beat metrics out.wav` (or `beat_metrics`) — read integrated LUFS, true peak, crest factor,
    spectral band percentages (sub/bass/mids/presence/air), stereo correlation/width.
 3. `beat lint out.wav [--target <LUFS>]` (or `beat_lint`) — the same metrics run through

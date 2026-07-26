@@ -11,7 +11,7 @@ body of work sharing one format version bump"). Scope: `docs/research/19-drum-vo
   into an identical document and re-serializes byte-for-byte unchanged. `hit` lines gained an
   optional trailing `duration`, elided when absent (same guarantee).
 - **Presets**: `kit-808`, `kit-909` (synth-backed, `presets/drum-kits.json`), `kit-acoustic`
-  (SoundFont-backed against `presets/sf2/muldjordkit-small.sf2`). `beat add-track --kind drums`
+  (SoundFont-backed against `presets/sf2/muldjordkit-small.sf2`). `beat add-track <file> <id> drums`
   defaults to the 12-lane GM-aligned kit going forward.
 - **Engine** (`ui/src/audio/engine.ts`): a lane→backing dispatch table for tracks that declare
   lanes (synth/sample/sf), threading `duration` through as release (synth/sf) or truncation
