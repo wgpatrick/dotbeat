@@ -174,7 +174,16 @@ const ARM_ORDER: Record<string, number> = {
   before: 0, baseline: 0, orig: 0, original: 0, unlayered: 0, a: 0, old: 0, control: 0,
   after: 1, new: 1, treatment: 1, b: 1, c: 2,
 }
-const armRank = (arm: string): number => ARM_ORDER[arm.toLowerCase()] ?? 10
+/** Rank a whole arm name, falling back to its last dash-segment — so an arm that did NOT fold
+ * (`heldout-before` / `heldout-after`, when no bare `after` exists to fold against) still reads
+ * before-then-after rather than alphabetically backwards. */
+const armRank = (arm: string): number => {
+  const lower = arm.toLowerCase()
+  const whole = ARM_ORDER[lower]
+  if (whole !== undefined) return whole
+  const dash = lower.lastIndexOf('-')
+  return (dash > 0 ? ARM_ORDER[lower.slice(dash + 1)] : undefined) ?? 10
+}
 
 /** Split `name` into `{stem, arm}` on the given separator: the LAST segment is the arm.
  * Returns null when the name has no separator (a single-segment name has no arm). */
