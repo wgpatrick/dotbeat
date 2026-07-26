@@ -1408,6 +1408,18 @@ export const rows = [
     core: 'done', cli: 'done', gui: 'na', status: 'done',
     research: 'research/119-production-task-evals.md', plan: 'prodtask.md',
   },
+  {
+    area: 'Taste loop', feature: 'Per-layer audibility as a GATE, not a script (`scripts/layered-diagnose.mjs`)',
+    description: 'THE ONLY MEASUREMENT THAT HAS EVER CAUGHT AN INAUDIBLE LAYER, AND IT IS NOT A GATE. `scripts/layered-diagnose.mjs` renders each layer of a stack ALONE at the stack\'s own gain staging and prints its RMS against the full mix. It has now found three defects no whole-file gate could see: the bass growl arriving 14 dB under the mix at a nominal -5 dB fader and the click 49 dB under at -16 (2026-07-26); and the chords pad arriving 10.93 dB under the mix at the SECOND HIGHEST fader in its stack, which is the owner\'s "The dark pad on the layered-after is not loud enough and is barely audible" (chords 1147, same day). In every case `verifyLayeredTargets` was flat or preferred the defective clip — on the chords pair it scores the BEFORE at 3/7 and the fixed AFTER at 2/7, because articulationDb correctly reads a newly-audible sustained bed as filling the gaps between notes. Banked as listen-bench/cases/2026-07-26-layered-chords-buried-pad-thin-stab.json, whose `metricGap` field is this row. WHY IT IS NOT ALREADY A GATE, stated so the cost is visible: this is a MULTI-TRACK feature by construction — it needs N+1 renders per clip instead of 1 — so it cannot join MixMetrics, which reads one finished WAV. The decision to be taken is whether the layered arm\'s verification renders per layer. TRIGGER: none needed. Every layered clip rated between now and then is rated on a stack whose per-layer balance nothing checks, and the failure mode is silent by definition — a buried layer measures as a clean mix.',
+    core: 'partial', cli: 'missing', gui: 'na', status: 'not-started',
+    research: 'research/138-splice-parity-plan.md', plan: null,
+  },
+  {
+    area: 'Taste loop', feature: 'A gated stab as the ONLY voice over the body: `body+stab` band share',
+    description: 'FOUND AND DELIBERATELY NOT FIXED, 2026-07-26, so it does not become a tail nobody comes back for. A chords `body+stab` draw is one SUSTAINED low layer plus one GATED mid layer (maxDurationSteps 2-4, sustain 0.05), so whole-file band share reads the body almost alone whatever the stab\'s fader says: seed 7201 measures 56.1% bass-band against the refs-packs chords p75 of 47.2% and 41.3% mids against a p25 of 50.4%, AFTER its level floor was raised 2 dB (it was 61.4% before). Raising the fader further is not the fix — it was measured and it moved the number 5 points without clearing the band. The real question is a design one this stream declined to guess at: should a gated accent ever be the only voice above the body, or does `body+stab` need either a sustained tail on the stab or a non-optional pad? Both answers are defensible and both change the family weights in CHORD_FAMILIES. TRIGGER: the next chords round in which the owner reports a clip as thin, hollow, or bottom-heavy — 2 of 20 seeds in the current sweep draw this shape, so it is roughly a 1-in-10 event per rated clip.',
+    core: 'missing', cli: 'na', gui: 'na', status: 'not-started',
+    research: null, plan: null,
+  },
 
   // ── Render / export ──────────────────────────────────────────────────────
   {

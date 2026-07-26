@@ -1,0 +1,92 @@
+{
+  "id": "2026-07-26-layered-chords-buried-pad-thin-stab",
+  "date": "2026-07-26",
+  "kind": "defect-and-fix",
+  "role": "chords",
+  "title": "Inside a chords stack the owner APPROVED, one layer could not be heard and the other had no fundamental — the buried pad and the thin stab",
+
+  "context": "This is the follow-on to 2026-07-26-layered-chords-sawtoothy-and-popping.json, and the framing matters: on the SAME listening pass the owner said the chords rebuild had worked. Verbatim: \"now there's some serious differences!\", \"I'm hearing a Pad + a stab... Sounds like two distinct instruments that are following along the same chord progression\", and on the per-layer modulation he had previously called \"odd\" and \"out of place\", \"whatever LFO that is panning or pitch changing is appropriate in its amount\" and \"the pad the feels much more layered, particularly with the LFO and the evolving nature of it. I think that's pretty nice.\" The 'pop pop' / snare-hit artifact went unmentioned. So this case is NOT about the architecture — the architecture is held constant across the pair. It is about two defects INSIDE an approved architecture, which is a class the bank did not previously hold.",
+
+  "verdict": {
+    "ownerWords": [
+      "The dark pad on the layered-after is not loud enough and is barely audible",
+      "The stabs in the layered after and production feels... just thin and not complex?",
+      "The pads seems more warm and have more tones / more voices",
+      "The stab itself sounds a bit more full with more voices? not sure - just sounds better"
+    ],
+    "heardOn": "chords seed 1147 for the pad; the stab thinness on 1147 and 2156, with the last quote explaining why he preferred the production arm on 1147",
+    "confidence": "stated plainly and unprompted, and the two complaints point in OPPOSITE directions on the same clip (one layer too quiet, the other too thin), which is the shape that rules out a global level or tone complaint",
+    "fixConfirmed": false,
+    "fixConfirmedNote": "case-26 is the CANDIDATE fix, banked in the same session as the defect per CLAUDE.md's rule, and NOT yet listened to. The four-arm listening set with the question written for him is at taste-dataset/chords-balance (unlayered control / BEFORE / AFTER / AFTER+production, on all three seeds he has now rated twice). If the listening pass disagrees, the label in answers.json is what moves, not the measurement."
+  },
+
+  "clips": [
+    {
+      "id": "case-25.wav",
+      "arm": "layered (before)",
+      "label": "REJECTED",
+      "path": "taste-dataset/listen-bench/cases/case-25.wav",
+      "sha256": "ed80f66842d45986e62ffad150ea13a237e0b0d815719e7c822a1ae1cf537174",
+      "producedBy": "scripts/layered-oldnew-ab.mjs against a reference build at fae0b397, chords seed 1147, 154 BPM, 4 bars, normalized in one batch with case-26",
+      "alsoAt": "taste-dataset/chords-balance/chords-1147/layered-old.wav",
+      "stack": "sawtooth body root octave-down (lowpass 420) @-13 dB + pad (highpass 350, resting LP 1220) @-11 dB + stab (highpass 800, resting LP 5200, +12 st) @-10 dB"
+    },
+    {
+      "id": "case-26.wav",
+      "arm": "layered (after)",
+      "label": "CANDIDATE FIX",
+      "path": "taste-dataset/listen-bench/cases/case-26.wav",
+      "sha256": "4731f4440b9f23862409df99721cb1ff494a8a56013afa042f6c7cdf43bdd214",
+      "producedBy": "same script, same figure/key/tempo, working tree at 32138fad, normalized in the SAME batch as case-25",
+      "alsoAt": "taste-dataset/chords-balance/chords-1147/layered-new.wav",
+      "stack": "sawtooth body root octave-down (lowpass 420) @-13 dB + pad (highpass 350, resting LP 1120, 4v) @-11 dB + stab (highpass 500 drawn / 460 after fundamental preservation, resting LP 3800, +12 st, 3v) @-8 dB"
+    }
+  ],
+
+  "measured": {
+    "note": "THE SIGNAL IS PER-LAYER, AND NO WHOLE-FILE FEATURE CARRIES IT. Each layer was rendered ALONE at the stack's own gain staging (scripts/layered-diagnose.mjs, no normalization — that is the whole point of the script) so its contribution can be read directly instead of inferred from a band share. The before/after WAVs above were separately loudness-normalized together in one vary batch, so the whole-file rows are treatment and not gain.",
+    "perLayerSoloRmsVsFullMix_dB": {
+      "note": "solo RMS minus the full stack's RMS. 0 means the layer alone is as loud as the whole instrument; -12 dB is FUSION_AUDIBILITY_DB, this codebase's own named threshold for a layer still being an event the ear times against.",
+      "chords-138": { "body": [-5.79, -5.78], "pad": [-1.37, -1.58], "stab": [-18.35, -12.65], "air": [-48.77, -49.39] },
+      "chords-1147": { "body": [-7.78, -10.83], "pad": [-10.93, -2.73], "stab": [-1.62, -3.66] },
+      "chords-2156": { "body": [-7.71, -9.83], "pad": [-1.57, -1.61], "stab": [-12.11, -8.01] },
+      "format": "[before, after]"
+    },
+    "wholeFile_case25_vs_case26": {
+      "case-25.wav": { "harsh1638kHzPct": 0.79, "centroidHz": 778, "bandBassPct": 15.8, "bandMidsPct": 80.3, "crestDb": 21.8, "characterLevelDb": 16.9, "gatesPassed": "3/7" },
+      "case-26.wav": { "harsh1638kHzPct": 0.53, "centroidHz": 648, "bandBassPct": 13.1, "bandMidsPct": 85.5, "crestDb": 18.7, "characterLevelDb": 20.0, "gatesPassed": "2/7" },
+      "warning": "the AFTER scores FEWER whole-file gates than the BEFORE on this single seed while fixing the thing the owner actually complained about. Across a 20-seed rendered sweep the two arms are level (61/140 before, 62/140 after, 67/140 for the production variant), so the single-seed drop is draw noise — but it is recorded rather than dropped, because a bank entry that only keeps the flattering number is worthless."
+    },
+    "refsPacksChordsQuartiles": {
+      "centroidHz": { "p25": 344, "p50": 448, "p75": 630 },
+      "bandBassPct": { "p25": 2.69, "p50": 23.15, "p75": 47.19 },
+      "bandMidsPct": { "p25": 50.35, "p50": 66.55, "p75": 93.78 },
+      "crestDb": { "p25": 15.0, "p50": 16.66, "p75": 18.32 },
+      "characterLevelDb": { "p25": 26.27, "p75": 46.09 }
+    }
+  },
+
+  "cause": {
+    "buriedPad": "NOT the darkness and NOT the fader. Seed 1147's figure is 16th notes at 154 BPM, so every pad note lasts 97 ms, and the pad drew a 240 ms amp attack from a fixed [0.06, 0.1, 0.16, 0.24] ladder that knows nothing about the notes. The envelope was still climbing when each note ended, on every note of the clip. The cross-check is seed 2156: the SAME 240 ms attack, at 90 BPM with 2-10 step notes, measures 1.57 dB under the mix. One dB of nominal difference between pad and stab on 1147; 9.3 dB of measured difference.",
+    "thinStab": "The stab was highpassed ABOVE its own lowest fundamental on all three rated seeds — 660/800/640 Hz against lowest notes of 330/349/392 Hz — leaving the bare upper harmonic series with the fundamental removed. src/taste/layered.ts had a `preserveFundamental` field on LayerSpec whose own comment described this exact failure in these words: 'deletes the fundamental and leaves the bare upper harmonic series, which is thin and metallic'. `grep -rn preserveFundamental src/` returned one line: the declaration. Nothing read it. The fix it describes had never been implemented.",
+    "notEnoughTones": "The stab ran osc + osc2 with no unison and no sub — TWO oscillators — on the role docs/priors/organic-vs-mechanical.md §4e measures as the most oscillator-dense of the ten (71.4% of chord patches use three oscillators, 78.6% split by octave, both the highest measured). The previous pass had read §4a ('unison is a minority choice: 50.0% use it at all, median 3 voices when on') as a claim about DEPTH and cut the pad from [3,4,5,6] voices to [1,1,3,4]. §4a is a claim about INCIDENCE, not depth, and [1,1,3,4] happens to encode it correctly — which is why the pad came back sounding right to the owner. The miss was that §4e was never applied to anything.",
+    "whyTheDiagnosticWasNeeded": "Every one of these is invisible to MixMetrics, which is whole-file and whole-band. The clip's centroid, band shares and crest were all inside or near the reference pool while one of its three layers was inaudible. This is the third time on this branch that per-layer rendering found a defect no gate could see (the bass growl at -14 dB and the click at -49 dB were the first two)."
+  },
+
+  "whatTheMetricsSaid": {
+    "verdict": "EVERY whole-file gate was blind to it, and one of them preferred the defective clip. verifyLayeredTargets scores case-25 at 3/7 and case-26 at 2/7 — the BEFORE wins. The seven features and what each said:",
+    "bandBassPct": "15.8 -> 13.1, both inside the pool IQR of 2.69-47.19. No signal.",
+    "bandMidsPct": "80.3 -> 85.5, both inside 50.35-93.78. No signal.",
+    "centroidHz": "778 -> 648 against a pool IQR of 344-630 — the AFTER is much closer to the reference class and both FAIL, so the gate reports no change in status while the value moves 130 Hz the right way. A two-sided pass/fail hides a real improvement here.",
+    "stereoWidthDb": "-15.3 -> -13.8, both fail the -8.75..-1.75 window. No signal.",
+    "crestDb": "21.8 -> 18.7 against a ceiling of 18.32 — again much closer, still failing, still reported as 'fail' either way.",
+    "articulationDb": "20.4 -> 15.5, and this one FLIPS from pass to fail. It is also the one that is arguably right to move: making the sustained bed audible fills the gaps between the stab's notes, which is what articulation measures. The gate reads the fix as a regression.",
+    "characterLevelDb": "16.9 -> 20.0, both under the pool p25 of 26.27. The closest whole-file proxy for the thing that actually changed, and it moves 3.1 dB in the right direction without ever crossing a threshold."
+  },
+
+  "metricGap": "PER-LAYER SOLO RMS AGAINST THE FULL MIX — computed today only by scripts/layered-diagnose.mjs, which is a script, not a gate, and which no test or verification path calls. On this pair it ranks the clips unambiguously and in the owner's direction: the pad moves from 10.93 dB under the mix to 2.73 dB under, and the stab from 1.62 to 3.66 dB under, i.e. the pair swaps from one-layer-dominant to balanced. It is a MULTI-TRACK feature by construction — it requires re-rendering the doc once per layer — so it cannot be added to MixMetrics, which reads one finished WAV. Making it a gate means deciding that the layered arm's verification renders N+1 times instead of once. That decision is not taken here; it is what this case exists to argue for.",
+
+  "openAfterThisFix": "A `body+stab` draw is one SUSTAINED low layer plus one GATED mid layer, so whole-file band share reads the body almost alone whatever the stab's fader says: seed 7201 measures 56.1% bass-band against a pool p75 of 47.2% even after its level floor came up 2 dB. Raising the fader further is not the fix and was not attempted. Recorded in src/taste/layered.ts at `stabSolo` and as a roadmap row.",
+
+  "whyThisPairMatters": "The bank's first pair where the defect sits INSIDE an approved architecture rather than being the architecture, and the first where the discriminating measurement (per-layer solo RMS against the full mix) is not computed by any gate in the repo. research/122 §8 and research/123 §6 both argue the roughness signal only exists BETWEEN matched renders of the same material; this pair extends that to balance, where the same argument holds even more strongly — there is no absolute dB at which a pad is 'audible', only a relationship to the stack it sits in."
+}
