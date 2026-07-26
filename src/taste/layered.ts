@@ -259,7 +259,7 @@ const BASSLINE_ARCH: LayeredArchitecture = {
         eqHigh: -2,
       },
       production: {
-        profile: { role: 'bass', saturator: { drive: 0.4, mix: 0.45 }, eqHigh: 2 },
+        profile: { role: 'bass', saturator: { drive: 0.4, mix: 0.45 } },
         comp: { threshold: -28, ratio: 8, attack: 0.015, release: 0.12, mix: 0.2 },
       },
     },
@@ -283,7 +283,7 @@ const BASSLINE_ARCH: LayeredArchitecture = {
       production: {
         // 5-10 ms on a transient layer (transients vein) — the one place a fast comp attack is
         // right, because the layer IS the transient; everywhere else 10-30 ms preserves punch.
-        profile: { role: 'perc', eqHigh: 4 },
+        profile: { role: 'perc', eqHigh: 2 },
         comp: { threshold: -26, ratio: 6, attack: 0.008, release: 0.08, mix: 0.25 },
       },
     },
@@ -372,10 +372,10 @@ const CHORDS_ARCH: LayeredArchitecture = {
         decay: 0.6,
         sustain: 0.85,
         release: 0.6,
-        pan: -0.45,
+        pan: -0.7,
       },
       production: {
-        profile: { role: 'pad', chorusMix: 0.35, utilityWidth: 0.78, saturator: { drive: 0.2, mix: 0.28 }, sendReverb: 0.3, sendDelay: 0.08, eqHigh: 2.5 },
+        profile: { role: 'pad', chorusMix: 0.45, saturator: { drive: 0.2, mix: 0.28 }, sendReverb: 0.3, sendDelay: 0.08, eqHigh: 2.5 },
         comp: { threshold: -28, ratio: 6, attack: 0.02, release: 0.2, mix: 0.25 },
       },
     },
@@ -396,10 +396,10 @@ const CHORDS_ARCH: LayeredArchitecture = {
         decay: 0.16,
         sustain: 0.05,
         release: 0.12,
-        pan: 0.45,
+        pan: 0.7,
       },
       production: {
-        profile: { role: 'chords', chorusMix: 0.2, utilityWidth: 0.75, saturator: { drive: 0.25, mix: 0.3 }, sendReverb: 0.14, sendDelay: 0.12, eqHigh: 3 },
+        profile: { role: 'chords', chorusMix: 0.3, saturator: { drive: 0.25, mix: 0.3 }, sendReverb: 0.14, sendDelay: 0.12, eqHigh: 3 },
         comp: { threshold: -28, ratio: 8, attack: 0.012, release: 0.1, mix: 0.35 },
       },
     },
@@ -423,7 +423,7 @@ const CHORDS_ARCH: LayeredArchitecture = {
         pan: 0,
       },
       production: {
-        profile: { role: 'hats', utilityWidth: 0.85, sendReverb: 0.4, eqHigh: 5, autoPan: { rate: 0.12, depth: 0.4, mix: 0.3 } },
+        profile: { role: 'hats', utilityWidth: 0.7, sendReverb: 0.4, eqHigh: 5, autoPan: { rate: 0.12, depth: 0.4, mix: 0.3 } },
       },
     },
   ],
@@ -491,7 +491,7 @@ const LEAD_ARCH: LayeredArchitecture = {
         osc2Level: 0.3,
         osc2Detune: 7,
         unisonVoices: 5,
-        unisonWidth: 0.5,
+        unisonWidth: 0.9,
         attack: 0.003,
         decay: 0.2,
         sustain: 0.55,
@@ -499,7 +499,7 @@ const LEAD_ARCH: LayeredArchitecture = {
         pan: 0,
       },
       production: {
-        profile: { role: 'lead', chorusMix: 0.2, utilityWidth: 0.75, saturator: { drive: 0.28, mix: 0.35 }, sendReverb: 0.2, sendDelay: 0.14, eqHigh: 3.5 },
+        profile: { role: 'lead', chorusMix: 0.3, saturator: { drive: 0.28, mix: 0.35 }, sendReverb: 0.2, sendDelay: 0.14, eqHigh: 3.5 },
         comp: { threshold: -28, ratio: 8, attack: 0.012, release: 0.1, mix: 0.35 },
       },
     },
@@ -523,10 +523,10 @@ const LEAD_ARCH: LayeredArchitecture = {
         decay: 0.18,
         sustain: 0.4,
         release: 0.15,
-        pan: 0.45,
+        pan: 0.7,
       },
       production: {
-        profile: { role: 'lead', utilityWidth: 0.78, sendReverb: 0.26, sendDelay: 0.16, eqHigh: 4 },
+        profile: { role: 'lead', sendReverb: 0.26, sendDelay: 0.16, eqHigh: 4 },
         comp: { threshold: -28, ratio: 6, attack: 0.015, release: 0.1, mix: 0.25 },
       },
     },
@@ -536,7 +536,7 @@ const LEAD_ARCH: LayeredArchitecture = {
       color: '#c678dd',
       figure: { transpose: 0, pick: 'all', velocityScale: 0.85 },
       band: { mode: 'highpass', cutoffHz: 400, resonance: 0.05 },
-      gainDb: -15,
+      gainDb: -12,
       mono: false,
       patch: {
         osc: 'sawtooth' as OscType,
@@ -549,10 +549,10 @@ const LEAD_ARCH: LayeredArchitecture = {
         decay: 0.3,
         sustain: 0.6,
         release: 0.3,
-        pan: -0.45,
+        pan: -0.7,
       },
       production: {
-        profile: { role: 'lead', chorusMix: 0.5, utilityWidth: 0.85, saturator: { drive: 0.2, mix: 0.25 }, sendReverb: 0.35, sendDelay: 0.1, autoPan: { rate: 0.1, depth: 0.35, mix: 0.25 }, eqHigh: 3 },
+        profile: { role: 'lead', chorusMix: 0.5, utilityWidth: 0.9, saturator: { drive: 0.2, mix: 0.25 }, sendReverb: 0.35, sendDelay: 0.1, autoPan: { rate: 0.1, depth: 0.35, mix: 0.25 }, eqHigh: 3 },
       },
     },
   ],
