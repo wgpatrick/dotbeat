@@ -23,7 +23,7 @@
 
 import { scalePitchClasses, degreePitch, chooseSeeded, type PhraseKey, type ScaleMode, type ComposedNote, type ComposedPhrase } from './phrase.js'
 import { mulberry32 } from './eval.js'
-import { contourInversion, transposeToNextChord, rhythmicDisplacement, oneChangePerRepeat, euclidSteps, type MotifOperator } from './motif.js'
+import { contourInversion, transposeToNextChord, rhythmicDisplacement, sameRhythmNewPitches, oneChangePerRepeat, euclidSteps, type MotifOperator } from './motif.js'
 
 const rnd2 = (x: number): number => Math.round(x * 100) / 100
 const clampVel = (v: number): number => rnd2(Math.min(0.95, Math.max(0.05, v)))
@@ -871,18 +871,61 @@ export const THEORY_LEAD_ARCHETYPES = ['motif-call-response', 'motif-repeat', 'a
 
 /** Lead register — two octaves above the key root (§ midifig register targets). */
 const LEAD_REGISTER = 24
+/** Seeded octave placement for a lead figure: the two-octaves-up default dominates, with a lower
+ * "tenor" placement and a bright top-octave one as the register-variety axis (owner ear-report
+ * 2026-07-26 — every lead sat in exactly one octave). Octave multiples only, so `degreePitch`'s
+ * scale-degree arithmetic is unaffected. */
+const LEAD_REGISTERS: readonly number[] = [24, 24, 24, 12, 36]
 const STRONG_STEPS = new Set([0, 4, 8, 12])
 
 /** 1-bar rhythm cells (onset steps), each using <=3 distinct inter-onset durations (motif economy,
- * §C.3). Denser cells first — the archetype picks a slice. */
-const MOTIF_RHYTHMS: readonly (readonly number[])[] = [
-  [0, 4, 8, 12], // quarter pulse
-  [0, 3, 4, 8, 11, 12], // dotted-ish cell
-  [0, 2, 4, 8, 10, 12], // 8ths with gaps
-  [0, 4, 6, 8, 12, 14], // syncopated
-  [0, 4, 7, 12], // sparse, off-grid middle
-  [0, 2, 4, 6, 8, 10, 12, 14], // running 8ths
-]
+ * §C.3), grouped by the character an archetype asks for. Every cell opens on step 0, which is what
+ * guarantees the phrase always has strong-beat onsets for the peak rule to land on. */
+const MOTIF_RHYTHM_POOLS: Record<'sparse' | 'running' | 'syncopated', readonly (readonly number[])[]> = {
+  sparse: [
+    [0, 4, 7, 12],
+    [0, 6, 12],
+    [0, 4, 12],
+    [0, 8, 12, 14],
+    [0, 5, 8],
+    [0, 4, 10],
+  ],
+  running: [
+    [0, 2, 4, 6, 8, 10, 12, 14],
+    [0, 2, 4, 8, 10, 12],
+    [0, 2, 4, 6, 8, 12, 14],
+    [0, 1, 2, 4, 6, 8, 10, 12],
+    [0, 2, 3, 4, 8, 10, 11, 12],
+  ],
+  syncopated: [
+    [0, 3, 4, 8, 11, 12],
+    [0, 2, 4, 8, 10, 12],
+    [0, 4, 6, 8, 12, 14],
+    [0, 4, 7, 12],
+    [0, 3, 6, 8, 11, 14],
+    [0, 2, 6, 8, 10, 14],
+    [0, 4, 6, 10, 12],
+  ],
+}
+
+/** Seeded ornament/rest on a rhythm cell: leave it alone, add one onset on a free WEAK 16th, or
+ * remove one non-initial onset. Both edits keep step 0 and the strong beats intact, so chord tones
+ * still land on strong beats and the cell keeps its motif economy — this just multiplies the family
+ * of cells a given archetype can state. */
+function varyRhythmCell(rng: () => number, cell: readonly number[]): number[] {
+  const r = rng()
+  if (r < 0.34 || cell.length < 3) return [...cell]
+  if (r < 0.67) {
+    const free: number[] = []
+    for (let s = 1; s < 16; s++) if (!cell.includes(s) && s % 4 !== 0) free.push(s)
+    if (free.length === 0) return [...cell]
+    return [...cell, pickOne(rng, free)].sort((a, b) => a - b)
+  }
+  const removable = cell.filter((s) => s !== 0 && !STRONG_STEPS.has(s))
+  if (removable.length === 0) return [...cell]
+  const drop = pickOne(rng, removable)
+  return cell.filter((s) => s !== drop)
+}
 
 /** A note in scale-degree space (0 = key root), the representation the motif is built in so chord
  * tones on strong beats and stepwise motion are exact before pitches are resolved. */
@@ -995,16 +1038,44 @@ export function enforceSinglePeak(notes: ComposedNote[], targetStep: number, key
 /** Resolve a bar of degree-space motif notes to pitches over `chord`, diatonically transposed onto
  * the chord (transpose-to-next-chord in degree space keeps chord tones as chord tones), offset to
  * the bar's absolute step position. */
-function barFromMotif(motif: readonly DegNote[], chord: ChordTrackChord, rootDeg0: number, barStart: number, key: PhraseKey): ComposedNote[] {
+function barFromMotif(motif: readonly DegNote[], chord: ChordTrackChord, rootDeg0: number, barStart: number, key: PhraseKey, register: number): ComposedNote[] {
   const rootDeg = chord.rootDegree ?? 0
   const delta = rootDeg - rootDeg0
   return motif.map((n) => ({
-    pitch: degreePitch(key, n.degree + delta, LEAD_REGISTER),
+    pitch: degreePitch(key, n.degree + delta, register),
     start: barStart + n.start,
     duration: n.duration,
     velocity: clampVel(n.velocity),
   }))
 }
+
+/** The pitch-space one-change operators a lead phrase is DERIVED with (§C.3 / §C.7 piece 3). Each is
+ * a single hearable change that keeps the motif recognisable: a 16th or 8th rhythmic displacement,
+ * a contour inversion (interval-preserving, so the 60-80% stepwise motion survives), the same rhythm
+ * with the pitch sequence rotated (repetition type 2), and a thinned tail (the call/response gap).
+ * Before this the whole 4-bar phrase was one bar stated four times with only the LAST bar varied. */
+/** Restrict an operator to the bar's TAIL (its second half). A rhythmic displacement applied to a
+ * WHOLE bar of straight 8ths lands every onset on the opposite 16ths — bars that share no onsets at
+ * all, which is exactly what the groove-consistency gate flags. Varying only the tail keeps the
+ * bar's first half anchored, which is both what the gate wants and what the one-change rule means:
+ * hold the core, change one thing. */
+const onTail = (op: MotifOperator): MotifOperator => (ns) => {
+  const head = ns.filter((n) => n.start < 8).map((n) => ({ ...n }))
+  const tail = ns.filter((n) => n.start >= 8)
+  if (tail.length === 0 || head.length === 0) return op(ns.map((n) => ({ ...n })))
+  const varied = op(tail.map((n) => ({ ...n, start: rnd2(n.start - 8) }))).map((n) => ({ ...n, start: rnd2(n.start + 8) }))
+  return [...head, ...varied].sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+}
+
+const LEAD_OPS: readonly MotifOperator[] = [
+  onTail((ns) => rhythmicDisplacement(ns, 1, 8)),
+  onTail((ns) => rhythmicDisplacement(ns, -1, 8)),
+  onTail((ns) => rhythmicDisplacement(ns, 2, 8)),
+  onTail((ns) => contourInversion(ns)),
+  (ns) => contourInversion(ns), // pitch-only: rhythm identical, so the groove is untouched
+  (ns) => sameRhythmNewPitches(ns, [...ns.slice(1).map((n) => n.pitch), ns[0]?.pitch ?? 60]),
+  (ns) => (ns.length > 3 ? ns.slice(0, -1).map((n) => ({ ...n })) : ns.map((n) => ({ ...n }))),
+]
 
 /** One theory-aware lead figure over a chord track: a 1-bar motif derived into a 4-bar call-and-
  * response phrase via the motif operators, with the single-peak and call-high/answer-low rules
@@ -1012,50 +1083,51 @@ function barFromMotif(motif: readonly DegNote[], chord: ChordTrackChord, rootDeg
 export function composeTheoryLead(archetype: string, track: ChordTrack, seed: number): ComposedNote[] {
   const rng = mulberry32(seed + 1693)
   const key = track.key
-  // archetype-driven rhythm slice: sparse -> the sparse cells, arp -> the running cells, else the
-  // syncopated middle
+  // archetype-driven rhythm character: sparse -> the sparse cells, arp -> the running cells, else
+  // the syncopated middle; then a seeded ornament/rest on the drawn cell
   const rhythmPool = archetype === 'sparse-motif'
-    ? MOTIF_RHYTHMS.slice(4)
+    ? MOTIF_RHYTHM_POOLS.sparse
     : archetype === 'arp-motif'
-      ? MOTIF_RHYTHMS.slice(2)
-      : MOTIF_RHYTHMS.slice(1, 5)
-  const rhythm = rhythmPool[Math.floor(rng() * rhythmPool.length)]!
+      ? MOTIF_RHYTHM_POOLS.running
+      : MOTIF_RHYTHM_POOLS.syncopated
+  const rhythm = varyRhythmCell(rng, pickOne(rng, rhythmPool))
+  const register = pickOne(rng, LEAD_REGISTERS)
   const chord0 = chordAtStep(track, 0)
   const rootDeg0 = chord0.rootDegree ?? 0
   const motif = buildMotif(chord0, rng, rhythm)
 
   // The answer inverts the call's contour for call-response archetypes, else repeats it (motif-
   // repeat). Inversion is done in DEGREE space (mirror around the motif's opening degree) so it
-  // stays diatonic; the pitch-space contourInversion operator is exercised too, below, on bar 3.
+  // stays diatonic; the pitch-space operators below then derive the bars WITHIN each half.
   const invert = archetype !== 'motif-repeat'
   const axisDeg = motif[0]!.degree
   const answerMotif: DegNote[] = invert ? motif.map((n) => ({ ...n, degree: 2 * axisDeg - n.degree })) : motif.map((n) => ({ ...n }))
 
+  // Each half of the phrase STATES its shape in its first bar and DERIVES every later bar from the
+  // one before it by exactly one operator (§C.3's one-change-per-repeat, via motif.ts's own
+  // scheduler). Statement bars are never displaced, which is what keeps strong-beat onsets in the
+  // phrase for the peak rule. Bars whose chord differs from their half's statement chord are moved
+  // onto it with transpose-to-next-chord in pitch space, then re-snapped to the key.
+  const answerStart = Math.max(1, Math.floor(track.bars / 2))
+  const halves: readonly { start: number; end: number; shape: DegNote[] }[] = [
+    { start: 0, end: answerStart, shape: motif },
+    { start: answerStart, end: track.bars, shape: answerMotif },
+  ]
   const notes: ComposedNote[] = []
-  for (let bar = 0; bar < track.bars; bar++) {
-    const chord = chordAtStep(track, bar * 16)
-    const isAnswer = bar >= track.bars / 2
-    const shape = isAnswer ? answerMotif : motif
-    notes.push(...barFromMotif(shape, chord, rootDeg0, bar * 16, key))
-  }
-
-  // Derive the LAST bar with the operator library as a one-change-per-repeat variation of itself
-  // (rhythmic displacement by a 16th OR a pitch-space contour inversion), then re-snap to scale — a
-  // concrete demonstration that the phrase is derived by operators, not redrawn.
-  const lastBarStart = (track.bars - 1) * 16
-  const lastBar = notes.filter((n) => n.start >= lastBarStart)
-  if (lastBar.length > 0) {
-    const ops: MotifOperator[] = [
-      (ns) => rhythmicDisplacement(ns, 1, 16).map((n) => ({ ...n, start: n.start + lastBarStart })),
-      (ns) => contourInversion(ns.map((n) => ({ ...n, start: n.start - lastBarStart })), ns[0]!.pitch).map((n) => ({ ...n, start: n.start + lastBarStart })),
-    ]
-    const local = lastBar.map((n) => ({ ...n, start: n.start - lastBarStart }))
-    const varied = oneChangePerRepeat(local, 1, ops.map((op) => (ns: readonly ComposedNote[]) => op(ns.map((n) => ({ ...n, start: n.start + lastBarStart })))), seed).at(-1)!
-    // rebuild notes: keep everything before the last bar, replace the last bar with the varied copy
-    const head = notes.filter((n) => n.start < lastBarStart)
-    notes.length = 0
-    notes.push(...head, ...varied.map((n) => ({ ...n, pitch: snapToScale(n.pitch, key) })))
-  }
+  halves.forEach((half, hi) => {
+    const len = half.end - half.start
+    if (len <= 0) return
+    const stmtChord = chordAtStep(track, half.start * 16)
+    const base = barFromMotif(half.shape, stmtChord, rootDeg0, 0, key, register)
+    const derived = oneChangePerRepeat(base, len - 1, LEAD_OPS, seed + hi * 101)
+    for (let i = 0; i < len; i++) {
+      const bar = half.start + i
+      const chord = chordAtStep(track, bar * 16)
+      const local = derived[i] ?? base
+      const moved = transposeToNextChord(local, key.root + stmtChord.rootOffset, key.root + chord.rootOffset)
+      for (const n of moved) notes.push({ ...n, pitch: snapToScale(n.pitch, key), start: rnd2(bar * 16 + n.start) })
+    }
+  })
 
   // snap every pitch to scale (guards the chromatic operators), then enforce cross-phrase contour
   for (const n of notes) n.pitch = snapToScale(n.pitch, key)

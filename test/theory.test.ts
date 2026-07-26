@@ -33,6 +33,7 @@ import {
   bassBarSchedule,
   chooseOpeningVoicing,
   THEORY_CHORD_ARCHETYPES,
+  THEORY_LEAD_ARCHETYPES,
 } from '../src/taste/theory.js'
 
 const MINOR = { root: 48, minor: true }
@@ -364,6 +365,41 @@ test('lead melody is mostly stepwise and the call ends higher than the answer en
   const callEnd = notes.filter((n) => n.start < mid).reduce((a, b) => (b.start > a.start ? b : a))
   const answerEnd = notes.filter((n) => n.start >= mid).reduce((a, b) => (b.start > a.start ? b : a))
   assert.ok(callEnd.pitch > answerEnd.pitch, 'call ends high, answer ends low')
+})
+
+test('a lead phrase is DERIVED bar by bar, never one bar stated four times', () => {
+  let variedFigures = 0
+  let total = 0
+  const skeletons = new Map<string, Set<string>>()
+  for (const archetype of THEORY_LEAD_ARCHETYPES) {
+    skeletons.set(archetype, new Set())
+    for (let seed = 0; seed < 40; seed++) {
+      // one chord for the whole clip, so only the OPERATORS can make the bars differ
+      const track = buildChordTrack(MINOR, seed, { barsPerChord: 4 })
+      const notes = composeTheoryLead(archetype, track, seed)
+      skeletons.get(archetype)!.add(onsetKey(notes))
+      const bars = [0, 1, 2, 3].map((b) =>
+        notes
+          .filter((n) => Math.floor(n.start / 16) === b)
+          .map((n) => `${Math.round(n.start) - b * 16}:${n.pitch}`)
+          .join(','))
+      total += 1
+      if (new Set(bars).size >= 3) variedFigures += 1
+    }
+  }
+  assert.ok(variedFigures / total > 0.8, `only ${variedFigures}/${total} lead phrases have 3+ distinct bars`)
+  for (const [archetype, set] of skeletons) {
+    assert.ok(set.size >= 8, `${archetype} produced only ${set.size} distinct skeletons in 40 draws`)
+  }
+})
+
+test('lead phrases are deterministic in the seed across the operator-derived bars', () => {
+  for (const archetype of THEORY_LEAD_ARCHETYPES) {
+    for (let seed = 0; seed < 20; seed++) {
+      const track = buildChordTrack(MINOR, seed)
+      assert.deepEqual(composeTheoryLead(archetype, track, seed), composeTheoryLead(archetype, track, seed))
+    }
+  }
 })
 
 test('snapToScale maps any pitch into the key; enforceSinglePeak yields exactly one maximum', () => {
