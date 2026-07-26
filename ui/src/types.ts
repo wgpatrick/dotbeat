@@ -89,7 +89,13 @@ export const OSC_TYPES_LIST: readonly OscType[] = ['sine', 'triangle', 'sawtooth
 // one literal list, same "hand-mirrors core" convention as OSC_TYPES_LIST above.
 export type WtTable = 'analog' | 'pwm' | 'vocal' | 'custom'
 export const WT_TABLES: readonly WtTable[] = ['analog', 'pwm', 'vocal', 'custom']
-export type TrackKind = 'synth' | 'drums' | 'instrument' | 'audio'
+// Mirrors src/core/document.ts's TrackKind exactly — including 'surge' (Track 1a / D23's
+// sidecar-instrument track). Research 137 §2.3 caught this list one kind BEHIND core: a surge
+// track's `kind` arrives verbatim in the daemon's GET /document JSON, so `examples/surge-pilot`
+// rendered `AUTO_OPTIONS_BY_KIND[track.kind]` === undefined and ArrangementView threw a TypeError
+// on `.map()` before the arrangement drew anything. Kept in sync structurally by
+// test/ui-track-kind-parity.test.ts — add a kind to core and that test names this line.
+export type TrackKind = 'synth' | 'drums' | 'instrument' | 'audio' | 'surge'
 
 export interface BeatNote {
   id: string
