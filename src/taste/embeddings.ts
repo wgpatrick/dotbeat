@@ -8,15 +8,9 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { execFile } from 'node:child_process'
-import { resolvePython } from '../analysis/sidecar.js'
+import { lastNonEmptyLine, resolvePython, spawnSidecar, type SpawnResult } from '../analysis/spawn-sidecar.js'
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-const EMBED_PY = 'python/embed.py'
-const SPAWN_TIMEOUT_MS = 600_000
-const SPAWN_MAX_BUFFER = 64 * 1024 * 1024
+const EMBED_PY = 'python/embed.py' // relative to the repo root, like every sidecar
 
 /** The raw-vector backends. Both real ones are LEGACY as of research/122 §5 ("Embedding spaces for
  * music, post-CLAP-retirement"): `clap` scored BELOW CHANCE on held-out owner picks and actively
@@ -58,15 +52,8 @@ function sha256File(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
-function spawnEmbed(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string; enoent: boolean }> {
-  const python = resolvePython()
-  return new Promise((resolvePromise) => {
-    execFile(python, args, { cwd: repoRoot, timeout: SPAWN_TIMEOUT_MS, maxBuffer: SPAWN_MAX_BUFFER }, (err, stdout, stderr) => {
-      if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') resolvePromise({ code: null, stdout, stderr, enoent: true })
-      else if (err) resolvePromise({ code: typeof (err as NodeJS.ErrnoException).code === 'number' ? (err as unknown as { code: number }).code : 1, stdout, stderr, enoent: false })
-      else resolvePromise({ code: 0, stdout, stderr, enoent: false })
-    })
-  })
+function spawnEmbed(args: readonly string[]): Promise<SpawnResult> {
+  return spawnSidecar({ python: resolvePython(), args })
 }
 
 /**
@@ -104,8 +91,7 @@ export async function embedAudioFile(audioPath: string, opts: { backend?: EmbedB
     throw new BeatEmbedError(`no Python interpreter found for the embedding sidecar (point $BEAT_PYTHON at one, or python3 -m venv python/.venv && python/.venv/bin/pip install -r python/${reqs})`)
   }
   if (res.code !== 0) {
-    const lines = res.stderr.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '')
-    throw new BeatEmbedError(`embed sidecar (${backend}) failed: ${lines[lines.length - 1] ?? `exit ${res.code}`}${res.code === 3 ? ' — run `beat taste-eval --doctor` (or use --embed-backend stub)' : ''}`)
+    throw new BeatEmbedError(`embed sidecar (${backend}) failed: ${lastNonEmptyLine(res.stderr) || `exit ${res.code}`}${res.code === 3 ? ' — run `beat taste-eval --doctor` (or use --embed-backend stub)' : ''}`)
   }
   let parsed: { backend?: string; model?: string; dims?: number; embedding?: number[] }
   try {
@@ -120,7 +106,9 @@ export async function embedAudioFile(audioPath: string, opts: { backend?: EmbedB
 
 /** The sidecar's --doctor report plus interpreter facts. Never throws. */
 export async function embedDoctor(): Promise<Record<string, unknown>> {
-  const res = await spawnEmbed([EMBED_PY, '--doctor']).catch((e: unknown) => ({ code: 1, stdout: '', stderr: String(e), enoent: true }))
+  // Not the generic sidecarDoctor: this report deliberately omits the `interpreter` field the other
+  // seven carry (it is printed by `beat taste-eval --doctor`, whose JSON shape is asserted).
+  const res = await spawnEmbed([EMBED_PY, '--doctor'])
   if (res.enoent) return { pythonFound: false, error: 'no Python interpreter found' }
   if (res.code !== 0) return { pythonFound: true, error: res.stderr.trim() || `--doctor exited ${res.code}` }
   try {

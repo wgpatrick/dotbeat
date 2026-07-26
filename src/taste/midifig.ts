@@ -17,19 +17,14 @@
 // expects — including the key transposition that keeps a batch diatonically coherent with its
 // seed. The CLI owns file picking per source and the fall-back-to-bank policy.
 
-import { execFile } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { resolvePython } from '../analysis/sidecar.js'
+import { basename, join, resolve } from 'node:path'
+import { lastNonEmptyLine, resolvePython, sidecarDoctor as runSidecarDoctor, spawnSidecar, type SpawnResult } from '../analysis/spawn-sidecar.js'
 import { BeatBatchError } from '../vary/batch.js'
 import { mulberry32 } from './eval.js'
 import type { ComposedPhrase, PhraseKey } from './showdown.js'
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-const MIDI_EXTRACT_PY = 'python/midi_extract.py' // relative to repoRoot, like every sidecar
-const SPAWN_TIMEOUT_MS = 600_000 // matches sidecar.ts / gen.ts / surge.ts
-const SPAWN_MAX_BUFFER = 64 * 1024 * 1024
+const MIDI_EXTRACT_PY = 'python/midi_extract.py' // relative to the repo root, like every sidecar
 
 export type MidiPart = 'bass' | 'chords' | 'lead'
 
@@ -220,27 +215,8 @@ export function pickMidiFile(files: readonly string[], seed: number, exclude: re
 
 // ---- sidecar spawn -----------------------------------------------------------------------------
 
-interface SpawnResult {
-  code: number | null
-  stdout: string
-  stderr: string
-  enoent: boolean
-}
-
-function spawnPython(args: string[]): Promise<SpawnResult> {
-  const python = resolvePython()
-  return new Promise((resolvePromise) => {
-    execFile(python, args, { cwd: repoRoot, timeout: SPAWN_TIMEOUT_MS, maxBuffer: SPAWN_MAX_BUFFER }, (err, stdout, stderr) => {
-      if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') resolvePromise({ code: null, stdout, stderr, enoent: true })
-      else if (err) resolvePromise({ code: typeof (err as { code?: unknown }).code === 'number' ? ((err as unknown as { code: number }).code) : 1, stdout, stderr, enoent: false })
-      else resolvePromise({ code: 0, stdout, stderr, enoent: false })
-    })
-  })
-}
-
-const lastLine = (text: string): string => {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '')
-  return lines.length > 0 ? lines[lines.length - 1]! : ''
+function spawnPython(args: readonly string[]): Promise<SpawnResult> {
+  return spawnSidecar({ python: resolvePython(), args })
 }
 
 /** Run the extraction sidecar for one part of one file. Throws BeatBatchError on every failure
@@ -251,7 +227,7 @@ export async function runMidiExtract(opts: { midiPath: string; part: MidiPart; b
   const res = await spawnPython([MIDI_EXTRACT_PY, '--input', resolve(opts.midiPath), '--part', opts.part, '--bars', String(opts.bars ?? 4)])
   if (res.enoent) throw new BeatBatchError('no Python interpreter found for midi_extract (python3 -m venv python/.venv && python/.venv/bin/pip install -r python/requirements-midi.txt)')
   if (res.code !== 0) {
-    throw new BeatBatchError(`midi_extract (${basename(opts.midiPath)}, ${opts.part}) failed: ${lastLine(res.stderr) || `exit ${res.code}`}`)
+    throw new BeatBatchError(`midi_extract (${basename(opts.midiPath)}, ${opts.part}) failed: ${lastNonEmptyLine(res.stderr) || `exit ${res.code}`}`)
   }
   let raw: unknown
   try {
@@ -265,20 +241,7 @@ export async function runMidiExtract(opts: { midiPath: string; part: MidiPart; b
 /** The sidecar's --doctor JSON plus the resolved interpreter (mirrors sidecarDoctor/surgeDoctor).
  * Never throws. */
 export async function midiExtractDoctor(): Promise<Record<string, unknown>> {
-  const python = resolvePython()
-  let res: SpawnResult
-  try {
-    res = await spawnPython([MIDI_EXTRACT_PY, '--doctor'])
-  } catch (e) {
-    return { backend: 'midi', pythonFound: false, interpreter: python, error: e instanceof Error ? e.message : String(e) }
-  }
-  if (res.enoent) return { backend: 'midi', pythonFound: false, interpreter: python, error: `no Python interpreter found (tried "${python}")` }
-  if (res.code !== 0) return { backend: 'midi', pythonFound: true, interpreter: python, error: lastLine(res.stderr) || `--doctor exited ${res.code}` }
-  try {
-    return { ...(JSON.parse(res.stdout) as Record<string, unknown>), interpreter: python, pythonFound: true }
-  } catch {
-    return { backend: 'midi', pythonFound: true, interpreter: python, error: 'midi_extract --doctor produced non-JSON output', raw: res.stdout }
-  }
+  return runSidecarDoctor(MIDI_EXTRACT_PY, { label: 'midi_extract', base: { backend: 'midi' } })
 }
 
 /** True iff the doctor report says mido is importable — the CLI's warn-once gate. */

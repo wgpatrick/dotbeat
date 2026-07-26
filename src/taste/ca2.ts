@@ -35,11 +35,8 @@
 // (research/124 §A.3) — so ca2 batches carry no third-party-content posture: no gitignore gate,
 // and the scores log records only the figureSource label 'ca2'.
 
-import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { resolvePython } from '../analysis/sidecar.js'
+import { join } from 'node:path'
+import { lastNonEmptyLine, repoRoot, resolvePython, sidecarDoctor as runSidecarDoctor, spawnSidecar, type SpawnResult } from '../analysis/spawn-sidecar.js'
 import { BeatBatchError } from '../vary/batch.js'
 import { mulberry32 } from './eval.js'
 import {
@@ -55,10 +52,7 @@ import {
 } from './theory.js'
 import { scalePitchClasses, type ComposedNote, type ComposedPhrase, type PhraseKey } from './showdown.js'
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-const CA2_PY = 'python/ca2_figures.py' // relative to repoRoot, like every sidecar
-const SPAWN_TIMEOUT_MS = 600_000 // matches sidecar.ts / gen.ts / surge.ts / midifig.ts
-const SPAWN_MAX_BUFFER = 64 * 1024 * 1024
+const CA2_PY = 'python/ca2_figures.py' // relative to the repo root, like every sidecar
 
 /** The sidecar payload contract this build speaks (python/ca2_figures.py CONTRACT_VERSION). */
 export const CA2_CONTRACT_VERSION = 1
@@ -257,39 +251,15 @@ export function validateCA2Payload(raw: unknown): CA2Payload {
  * trial's python3.10 venv), so it gets its own override: BEAT_CA2_PYTHON, then the compose-lab
  * trial venv if it's there, then whatever resolvePython() finds. */
 export function resolveCA2Python(): string {
-  const override = process.env.BEAT_CA2_PYTHON
-  if (override && override.trim() !== '') return override.trim()
-  for (const base of [join(repoRoot, '..'), join(repoRoot, '..', '..', '..', '..'), join(process.env.HOME ?? '', 'Documents', 'dotbeat')]) {
-    const venv = join(base, 'taste-dataset', 'compose-lab', 'tools', 'amt-venv', 'bin', 'python3')
-    if (existsSync(venv)) return venv
-  }
-  return resolvePython()
-}
-
-interface SpawnResult {
-  code: number | null
-  stdout: string
-  stderr: string
-  enoent: boolean
-}
-
-function spawnCA2(args: string[], stdin?: string): Promise<SpawnResult> {
-  const python = resolveCA2Python()
-  return new Promise((resolvePromise) => {
-    const child = execFile(python, args, { cwd: repoRoot, timeout: SPAWN_TIMEOUT_MS, maxBuffer: SPAWN_MAX_BUFFER }, (err, stdout, stderr) => {
-      if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') resolvePromise({ code: null, stdout, stderr, enoent: true })
-      else if (err) resolvePromise({ code: typeof (err as { code?: unknown }).code === 'number' ? ((err as unknown as { code: number }).code) : 1, stdout, stderr, enoent: false })
-      else resolvePromise({ code: 0, stdout, stderr, enoent: false })
-    })
-    if (stdin !== undefined) {
-      child.stdin?.end(stdin)
-    }
+  return resolvePython({
+    envVar: 'BEAT_CA2_PYTHON',
+    extraCandidates: [join(repoRoot, '..'), join(repoRoot, '..', '..', '..', '..'), join(process.env.HOME ?? '', 'Documents', 'dotbeat')]
+      .map((base) => join(base, 'taste-dataset', 'compose-lab', 'tools', 'amt-venv', 'bin', 'python3')),
   })
 }
 
-const lastLine = (text: string): string => {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '')
-  return lines.length > 0 ? lines[lines.length - 1]! : ''
+function spawnCA2(args: string[], stdin?: string): Promise<SpawnResult> {
+  return spawnSidecar({ python: resolveCA2Python(), args, ...(stdin !== undefined ? { stdin } : {}) })
 }
 
 /** Run one CA2 generation. Throws BeatBatchError on every failure mode with the sidecar's own last
@@ -299,7 +269,7 @@ export async function runCA2(request: CA2Request): Promise<CA2Payload> {
   const res = await spawnCA2([CA2_PY, '--request', '-'], JSON.stringify(request))
   if (res.enoent) throw new BeatBatchError(`no Python interpreter found for ca2_figures (tried "${resolveCA2Python()}") — ${CA2_SETUP_HINT}`)
   if (res.code !== 0) {
-    const detail = lastLine(res.stderr) || `exit ${res.code}`
+    const detail = lastNonEmptyLine(res.stderr) || `exit ${res.code}`
     throw new BeatBatchError(`ca2_figures (${request.role}, seed ${request.seed}) failed: ${detail}${res.code === 3 ? ` — ${CA2_SETUP_HINT}` : ''}`)
   }
   let raw: unknown
@@ -314,20 +284,13 @@ export async function runCA2(request: CA2Request): Promise<CA2Payload> {
 /** The sidecar's --doctor (or --smoke) JSON plus the resolved interpreter — mirrors
  * sidecarDoctor / surgeDoctor / midiExtractDoctor. Never throws. */
 export async function ca2Doctor(opts: { smoke?: boolean } = {}): Promise<Record<string, unknown>> {
-  const python = resolveCA2Python()
-  let res: SpawnResult
-  try {
-    res = await spawnCA2([CA2_PY, opts.smoke === true ? '--smoke' : '--doctor'])
-  } catch (e) {
-    return { backend: 'ca2', pythonFound: false, interpreter: python, available: false, error: e instanceof Error ? e.message : String(e), fix: CA2_SETUP_HINT }
-  }
-  if (res.enoent) return { backend: 'ca2', pythonFound: false, interpreter: python, available: false, error: `no Python interpreter found (tried "${python}")`, fix: CA2_SETUP_HINT }
-  if (res.code !== 0) return { backend: 'ca2', pythonFound: true, interpreter: python, available: false, error: lastLine(res.stderr) || `--doctor exited ${res.code}`, fix: CA2_SETUP_HINT }
-  try {
-    return { ...(JSON.parse(res.stdout) as Record<string, unknown>), interpreter: python, pythonFound: true }
-  } catch {
-    return { backend: 'ca2', pythonFound: true, interpreter: python, available: false, error: 'ca2_figures --doctor produced non-JSON output', raw: res.stdout, fix: CA2_SETUP_HINT }
-  }
+  return runSidecarDoctor(CA2_PY, {
+    python: resolveCA2Python(),
+    args: [opts.smoke === true ? '--smoke' : '--doctor'],
+    label: 'ca2_figures',
+    base: { backend: 'ca2' },
+    failure: { available: false, fix: CA2_SETUP_HINT },
+  })
 }
 
 /** True iff the doctor report says the checkout, the weights, and every package are present. */
