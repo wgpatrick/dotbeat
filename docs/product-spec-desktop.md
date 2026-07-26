@@ -1,9 +1,10 @@
 # dotbeat Desktop — product spec
 
-*Started 2026-07-11 from owner direction (voice notes). Living document — sections marked
-`[research pending]` will be revised when `docs/research/10-interaction-and-versioning.md`
-lands. This spec is about the product; engine internals live in
-`docs/m4-native-engine-design.md`.*
+*Started 2026-07-11 from owner direction (voice notes). Living document. The research this spec
+was waiting on has landed, under two filenames rather than the one anticipated here:
+`docs/research/10-interaction-model.md` and `docs/research/11-versioning-ux.md` — no
+`[research pending]` markers remain in the body. This spec is about the product; engine internals
+live in `docs/m4-native-engine-design.md`.*
 
 ## Owner direction this spec exists to serve (2026-07-11)
 

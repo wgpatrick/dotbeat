@@ -21,7 +21,7 @@
 // trance envelope, the Stussy tech-house pattern, the swing 56-58% window) are single-author craft
 // recipes per Part C's own confidence flags — tunable defaults, not measured consensus.
 
-import { scalePitchClasses, degreePitch, type PhraseKey, type ScaleMode, type ComposedNote, type ComposedPhrase } from './showdown.js'
+import { scalePitchClasses, degreePitch, chooseSeeded, type PhraseKey, type ScaleMode, type ComposedNote, type ComposedPhrase } from './phrase.js'
 import { mulberry32 } from './eval.js'
 import { contourInversion, transposeToNextChord, rhythmicDisplacement, oneChangePerRepeat, type MotifOperator } from './motif.js'
 
@@ -858,21 +858,17 @@ export const THEORY_ROLE_BANKS = {
 
 const THEORY_ROLE_SALTS = { bassline: 1301, chords: 1487, lead: 1693 } as const
 
-function seededShuffle<T>(rng: () => number, arr: readonly T[]): T[] {
-  const out = [...arr]
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
-    ;[out[i], out[j]] = [out[j]!, out[i]!]
-  }
-  return out
-}
+/** The label a theory figure carries in the manifest and the per-role exclude chain. Prefixed
+ * 'theory:' so it can never collide with a bank archetype, a 'ca2:' label, or a midi figure label —
+ * the raw names genuinely overlap ('offbeat-stabs' and 'motif-repeat' are in the bank's banks too),
+ * so the prefix is load-bearing (test/figure-labels.test.ts). */
+export const theoryFigureLabel = (name: string): string => `theory:${name}`
 
 /** First archetype of a seeded shuffle not excluded this run (every one used -> seeded pick anyway),
- * matching showdown.chooseArchetype's contract so the CLI's per-role exclude chain works unchanged. */
-function chooseTheoryArchetype(rng: () => number, names: readonly string[], exclude: readonly string[]): string {
-  const shuffled = seededShuffle(rng, names)
-  return shuffled.find((n) => !exclude.includes(`theory:${n}`)) ?? shuffled[0]!
-}
+ * through the shared selector in phrase.ts so all four figure sources have ONE implementation of
+ * the CLI's per-role exclude-chain contract. */
+const chooseTheoryArchetype = (rng: () => number, names: readonly string[], exclude: readonly string[]): string =>
+  chooseSeeded(rng, names, theoryFigureLabel, exclude)
 
 /** One 4-bar theory-aware figure for a pitched role, deterministic in `seed`, over a freshly built
  * chord track in `key`. `opts.exclude` lists figure labels already used this run so consecutive

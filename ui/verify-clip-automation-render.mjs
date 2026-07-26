@@ -26,36 +26,22 @@
 //             other (pre-fix the automated take read ~10dB louder — the lane barely bit).
 //
 // Usage: node ui/verify-clip-automation-render.mjs
+//
+// Ported to ui/verify-lib.mjs (W1.5). The port also FIXED a real teardown bug this script carried:
+// it called `await daemon.stop?.()`, and the Daemon API is `close()` — optional chaining turned the
+// mistake into a silent no-op, so every run leaked a listening daemon on port 48627 and the second
+// run of the day would fail to bind. bootGui's own `close()` owns teardown now.
 
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { readFileSync, mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { execFileSync, spawn } from 'node:child_process'
-import { chromium } from 'playwright-core'
+import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { bootGui, buildAll, check, importDist, repoRoot, run as runVerify, scratchProject } from './verify-lib.mjs'
 
-const uiDir = dirname(fileURLToPath(import.meta.url))
-const repoRoot = join(uiDir, '..')
-const beatCli = join(repoRoot, 'cli', 'beat.mjs')
 const fixturesDir = join(repoRoot, 'test', 'fixtures', 'clip-automation')
 const DAEMON_PORT = 48627
 const PREVIEW_PORT = 45627
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-function beat(args) {
-  return execFileSync(process.execPath, [beatCli, ...args], { encoding: 'utf8' })
-}
-async function pollUntil(fn, what, timeoutMs = 20000, everyMs = 40) {
-  const t0 = Date.now()
-  for (;;) {
-    const v = await fn()
-    if (v) return v
-    if (Date.now() - t0 > timeoutMs) throw new Error(`timed out (${timeoutMs}ms) waiting for: ${what}`)
-    await sleep(everyMs)
-  }
-}
 async function decodeBase64Wav(b64) {
-  const { decodeWav } = await import(join(repoRoot, 'dist/src/metrics/index.js'))
+  const { decodeWav } = await importDist('src/metrics/index.js')
   const bytes = Buffer.from(b64, 'base64')
   return decodeWav(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength))
 }
@@ -77,40 +63,24 @@ function rmsDb(decoded, skipSec = 0.4) {
 }
 
 async function main() {
-  console.log('building repo core/daemon/metrics + ui...')
-  execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
-  execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+  buildAll()
 
-  const { parse } = await import(join(repoRoot, 'dist/src/core/index.js'))
+  const { parse } = await importDist('src/core/index.js')
   const loadDoc = (name) => JSON.parse(JSON.stringify(parse(readFileSync(join(fixturesDir, `${name}.beat`), 'utf8'))))
 
   // A throwaway project just to get a daemon+page pair up; every take records via setDoc() straight
   // into the live engine (same as verify-phase26-stream-da.mjs), so the daemon file is never read.
-  const proj = mkdtempSync(join(tmpdir(), 'dotbeat-clipauto-'))
-  const beatPath = join(proj, 'song.beat')
-  beat(['init', beatPath, '--bpm', '120', '--bars', '1'])
+  const { file: beatPath } = scratchProject({ prefix: 'dotbeat-clipauto-', bpm: 120, bars: 1 })
 
-  const { startDaemon } = await import(join(repoRoot, 'dist/src/daemon/daemon.js'))
-  const daemon = await startDaemon({ filePath: beatPath, port: DAEMON_PORT })
-  console.log(`daemon on :${daemon.port}`)
-
-  const preview = spawn('npm', ['run', 'preview', '--', '--port', String(PREVIEW_PORT), '--strictPort'], { cwd: uiDir, stdio: 'pipe' })
-  preview.stderr.on('data', (d) => process.stderr.write(`[preview] ${d}`))
-  await pollUntil(async () => {
-    try { return (await fetch(`http://localhost:${PREVIEW_PORT}/`)).ok } catch { return false }
-  }, 'vite preview to serve')
-  console.log(`ui served on :${PREVIEW_PORT}`)
-
-  const browser = await chromium.launch({
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-    headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required'],
-  })
-  const errors = []
+  const gui = await bootGui({ file: beatPath, daemonPort: DAEMON_PORT, previewPort: PREVIEW_PORT, waitAppReady: false })
+  const { browser, errors, previewPort, daemon } = gui
+  // Each take gets its OWN page (fresh Tone context) so no audio state bleeds between recordings —
+  // that is this script's specific requirement, so it keeps its own freshPage rather than using the
+  // harness's single page.
   const freshPage = async () => {
     const page = await browser.newPage()
     page.on('pageerror', (e) => errors.push(String(e)))
-    await page.goto(`http://localhost:${PREVIEW_PORT}/?daw=${daemon.port}`, { waitUntil: 'load' })
+    await page.goto(`http://localhost:${previewPort}/?daw=${daemon.port}`, { waitUntil: 'load' })
     await page.waitForFunction(() => window.__store && window.__store.getState().doc && window.__engine, { timeout: 12000 })
     return page
   }
@@ -136,7 +106,6 @@ async function main() {
   }
 
   const results = {}
-  let failed = false
   try {
     const SECS = 2.4
     // ============================== [VOLUME] ==============================
@@ -147,9 +116,8 @@ async function main() {
     console.log(`  automated -60dB lane RMS: ${volAutoDb === -Infinity ? '-Infinity' : volAutoDb.toFixed(1)}dBFS`)
     console.log(`  static  0dB control RMS: ${volStaticDb.toFixed(1)}dBFS`)
     console.log(`  attenuation the lane actually achieved: ${(volStaticDb - volAutoDb).toFixed(1)}dB (pre-fix this was ~4.6dB)`)
-    if (!(volStaticDb - volAutoDb > 40)) { failed = true; console.error(`  [VOLUME] FAIL: automated -60dB lane only attenuated ${(volStaticDb - volAutoDb).toFixed(1)}dB below the static control (expected > 40dB)`) }
-    else if (!(volAutoDb < -50)) { failed = true; console.error(`  [VOLUME] FAIL: automated -60dB lane render is not near-silent (${volAutoDb.toFixed(1)}dBFS, expected < -50dBFS)`) }
-    else console.log('  [VOLUME] PASS: the -60dB volume lane renders near-silent')
+    check(volStaticDb - volAutoDb > 40, `the automated -60dB lane attenuates ${(volStaticDb - volAutoDb).toFixed(1)}dB below the static control (bar: > 40dB)`)
+    check(volAutoDb < -50, `the automated -60dB lane renders near-silent (${volAutoDb.toFixed(1)}dBFS, bar: < -50dBFS)`)
 
     // ============================== [CUTOFF] ==============================
     console.log('\n[CUTOFF] recording an automated 150Hz cutoff lane vs an identical static-150Hz-cutoff control...')
@@ -159,17 +127,12 @@ async function main() {
     console.log(`  automated 150Hz-cutoff lane RMS: ${cutAutoDb.toFixed(1)}dBFS`)
     console.log(`  static  150Hz-cutoff control RMS: ${cutStaticDb.toFixed(1)}dBFS`)
     console.log(`  gap between automated and static 150Hz cutoff: ${(cutAutoDb - cutStaticDb).toFixed(1)}dB (pre-fix ~+10dB — lane barely bit)`)
-    if (!(Math.abs(cutAutoDb - cutStaticDb) < 4)) { failed = true; console.error(`  [CUTOFF] FAIL: automated 150Hz cutoff render is ${(cutAutoDb - cutStaticDb).toFixed(1)}dB from the static control (expected within 4dB)`) }
-    else console.log('  [CUTOFF] PASS: the automated 150Hz cutoff renders within tolerance of the static 150Hz control')
+    check(Math.abs(cutAutoDb - cutStaticDb) < 4, `the automated 150Hz cutoff renders within tolerance of the static 150Hz control (${(cutAutoDb - cutStaticDb).toFixed(1)}dB apart, bar: < 4dB)`)
   } finally {
-    await browser.close()
-    preview.kill()
-    await daemon.stop?.()
+    await gui.close()
   }
-  if (errors.length) console.error('page errors:', errors)
+  check(errors.length === 0, `no page errors during the run${errors.length ? ` (saw: ${errors.join(' | ')})` : ''}`)
   console.log('\nRESULTS', JSON.stringify(results, null, 2))
-  if (failed) { console.error('\nFAIL'); process.exit(1) }
-  console.log('\nALL CHECKS PASS')
 }
 
-main().catch((e) => { console.error(e); process.exit(1) })
+await runVerify('clip-automation-render', main)

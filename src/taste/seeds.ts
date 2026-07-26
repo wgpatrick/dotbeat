@@ -7,6 +7,7 @@
 // that doesn't parse is a bug, not a variant).
 
 import { mulberry32 } from './eval.js'
+import { seededShuffle } from '../core/rng.js'
 import { parse, serialize, setValue } from '../core/index.js'
 import { productionRoleFor, productionProfileFor, applyProducedDefaults } from '../analysis/produce.js'
 import { engineCuratedForRole, type EngineCuratedFile } from './enginePresets.js'
@@ -211,7 +212,7 @@ function finalizeSeed(rawText: string, seed: number, curated: EngineCuratedFile 
 // batches cover the sound-design axes (what kind of sound) x style axes (what treatment), and
 // the scores log's per-type splits can answer where generated taste signal actually lives.
 
-const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
+export const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
   { id: 'kick', subject: 'a punchy kick drum one-shot', seconds: 1 },
   { id: 'snare', subject: 'a tight snare drum one-shot', seconds: 1 },
   { id: 'clap', subject: 'a layered hand clap one-shot', seconds: 1 },
@@ -249,7 +250,7 @@ const GEN_SUBJECTS: { id: string; subject: string; seconds: number }[] = [
  * picked). Only ids that need real musical variety are listed; one-shot subjects (kick, bass,
  * etc.) aren't — a "punchy kick drum" doesn't have a genre. Each list's first entry is the
  * original fixed subject (kept so nothing that reads GEN_SUBJECTS directly changes meaning). */
-const PHRASE_VARIANTS: Record<string, string[]> = {
+export const PHRASE_VARIANTS: Record<string, string[]> = {
   melody: [
     'a melodic synth lead phrase, 4 bar loop, catchy and emotive',
     'a dark minor-key arpeggio lead phrase, 4 bars, moody and driving',
@@ -293,7 +294,7 @@ const PHRASE_VARIANTS: Record<string, string[]> = {
  * clip is supposed to be ONE role). Appended to every phrase prompt by genSubjectVaried, so all
  * consumers inherit it. If prompts prove insufficient by ear, v2 is Demucs stem-extraction on
  * gen clips (the T3 pipeline already runs Demucs). */
-const PHRASE_ISOLATION: Record<string, string> = {
+export const PHRASE_ISOLATION: Record<string, string> = {
   melody: 'isolated solo lead melody stem only, no drums, no other instruments',
   bassline: 'isolated solo bassline stem only, absolutely no drums, no percussion, no other instruments',
   chords: 'isolated chords stem only, no drums, no bass, no other instruments',
@@ -368,14 +369,24 @@ export interface StyleContrastSpec {
   prompts: string[]
 }
 
+// Shuffle note (2026-07-25, R3 finding 5): the four generators below used to draw with
+// `[...X].sort(() => rng() - 0.5)`. That is not a uniform shuffle — a random comparator biases
+// toward the input order, so the very thing these functions promise ("stratified across subjects
+// before styles repeat", "styles sampled without replacement") was systematically over-sampling
+// some prompts. It was also engine-dependent (V8's sort takes an insertion-sort path for arrays
+// <= 22, and both banks are under that) and consumed a data-dependent number of rng draws, so
+// every draw made AFTER a shuffle sat at an unspecified stream position. All six sites now use the
+// Fisher-Yates in src/core/rng.ts. Same seed still gives the same prompts; a given seed gives
+// DIFFERENT (and now unbiased) prompts than it did before this change.
+
 export function generateStyleContrasts(seed: number, count: number, stylesPer = 4): StyleContrastSpec[] {
   const rng = mulberry32(seed * 7 + 3)
-  const subjects = [...GEN_SUBJECTS].sort(() => rng() - 0.5)
+  const subjects = seededShuffle(rng, GEN_SUBJECTS)
   const out: StyleContrastSpec[] = []
   for (let i = 0; i < count; i++) {
     const s = subjects[i % subjects.length]!
     const subject = genSubjectVaried(s.id, rng).subject
-    const styles = [...GEN_STYLES].sort(() => rng() - 0.5).slice(0, stylesPer)
+    const styles = seededShuffle(rng, GEN_STYLES).slice(0, stylesPer)
     out.push({ id: `${s.id}sc${i + 1}`, subject, seconds: s.seconds, prompts: styles.map((st) => `${subject}, ${st}`) })
   }
   return out
@@ -384,7 +395,7 @@ export function generateStyleContrasts(seed: number, count: number, stylesPer = 
 /** `count` seeded prompts, stratified across subjects before styles repeat. */
 export function generateGenPrompts(seed: number, count: number): GenPromptSpec[] {
   const rng = mulberry32(seed)
-  const subjects = [...GEN_SUBJECTS].sort(() => rng() - 0.5)
+  const subjects = seededShuffle(rng, GEN_SUBJECTS)
   const out: GenPromptSpec[] = []
   for (let i = 0; i < count; i++) {
     const s = subjects[i % subjects.length]!
@@ -404,7 +415,7 @@ export function generateGenPrompts(seed: number, count: number): GenPromptSpec[]
  * vocabulary the taste loop already collects and scores. */
 export function stylePromptsFor(subject: string, n: number, seed: number): string[] {
   const rng = mulberry32(seed)
-  const shuffled = [...GEN_STYLES].sort(() => rng() - 0.5)
+  const shuffled = seededShuffle(rng, GEN_STYLES)
   const prompts: string[] = []
   for (let i = 0; i < n; i++) prompts.push(`${subject}, ${shuffled[i % shuffled.length]!}`)
   return prompts
@@ -428,12 +439,12 @@ export interface GenStyleBatchSpec {
  * without replacement, cycling only if `variants` exceeds the style-bank size. Deterministic in `seed`. */
 export function generateGenStyleBatches(seed: number, batchCount: number, variants: number): GenStyleBatchSpec[] {
   const rng = mulberry32(seed)
-  const subjects = [...GEN_SUBJECTS].sort(() => rng() - 0.5)
+  const subjects = seededShuffle(rng, GEN_SUBJECTS)
   const out: GenStyleBatchSpec[] = []
   for (let i = 0; i < batchCount; i++) {
     const s = subjects[i % subjects.length]!
     const subject = genSubjectVaried(s.id, rng).subject
-    const shuffledStyles = [...GEN_STYLES].sort(() => rng() - 0.5)
+    const shuffledStyles = seededShuffle(rng, GEN_STYLES)
     const styles: string[] = []
     for (let v = 0; v < variants; v++) styles.push(shuffledStyles[v % shuffledStyles.length]!)
     out.push({

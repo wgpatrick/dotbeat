@@ -50,7 +50,7 @@ import {
   type ChordTrackOptions,
   type LintReport,
 } from './theory.js'
-import { scalePitchClasses, type ComposedNote, type ComposedPhrase, type PhraseKey } from './showdown.js'
+import { scalePitchClasses, chooseSeeded, type ComposedNote, type ComposedPhrase, type PhraseKey } from './phrase.js'
 
 const CA2_PY = 'python/ca2_figures.py' // relative to the repo root, like every sidecar
 
@@ -124,21 +124,11 @@ const CA2_ROLE_SALTS: Record<CA2Role, number> = { bassline: 2311, chords: 2477, 
  * so it can never collide with a bank archetype, a 'theory:' label, or a midi figure label. */
 export const ca2FigureLabel = (ask: string): string => `ca2:${ask}`
 
-function seededShuffle<T>(rng: () => number, arr: readonly T[]): T[] {
-  const out = [...arr]
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
-    ;[out[i], out[j]] = [out[j]!, out[i]!]
-  }
-  return out
-}
-
 /** First ask of a seeded shuffle not excluded this run (every one used -> seeded pick anyway),
- * matching chooseArchetype / chooseTheoryArchetype so the CLI's per-role exclude chain works
- * unchanged. */
+ * through the shared selector in phrase.ts so all four figure sources have ONE implementation of
+ * the CLI's per-role exclude-chain contract. */
 export function chooseCA2Ask(rng: () => number, asks: readonly CA2Ask[], exclude: readonly string[]): CA2Ask {
-  const shuffled = seededShuffle(rng, asks)
-  return shuffled.find((a) => !exclude.includes(ca2FigureLabel(a.name))) ?? shuffled[0]!
+  return chooseSeeded(rng, asks, (a) => ca2FigureLabel(a.name), exclude)
 }
 
 // ---- the sidecar request/response contract ------------------------------------------------------

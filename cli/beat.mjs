@@ -3463,7 +3463,9 @@ async function varyCmd(argv) {
   // instead of jittering around the parent's value. For preference-data collection (taste-collect),
   // where local mutation around a range-edge value yields near-identical variants (owner, 2026-07-17).
   const spread = argv.includes('--spread')
-  const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
+  // varySeed owns the clock default AND its zero guard, shared with beat_vary (W1.3, R5-F2).
+  const { varySeed } = await import('../dist/src/vary/run.js')
+  const seed = varySeed(flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : undefined)
   // Default out-dir sits NEXT TO the .beat file, not under the process cwd (Phase 35 OC,
   // pilot 101 medium 4) — an explicit --out-dir still resolves exactly as written.
   const { defaultBatchDir } = await import('../dist/src/vary/batch.js')
@@ -3485,7 +3487,7 @@ async function varyCmd(argv) {
 
   // Manifest write + render shaping live in src/vary/batch.ts, shared with beat_vary over MCP
   // (Phase 34 Stream NA) — the manifest shape is the contract `beat score`/`beat_score` read.
-  const { writeVaryBatch, renderVaryBatch, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
+  const { writeVaryBatch } = await import('../dist/src/vary/batch.js')
   const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group, count, amount, seed, outDir, variants })
   process.stdout.write(`${outDir}/: ${variants.length} variants of ${track}.${group} (amount ${amount}, seed ${seed})\n`)
   for (let i = 0; i < variants.length; i++) {
@@ -3493,31 +3495,38 @@ async function varyCmd(argv) {
   }
 
   if (argv.includes('--render') || argv.includes('--audition')) {
-    // Pilot 113 (MEDIUM-HIGH): a batch that varies `volume` while loudness normalization is on
-    // rates level-matched audio — the rater never hears the very difference the batch mutates,
-    // yet adopting the winner writes that volume into a project nothing normalizes. Say so.
-    if (!argv.includes('--no-normalize') && variants.some((v) => v.edits.some((e) => e.path.endsWith('.volume')))) {
-      process.stdout.write(`note: this batch varies volume, but loudness normalization will gain-match the renders — the volume differences will be largely inaudible when auditioning (pass --no-normalize to hear them raw)\n`)
-    }
-    // D15/D23: the one render path is dotbeat's own engine driven headless via render.mjs --batch
-    // (one harness boot per batch; offline compute by default, live fallback for soundfont
-    // projects — the child prints which). Pilot 111: linkMediaFrom was missing HERE while the
-    // feel/automation paths passed it — a group vary of any sample-using project rendered with
-    // every media fetch 404ing (silent lanes / thousands of noisy errors).
-    const norm = renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...varyRenderMode(argv) })
-    process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
-    if (norm) process.stdout.write(formatNormalizationResult(norm))
-    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
+    await varyRenderTail(argv, { file, outDir, count: variants.length, variants, seed })
   }
 }
 
-/** The vary --render capture-mode passthrough (pilot 111: --live used to be silently swallowed —
- * the render child never saw it, despite the batch banner advertising it), plus the
- * --no-normalize opt-out of the default post-render loudness normalization. */
-function varyRenderMode(argv) {
-  return {
-    ...(argv.includes('--live') ? { mode: 'live' } : argv.includes('--offline') ? { mode: 'offline' } : {}),
-    ...(argv.includes('--no-normalize') ? { normalize: false } : {}),
+/** The vary render/normalize/audition tail, owned once in src/vary/run.ts (W1.3, review R5-F2):
+ * the block that used to be copy-pasted across varyCmd/varyFeelCmd/varyAutomationCmd here AND the
+ * three beat_vary branches in the MCP server — which is exactly where all three of the review's
+ * drifts lived (a missing linkMediaFrom on one branch, the pilot-113 volume warning on one of six,
+ * capture mode on the CLI only). Parsed here: capture mode (--live/--offline, pilot 111: --live
+ * used to be silently swallowed) and the --no-normalize opt-out. Everything after that is shared.
+ * Lines stream to stdout as they are produced, so the volume warning still lands BEFORE the
+ * minutes-long real-time render rather than after it. */
+async function varyRenderTail(argv, { file, outDir, count, variants, seed }) {
+  const { runVaryBatch } = await import('../dist/src/vary/run.js')
+  const { BeatBatchError } = await import('../dist/src/vary/batch.js')
+  try {
+    runVaryBatch({
+      file,
+      outDir,
+      count,
+      variants,
+      seed,
+      surface: 'cli',
+      ...(argv.includes('--live') ? { mode: 'live' } : argv.includes('--offline') ? { mode: 'offline' } : {}),
+      ...(argv.includes('--no-normalize') ? { normalize: false } : {}),
+      audition: argv.includes('--audition'),
+      noShuffle: argv.includes('--no-shuffle'),
+      onLine: (line) => process.stdout.write(`${line}\n`),
+    })
+  } catch (err) {
+    if (err instanceof BeatBatchError) throw new BeatEditError(err.message)
+    throw err
   }
 }
 
@@ -3571,7 +3580,9 @@ async function fetchSelectionScope(port, doc, track) {
 async function varyFeelCmd(argv, file, track) {
   const { varyFeel, BeatVaryError } = await import('../dist/src/vary/vary.js')
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
-  const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
+  // varySeed owns the clock default AND its zero guard, shared with beat_vary (W1.3, R5-F2).
+  const { varySeed } = await import('../dist/src/vary/run.js')
+  const seed = varySeed(flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : undefined)
   // Same next-to-the-.beat out-dir default as the param rung above (Phase 35 OC).
   const { defaultBatchDir } = await import('../dist/src/vary/batch.js')
   const outDir = flagValue(argv, '--out-dir') ?? defaultBatchDir(file, 'feel', seed)
@@ -3621,20 +3632,13 @@ async function varyFeelCmd(argv, file, track) {
   }
   // Manifest write + render shaping live in src/vary/batch.ts, shared with beat_vary over MCP
   // (Phase 34 Stream NA) — the manifest shape is the contract `beat score`/`beat_score` read.
-  const { writeVaryBatch, renderVaryBatch, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
+  const { writeVaryBatch } = await import('../dist/src/vary/batch.js')
   const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group: 'feel', count, seed, outDir, variants })
   process.stdout.write(`${outDir}/: ${variants.length} feel variants of ${track} (seed ${seed})\n`)
   for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
 
   if (argv.includes('--render') || argv.includes('--audition')) {
-    // D15: render through dotbeat's own engine (cli/render.mjs) — real-time per variant (see the
-    // matching note in varyCmd above; a fast batch renderer for the canonical engine is future work).
-    // linkMediaFrom: variant .beat files reference media relative to themselves; the parent's
-    // media/ dir sits next to the parent, so batch.ts links it into the batch dir before rendering.
-    const norm = renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...varyRenderMode(argv) })
-    process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
-    if (norm) process.stdout.write(formatNormalizationResult(norm))
-    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
+    await varyRenderTail(argv, { file, outDir, count: variants.length, variants, seed })
   }
 }
 
@@ -3647,7 +3651,9 @@ async function varyAutomationCmd(argv, file, track, param) {
     throw new BeatEditError('vary --scope selection only applies to "feel" (automation:<param> generates a whole-doc lane, not per-note/hit content)')
   }
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
-  const seed = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : (Date.now() % 2147483647)
+  // varySeed owns the clock default AND its zero guard, shared with beat_vary (W1.3, R5-F2).
+  const { varySeed } = await import('../dist/src/vary/run.js')
+  const seed = varySeed(flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : undefined)
   const { defaultBatchDir } = await import('../dist/src/vary/batch.js')
   // Colon-free dir label (a ':' in a path is legal on Linux but ugly/portability-risky); the
   // manifest still records the real group `automation:<param>`.
@@ -3672,16 +3678,13 @@ async function varyAutomationCmd(argv, file, track, param) {
     if (err instanceof BeatVaryError) throw new BeatEditError(err.message)
     throw err
   }
-  const { writeVaryBatch, renderVaryBatch, formatNormalizationResult } = await import('../dist/src/vary/batch.js')
+  const { writeVaryBatch } = await import('../dist/src/vary/batch.js')
   const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group: `automation:${param}`, count, seed, outDir, variants })
   process.stdout.write(`${outDir}/: ${variants.length} automation variants of ${track}.${param} (seed ${seed})\n`)
   for (let i = 0; i < variants.length; i++) process.stdout.write(`  v${i + 1}: ${manifest.variants[i].recipe}\n`)
 
   if (argv.includes('--render') || argv.includes('--audition')) {
-    const norm = renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...varyRenderMode(argv) })
-    process.stdout.write(`rendered ${variants.length} wavs into ${outDir}/ — audition, then: beat score ${outDir} <best> [2nd 3rd]\n`)
-    if (norm) process.stdout.write(formatNormalizationResult(norm))
-    if (argv.includes('--audition')) await auditionAfterRender(outDir, variants.length, { noShuffle: argv.includes('--no-shuffle') })
+    await varyRenderTail(argv, { file, outDir, count: variants.length, variants, seed })
   }
 }
 // === Phase 37 Stream RC end ===

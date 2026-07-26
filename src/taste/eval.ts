@@ -16,6 +16,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { computeBatchFeatures, type FeatureVector } from './features.js'
 import { pairsFromRanking, standardizeBatch, zScoreColumns, trainBT, scoreVector, describeWeights, trainBTEnsemble, scoreVectorEnsemble, pessimisticScore, type TrainPair, type BTModel, type BTEnsemble } from './ranker.js'
 import { embedAudioFile, BeatEmbedError, fitPCA, projectPCA, AES_AXES, type EmbedBackend, type AesBackend } from './embeddings.js'
+import { mulberry32 } from '../core/rng.js'
 
 export interface TasteBatch {
   /** batch dir as recorded in the log entry */
@@ -175,16 +176,10 @@ export function loadTasteBatches(logPath: string): LoadResult {
  * per variant file (higher = predicted more preferred). */
 export type Scorer = (heldOut: TasteBatch, trainingBatches: TasteBatch[], rng: () => number) => Record<string, number>
 
-/** Deterministic RNG (mulberry32) so eval runs are reproducible. */
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
+/** Deterministic RNG (mulberry32) so eval runs are reproducible. Re-exported from src/core/rng.ts,
+ * which is now the single definition — this alias keeps every existing `from './eval.js'` import
+ * working (the taste layer reaches for it from a dozen places). */
+export { mulberry32 }
 
 /** Standardized vectors for one batch, keyed by variant file. */
 function standardizedByFile(batch: TasteBatch): Map<string, number[]> {

@@ -87,3 +87,44 @@ once they're scoped down enough to fit one, rather than letting them sit indefin
 Whenever a phase/stream finishes, update `scripts/roadmap-data.mjs` and `docs/product-roadmap.md`,
 then republish the HTML dashboard artifact (splice a fresh `rows` array into it, reuse the existing
 artifact URL) — not just the markdown doc.
+
+## Code-quality guardrails (distilled from the 2026-07-25 six-stream review, research/130)
+
+**Parity is structural, never disciplinary.** When one operation is exposed on two or more
+surfaces (CLI + MCP + daemon route + GUI), the shared logic lives in ONE `src/` helper both
+surfaces import (D21's own words; `runVaryBatch` is the pattern), and the operation gets a row in
+the CLI↔MCP parity table test. Never copy a handler and vow to keep it in sync — that vow has
+been broken at least six measured times (pilot-111's silent-lanes twin, the effect-bypass
+polarity inversion, three vary-tail drifts, the humanize seed divergence).
+
+**Frozen eval constants are never edited.** `engineplusProfile`/`surgeplusProfile` (and any block
+commented "frozen science") pin the exact treatments whose effects were measured in blind
+ratings; editing them silently invalidates every historical comparison. They are guarded by
+`===` exact-value tests — a new treatment gets a NEW named profile alongside, never a tweak.
+
+**Sidecars go through the shared scaffold.** New Python sidecars build on
+`src/analysis/spawn-sidecar.ts` (one spawn/timeout/resolver/doctor contract — never re-declare
+`spawnPython`/`SPAWN_TIMEOUT_MS`), ship a `--doctor`, and register in `python/README.md`'s table.
+
+**Seeded randomness comes from `src/core/rng.ts` only** (mulberry32 + Fisher-Yates).
+`sort(() => rng() - 0.5)` is banned: biased, V8-version-dependent, and it consumes a
+data-dependent number of draws so every downstream draw shifts.
+
+**No raw control bytes in source.** NUL sentinels are written as the `\x00` escape — a literal
+byte makes the file binary to grep/ripgrep, and four files were silently unsearchable for weeks
+(one produced a confidently wrong review conclusion).
+
+**A test that can silently skip is not a gate.** Missing fixtures/goldens FAIL LOUDLY with a
+regenerate hint. Only explicitly env-gated dependencies (venvs, surgepy, network) may skip, each
+with a named reason. Guards on measured thresholds carry calibration provenance in a comment
+(complaint date + the before/after numbers that set them).
+
+**Coordinator merge discipline.** After ANY branch merge: `npm run build`, then run the merged
+area's named test files, THEN push. On 2026-07-25 a merge with unresolved conflict markers
+reached origin because this order was skipped; a second merge "verified" tests on a file that
+didn't exist because only pass/fail totals were grepped — confirm the specific test file ran.
+
+**Agent survival in worktrees.** Work in tiny increments; commit each step; push the branch to
+origin after EVERY commit (`git push -u origin HEAD`). Harness stalls are routine; pushed commits
+are the only work that survives. Never park on a background watcher — they die with the agent;
+poll artifacts in short foreground checks instead.

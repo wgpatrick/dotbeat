@@ -30,31 +30,17 @@
 //
 // Usage: node ui/verify-phase28-stream-ff.mjs
 
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { execFileSync, spawn } from 'node:child_process'
-import { chromium } from 'playwright-core'
+//
+// Ported to ui/verify-lib.mjs (W1.5): sleep, pollUntil, git, the double `npm run build`, the daemon
+// boot, the preview spawn, the chromium launch, the page setup and the teardown come from the
+// shared harness. Everything below the boot — the WCAG color math and the assertions — is untouched.
 
-const uiDir = dirname(fileURLToPath(import.meta.url))
-const repoRoot = join(uiDir, '..')
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { bootGui, buildAll, importDist, pollUntil, repoRoot, run as runVerify, screenshot, scratchProject, sleep, uiDir } from './verify-lib.mjs'
+
 const PORT = 8542
 const PREVIEW_PORT = 5362
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-function git(dir, ...cmd) {
-  return execFileSync('git', ['-C', dir, ...cmd], { encoding: 'utf8' })
-}
-async function pollUntil(fn, what, timeoutMs = 9000, everyMs = 25) {
-  const t0 = Date.now()
-  for (;;) {
-    const v = await fn()
-    if (v) return v
-    if (Date.now() - t0 > timeoutMs) throw new Error(`timed out (${timeoutMs}ms) waiting for: ${what}`)
-    await sleep(everyMs)
-  }
-}
 
 const count = (page, sel) => page.evaluate((s) => document.querySelectorAll(s).length, sel)
 const hasClass = (page, sel, cls) =>
@@ -84,57 +70,22 @@ function rgbDistance(c1, c2) {
 }
 
 async function main() {
-  console.log('building repo core/daemon + ui...')
-  execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
-  execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+  buildAll()
 
-  const { startDaemon } = await import(join(repoRoot, 'dist/src/daemon/daemon.js'))
-  const { parse, serialize } = await import(join(repoRoot, 'dist/src/core/index.js'))
-
+  const { parse, serialize } = await importDist('src/core/index.js')
   // Disposable copy of examples/night-shift.beat in a temp dir — NEVER the owner's own live
   // examples/night-shift-song.beat.
-  const proj = mkdtempSync(join(tmpdir(), 'dotbeat-p28-ff-'))
-  const beatPath = join(proj, 'night-shift.beat')
-  writeFileSync(beatPath, serialize(parse(readFileSync(join(repoRoot, 'examples/night-shift.beat'), 'utf8'))))
-  git(proj, 'init', '-q')
-  git(proj, 'config', 'user.email', 'verify@dotbeat.local')
-  git(proj, 'config', 'user.name', 'verify')
-  git(proj, 'add', '-A')
-  git(proj, 'commit', '-q', '-m', 'baseline night-shift (disposable copy)')
-
-  const daemon = await startDaemon({ filePath: beatPath, port: PORT })
-  console.log(`daemon up on :${daemon.port}, project ${beatPath}`)
-
-  const preview = spawn('npm', ['run', 'preview', '--', '--port', String(PREVIEW_PORT), '--strictPort'], { cwd: uiDir, stdio: 'pipe' })
-  preview.stdout.on('data', () => {})
-  preview.stderr.on('data', (d) => process.stderr.write(`[preview] ${d}`))
-  await pollUntil(
-    async () => {
-      try {
-        return (await fetch(`http://localhost:${PREVIEW_PORT}/`)).ok
-      } catch {
-        return false
-      }
-    },
-    'vite preview to serve',
-    15000,
-  )
-  console.log(`ui served on :${PREVIEW_PORT}`)
-
-  const browser = await chromium.launch({
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-    headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required'],
+  const { file: beatPath } = scratchProject({
+    prefix: 'dotbeat-p28-ff-',
+    name: 'night-shift.beat',
+    text: serialize(parse(readFileSync(join(repoRoot, 'examples/night-shift.beat'), 'utf8'))),
+    gitInit: true,
   })
+
+  const gui = await bootGui({ file: beatPath, daemonPort: PORT, previewPort: PREVIEW_PORT, viewport: { width: 1600, height: 980 } })
+  const { page, errors } = gui
   const results = {}
   try {
-    const page = await browser.newPage()
-    await page.setViewportSize({ width: 1600, height: 980 })
-    const errors = []
-    page.on('pageerror', (e) => errors.push(String(e)))
-    await page.goto(`http://localhost:${PREVIEW_PORT}/?daw=${daemon.port}`, { waitUntil: 'load' })
-    await page.waitForFunction(() => window.__store && window.__store.getState().doc, { timeout: 10000 })
-    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 })
 
     await page.click('[data-action="toggle-library"]')
     await page.waitForSelector('[data-testid="content-browser"]', { timeout: 5000 })
@@ -269,13 +220,8 @@ async function main() {
     console.log('\n================ ALL PHASE 28 STREAM FF CHECKS PASSED ================')
     console.log(JSON.stringify(results, null, 2))
   } finally {
-    await browser.close()
-    preview.kill('SIGTERM')
-    await daemon.close()
+    await gui.close()
   }
 }
 
-main().catch((err) => {
-  console.error('\nPHASE 28 STREAM FF VERIFY FAILED:', err)
-  process.exit(1)
-})
+await runVerify('phase28-stream-ff', main)

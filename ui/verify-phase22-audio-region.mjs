@@ -22,16 +22,17 @@
 //
 // Usage: node ui/verify-phase22-audio-region.mjs
 
+//
+// Ported to ui/verify-lib.mjs (W1.5): sleep, pollUntil, check, the double `npm run build`, the
+// daemon boot, the preview spawn, the chromium launch, the page setup and the teardown come from
+// the shared harness; the onset/envelope/pitch measurement below is untouched.
+
 import { readFileSync, writeFileSync, copyFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { execFileSync, spawn } from 'node:child_process'
-import { chromium } from 'playwright-core'
+import { bootGui, buildAll, check, importDist, pollUntil, repoRoot, run as runVerify, sleep, tally } from './verify-lib.mjs'
 
-const uiDir = dirname(fileURLToPath(import.meta.url))
-const repoRoot = join(uiDir, '..')
 const DAEMON_PORT = 8477
 const PREVIEW_PORT = 5323
 const BPM = 120
@@ -42,26 +43,6 @@ const MEDIA_ID = 'smp_kick'
 // simplest is to keep both sides using the same bare relative path.)
 const MEDIA_PATH = 'kick.wav'
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-async function pollUntil(fn, what, timeoutMs = 15000, everyMs = 50) {
-  const t0 = Date.now()
-  for (;;) {
-    const v = await fn()
-    if (v) return v
-    if (Date.now() - t0 > timeoutMs) throw new Error(`timed out (${timeoutMs}ms) waiting for: ${what}`)
-    await sleep(everyMs)
-  }
-}
-
-let failures = 0
-function check(cond, msg) {
-  if (cond) {
-    console.log(`  PASS: ${msg}`)
-  } else {
-    failures++
-    console.log(`  FAIL: ${msg}`)
-  }
-}
 
 // ---- analysis helpers -----------------------------------------------------------------------
 
@@ -232,12 +213,9 @@ function mkDoc({ in: inP, out, gainDb = 0, warp = 'off', rate = 1, gainPoints, l
 }
 
 async function main() {
-  console.log('building repo core/daemon/metrics + ui...')
-  execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
-  execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+  buildAll()
 
-  const { startDaemon } = await import(join(repoRoot, 'dist/src/daemon/daemon.js'))
-  const { addAudioClip, addTrack, initDocument, serialize, setMediaSample, splitAudioClip } = await import(join(repoRoot, 'dist/src/core/index.js'))
+  const { addAudioClip, addTrack, initDocument, serialize, setMediaSample, splitAudioClip } = await importDist('src/core/index.js')
 
   // Real project directory, real media file, real sha256 — the daemon's OWN document (what
   // GET /media/<path> validates against) is built through the ordinary core edit primitives,
@@ -261,31 +239,9 @@ async function main() {
   check(splitResult.second.audio.in === 0.125 && splitResult.second.audio.out === 0.26, 'split second half: in=0.125, out=0.26 (continues from the split point to the original out)')
   check(splitResult.second.audio.media === MEDIA_ID, 'split second half references the SAME media as the original')
 
-  const daemon = await startDaemon({ filePath: beatPath, port: DAEMON_PORT })
-  console.log(`daemon on :${daemon.port}`)
-
-  const preview = spawn('npm', ['run', 'preview', '--', '--port', String(PREVIEW_PORT), '--strictPort'], { cwd: uiDir, stdio: 'pipe' })
-  preview.stderr.on('data', (d) => process.stderr.write(`[preview] ${d}`))
-  await pollUntil(async () => {
-    try {
-      return (await fetch(`http://localhost:${PREVIEW_PORT}/`)).ok
-    } catch {
-      return false
-    }
-  }, 'vite preview to serve')
-  console.log(`ui served on :${PREVIEW_PORT}`)
-
-  const browser = await chromium.launch({
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-    headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required'],
-  })
+  const gui = await bootGui({ file: beatPath, daemonPort: DAEMON_PORT, previewPort: PREVIEW_PORT, waitAppReady: false })
+  const { page, errors } = gui
   try {
-    const page = await browser.newPage()
-    const errors = []
-    page.on('pageerror', (e) => errors.push(String(e)))
-    await page.goto(`http://localhost:${PREVIEW_PORT}/?daw=${daemon.port}`, { waitUntil: 'load' })
-    await page.waitForFunction(() => window.__store && window.__store.getState().doc && window.__engine, { timeout: 15000 })
 
     const recordDoc = async (docOpts, secs = REC_SECS) => {
       const doc = mkDoc(docOpts)
@@ -398,16 +354,10 @@ async function main() {
 
     if (errors.length) console.log('\n(page console errors, non-fatal):\n' + errors.join('\n'))
 
-    console.log(`\n================ ${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`} ================`)
-    if (failures > 0) process.exitCode = 1
+    console.log(`\n================ ${tally().failed === 0 ? 'ALL CHECKS PASSED' : `${tally().failed} CHECK(S) FAILED`} ================`)
   } finally {
-    await browser.close()
-    preview.kill('SIGTERM')
-    await daemon.close()
+    await gui.close()
   }
 }
 
-main().catch((err) => {
-  console.error('\nAUDIO-REGION VERIFY FAILED:', err)
-  process.exit(1)
-})
+await runVerify('phase22-audio-region', main)

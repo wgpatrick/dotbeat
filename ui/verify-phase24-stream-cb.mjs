@@ -25,28 +25,18 @@
 //
 // Usage: node ui/verify-phase24-stream-cb.mjs
 
-import { readFileSync, writeFileSync, mkdtempSync, copyFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { execFileSync, spawn } from 'node:child_process'
-import { chromium } from 'playwright-core'
+//
+// Ported to ui/verify-lib.mjs (W1.5): sleep, pollUntil, the double `npm run build`, the daemon boot,
+// the preview spawn, the chromium launch, the page setup and the teardown come from the shared
+// harness. The drag choreography and the on-disk section assertions below are untouched.
 
-const uiDir = dirname(fileURLToPath(import.meta.url))
-const repoRoot = join(uiDir, '..')
+import { readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { bootGui, buildAll, importDist, pollUntil, repoRoot, run as runVerify, scratchProject, sleep } from './verify-lib.mjs'
+
 const DAEMON_PORT = 8624
 const PREVIEW_PORT = 5363
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-async function pollUntil(fn, what, timeoutMs = 10000, everyMs = 40) {
-  const t0 = Date.now()
-  for (;;) {
-    const v = await fn()
-    if (v) return v
-    if (Date.now() - t0 > timeoutMs) throw new Error(`timed out (${timeoutMs}ms) waiting for: ${what}`)
-    await sleep(everyMs)
-  }
-}
 const sectionLines = (text) => text.split('\n').filter((l) => l.trim().startsWith('section '))
 
 const PROJECT_TEXT = `format_version 0.10
@@ -84,55 +74,26 @@ song
 `
 
 async function main() {
-  console.log('building repo core/daemon/mcp + ui...')
-  execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
-  execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+  buildAll()
 
-  const { startDaemon } = await import(join(repoRoot, 'dist/src/daemon/daemon.js'))
-  const { parse, serialize, diffDocuments, formatDiff, songMove } = await import(join(repoRoot, 'dist/src/core/index.js'))
+  const { parse, serialize, diffDocuments, formatDiff, songMove } = await importDist('src/core/index.js')
 
-  const proj = mkdtempSync(join(tmpdir(), 'dotbeat-p24cb-'))
-  const beatPath = join(proj, 'project.beat')
   // Round-trip through parse/serialize once so the on-disk file starts in exactly the tool's own
   // canonical form (matches every other verify script's convention).
-  writeFileSync(beatPath, serialize(parse(PROJECT_TEXT)))
+  const { file: beatPath } = scratchProject({ prefix: 'dotbeat-p24cb-', name: 'project.beat', text: serialize(parse(PROJECT_TEXT)) })
   const readBeat = () => readFileSync(beatPath, 'utf8')
   console.log(`baseline sections: ${sectionLines(readBeat()).join(' | ')}`)
 
-  const daemon = await startDaemon({ filePath: beatPath, port: DAEMON_PORT })
-  console.log(`daemon up on :${daemon.port}, project ${beatPath}`)
-
-  const preview = spawn('npm', ['run', 'preview', '--', '--port', String(PREVIEW_PORT), '--strictPort'], { cwd: uiDir, stdio: 'pipe' })
-  preview.stderr.on('data', (d) => process.stderr.write(`[preview] ${d}`))
-  await pollUntil(async () => {
-    try {
-      return (await fetch(`http://localhost:${PREVIEW_PORT}/`)).ok
-    } catch {
-      return false
-    }
-  }, 'vite preview to serve', 20000)
-  console.log(`ui served on :${PREVIEW_PORT}`)
-
-  const browser = await chromium.launch({
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-    headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required'],
-  })
+  const gui = await bootGui({ file: beatPath, daemonPort: DAEMON_PORT, previewPort: PREVIEW_PORT, viewport: { width: 1440, height: 960 } })
+  const { page, errors } = gui
   const results = {}
   try {
-    const page = await browser.newPage()
-    await page.setViewportSize({ width: 1440, height: 960 })
-    const errors = []
-    page.on('pageerror', (e) => {
-      errors.push(String(e))
-      console.log(`[pageerror] ${e}`)
-    })
+    // bootGui already collects pageerror into `errors`; this script additionally echoes browser
+    // warnings/errors live, which is genuinely useful while a drag choreography is being debugged.
+    page.on('pageerror', (e) => console.log(`[pageerror] ${e}`))
     page.on('console', (m) => {
       if (m.type() === 'warning' || m.type() === 'error') console.log(`[browser ${m.type()}] ${m.text()}`)
     })
-    await page.goto(`http://localhost:${PREVIEW_PORT}/?daw=${daemon.port}`, { waitUntil: 'load' })
-    await page.waitForFunction(() => window.__store && window.__store.getState().doc, { timeout: 12000 })
-    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 })
     await page.waitForSelector('[data-section-chip="0"]', { timeout: 5000 })
 
     const chipNames = async () => page.$$eval('[data-section-chip]', (els) => els.map((el) => el.querySelector('.arr-chip-name').textContent))
@@ -186,7 +147,7 @@ async function main() {
     // Run the equivalent move (index 0 -> index 2, "intro" past its two siblings) against a fresh
     // copy of the PRE-CB2 file via the CLI, and again via songMove directly (what the MCP tool
     // calls), and confirm all three paths (GUI drag+clicks, CLI, core primitive) agree.
-    const cliCopy = join(proj, 'cli-copy.beat')
+    const cliCopy = join(dirname(beatPath), 'cli-copy.beat')
     writeFileSync(cliCopy, afterCb1) // state after CB1: main, intro, outro
     execFileSync('node', [join(repoRoot, 'cli', 'beat.mjs'), 'song-move', cliCopy, '0', '2'], { encoding: 'utf8' })
     const cliResult = readFileSync(cliCopy, 'utf8')
@@ -201,15 +162,8 @@ async function main() {
     console.log('\nALL PASS — Phase 24 Stream CB (drag a section left/right to reorder it) verified live:')
     console.log(JSON.stringify(results, null, 2))
   } finally {
-    await browser.close()
-    preview.kill('SIGKILL')
-    await daemon.close()
+    await gui.close()
   }
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error(err)
-    process.exit(1)
-  })
+await runVerify('phase24-stream-cb', main)

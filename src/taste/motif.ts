@@ -6,7 +6,7 @@
 // ComposedNote shape the rest of the composition layer uses.
 
 import { mulberry32 } from './eval.js'
-import type { ComposedNote } from './showdown.js'
+import type { ComposedNote } from './phrase.js'
 
 const rnd2 = (x: number): number => Math.round(x * 100) / 100
 const clone = (n: ComposedNote): ComposedNote => ({ ...n })

@@ -17,29 +17,19 @@
 // Screenshots: the flashed Cutoff control, the Clip piano roll, the Mixer overlay.
 //
 // Usage: node ui/verify-focus-deeplinks.mjs
+//
+// Ported to ui/verify-lib.mjs (W1.5): sleep, pollUntil, the double build, the daemon boot, the
+// preview spawn, the chromium launch, the page setup and the teardown all come from the harness.
+// Note the port hazard this removes: the script hardcoded daemon port 8471 and would previously
+// have failed outright if anything held it; pickPort now prefers 8471 and falls back.
 
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { execFileSync, spawn } from 'node:child_process'
-import { chromium } from 'playwright-core'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { bootGui, buildAll, importDist, pollUntil, repoRoot, run as runVerify, screenshot, scratchProject, sleep } from './verify-lib.mjs'
 
-const uiDir = dirname(fileURLToPath(import.meta.url))
-const repoRoot = join(uiDir, '..')
 const PORT = 8471
 const PREVIEW_PORT = 5331
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-async function pollUntil(fn, what, timeoutMs = 9000, everyMs = 25) {
-  const t0 = Date.now()
-  for (;;) {
-    const v = await fn()
-    if (v) return v
-    if (Date.now() - t0 > timeoutMs) throw new Error(`timed out (${timeoutMs}ms) waiting for: ${what}`)
-    await sleep(everyMs)
-  }
-}
 const count = (page, sel) => page.evaluate((s) => document.querySelectorAll(s).length, sel)
 const st = (page) => page.evaluate(() => window.__store.getState())
 async function postFocus(port, body) {
@@ -52,50 +42,24 @@ async function postFocus(port, body) {
 }
 
 async function main() {
-  console.log('building repo core/daemon + ui...')
-  execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
-  execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+  buildAll()
 
-  const { startDaemon } = await import(join(repoRoot, 'dist/src/daemon/daemon.js'))
-  const { parse, serialize } = await import(join(repoRoot, 'dist/src/core/index.js'))
-
-  const proj = mkdtempSync(join(tmpdir(), 'dotbeat-focus-'))
-  const beatPath = join(proj, 'night-shift.beat')
-  writeFileSync(beatPath, serialize(parse(readFileSync(join(repoRoot, 'examples/night-shift.beat'), 'utf8'))))
-
-  const daemon = await startDaemon({ filePath: beatPath, port: PORT })
-  console.log(`daemon up on :${daemon.port}, project ${beatPath}`)
-
-  const preview = spawn('npm', ['run', 'preview', '--', '--port', String(PREVIEW_PORT), '--strictPort'], { cwd: uiDir, stdio: 'pipe' })
-  preview.stdout.on('data', () => {})
-  preview.stderr.on('data', (d) => process.stderr.write(`[preview] ${d}`))
-  await pollUntil(
-    async () => {
-      try {
-        return (await fetch(`http://localhost:${PREVIEW_PORT}/`)).ok
-      } catch {
-        return false
-      }
-    },
-    'vite preview to serve',
-    15000,
-  )
-  console.log(`ui served on :${PREVIEW_PORT}`)
-
-  const browser = await chromium.launch({
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-    headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required'],
+  const { parse, serialize } = await importDist('src/core/index.js')
+  const { file: beatPath } = scratchProject({
+    prefix: 'dotbeat-focus-',
+    name: 'night-shift.beat',
+    text: serialize(parse(readFileSync(join(repoRoot, 'examples/night-shift.beat'), 'utf8'))),
   })
+
+  const gui = await bootGui({
+    file: beatPath,
+    daemonPort: PORT,
+    previewPort: PREVIEW_PORT,
+    viewport: { width: 1440, height: 960 },
+  })
+  const { page, errors, daemon } = gui
   const results = {}
   try {
-    const page = await browser.newPage()
-    await page.setViewportSize({ width: 1440, height: 960 })
-    const errors = []
-    page.on('pageerror', (e) => errors.push(String(e)))
-    await page.goto(`http://localhost:${PREVIEW_PORT}/?daw=${daemon.port}`, { waitUntil: 'load' })
-    await page.waitForFunction(() => window.__store && window.__store.getState().doc, { timeout: 10000 })
-    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 })
     const trackIds = (await st(page)).doc.tracks.map((t) => t.id)
     console.log(`tracks: ${JSON.stringify(trackIds)}`)
 
@@ -120,7 +84,7 @@ async function main() {
     const flashed = await pollUntil(async () => (await count(page, '.param-flash')) > 0, '[F1] the focused control to flash (.param-flash)', 3000)
     const groupFlash = await count(page, '[data-param-group="filter"].param-group-flash')
     if (groupFlash < 1) throw new Error('[F1] the Filter group did not flash (param-group-flash)')
-    await page.screenshot({ path: join(uiDir, 'verify-focus-device-param.png') })
+    await screenshot(page, 'verify-focus-device-param')
     console.log('[F1] PASS: focus selected lead, opened Device, posted the D2 selection + selected_track (as a click would), and flashed Cutoff + the Filter group')
     results.f1 = { flashed, groupFlash }
 
@@ -132,7 +96,7 @@ async function main() {
       return s.selectedTrackId === 'bass' && s.bottomPane === 'clip'
     }, '[F2] bass selected + clip pane')
     await page.waitForSelector('.noteview-grid', { timeout: 5000 })
-    await page.screenshot({ path: join(uiDir, 'verify-focus-clip.png') })
+    await screenshot(page, 'verify-focus-clip')
     console.log('[F2] PASS: focus flipped to the Clip pane on bass (piano roll shown)')
     results.f2 = { pane: 'clip' }
 
@@ -141,7 +105,7 @@ async function main() {
     if (r.status !== 200) throw new Error(`[F3] /focus returned ${r.status}`)
     await pollUntil(async () => (await count(page, '[data-testid="mixer-overlay"]')) === 1, '[F3] the Mixer overlay to open')
     if (!(await st(page)).mixerOpen) throw new Error('[F3] mixerOpen flag not set')
-    await page.screenshot({ path: join(uiDir, 'verify-focus-mixer.png') })
+    await screenshot(page, 'verify-focus-mixer')
     console.log('[F3] PASS: focus opened the on-demand Mixer overlay (reusing mixerOpen)')
     results.f3 = { mixerOpen: true }
     await page.click('[data-action="close-mixer"]')
@@ -173,13 +137,8 @@ async function main() {
     console.log('\n================ ALL CHECKS PASSED ================')
     console.log(JSON.stringify(results, null, 2))
   } finally {
-    await browser.close()
-    preview.kill('SIGTERM')
-    await daemon.close()
+    await gui.close()
   }
 }
 
-main().catch((err) => {
-  console.error('\nVERIFY FAILED:', err)
-  process.exit(1)
-})
+await runVerify('focus-deeplinks', main)

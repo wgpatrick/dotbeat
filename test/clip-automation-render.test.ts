@@ -15,10 +15,25 @@
 // depend on. A fixture that silently stopped mapping its clip, or drifted off -60dB/150Hz, would
 // make the render checks vacuous — these tests fail loudly if that happens.
 //
-// When golden WAVs rendered by the FIXED engine are present next to the fixtures
-// (test/fixtures/clip-automation/*.wav, produced by the verify script), the second half of this
-// file decodes them with src/metrics and asserts the actual measured render — so `node --test`
-// asserts real rendered audio too, not just the document shape.
+// The second half decodes golden WAVs rendered by the FIXED engine (test/fixtures/clip-automation/
+// *.wav, committed through git-lfs per D11) with src/metrics and asserts the actual measured
+// render — so `node --test` asserts real rendered audio too, not just the document shape.
+//
+// Wave-0 gate W0.1 (docs/research/130 §3; review R6-2). Until this commit the four goldens were
+// never committed and the rendered-audio assertions carried `{ skip: !haveGolden }`, so on every
+// clean checkout `npm test` SILENTLY SKIPPED the two assertions written for the exact bug above —
+// "the regression fixture the brief names as a gate is, today, asserting nothing about audio."
+// Worse, the skip message told you to run `ui/verify-clip-automation-render.mjs`, which measures
+// in memory and writes no WAV at all: the goldens it named could never have been produced that
+// way. A skip that reads as a pass is worse than no test, so a missing/unfetched golden now FAILS
+// LOUDLY with the real regenerate command (REGENERATE below).
+//
+// What the committed goldens do and do not gate, stated honestly: they pin the measured render of
+// a known-good engine, so they catch a corrupted or wrongly-regenerated golden immediately, and
+// they make the regenerate step a required, visible part of any engine change — re-render after
+// touching the tick/automation path and these thresholds are what tell you whether the sound moved.
+// The live end-to-end check (drive the real browser engine and measure what it plays right now)
+// remains ui/verify-clip-automation-render.mjs.
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -83,7 +98,22 @@ test('cutoff-static: control has no lanes and a static 150Hz patch cutoff matchi
   assert.equal(track.synth.cutoff, 150, 'static cutoff equals the automated lane target — the two renders must match')
 })
 
-// ---- rendered-audio assertions (present once the verify script has written golden WAVs) ----------
+// ---- rendered-audio assertions (against the committed golden WAVs) ------------------------------
+
+const GOLDENS = ['vol-auto', 'vol-static', 'cutoff-auto', 'cutoff-static'] as const
+
+/** The command that produced the committed goldens — printed by every failure below so the fix is
+ * always one copy-paste away. Offline compute through the engine (~0.2s each) rather than realtime
+ * capture: exact, no recorder spin-up, no opus round-trip, and a single render is never
+ * loudness-normalized (cli/render.mjs), which the -60dB volume case depends on. */
+const REGENERATE = [
+  'regenerate with:',
+  '  npm run build && (cd ui && npm run build)',
+  "  for n in vol-auto vol-static cutoff-auto cutoff-static; do \\",
+  '    node cli/render.mjs test/fixtures/clip-automation/$n.beat -o test/fixtures/clip-automation/$n.wav --offline; \\',
+  '  done',
+].join('\n')
+
 // dBFS RMS of a decoded WAV, skipping the first `skipSec` (graph settle + note attack).
 function rmsDb(wav: { channels: Float64Array[]; sampleRate: number }, skipSec = 0.4): number {
   const i0 = Math.min(wav.channels[0]!.length, Math.floor(skipSec * wav.sampleRate))
@@ -96,17 +126,53 @@ function rmsDb(wav: { channels: Float64Array[]; sampleRate: number }, skipSec = 
   return rms > 0 ? 20 * Math.log10(rms) : -Infinity
 }
 const wavPath = (name: string) => join(fixturesDir, `${name}.wav`)
-const haveGolden = ['vol-auto', 'vol-static', 'cutoff-auto', 'cutoff-static'].every((n) => existsSync(wavPath(n)))
-const decode = (name: string) => decodeWav(new Uint8Array(readFileSync(wavPath(name))))
 
-test('rendered golden WAVs: automated -60dB volume lane is near-silent vs the static-0dB control', { skip: !haveGolden && 'golden WAVs not rendered (run ui/verify-clip-automation-render.mjs)' }, () => {
+/** Reads a committed golden, failing LOUDLY (never skipping) on the three ways it can be absent:
+ * never rendered, fetched as an unresolved git-lfs pointer, or truncated/not a RIFF WAV. */
+function readGolden(name: string): Uint8Array {
+  const path = wavPath(name)
+  if (!existsSync(path)) {
+    assert.fail(`missing golden WAV ${name}.wav — the rendered-audio regression gate cannot run.\nThis is a FAILURE, not a skip (review R6-2: a skip that reads as a pass is worse than no test).\n${REGENERATE}`)
+  }
+  const bytes = new Uint8Array(readFileSync(path))
+  const head = Buffer.from(bytes.subarray(0, 64)).toString('utf8')
+  if (head.startsWith('version https://git-lfs')) {
+    assert.fail(`golden WAV ${name}.wav is an unresolved git-lfs pointer, not audio (*.wav goes through lfs per D11/.gitattributes).\nFetch it with:  git lfs pull\n${REGENERATE}`)
+  }
+  if (!head.startsWith('RIFF')) {
+    assert.fail(`golden WAV ${name}.wav is not a RIFF WAV (${bytes.length} bytes) — corrupted or partially written.\n${REGENERATE}`)
+  }
+  return bytes
+}
+const decode = (name: string) => decodeWav(readGolden(name))
+
+test('golden WAVs: all four are present, decodable, and the right shape', () => {
+  // Runs first so a missing/unfetched golden reports ONCE with the regenerate command, rather than
+  // as two confusing decode failures further down.
+  for (const name of GOLDENS) {
+    const wav = decode(name)
+    assert.equal(wav.sampleRate, 44100, `${name}.wav: unexpected sample rate`)
+    assert.equal(wav.channels.length, 2, `${name}.wav: expected stereo`)
+    const seconds = wav.channels[0]!.length / wav.sampleRate
+    // Every fixture is one bar at 120bpm = 2.00s; a golden much shorter than that would make the
+    // RMS window (which skips the first 0.4s) meaningless rather than failing outright.
+    assert.ok(Math.abs(seconds - 2) < 0.25, `${name}.wav: expected ~2.00s of audio, got ${seconds.toFixed(3)}s\n${REGENERATE}`)
+  }
+})
+
+// Threshold provenance (measured 2026-07-25 on the committed goldens, rendered offline through the
+// FIXED engine): vol-auto -77.3 dBFS vs vol-static -16.6 dBFS => 60.7dB of attenuation, and the two
+// cutoff takes matched to 0.0dB. The guards below sit far outside those margins on purpose — they
+// are catching the pre-fix behaviour (~4.6dB of attenuation; the automated take ~10dB LOUDER),
+// not policing render-to-render noise.
+test('rendered golden WAVs: automated -60dB volume lane is near-silent vs the static-0dB control', () => {
   const autoDb = rmsDb(decode('vol-auto'))
   const staticDb = rmsDb(decode('vol-static'))
   assert.ok(staticDb - autoDb > 40, `automated -60dB lane should attenuate >40dB below the static control (got ${(staticDb - autoDb).toFixed(1)}dB; pre-fix ~4.6dB)`)
   assert.ok(autoDb < -50, `automated -60dB lane render should be near-silent (got ${autoDb.toFixed(1)}dBFS)`)
 })
 
-test('rendered golden WAVs: automated 150Hz cutoff renders within tolerance of the static-150Hz control', { skip: !haveGolden && 'golden WAVs not rendered (run ui/verify-clip-automation-render.mjs)' }, () => {
+test('rendered golden WAVs: automated 150Hz cutoff renders within tolerance of the static-150Hz control', () => {
   const autoDb = rmsDb(decode('cutoff-auto'))
   const staticDb = rmsDb(decode('cutoff-static'))
   assert.ok(Math.abs(autoDb - staticDb) < 4, `automated 150Hz cutoff should render within 4dB of the static 150Hz control (got ${(autoDb - staticDb).toFixed(1)}dB; pre-fix ~+10dB)`)

@@ -108,8 +108,6 @@ import { varyTrack, varyFeel, varyAutomation, VARY_GROUPS } from '../vary/vary.j
 import { AUTOMATION_SHAPES } from '../core/automation-shape.js'
 import {
   writeVaryBatch,
-  renderVaryBatch,
-  formatNormalizationResult,
   scoreBatch,
   formatScoreResult,
   adoptVariant,
@@ -119,6 +117,10 @@ import {
   DEFAULT_SCORES_LOG,
 } from '../vary/batch.js'
 import { stitchAudition, formatAuditionIndex } from '../vary/audition.js'
+// W1.3 (review R5-F2): the render/normalize/audition tail beat_vary shares with `beat vary` —
+// three copies used to live in this file's beat_vary handler alone, and the pilot-111
+// linkMediaFrom fix reached only two of them.
+import { runVaryBatch, varySeed, type VaryTailVariant } from '../vary/run.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -2055,6 +2057,9 @@ const TOOLS: ToolDef[] = [
         render: { type: 'boolean', description: 'also render each variant to vN.wav — SLOW: real-time capture per variant in headless Chromium' },
         audition: { type: 'boolean', description: 'implies render: also stitch the rendered variants into one audition.wav (0.5s gaps) + timecode index + audition.json' },
         normalize: { type: 'boolean', description: 'default true: rendered variants are loudness-normalized to a common LUFS (pure gain to the batch-median variant\'s level; upward gains capped at -1 dBTP true peak — an already-hot render is never attenuated; recorded per-variant in the manifest) so picks rate sound rather than level — the taste log\'s "louder wins" confound. Pass false to keep raw render loudness (levels still measured and recorded).' },
+        // W1.3: the CLI has had --live/--offline since pilot 111; this surface had no way to ask
+        // for a capture mode at all (review R5-F2's third drift).
+        mode: { type: 'string', description: 'render only: force the capture path — "offline" (faster-than-real-time compute rendering) or "live" (real-time capture; required for soundfont projects). Omit to let the renderer choose (offline when the project is eligible, live otherwise).' },
         exclude: { type: 'array', items: { type: 'string' }, description: 'param groups only: group param keys to leave UNTOUCHED (e.g. ["volume"] on mix — normalization would cancel volume differences anyway); unknown keys error' },
       },
       required: ['file', 'track', 'group'],
@@ -2064,9 +2069,27 @@ const TOOLS: ToolDef[] = [
       const track = str(args, 'track')
       const group = str(args, 'group')
       const count = typeof args.count === 'number' ? args.count : 9
-      // Same seed default as the CLI: the clock, folded to a 31-bit int.
-      const seed = typeof args.seed === 'number' ? args.seed : Date.now() % 2147483647
+      // Same seed default as the CLI, from the same helper: the clock folded to a 31-bit int, with
+      // the zero guard (W1.3 — this site was one of the two that lacked it).
+      const seed = varySeed(typeof args.seed === 'number' ? args.seed : undefined)
       const render = args.render === true || args.audition === true // audition implies render
+      if (args.mode !== undefined && args.mode !== 'live' && args.mode !== 'offline') {
+        throw new Error(`vary mode must be "live" or "offline", got "${String(args.mode)}"`)
+      }
+      // Everything after the manifest write — the volume warning, the render, the normalization
+      // summary, the audition stitch — belongs to src/vary/run.ts, shared with `beat vary`.
+      const tail = (outDir: string, variants: readonly VaryTailVariant[]) =>
+        runVaryBatch({
+          file,
+          outDir,
+          count: variants.length,
+          variants,
+          seed,
+          surface: 'mcp',
+          ...(args.mode !== undefined ? { mode: args.mode as 'live' | 'offline' } : {}),
+          ...(args.normalize === false ? { normalize: false } : {}),
+          audition: args.audition === true,
+        }).lines
       const text = readFileSync(file, 'utf8')
       const doc = parse(text)
       // scope "selection" — same rules and error texts as the CLI's --scope selection glue.
@@ -2110,12 +2133,7 @@ const TOOLS: ToolDef[] = [
         const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group, count, seed, outDir, variants })
         lines.push(`${outDir}/: ${variants.length} automation variants of ${track}.${param} (seed ${seed})`)
         for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.recipe}`)
-        if (render) {
-          const norm = renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...(args.normalize === false ? { normalize: false } : {}) })
-          lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
-          if (norm) lines.push(formatNormalizationResult(norm).trimEnd())
-          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
-        }
+        if (render) lines.push(...tail(outDir, variants))
         return lines.join('\n') + '\n'
       }
       // === Phase 37 Stream RC end ===
@@ -2135,12 +2153,7 @@ const TOOLS: ToolDef[] = [
         const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group: 'feel', count, seed, outDir, variants })
         lines.push(`${outDir}/: ${variants.length} feel variants of ${track} (seed ${seed})`)
         for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.recipe}`)
-        if (render) {
-          const norm = renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...(args.normalize === false ? { normalize: false } : {}) })
-          lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
-          if (norm) lines.push(formatNormalizationResult(norm).trimEnd())
-          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
-        }
+        if (render) lines.push(...tail(outDir, variants))
       } else {
         const amount = typeof args.amount === 'number' ? args.amount : 0.25
         const outDir = typeof args.out_dir === 'string' ? args.out_dir : defaultBatchDir(file, group, seed)
@@ -2148,14 +2161,7 @@ const TOOLS: ToolDef[] = [
         const manifest = writeVaryBatch({ parentPath: file, parentText: text, track, group, count, amount, seed, outDir, variants })
         lines.push(`${outDir}/: ${variants.length} variants of ${track}.${group} (amount ${amount}, seed ${seed})`)
         for (let i = 0; i < manifest.variants.length; i++) lines.push(`  v${i + 1}: ${manifest.variants[i]!.edits!.join(', ')}`)
-        if (render) {
-          // Pilot 111's fix, mirrored (review R1 found the CLI got it and this branch didn't):
-          // without linkMediaFrom, sample-backed lanes render silent in param-vary batches.
-          const norm = renderVaryBatch(outDir, variants.length, { linkMediaFrom: file, ...(args.normalize === false ? { normalize: false } : {}) })
-          lines.push(`rendered ${variants.length} wavs into ${outDir}/ — audition, then record picks with beat_score`)
-          if (norm) lines.push(formatNormalizationResult(norm).trimEnd())
-          if (args.audition === true) lines.push(formatAuditionIndex(stitchAudition(outDir, variants.length, { shuffleSeed: seed })).trimEnd())
-        }
+        if (render) lines.push(...tail(outDir, variants))
       }
       return lines.join('\n') + '\n'
     },

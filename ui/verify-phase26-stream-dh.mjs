@@ -31,34 +31,18 @@
 //
 // Usage: node ui/verify-phase26-stream-dh.mjs
 
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { execFileSync, spawn } from 'node:child_process'
-import { chromium } from 'playwright-core'
+//
+// Ported to ui/verify-lib.mjs (W1.5): sleep, pollUntil, git, the double `npm run build`, the daemon
+// boot, the preview spawn, the chromium launch, the page setup and the teardown come from the
+// shared harness; the spectral-band analysis and every assertion below are untouched.
 
-const uiDir = dirname(fileURLToPath(import.meta.url))
-const repoRoot = join(uiDir, '..')
+import { bootGui, buildAll, check, importDist, pollUntil, run as runVerify, scratchProject, sleep } from './verify-lib.mjs'
+
 const DAEMON_PORT = 8472
 const PREVIEW_PORT = 5328
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-function git(dir, ...cmd) {
-  return execFileSync('git', ['-C', dir, ...cmd], { encoding: 'utf8' })
-}
-async function pollUntil(fn, what, timeoutMs = 15000, everyMs = 40) {
-  const t0 = Date.now()
-  for (;;) {
-    const v = await fn()
-    if (v) return v
-    if (Date.now() - t0 > timeoutMs) throw new Error(`timed out (${timeoutMs}ms) waiting for: ${what}`)
-    await sleep(everyMs)
-  }
-}
-
 async function analyzeBase64Wav(b64) {
-  const { decodeWav, analyze } = await import(join(repoRoot, 'dist/src/metrics/index.js'))
+  const { decodeWav, analyze } = await importDist('src/metrics/index.js')
   const bytes = Buffer.from(b64, 'base64')
   const decoded = decodeWav(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength))
   return analyze(decoded.channels, decoded.sampleRate)
@@ -108,47 +92,20 @@ function bandDist(a, b) {
 }
 
 async function main() {
-  console.log('building repo (core/daemon/metrics) + ui...')
-  execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
-  execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+  buildAll()
 
-  const { startDaemon } = await import(join(repoRoot, 'dist/src/daemon/daemon.js'))
-  const { parse, serialize } = await import(join(repoRoot, 'dist/src/core/index.js'))
+  const { parse, serialize } = await importDist('src/core/index.js')
+  const { file: beatPath } = scratchProject({ prefix: 'dotbeat-wavetable-', name: 'wt.beat', text: serialize(parse(BEAT)), gitInit: true })
 
-  const proj = mkdtempSync(join(tmpdir(), 'dotbeat-wavetable-'))
-  const beatPath = join(proj, 'wt.beat')
-  writeFileSync(beatPath, serialize(parse(BEAT)))
-  git(proj, 'init', '-q')
-  git(proj, 'config', 'user.email', 'verify@dotbeat.local')
-  git(proj, 'config', 'user.name', 'verify')
-  git(proj, 'add', '-A')
-  git(proj, 'commit', '-q', '-m', 'baseline')
+  const gui = await bootGui({ file: beatPath, daemonPort: DAEMON_PORT, previewPort: PREVIEW_PORT, waitAppReady: false })
+  const { page, errors } = gui
 
-  const daemon = await startDaemon({ filePath: beatPath, port: DAEMON_PORT })
-  console.log(`daemon on :${daemon.port}`)
-
-  const preview = spawn('npm', ['run', 'preview', '--', '--port', String(PREVIEW_PORT), '--strictPort'], { cwd: uiDir, stdio: 'pipe' })
-  preview.stderr.on('data', (d) => process.stderr.write(`[preview] ${d}`))
-  await pollUntil(async () => {
-    try { return (await fetch(`http://localhost:${PREVIEW_PORT}/`)).ok } catch { return false }
-  }, 'vite preview to serve', 25000)
-  console.log(`ui served on :${PREVIEW_PORT}`)
-
-  const browser = await chromium.launch({
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-    headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required'],
-  })
-
-  let failures = 0
-  const fail = (msg) => { failures++; console.log(`  FAIL: ${msg}`) }
+  // `fail(msg)` kept as a thin adapter over the harness's check() so the ~20 call sites below stay
+  // exactly as written — the port moves the harness, not the assertions.
+  const fail = (msg) => check(false, msg)
 
   try {
-    const page = await browser.newPage()
-    const errors = []
-    page.on('pageerror', (e) => errors.push(String(e)))
-    await page.goto(`http://localhost:${PREVIEW_PORT}/?daw=${daemon.port}`, { waitUntil: 'load' })
-    await page.waitForFunction(() => window.__store && window.__store.getState().doc && window.__engine && window.__bridge, { timeout: 15000 })
+    await page.waitForFunction(() => window.__bridge, { timeout: 15000 })
 
     // Post one edit through the REAL GUI path and wait until the store reflects it (same pattern
     // as verify-osc2-fix.mjs, generalized to string-valued enum fields too — `osc`/`wtTable` are
@@ -328,13 +285,10 @@ async function main() {
 
     if (errors.length) console.log('\n(page console errors, non-fatal):\n' + errors.join('\n'))
     console.log('\n================ SUMMARY ================')
-    console.log(failures === 0 ? 'ALL CHECKS PASS — the wavetable oscillator produces real, distinct, interpolated spectral content' : `${failures} CHECK(S) FAILED`)
+    console.log('(the wavetable oscillator should produce real, distinct, interpolated spectral content)')
   } finally {
-    await browser.close()
-    preview.kill('SIGTERM')
-    await daemon.close()
+    await gui.close()
   }
-  process.exit(failures === 0 ? 0 : 1)
 }
 
 function mapRound(bands) {
@@ -343,7 +297,4 @@ function mapRound(bands) {
   return out
 }
 
-main().catch((err) => {
-  console.error('\nWAVETABLE VERIFY FAILED:', err)
-  process.exit(1)
-})
+await runVerify('phase26-stream-dh', main)

@@ -164,8 +164,8 @@ automated synth param already uses.
 ## CLI / MCP
 
 - `beat add-track <file> <id> audio` — already worked with zero CLI changes (kind was always
-  forwarded generically to `addTrack`); the usage string and `--kind` enum were updated to mention
-  it.
+  forwarded generically to `addTrack`); the usage string and its positional kind enum
+  (`<synth|drums|instrument|audio|surge>`) were updated to mention it.
 - `beat audio-clip <file> <track> <clip> <media> <in> <out> [gain] [warp] [rate]` — wraps
   `addAudioClip`. Trims go through the existing `beat set <track>.clip.<id>.audio.<field> <value>`.
 - `beat audio-split <file> <track> <clip> <at-step> [--id new-clip-id]` — wraps `splitAudioClip`.

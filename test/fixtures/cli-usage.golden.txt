@@ -1,0 +1,732 @@
+usage (one command's block: beat help <command>, or beat <command> --help):
+  beat init <file> [--bpm 120] [--bars 2]               a fresh project with one starter track
+  beat add-track <file> <id> <synth|drums|instrument|audio|surge> [--name N] [--color #hex] [--soundfont <sample-id> --program N] [--patch "<name>" --sample-rate N] [--legacy-lanes]
+                     [--produced [--role bass|lead|pad|keys|drums]]
+                                                          (a fresh drums track defaults to the 12-lane kit; --legacy-lanes opts back into the old implicit 5;
+                                                          a fresh synth or drums track also starts with a real, already-populated default effect chain —
+                                                          eq3 -> comp -> distortion -> bitcrush, all enabled — not an empty one; see beat effect-add.
+                                                          --produced applies the track's role production profile — width/air/glue/space, the same layer
+                                                          gen-kit ships (docs/producing.md); role is inferred from the id unless --role is given.
+                                                          a surge track needs --patch "<factory patch name>" — see docs/surge-track.md, list names with beat surge patches)
+  beat surge patches [--role lead|bassline|chords]      list Surge XT factory patch names (render-side; needs surgepy + SURGE_DATA_HOME)
+  beat surge doctor                                     probe surgepy availability + factory patch count
+  beat rm-track <file> <id>
+  beat group <file> <id> <track-id> [<track-id> ...] [--name N] [--color #hex]
+                                                          fold N existing tracks into one named, colored
+                                                          group (a track belongs to at most one group)
+  beat rm-group <file> <id>                                ungroup (member tracks are kept, untouched)
+  beat group-set <file> <id> [--name N] [--color #hex] [--tracks id,id,...]
+                                                          rename/recolor a group or replace its whole
+                                                          membership list (add/remove/reorder members)
+  beat inspect <file> [--json]
+  beat analyze <audio.wav> [--backend beatthis|stub|allin1] [--force] [-o out.json] [--json]
+                                                          detect tempo/beats/downbeats/sections in a real WAV via the
+                                                          Python sidecar; writes a cached <audio>.analysis.json (feed it to
+                                                          beat skeleton). Default backend beatthis (needs the owner-side venv;
+                                                          stub is a deterministic no-deps grid for testing). --force re-analyzes.
+                                                          NOTE: for the SYMBOLIC analysis of a .beat file, use analyze-structure.
+  beat analyze --doctor                                   report the Python interpreter + which backends are installed
+  beat analyze-structure <file> [--json] [--root N] [--scale name]
+                                                          symbolic song analysis (no rendering): per-section onset
+                                                          density, syncopation, pitch-class vs scale, repetition/novelty.
+                                                          --root 0-11 (0=C) + --scale (major/minor/dorian/…) enable the
+                                                          in-scale readout; omit both for scale-agnostic histograms
+  beat set <file> <path> <value> [<path> <value> ...]     e.g. beat set song.beat lead.cutoff 900 bpm 124
+                                                          declared drum lanes: <track>.lane.<name>.<param> <v>
+                                                          (synth-backed: tune/punch/decay/tone; sample-backed:
+                                                          start/length/attack/hold/decay/cutoff/resonance/gainDb/
+                                                          tune; empty value reverts a param to its default)
+  beat add-note <file> <track> <pitch> <start> <duration> <velocity 0-1>
+                                                          velocity is 0.0-1.0, NOT MIDI's 0-127 (e.g. 0.8, not 100)
+  beat rm-note <file> <track> <note-id>
+  beat add-hit <file> <track> <lane> <start> <velocity 0-1> [duration]   free-timed drum hit (start/duration in fractional 16th steps;
+                                                          velocity is 0.0-1.0, NOT MIDI's 0-127 — e.g. 0.9, not 110)
+  beat rm-hit <file> <track> <hit-id>
+  beat quantize <file> <track> [--grid 1] [--amount 1] [--ends] [--no-starts] [--notes id,id]
+                                                          snap notes toward the grid (grid in 16th steps:
+                                                          1=16ths 2=8ths 4=quarters 0.5=32nds; amount<1 = partial)
+  beat humanize <file> <track> [--timing 0.15] [--velocity 0.06] [--push-late 0] [--swing 0] [--seed N] [--lanes hat,openhat | --ids a,b]
+                                                          make a stiff part feel played: seeded timing/velocity
+                                                          jitter, behind-the-beat drag, offbeat swing; scope by lane/id
+  beat transpose <file> <track> <semitones> [--notes id,id]      shift pitch (clamped to MIDI 0-127)
+  beat time-scale <file> <track> <factor> [--notes id,id]        stretch time (2 = x2, 0.5 = ÷2), anchored at the
+                                                          earliest scoped note so a selection stretches in place
+  beat fit-scale <file> <track> <root 0-11> <scale> [--notes id,id]   snap pitches to the nearest tone in a scale
+                                                          (root: 0=C..11=B; see --list-scales)
+  beat fit-scale --list-scales                            list the valid <scale> names
+  beat invert <file> <track> [axis-pitch] [--notes id,id]  mirror pitch around axis (default: selection's own mean)
+  beat reverse <file> <track> [--notes id,id]              tape-reverse the scoped notes' time span
+  beat legato <file> <track> [--gap 0] [--notes id,id]     extend each note to the next note's start
+  beat consolidate <file> <track> [--notes id,id]          bake ratcheted notes (ratchetCount>1) back into
+                                                          discrete notes (the ratchet "consolidate" action)
+  beat diff <a.beat> <b.beat>                             semantic (musical) diff — reads like an edit list
+  beat diff --git <rev1> <rev2> <file>                    same, between two git revisions
+  beat diff --since [<ref>] <file> [--rollup] [--json]    <ref> (a checkpoint from `beat history` or a pin name
+                                                          from `beat pins`; defaults to the LAST checkpoint) -> the
+                                                          CURRENT on-disk file: "what changed since checkpoint X".
+                                                          --rollup collapses to the agent's morning read (net per-
+                                                          param + tweak counts, note clusters per bar, ordered by
+                                                          edit mass); --json emits the structured form (of the diff,
+                                                          or of the rollup)
+  beat presets [--json] [--category <cat>]                list the factory preset library (optionally
+                                                          filtered to one taxonomy category — see
+                                                          --list-categories for the enumerated set)
+  beat presets --list-categories                          list the valid --category values
+  beat preset <file> <track> <name>                       apply a preset to a track (a bag of set edits)
+  beat macro list [--json]                                 list the factory macro library (a knob -> N target params)
+  beat macro apply <file> <track> <name> <value>           apply a macro to a track at knob position 0..100
+                                                          (resolves to literal set edits, same discipline as presets)
+  beat trick list [--json] [--axis width|air|motion|glue]  list the production-trick catalog (research 118)
+  beat trick show <name>                                   full card: when/recipe/expect/counter/why
+  beat trick apply <file> <track> <name> [--clip c] [--knob k] [--force] [--dry-run]
+                                                          apply a trick's recipe as ordinary edits (prints the
+                                                          honest applied list; refuses on counter-indications
+                                                          unless --force; --dry-run previews without writing)
+  beat trick suggest <file> [<track>] [--json]             rank the tricks whose preconditions pass (reads a
+                                                          sibling <file>.wav render for metrics if present, else
+                                                          document state only — renders nothing itself)
+  beat produce <file> <track> [--role bass|lead|pad|keys|drums] [--dry-run]
+                                                          retrofit an existing track with its role's produced-
+                                                          defaults profile — width/air/glue/space, the same layer
+                                                          gen-kit ships and add-track --produced applies (docs/
+                                                          producing.md). Intensify-only: never weakens a patch that
+                                                          already carries production (re-running is a no-op). Role
+                                                          is inferred from the track id unless --role is given;
+                                                          --dry-run previews the diff without writing. Prints the
+                                                          honest applied list; refuses on non-synth/drums tracks
+  beat drum-kits [--json]                                  list the factory drum-kit library (kit-808/kit-909/kit-acoustic)
+  beat drum-kit <file> <track> <name>                      apply a drum kit to a track (replaces its whole lane list)
+  beat vary <file> <track> <group-or-lane> [--count 9] [--amount 0.25] [--seed N] [--out-dir d] [--render] [--audition] [--no-normalize] [--spread] [--exclude p1,p2]
+                                                          batch-generate small-diff variants. On a declared-lane
+                                                          drums track (every fresh/kit drums track), target a LANE
+                                                          NAME (kick, hat, tom_lo, ...) — mutates that lane's own
+                                                          backing params (synth voice tune/punch/decay/tone, or a
+                                                          sample lane's start/length/AHD/filter plus gainDb/tune),
+                                                          written as replayable beat-set lane paths; the legacy
+                                                          kick/snare/hats groups error there (they mutate track-wide
+                                                          params the engine never plays once lanes are declared).
+                                                          Elsewhere, target a param group (see --groups).
+                                                          --out-dir defaults to vary-<target>-<seed> NEXT TO the
+                                                          .beat file, not the cwd; --audition implies --render and
+                                                          stitches the wavs into one audition.wav + timecode index.
+                                                          --spread explores each param's FULL musical range
+                                                          (stratified bands — audibly distinct variants, what
+                                                          taste-collect uses) instead of jittering near the current
+                                                          value; --exclude leaves the named group params untouched.
+                                                          Rendered variants are loudness-normalized by default (pure
+                                                          gain to the batch-median LUFS; upward gains capped at -1
+                                                          dBTP true peak — an already-hot render is never attenuated
+                                                          — recorded in the manifest) so picks rate sound, not level
+                                                          — the taste log's "louder wins" confound; --no-normalize
+                                                          keeps the raw render loudness (levels still measured and
+                                                          recorded).
+  beat vary <file> <track> feel [--count 9] [--seed N] [--timing .15] [--velocity .06] [--push-late 0] [--swing 0] [--lanes hat,openhat | --ids a,b] [--spread] [--render] [--audition]
+                                                          batch humanized FEEL variants (content variation) to audition + score
+  beat vary <file> <track> feel --scope selection --port <p> [...same feel flags, minus --lanes/--ids]
+                                                          scope to the GUI selection held by a running daemon instead of
+                                                          typing --lanes/--ids by hand (lanes -> --lanes, bars/notes -> --ids)
+  beat vary <file> <track> automation:<param> [--clip id] [--count 9] [--seed N] [--render] [--audition]
+                                                          batch MOVEMENT variants of a clip's automation on <param>
+                                                          (varies shape/depth/rate/phase, e.g. automation:cutoff) —
+                                                          --clip picks WHICH clip's lane (default the track's first clip);
+                                                          each variant carries a replayable beat automate-shape recipe;
+                                                          scores/adopts through the same loop (see beat automate-shape)
+  beat vary --groups                                      list the mutation groups (static; both modes documented)
+  beat vary <file> <track> --groups                       list THAT track's real targets (lanes + live groups)
+  beat automate <file> <track> <clip> <param> <time> <value> [--id p1] [--interpolation linear|hold|curve]
+                                                          add or move a clip automation point (time in fractional
+                                                          16th steps from the clip's start; --id moves that point
+                                                          if it already exists, else adds it with that id;
+                                                          --interpolation sets the segment-shape this point starts,
+                                                          default linear — omit on a move to keep the existing shape)
+  beat automate-shape <file> <track> <clip> <param> <ramp|sine|triangle|exp|adsr> --from V --to V [--cycles N --points N --bars N]
+                                                          fill a clip's automation lane with a predefined SHAPE (Phase 37):
+                                                          ramp = linear from->to; sine/triangle = --cycles oscillations
+                                                          between from and to; exp = eased curve; adsr = envelope. Emits
+                                                          --points points (default 16) across the clip span (--bars, else
+                                                          the clip loop / audio length / doc loop_bars). REPLACES any
+                                                          existing lane for that param on the clip.
+  beat clip <file> <track> <clip-id>                      snapshot the track's CURRENT LIVE content into a clip
+                                                          (re-snapshotting always starts from whatever's live on the
+                                                          track right now, not empty — the same "capture current live
+                                                          state" model the daemon's own "+ capture scene" uses; two
+                                                          clips saved back-to-back without clearing the track in
+                                                          between will share content, e.g. a "chorus" snapshotted on
+                                                          top of "verse" content becomes verse-plus-chorus, not an
+                                                          independent chorus — rm-note/rm-hit the live track's
+                                                          existing content first if you want a fresh, independent
+                                                          clip instead of an accumulated one)
+  beat scene <file> <scene-id> [<track>=<clip>[@<steps>] ...]
+                                                          create/replace a scene's slot map — the command that MINTS a
+                                                          scene (beat place only edits existing ones). Repeat a track for
+                                                          multiple placements (v0.11), e.g. fx=riser1 fx=impact1@48;
+                                                          @<steps> is fractional 16th steps from the section start
+                                                          (omitted = 0). Multi-placement / @>0 is AUDIO tracks only for
+                                                          now — synth/drum clips tile from the section start
+  beat scene-set <file> <scene-id> --name N|--clear-name  rename a scene (or clear its name, back to showing
+                                                          just the id) — the scene IS the reusable bundle of
+                                                          content, so its name follows it into every section
+                                                          that reuses it
+  beat place <file> <scene> <track> <clip> <at-steps>     add ONE placement of an already-saved clip to a scene's
+                                                          track slot at <at-steps> (fractional 16th steps from the
+                                                          section start). The scene must already EXIST — beat scene
+                                                          mints scenes, place edits one placement. Audio tracks only
+                                                          for at > 0 / multiple placements (v1); overlapping
+                                                          placements on one track are an error
+  beat unplace <file> <scene> <track> <clip>[@<at>]       remove ONE placement. @<at> is only required when the
+                                                          same clip is placed more than once on that track (the
+                                                          error lists the candidate at values); removing the last
+                                                          placement drops the track from the scene entirely
+  beat song <file> [<scene> <bars> ...]                   replace the song timeline (empty = loop mode)
+  beat song-move <file> <from-index> <to-index>           reorder a section — a two-line diff, not a rewrite
+  beat song-insert <file> <index> <bars>                  insert a NEW section with a fresh, empty, independent scene at
+                                                          <index> (0-based; song.length appends) — unlike song-move/song,
+                                                          never reuses an existing scene id, so it can't share content with
+                                                          any other section (docs/product-roadmap.md's "Independent
+                                                          per-section scene editing" row); place clips into it afterward
+                                                          via beat scene/beat_song. Requires song mode already.
+  beat sample <file> <sample-id> <wav-path>               register media (sha256 computed for you; path relative to the .beat)
+  beat skeleton <out.beat> <analysis.json> [--section-bars N]
+                                                          scaffold a NEW, structure-matched empty project from a
+                                                          *.analysis.json (from beat analyze): one empty scene per
+                                                          distinct detected section label, a song block matching the
+                                                          detected arrangement, tempo from the artifact. Refuses to
+                                                          overwrite an existing out.beat. Labelless artifacts fall back
+                                                          to uniform --section-bars (default 8) chunks. Fill the scenes
+                                                          afterward with beat clip / beat place.
+  beat source search <query> [--max N] [--dur-min V] [--dur-max V] [--out-dir d]
+                                                          find CC0 (public-domain) sounds on Freesound, top-rated first
+                                                          (--out-dir also downloads each preview for auditioning);
+                                                          NEEDS FREESOUND_API_KEY + network egress to freesound.org
+  beat source add <file.beat> <sample-id> <local-audio-file> [--license L] [--note N]
+                                                          OFFLINE: prep a file you already have (trim/fade/normalize)
+                                                          and register it as media, writing an enforced provenance
+                                                          sidecar media/<id>.wav.json. --license defaults to
+                                                          "unspecified" (you assert the license; only the --freesound
+                                                          path labels media "CC0-1.0")
+  beat source add <file.beat> <sample-id> --freesound <id> [--note N]
+                                                          GATED: fetch a specific CC0 sound from Freesound by id and
+                                                          register it (label "CC0-1.0"); needs the key + egress. CC0
+                                                          is the only license ever fetched (zero redistribution risk)
+  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio|fal] [--provider P] [--license L]
+                                                          GENERATE a one-shot with Stable Audio Open (local text-to-audio)
+                                                          and register it as media with a provenance sidecar. Default
+                                                          --backend stableaudio (needs torch + the model, owner-side;
+                                                          see python/README.md), default --seconds 2. --backend stub is
+                                                          a deterministic, dependency-free tone bed. --backend fal
+                                                          generates on fal.ai's GPUs (seconds per one-shot instead
+                                                          of minutes; needs FAL_KEY) — default model Stable Audio 3
+                                                          MEDIUM (1.4B params, licensed training data, outputs yours
+                                                          under the Community License); --provider picks others:
+                                                          fal-ai/stable-audio (Open, the local backend's model) or
+                                                          fal-ai/stable-audio-25/text-to-audio (2.5, Stability
+                                                          platform terms). "Powered by Stability AI"
+  beat source gen --doctor                                report which generative backends are installed (JSON)
+  beat source gen <file.beat> <sample-id> "<prompt>" --count N [--seed-from S] [--out-dir d] [--audition]
+                                                          BATCH: generate N candidates of ONE prompt across seeds
+                                                          S..S+N-1 into gen-<sample-id>-<S>/ next to the .beat and
+                                                          register NOTHING — then rank them with `beat score` and
+                                                          register the winner ALONE with `beat adopt` (the same two
+                                                          verbs a vary batch uses). Losing candidates never enter the
+                                                          media block; delete the batch dir to forget them. --audition
+                                                          stitches the candidates into one audition.wav with a timecode
+                                                          index (no render needed — they are already audio)
+  beat regen <file.beat> [--verify] [--id <sample-id>]     rebuild generated media from the provenance sidecars alone
+                                                          (media/<id>.wav.json's prompt/seed/seconds/backend) — a fully
+                                                          generated project is a RECIPE: clone it with an empty media/,
+                                                          run this, get the song back. --verify regenerates to a temp
+                                                          dir and reports per-sample sha256 match/differ WITHOUT
+                                                          touching media/; --id does one sample. SLOW: ~2 min per
+                                                          one-shot on CPU (a 10-sample project is ~20 min); the count
+                                                          and estimate print before the run starts. Byte-identical
+                                                          reproduction is verified same-machine/same-torch only — a
+                                                          differing hash elsewhere is expected, not corruption.
+                                                          Freesound/local-ingest media isn't generated, so it's skipped
+  beat gen-kit <project-dir> [--roles kick,snare,hats,perc,bass,lead] [--candidates 4] [--bpm 96] [--key a] [--scale minorPentatonic] [--gen-backend fal|stub|stableaudio] [--seed 41]
+                                                          compose a PLAYABLE .beat project entirely from generated
+                                                          sounds — the recipe-song workflow as one command
+                                                          (docs/gen-kit-pipeline.md). Per role: N candidate one-shots
+                                                          (one subject x N distinct style prompts, taste-collect's
+                                                          convention) land as a scoreable batch dir (group
+                                                          genkit:<role>) registering NOTHING; a measurable default is
+                                                          picked — drums by spectral centroid vs the role's target
+                                                          band, bass/lead by pitch-detection confidence — and adopted
+                                                          (deferred registration: losers never touch the media block);
+                                                          tonal winners are keymapped into the project's key. Starter
+                                                          patterns (simple seeded groove + in-key phrases) are written,
+                                                          scene-placed and song-armed, so beat render is audible
+                                                          immediately. Everything is deterministic in --seed for a
+                                                          given backend; every asset carries a provenance sidecar, so
+                                                          beat regen --verify replays the whole kit. Re-pick any role
+                                                          later: beat rate <project-dir> (or beat score <batch> ...),
+                                                          then beat adopt <batch> vN --force. Default --gen-backend
+                                                          fal (needs FAL_KEY; seconds per sound); stub is the
+                                                          dependency-free deterministic tone bed CI runs.
+  beat lane <file> <track> <lane> <sample-id|none> [gain] [tune]   back a drum lane with a sample ("none" reverts the lane
+                                                          to its synth voice)
+  beat lane <file> <track> --clear-legacy                 drop stale v0.5 `lane` sample lines from a DECLARED-lane track
+                                                          (dead data there — playback reads the declarations; inspect
+                                                          flags them). Errors on a legacy 5-lane track, where those
+                                                          lines are live.
+  beat sample-info <file> <sample-id> [--json] [--partials 8]
+                                                          what IS this sound: detected pitch (+ note name, cents off),
+                                                          confidence, duration, peak, centroid, and the top-partials
+                                                          table (frequency, level, ratio to the lowest strong partial).
+                                                          Pure TS — no Python, no venv. Read the TABLE, not just the f0:
+                                                          two partials a semitone apart (ratio ~1.06) will beat against
+                                                          themselves; a ratio like 1.80 means an inharmonic clang whose
+                                                          pitch is a judgement call. LOW confidence is a real answer, not
+                                                          a failure — bells and found percussion usually read low, and
+                                                          the table is how you decide the root yourself.
+  beat keymap <file> <track> <sample-id> --scale <name> --from <note> --to <note> [--root <note>] [--key <note>] [--gain dB] [--dry-run] [--force]
+                                                          pitch-map ONE sample across a scale: mints one declared lane per
+                                                          scale degree, named by note (a5, c6, …), each tuned to land the
+                                                          sample on that pitch. The tunes come from the sample's DETECTED
+                                                          fundamental, so they are right even when the sound came back
+                                                          between notes (fractional tunes are normal and correct).
+                                                          --root <note> states the root yourself and skips detection —
+                                                          a first-class path, not a fallback: bells, plucks and found
+                                                          percussion are exactly where detection is weakest, so expect to
+                                                          use it. Refuses on a low-confidence detection (quoting the
+                                                          partials and a ready-to-paste --root) rather than building a
+                                                          wrong keymap; --force takes the detection anyway.
+                                                          --key sets the scale's root (default: --from's pitch class).
+                                                          --scale names: see beat fit-scale --list-scales.
+                                                          --dry-run prints the lanes without writing.
+                                                          A lane's tune is limited to -24..24 semitones, so a span more
+                                                          than 2 octaves from the root errors, naming what IS reachable.
+  beat audio-pitch <file> <track> <clip-id> (--to <note> [--root <note>] | --semitones <n>) [--force]
+                                                          repitch an audio-region clip by computing its warp rate for you
+                                                          (sets warp repitch + rate). --to <note> detects the region's
+                                                          fundamental and moves it to that note; --root <note> states the
+                                                          region's current pitch instead of detecting it; --semitones
+                                                          shifts by an interval with no detection at all (the honest
+                                                          option for a chord or a pad, which has no single pitch).
+                                                          Repitch is variable-speed: length changes with pitch.
+  beat effect-add <file> <track> <eq3|comp|distortion|bitcrush|eq7|autoFilter|autoPan|tremolo|utility|grainDelay|vinylDistortion|resonator> [--id id] [--index n] [--bypassed]
+                                                          add an insert to a synth track's effect chain
+                                                          (default: appended, enabled; order in the file IS chain order)
+  beat effect-rm <file> <track> <effect-id>               remove an insert by id
+  beat effect-move <file> <track> <effect-id> <new-index>  reorder — a two-line diff, not a rewrite
+  beat effect-bypass <file> <track> <effect-id> <true|false>  bypass/re-enable one insert (real routing
+                                                          bypass, not just its own mix knob — see beat_set's
+                                                          <track>.effect.<id>.enabled path for the same edit)
+  beat audio-clip <file> <track> <clip-id> <media-id> <in> <out> [gain] [warp off|repitch|complex] [rate]
+                                                          create/replace an audio-region clip on an
+                                                          'audio' track (in/out are seconds into the
+                                                          source media); trim an existing clip's fields
+                                                          with beat set <track>.clip.<id>.audio.<field> <v>
+  beat audio-split <file> <track> <clip-id> <at-step> [--id new-clip-id]
+                                                          split-at-point: cuts one audio-region clip into
+                                                          two at a timeline position (fractional 16th
+                                                          steps from the clip's start), same media,
+                                                          adjusted in/out — no DSP. v0.11: the second half
+                                                          is auto-placed right after the first in every
+                                                          scene that placed the original (reported in the
+                                                          output), so a split never orphans arrangement
+  beat score <batch-dir> <pick> [pick2 pick3] [--log f]   record a ranked pick (<=3) into the scores log
+                                                          (pick is a variant number, "1" or "v1" both work;
+                                                          --log defaults to beat-scores.jsonl NEXT TO the
+                                                          batch's parent .beat file, not the cwd)
+  beat adopt <batch-dir> <pick> [--force]                 copy the picked variant over the batch's parent .beat
+                                                          (refuses if the parent changed since the batch was
+                                                          generated — sha256 guard — unless --force; a running
+                                                          daemon/GUI hot-reloads the adopted file automatically)
+  beat suggest --taste <batch-dir> [--log f]            T4 (gate passed on 37 rated batches, 32% top-1 vs 20%
+                                                          chance): pre-rank an UNSCORED rendered batch with the
+                                                          taste model trained on your whole scores log — a listen-
+                                                          in-this-order hint. ADVISORY only: never adopts, never
+                                                          writes; your beat score pick is still the data.
+  beat suggest --taste-next <collection-dir> [--log f]    T4 next-round proposal: coverage of your scored batches
+                                                          vs the target data mix (taste-loop-design.md), concrete
+                                                          collect commands for the under-covered splits, one
+                                                          repeat-probe (self-consistency ceiling), and the
+                                                          connectivity-anchor reminder. Advisory: runs nothing.
+  beat suggest <file> <track> [--target <lane-or-id>] [--log f]
+                                                          read the scores log and propose the next beat-vary round
+                                                          (--log defaults to beat-scores.jsonl next to the .beat);
+                                                          lane-aware on declared-lane drums tracks (cold start
+                                                          recommends a real lane; never recommends a group that
+                                                          would be an audio no-op on that track)
+  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M] [--aes-backend aes|stub|off]
+                                                          the taste-model eval harness (docs/taste-loop-design.md):
+                                                          leave-one-batch-out held-out pick prediction over the
+                                                          scores log — top-1/top-3/pairwise accuracy vs chance for
+                                                          the built-in scorers (random, dsp-bt, and — when batch
+                                                          renders still exist to embed — embed-bt and both-bt, the
+                                                          T2 ablation) plus the learned taste directions. Embeddings
+                                                          come from a Python sidecar (python/embed.py), cached next
+                                                          to each wav: clap = LAION-CLAP (default, Apache-2.0),
+                                                          mert = MERT-330M (stronger on music benchmarks; CC-BY-NC
+                                                          weights, personal use only), stub = deterministic no-deps.
+                                                          --aes-backend adds Audiobox-Aesthetics (CC-BY-4.0): four
+                                                          NAMED axes per clip — CE content enjoyment, CU content
+                                                          usefulness, PC production complexity, PQ production
+                                                          quality — as explicit features (aes-bt / dsp+aes-bt in
+                                                          the ablation) plus signed per-axis taste directions.
+                                                          Scored batches carry per-variant DSP features in the log
+                                                          since T0; --backfill derives them for older entries whose
+                                                          batch renders still exist (rewrites the log, .bak kept).
+                                                          When the log mixes round kinds, each scorer also reports
+                                                          per-type splits — vary (track variations), gen (generated
+                                                          samples, group "gen:<id>"), clip-set (beat audition dirs)
+                                                          — same folds, attributed by the held-out batch's kind;
+                                                          splits under 5 batches are labeled smoke (JSON: smoke).
+  beat taste-eval --doctor                                report the embedding sidecar's readiness (interpreter +
+                                                          per-backend deps), JSON
+  beat match <target.wav> [--track-kind synth|drum-sampler] [--budget N] [--population N] [--out <dir>] [--seed N] [--no-clap]
+                                                          T6 sound matching (docs/t6-sound-matching.md): CMA-ES
+                                                          over the engine's continuous params against a 1-2s
+                                                          target chop — can the engine make THIS sound, and how
+                                                          close? Pitch frozen from f0 detection; osc/filter types
+                                                          enumerated as short screening runs; staged search
+                                                          (source params, then insert effects); target and every
+                                                          candidate loudness-normalized before the loss (log-mel
+                                                          multi-scale + MFCC + envelope). One offline engine
+                                                          session serves the whole run; evals cached by candidate
+                                                          hash (re-runs with a bigger --budget resume free).
+                                                          Writes best.beat + best.wav, patch.txt (beat set lines),
+                                                          loss-curve.jsonl, report.json (ceiling in MFCC + CLAP
+                                                          cosine; CLAP degrades to a named reason without the
+                                                          python sidecar). Default --budget 50 is smoke-scale;
+                                                          real ceiling runs want 2000-5000.
+  beat taste-seeds <dir> [--count 8] [--seed 1]         generate synthetic seed SONGS (deterministic space:
+                                                          tempo, key, progression, palette, drum feel) as the raw
+                                                          material for taste data collection. Step 1 of the
+                                                          collect->rate->eval pipeline (docs/taste-loop-design.md).
+  beat taste-collect <dir> [--per-seed 2] [--count 5] [--gen N] [--gen-backend fal|stub|stableaudio] [--seed 41]
+                                                          build the rating queue from a taste-seeds dir: --per-seed
+                                                          vary batches per seed song (random track x group incl.
+                                                          feel + drum voices, offline-rendered), --count variants
+                                                          per batch, plus --gen generated-sample batches from a
+                                                          stratified prompt bank
+                                                          (drum one-shots, bass/plucks, pads/textures, vox chops,
+                                                          risers — default backend fal, needs FAL_KEY). Failures
+                                                          skip with a warning; everything lands as ordinary
+                                                          score-able batches.
+  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
+                [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--random-patches]
+                [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S] [--gen-stem-extract]
+                                                          build blind SOURCE-SHOWDOWN batches from a taste-seeds
+                                                          dir: each batch is ONE musical role x one clip per
+                                                          source — engine (the role's seed phrase, soloed, through
+                                                          dotbeat's own synth, playing a role-mapped factory/curated
+                                                          preset — docs/engine-presets.md; --random-patches keeps the
+                                                          seed's historical random patch for era comparison, and the
+                                                          engine/engineplus manifest from-strings record the patch
+                                                          source [patch: random-seed-patch|factory:<name>|curated:<id>]),
+                                                          gen (a fal-generated phrase from
+                                                          the prompt bank's phrase tier), keymap (a generated
+                                                          one-shot played as an instrument through the engine's
+                                                          sampler lanes), optionally engineplus (--with-produced:
+                                                          the SAME figure and patch as the engine clip plus a
+                                                          production pass — unison/chorus width, saturation,
+                                                          reverb/delay sends, eqHigh air — the "is it the synth
+                                                          or the production?" ablation), optionally surge
+                                                          (--with-surge: a composed figure through a Surge XT
+                                                          factory patch via surgepy — pitched roles only,
+                                                          drum-loop skipped; its own distinct figure unless
+                                                          --shared-figure; needs a source-built surgepy, see
+                                                          beat showdown --surge-doctor). With --with-surge AND
+                                                          --with-produced together, a surgeplus clip is added: the
+                                                          SAME surge render through a dotbeat production pass
+                                                          (hosted as a sample voice on a drums-kind track — the
+                                                          audio-playback track the engine produces; 'audio'-kind
+                                                          tracks carry no effect chain — applying a strengthened,
+                                                          role-aware pass: chords/lead get assertive chorus + the
+                                                          mid/side utility widener + slow auto-pan + saturation +
+                                                          reverb/delay space + a firm air shelf; bass stays
+                                                          mono-anchored [saturation + air, no wide utility]),
+                                                          isolating production for surge as engineplus does for
+                                                          engine (moves stereo width 5-8 dB on pitched roles).
+                                                          Optionally ref
+                                                          (--ref-dir). With --midi-dir the composed sources
+                                                          (engine/engineplus/keymap/surge) draw their figures
+                                                          from MIDI files of commercial tracks instead of the
+                                                          archetype bank (bass/chords/lead parts extracted via
+                                                          python/midi_extract.py, transposed into the seed's
+                                                          key; drum-loop keeps the bank; per-source distinct
+                                                          files unless --shared-figure; unusable dir/files warn
+                                                          and fall back to the bank) — holds COMPOSITION at
+                                                          commercial quality so ratings compare sound
+                                                          realization. With --theory the composed pitched
+                                                          sources draw figures from the deterministic theory-
+                                                          aware layer instead (weighted/function-tagged chord
+                                                          track, register-ruled kick-relationship bass, minimal-
+                                                          motion voice-leading, motif-first leads; drum-loop
+                                                          keeps the bank) — the figureSource:'theory' arm that
+                                                          blind-compares theory vs bank vs midi composition with
+                                                          the sound source held constant (research 124 §C.7).
+                                                          With --gen-stem-extract the gen clip is put
+                                                          through Demucs (htdemucs) after download and
+                                                          before the downbeat trim, keeping ONLY the
+                                                          role's stem — bassline->bass, chords/lead->
+                                                          other, drum-loop->drums. This is the
+                                                          GUARANTEE that prompting could not give:
+                                                          Lyria is a full-track model and prose
+                                                          isolation, negative_prompt and instrument-
+                                                          first framing all still returned a band
+                                                          (2026-07-25). If the requested stem comes
+                                                          back >25 dB below the mix (the prompt DID
+                                                          solo the instrument and demucs filed it
+                                                          elsewhere) it falls back to other, then the
+                                                          loudest non-drums stem, recording which was
+                                                          used — it never emits silence. The local
+                                                          manifest's gen from-string gains
+                                                          "+ demucs:<stem>"; the shared scores log is
+                                                          kind-only and unchanged. Needs the demucs
+                                                          sidecar — check with
+                                                          beat showdown --stem-doctor. Off by default.
+                                                          With --ca2 the pitched sources draw figures from
+                                                          Composer's Assistant 2 composing OVER that theory chord
+                                                          track (research 124 §A.4's LLM-as-orchestrator: our code
+                                                          picks key/chords/register/density, the model proposes
+                                                          notes; the theory layer's register/scale guards and
+                                                          pre-render lint then gate it, reseeding up to 3x on a
+                                                          gross failure). drum-loop keeps the bank; CA2's install
+                                                          and weights live OUT of the repo (BEAT_CA2_DIR /
+                                                          BEAT_CA2_PYTHON) and a missing install fails the batch
+                                                          loudly — see beat showdown --ca2-doctor.
+                                                          Clips are duration-matched (trim/pad;
+                                                          --seconds overrides the shortest-clip default) and
+                                                          loudness-normalized to a
+                                                          common LUFS; sources are seeded-shuffled into v-numbers
+                                                          so rating stays blind. Rate with beat rate as usual.
+  beat showdown --report [--log f] (or beat showdown <dir> --report [--json])
+                                                          the scoreboard: per-source win / top-half / pairwise
+                                                          rates from every scored showdown batch, overall and per
+                                                          role, small-n splits labeled smoke (same convention as
+                                                          taste-eval). See docs/source-showdown-eval.md.
+        --ref-dir clips are PRIVATE chops of commercial music: the tool only ever READS under that
+        path (originals untouched), the trimmed/level-matched working copies live in the batch dir
+        behind a generated .gitignore, the manifest records the origin path as a reference only,
+        and the shared scores log records the source KIND alone — never the path, title, or audio.
+        --with-surge renders through Surge XT (GPLv3, a local dev-side tool — outputs carry no code
+        copyleft) but its factory-patch CONTENT license is unresolved upstream, so surge- and
+        surgeplus-bearing batches get the same .gitignore treatment as ref batches (surgeplus is the
+        same surge audio, produced); the scores log stays kind-only.
+        surgepy has no PyPI wheel — beat showdown --surge-doctor reports the source-build steps.
+        --midi-dir files are MIDI transcriptions of copyrighted songs (derivative works, PRIVATE —
+        keep them outside any repo): the tool only ever READS them, midi-figure batches get the
+        generated .gitignore gate, the manifest records the midi path/transposition as a local
+        reference only, and the shared scores log records only figureSource:'midi'|'bank' — never
+        a song title, artist, or path.
+        --ca2 needs an out-of-repo Composer's Assistant 2 install (MIT code, 716MB release
+        weights): BEAT_CA2_DIR -> its Scripts/composers_assistant_v2 dir, BEAT_CA2_PYTHON -> a
+        venv python with python/requirements-ca2.txt. Weights never enter the repo. CA2's training
+        set is public-domain/permissive MIDI only (research 124 §A.3), so ca2 batches carry no
+        third-party-content posture: no gitignore gate, and the log records figureSource:'ca2'.
+  beat prodtask transform <dir> [--rounds 1] [--seed 61] [--arms original,tricked,random]
+                [--tricks name,name] [--roles bassline,chords,lead,drum-loop] [--seconds S]
+                                                          build blind PRODUCTION-TRANSFORM batches (research 119
+                                                          §T-C): each batch is ONE composed figure in N arms —
+                                                          original (raw engine solo, the documented mono/dry/static
+                                                          loss mode), tricked (the SAME figure + patch plus a
+                                                          sensible per-role trick stack via the real beat trick
+                                                          apply path — width/air/glue), and random (the SAME figure
+                                                          + a magnitude-matched RANDOM-EDIT control: the same number
+                                                          of edits the stack made, on random legal params at random
+                                                          legal values — the control that separates "the RIGHT
+                                                          production moves" from "any change sounds different").
+                                                          Notes/patch are identical across arms; only production
+                                                          varies. Assembled as an ordinary clip-set batch: arms
+                                                          seeded-shuffled into v-numbers, duration-matched, and —
+                                                          load-bearing — loudness-normalized so tricks win on
+                                                          width/air/glue, never on level. Renders are local-engine
+                                                          only (no fal). --tricks overrides the per-role stack (for
+                                                          ablations: width-only vs width+air vs full). Rate with
+                                                          beat rate as usual.
+  beat prodtask --report <dir> [--json] (or --log f)      the scoreboard: per-arm win / top-half / pairwise from
+                                                          every scored prodtask batch, overall and per task/role,
+                                                          small-n splits labeled smoke, PLUS per-arm mean DSP
+                                                          receipts (stereoWidthDb, bandAirPct) tying the blind
+                                                          result to the mechanical one. Chance: tricked-vs-original
+                                                          pairwise 50% = tricks don't move the ear; tricked must
+                                                          ALSO beat random. See docs/prodtask.md.
+  beat pilot run <dir> [--budget 80] [--generations 6] [--niches 4]
+                [--roles bassline,chords] [--seed N] [--controls 3] [--aes-backend aes]
+                                                          the constrained T5 overnight pilot (plan C3,
+                                                          docs/research/117): the owner's "circular process" —
+                                                          seeded quality-diversity search over the synth-param VARY
+                                                          space (NEVER gen — the critic is blind there), scored by
+                                                          the PESSIMISTIC ensemble critic (mean − β·std) with the #1
+                                                          hack vector STEREO WIDTH fenced out. Per generation: mutate
+                                                          the best-per-niche elites (niches = brightness×density DSP
+                                                          buckets) + ε random immigrants, render offline (budget-
+                                                          bounded, one boot/gen), keep best per niche. Ships a blind
+                                                          morning frontier per role: critic-guided ELITES plus
+                                                          random-mutation CONTROLS (never critic-scored), as ordinary
+                                                          rateable clip-set batches (group pilot:<role>, loudness-
+                                                          normalized, seeded-shuffle). SCALING GATE: elites must beat
+                                                          controls in your blind ratings before any scale-up. Needs
+                                                          a scored log (the critic trains on it) + the aes sidecar
+                                                          (BEAT_PYTHON at the venv). Rate with beat rate as usual.
+  beat pilot --report <dir> [--json] (or --log f)         the scoreboard: elite-vs-control win / top-half / pairwise
+                                                          over every scored pilot batch, overall and per role, with
+                                                          the SCALING GATE verdict. See docs/pilot.md.
+  beat rate <dir> [--port 4321] [--log f]               local web UI over every UNSCORED rendered batch under
+                                                          <dir>: blind shuffled A/B/C players, click picks in
+                                                          preference order (best first, up to 3), saved through the
+                                                          standard score path into ONE beat-scores.jsonl at the dir
+                                                          root (--log overrides). Re-running resumes where you left
+                                                          off; then: beat taste-eval --log <dir>/beat-scores.jsonl
+  beat board <dir> [--port 4322] [--log f]              option-board PICKING UI (NON-BLIND, production — the
+                                                          sibling of beat rate) over every UNDECIDED rendered batch
+                                                          under <dir>: each board shows its candidates with visible
+                                                          provenance (source.kind / recipe / provider) + the measured
+                                                          features table; PICK one (1-9, optional note), REJECT ALL
+                                                          (n, note REQUIRED), or SKIP (s). Writes decision.json per
+                                                          batch + ONE beat-decisions.jsonl at the dir root (--log
+                                                          overrides) — a SEPARATE log from blind beat-scores.jsonl,
+                                                          never merged. --status [--json]: no server, print per-batch
+                                                          decided/undecided + decisions (how the produce loop polls).
+                                                          Adopt a winner with: beat adopt <batch> <pick>
+  beat audition <dir> [--group G] [--seed N] [--no-shuffle]
+                                                          stitch a blind audition.wav from ANY directory of wavs
+                                                          (stem chops, one-shots) or re-stitch an existing batch.
+                                                          A plain wav dir gets a clip-set manifest (sorted names ->
+                                                          v1..vN) so beat score works on it; presentation order is
+                                                          seeded-shuffled by default (position bias — the printed
+                                                          index is the answer key). vary/gen --audition shuffles the
+                                                          same way; --no-shuffle restores generation order there too
+  beat metrics <file.wav> [--json] [--save-profile <ref.json>] [--sections-from <src>]
+                                                          LUFS, true peak, crest, spectral, stereo;
+                                                          --save-profile writes the numbers as a reusable
+                                                          reference profile (with provenance) for lint --ref.
+                                                          --sections-from builds a per-section ENERGY-ARC
+                                                          profile from the reference instead: each section's
+                                                          loudness relative to the loudest (the drop = 0 dB),
+                                                          the phase-3 dynamics plan. <src> is 'analysis' (the
+                                                          sibling <file>.analysis.json from beat analyze),
+                                                          a <name>.analysis.json, a <file>.beat (its song
+                                                          block), or a <file>.csv of label,start,end seconds.
+                                                          Prints the arc table (paste into NOTES.md); with
+                                                          --save-profile also writes it for feedback --sections
+                                                          --ref to verify the render against
+  beat lint <file.wav> [--target <LUFS> | --ref <ref.json>] [--screens [--sections <file.beat>] [--roughness-baseline <baseline.wav>]] [--json] [--doc <file.beat>]
+                                                          deterministic mix findings (default target -14);
+                                                          --ref compares against a saved reference profile
+                                                          instead of absolute targets (LUFS/band/width/crest
+                                                          deltas) — full-mix statics only: a profile can't
+                                                          hear arrangement, sections, or masking;
+                                                          --screens runs the standing PATHOLOGY suite (clicks,
+                                                          DC offset, mono-collapse, 2-5kHz resonance, mud,
+                                                          crest collapse, dead air, sub rumble) — deterministic
+                                                          DEFECT checks, distinct from the taste findings above;
+                                                          --sections <file.beat> adds the song section map so the
+                                                          arrangement-flatness screen runs (flags "everything on
+                                                          all the time") and dead air is located by section
+                                                          (implies --screens);
+                                                          --roughness-baseline <baseline.wav> adds the PAIR-RELATIVE
+                                                          grind screen (Daniel-Weber roughness via MoSQITo): flags
+                                                          3s bins where <file.wav> got grindier than a matched
+                                                          baseline render of the same material (implies --screens).
+                                                          Pair-relative ONLY — there is no absolute roughness gate
+                                                          (research 123: commercial material out-roughs the defect);
+                                                          skipped with a note if no baseline is given;
+                                                          --doc renders each track solo to name the actual
+                                                          offending track in each finding's suggestion, and
+                                                          makes fix lines cite that .beat by name (without it
+                                                          they show an honest <file.beat> placeholder)
+  beat excerpt <file.beat> <section...> [--out <path>]
+                                                          write a derived .beat keeping ONLY the named song
+                                                          sections (tracks/scenes/clips/media untouched) — for
+                                                          cheap partial renders of e.g. just the drop. Sections
+                                                          are named by scene id or name; requested order is kept.
+                                                          Default output <file>-excerpt.beat next to the source.
+  beat render <file> [-o out.wav] [--tail <sec>]          render to WAV through dotbeat's own engine
+                                                          (headless Chromium driving ui/; no BeatLab needed)
+  beat render <file> --offline [-o out.wav]               compute the mix through an offline context instead
+                                                          of capturing the realtime clock — same engine, no
+                                                          lossy recorder step. Repeatable to ~1 LSB for
+                                                          oscillator content; noise-based voices (e.g. the
+                                                          default kit's snare/hats) vary per run, exactly as
+                                                          they do live. CPU-bound: fast for short/small
+                                                          projects, can be SLOWER than live capture for long
+                                                          dense songs (the measured ratio is printed).
+                                                          Refuses soundfont (instrument/sf-lane) projects;
+                                                          an ACTIVE bitcrushRate (>1 with bitcrushMix >0)
+                                                          renders as passthrough (caveat printed).
+  beat render --batch <dir> [--live | --offline] [--no-normalize]
+                                                          render every .beat variant in a vary-batch dir through
+                                                          ONE harness boot (what vary --render calls). Defaults
+                                                          to OFFLINE compute — short clips are where it is both
+                                                          exact and fast — falling back to live capture with a
+                                                          printed reason when the project uses soundfonts.
+                                                          --live forces realtime capture; --offline errors
+                                                          instead of falling back. Re-rendering a batch whose
+                                                          manifest records loudness normalization re-applies it
+                                                          (to the recorded target LUFS) and refreshes the
+                                                          manifest's measured levels, so the manifest keeps
+                                                          describing the actual audio; --no-normalize keeps the
+                                                          raw re-render loudness and honestly re-records the
+                                                          batch as not normalized.
+  beat render <file> --stems [--out-dir d]                Phase 37: one solo WAV per track into an out dir
+                                                          (default stems-<file> next to the .beat) — stems for
+                                                          external mixing or per-track metrics
+  env CHROME_PATH=<binary>                                use a specific Chromium/Chrome instead of a system
+                                                          Chrome install — required in locked-down/proxied
+                                                          environments where `playwright install chrome` is
+                                                          blocked (a `playwright install chromium` binary works).
+  note: song mode renders only scene-placed content — a groove on a track that isn't placed in any
+        scene renders SILENT. Snapshot with beat clip and place it with beat scene / beat place first.
+  beat feedback <file> [--sections] [--ref <ref.json>] [--json]
+                                                          render the song ONCE, then report mix feedback.
+                                                          default: whole-song metrics + lint in one block.
+                                                          --sections: slice the render at song section
+                                                          boundaries and report the per-section energy arc
+                                                          (LUFS / spectral balance / width / crest per section
+                                                          + section-to-section movement, flagged only when it
+                                                          clears the render-run variance floor), and runs the
+                                                          pathology screens including arrangement-flatness (which
+                                                          FLAGS a mix with no dynamic arc). --ref compares
+                                                          against a saved reference profile: a whole-mix profile
+                                                          (beat metrics --save-profile) critiques each section's
+                                                          static metrics; an ARC profile (beat metrics
+                                                          --sections-from) diffs the render's energy arc against
+                                                          the reference's section-by-section and PASS/FAILs it
+                                                          (the phase-6 dynamics-plan check).
+                                                          Honest limits: per-section STATIC metrics only — this
+                                                          does NOT hear masking, arrangement, or transitions,
+                                                          only how sections differ as isolated static mixes
+  beat daemon <file> [--port 8420] [--edit-log]           two-way sync with a running dotbeat GUI;
+                                                          --edit-log appends every edit (GUI/CLI/MCP) to
+                                                          ~/.dotbeat/edit-log.jsonl (research/116 log-don't-train
+                                                          telemetry, opt-in; = BEAT_EDIT_LOG=1)
+  beat open <file.beat> [--track X] [--view device|clip|mixer|arrangement]
+                        [--param cutoff] [--port 8420] [--gui-url URL]
+                                                          deep-link the running GUI to a spot: if a daemon is reachable
+                                                          on --port, focus it (select the track, open the pane, flash
+                                                          the param — a --param always opens the device view) and print
+                                                          the GUI URL; if none is running, print how to start one. Exit
+                                                          0 focused, 3 no daemon. --param names a synth param (the ones
+                                                          beat inspect lists). GUI base is --gui-url / $BEAT_GUI_URL /
+                                                          http://localhost:5300
+  beat checkpoint <file> [--label L] [--intent I]         save a restorable version (auto-labels from the diff)
+  beat history <file> [--limit N] [--collapsed]           list checkpoints, newest first (--collapsed folds
+                                                          unnamed runs between pins into "N more checkpoints")
+  beat restore <file> <ref>                               go back to a checkpoint (append-only — never destroys work)
+  beat pin <file> <ref> <name...>                         name a checkpoint (<=25 chars), e.g. beat pin song.beat a1b2c3 rough mix v1
+  beat unpin <file> <name...>                             remove a pin by name
+  beat pins <file>                                        list this project's pins, newest checkpoint first
+  beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon
+  beat mcp                                                MCP server over stdio: the commands above as tools (~58,
+                                                          covering track/note/hit/effect/scene/place/song/preset/macro/
+                                                          drum-kit/vary/score/adopt/sample/lane/checkpoint/render/metrics editing) —
+                                                          only daemon (a long-running process, structurally not a
+                                                          tool call) stays CLI-only; send tools/list on a running
+                                                          'beat mcp' for the exact, current set
+  beat mcp-init <file> [--force | --force-config | --force-claude]
+                                                          write a .mcp.json next to <file> so Claude Code
+                                                          (or any MCP client) auto-discovers 'beat mcp' there,
+                                                          plus a music-session CLAUDE.md scaffold (you're making
+                                                          music, not developing dotbeat; render->metrics->lint;
+                                                          vary/score for taste; units). Existing files are never
+                                                          overwritten without a force flag, per file:
+                                                          --force-config regenerates just .mcp.json (e.g. after
+                                                          this repo moves), --force-claude replaces just the
+                                                          CLAUDE.md scaffold (your own edits to it are lost),
+                                                          --force overwrites both
+
+paths for set: bpm | loop_bars | selected_track | <track>.<synth param> | <track>.name |
+               <track>.color | <track>.pattern.<lane>[<step>]
