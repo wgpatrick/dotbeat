@@ -680,6 +680,39 @@ function json(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body))
 }
 
+/**
+ * Thrown by a mutating route when the .beat file changed on disk between the moment the daemon
+ * last read it and the moment the edit was about to be written — i.e. someone ELSE (a `beat set`,
+ * an MCP call, a hand edit, another agent) got there first, so the edit in hand was computed
+ * against a document that no longer exists.
+ *
+ * The daemon's answer is REJECT, not merge (see writeIfChanged's comment for why): the external
+ * write is authoritative and is adopted first (clearing the undo stack per research/28 §3 and
+ * broadcasting a `doc` SSE so every client re-syncs), and the caller gets 409 + `conflict: true`
+ * so it can re-read /document and re-issue its edit against the state that actually exists.
+ */
+export class ExternalChangeError extends Error {
+  readonly conflict = true
+  constructor(message = 'the .beat file changed on disk since this edit was computed — re-read /document and retry') {
+    super(message)
+    this.name = 'ExternalChangeError'
+  }
+}
+
+/**
+ * Shared error→HTTP mapping for the mutating routes' `.catch` handlers. A conflict always wins
+ * over the route's own fallback status: 409 is the one answer that is true regardless of which
+ * route raised it, and centralising it here is what keeps every one of the 30+ write routes
+ * honest without each having to know about ExternalChangeError.
+ */
+function routeError(res: ServerResponse, err: unknown, fallbackStatus: number) {
+  if (err instanceof ExternalChangeError) {
+    json(res, 409, { error: err.message, conflict: true })
+    return
+  }
+  json(res, fallbackStatus, { error: err instanceof Error ? err.message : String(err) })
+}
+
 // ─── Phase 22 Stream AH: the content-browser library surface ────────────────────────────────────
 // Read-only catalog over the repo's bundled, un-project-scoped content (presets/factory.json,
 // presets/kit-*/, presets/sf2/*.sf2) — the same data `beat presets`/`beat presets --category`
@@ -862,6 +895,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
   })
 
   function onFileMaybeChanged() {
+    watchTimer = null
     let text: string
     try {
       text = readFileSync(filePath, 'utf8')
@@ -869,6 +903,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       return // transient (mid-rename); the next event will retry
     }
     if (text === lastFileText) return // echo of our own write, or a no-op save
+    adoptExternalText(text)
+  }
+
+  /**
+   * The daemon's ONE external-change path (Phase 30: previously inlined in the watcher callback).
+   * Reached two ways: the directory watcher's debounced callback, and — critically — the
+   * synchronous pre-write check every mutating route now runs (checkExternalChange below), which is
+   * what closes the 60 ms window in which an external write used to be silently overwritten.
+   */
+  function adoptExternalText(text: string) {
     // An external write (hand edit / CLI / another process) landed — close out any in-flight GUI
     // gesture's telemetry before we adopt the new on-disk state, so its `after` is the value the
     // owner actually left, not whatever the external change makes it.
@@ -900,6 +944,38 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     revalidateSelection()
   }
 
+  /**
+   * Phase 30 / research/28 §3, the missing half of the external-change contract.
+   *
+   * The directory watcher is debounced by 60 ms and an editor's save can take longer still, so
+   * between "an external write hit the disk" and "the daemon noticed" there is a real window —
+   * measured at 0-80 ms — in which the daemon still believed its own `doc`/`lastFileText` were
+   * current. Any write issued in that window overwrote the external edit outright AND reset
+   * `lastFileText` to the daemon's own text, so the watcher never fired the external-change path
+   * either: the undo stack stayed armed over a history that had silently diverged.
+   *
+   * So every write re-reads the file first. If disk no longer matches what we last wrote/read, the
+   * external write is adopted RIGHT NOW (undo cleared, `doc` SSE broadcast) — the watcher's job,
+   * done synchronously and ahead of us — and the caller is told it lost the race. Returns true when
+   * an external change was found and adopted.
+   */
+  function checkExternalChange(): boolean {
+    let text: string
+    try {
+      text = readFileSync(filePath, 'utf8')
+    } catch {
+      return false // file momentarily absent (mid-rename); nothing to compare against, let the write proceed
+    }
+    if (text === lastFileText) return false
+    // We are handling this change now; drop the pending debounce so the watcher doesn't re-run it.
+    if (watchTimer) {
+      clearTimeout(watchTimer)
+      watchTimer = null
+    }
+    adoptExternalText(text)
+    return true
+  }
+
   // A selection points at ids in the document; a hand edit that removes a selected track/note/lane
   // invalidates it. Rather than serve a stale pointer, drop to empty and tell the GUI.
   function revalidateSelection() {
@@ -925,10 +1001,33 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
   // research/28 §5.3. Callers with no natural gesture identity (add-track, effect ops, …) omit it
   // and each call is its own distinct undo step, which is correct for one-shot structural edits.
   function writeIfChanged(nextDoc: BeatDocument, coalesceKey?: string, surface: EditSurface = 'gui'): boolean {
+    // Conflict check FIRST — before the canonical compare, not after. `nextDoc` was computed from
+    // `doc`, and `canonicalText` describes `doc`; if disk has moved on, BOTH are stale, so a
+    // "nextText === canonicalText → nothing to do" verdict would be measured against a document
+    // that no longer exists and would quietly report success for an edit nobody can see.
+    //
+    // REJECT, not merge — the documented choice. Merging would mean re-running the mutation
+    // against the freshly-adopted document, but the 30+ routes funnelling through here hand in an
+    // already-computed BeatDocument (several also return a `report` derived from it), so there is
+    // no mutation left to re-run and a "rebase" here could only mean replaying a stale whole-
+    // document snapshot — exactly the clobber this is fixing. A 409 hands the decision back to the
+    // caller, which is the only participant that still knows what the user meant; the GUI has
+    // already received the `doc` SSE by the time it reads the response, so retrying is a re-issue
+    // against true state, not a guess.
+    if (checkExternalChange()) throw new ExternalChangeError()
     const nextText = serialize(nextDoc)
     if (nextText === canonicalText) return false
     const now = Date.now()
-    const coalesced = coalesceKey !== undefined && coalesceKey === lastUndoKey && now - lastUndoAt < UNDO_COALESCE_MS
+    // Phase 30 (M8): the coalescing identity is (surface, key), never key alone. A gesture is one
+    // person doing one thing on one surface — an agent's MCP edit that happens to touch the same
+    // path as a human's in-flight knob drag is a SEPARATE deliberate action, and merging the two
+    // meant one Ctrl+Z reverted both (the human's drag AND the agent's edit, back past a state the
+    // human never asked to leave) while research/116's telemetry attributed the agent's edit as a
+    // `gui` continuation of the drag — a false provenance record in the one log meant to answer
+    // "who made this edit". Namespacing the key by surface keeps genuine drags coalescing (a drag
+    // never changes surface mid-gesture) while making cross-surface merges impossible.
+    const gestureKey = coalesceKey === undefined ? undefined : `${surface}:${coalesceKey}`
+    const coalesced = gestureKey !== undefined && gestureKey === lastUndoKey && now - lastUndoAt < UNDO_COALESCE_MS
     const preDoc = doc // the pre-write state — a gesture's telemetry `before` when this starts one
     if (!coalesced) {
       // Push the PRE-write document — the state Ctrl+Z should land back on — and drop the oldest
@@ -937,7 +1036,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
       if (undoStack.length > UNDO_MAX) undoStack.shift()
       redoStack.length = 0
     }
-    lastUndoKey = coalesceKey ?? null
+    lastUndoKey = gestureKey ?? null
     lastUndoAt = now
     writeFileSync(filePath, nextText)
     lastFileText = nextText
@@ -946,7 +1045,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     // Edit telemetry (research/116 §4): ride the SAME gesture boundary the undo stack just used
     // (`coalesced`), so a 60 ms-debounced knob drag logs ONE entry, not one per tick. No-ops
     // unless BEAT_EDIT_LOG is set — the enabled check inside is the only cost on the hot path.
-    noteDaemonEdit(preDoc, doc, { coalesced, gestureKey: coalesceKey, surface, file: filePath })
+    noteDaemonEdit(preDoc, doc, { coalesced, gestureKey, surface, file: filePath })
     broadcastUndoState()
     return true
   }
@@ -1065,7 +1164,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           json(res, 200, selection)
         })
         .catch((err) => {
-          json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, 400)
         })
       return
     }
@@ -1119,7 +1218,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           json(res, 200, { focused: focus, clients: sseClients.size })
         })
         .catch((err) => {
-          json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, 400)
         })
       return
     }
@@ -1145,6 +1244,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             json(res, 400, { error: 'body is not a sandbox payload' })
             return
           }
+          // Same pre-write conflict check writeIfChanged makes (this route writes directly because
+          // it carries media/groups/instrument tracks across itself). A whole-document GUI push is
+          // the MOST destructive thing to land on top of an external write, so it gets the guard
+          // before it reads `doc` for any of that carry-over.
+          if (checkExternalChange()) throw new ExternalChangeError()
           const { doc: converted, report } = sandboxPayloadToBeatDocument(payload)
           // v0.5: the GUI has no media/lane-sample editing surface, so a GUI push must never
           // erase them — carry the CURRENT document's media table and per-track lane
@@ -1196,7 +1300,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           json(res, 200, { written, report })
         })
         .catch((err) => {
-          json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, 400)
         })
       return
     }
@@ -1240,7 +1344,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           json(res, 200, { written })
         })
         .catch((err) => {
-          json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, 400)
         })
       return
     }
@@ -1260,6 +1364,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
 
     if (req.method === 'POST' && url.pathname === '/undo') {
+      // An external write inside the watcher debounce must invalidate the stack BEFORE we pop it —
+      // otherwise Ctrl+Z restores a snapshot that predates content nobody asked to discard. This
+      // needs no 409: adopting clears the stack, so the honest answer is simply "nothing to undo".
+      checkExternalChange()
       if (undoStack.length === 0) {
         json(res, 200, { undone: false, doc, ...undoState() })
         return
@@ -1276,6 +1384,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
 
     if (req.method === 'POST' && url.pathname === '/redo') {
+      checkExternalChange() // same invalidation-before-navigation rule as /undo above
       if (redoStack.length === 0) {
         json(res, 200, { redone: false, doc, ...undoState() })
         return
@@ -1342,7 +1451,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1373,7 +1482,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1399,7 +1508,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1425,7 +1534,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1450,7 +1559,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1537,7 +1646,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatPitchTimeError || err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1571,7 +1680,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1634,7 +1743,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           json(res, 400, { error: "op must be 'set' or 'remove'" })
         })
         .catch((err) => {
-          json(res, 400, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, 400)
         })
       return
     }
@@ -1671,7 +1780,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1691,7 +1800,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1714,7 +1823,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1733,7 +1842,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1752,7 +1861,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1771,7 +1880,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1826,7 +1935,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1890,7 +1999,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof BeatParseError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1922,7 +2031,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           json(res, 200, { filePath: targetAbs, source: filePath })
         })
         .catch((err) => {
-          json(res, 500, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, 500)
         })
       return
     }
@@ -1947,7 +2056,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof HistoryError ? 400 : err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -1997,7 +2106,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof HistoryError ? 400 : err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2017,7 +2126,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof HistoryError ? 400 : err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2036,7 +2145,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof HistoryError ? 400 : err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2070,7 +2179,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatVaryError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2101,7 +2210,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatVaryError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2136,7 +2245,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatVaryError || err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2205,7 +2314,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2225,7 +2334,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         json(res, 200, { presets, categories: PRESET_CATEGORIES, macros: loadFactoryMacros(), kits: listKits(), soundfonts: listSoundfonts() })
       } catch (err) {
         const status = err instanceof BeatPresetError || err instanceof BeatMacroError ? 400 : 500
-        json(res, status, { error: err instanceof Error ? err.message : String(err) })
+        routeError(res, err, status)
       }
       return
     }
@@ -2287,7 +2396,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof BeatPresetError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2320,7 +2429,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof BeatMacroError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2377,7 +2486,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2466,7 +2575,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2532,7 +2641,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2559,7 +2668,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
@@ -2607,7 +2716,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         })
         .catch((err) => {
           const status = err instanceof BeatEditError || err instanceof SyntaxError ? 400 : 500
-          json(res, status, { error: err instanceof Error ? err.message : String(err) })
+          routeError(res, err, status)
         })
       return
     }
