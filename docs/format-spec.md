@@ -983,6 +983,83 @@ live/non-clip automation remain deferred.
 
 ---
 
+### v0.12 additions — audio-track production block + per-lane polyphony (research 142 §3.2, D6)
+
+Two additive changes from the sampling-toolkit stream. **No format-version bump and no new
+grammar**: both reuse shapes the format already had, and both are canonically elided at their
+defaults, so every pre-existing file round-trips byte-identically and renders bit-for-bit as before.
+
+**1. An `audio` track carries a production block and an effect chain.**
+
+Before this, dotbeat could PLACE sampled audio but could not PROCESS it: an `audio` track's engine
+voice was `player -> muteGain -> master`, `parse.ts` rejected `effect` lines on one and
+`addEffect` refused outright — while a sample-backed DRUM LANE had a filter, an AHD envelope and
+its own ordered effect chain. The drum machine could mangle a sample; the track literally named
+`audio` could not.
+
+```
+track stem Stem #56b6c2 audio
+  volume -6                        # bare field lines, no `synth` wrapper
+  cutoff 300
+  filterType highpass
+  sendReverb 0.4
+  bitcrushBits 3
+  effect tape distortion           # file order IS chain order, as everywhere else
+  effect vinyl vinylDistortion
+  effect crush bitcrush
+  clip c1
+    audio loop 0 2 0 off 1
+```
+
+- **Exactly the instrument-track precedent**, not a new mechanism: an audio track still has NO
+  `synth` block (`parse.ts` keeps refusing one), it carries bare `key value` lines for a named
+  subset, and those land in the same shared `BeatTrack.synth` record every other kind's knobs live
+  in. The key set is `AUDIO_TRACK_FIELDS` in `document.ts` — the production block
+  (`volume`, `pan`, `cutoff`, `resonance`, `filterType`, `sendReverb`, `sendDelay`) followed by
+  the ~12 `EffectType` chain members' own knobs (the same set `INSTRUMENT_EFFECT_FIELD_KEYS`
+  gives an instrument track). Anything outside it is a parse/edit error.
+- **The defaults are the TRANSPARENT ones, not `INIT_SYNTH`'s** — 0 dB (not -10), a 20 kHz / Q 0
+  filter (not 2 kHz / 0.8), silent sends, empty chain. That is the whole backward-compatibility
+  story and it is asserted field by field in `test/audio-track-fx.test.ts`.
+- **The chain's canonical default is `[]`**, like an instrument track's: an audio track never had a
+  fixed insert order to preserve, so "never declared" and "explicitly emptied" are the same state
+  and there is no `effects none` sentinel for this kind.
+- **What deliberately does NOT apply**, stated rather than wired to nothing: the amp envelope
+  (`attack`/`decay`/`sustain`/`release`) and `osc` — a region's amplitude shape is its own `gainDb`
+  plus its gain-automation lane, and there is no oscillator; every filter-envelope / LFO / keytrack
+  / velocity-modulation field, because those modulate PER NOTE and a region is not a note; the
+  oscillator-stack fields (unison/detune/sub/noise/FM); and the duck block, whose sidechain source
+  is a drum-lane trigger concept. `warp complex` is still a no-op and no production field changes
+  that.
+- **Clip automation is unchanged** — `AUDIO_AUTOMATABLE_PARAMS` is still `['gain']`, and the lane
+  still rides the region's own gain upstream of everything above.
+
+**2. `voices` — per-lane polyphony on a sample-backed drum lane.**
+
+```
+  lane a5 sample bell_a 0 -12 voices=4
+```
+
+- An ordinary `SAMPLE_LANE_PARAM_KEYS` member, so it uses the existing `key=value` token grammar,
+  the existing `beat set <track>.lane.<name>.voices` path, and the existing elision rule.
+- **Default 1**, which is exactly the pre-existing behavior: one `Tone.Player` per lane, and
+  `Source.start()` on a started source restarts it, so a repeated hit cuts its own tail. That is
+  usually right on a drum lane and it is how every committed kit and golden render sounds, so it
+  stays the default and nothing existing moves.
+- It exists because a KEYMAP lane is a pitched instrument built out of drum lanes, where
+  self-choking is wrong: a line revisiting a pitch inside the sample's own decay came out chopped
+  and mechanical. `beat keymap` therefore mints its lanes with `voices=4` (`KEYMAP_LANE_VOICES`),
+  and re-running keymap over older lanes upgrades them.
+- **Validated, not clamped**: an integer 1..8 (`SAMPLE_LANE_VOICES_MIN`/`MAX`). `voices 0` would be
+  a silent lane and `voices 2.5` a rounding surprise; both are user errors with obvious fixes, so
+  both fail loudly, through one rule (`sampleLaneParamError`) shared by `parse.ts` and `edit.ts`.
+
+Measured in `ui/verify-audio-track-fx.mjs` and `ui/verify-lane-polyphony.mjs` respectively (real
+browser engine, real recorded audio); guarded as data contracts in `test/audio-track-fx.test.ts`
+and `test/lane-polyphony.test.ts`.
+
+---
+
 ## Future (post-v0, not implemented) — a fuller sketch once automation/devices/media land
 
 The sections below are earlier exploratory sketches for where the format goes *after* v0 proves
