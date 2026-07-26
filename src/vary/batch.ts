@@ -6,7 +6,7 @@
 // once instead of being re-shaped per surface (phase-34-plan.md NA item 5: "extract the shared
 // shaping into src/ helpers both surfaces import, so the next drift can't happen").
 
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, symlinkSync, copyFileSync, rmSync, accessSync, constants } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, symlinkSync, copyFileSync, rmSync, accessSync, realpathSync, constants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
@@ -146,6 +146,21 @@ export const NORMALIZE_TRUE_PEAK_CEILING_DBTP = -1
  * rewriting 16-bit samples for a hundredth of a dB only adds requantization noise. */
 const NORMALIZE_MIN_GAIN_DB = 0.05
 
+/** Hard floor on UPWARD normalization gain, dB (2026-07-26 eval-integrity hunt, M7). A variant
+ * more than this far below the batch median is not "a quiet render" — it is a different signal (a
+ * failed render, a tacet stem, a chop that landed in a gap), and boosting it to match raises its
+ * noise floor by the same amount, so what the owner rates is materially not what was rendered.
+ * Without a floor a -70 LUFS near-silence got +54 dB and entered a blind batch at full level,
+ * recorded in the manifest as an ordinary normalization.
+ *
+ * Calibration (2026-07-26, over the 877 per-variant loudness records in examples/**\/manifest.json,
+ * i.e. every batch rated to date): 321 boosts were upward, p50 +4.36 dB, p90 +11.63 dB,
+ * p99 +21.58 dB, max +42.01 dB. 18 dB limits 6 of those 321 (1.9%) — the +42.0/+32.8/+23.8/+21.6/
+ * +20.5/+19.1 dB outliers — and leaves every boost inside the p99 untouched. Raising it silently
+ * re-admits the pathology; lowering it starts capping ordinary quiet renders. Limited variants are
+ * flagged `capped` with `capLimit: 'maxBoost'`, exactly like the true-peak ceiling. */
+export const NORMALIZE_MAX_BOOST_DB = 18
+
 /** What normalization did to one variant's render — recorded in the manifest (D21: additive
  * optional fields on the one shared manifest shape) so score/audition/training can see it. */
 export interface VariantLoudness {
@@ -155,9 +170,14 @@ export interface VariantLoudness {
   measuredLufs: number | null
   /** The pure gain applied to vN.wav, in dB (0 = left byte-identical). */
   gainDb: number
-  /** True when the NORMALIZE_TRUE_PEAK_CEILING_DBTP ceiling limited an upward gain below full
-   * normalization — this variant still renders quieter than the batch target. */
+  /** True when a limit held an upward gain below full normalization — this variant still renders
+   * quieter than the batch target. WHICH limit is in `capLimit`. */
   capped: boolean
+  /** Which limit bound (only present when `capped`): 'truePeak' = the
+   * NORMALIZE_TRUE_PEAK_CEILING_DBTP ceiling, 'maxBoost' = the NORMALIZE_MAX_BOOST_DB floor on
+   * upward gain. Absent on entries written before the boost floor existed, where `capped` always
+   * meant 'truePeak'. */
+  capLimit?: 'truePeak' | 'maxBoost'
   /** Estimated true peak of vN.wav as rendered (dBTP, BEFORE the gain) — pilot 113: the number
    * that makes a "capped" record readable on its own. Absent when immeasurable. */
   truePeakDbtp?: number
@@ -266,6 +286,7 @@ function recordLoudnessInManifest(outDir: string, count: number, normalization: 
       measuredLufs: v.measuredLufs,
       gainDb: v.gainDb,
       capped: v.capped,
+      ...(v.capLimit !== undefined ? { capLimit: v.capLimit } : {}),
       ...(v.truePeakDbtp !== undefined ? { truePeakDbtp: v.truePeakDbtp } : {}),
       ...(v.wantedGainDb !== undefined ? { wantedGainDb: v.wantedGainDb } : {}),
     }
@@ -309,20 +330,30 @@ export function normalizeBatchLoudness(outDir: string, count: number, opts: { ta
     const wantedGainDb = targetLufs - m.lufs
     let gainDb = wantedGainDb
     let capped = false
+    let capLimit: 'truePeak' | 'maxBoost' | undefined
     if (gainDb > 0) {
+      // Floor the boost first (M7): past NORMALIZE_MAX_BOOST_DB the variant is not quiet, it is
+      // broken, and matching it would just amplify its noise floor into the comparison.
+      if (gainDb > NORMALIZE_MAX_BOOST_DB) {
+        gainDb = NORMALIZE_MAX_BOOST_DB
+        capped = true
+        capLimit = 'maxBoost'
+      }
       // Boosting can push peaks toward clipping — cap the gain so the ESTIMATED true peak
       // (pre-peak + gain: a pure gain shifts true peak by exactly the gain) stays at or below
       // the ceiling. Never cap below 0: a variant already over the ceiling as rendered is the
-      // render's business, not normalization's — we just refuse to make it worse.
+      // render's business, not normalization's — we just refuse to make it worse. Whichever
+      // limit binds TIGHTER is the one named in capLimit.
       const maxUp = NORMALIZE_TRUE_PEAK_CEILING_DBTP - m.truePeakDb
       if (gainDb > maxUp) {
         gainDb = Math.max(0, maxUp)
         capped = true
+        capLimit = 'truePeak'
       }
     }
     if (Math.abs(gainDb) >= NORMALIZE_MIN_GAIN_DB) applyWavGain(resolve(outDir, file), gainDb)
     else gainDb = 0
-    variants.push({ file, measuredLufs: round2(m.lufs), gainDb: round2(gainDb), capped, truePeakDbtp: round2(m.truePeakDb), wantedGainDb: round2(wantedGainDb) })
+    variants.push({ file, measuredLufs: round2(m.lufs), gainDb: round2(gainDb), capped, ...(capLimit !== undefined ? { capLimit } : {}), truePeakDbtp: round2(m.truePeakDb), wantedGainDb: round2(wantedGainDb) })
   }
 
   recordLoudnessInManifest(outDir, count, { targetLufs: round2(targetLufs), truePeakCeilingDbtp: NORMALIZE_TRUE_PEAK_CEILING_DBTP, normalized: true }, variants)
@@ -380,6 +411,11 @@ export function formatNormalizationResult(r: NormalizeBatchResult): string {
       if (v.measuredLufs === null) return `v${i + 1} silent (untouched)`
       if (!v.capped) return `v${i + 1} ${fmt(v.gainDb)} dB`
       const wanted = v.wantedGainDb ?? v.gainDb
+      // M7: say WHICH limit held the gain back — a floored boost means "this variant is far too
+      // quiet to be part of this comparison", which is a different fact from a peak-limited one.
+      if (v.capLimit === 'maxBoost') {
+        return `v${i + 1} ${fmt(v.gainDb)} dB applied (wanted ${fmt(wanted)}, floored at the +${NORMALIZE_MAX_BOOST_DB} dB max boost — this variant is far below the rest of the batch; check the render)`
+      }
       return v.gainDb === 0
         ? `v${i + 1} +0.0 dB applied (wanted ${fmt(wanted)}, capped: already at ${fmt(v.truePeakDbtp ?? 0)} dBTP)`
         : `v${i + 1} ${fmt(v.gainDb)} dB applied (wanted ${fmt(wanted)}, capped at the ${NORMALIZE_TRUE_PEAK_CEILING_DBTP} dBTP ceiling)`
@@ -639,6 +675,21 @@ export interface ScoreEntry {
    * into per-source win rates, durable after the batch dir is gone. Deliberately the kind ONLY:
    * a ref clip's origin path stays in the batch dir's manifest, never in the shared log. */
   sources?: Record<string, string>
+  /** Variant files this batch's D25 holdout must keep OUT of taste-model TRAINING pairs — they
+   * are still rated and still ranked held-out, they just never become a training comparison.
+   * Two sources, both decided at score time from the batch dir's own manifest: refs-packs ref
+   * clips (purchased pro loops whose vendor ToU prohibits ML-training use) and generated clips
+   * whose provider ToS bans training on outputs.
+   *
+   * WHY IT RIDES THE LOG (2026-07-26 eval-integrity hunt, H3): this list used to live ONLY in the
+   * batch manifest while the trainable FEATURES lived here — and deleting batch dirs after a round
+   * is the documented lifecycle. Delete the dirs and every purchased-loop clip silently became
+   * training data, with no error and no visible change. Carrying the file names here leaks nothing
+   * `sources` doesn't already (variant file names + kinds; the ref's origin PATH still never
+   * leaves the batch dir). BACK-FILL IS IMPOSSIBLE for entries written before this field existed:
+   * once a batch dir is gone, nothing on disk records which pool its ref came from. eval.ts
+   * therefore treats a ref variant with no manifest and no logged list as UNKNOWN => EXCLUDED. */
+  trainingExcluded?: string[]
   /** Showdown batches only: where the composed figures came from — 'midi' (commercial MIDI
    * transcriptions, private), 'theory' (the deterministic theory-aware layer), 'ca2' (Composer's
    * Assistant 2 over that layer's chord track) or 'bank' (internal archetypes). The label is the
@@ -730,6 +781,39 @@ export function discardIncompleteBatch(dir: string): boolean {
   }
 }
 
+/** The canonical key for a batch dir in the scores log (2026-07-26 hunt, M1). `resolve` collapses
+ * `./x`, `x` and `x/` against the cwd; `realpathSync` additionally collapses symlinked parents,
+ * which is how the SAME dir reached the log under two spellings on macOS (where /tmp and
+ * /var/folders are symlinks). Falls back to `resolve` when the path does not exist — callers that
+ * reach here have already read the manifest, so that is a race, not the normal path. */
+export function canonicalBatchKey(dir: string): string {
+  try {
+    return realpathSync(resolve(dir))
+  } catch {
+    return resolve(dir)
+  }
+}
+
+/** The D25 training holdout for one batch, read from its manifest — the ONE definition both the
+ * score-time writer (which freezes it into the log entry) and the load-time reader
+ * (src/taste/eval.ts, for pre-H3 entries whose dir still exists) use. Two markers:
+ *   - a ref clip from the refs-packs pool: purchased pro loops, vendor ToU prohibits ML training;
+ *   - an explicit `trainingExcluded` flag on the source or on a gen candidate's provenance
+ *     sidecar (providers whose ToS bans training on outputs).
+ * Returned in manifest order, deduped. */
+export function trainingExcludedFiles(manifest: VaryBatchManifest): string[] {
+  const out: string[] = []
+  for (const v of manifest.variants ?? []) {
+    if (typeof v.file !== 'string') continue
+    const source = v.source as { kind?: string; from?: string; trainingExcluded?: boolean } | undefined
+    const media = v.media as (VariantMedia & { sidecar?: { generated?: { trainingExcluded?: boolean } } }) | undefined
+    const refsPack = source?.kind === 'ref' && typeof source.from === 'string' && /refs-packs\b/.test(source.from)
+    const banned = source?.trainingExcluded === true || media?.sidecar?.generated?.trainingExcluded === true
+    if ((refsPack || banned) && !out.includes(v.file)) out.push(v.file)
+  }
+  return out
+}
+
 /** Read + parse a batch dir's manifest.json — shared by scoreBatch and adoptVariant so the
  * missing-batch error text stays identical across every verb that takes a batch dir. */
 export function readBatchManifest(dir: string): VaryBatchManifest {
@@ -809,6 +893,16 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   if (picks.length === 0) throw new BeatBatchError('score needs 1-3 ranked picks (variant numbers, best first)')
   if (picks.length > 3) throw new BeatBatchError('at most 3 ranked picks (Edisyn (3,16) pattern — ranking more adds fatigue, not signal)')
   const manifest = readBatchManifest(dir)
+  // ONE physical batch dir is ONE batch, however the caller spelled it (2026-07-26 hunt, M1).
+  // The entry used to store the raw argument, so `./x`, `x`, `/abs/x` and `x/` each created a
+  // PHANTOM batch: the re-score note never fired, the showdown report counted one board up to four
+  // times, and taste-eval built a fold per spelling out of contradictory rankings of the same
+  // clips. Resolving here makes the key canonical at write time (pilot-108's corruption, reachable
+  // from an ordinary `cd` into the collection root between two ratings).
+  const batchKey = canonicalBatchKey(dir)
+  // NB: the log path deliberately uses plain `resolve`, not the canonical key — canonicalization
+  // is for the log's batch KEY, and routing the default log through realpath would rename it
+  // (/var -> /private/var on macOS) for every existing collection.
   const resolvedLog = logPath ?? (manifest.parent === '' ? resolve(dirname(resolve(dir)), DEFAULT_SCORES_LOG) : defaultScoresLog(resolveBatchParent(dir, manifest)))
   const ranks = picks.map((p) => normalizePick(p, manifest.variants.length))
   if (new Set(ranks).size !== ranks.length) throw new BeatBatchError('picks must be distinct')
@@ -827,7 +921,7 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   // ==== end Phase 40 Stream VB ====
   const entry: ScoreEntry = {
     t: new Date().toISOString(),
-    batch: dir,
+    batch: batchKey,
     ...(manifest.track !== undefined ? { track: manifest.track } : {}),
     group: manifest.group,
     amount: manifest.amount,
@@ -854,6 +948,9 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
   // ScoreEntry field comment — kinds only, a ref clip's path never leaves the batch dir).
   const sources = Object.fromEntries(manifest.variants.filter((v) => v.source !== undefined).map((v) => [v.file, v.source!.kind]))
   if (Object.keys(sources).length > 0) entry.sources = sources
+  // D25 holdout (hunt H3): the exclusion list must outlive the batch dir — see the field comment.
+  const excluded = trainingExcludedFiles(manifest)
+  if (excluded.length > 0) entry.trainingExcluded = excluded
   // Midi-figure showdown batches: carry the figure-source LABEL (see the ScoreEntry field
   // comment — 'midi'/'bank' only, never what the midi transcribes).
   if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
@@ -867,7 +964,10 @@ export function scoreBatch(dir: string, picks: string[], logPath?: string): Scor
       if (!trimmed) continue
       try {
         const prev = JSON.parse(trimmed) as Partial<ScoreEntry>
-        if (prev.batch === dir && Array.isArray(prev.picks)) {
+        // match on the RESOLVED path, and re-resolve legacy entries written before that was the
+        // rule so a re-score of an already-scored batch is still recognized as one
+        const sameBatch = typeof prev.batch === 'string' && (prev.batch === batchKey || canonicalBatchKey(prev.batch) === batchKey)
+        if (sameBatch && Array.isArray(prev.picks)) {
           previousPicks = prev.picks.map((p) => fileToLabel.get(p.variant) ?? p.variant).join(' > ')
         }
       } catch {
@@ -896,11 +996,15 @@ export interface NoneGoodResult {
  * needed for the exclusion; only the report's own none-good tally reads the field. */
 export function recordNoneGood(dir: string, logPath?: string): NoneGoodResult {
   const manifest = readBatchManifest(dir)
+  const batchKey = canonicalBatchKey(dir) // same canonical batch key scoreBatch writes — see M1 there
+  // NB: the log path deliberately uses plain `resolve`, not the canonical key — canonicalization
+  // is for the log's batch KEY, and routing the default log through realpath would rename it
+  // (/var -> /private/var on macOS) for every existing collection.
   const resolvedLog = logPath ?? (manifest.parent === '' ? resolve(dirname(resolve(dir)), DEFAULT_SCORES_LOG) : defaultScoresLog(resolveBatchParent(dir, manifest)))
   const allFiles = manifest.variants.map((v) => v.file)
   const entry: ScoreEntry = {
     t: new Date().toISOString(),
-    batch: dir,
+    batch: batchKey,
     ...(manifest.track !== undefined ? { track: manifest.track } : {}),
     group: manifest.group,
     amount: manifest.amount,
@@ -917,6 +1021,8 @@ export function recordNoneGood(dir: string, logPath?: string): NoneGoodResult {
   if (Object.keys(features).length > 0) entry.features = features
   const sources = Object.fromEntries(manifest.variants.filter((v) => v.source !== undefined).map((v) => [v.file, v.source!.kind]))
   if (Object.keys(sources).length > 0) entry.sources = sources
+  const excluded = trainingExcludedFiles(manifest)
+  if (excluded.length > 0) entry.trainingExcluded = excluded
   if (manifest.figureSource !== undefined) entry.figureSource = manifest.figureSource
   appendFileSync(resolvedLog, JSON.stringify(entry) + '\n')
   return { dir, logPath: resolvedLog, manifest, entry }

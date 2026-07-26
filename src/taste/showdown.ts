@@ -1276,12 +1276,17 @@ export function loadShowdownEntries(logPath: string): { entries: ShowdownLogEntr
       continue
     }
     if (typeof raw.batch !== 'string' || typeof raw.group !== 'string' || !raw.group.startsWith('showdown:')) continue
-    if (!Array.isArray(raw.picks) || raw.picks.length === 0) continue
+    if (!Array.isArray(raw.picks)) continue
+    // SUPERSEDE FIRST, then drop empty picks (2026-07-26 hunt, M3). Dropping empty-picks entries
+    // HERE — the old order — meant a later "none of these are good" could never become the batch's
+    // latest entry, so a ranking the owner had explicitly retracted kept counting in the win-rate
+    // and pairwise math, under a report line claiming none-good batches are excluded.
     latest.set(raw.batch, { group: raw.group, picks: raw.picks, rejected: raw.rejected, sources: raw.sources })
   }
   const entries: ShowdownLogEntry[] = []
   let skipped = 0
   for (const [batch, e] of latest) {
+    if (e.picks.length === 0) continue // a retracted batch: counted by noneGoodByRole, never here
     if (e.sources === undefined || Object.keys(e.sources).length === 0) {
       skipped += 1
       continue
@@ -1390,15 +1395,25 @@ export function tally(entries: RankedArmEntry[]): SourceStat[] {
     const topHalfRanks = Math.ceil(n / 2)
     const winner = e.sources[e.picks[0]!]
     if (winner !== undefined) stat(winner).wins += 1
+    // Top-half is a per-BATCH fact, not a per-slot one (2026-07-26 hunt, M4). Real pilot batches
+    // duplicate arms (three elites and two controls in one board), so counting every top-half SLOT
+    // let one kind's topHalf exceed its `batches` — the report printed "top-half 200%". A kind
+    // places top-half in a batch if ANY of its clips did.
+    const topHalfKinds = new Set<string>()
     for (let i = 0; i < Math.min(topHalfRanks, e.picks.length); i++) {
       const k = e.sources[e.picks[i]!]
-      if (k !== undefined) stat(k).topHalf += 1
+      if (k !== undefined) topHalfKinds.add(k)
     }
-    // implied pairwise comparisons: each ranked pick beats every later pick and every reject
+    for (const k of topHalfKinds) stat(k).topHalf += 1
+    // implied pairwise comparisons: each ranked pick beats every later pick and every reject.
+    // SELF-COMPARISONS ARE NOT EVIDENCE (M4): when a batch carries two clips of the same arm, one
+    // of them necessarily "beats" the other, which manufactured a guaranteed win AND a guaranteed
+    // loss for that arm — pulling a lopsided elite-vs-control result toward 50% purely as an
+    // artifact of how many duplicate arms the board happened to hold.
     for (let wi = 0; wi < e.picks.length; wi++) {
       const w = e.sources[e.picks[wi]!]
       if (w === undefined) continue
-      const losers = [...e.picks.slice(wi + 1), ...e.rejected].map((f) => e.sources[f]).filter((k): k is string => k !== undefined)
+      const losers = [...e.picks.slice(wi + 1), ...e.rejected].map((f) => e.sources[f]).filter((k): k is string => k !== undefined && k !== w)
       for (const l of losers) {
         stat(w).pairsWon += 1
         stat(w).pairCount += 1

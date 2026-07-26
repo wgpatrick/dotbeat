@@ -14,6 +14,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { computeBatchFeatures, type FeatureVector } from './features.js'
+import { trainingExcludedFiles, type VaryBatchManifest } from '../vary/batch.js'
 import { pairsFromRanking, standardizeBatch, zScoreColumns, trainBT, scoreVector, describeWeights, trainBTEnsemble, scoreVectorEnsemble, pessimisticScore, type TrainPair, type BTModel, type BTEnsemble } from './ranker.js'
 import { embedAudioFile, BeatEmbedError, fitPCA, projectPCA, AES_AXES, type EmbedBackend, type AesBackend } from './embeddings.js'
 import { mulberry32 } from '../core/rng.js'
@@ -32,8 +33,8 @@ export interface TasteBatch {
   featuresStored: boolean
   /** variant files EXCLUDED from training pairs (still evaluated/ranked held-out): ref clips
    * from the refs-packs pool, whose vendor terms (Splice ToU) prohibit ML-training use — D25.
-   * Populated from the batch dir's local manifest at load time; empty when the dir is gone
-   * (historical batches predate the packs pool, so nothing is silently missed). */
+   * Resolved by holdoutFiles below: the log entry's own frozen copy first, then the batch dir's
+   * manifest, then a conservative unknown-ref exclusion. Never depends on the dir still existing. */
   trainingExcluded: Set<string>
   /** T2: raw audio embeddings keyed by variant file (attachEmbeddings; only for batches whose
    * renders still exist — embeddings are cached next to the wavs, not in the log). */
@@ -63,39 +64,58 @@ interface RawEntry {
   picks?: { rank: number; variant: string }[]
   rejected?: string[]
   features?: Record<string, FeatureVector>
+  /** D25 holdout frozen into the entry at score time (hunt H3) — see holdoutFiles below. */
+  trainingExcluded?: string[]
+  /** variant file -> source kind; the tier-3 fallback keys off `ref` here. */
+  sources?: Record<string, string>
 }
 
 /** Parse the scores log and resolve per-variant features (stored, else lazily derived from the
  * batch dir's renders). Tolerant of the log's other entry shapes — anything without picks is
  * ignored, matching parseScoresLog's stance. */
-/** Variant files in this batch dir the training holdout must exclude — still fully rateable and
- * ranked held-out, they just never become training PAIRS. Two sources, both read from the local
- * manifest (the shared log stays kind-only):
+/** Variant files this batch's training holdout must exclude — still fully rateable and ranked
+ * held-out, they just never become training PAIRS. Two markers:
  *   - refs-packs ref clips (D25): Splice ToU prohibits ML-training use.
  *   - generated clips whose provider ToS bans training on outputs (research/127 §4.2): ElevenLabs
  *     (categorical) and MiniMax (unknown-treat-as-banned). The marker rides either the showdown
  *     source (`source.trainingExcluded`) or a gen candidate's enforced provenance sidecar
- *     (`media.sidecar.generated.trainingExcluded`) — Lyria/stable-audio stay trainable, unmarked. */
-function packRefFiles(batchDir: string): Set<string> {
+ *     (`media.sidecar.generated.trainingExcluded`) — Lyria/stable-audio stay trainable, unmarked.
+ *
+ * THREE TIERS, in order of trust (2026-07-26 eval-integrity hunt, H3 — this used to read the local
+ * manifest ONLY, so deleting batch dirs after a round, the documented lifecycle, silently turned
+ * every purchased-loop clip into training data):
+ *   1. the LOG entry's own `trainingExcluded` (written at score time by scoreBatch/recordNoneGood)
+ *      — durable, and the only tier that survives the batch dir;
+ *   2. the batch dir's manifest, for entries written before tier 1 existed and whose dir is still
+ *      on disk;
+ *   3. neither available and the entry says a variant is a `ref`: UNKNOWN => EXCLUDED. Back-fill
+ *      is impossible (once the dir is gone nothing records which pool the ref came from), so the
+ *      holdout is deliberately conservative. Worst case it withholds a training pair it could
+ *      legally have used; the other direction is a licence violation baked into a model. */
+function holdoutFiles(batchDir: string, logged: string[] | undefined, sources: Record<string, string> | undefined): Set<string> {
   const out = new Set<string>()
+  const add = (file: string) => {
+    out.add(file.replace(/\.beat$/, '.wav'))
+    out.add(file)
+  }
+  if (Array.isArray(logged)) {
+    // Tier 1. An entry that carries the field is authoritative, INCLUDING when it is empty: the
+    // scorer looked at the manifest and found nothing to exclude.
+    for (const f of logged) if (typeof f === 'string') add(f)
+    return out
+  }
   const manifestPath = join(batchDir, 'manifest.json')
-  if (!existsSync(manifestPath)) return out
-  const add = (file: string) => { out.add(file.replace(/\.beat$/, '.wav')); out.add(file) }
-  try {
-    const man = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
-      variants?: {
-        file?: string
-        source?: { kind?: string; from?: string; trainingExcluded?: boolean }
-        media?: { sidecar?: { generated?: { trainingExcluded?: boolean } } }
-      }[]
+  if (existsSync(manifestPath)) {
+    try {
+      const man = JSON.parse(readFileSync(manifestPath, 'utf8')) as VaryBatchManifest
+      for (const f of trainingExcludedFiles(man)) add(f) // tier 2, same rule the writer applies
+      return out
+    } catch {
+      /* unreadable manifest -> fall through to the conservative tier */
     }
-    for (const v of man.variants ?? []) {
-      if (typeof v.file !== 'string') continue
-      const refsPack = v.source?.kind === 'ref' && typeof v.source.from === 'string' && /refs-packs\b/.test(v.source.from)
-      const genBanned = v.source?.trainingExcluded === true || v.media?.sidecar?.generated?.trainingExcluded === true
-      if (refsPack || genBanned) add(v.file)
-    }
-  } catch { /* unreadable manifest -> nothing excluded */ }
+  }
+  // Tier 3: no manifest, no logged list. Any ref variant is unattributable, so it is excluded.
+  for (const [file, kind] of Object.entries(sources ?? {})) if (kind === 'ref') add(file)
   return out
 }
 
@@ -133,11 +153,16 @@ export function loadTasteBatches(logPath: string): LoadResult {
   }
   const latestByBatch = new Map<string, RawEntry>()
   for (const raw of rawEntries) {
-    if (typeof raw.batch !== 'string' || !Array.isArray(raw.picks) || raw.picks.length === 0) continue
+    if (typeof raw.batch !== 'string' || !Array.isArray(raw.picks)) continue
+    // SUPERSEDE FIRST, then drop empty picks (2026-07-26 hunt, M3). Skipping empty-picks entries
+    // at parse time — the old order — meant a "none of these are good" verdict could never become
+    // a batch's latest entry, so a retracted ranking still TRAINED the taste model. The verdict is
+    // load-bearing precisely because it is the owner's final word on that batch.
     if (latestByBatch.has(raw.batch)) superseded += 1
     latestByBatch.set(raw.batch, raw)
   }
   for (const [batchDir, raw] of latestByBatch) {
+    if (raw.picks!.length === 0) continue // none-good: no winner, so nothing to imply a pair from
     const picks = [...raw.picks!].sort((a, b) => a.rank - b.rank).map((p) => p.variant)
     const rejected = Array.isArray(raw.rejected) ? raw.rejected : []
     const allFiles = [...picks, ...rejected]
@@ -148,7 +173,7 @@ export function loadTasteBatches(logPath: string): LoadResult {
       features = existsSync(batchDir) ? computeBatchFeatures(batchDir, allFiles) : {}
     }
     const featured = allFiles.filter((f) => features![f] !== undefined)
-    const trainingExcluded = packRefFiles(batchDir)
+    const trainingExcluded = holdoutFiles(batchDir, raw.trainingExcluded, raw.sources)
     const batch: TasteBatch = {
       dir: batchDir,
       trainingExcluded,

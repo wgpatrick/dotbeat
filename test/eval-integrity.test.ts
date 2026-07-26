@@ -7,13 +7,14 @@
 // trace each assertion back to the failure it encodes.
 
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { applyWavGain, assertWavGainable, normalizeBatchLoudness, markBatchComplete, isBatchComplete, discardIncompleteBatch, BATCH_COMPLETE_MARKER } from '../src/vary/batch.js'
-import { decodeWav, readWavFormat } from '../src/metrics/index.js'
-import { matchClipDurations, writeShowdownBatch } from '../src/taste/showdown.js'
+import { applyWavGain, assertWavGainable, normalizeBatchLoudness, markBatchComplete, isBatchComplete, discardIncompleteBatch, canonicalBatchKey, scoreBatch, recordNoneGood, BATCH_COMPLETE_MARKER, NORMALIZE_MAX_BOOST_DB } from '../src/vary/batch.js'
+import { decodeWav, readWavFormat, integratedLoudness } from '../src/metrics/index.js'
+import { matchClipDurations, writeShowdownBatch, tally, computeShowdownReport } from '../src/taste/showdown.js'
+import { loadTasteBatches, trainable } from '../src/taste/eval.js'
 
 const tmp = (name: string) => mkdtempSync(join(tmpdir(), `beat-evalint-${name}-`))
 
@@ -185,6 +186,172 @@ test('M5: a trimmed clip is faded out in every supported encoding (24-bit includ
     const mid = Math.max(...Array.from(ch.slice(ch.length >> 1, (ch.length >> 1) + 64)).map(Math.abs))
     assert.ok(tail < 0.1 * mid, `${bits}-bit${float ? ' float' : ''} clip ends in a hard cut (tail peak ${tail.toFixed(3)} vs mid ${mid.toFixed(3)})`)
   }
+})
+
+// ---- M7: floor the normalization boost ----------------------------------------------------------
+
+test('M7: a near-silent variant is not boosted into the batch at full level', () => {
+  const dir = tmp('m7')
+  writeFileSync(join(dir, 'v1.wav'), sineWav({ seconds: 2, amp: 0.3 }))
+  writeFileSync(join(dir, 'v2.wav'), sineWav({ seconds: 2, amp: 0.25 }))
+  writeFileSync(join(dir, 'v3.wav'), sineWav({ seconds: 2, amp: 0.35 }))
+  writeFileSync(join(dir, 'v4.wav'), sineWav({ seconds: 2, amp: 0.0005 })) // ~-66 dBFS
+  const r = normalizeBatchLoudness(dir, 4)!
+  const v4 = r.variants[3]!
+  assert.ok(v4.wantedGainDb! > NORMALIZE_MAX_BOOST_DB, 'fixture is not quiet enough to exercise the floor')
+  assert.equal(v4.gainDb, NORMALIZE_MAX_BOOST_DB)
+  assert.equal(v4.capped, true, 'a floored boost must be flagged like any other limited gain')
+  const after = decodeWav(readFileSync(join(dir, 'v4.wav')))
+  const lufs = integratedLoudness(after.channels, after.sampleRate).integratedLufs
+  assert.ok(lufs < r.targetLufs! - 10, `a -70 LUFS variant reached ${lufs.toFixed(1)} LUFS against a ${r.targetLufs} target — it entered the batch as an ordinary clip`)
+  // the other three are normalized as usual: the floor is per-variant, not a batch-wide bail-out
+  assert.equal(r.variants[0]!.capped, false)
+})
+
+// ---- helpers for the log-side findings ----------------------------------------------------------
+
+/** A showdown batch of `kinds`, each a distinct sine, with the manifest written. */
+function makeShowdownBatch(dir: string, kinds: ('engine' | 'gen' | 'ref')[], opts: { from?: Record<string, string> } = {}): string {
+  mkdirSync(dir, { recursive: true })
+  const clips = kinds.map((k, i) => {
+    writeFileSync(join(dir, `v${i + 1}.wav`), sineWav({ seconds: 1, amp: 0.2 + 0.05 * i, freq: 180 + 40 * i }))
+    return { file: `v${i + 1}.wav`, source: { kind: k, ...(opts.from?.[k] !== undefined ? { from: opts.from[k]! } : {}) } }
+  })
+  writeShowdownBatch(dir, 'bassline', clips, { seed: 41 })
+  return dir
+}
+
+// ---- M3: a none-good verdict supersedes an earlier ranking ---------------------------------------
+// Both loaders skipped empty-picks entries at PARSE time, so a none-good could never become the
+// "latest" entry for its batch — the retracted ranking still counted in the win rates AND trained
+// the taste model, under a report line claiming none-good batches are excluded.
+
+test('M3: a later none-good retracts the earlier ranking in BOTH loaders', () => {
+  const root = tmp('m3')
+  const log = join(root, 'beat-scores.jsonl')
+  const dir = makeShowdownBatch(join(root, 'showdown-bassline-1'), ['engine', 'gen', 'ref'])
+  scoreBatch(dir, ['2'], log)
+  recordNoneGood(dir, log)
+
+  const rep = computeShowdownReport(log)
+  assert.equal(rep.totalBatches, 0, 'the retracted ranking still counts in the showdown scoreboard')
+  assert.equal(rep.noneGood.total, 1)
+  assert.deepEqual(rep.overall, [])
+
+  const t = loadTasteBatches(log)
+  assert.equal(t.batches.length, 0, 'the retracted ranking is still training data')
+  assert.equal(t.superseded, 1, 'the retraction must be counted as a supersede, not dropped at parse time')
+})
+
+test('M3: a ranking recorded AFTER a none-good wins — supersede is by order, not by verdict', () => {
+  const root = tmp('m3b')
+  const log = join(root, 'beat-scores.jsonl')
+  const dir = makeShowdownBatch(join(root, 'showdown-bassline-2'), ['engine', 'gen', 'ref'])
+  recordNoneGood(dir, log)
+  scoreBatch(dir, ['1'], log)
+  assert.equal(computeShowdownReport(log).totalBatches, 1)
+  assert.equal(computeShowdownReport(log).noneGood.total, 0)
+  assert.equal(loadTasteBatches(log).batches.length, 1)
+})
+
+// ---- M1: one physical batch dir is one batch, however it was spelled ------------------------------
+
+test('M1: ./x, x, /abs/x and x/ are the same batch, not four phantom ones', () => {
+  const root = tmp('m1')
+  const log = join(root, 'beat-scores.jsonl')
+  const dir = makeShowdownBatch(join(root, 'showdown-bassline-3'), ['engine', 'gen', 'ref'])
+  scoreBatch(dir, ['3'], log)
+  const cwd = process.cwd()
+  try {
+    process.chdir(root)
+    const r2 = scoreBatch('showdown-bassline-3', ['1'], log)
+    assert.ok(r2.previousPicks !== undefined, 'a re-score by relative path was reported as a first score')
+    const r3 = scoreBatch('./showdown-bassline-3/', ['2'], log)
+    assert.ok(r3.previousPicks !== undefined, 'a re-score by trailing-slash path was reported as a first score')
+  } finally {
+    process.chdir(cwd)
+  }
+  assert.equal(computeShowdownReport(log).totalBatches, 1)
+  const t = loadTasteBatches(log)
+  assert.equal(t.batches.length, 1)
+  assert.equal(t.superseded, 2)
+  // the entry itself carries the resolved path, so the log is portable-by-convention
+  assert.equal(t.batches[0]!.dir, canonicalBatchKey(dir))
+})
+
+// ---- M4: self-arm pairs are not evidence ---------------------------------------------------------
+
+test('M4: tally() skips pairs whose two sides are the same arm', () => {
+  // one batch, two clips from the SAME arm plus one from another: the duplicated arm must not
+  // beat itself into the pairwise record
+  const stats = tally([{ picks: ['v1.wav', 'v2.wav', 'v3.wav'], rejected: [], sources: { 'v1.wav': 'ref', 'v2.wav': 'ref', 'v3.wav': 'engine' } }])
+  const ref = stats.find((s) => s.kind === 'ref')!
+  const engine = stats.find((s) => s.kind === 'engine')!
+  assert.equal(ref.pairCount, 2, 'ref should face engine twice, never itself')
+  assert.equal(ref.pairsWon, 2)
+  assert.equal(engine.pairCount, 2)
+  assert.equal(engine.pairsWon, 0)
+})
+
+test('M4: topHalf is counted per variant SLOT, so it can never exceed batches', () => {
+  const stats = tally([
+    { picks: ['v1.wav', 'v2.wav'], rejected: ['v3.wav', 'v4.wav'], sources: { 'v1.wav': 'ref', 'v2.wav': 'ref', 'v3.wav': 'engine', 'v4.wav': 'engine' } },
+    { picks: ['v1.wav', 'v2.wav'], rejected: ['v3.wav', 'v4.wav'], sources: { 'v1.wav': 'ref', 'v2.wav': 'ref', 'v3.wav': 'engine', 'v4.wav': 'engine' } },
+  ])
+  for (const s of stats) assert.ok(s.topHalf <= s.batches, `${s.kind} placed top-half in ${s.topHalf} of ${s.batches} batches ("${Math.round((100 * s.topHalf) / s.batches)}%")`)
+})
+
+// ---- H3: the D25 holdout must survive batch-dir deletion ------------------------------------------
+// trainingExcluded lived ONLY in the batch manifest while the trainable features lived in the log.
+// Deleting the dirs is the documented lifecycle, and it silently turned purchased-loop clips into
+// training data.
+
+test('H3: a purchased-pool ref stays out of training after its batch dir is deleted', () => {
+  const root = tmp('h3')
+  const log = join(root, 'beat-scores.jsonl')
+  const dir = makeShowdownBatch(join(root, 'showdown-bassline-4'), ['engine', 'gen', 'ref'], {
+    from: { ref: '/somewhere/taste-dataset/refs-packs/bassline/PURCHASED_LOOP.wav' },
+  })
+  scoreBatch(dir, ['3', '2'], log)
+  const before = loadTasteBatches(log).batches[0]!
+  assert.ok(before.trainingExcluded.has('v3.wav'))
+  const beforeTrainable = trainable(before)
+
+  rmSync(dir, { recursive: true, force: true })
+  const after = loadTasteBatches(log).batches[0]!
+  assert.ok(after.trainingExcluded.has('v3.wav'), 'the D25 holdout evaporated with the batch dir')
+  assert.deepEqual(trainable(after), beforeTrainable)
+  // the entry still carries the clip's features (it is still ranked held-out) — only training pairs
+  // are withheld, which is the whole point of the holdout
+  assert.ok(Object.keys(after.features).includes('v3.wav'))
+})
+
+test('H3: a ref variant with no manifest and no logged holdout is excluded — unknown means exclude', () => {
+  const root = tmp('h3b')
+  const log = join(root, 'beat-scores.jsonl')
+  // an entry as it was written BEFORE trainingExcluded rode in the log: sources say `ref`, but the
+  // origin pool is unknowable once the dir is gone. Conservative by construction — it can only
+  // withhold training pairs, never add them.
+  const features = { 'v1.wav': { rms: 0.2, centroid: 0.4 }, 'v2.wav': { rms: 0.3, centroid: 0.5 }, 'v3.wav': { rms: 0.25, centroid: 0.45 } }
+  writeFileSync(
+    log,
+    JSON.stringify({
+      t: new Date().toISOString(),
+      batch: join(root, 'gone-batch'),
+      group: 'showdown:bassline',
+      seed: 41,
+      parentSha256: '',
+      picks: [{ rank: 1, variant: 'v3.wav' }],
+      rejected: ['v1.wav', 'v2.wav'],
+      sources: { 'v1.wav': 'engine', 'v2.wav': 'gen', 'v3.wav': 'ref' },
+      features,
+    }) + '\n',
+  )
+  const b = loadTasteBatches(log).batches[0]!
+  assert.ok(b.trainingExcluded.has('v3.wav'), 'an unattributable ref variant must not become training data')
+  assert.deepEqual(trainable(b), { picks: [], rejected: ['v1.wav', 'v2.wav'] })
+  // non-ref arms are unaffected — the conservative rule is scoped to ref variants
+  assert.equal(b.trainingExcluded.has('v1.wav'), false)
 })
 
 // ---- H2: a failed batch must not stay rateable ---------------------------------------------------
