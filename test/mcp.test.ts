@@ -17,10 +17,10 @@ interface McpClient {
   close: () => void
 }
 
-function startMcp(): McpClient {
+function startMcp(extraEnv: Record<string, string> = {}): McpClient {
   // Scrub the owner's real Freesound key: the source-search case asserts the no-key isError, and
   // an inherited key would turn it into a live network call.
-  const env = { ...process.env }
+  const env = { ...process.env, ...extraEnv }
   delete env.FREESOUND_API_KEY
   const proc: ChildProcess = spawn(process.execPath, [join(repoRoot, 'cli', 'beat.mjs'), 'mcp'], { stdio: ['pipe', 'pipe', 'inherit'], env })
   let nextId = 1
@@ -820,3 +820,32 @@ test('tools/call: beat_source_add offline ingest + enforced sidecar; beat_source
   }
 })
 // ==== Phase 37 Stream RD end ====
+
+// ---- dispatch lifecycle over the REAL binary (adversarial hunt #2, 2026-07-26) -----------------
+// The dispatch behaviour itself is pinned in mcp-concurrency.test.ts against the exported
+// runMcpServer. This one case runs through the actual `beat mcp` subprocess, because the thing it
+// checks — that the env override reaches the server and that a timeout comes back as a well-formed
+// isError rather than silence — lives in the wiring, not in the dispatcher.
+test('a tool call that outruns BEAT_MCP_TOOL_TIMEOUT_MS answers with an isError, and the session survives', async () => {
+  const mcp = startMcp({ BEAT_MCP_TOOL_TIMEOUT_MS: '1' })
+  try {
+    await mcp.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } })
+    mcp.notify('notifications/initialized')
+    // beat_render shells out, so it cannot possibly finish inside 1ms — before the fix this simply
+    // ran to completion (or forever) with every later call stuck behind it.
+    const timedOut = await mcp.request('tools/call', {
+      name: 'beat_render',
+      arguments: { file: join(tmpdir(), 'no-such.beat'), out: join(tmpdir(), 'no-such.wav') },
+    })
+    assert.equal(timedOut.isError, true)
+    assert.match(timedOut.content[0].text, /^beat_render exceeded the 1ms tool timeout and was abandoned/)
+    assert.match(timedOut.content[0].text, /BEAT_MCP_TOOL_TIMEOUT_MS/)
+    assert.doesNotMatch(timedOut.content[0].text, /\n\s+at /, 'no stack trace in an agent-facing error')
+
+    // one call timing out is not the session dying
+    const tools = await mcp.request('tools/list')
+    assert.ok(tools.tools.length > 0)
+  } finally {
+    mcp.close()
+  }
+})
