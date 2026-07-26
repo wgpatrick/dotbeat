@@ -112,6 +112,9 @@ export const VERIFY_SCRIPTS = [
 
   // ---- gui tier: DOM + on-disk .beat assertions ------------------------------------------------
   { script: 'ui/verify-focus-deeplinks.mjs', area: 'daemon-sync', tier: 'gui', status: 'live' },
+  // Not the daemon GUI — the `beat ab` feedback page, a self-contained node:http app like
+  // `beat rate`/`beat board`. It still needs a browser, so it belongs in the gui tier.
+  { script: 'ui/verify-ab-page.mjs', area: 'owner-feedback', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase16-velocity.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase17-arrangement.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
   {

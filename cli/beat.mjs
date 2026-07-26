@@ -169,13 +169,14 @@ const HELP_FAMILIES = [
   ['produce', 'add-track', 'trick', 'gen-kit'], // composing produced: retrofit a track / create one produced / pull a named move / generate a whole produced kit (docs/producing.md)
   ['pilot', 'taste-eval', 'rate', 'score'], // the T5 overnight critic-guided QD search (docs/pilot.md, research/117)
   ['board', 'vary', 'adopt', 'rate'], // the NON-BLIND production picking loop (research/128): vary candidates -> board pick -> adopt (rate is the blind sibling)
+  ['ab', 'board', 'rate', 'render'], // the owner-FEEDBACK loop (research/128 §2.5, 137): render a listening set -> ab for the owner's words -> digest back to the agent
   ['checkpoint', 'history', 'restore', 'pin', 'unpin', 'pins'],
   ['daemon', 'open', 'selection'], // the running-GUI surface: serve a file, deep-link into it, read/set its selection
 
   ['effect-add', 'effect-rm', 'effect-move', 'effect-bypass'],
   ['clip', 'scene', 'scene-set', 'place', 'unplace', 'song', 'song-move', 'song-insert'],
   ['add-note', 'rm-note', 'add-hit', 'rm-hit'],
-  ['render', 'feedback', 'metrics', 'lint'], // Phase 37 Stream RA: the render -> listen loop
+  ['render', 'feedback', 'metrics', 'lint', 'ab'], // Phase 37 Stream RA: the render -> listen loop (feedback = the machine's ears, ab = the owner's)
   // ==== Phase 38 Stream SA begin ====
   ['analyze', 'skeleton', 'analyze-structure', 'source'], // Phase 38: audio import -> skeleton -> critique
   // ==== Phase 38 Stream SA end ====
@@ -987,6 +988,33 @@ const HELP = [
                                                           Adopt a winner with: beat adopt <batch> <pick>`,
   },
   {
+    cmd: 'ab',
+    aliases: ['ask'],
+    text: `  beat ab <dir> [--port 4323] [--log f] [--all]         owner-FEEDBACK UI over a folder of renders: A/B(/C)
+                                                          players that all play IN SYNC so 1-9 switches which one
+                                                          you hear at the same instant and the same moment. Captures
+                                                          a preference AND free text ("what did you hear?") — the
+                                                          free text is the point. Reads <dir>/feedback.json if the
+                                                          agent wrote one ({question, comparisons:[{id, label,
+                                                          question?, options:[{name, wav, note?}], measurements?}]}),
+                                                          otherwise INFERS comparisons from the folder: <case>/
+                                                          <arm>.wav sets and <stem>--before/--after.wav pairs.
+                                                          Writes ONE beat-feedback.jsonl at <dir> + one answer file
+                                                          per comparison under feedback-answers/ — a SEPARATE log
+                                                          from blind beat-scores.jsonl and from beat-decisions.jsonl,
+                                                          never merged. --status [--json]: no server, poll answers.
+                                                          --digest [--json]: preferences + the owner's VERBATIM
+                                                          words (relay those, never a paraphrase).
+                                                          --bank-listen-bench: turn flagged complaints into matched
+                                                          fail/pass listening-case candidates. --all: re-answer.
+                                                          --answer <id> --prefer <name> [--note "..."] [--flag]:
+                                                          record an answer with NO browser — the channel for an owner
+                                                          who replied in chat (transcribe their exact words).
+                                                          also reachable as: beat ask
+                                                          NOTE: beat feedback is the opposite direction of this loop
+                                                          (DSP analysis, no human) — this is the owner's own ears.`,
+  },
+  {
     cmd: 'audition',
     text: `  beat audition <dir> [--group G] [--seed N] [--no-shuffle]
                                                           stitch a blind audition.wav from ANY directory of wavs
@@ -1145,7 +1173,9 @@ const HELP = [
                                                           (the phase-6 dynamics-plan check).
                                                           Honest limits: per-section STATIC metrics only — this
                                                           does NOT hear masking, arrangement, or transitions,
-                                                          only how sections differ as isolated static mixes`,
+                                                          only how sections differ as isolated static mixes.
+                                                          This is DSP ANALYSIS, not a human. To get the OWNER's
+                                                          own reaction to a folder of renders, use: beat ab`,
   },
   // ---- Phase 37 Stream RA end -------------------------------------------------------------
   {
@@ -6358,6 +6388,12 @@ async function main() {
       const { boardCommand } = await import('./board.mjs')
       await boardCommand(rest)
       return // the picking server runs until ctrl-c (--status returns instead)
+    }
+    case 'ask':
+    case 'ab': {
+      const { abCommand } = await import('./ab.mjs')
+      await abCommand(rest)
+      return // the feedback server runs until ctrl-c (--status/--digest return instead)
     }
     case 'taste-eval':
       await tasteEvalCmd(rest)
