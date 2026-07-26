@@ -692,11 +692,11 @@ const HELP = [
                                                           tried; both stay selectable to reproduce an old run.
                                                           stub = deterministic no-deps. The endorsed representation
                                                           is --aes-backend (Audiobox-Aesthetics, CC-BY-4.0), ON by
-                                                          default: four
-                                                          NAMED axes per clip — CE content enjoyment, CU content
-                                                          usefulness, PC production complexity, PQ production
-                                                          quality — as explicit features (aes-bt / dsp+aes-bt in
-                                                          the ablation) plus signed per-axis taste directions.
+                                                          default: four NAMED axes per clip — CE content enjoyment,
+                                                          CU content usefulness, PC production complexity, PQ
+                                                          production quality — as explicit features (aes-bt /
+                                                          dsp+aes-bt in the ablation) plus signed per-axis taste
+                                                          directions.
                                                           Scored batches carry per-variant DSP features in the log
                                                           since T0; --backfill derives them for older entries whose
                                                           batch renders still exist (rewrites the log, .bak kept).
