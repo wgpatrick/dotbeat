@@ -85,7 +85,7 @@ export async function prepareSurgeTracks(beatPath) {
     const hit = byName.get(name.toLowerCase())
     if (!hit) {
       const near = catalogue.map((p) => p.name).filter((n) => n.toLowerCase().includes(name.toLowerCase())).slice(0, 5)
-      throw new Error(`surge render prep: patch "${name}" not found in the factory catalogue (${catalogue.length} patches)${near.length ? `; did you mean: ${near.join(', ')}` : ''}. List names with \`beat surge patches\`.`)
+      throw new Error(`surge render prep: patch "${name}" not found in the patch catalogue (${catalogue.length} patches across the factory + third-party pools)${near.length ? `; did you mean: ${near.join(', ')}` : ''}. List names with \`beat surge patches\`.`)
     }
     return hit
   }
@@ -112,7 +112,10 @@ export async function prepareSurgeTracks(beatPath) {
       continue
     }
     const overrides = [...surge.overrides].sort((a, b) => a.param.localeCompare(b.param)).map((o) => ({ param: o.param, value: o.value }))
-    const keyObj = { patch: surge.patch, overrides, notes: surgeNotes, sampleRate: surge.sampleRate }
+    // D6: the doc's bpm is part of the render, not just of the note timing — every tempo-synced
+    // LFO/delay/arp in the patch locks to it. It therefore belongs in the cache key: changing the
+    // doc's tempo must invalidate the cached WAV exactly like changing a note or an override does.
+    const keyObj = { patch: surge.patch, overrides, notes: surgeNotes, sampleRate: surge.sampleRate, tempo: doc.bpm }
     const hash = createHash('sha256').update(JSON.stringify(keyObj)).digest('hex')
     const short = hash.slice(0, 12)
     const sampleId = `surge_${sanitizeId(track.id)}_${short}`
@@ -133,7 +136,7 @@ export async function prepareSurgeTracks(beatPath) {
 
     if (!cached) {
       mkdirSync(mediaDir, { recursive: true })
-      const { meta } = await runSurgeRender({ patch: resolvePatchPath(surge.patch), notes: surgeNotes, sampleRate: surge.sampleRate, outPath: wavPath, overrides })
+      const { meta } = await runSurgeRender({ patch: resolvePatchPath(surge.patch), notes: surgeNotes, sampleRate: surge.sampleRate, outPath: wavPath, overrides, tempo: doc.bpm })
       const prov = {
         generator: 'surge-render (Track 1a)',
         track: track.id,
@@ -142,6 +145,8 @@ export async function prepareSurgeTracks(beatPath) {
         appliedOverrides: meta.overrides,
         overrides,
         sampleRate: surge.sampleRate,
+        tempo: meta.tempo,
+        tempoApplied: meta.tempoApplied,
         notes: surgeNotes.length,
         seconds: meta.seconds,
         hash,
