@@ -1429,6 +1429,46 @@ function buildSeededNoiseBuffer(type: SeededNoiseType, seed: number): Tone.ToneA
   return buffer
 }
 
+/** The shared reverb send's decay time, seconds — unchanged from the Tone.Reverb it replaced. */
+const REVERB_DECAY_SECONDS = 2.2
+/** Fixed: the reverb bus is ONE shared send, so there is no per-track identity to derive a seed
+ * from, and a constant is what makes the same project render the same reverb tail in every
+ * process. Arbitrary but frozen — changing it changes the tail of every project ever rendered. */
+const REVERB_IMPULSE_SEED = 0x5eed_1e55
+
+/** A seeded, decaying stereo noise impulse response — the same thing `Tone.Reverb.generate()`
+ * builds (a noise burst with an exponential decay envelope, rendered offline into a Convolver),
+ * with the one difference that matters: its noise comes from makeNoiseStream instead of
+ * `Math.random()`.
+ *
+ * Found by the CLI/MCP pilot run against the D20 seeding work: seeding the drum voices made
+ * `--offline` reproducible for drums, and the help text was updated to say renders reproduce — but
+ * a track with `sendReverb > 0` still varied by up to 197 LSB across ~84% of samples, moving the
+ * measured loudness 0.4 LU and the stereo width 0.6 dB between identical runs. That is the same
+ * order as the deltas `beat feedback` and the vary->score loop are asked to adjudicate, and
+ * `beat produce` sets `sendReverb 0.2` on lead/pad/keys/hats BY DEFAULT — so the recommended happy
+ * path walked straight into it and the taste loop was scoring partly on reverb noise.
+ *
+ * Both of Tone.Noise's unseeded halves are gone here: the samples are drawn from the seeded stream,
+ * and there is no per-trigger random read offset because the IR is a one-shot buffer, not a loop. */
+function buildReverbImpulse(decaySeconds: number, seed: number): Tone.ToneAudioBuffer {
+  const sr = (Tone.getContext().rawContext as unknown as AudioContext).sampleRate
+  const length = Math.max(1, Math.round(sr * decaySeconds))
+  const channels: Float32Array[] = []
+  for (let c = 0; c < 2; c++) {
+    const channel = new Float32Array(length)
+    // Independent draw per channel — two identical channels would make a mono reverb, and Tone's
+    // own generate() runs a separate Noise per side for exactly that reason.
+    const rand = makeNoiseStream(hashSeed(seed, 'reverb-ch', c))
+    for (let i = 0; i < length; i++) {
+      // exponentialApproachValueAtTime(0, 0, decay) is a time constant of `decay`: e^(-t/decay).
+      channel[i] = (rand() * 2 - 1) * Math.exp(-(i / sr) / decaySeconds)
+    }
+    channels.push(channel)
+  }
+  return new Tone.ToneAudioBuffer().fromArray(channels)
+}
+
 /** A drop-in replacement for the `Tone.NoiseSynth` surface this engine actually uses
  * (`connect`/`volume`/`set({ envelope })`/`triggerAttackRelease`/`dispose`), with every source of
  * `Math.random()` replaced by a seed. */
@@ -2128,7 +2168,7 @@ export class Engine {
     return this.nativeCtx
   }
 
-  private reverbBus: Tone.Reverb | null = null
+  private reverbBus: Tone.Convolver | null = null
   private delayBus: Tone.FeedbackDelay | null = null
 
   private masterBus: Tone.Gain | null = null
@@ -2184,7 +2224,12 @@ export class Engine {
   // already live one-instance-per-track — research 17 §4.2). reverb/delay stay shared sends.
   private getBuses() {
     if (!this.reverbBus) {
-      this.reverbBus = new Tone.Reverb({ decay: 2.2, wet: 1 }).connect(this.getMaster())
+      // A Convolver over a SEEDED impulse response, not Tone.Reverb — Tone.Reverb generates its IR
+      // from Tone.Noise (Math.random at construction), which made every render of a project with any
+      // sendReverb different. See buildReverbImpulse. Same topology and decay; a Convolver is 100%
+      // wet by construction, which is what `wet: 1` said on the Reverb it replaces — the send GAIN
+      // (reverbSend, driven by sendReverb) is what sets how much of each track reaches this bus.
+      this.reverbBus = new Tone.Convolver({ url: buildReverbImpulse(REVERB_DECAY_SECONDS, REVERB_IMPULSE_SEED), normalize: true }).connect(this.getMaster())
       this.delayBus = new Tone.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 1 }).connect(this.getMaster())
     }
     return { reverb: this.reverbBus, delay: this.delayBus! }

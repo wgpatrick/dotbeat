@@ -14,7 +14,7 @@ import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { detectPitch, formatPartials, formatPitchLine, verifyRoot, PITCH_CONFIDENCE_MEDIUM } from '../src/analysis/pitch.js'
+import { detectPitch, formatPartials, formatPitchLine, verifyRoot, formatRootVerification, PITCH_CONFIDENCE_MEDIUM } from '../src/analysis/pitch.js'
 import { decodeWav } from '../src/metrics/wav.js'
 import { hzToMidi } from '../src/core/keymap.js'
 
@@ -266,4 +266,41 @@ test('verifyRoot passes the recipe-song bell on the root the song is actually ke
   const p = detectFile('bell_a.wav')
   const v = verifyRoot(hzToMidi(1748.6), p)
   assert.equal(v.ok, true, `bell_a on its own a6 root was rejected: ${v.detail}`)
+})
+
+// The octave-DOWN hole, found by the 2026-07-26 CLI/MCP pilot AFTER the checks above shipped.
+// `--root a3` on an unambiguous a4 sample passed both hard checks and built a keymap an octave
+// sharp in silence: nothing sits below a3 to trip the octave-error check, and a3's harmonic series
+// trivially CONTAINS the real a4, so support read 100%. It is the likelier human error of the two
+// directions, and it was the one that was missed.
+test('verifyRoot warns (never silently passes) on a root an octave BELOW the true fundamental', () => {
+  const p = detectPitch([sawtooth(440)], FS)
+  const v = verifyRoot(hzToMidi(220), p)
+  assert.equal(v.ok, true, 'a missing fundamental is legitimate material — this must not become a refusal')
+  assert.equal(v.warnings.length, 1, 'but it must not pass silently')
+  assert.match(v.warnings[0]!, /no partial sits at a3 itself/)
+  assert.match(v.warnings[0]!, /probably a4/, 'the warning must name the root the spectrum points at')
+  assert.match(v.warnings[0]!, /12 semitones flat/, 'and say which way the whole clip would be wrong')
+})
+
+test('verifyRoot stays silent on the CORRECT root — a warning on every root is no warning at all', () => {
+  const v = verifyRoot(hzToMidi(440), detectPitch([sawtooth(440)], FS))
+  assert.equal(v.ok, true)
+  assert.deepEqual(v.warnings, [])
+  assert.match(formatRootVerification(hzToMidi(440), v), /OK/)
+})
+
+test('the recipe-song bell does not trip the octave-DOWN warning on its own root', () => {
+  // bell_a's 1748.6 Hz a6 IS present in its partial table (0.8 dB under the strongest), so the
+  // check has nothing to say. A warning here would fire on the project's own known-good asset.
+  const v = verifyRoot(hzToMidi(1748.6), detectFile('bell_a.wav'))
+  assert.equal(v.ok, true)
+  assert.deepEqual(v.warnings, [], 'the song\'s own hand-verified root must not be called suspect')
+})
+
+test('formatRootVerification never prints OK and SUSPECT together', () => {
+  const suspect = verifyRoot(hzToMidi(220), detectPitch([sawtooth(440)], FS))
+  const text = formatRootVerification(hzToMidi(220), suspect)
+  assert.match(text, /SUSPECT/)
+  assert.ok(!/: OK/.test(text), 'a reader who sees OK first stops reading — which is how this hole stayed invisible')
 })

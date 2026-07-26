@@ -144,7 +144,11 @@ export function pickTonalCandidate(pitches: PitchDetection[]): GenKitTonalPick {
   const verifies = (i: number): boolean => {
     const p = pitches[i]!
     const root = rootOf(p)
-    return root !== null && verifyRoot(root, p).ok
+    if (root === null) return false
+    const v = verifyRoot(root, p)
+    // A warned root (octave-DOWN suspect) loses to a clean one in the first pass, but is still
+    // pickable in the second — gen-kit never refuses, it only prefers.
+    return v.ok && v.warnings.length === 0
   }
   let best = -1
   let bestConf = -1
@@ -175,13 +179,13 @@ export function pickTonalCandidate(pitches: PitchDetection[]): GenKitTonalPick {
       index: best,
       rootMidi: p.midi,
       rootSource: 'detected',
-      rootVerified: verification.ok,
+      rootVerified: verification.ok && verification.warnings.length === 0,
       verification,
       reason:
         `detected ${p.hz.toFixed(1)} Hz = ${p.note} at ${p.level} confidence ${p.confidence.toFixed(2)} — the most confident single pitch in the batch; ` +
-        (verification.ok
+        (verification.ok && verification.warnings.length === 0
           ? `root verified (${verification.detail})`
-          : `ROOT UNVERIFIED in every candidate — ${verification.detail} Keymapped anyway (gen-kit ships a playable start), so treat this instrument's tuning as suspect and re-pick from the batch`),
+          : `ROOT UNVERIFIED in every candidate — ${verification.ok ? verification.warnings.join(' ') : verification.detail} Keymapped anyway (gen-kit ships a playable start), so treat this instrument's tuning as suspect and re-pick from the batch`),
     }
   }
   // Low confidence everywhere: root on the winner's lowest strong partial rather than refusing —
@@ -194,13 +198,13 @@ export function pickTonalCandidate(pitches: PitchDetection[]): GenKitTonalPick {
     index: best,
     rootMidi,
     rootSource: 'suggested',
-    rootVerified: verification.ok,
+    rootVerified: verification.ok && verification.warnings.length === 0,
     verification,
     reason:
       `no candidate reached medium pitch confidence (best ${p.confidence.toFixed(2)}) — rooted on the winner's lowest strong partial, ${rootHz.toFixed(1)} Hz = ${midiToNote(rootMidi)} (the same call beat keymap's --root hint makes); ` +
-      (verification.ok
+      (verification.ok && verification.warnings.length === 0
         ? `root verified (${verification.detail})`
-        : `root UNVERIFIED — ${verification.detail} Treat this instrument's tuning as suspect and re-pick from the batch`),
+        : `root UNVERIFIED — ${verification.ok ? verification.warnings.join(' ') : verification.detail} Treat this instrument's tuning as suspect and re-pick from the batch`),
   }
 }
 

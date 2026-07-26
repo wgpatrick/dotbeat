@@ -1017,12 +1017,14 @@ const HELP = [
                                                           (headless Chromium driving ui/; no BeatLab needed)
   beat render <file> --offline [-o out.wav]               compute the mix through an offline context instead
                                                           of capturing the realtime clock — same engine, no
-                                                          lossy recorder step. REPRODUCIBLE: the same file
-                                                          renders the same audio every run, to ~1 LSB — the
-                                                          drum kit's noise voices are seeded per (track, lane)
-                                                          with a read offset that is a function of the hit's
-                                                          time, so nothing is drawn from the clock or from
-                                                          process state. CPU-bound: fast for short/small
+                                                          lossy recorder step. REPRODUCIBLE to ~1 LSB: every
+                                                          stochastic element is seeded from the DOCUMENT, not
+                                                          the clock or process state — the kit's noise voices
+                                                          per (track, lane) with a read offset that is a
+                                                          function of the hit's time, and the shared reverb
+                                                          send's impulse response from a fixed seed. The ~1 LSB
+                                                          residual is float-rounding in the offline mix, not
+                                                          randomness. CPU-bound: fast for short/small
                                                           projects, can be SLOWER than live capture for long
                                                           dense songs (the measured ratio is printed).
                                                           Refuses soundfont (instrument/sf-lane) projects;
@@ -4781,7 +4783,10 @@ function keymapCmd(argv) {
     try {
       const { channels, sampleRate } = readSampleAudio(file, before, sampleId)
       const check = verifyRoot(rootMidi, detectPitch(channels, sampleRate))
-      if (!check.ok) {
+      // Both directions must be reported here. The CLI/MCP pilot (2026-07-26) found `--root a3` on
+      // an unambiguous a4 sample passing silently: octave-DOWN cannot fail the hard checks, so it
+      // arrives as a WARNING, and a warning nobody prints is the defect all over again.
+      if (!check.ok || check.warnings.length > 0) {
         process.stderr.write(`warning: ${formatRootVerification(rootMidi, check)}\nBuilding the keymap on your stated root anyway.\n`)
       }
     } catch {
@@ -4799,10 +4804,15 @@ function keymapCmd(argv) {
     if (!verification.ok && !argv.includes('--force')) {
       throw new BeatEditError(keymapRootRefusal(argv, sampleId, pitch, verification))
     }
+    for (const w of verification.warnings) process.stderr.write(`warning: root check ${pitch.note}: SUSPECT — ${w}\n`)
     rootMidi = pitch.midi
     rootSource =
       `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)}); ` +
-      (verification.ok ? `root verified — ${verification.detail}` : `root check FAILED (${verification.reason}) and --force overrode it`)
+      (!verification.ok
+        ? `root check FAILED (${verification.reason}) and --force overrode it`
+        : verification.warnings.length > 0
+          ? 'root SUSPECT — see the warning above'
+          : `root verified — ${verification.detail}`)
   }
 
   // --dry-run runs the REAL build and simply doesn't write it. Computing the plan alone would skip

@@ -515,6 +515,14 @@ export function formatPitchLine(p: PitchDetection): string {
 //      If so the claimed root is a harmonic and the true fundamental is lower — the octave error.
 //   2. Do the partials actually form a harmonic series ON the claimed root? A root the series
 //      does not support is not a root, however confidently it was detected.
+//   3. Is there any energy AT the claimed root itself? Found by the 2026-07-26 CLI/MCP pilot as a
+//      hole in checks 1-2: `--root a3` on an unambiguous a4 sample passed both, because a3's
+//      harmonic series trivially CONTAINS the real a4, so support reads 100% and there is nothing
+//      below a3 to trip check 1 — and the keymap came out an octave sharp, silently. Octave-DOWN
+//      is the likelier human error (under-guessing the root of a bright sound), which made this the
+//      more dangerous of the two directions to have missed. It is a WARNING and not a refusal
+//      because a real instrument may genuinely lack its own fundamental (a filtered bass, a
+//      missing-fundamental tone), and refusing those would break material that keymaps fine.
 //
 // This does NOT re-render and re-detect. That was the first design and it is circular: repitching
 // by `tune` is a frequency scaling, so a detector with a systematic octave error reproduces the
@@ -544,7 +552,12 @@ const SUBHARMONIC_EVIDENCE_DB = -18
 const HARMONIC_SUPPORT_MIN = 0.35
 
 export interface RootVerification {
+  /** Hard fail: do not build a keymap on this root without an explicit override. */
   ok: boolean
+  /** Soft signals that must be REPORTED but do not refuse — currently the phantom-root check (3).
+   * Separate from `reason` because "this is wrong" and "this is unconfirmable" are different
+   * answers, and collapsing them would either refuse legitimate material or hide a real defect. */
+  warnings: string[]
   /** 'octave-error' = a prominent partial sits an octave/twelfth/two octaves BELOW the claimed
    * root, so the root is a harmonic of something lower. 'unsupported' = the partials do not form a
    * series on the claimed root. 'no-evidence' = no usable partial table (nothing to check against;
@@ -576,6 +589,7 @@ export function verifyRoot(rootMidi: number, pitch: PitchDetection): RootVerific
   if (partials.length === 0) {
     return {
       ok: true,
+      warnings: [],
       reason: 'no-evidence',
       alternateRootMidi: null,
       alternateRootNote: null,
@@ -595,6 +609,7 @@ export function verifyRoot(rootMidi: number, pitch: PitchDetection): RootVerific
     const interval = divisor === 2 ? 'an octave' : divisor === 3 ? 'a twelfth' : 'two octaves'
     return {
       ok: false,
+      warnings: [],
       reason: 'octave-error',
       alternateRootMidi: altMidi,
       alternateRootNote: midiToNote(altMidi),
@@ -613,6 +628,7 @@ export function verifyRoot(rootMidi: number, pitch: PitchDetection): RootVerific
     const altMidi = alt === null ? null : hzToMidi(alt)
     return {
       ok: false,
+      warnings: [],
       reason: 'unsupported',
       alternateRootMidi: altMidi,
       alternateRootNote: altMidi === null ? null : midiToNote(altMidi),
@@ -623,8 +639,32 @@ export function verifyRoot(rootMidi: number, pitch: PitchDetection): RootVerific
     }
   }
 
+  // ---- check 3: is there anything AT the claimed root? (the octave-DOWN hole) -----------------
+  // A root an octave (or more) BELOW the true fundamental cannot fail checks 1 or 2 by
+  // construction: nothing sits below it, and the true fundamental is one of its own harmonics, so
+  // support reads high. The tell is that the claimed root frequency itself is EMPTY.
+  const warnings: string[] = []
+  const atRootItself = partials.find((p) => atRatio(p.hz, rootHz))
+  if (!atRootItself) {
+    const lowestProminent = partials
+      .filter((p) => p.relDb >= -PROMINENCE_DB)
+      .reduce<SpectralPartial | null>((lo, p) => (lo === null || p.hz < lo.hz ? p : lo), null)
+    if (lowestProminent && lowestProminent.hz > rootHz) {
+      const mult = lowestProminent.hz / rootHz
+      const altMidi = hzToMidi(lowestProminent.hz)
+      warnings.push(
+        `no partial sits at ${midiToNote(rootMidi)} itself — the lowest prominent partial is ` +
+          `${lowestProminent.hz.toFixed(1)} Hz (${midiToNote(altMidi)}), ${mult.toFixed(2)}x above it. ` +
+          `The claimed root passes the harmonic-series check only because the real fundamental is one of ` +
+          `ITS harmonics, so every lane would be tuned ${(12 * Math.log2(mult)).toFixed(0)} semitones flat. ` +
+          `Unless this sample deliberately lacks its own fundamental, the root is probably ${midiToNote(altMidi)}.`,
+      )
+    }
+  }
+
   return {
     ok: true,
+    warnings,
     reason: 'ok',
     alternateRootMidi: null,
     alternateRootNote: null,
@@ -649,8 +689,14 @@ function harmonicSupportFor(rootHz: number, partials: SpectralPartial[]): number
 
 /** The refusal/warning body both `beat keymap` and gen-kit print — one wording for one defect. */
 export function formatRootVerification(rootMidi: number, v: RootVerification): string {
-  if (v.ok) return `root check ${midiToNote(rootMidi)}: OK — ${v.detail}`
-  const lines = [`root check ${midiToNote(rootMidi)}: FAILED (${v.reason}) — ${v.detail}`]
-  if (v.alternateRootNote !== null) lines.push(`the spectrum points at ${v.alternateRootNote} instead.`)
+  // "OK" and "SUSPECT" must never appear together — a reader who sees OK first stops reading, which
+  // is precisely how the octave-DOWN case stayed invisible.
+  const lines = !v.ok
+    ? [`root check ${midiToNote(rootMidi)}: FAILED (${v.reason}) — ${v.detail}`]
+    : v.warnings.length > 0
+      ? []
+      : [`root check ${midiToNote(rootMidi)}: OK — ${v.detail}`]
+  if (!v.ok && v.alternateRootNote !== null) lines.push(`the spectrum points at ${v.alternateRootNote} instead.`)
+  for (const w of v.warnings) lines.push(`root check ${midiToNote(rootMidi)}: SUSPECT — ${w}`)
   return lines.join('\n')
 }

@@ -326,3 +326,27 @@ function writeWavMono(path: string, sampleRate: number, seconds: number, fn: (t:
   header.writeUInt32LE(data.length, 40)
   writeFileSync(path, Buffer.concat([header, data]))
 }
+
+test('beat keymap warns on an octave-DOWN stated root — the hole the CLI/MCP pilot found', () => {
+  // The pilot ran exactly this and got NO warning: `--root a3` on an unambiguous a4 sample, which
+  // tunes lane a4 to +12 and plays the whole keymap an octave sharp. It passes both hard checks by
+  // construction, so it has to arrive as a warning or not at all.
+  const dir = mkdtempSync(join(tmpdir(), 'beat-keymap-octave-down-'))
+  const file = join(dir, 'song.beat')
+  writeWavMono(join(dir, 'bell.wav'), 44100, 1.5, (t) =>
+    0.5 * (0.9 * Math.sin(2 * Math.PI * 440 * t) + 0.45 * Math.sin(2 * Math.PI * 880 * t) + 0.25 * Math.sin(2 * Math.PI * 1320 * t)))
+  execFileSync(process.execPath, [beatCli, 'init', file], { encoding: 'utf8' })
+  execFileSync(process.execPath, [beatCli, 'add-track', file, 'kit', 'drums'], { encoding: 'utf8' })
+  execFileSync(process.execPath, [beatCli, 'sample', file, 'bell', 'bell.wav'], { encoding: 'utf8', cwd: dir })
+
+  const args = ['keymap', file, 'kit', 'bell', '--scale', 'minorPentatonic', '--from', 'a4', '--to', 'a5', '--dry-run']
+  const low = spawnSync(process.execPath, [beatCli, ...args, '--root', 'a3'], { encoding: 'utf8', cwd: dir })
+  assert.equal(low.status, 0, 'a stated root is still never refused')
+  assert.match(low.stderr, /SUSPECT/, 'an octave-down root must not pass in silence')
+  assert.match(low.stderr, /probably a4/)
+
+  // and the correct root must stay quiet, or the warning means nothing
+  const right = spawnSync(process.execPath, [beatCli, ...args, '--root', 'a4'], { encoding: 'utf8', cwd: dir })
+  assert.equal(right.status, 0)
+  assert.ok(!/SUSPECT/.test(right.stderr), `the correct root was called suspect:\n${right.stderr}`)
+})
