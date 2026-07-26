@@ -4,7 +4,8 @@
 //      synthetic drifted trick fails loudly at load (the genSubject/showdownRole property);
 //   2. apply is exactly a bag of ordinary edits — the referenced fields land, notes/hits the recipe
 //      doesn't touch are untouched, and a counter-indicated apply refuses unless forced;
-//   3. suggest proposes only precondition-passing, non-counter-indicated tricks, ranked width-first.
+//   3. suggest proposes only precondition-passing, non-counter-indicated tricks, ranked by the
+//      MEASURED axis order and against each track's own per-role target band.
 
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -179,14 +180,58 @@ test('suggest excludes counter-indicated and kind-mismatched tricks', () => {
   assert.ok(!names.includes('open-hat-air'))
 })
 
-test('suggest ranks width tricks before air/motion/glue (the measured showdown ordering)', () => {
+// Was 'suggest ranks width tricks before air/motion/glue (the measured showdown ordering)', pinning
+// 115 §6's width-first order. Research 133 §1 measured that ordering as dead — pack basslines win
+// ~87% pairwise at -45.5 dB width and 0.00% air, and engineplus already sits inside the pack width
+// range, so width/air tricks were ranked first onto an already-closed gap. Motion and glue now lead.
+// This is a SCREEN, not a frozen ablation constant (research/140 §4.3): reordering it invalidates no
+// historical blind comparison, unlike engineplusProfile.
+test('suggest ranks motion and glue before width and air (133 §1, replacing 115 §6)', () => {
   const doc = projectWithRoles()
   const all = suggestForDocument(TRICKS, doc, null)
   const axisSeq = all.map((s) => s.trick.axis)
-  const order = { width: 0, air: 1, motion: 2, glue: 3 } as const
+  const order = { motion: 0, glue: 1, width: 2, air: 3 } as const
   for (let i = 1; i < axisSeq.length; i++) {
     assert.ok(order[axisSeq[i - 1]!] <= order[axisSeq[i]!], `axis order violated at ${i}: ${axisSeq[i - 1]} before ${axisSeq[i]}`)
   }
+})
+
+test('produced targets are per-role: the same width reads as a gap on lead and as fine on bass', () => {
+  // -44 dB width. For a LEAD that is far below the pack lead band (p25 -11.2 dB) — a real gap.
+  // For a BASSLINE it is exactly what the reference class does (21 of 32 pack basslines measure at
+  // or below -40 dB), so it must NOT read as a gap. The old role-blind table scored both identically
+  // and, being one-sided, could not express "too wide" for bass at all.
+  const feats = (widthDb: number) => ({
+    lufs: -14, samplePeakDb: -1, truePeakDb: -1, crestDb: 12, rmsDb: -20,
+    bandSubPct: 4, bandBassPct: 30, bandMidsPct: 50, bandPresencePct: 5, bandAirPct: 0.1,
+    centroidLog2: 9, stereoCorrelation: 1, stereoWidthDb: widthDb,
+  })
+  const doc = projectWithRoles()
+  const widthGap = (trackId: string, w: number) => {
+    const s = suggestForTrack(TRICKS, { doc, trackId, features: feats(w) }).find((x) => x.trick.name === 'unison-spread')
+    return s ? s.gap : null
+  }
+  const leadGap = widthGap('lead', -44)
+  assert.ok(leadGap !== null && leadGap > 0, 'a -44 dB lead sits below the pack lead width band, so it is a gap')
+
+  // and the bass side of the same coin: a dead-mono bassline is on target, not deficient.
+  const bassGap = widthGap('bass', -44)
+  if (bassGap !== null) {
+    assert.equal(bassGap, 0, 'a -44 dB bassline is exactly the pack bassline target — it must not score a width gap')
+  }
+})
+
+test('produced ranges are two-sided, so "too much" is as visible as "too little"', () => {
+  // The one-sided predecessor returned 0 for every over-range value, which is why 133 could report
+  // an air-shelf firing on a chords track whose reference class ships 0.00% air.
+  const doc = projectWithRoles()
+  const overWide = {
+    lufs: -14, samplePeakDb: -1, truePeakDb: -1, crestDb: 12, rmsDb: -20,
+    bandSubPct: 4, bandBassPct: 30, bandMidsPct: 50, bandPresencePct: 5, bandAirPct: 0.1,
+    centroidLog2: 9, stereoCorrelation: 0, stereoWidthDb: 6, // +6 dB: wider than any pack loop
+  }
+  const s = suggestForTrack(TRICKS, { doc, trackId: 'lead', features: overWide }).find((x) => x.trick.name === 'unison-spread')
+  if (s) assert.ok(s.gap > 0, 'a +6 dB width is far ABOVE the pack lead band and must score a nonzero gap')
 })
 
 test('without a render, metric-gated tricks are flagged unverified rather than dropped', () => {
@@ -208,5 +253,5 @@ test('with a render, a passing metric gate marks the suggestion verified and com
   const lead = suggestForTrack(TRICKS, { doc, trackId: 'lead', features })
   const uni = lead.find((s) => s.trick.name === 'unison-spread')!
   assert.equal(uni.unverified, false)
-  assert.ok(uni.gap > 0, 'a -52 dB width sits far below the produced range, so gap > 0')
+  assert.ok(uni.gap > 0, 'a -52 dB width sits far below the lead role\'s produced range, so gap > 0')
 })

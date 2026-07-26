@@ -11,6 +11,8 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   CURATION_GATES,
+  CURATION_GATES_BY_ROLE,
+  gatesForRole,
   CURATION_BLEND,
   passesGates,
   zScores,
@@ -44,8 +46,55 @@ test('passesGates: rejects a ringy render (> -32 dB) and a mostly-silent one (< 
   assert.ok(passesGates(scores({ ringDb: -32 })), 'exactly -32 dB is on the keep side')
   assert.ok(!passesGates(scores({ activeFraction: 0.4 })), 'below 0.5 active is rejected')
   assert.ok(passesGates(scores({ activeFraction: 0.5 })), 'exactly 0.5 active is on the keep side')
+  // These two pins are a CHANGE-DETECTOR on a screen, not a frozen-science assertion. Research/140
+  // §4.3 found that a bare `===` here had made the gate feel frozen — the same guardrail that
+  // rightly protects engineplusProfile was being read onto a value that invalidates nothing
+  // historical, and a measurably wrong threshold sat for a week because of it. Changing these is
+  // allowed; changing them WITHOUT re-measuring is not. See CURATION_GATES_BY_ROLE for the
+  // calibrated replacements and the pool measurement behind them.
   assert.equal(CURATION_GATES.ringDbMax, -32)
   assert.equal(CURATION_GATES.activeFractionMin, 0.5)
+})
+
+test('per-role gates loosen the ring threshold where the reference class demands it (134 §5)', () => {
+  // 134 §2.2 measured the role-blind -32 dB gate rejecting 22% of the owner's own Splice lead loops
+  // and 16% of chords — "the screens reject the quality bar itself". Re-measured 2026-07-26 over the
+  // cleaned pools (lead 21.8%, chords 15.6%, bassline 0%), then recalibrated by 134 §5's own rule:
+  // each role's threshold is max(-32, p95 of that role's pack-loop ringDb) — loosen, never tighten.
+  assert.ok(
+    CURATION_GATES_BY_ROLE.lead.ringDbMax > CURATION_GATES.ringDbMax,
+    'lead must be looser than the role-blind gate — 134: "lead needs >> -32"',
+  )
+  assert.ok(CURATION_GATES_BY_ROLE.chords.ringDbMax > CURATION_GATES.ringDbMax, 'chords likewise')
+  assert.equal(
+    CURATION_GATES_BY_ROLE.bassline.ringDbMax,
+    CURATION_GATES.ringDbMax,
+    'bassline stays at -32 — 0% of pack basslines fail it, and 134 says "bass can stay"',
+  )
+  // activeFraction was explicitly left alone (134 §5 item 5).
+  for (const role of ['bassline', 'chords', 'lead', 'drum-loop'] as const) {
+    assert.equal(CURATION_GATES_BY_ROLE[role].activeFractionMin, CURATION_GATES.activeFractionMin)
+  }
+  // and a lead render that the old gate rejected now passes under its own role's gate
+  const ringyForOldGate = scores({ ringDb: -20 })
+  assert.ok(!passesGates(ringyForOldGate), 'still rejected by the role-blind fallback')
+  assert.ok(
+    passesGates(ringyForOldGate, gatesForRole('lead')),
+    'a -20 dB lead sits inside the pack lead distribution and must survive its own role gate',
+  )
+})
+
+test('curateRole uses the role gates when given a role, and explicit gates still win', () => {
+  const ringy = (n: string) => cand(n, 'Leads', { ringDb: -20 })
+  // role-blind: the -20 dB candidates are all rejected, so nothing survives
+  assert.equal(curateRole([ringy('a'), ringy('b')]).survivors, 0)
+  // with the role named, they clear the calibrated lead gate
+  assert.equal(curateRole([ringy('a'), ringy('b')], { role: 'lead' }).survivors, 2)
+  // an explicit gates object still overrides the role
+  assert.equal(
+    curateRole([ringy('a'), ringy('b')], { role: 'lead', gates: { ringDbMax: -60, activeFractionMin: 0.5 } }).survivors,
+    0,
+  )
 })
 
 // ---- composite math ----------------------------------------------------------------------------
