@@ -244,5 +244,10 @@ accumulated understanding).** All text, all in git's reach, all reconstructable.
   `render --batch` skips surge prep (single `beat render` / `feedback` are covered).
 - **Write scope**: the Write tool may be confined to your worktree while the deliverable lives
   outside it — hence the ground-rule workshop dir; use bash for writes beyond Write's reach.
-- **`beat render --offline` can silently render silence** in some environments — verify the first
-  render's `beat metrics` before trusting the pipeline (see the dotbeat skill's render caveats).
+- **`beat render --offline` is exact and reproducible.** The old silent-WAV failure mode belonged to
+  the retired `cli/render-offline.mjs`; since D22/D23 `--offline` computes through the same `Engine`
+  on an `OfflineAudioContext`, refuses soundfont projects *by name* rather than silently, and prints
+  its caveats to stderr — read them. (Since D20's seeded noise voices it is also sample-identical
+  run to run.) Verifying a first render with `beat metrics` is still good practice on any pipeline,
+  but not because of this. See the dotbeat skill's render caveats and
+  `references/render-metrics-loop.md`.

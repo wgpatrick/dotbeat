@@ -1182,12 +1182,13 @@ const HELP = [
   { cmd: 'selection', text: `  beat selection --port <p> [--set "<grammar>" | --clear]  read/set the GUI selection held by a running daemon` },
   {
     cmd: 'mcp',
-    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (~58,
+    text: `  beat mcp                                                MCP server over stdio: the commands above as tools (75,
                                                           covering track/note/hit/effect/scene/place/song/preset/macro/
                                                           drum-kit/vary/score/adopt/sample/lane/checkpoint/render/metrics editing) —
-                                                          only daemon (a long-running process, structurally not a
-                                                          tool call) stays CLI-only; send tools/list on a running
-                                                          'beat mcp' for the exact, current set`,
+                                                          the orchestration and eval verbs stay CLI-only (daemon,
+                                                          showdown, pilot, board, recipe, rolecheck and friends);
+                                                          send tools/list on a running 'beat mcp' for the exact,
+                                                          current set`,
   },
   {
     cmd: 'mcp-init',

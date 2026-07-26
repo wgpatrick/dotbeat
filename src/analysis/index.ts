@@ -126,6 +126,12 @@ export {
 // static init patch. See docs/research/115-production-layer-techniques.md and produce.ts.
 export {
   productionRoleFor,
+  // the STRICT resolver + its advertised name list: a role the user typed is validated, unlike a
+  // track id we are guessing from (2026-07-26 — `--role basss` used to resolve silently to
+  // 'default').
+  requireProductionRole,
+  PRODUCTION_ROLE_ALIASES,
+  PRODUCTION_ROLE_NAMES,
   productionProfileFor,
   applyProducedDefaults,
   // authoring helpers (Track 1b): the shared role/profile resolution `beat add-track --produced`
