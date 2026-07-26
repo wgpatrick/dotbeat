@@ -250,6 +250,21 @@ const HELP = [
                                                           Registers NOTHING into any project, and writes a .gitignore into
                                                           the chop dir (chops of a record are that record).`,
   },
+  {
+    cmd: 'resample',
+    text: `  beat resample <file.beat> <track> [--out <sample-id>] [--license "..."] [--json]
+                                                          bounce ONE track's own output back into the project as a
+                                                          registered sample, with full provenance (which track, which
+                                                          document sha, which effect chain). This is what converts "a
+                                                          recording" into "an instrument": resample long then trim short
+                                                          (you can shorten a sample, never lengthen it), and commit a
+                                                          degradation chain so it cannot be re-balanced later.
+                                                          COST: ~10-15s harness boot + roughly REALTIME capture of the
+                                                          whole project (there is no range render — use beat excerpt).
+                                                          A deliberate act, not an inner-loop operation.
+                                                          --out defaults to a fresh <track>-resample id; an explicit id
+                                                          may re-register an existing sample, and says so.`,
+  },
   // ==== end research 142 §2.1 ====
   // --- Phase 37 Stream RB begin ---
   {
@@ -5730,6 +5745,89 @@ async function renderStemsCmd(argv) {
   process.stdout.write(`wrote ${trackIds.length} stem${trackIds.length === 1 ? '' : 's'} to ${dir}/ (one solo render per track: ${trackIds.join(', ')})\n`)
   process.exit(0) // render leaves chromium/vite event-loop stragglers — see render.mjs footer
 }
+// ==== beat resample (research 142 §3.1) ====
+// Bounce ONE track's own output back into the project as a registered sample — the corpus's #1
+// unprompted pick, because "the resample step is what converts 'a recording' into 'an instrument'."
+// Glue between renderTrackSolosCommand (which already renders one solo WAV per track through one
+// harness boot) and registerResample (src/vary/resample.ts — id minting + the enforced provenance
+// sidecar + registerPreppedMedia, the same primitive `beat adopt` uses). Nothing new is invented
+// here; the verb is the thing that was missing.
+async function resampleCmd(argv) {
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { renderTrackSolosCommand } = await import('./render.mjs')
+  const { registerResample, projectRenderSeconds } = await import('../dist/src/vary/resample.js')
+
+  const known = new Set(['--out', '--as', '--license', '--preview-port', '--json'])
+  for (const a of argv) {
+    if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
+  }
+  const json = argv.includes('--json')
+  // `--out` is the owner's spelling and `--as` is research 142's; both mean the same thing (the
+  // media id of the result), so both are accepted rather than making anyone remember which.
+  const asId = flagValue(argv, '--out') ?? flagValue(argv, '--as')
+  const license = flagValue(argv, '--license')
+  const previewPortRaw = flagValue(argv, '--preview-port')
+  const previewPort = previewPortRaw === undefined ? undefined : Number(previewPortRaw)
+  if (previewPortRaw !== undefined && !Number.isFinite(previewPort)) throw new BeatEditError('--preview-port needs a port number')
+
+  const consumed = new Set()
+  for (const f of ['--out', '--as', '--license', '--preview-port']) {
+    const i = argv.indexOf(f)
+    if (i !== -1) consumed.add(i + 1)
+  }
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !consumed.has(i))
+  const [file, trackId] = positional
+  if (!file || !trackId) throw new BeatEditError('resample needs <file.beat> <track> [--out <sample-id>]')
+
+  const doc = readDoc(file)
+  const track = doc.tracks.find((t) => t.id === trackId)
+  if (!track) throw new BeatEditError(`no track "${trackId}" in ${file} (have: ${doc.tracks.map((t) => t.id).join(', ') || 'none'})`)
+  const seconds = projectRenderSeconds(doc)
+
+  // Say the cost out loud BEFORE paying it — a bounce is a deliberate act, and a command that
+  // looks hung for 30 s with no explanation is how pilots report "I assumed it had crashed."
+  console.error(`resampling track "${trackId}" from ${basename(file)} — ~10-15s harness boot + ~${seconds.toFixed(1)}s realtime capture (the whole project renders; use beat excerpt for a range)`)
+
+  const wavByTrack = await renderTrackSolosCommand(file, [trackId], previewPort !== undefined ? { previewPort } : {})
+  const wavBytes = wavByTrack.get(trackId)
+  if (!wavBytes || wavBytes.length === 0) throw new BeatEditError(`the solo render of "${trackId}" produced no audio`)
+
+  const scratch = mkdtempSync(join(tmpdir(), 'dotbeat-resample-'))
+  const scratchWav = join(scratch, 'bounce.wav')
+  writeFileSync(scratchWav, wavBytes)
+  const decoded = decodeWav(wavBytes)
+
+  const res = registerResample({
+    beatFilePath: file,
+    trackId,
+    wavBytes,
+    wavPath: scratchWav,
+    durationSeconds: decoded.durationSeconds,
+    opts: { ...(asId !== undefined ? { as: asId } : {}), ...(license !== undefined ? { license } : {}) },
+  })
+  rmSync(scratch, { recursive: true, force: true })
+
+  if (json) {
+    process.stdout.write(JSON.stringify(res, null, 2) + '\n')
+    process.exit(0)
+  }
+  const out = []
+  out.push(`resampled ${trackId} → sample "${res.id}" (${res.relPath}, ${res.durationSeconds.toFixed(2)}s)`)
+  if (res.reregistered) {
+    out.push(`  ⚠ re-registered an existing sample id — the previous bytes (${res.reregistered.previousSha256.slice(0, 12)}…) are gone from the media block`)
+  }
+  const chain = res.provenance.chain.filter((e) => e.enabled).map((e) => e.type)
+  out.push(`  committed chain: ${chain.length ? chain.join(' → ') : '(none — the track carries no enabled inserts)'}`)
+  out.push(`  provenance: ${res.sidecarPath} (doc ${res.provenance.docSha256.slice(0, 12)}…, licence "${res.license}")`)
+  out.push(`  the chain above is now BAKED IN — that is the point, and it cannot be undone from the sample`)
+  out.push(`  next: beat keymap ${file} <track> ${res.id}   # play it chromatically`)
+  out.push(`        beat lane ${file} <drums> <lane> ${res.id}   # or slice/trim it on a drum lane`)
+  process.stdout.write(out.join('\n') + '\n')
+  process.exit(0) // render leaves chromium/vite event-loop stragglers — see render.mjs footer
+}
+// ==== end beat resample ====
+
 // ---- Phase 37 Stream RA end -----------------------------------------------------------------
 
 /** `beat excerpt <file> <section...>` — write a derived .beat whose song block keeps ONLY the named
@@ -6176,9 +6274,12 @@ async function main() {
     case 'inspect':
       await inspectCmd(rest)
       break
-    // ==== research 142 §2.1 ====
+    // ==== research 142 §2.1 / §3.1 ====
     case 'chop':
       await chopCmd(rest)
+      break
+    case 'resample':
+      await resampleCmd(rest)
       break
     // ==== Phase 38 Stream SB begin ====
     case 'analyze':

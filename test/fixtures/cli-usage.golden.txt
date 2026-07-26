@@ -40,6 +40,18 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           Cuts snap to a zero crossing (±2ms) with a 3ms seam fade.
                                                           Registers NOTHING into any project, and writes a .gitignore into
                                                           the chop dir (chops of a record are that record).
+  beat resample <file.beat> <track> [--out <sample-id>] [--license "..."] [--json]
+                                                          bounce ONE track's own output back into the project as a
+                                                          registered sample, with full provenance (which track, which
+                                                          document sha, which effect chain). This is what converts "a
+                                                          recording" into "an instrument": resample long then trim short
+                                                          (you can shorten a sample, never lengthen it), and commit a
+                                                          degradation chain so it cannot be re-balanced later.
+                                                          COST: ~10-15s harness boot + roughly REALTIME capture of the
+                                                          whole project (there is no range render — use beat excerpt).
+                                                          A deliberate act, not an inner-loop operation.
+                                                          --out defaults to a fresh <track>-resample id; an explicit id
+                                                          may re-register an existing sample, and says so.
   beat analyze-structure <file> [--json] [--root N] [--scale name]
                                                           symbolic song analysis (no rendering): per-section onset
                                                           density, syncopation, pitch-class vs scale, repetition/novelty.
