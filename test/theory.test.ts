@@ -77,14 +77,38 @@ test('major keys draw only major progressions', () => {
 
 // ---- harmonic rhythm (§C.1) --------------------------------------------------------------------
 
-test('harmonic rhythm is 1 or 2 bars per chord — never a hardcoded always-one-per-bar', () => {
-  const rhythms = new Set<number>()
-  for (let seed = 0; seed < 200; seed++) rhythms.add(buildChordTrack(MINOR, seed).barsPerChord)
-  assert.deepEqual([...rhythms].sort(), [1, 2], 'both 1-bar and 2-bar harmonic rhythms must occur')
+test('harmonic rhythm is 1, 2 or (rarely) the whole clip per chord — never a hardcoded always-one-per-bar', () => {
+  const rhythms = new Map<number, number>()
+  for (let seed = 0; seed < 200; seed++) {
+    const b = buildChordTrack(MINOR, seed).barsPerChord
+    rhythms.set(b, (rhythms.get(b) ?? 0) + 1)
+  }
+  assert.deepEqual([...rhythms.keys()].sort((a, b) => a - b), [1, 2, 4], 'all three harmonic rhythms must occur')
+  // the whole-clip hold (the techno one-chord vamp) stays RARE — it colours a round, never defines it
+  assert.ok((rhythms.get(4) ?? 0) < (rhythms.get(1) ?? 0), 'the 4-bar hold is rarer than the 1-bar rhythm')
+  assert.ok((rhythms.get(2) ?? 0) > (rhythms.get(1) ?? 0), 'the 2-bar held chord stays the trance-breakdown norm')
   // a 2-bar rhythm actually holds a chord across two bars
   const held = buildChordTrack(MINOR, 0, { barsPerChord: 2, bars: 4 })
   assert.ok(held.chords.every((c) => c.bars === 2))
   assert.equal(held.chords.length, 2)
+})
+
+// ---- mode colour (§C.4) ------------------------------------------------------------------------
+
+test('minor chord tracks draw a weighted mode palette — natural minor dominant, Phrygian/Dorian as colour', () => {
+  const counts = new Map<string, number>()
+  for (let seed = 0; seed < 600; seed++) {
+    const m = buildChordTrack(MINOR, seed).key.mode!
+    counts.set(m, (counts.get(m) ?? 0) + 1)
+  }
+  assert.deepEqual([...counts.keys()].sort(), ['dorian', 'natural-minor', 'phrygian'])
+  const nat = counts.get('natural-minor')!
+  assert.ok(nat > counts.get('phrygian')! * 2, 'natural minor stays the genre workhorse')
+  assert.ok(nat > counts.get('dorian')! * 2, 'natural minor stays the genre workhorse')
+  // major keys keep one mode
+  for (let seed = 0; seed < 100; seed++) assert.equal(buildChordTrack(MAJOR, seed).key.mode, 'major')
+  // and an explicit mode still wins
+  assert.equal(buildChordTrack(MINOR, 4, { mode: 'dorian' }).key.mode, 'dorian')
 })
 
 // ---- cadence position (§C.1) -------------------------------------------------------------------
@@ -92,7 +116,7 @@ test('harmonic rhythm is 1 or 2 bars per chord — never a hardcoded always-one-
 test('cadence substitution is position-conditional: only ever the phrase-FINAL chord, and it is a harmonic-minor V', () => {
   let sawCadential = false
   for (let seed = 0; seed < 400; seed++) {
-    const track = buildChordTrack(MINOR, seed)
+    const track = buildChordTrack(MINOR, seed, { mode: 'natural-minor' })
     track.chords.forEach((c, i) => {
       if (c.cadential) {
         sawCadential = true
@@ -107,11 +131,18 @@ test('cadence substitution is position-conditional: only ever the phrase-FINAL c
   assert.ok(sawCadential, 'some minor phrases must get the cadence substitution')
 })
 
-test('cadence:false disables the substitution; major keys never cadential by default', () => {
+test('cadence:false disables the substitution; major and modal keys never cadential by default', () => {
   for (let seed = 0; seed < 200; seed++) {
     assert.ok(!buildChordTrack(MINOR, seed, { cadence: false }).chords.some((c) => c.cadential))
     assert.ok(!buildChordTrack(MAJOR, seed).chords.some((c) => c.cadential))
+    // the borrowed harmonic-minor V is the NATURAL-minor move; Phrygian/Dorian cadence elsewhere
+    assert.ok(!buildChordTrack(MINOR, seed, { mode: 'phrygian' }).chords.some((c) => c.cadential))
+    assert.ok(!buildChordTrack(MINOR, seed, { mode: 'dorian' }).chords.some((c) => c.cadential))
   }
+  // forced on over a modal track, the V is still spelled from natural minor (a borrowed chord)
+  const forced = buildChordTrack(MINOR, 3, { mode: 'phrygian', cadence: true, barsPerChord: 1 })
+  const last = forced.chords[forced.chords.length - 1]!
+  if (last.cadential) assert.deepEqual(last.tones.map((t) => t - last.tones[0]!), [0, 4, 7])
 })
 
 // ---- parallel planing (§C.1) -------------------------------------------------------------------

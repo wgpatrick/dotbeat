@@ -128,10 +128,32 @@ function diatonicTones(key: PhraseKey, d: number, seventh: boolean): number[] {
   return tones
 }
 
+/** The minor-key mode palette (§C.4, "mode as a one-parameter genre colorizer"), as a weighted
+ * draw: natural minor is the genre workhorse, Phrygian is the melodic-techno/psytrance colour (the
+ * b2 as featured neighbour tone) and Dorian the house/deep-house one. Weighted, not uniform —
+ * natural minor stays the default sound; the other two are the "same progression, different colour"
+ * axis that keeps a round of figures from all sharing one palette (owner ear-report 2026-07-26). */
+const MINOR_MODE_WEIGHTS: readonly { mode: ScaleMode; weight: number }[] = [
+  { mode: 'natural-minor', weight: 7 },
+  { mode: 'phrygian', weight: 2 },
+  { mode: 'dorian', weight: 2 },
+]
+
+const pickWeightedMode = (rng: () => number): ScaleMode => {
+  const total = MINOR_MODE_WEIGHTS.reduce((s, e) => s + e.weight, 0)
+  let r = rng() * total
+  for (const e of MINOR_MODE_WEIGHTS) {
+    r -= e.weight
+    if (r <= 0) return e.mode
+  }
+  return 'natural-minor'
+}
+
 export interface ChordTrackOptions {
   /** total bars (default 4 — a showdown clip) */
   bars?: number
-  /** force the mode; default derives natural-minor/major from the picked progression's tonality */
+  /** force the mode; default is a seeded weighted draw over the minor palette (natural minor /
+   * Phrygian / Dorian) for minor keys, and 'major' for major ones */
   mode?: ScaleMode
   /** force parallel-planing on/off; default is a seeded ~15% chance for minor keys */
   planing?: boolean
@@ -139,8 +161,10 @@ export interface ChordTrackOptions {
   barsPerChord?: number
   /** add sevenths to every diatonic chord's tone content (m7 colour); default false */
   sevenths?: boolean
-  /** enable position-conditional harmonic-minor V cadence substitution at the phrase end
-   * (default true for minor keys) */
+  /** enable position-conditional harmonic-minor V cadence substitution at the phrase end (default
+   * true for NATURAL-minor keys only — the borrowed V is the natural-minor/trance move; Phrygian
+   * cadences on its bII and Dorian on its natural-6 IV, so forcing a raised leading tone into
+   * either mode just sprays out-of-scale tones the lint would rightly flag) */
   cadence?: boolean
 }
 
@@ -153,14 +177,18 @@ export function buildChordTrack(key: PhraseKey, seed: number, opts: ChordTrackOp
   const bars = opts.bars ?? 4
   const slice = PROGRESSION_BANK.filter((e) => e.minor === key.minor)
   const entry = weightedPick(rng, slice.length > 0 ? slice : PROGRESSION_BANK)
-  const mode: ScaleMode = opts.mode ?? (key.minor ? 'natural-minor' : 'major')
+  const mode: ScaleMode = opts.mode ?? (key.minor ? pickWeightedMode(rng) : 'major')
   const trackKey: PhraseKey = { ...key, mode }
-  // harmonic rhythm: 1 or 2 bars per chord — never a hardcoded always-one-per-bar (§C.1). Held
-  // (2-bar) chords are the trance-breakdown norm, so weight toward them.
-  const barsPerChord = opts.barsPerChord ?? (rng() < 0.55 ? 2 : 1)
+  // harmonic rhythm: 1, 2 or (rarely) 4 bars per chord — never a hardcoded always-one-per-bar
+  // (§C.1). Held (2-bar) chords are the trance-breakdown norm, so weight toward them; the whole-
+  // clip hold is the techno one-chord vamp, kept rare so it colours a round rather than defining it.
+  const barsPerChord = opts.barsPerChord ?? ((): number => {
+    const r = rng()
+    return r < 0.4 ? 1 : r < 0.9 ? 2 : bars
+  })()
   const planing = opts.planing ?? (key.minor && rng() < 0.15)
   const sevenths = opts.sevenths ?? false
-  const cadence = opts.cadence ?? key.minor
+  const cadence = opts.cadence ?? (key.minor && mode === 'natural-minor')
 
   // lay chords sequentially across the bar span, cycling the progression to fill
   const chords: ChordTrackChord[] = []
@@ -196,7 +224,9 @@ export function buildChordTrack(key: PhraseKey, seed: number, opts: ChordTrackOp
   if (cadence && !planing && chords.length > 0) {
     const last = chords[chords.length - 1]!
     if (last.rootDegree === 4 || rng() < 0.5) {
-      const vTones = diatonicTones(trackKey, 4, sevenths)
+      // the borrowed V is spelled from NATURAL minor whatever the track's mode is — it is a
+      // borrowed chord, and Phrygian's b2 / Dorian's natural 6 would otherwise bend its fifth
+      const vTones = diatonicTones({ ...trackKey, mode: 'natural-minor' }, 4, sevenths)
       vTones[1] = vTones[1]! + 1 // raise the third: b7 (subtonic) -> leading tone
       chords[chords.length - 1] = { ...last, rootDegree: 4, rootOffset: vTones[0]!, tones: vTones, cadential: true }
     }
