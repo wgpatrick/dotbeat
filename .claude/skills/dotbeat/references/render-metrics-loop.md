@@ -25,7 +25,10 @@ invents a number. The loop:
 ## Worked example (real, from `docs/sessions/2026-07-10-claude-over-mcp.md`)
 
 Setup: a 4-track groove, offline-render path, target -23.5 LUFS (the -14 LUFS streaming target
-mapped through the measured 9.5 LU offline-vs-browser offset — see the caveat below).
+mapped through the then-measured 9.5 LU offline-vs-browser offset). **That offset is history** —
+it was pre-D15, between two different engines; today both render paths share one engine and you
+target the streaming number directly. See "Cross-path calibration" below. The *loop* below is what
+to copy; the specific target number is not.
 
 **Round 0 — baseline**: `beat_inspect` → 4 tracks; all `pan 0`; lead/chords cutoffs 3200/3500 Hz.
 `beat_render` → `beat_metrics`: **-27.53 LUFS**, width **-39.3 dB** (near-mono), spectrum 80% below
@@ -56,28 +59,45 @@ version in use at the time).
 overshoot was caught by re-measurement, not by ear; round 2's correction followed arithmetically
 from the numbers. That's the point of D2 — trust the measurement, narrate it, propose from it.
 
-## Current environment caveat (verify before assuming render "just works")
+## Current environment (D15 landed — no BeatLab, no patched native build)
 
-As of this writing, `beat render` (`cli/render.mjs`, the Chromium path) requires a BeatLab checkout
-(`--beatlab-dir` or `BEATLAB_DIR`), and `beat render --offline` (`cli/render-offline.mjs`) also
-requires a BeatLab checkout **and** a locally-patched `node-web-audio-api` native build that is not
-part of a normal `npm install` — without it, `--offline` renders **total silence with no error**,
-not a degraded result (confirmed in this checkout: neither `BEATLAB_DIR` nor a patched
-`node-web-audio-api` build is present). `docs/decisions.md` D15 records the decision to retarget
-`beat render` onto dotbeat's own `ui/src/audio/engine.ts` (no BeatLab dependency at all) and retire
-`--offline`'s broken BeatLab-dependent path; `docs/phase-17-plan.md` Stream L is the execution plan
-for that, and may or may not have landed by the time this skill is read. Before trusting a render:
-check `cli/render.mjs`'s own top-of-file comment/usage for whether it still requires
-`--beatlab-dir`, and if a WAV comes back suspiciously short/silent, check for the
-`node-web-audio-api.build-release.node` warning `render-offline.mjs` prints rather than assuming
-the mix is actually silent.
+`beat render` drives **dotbeat's own** engine (`ui/src/audio/engine.ts`) headless: it boots the
+daemon on the .beat file, serves a production `ui/` build, loads it in headless Chromium, and
+captures the live post-limiter master. There is no BeatLab dependency and no separate repo — see
+`cli/render.mjs`'s own header. `--beatlab-dir` is accepted only as a swallowed no-op for old
+scripts; `BEATLAB_DIR` does nothing.
 
-## Cross-path calibration (if using the browser/Chromium path vs `--offline`, historically)
+`beat render --offline` computes the mix through an `OfflineAudioContext` built on the **same**
+`Engine` class (`ui/src/audio/offline.ts`, D22/D23) instead of capturing the realtime clock — no
+`node-web-audio-api`, no patched native build, no silent-WAV failure mode. `cli/render-offline.mjs`
+and `scripts/build-headless-engine.mjs` were **deleted** with D15 (Phase 17 Stream L); any doc or
+memory telling you to check `render-offline.mjs`'s startup warning is describing a path that no
+longer exists.
 
-The two render paths were measured to differ by a **constant 9.5 LU** (offline vs browser), traced
-to differing `DynamicsCompressor` auto-makeup formulas between the Rust engine and Chromium's own
-implementation — linear, not a bug, so it's a fixed offset to apply when translating a
-streaming-platform LUFS target (e.g. -14) into an offline-path target (e.g. -23.5), not something
-to "fix" by tuning. Never compare a render from one path against a render from the other without
-applying this offset (or better, stay on one path for an entire iteration loop and only translate
-the final number).
+What `--offline` *does* still refuse, loudly and by name (not silently): soundfont projects
+(instrument tracks / sf-backed drum lanes) fall back to live capture with the reason printed, and
+an active `bitcrushRate` degrades to passthrough with a printed caveat. It is CPU-bound, so it is
+fast on short clips and can be *slower* than live capture on long dense songs — the measured
+realtime ratio is printed every run. Requirements today are just `npm run build` plus a Chromium
+(bundled Playwright, or `CHROME_PATH`).
+
+## Cross-path calibration (live capture vs `--offline`)
+
+Since D15 both paths run the same engine code, so there is **no** loudness offset to apply — pick
+your LUFS target directly (e.g. -14 for a streaming spec) on whichever path you are using. The
+parity gates (smoke/real-groove/voxtest) hold live and offline to the bounds in
+`src/metrics/variance.ts`; on the full-song gate LUFS agrees to Δ0.19 and RMS to Δ0.12.
+
+Three known live-chain exceptions remain, all traced to the live path's MediaRecorder→opus step,
+and in every one **the offline number is the trustworthy one** (D23): peak-domain on a
+limiter-pinned dense mix (live reads ~1 dB hotter — −1.5 vs −2.5 dBTP — because lossy-codec
+overshoot, verified by round-tripping the offline WAV through the same codec: +0.45 dB), mono-width
+opus noise, and sub-band tilt. Energy metrics (LUFS, RMS, band shares, correlation) are comparable
+across paths; **true-peak/crest are not** — don't chase a ~1 dB peak difference between a live and
+an offline render of the same file, and prefer staying on one path for an entire iteration loop.
+
+> **Historical note.** A **constant 9.5 LU** offline-vs-browser offset is quoted in the Phase 4
+> docs, `ROADMAP.md`, and the worked example above (which is why it targets -23.5 LUFS rather
+> than -14). That measurement was between *BeatLab's Rust `node-web-audio-api` engine* and
+> Chromium's `DynamicsCompressor`, i.e. between two different implementations. D15 collapsed both
+> CLI paths onto one engine and the offset went with it. **Do not apply it today.**
