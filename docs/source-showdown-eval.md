@@ -395,3 +395,18 @@ Rounds accumulate: the report reads the whole log, and per-role splits shed thei
 - **Prep asymmetry**: gen clips pass through the one-shot prep (trim/fade/peak-normalize) before
   batch-level LUFS matching; engine/keymap renders don't need it. Batch-level normalization is
   what makes the comparison fair either way.
+- **Historical ref-arm fade artifact (fixed 2026-07-26)**: the trim fade at duration-matching
+  handled 16-bit PCM and 32-bit float only, while the clip reader accepted 24-bit — and the ref
+  pool is overwhelmingly 24-bit. Every trimmed 24-bit clip therefore got a **hard cut** rather than
+  a fade: 70 of the 950 clips rated before that date, one of them ending at full scale. The
+  artifact is **one-sided** (ref arm only; engine/keymap/gen renders are 16-bit or float), so
+  historical ref-vs-engine numbers carry a small unmeasured penalty against ref. Those ratings
+  aren't re-runnable; read them with that in mind.
+- **The D25 training holdout is conservative for old entries (2026-07-26)**: `trainingExcluded`
+  now rides the scores-log entry, so a purchased refs-packs clip stays out of taste-model training
+  after its batch dir is deleted (before, the holdout lived only in the manifest and evaporated
+  with the dir — the documented post-round lifecycle silently turned those clips into training
+  data). Entries written before that change **cannot be back-filled**: once the dir is gone,
+  nothing records which pool a ref came from. The loader therefore treats an unattributable `ref`
+  variant as **unknown ⇒ excluded**, so the trainable-pair count on the historical log is lower
+  than it used to read. That drop is the bug being corrected, not lost data.
