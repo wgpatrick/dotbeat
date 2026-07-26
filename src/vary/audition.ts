@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { BeatBatchError } from './batch.js'
+import { mulberry32 } from '../core/rng.js'
 
 /** Silence between stitched variants, in seconds. */
 export const AUDITION_GAP_SECONDS = 0.5
@@ -93,17 +94,6 @@ export interface AuditionResult {
    * then withholds the variant-at-timecode mapping (it IS the answer key; blindness shouldn't
    * depend on the listener averting their eyes from the very line that names the wav). */
   shuffled: boolean
-}
-
-/** Deterministic seeded RNG for reproducible presentation shuffles. */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
 }
 
 /** Fisher-Yates over 1..count, seeded — the presentation order for a blind audition. Exported so

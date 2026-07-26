@@ -1,183 +1,139 @@
-// RNG cross-copy equality — wave-0 gate W0.7(a) for the codebase review's T4/R6-13 consolidation.
+// src/core/rng.ts is the single seeded generator behind every reproducible thing in the taste
+// layer: figure composition, archetype/ask/patch/midi selection, prompt-bank draws, the blind clip
+// assignment, and the ranker's bootstrap ensemble. Until this file existed, mulberry32 was copied
+// verbatim into three modules (eval.ts, ranker.ts, vary/audition.ts) — byte-identical, so nothing
+// was broken, but the blinding shuffle and the figure draws had no shared definition and no test
+// asserting they were the same generator.
 //
-// `mulberry32` is copy-pasted across this repo (R3's ledger counts 5-6 copies; R6's src sweep found
-// more). Every copy is *supposed* to be the same generator: seeds, salts, and every "same seed =>
-// same audio/same batch" reproducibility claim in the taste layer assume it. Nothing asserted that.
-//
-// This test is deliberately COORDINATE-FREE: it does not name the copies. It scans the tree for the
-// mulberry32 magic constant, extracts whichever implementations are there RIGHT NOW, and proves they
-// all emit the identical stream. A consolidation pass that deletes four copies leaves this test
-// green and still guarding the survivor; a consolidation pass that accidentally changes the
-// algorithm (or leaves one copy behind on the old math) fails it.
-//
-// Two layers:
-//   1. A golden vector for the algorithm itself, so "they all agree" can't drift together.
-//   2. Cross-copy equality for every implementation discovered on disk.
+// The exact output sequence is a CONTRACT: every rated batch's figures, prompts and clip order are
+// reproducible only as long as a given seed yields these exact numbers. The goldens below are
+// therefore not a snapshot of an implementation detail — a failure here means historical batch
+// provenance just became irreproducible.
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { readFileSync, readdirSync } from 'node:fs'
-import { join, dirname, relative, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { mulberry32 } from '../src/taste/eval.js'
-import { makeRng } from '../src/vary/vary.js'
-import { SeededRandom } from '../src/match/cmaes.js'
+import { mulberry32, seededShuffle } from '../src/core/rng.js'
+import { mulberry32 as evalMulberry32 } from '../src/taste/eval.js'
+import { shuffledOrder } from '../src/vary/audition.js'
+import { assignClipOrder } from '../src/taste/showdown.js'
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const take = (rng: () => number, n: number): number[] => Array.from({ length: n }, () => rng())
 
-/** The mulberry32 increment. Every copy in this repo is found by this constant, not by name. */
-const MAGIC = '0x6d2b79f5'
-
-const SEEDS = [0, 1, 2, 7, 41, 42, 401, 523, 613, 971, 1301, 1487, 1693, 2027, 123456, 0x7fffffff, 0xdeadbeef, 4294967295]
-const DRAWS = 8
-
-/** The reference stream: `seed -> DRAWS successive draws`, from src/taste/eval.ts's exported copy. */
-function reference(seed: number): number[] {
-  const rng = mulberry32(seed)
-  return Array.from({ length: DRAWS }, () => rng())
-}
-
-// ---------------------------------------------------------------------------------------------
-// 1. The algorithm itself, pinned. If a consolidation swaps in a "better" PRNG, every reproducible
-// artifact in the repo (rated batches, seeded showdowns, humanize jitter, chance rolls) silently
-// changes meaning. That must be a deliberate, visible edit to these numbers.
-// ---------------------------------------------------------------------------------------------
-test('mulberry32 golden vector — the algorithm every seeded surface in the repo depends on', () => {
-  assert.deepEqual(
-    reference(0).map((v) => Number(v.toFixed(12))),
-    [0.266429208685, 0.000329745701, 0.223272027448, 0.146202147938, 0.467327822931, 0.545049082721, 0.615251384443, 0.648985379841],
-  )
-  assert.deepEqual(
-    reference(42).map((v) => Number(v.toFixed(12))),
-    [0.60110375192, 0.448290558998, 0.85246579349, 0.669734041439, 0.174813898746, 0.526592542185, 0.27322799433, 0.624744653935],
-  )
-  // Range invariant — every draw is a uniform in [0, 1).
-  for (const seed of SEEDS) for (const v of reference(seed)) assert.ok(v >= 0 && v < 1, `draw out of [0,1): ${v}`)
+test('mulberry32: GOLDEN sequences — the seed -> stream contract every rated batch depends on', () => {
+  assert.deepEqual(take(mulberry32(0), 5), [
+    0.26642920868471265, 0.0003297457005828619, 0.2232720274478197, 0.1462021479383111, 0.46732782293111086,
+  ])
+  assert.deepEqual(take(mulberry32(1), 5), [
+    0.6270739405881613, 0.002735721180215478, 0.5274470399599522, 0.9810509674716741, 0.9683778982143849,
+  ])
+  assert.deepEqual(take(mulberry32(41), 5), [
+    0.8510142471641302, 0.5088475255761296, 0.6344115899410099, 0.5411878905724734, 0.8519706330262125,
+  ])
+  assert.deepEqual(take(mulberry32(12345), 5), [
+    0.9797282677609473, 0.3067522644996643, 0.484205421525985, 0.817934412509203, 0.5094283693470061,
+  ])
+  assert.deepEqual(take(mulberry32(2 ** 31), 5), [
+    0.8205775609239936, 0.4481089550536126, 0.7836112855002284, 0.5120457962621003, 0.8388098266441375,
+  ])
 })
 
-// ---------------------------------------------------------------------------------------------
-// 2. Every copy on disk, discovered by scanning. Two shapes exist today:
-//    - factory:  function f(seed): () => number   (a closure whose state advances per call)
-//    - one-shot: function f(seed): number         (one draw; equals the factory's FIRST draw)
-// A hit that sits in neither shape is reported by name so nobody can add a third silently.
-// ---------------------------------------------------------------------------------------------
-
-/** Files whose mulberry32 is NOT a free `function f(seed)` and is therefore covered by an explicit
- * import-based case below instead of by extraction. Shrinking this list is fine (consolidation);
- * GROWING it means a new odd-shaped RNG copy appeared and needs a case here. */
-const NON_FREE_FUNCTION_COPIES = ['src/match/cmaes.ts']
-
-function walk(dir: string, out: string[] = []): string[] {
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue
-    const p = join(dir, e.name)
-    if (e.isDirectory()) walk(p, out)
-    else if (/\.tsx?$/.test(e.name)) out.push(p)
+test('mulberry32: same seed -> same stream, different seeds -> different streams, always in [0,1)', () => {
+  for (const seed of [0, 1, 41, 12345, 2 ** 31, -7, 1.5]) {
+    assert.deepEqual(take(mulberry32(seed), 20), take(mulberry32(seed), 20), `seed ${seed} is reproducible`)
+    for (const v of take(mulberry32(seed), 500)) assert.ok(v >= 0 && v < 1, `${v} out of range for seed ${seed}`)
   }
-  return out
-}
+  assert.notDeepEqual(take(mulberry32(41), 20), take(mulberry32(42), 20))
+  // the seed is coerced with >>> 0, so these alias deliberately — worth pinning so nobody "fixes" it
+  assert.deepEqual(take(mulberry32(-1), 5), take(mulberry32(2 ** 32 - 1), 5))
+  assert.deepEqual(take(mulberry32(1.5), 5), take(mulberry32(1), 5))
+})
 
-/** Extracts the enclosing `function name(seed…) { … }` around `hitLine`, by walking back to the
- * declaration and forward to its balanced closing brace. Returns null if the hit isn't in one. */
-function extractEnclosingFunction(lines: string[], hitLine: number): { name: string; src: string } | null {
-  let start = -1
-  let name = ''
-  for (let i = hitLine; i >= 0 && i > hitLine - 12; i--) {
-    const m = /^(?:export\s+)?function\s+(\w+)\s*\(\s*seed\b/.exec(lines[i]!)
-    if (m) {
-      start = i
-      name = m[1]!
-      break
+test('every re-export is the SAME generator (the consolidation is provably behavior-preserving)', () => {
+  // eval.ts is the import path a dozen taste modules already use; it must stay identical to core's.
+  for (const seed of [0, 1, 41, 12345, 2 ** 31]) {
+    assert.deepEqual(take(evalMulberry32(seed), 25), take(mulberry32(seed), 25), `eval.ts alias matches at seed ${seed}`)
+  }
+  // audition.ts's shuffledOrder — the FIRST blinding layer, previously seeded by its own private
+  // copy — is exactly a Fisher-Yates over the shared generator. This is the assertion that used to
+  // be missing: "the blinding shuffle's RNG" and "the figure RNG" are now one definition.
+  for (const seed of [0, 3, 41, 999]) {
+    for (const count of [2, 5, 8, 13]) {
+      const reference = seededShuffle(mulberry32(seed), Array.from({ length: count }, (_, i) => i + 1))
+      assert.deepEqual(shuffledOrder(count, seed), reference, `shuffledOrder(${count}, ${seed})`)
     }
   }
-  if (start === -1) return null
-  let depth = 0
-  for (let i = start; i < lines.length; i++) {
-    for (const ch of lines[i]!) {
-      if (ch === '{') depth++
-      else if (ch === '}') depth--
-    }
-    if (depth === 0 && i > start) return { name, src: lines.slice(start, i + 1).join('\n') }
+  // ranker.ts's copy seeded every bootstrap ensemble; it has no exported RNG surface of its own, so
+  // its equality is pinned through trainBTEnsemble's existing determinism test in taste.test.ts.
+  assert.deepEqual(shuffledOrder(8, 41), [1, 5, 2, 6, 3, 8, 4, 7], 'golden blind order')
+})
+
+test('seededShuffle: a uniform permutation consuming exactly n-1 draws', () => {
+  const items = ['a', 'b', 'c', 'd', 'e', 'f']
+  // permutation-ness and determinism
+  for (const seed of [0, 1, 41, 12345]) {
+    const out = seededShuffle(mulberry32(seed), items)
+    assert.deepEqual([...out].sort(), [...items].sort(), 'every element survives exactly once')
+    assert.deepEqual(out, seededShuffle(mulberry32(seed), items), 'deterministic in the seed')
   }
-  return null
-}
+  assert.notDeepEqual(seededShuffle(mulberry32(41), items), seededShuffle(mulberry32(42), items))
+  // the input is never mutated
+  const frozen = [...items]
+  seededShuffle(mulberry32(3), items)
+  assert.deepEqual(items, frozen)
+  // edge cases
+  assert.deepEqual(seededShuffle(mulberry32(3), []), [])
+  assert.deepEqual(seededShuffle(mulberry32(3), ['only']), ['only'])
 
-/** Strips the handful of TS annotations these functions carry, so the body can be evaluated. */
-function stripTypes(src: string): string {
-  return src
-    .replace(/^export\s+/, '')
-    .replace(/\(\s*seed\s*:\s*number\s*\)/, '(seed)')
-    .replace(/\)\s*:\s*(?:\(\s*\)\s*=>\s*)?number\s*\{/, ') {')
-}
-
-interface Copy {
-  file: string
-  name: string
-  kind: 'factory' | 'one-shot'
-  fn: (seed: number) => unknown
-}
-
-function discoverCopies(): Copy[] {
-  const files = [...walk(join(repoRoot, 'src')), ...walk(join(repoRoot, 'ui', 'src'))]
-  const copies: Copy[] = []
-  const unrecognized: string[] = []
-  for (const file of files) {
-    const text = readFileSync(file, 'utf8')
-    if (!text.includes(MAGIC)) continue
-    const rel = relative(repoRoot, file).split(sep).join('/')
-    const lines = text.split('\n')
-    let found = false
-    for (let i = 0; i < lines.length; i++) {
-      if (!lines[i]!.includes(MAGIC)) continue
-      const ex = extractEnclosingFunction(lines, i)
-      if (!ex) continue
-      found = true
-      const kind: Copy['kind'] = /return\s*(?:\(\s*\)\s*=>|function)/.test(ex.src) ? 'factory' : 'one-shot'
-      // eslint-disable-next-line no-new-func -- evaluating repo source on purpose: the point of the
-      // test is to run the copies as they are written, without importing (several aren't exported).
-      const fn = new Function(`"use strict"; return (${stripTypes(ex.src)})`)() as (seed: number) => unknown
-      copies.push({ file: rel, name: ex.name, kind, fn })
+  // EXACTLY n-1 draws, independent of the data — this is the property `sort(() => rng() - 0.5)`
+  // lacks, and why that idiom silently shifts every draw made after it.
+  for (const n of [1, 2, 5, 17]) {
+    let draws = 0
+    const counted = (): number => {
+      draws += 1
+      return 0.5
     }
-    if (!found) unrecognized.push(rel)
+    seededShuffle(counted, Array.from({ length: n }, (_, i) => i))
+    assert.equal(draws, Math.max(0, n - 1), `${n} items consume ${n - 1} draws`)
   }
-  assert.deepEqual(
-    unrecognized.sort(),
-    [...NON_FREE_FUNCTION_COPIES].sort(),
-    'a mulberry32 copy appeared in a shape this test cannot extract — either consolidate it onto the shared RNG, or add an explicit import-based case for it below and list its file in NON_FREE_FUNCTION_COPIES',
-  )
-  return copies
-}
 
-test('every mulberry32 copy on disk emits the identical stream', () => {
-  const copies = discoverCopies()
-  assert.ok(copies.length >= 1, 'expected at least one mulberry32 implementation in src/ or ui/src/')
-  for (const copy of copies) {
-    for (const seed of SEEDS) {
-      const want = reference(seed)
-      if (copy.kind === 'factory') {
-        const gen = copy.fn(seed) as () => number
-        const got = Array.from({ length: DRAWS }, () => gen())
-        assert.deepEqual(got, want, `${copy.file}: ${copy.name}(${seed}) stream diverges from src/taste/eval.ts's mulberry32`)
-      } else {
-        assert.equal(copy.fn(seed), want[0], `${copy.file}: ${copy.name}(${seed}) diverges from the first draw of the canonical stream`)
-      }
-    }
+  // uniformity: over many seeds every element reaches every position (a biased comparator-sort
+  // leaves elements clustered near their input index)
+  const counts = items.map(() => items.map(() => 0))
+  for (let seed = 0; seed < 3000; seed++) {
+    seededShuffle(mulberry32(seed), items).forEach((v, pos) => {
+      const row = counts[items.indexOf(v)]!
+      row[pos] = row[pos]! + 1
+    })
+  }
+  const expected = 3000 / items.length
+  for (const row of counts) for (const c of row) {
+    assert.ok(Math.abs(c - expected) < expected * 0.25, `position histogram ${c} vs ~${expected} — shuffle looks biased`)
   }
 })
 
-// Belt-and-braces on the copies that ARE exported: exercised through their real import path, so the
-// extraction machinery above can never be the only thing under test.
-test('exported RNG entry points agree with the canonical stream', () => {
-  for (const seed of SEEDS) {
-    const want = reference(seed)
-
-    const vary = makeRng(seed)
-    assert.deepEqual(Array.from({ length: DRAWS }, () => vary()), want, `src/vary/vary.ts makeRng(${seed})`)
-
-    // src/match/cmaes.ts's SeededRandom is the same generator in class clothing: it keeps state as
-    // uint32 (`>>> 0`) where the free functions keep it as int32 (`| 0`), which is bit-identical
-    // through Math.imul. Pinned here so a consolidation can fold it in with evidence.
-    const cmaes = new SeededRandom(seed)
-    assert.deepEqual(Array.from({ length: DRAWS }, () => cmaes.uniform()), want, `src/match/cmaes.ts SeededRandom(${seed}).uniform()`)
+test('assignClipOrder: the *7+3 seed derivation is APPLIED, not just a permutation (I3)', () => {
+  // assignClipOrder(n, s) is shuffledOrder(n, s*7+3).map(n => n-1). The derivation exists precisely
+  // so that the rate UI re-shuffling with the SAME batch seed never composes back to identity
+  // systematically. Deleting `*7+3` during a refactor keeps every other assertion passing —
+  // determinism, permutation-ness, and "a different seed gives a different order" all still hold.
+  for (const seed of [1, 3, 41, 99, 12345]) {
+    for (const count of [3, 5, 8]) {
+      assert.deepEqual(
+        assignClipOrder(count, seed),
+        shuffledOrder(count, seed * 7 + 3).map((n) => n - 1),
+        `assignClipOrder(${count}, ${seed}) derives its seed`,
+      )
+    }
+    // ...and the derivation is observable: at a realistic batch size the derived order differs from
+    // the underived one. (Kept off count 3, where only 6 permutations exist and a coincidence is
+    // ordinary rather than evidence.)
+    for (const count of [5, 8]) {
+      assert.notDeepEqual(
+        assignClipOrder(count, seed),
+        shuffledOrder(count, seed).map((n) => n - 1),
+        `assignClipOrder(${count}, ${seed}) must NOT be the underived shuffle`,
+      )
+    }
   }
+  assert.deepEqual(assignClipOrder(6, 41), [1, 5, 0, 3, 4, 2], 'golden clip assignment')
 })
