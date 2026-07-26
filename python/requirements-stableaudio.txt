@@ -1,7 +1,7 @@
 # dotbeat `beat source gen` backend — Stable Audio Open 1.0, run LOCALLY (Phase 39 Stream UB).
 #
 # This is the ONE licensing-clean, egress-free generative path for dotbeat's shareable-project
-# thesis (research 103): you own the generated outputs, commercial use is permitted for individuals
+# thesis (research 145): you own the generated outputs, commercial use is permitted for individuals
 # and orgs under $1M annual revenue at no fee (registration with Stability required for commercial
 # use), and the license's distribution/attribution obligations attach to the MODEL/Materials, not
 # to the generated audio files you commit into a project's media/ folder. See the license posture

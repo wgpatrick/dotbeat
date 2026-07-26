@@ -92,18 +92,43 @@ export interface ProductionProfile {
 
 /** Map a track id / gen-kit role name onto a production role. Unknown ids fall back to `default`
  * (a mild all-round profile) rather than erroring — a produced default should degrade gracefully. */
+export const PRODUCTION_ROLE_ALIASES: Readonly<Record<string, ProductionRole>> = {
+  kick: 'kick',
+  snare: 'snare', clap: 'snare', rimshot: 'snare',
+  hats: 'hats', hat: 'hats', openhat: 'hats', hihat: 'hats',
+  perc: 'perc', percussion: 'perc', cowbell: 'perc', tom: 'perc', crash: 'perc', ride: 'perc',
+  bass: 'bass',
+  sub: 'sub',
+  lead: 'lead', arp: 'lead', melody: 'lead', pluck: 'lead',
+  pad: 'pad', pads: 'pad',
+  chords: 'chords', chord: 'chords', keys: 'chords', stab: 'chords',
+  kit: 'kit', drums: 'kit', drum: 'kit',
+  default: 'default',
+}
+
+/** Every spelling `--role` / `produced_role` accepts, for error messages and help text. */
+export const PRODUCTION_ROLE_NAMES: readonly string[] = Object.keys(PRODUCTION_ROLE_ALIASES)
+
 export function productionRoleFor(id: string): ProductionRole {
-  const k = id.toLowerCase()
-  if (k === 'kick') return 'kick'
-  if (k === 'snare' || k === 'clap' || k === 'rimshot') return 'snare'
-  if (k === 'hats' || k === 'hat' || k === 'openhat' || k === 'hihat') return 'hats'
-  if (k === 'perc' || k === 'percussion' || k === 'cowbell' || k === 'tom' || k === 'crash' || k === 'ride') return 'perc'
-  if (k === 'bass' || k === 'sub') return k === 'sub' ? 'sub' : 'bass'
-  if (k === 'lead' || k === 'arp' || k === 'melody' || k === 'pluck') return 'lead'
-  if (k === 'pad' || k === 'pads') return 'pad'
-  if (k === 'chords' || k === 'chord' || k === 'keys' || k === 'stab') return 'chords'
-  if (k === 'kit' || k === 'drums' || k === 'drum') return 'kit'
-  return 'default'
+  return PRODUCTION_ROLE_ALIASES[id.toLowerCase()] ?? 'default'
+}
+
+/** The STRICT form, for a role the user typed rather than a track id we are guessing from.
+ *
+ * `productionRoleFor` must keep falling back to 'default' — it is fed arbitrary track ids
+ * ("lead_v2", "gtr") and guessing is its whole job. But an explicit `--role basss` fed through the
+ * same fallback silently produced the mild all-round profile and printed a confident success, so
+ * the user's typo cost them a render and a listen. Every sibling flag on this CLI rejects an
+ * unknown value; this one now does too (2026-07-26). */
+export function requireProductionRole(name: string): ProductionRole {
+  const role = PRODUCTION_ROLE_ALIASES[name.toLowerCase()]
+  if (role === undefined) {
+    throw new BeatProduceError(
+      `unknown production role "${name}" — known roles: ${PRODUCTION_ROLE_NAMES.join(', ')}. ` +
+        'Omit --role to infer it from the track id.',
+    )
+  }
+  return role
 }
 
 /** The full-strength (gen-kit tier) profile per role — the concrete ranges from research 115 §6
@@ -395,7 +420,9 @@ export interface ResolvedProducedProfile {
  * the one genre-defining move a base profile can't set itself. */
 export function resolveProducedProfile(doc: BeatDocument, trackId: string, override?: string): ResolvedProducedProfile {
   const kind = doc.tracks.find((t) => t.id === trackId)?.kind
-  let role = productionRoleFor(override ?? trackId)
+  // An explicit role is VALIDATED (a typo is an error); an inferred one falls back to 'default',
+  // because inference from a free-form track id is a guess by construction.
+  let role = override !== undefined ? requireProductionRole(override) : productionRoleFor(trackId)
   if (role === 'default' && kind === 'drums') role = 'kit'
   let profile = productionProfileFor(role)
   if (role === 'bass' || role === 'sub') {

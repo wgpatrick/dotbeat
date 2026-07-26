@@ -941,11 +941,11 @@ scene s1
   land, consumers take a slot's at-0/first placement (`firstPlacementClip`) — single-placement
   projects, i.e. every pre-v0.11 document, play and render exactly as before.
 
-### v0.12 additions — surge sidecar-instrument tracks (Track 1a; decisions.md D23; docs/surge-track.md)
+### v0.12 additions — surge sidecar-instrument tracks (Track 1a; decisions.md D31; docs/surge-track.md)
 
 A fifth track kind, `surge`, whose SOUND SOURCE is a Surge XT factory patch rendered
 out-of-process by `python/surge_render.py` at render time, while its parameters and notes stay
-ordinary diffable text. GPL stays out-of-process — nothing links Surge (D23).
+ordinary diffable text. GPL stays out-of-process — nothing links Surge (D31).
 
 - **`track <id> <name> <color> surge`** carries a `surge` block (level 1, before the synth block):
   `patch "<name>"` (the factory patch name — the format's ONE quoted string, since factory names
@@ -969,7 +969,7 @@ ordinary diffable text. GPL stays out-of-process — nothing links Surge (D23).
 - **Edit/diff**: `beat set <track>.surge.patch|.sampleRate|.override.<param>` (empty value clears an
   override) through the standard path; production fields route to the synth block; diff reports
   `surge-param`/`surge-override` as one-line musical facts.
-- **Licensing**: rendered surge WAVs carry Surge's unresolved factory-patch content license (D23) —
+- **Licensing**: rendered surge WAVs carry Surge's unresolved factory-patch content license (D31) —
   gitignore the project's `media/` surge renders; the `.beat` (a patch-NAME reference) is safe.
 
 ### Deferred past v0.3 (explicitly out of scope, not forgotten)

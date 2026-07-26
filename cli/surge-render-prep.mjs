@@ -4,7 +4,7 @@
 // python/surge_render.py keyed by a content hash of (patch, overrides, notes, sampleRate), and
 // rewrite the track in-memory as a drums-kind SAMPLE host that plays that WAV through the track's
 // own synth production block + effect/send chain (the surgeplus hosting mechanism, promoted from
-// eval trick to engine feature — see src/taste/showdown.ts buildSurgeSampleHost and D23).
+// eval trick to engine feature — see src/taste/showdown.ts buildSurgeSampleHost and D31).
 //
 // Determinism/provenance (the `beat regen` discipline): same doc -> same audio. The WAV is cached
 // next to the project under media/ with a `.json` provenance sidecar (patch, overrides, hash,

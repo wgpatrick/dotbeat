@@ -116,7 +116,9 @@ export interface RoleCheckRow {
 export interface RoleCheckResult {
   audioPath: string
   role: string
-  verdict: 'pass' | 'fail'
+  /** 'declined' = the audio does not look like the role asked for, so NO pass/fail was computed.
+   *  The rows are still reported as diagnostics; the verdict is not. */
+  verdict: 'pass' | 'fail' | 'declined'
   passed: number
   missed: number
   /** rows excluded from the verdict because they cannot mean what they say on this audio */
@@ -124,7 +126,8 @@ export interface RoleCheckResult {
   /** the miss budget this role's own reference clips set, and the share of them that clear it */
   maxMisses: number
   refPassRate: number
-  /** set when the audio does not look like the role asked for — the verdict is withheld */
+  /** set when the audio does not look like the role asked for — the verdict is withheld
+   *  (`verdict === 'declined'`); see the APPLICABILITY block in `rolecheckFeatures`. */
   applicability?: string
   rows: RoleCheckRow[]
   targets: { version: number; generatedAt: string; refPool: string; refClips: number; extractor: string }
@@ -162,6 +165,13 @@ export function rolecheckFeatures(features: FeatureVector, role: string, targets
   // clip whose spectral centroid was 5.6 kHz. The tool has that number in hand, so it should
   // decline rather than guess. Bound generously (the reference p10..p90 widened by 2 octaves) so
   // this only fires on material that is nowhere near the role.
+  //
+  // When this fires the VERDICT IS WITHHELD (`verdict: 'declined'`), not merely annotated. Until
+  // 2026-07-26 this comment and the D26 commit message both claimed the verdict was withheld while
+  // the code computed it identically and the report said "the rows below are still printed" — so a
+  // drum loop checked as a bassline still printed a confident PASS under a warning banner. A
+  // confident pass/fail on material the tool has just said it cannot judge is the exact
+  // confidently-wrong output this screen exists to prevent, so the code now matches the comment.
   const centroidRef = spec.refDistribution.centroidLog2
   let applicability: string | undefined
   if (centroidRef !== undefined) {
@@ -243,7 +253,8 @@ export function rolecheckFeatures(features: FeatureVector, role: string, targets
   const result: RoleCheckResult = {
     audioPath,
     role,
-    verdict: missed <= maxMisses ? 'pass' : 'fail',
+    // Applicability wins over the budget: no verdict at all beats a confident wrong one.
+    verdict: applicability !== undefined ? 'declined' : missed <= maxMisses ? 'pass' : 'fail',
     passed: rows.length - missed - advisoryCount,
     missed,
     advisory: advisoryCount,
@@ -290,12 +301,18 @@ function targetText(row: RoleCheckRow): string {
 export function formatRoleCheck(r: RoleCheckResult): string {
   const out: string[] = []
   const name = r.audioPath === '' ? '(features)' : r.audioPath
-  out.push(`rolecheck ${name} as ${r.role}: ${r.verdict.toUpperCase()} — ${r.missed} miss${r.missed === 1 ? '' : 'es'} (bar: at most ${r.maxMisses}), ${r.passed}/${r.rows.length} checks pass`)
+  if (r.verdict === 'declined') {
+    out.push(`rolecheck ${name} as ${r.role}: DECLINED — no pass/fail verdict was computed for this clip`)
+  } else {
+    out.push(`rolecheck ${name} as ${r.role}: ${r.verdict.toUpperCase()} — ${r.missed} miss${r.missed === 1 ? '' : 'es'} (bar: at most ${r.maxMisses}), ${r.passed}/${r.rows.length} checks pass`)
+  }
   out.push(`targets v${r.targets.version} from ${r.targets.refClips} ${r.targets.refPool} reference clips (${r.targets.generatedAt.slice(0, 10)}); ${(r.refPassRate * 100).toFixed(0)}% of those references clear this same bar`)
   if (r.applicability !== undefined) {
     out.push('')
     out.push(`  !! ${r.applicability}`)
-    out.push('  The rows below are still printed, but read them knowing the targets are for a different kind of material.')
+    out.push('  NO VERDICT. The rows below are printed as raw measurements only — they are scored against')
+    out.push(`  ${r.role} targets, which are the wrong targets for this material, so neither the misses nor`)
+    out.push('  the fixes below are trustworthy advice. Re-run with the right --role.')
   }
   out.push('')
   const w = Math.max(...r.rows.map((x) => x.feature.length), 7)
@@ -313,6 +330,11 @@ export function formatRoleCheck(r: RoleCheckResult): string {
   const misses = r.rows.filter((x) => x.verdict === 'miss').sort((a, b) => b.severity - a.severity)
   if (misses.length === 0) {
     out.push('')
+    if (r.verdict === 'declined') {
+      out.push(`every measured axis happens to sit inside the ${r.role} band, but the clip does not look like a`)
+      out.push(`${r.role} — see above. That coincidence is not a pass; re-run with the right --role.`)
+      return out.join('\n')
+    }
     out.push('every measured axis is inside the reference band for this role. This is a SCREEN, not a')
     out.push('quality verdict — no feature here hears harmony, groove or pocket (131 §8), and it does')
     out.push('NOT rank clips: use `beat rank` / the taste critic for that.')
@@ -320,7 +342,11 @@ export function formatRoleCheck(r: RoleCheckResult): string {
   }
   out.push('')
   out.push(`${misses.length} miss${misses.length === 1 ? '' : 'es'}, worst first (severity = distance outside the band in reference-IQR units).`)
-  out.push(`The role's own reference clips miss several of these too — the BUDGET is the verdict, this list is the diagnosis:`)
+  out.push(
+    r.verdict === 'declined'
+      ? 'No verdict was computed, so these are measurements against the wrong targets, not a diagnosis:'
+      : `The role's own reference clips miss several of these too — the BUDGET is the verdict, this list is the diagnosis:`,
+  )
   for (const m of misses) {
     out.push('')
     out.push(`  ${m.feature} — measured ${fmt(m.measured)}, wants ${targetText(m)} (ref median ${fmt(m.refMedian)}), severity ${m.severity.toFixed(2)}`)

@@ -227,8 +227,8 @@ TS side (`src/analysis/sidecar.ts`, SB):
 Synergy with `beat analyze` is the *idiom* (spawn/JSON/doctor/venv), not code — captured free by
 documenting the conventions in `python/README.md`. Building it now would ship a second
 owner-side-only feature before the first has ever run on a real machine, and its commercial-use
-registration condition (research 103) deserves its own decision entry. Deferral is concrete: a
-roadmap row citing research 103, conventions noted in the README.
+registration condition (research 145) deserves its own decision entry. Deferral is concrete: a
+roadmap row citing research 145, conventions noted in the README.
 
 ### SD — papercuts (pilot 104 lows; touches NONE of SA/SB's regions)
 
@@ -253,7 +253,7 @@ roadmap row citing research 103, conventions noted in the README.
 - Wrap-up per standing practice: `scripts/roadmap-data.mjs` + `docs/product-roadmap.md` + dashboard
   splice (checked-in `docs/roadmap-dashboard.html`); README/skill refresh; `docs/decisions.md`
   entries (the sidecar JSON contract; the never-register-reference-audio posture); the deferred
-  `beat source gen` roadmap row citing research 103.
+  `beat source gen` roadmap row citing research 145.
 
 ## Ordering & process
 

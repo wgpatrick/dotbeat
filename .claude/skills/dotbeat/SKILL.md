@@ -95,7 +95,7 @@ daemon's memory (`beat daemon <file> --port <p>`). It maps directly onto scoped 
    (`--scope selection` resolves the daemon's live selection into vary's own `--lanes`/`--ids`
    scoping — confirmed end-to-end: a selection of `lanes drums.hat` resolves to `--lanes hat`).
 3. `--scope selection` **only works with `feel`** (content variation / humanize batches). Whole-
-   track param-group variants (`beat vary <file> <track> cutoff`, etc.) have no per-note/lane
+   track param-group variants (`beat vary <file> <track> filter`, etc.) have no per-note/lane
    concept to scope by and reject `--scope selection` with a clear error.
 4. To set a selection by hand (e.g. no GUI in the loop): `beat selection --port <p> --set "$(printf
    'selection\n  lanes drums.hat\n')"`. Grammar: header line `selection`, then any subset of

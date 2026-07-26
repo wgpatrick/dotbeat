@@ -1,7 +1,7 @@
 # dotbeat CLI + MCP command surface
 
-Re-verified 2026-07-25 against the live surfaces: 87 CLI commands from `cli/beat.mjs`'s `HELP`
-array (1:1 with its dispatch switch), and 71 MCP tools from a real `tools/list` call over stdio.
+Re-verified 2026-07-26 against the live surfaces: 89 CLI commands from `cli/beat.mjs`'s `HELP`
+array (1:1 with its dispatch switch), and 75 MCP tools from a real `tools/list` call over stdio.
 
 > **This file deliberately does not reproduce the usage text.** It used to embed a verbatim
 > snapshot of `USAGE`, and that snapshot went stale badly — by 2026-07-25 it listed ~30 of the 87
@@ -10,7 +10,7 @@ array (1:1 with its dispatch switch), and 71 MCP tools from a real `tools/list` 
 > own help is the only authoritative source.** Run it; it is instant and always current.
 
 ```bash
-node cli/beat.mjs help              # all 87 commands, grouped, with every flag
+node cli/beat.mjs help              # all 89 commands, grouped, with every flag
 node cli/beat.mjs help <command>    # one command's block (also: beat <command> --help)
 ```
 
@@ -22,12 +22,19 @@ exits 1 if any finding is `warn` level, else 0 — usable in a script/loop.
 
 ## What is on MCP and what is CLI-only
 
-71 tools, confirmed live 2026-07-25. Almost every *document-editing* verb has a twin; the
+75 tools, confirmed live 2026-07-26. Almost every *document-editing* verb has a twin; the
 **orchestration and eval verbs do not**.
 
 **CLI-only** (shell out even inside an MCP session): `audition`, `board`, `daemon`, `excerpt`,
-`gen-kit`, `match`, `mcp`, `mcp-init`, `open`, `pilot`, `prodtask`, `rate`, `showdown`, `surge`,
-`taste-collect`, `taste-eval`, `taste-seeds`, `trick`.
+`gen-kit`, `match`, `mcp`, `mcp-init`, `open`, `pilot`, `prodtask`, `rate`, `recipe`, `rolecheck`,
+`showdown`, `surge`, `taste-collect`, `taste-eval`, `taste-seeds`.
+
+`beat trick` left this list on 2026-07-26 — `beat_trick`, `beat_trick_list`, `beat_trick_show` and
+`beat_trick_suggest` all exist now (D11). `beat recipe` and `beat rolecheck` joined it the same
+week: both shipped CLI-only, and neither is a deliberate omission the way the orchestration verbs
+are — a `beat rolecheck` twin in particular is the pre-batch screen an MCP-driven agent most needs,
+since it is the one call that tells the agent not to spend the owner's ratings on a clip. Filed as
+a roadmap row rather than fixed here.
 
 Everything else has a tool. Name mapping is `beat <verb>` → `beat_<verb_with_underscores>`, with
 five deliberate exceptions to know about:

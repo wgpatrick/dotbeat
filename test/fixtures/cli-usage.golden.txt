@@ -716,6 +716,9 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           over every check rejected 98.7% of the reference pool
                                                           itself. Exit 1 on FAIL so a batch script can gate on it;
                                                           takes one WAV, so loop for a batch.
+                                                          If the clip is nowhere near the role asked for (a --role
+                                                          typo), the verdict is WITHHELD, not guessed: DECLINED,
+                                                          exit 2, measurements printed but no pass/fail.
                                                           Rows that cannot mean what they say on the given audio
                                                           are marked (advisory) and NOT counted — truePeak/crest on
                                                           an un-normalized stem read level, not punch.

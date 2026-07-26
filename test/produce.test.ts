@@ -14,6 +14,9 @@ import {
   productionRoleFor,
   productionProfileFor,
   applyProducedDefaults,
+  resolveProducedProfile,
+  requireProductionRole,
+  PRODUCTION_ROLE_NAMES,
   BeatProduceError,
   type ProductionRole,
 } from '../src/analysis/index.js'
@@ -33,6 +36,48 @@ test('productionRoleFor maps names (and synonyms) onto roles, unknowns to defaul
     ['kit', 'kit'], ['drums', 'kit'], ['KICK', 'kick'], ['wobblegizmo', 'default'],
   ]
   for (const [id, role] of cases) assert.equal(productionRoleFor(id), role, `${id} -> ${role}`)
+})
+
+// An explicit --role is the user TYPING a role; a track id is us GUESSING from one. Until
+// 2026-07-26 both went through the same silent fallback, so `beat produce song lead --role basss`
+// applied the mild all-round 'default' profile and printed a confident success — the typo cost a
+// render and a listen, and every sibling flag on this CLI rejects an unknown value.
+test('an explicit role is validated; an inferred one still falls back to default', () => {
+  const doc = synthDoc('lead')
+
+  assert.equal(resolveProducedProfile(doc, 'lead', 'bass').role, 'bass', 'a good override still wins')
+  assert.equal(resolveProducedProfile(doc, 'lead', 'keys').role, 'chords', 'synonyms still resolve')
+  assert.equal(resolveProducedProfile(doc, 'lead', 'BASS').role, 'bass', 'and are case-insensitive')
+
+  assert.throws(
+    () => resolveProducedProfile(doc, 'lead', 'basss'),
+    (err: unknown) => {
+      assert.ok(err instanceof BeatProduceError)
+      assert.match(err.message, /unknown production role "basss"/)
+      assert.match(err.message, /bass/, 'the error must list the roles that DO work')
+      assert.match(err.message, /Omit --role/, 'and say how to get the old inferring behaviour')
+      return true
+    },
+    'a typo in --role must be an error, not the default profile',
+  )
+  assert.throws(() => resolveProducedProfile(doc, 'lead', ''), BeatProduceError)
+
+  // The inference path is unchanged: a free-form track id is a guess by construction.
+  const oddly = synthDoc('wobblegizmo')
+  assert.equal(resolveProducedProfile(oddly, 'wobblegizmo').role, 'default')
+  // ...except that an un-inferrable DRUMS track still gets the kit bus, not the mild default.
+  const drums = drumsDoc('wobblegizmo')
+  assert.equal(resolveProducedProfile(drums, 'wobblegizmo').role, 'kit')
+})
+
+test('every name the error message advertises actually resolves', () => {
+  // A list of accepted values that is not the list the resolver uses is worse than no list.
+  assert.ok(PRODUCTION_ROLE_NAMES.length >= 25, `only ${PRODUCTION_ROLE_NAMES.length} role spellings`)
+  for (const name of PRODUCTION_ROLE_NAMES) {
+    assert.doesNotThrow(() => requireProductionRole(name), `advertised role "${name}" does not resolve`)
+    assert.equal(requireProductionRole(name), productionRoleFor(name), `${name} resolves two different ways`)
+  }
+  assert.throws(() => requireProductionRole('basss'), BeatProduceError)
 })
 
 // ---- profiles differ by role -----------------------------------------------------------------
