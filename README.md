@@ -145,12 +145,16 @@ the GUI hot-reloads without stopping playback.
   running GUI to a track/param), `beat diff --since --rollup` (the agent's morning read of what
   the owner changed), and opt-in edit telemetry across all three write surfaces (research/128,
   D29).
-- **ML sidecars, contained** — `beat analyze` (Beat This beat/downbeat detection), `beat source
-  gen` (Stable Audio Open locally, fal hosted), and CLAP + Audiobox-Aesthetics embeddings. Python
-  stays tiny and dumb; TypeScript owns caching/hashing/contracts; stub backends keep CI green with
-  zero Python; owner-side tests cover the real-model paths CI structurally can't. The proof:
-  [`examples/recipe-song/`](examples/recipe-song/) regenerates every audio asset byte-for-byte
-  from provenance sidecars.
+- **ML sidecars, contained** — eight Python sidecars behind one shared spawn/doctor scaffold
+  (`src/analysis/spawn-sidecar.ts`): `beat analyze` (Beat This beat/downbeat detection),
+  `beat source gen` (Stable Audio Open locally; hosted providers via a fal.ai adapter table —
+  Stable Audio 2.5/3, Lyria 2, MiniMax, ElevenLabs — with downbeat trimming and Demucs stem
+  extraction), Surge XT patch rendering, roughness curves, Audiobox-Aesthetics embeddings (CLAP
+  measured below chance and retired from the default), MIDI figure extraction, and Composer's
+  Assistant 2. Python stays tiny and dumb; TypeScript owns caching/hashing/contracts; stub
+  backends keep CI green with zero Python; owner-side tests cover the real-model paths CI
+  structurally can't. The proof: [`examples/recipe-song/`](examples/recipe-song/) regenerates
+  every audio asset byte-for-byte from provenance sidecars.
 - **The generative sampler** — `beat sample-info` pitch detection, `beat keymap` minting a
   playable, diffable sampler instrument from any one-shot, and generation candidates flowing
   through the same score/adopt loop as everything else.
@@ -183,17 +187,28 @@ with preconditions and measurable receipts — verified by ear via `beat prodtas
 tricked beat a random-edit control 90% vs 33% pairwise), **Surge XT as an out-of-process sound
 factory** (`--with-surge`; 639 factory patches; a surgepy channel-corruption bug was root-caused
 and fixed — upstream issue drafted), and **commercial-MIDI figures** (`--midi-dir`, private) that
-hold composition at commercial quality. Current standings with commercial figures: refs ~93%
+hold composition at commercial quality. Composition since grew two more figure sources that don't
+need private data: a **theory composition layer** (voice-leading chord generation + a motif-first
+lead generator with pre-render gross-error gates, `--theory`) and **Composer's Assistant 2**
+(`--ca2`, composing over the chord track — the winner of the research/125 MIDI-model trials).
+Current standings with commercial figures: refs ~93%
 pairwise, gen 52% ≈ surge 50% ≈ keymap 45%, raw engine 0% — the chosen path (D26) is making
 engine/surge sound commercial, and the program's north star (D27) is the first blind batch where
 the owner genuinely ranks a dotbeat-rendered clip above the reference. T4 (`beat suggest
---taste`) is live; the critic now carries bootstrap-ensemble uncertainty (pessimistic scoring
-that auto-discounts its measured blind spots) — the stated prerequisite for the first constrained
-T5 overnight pilot.
+--taste`) is live; the critic carries bootstrap-ensemble uncertainty (pessimistic scoring
+that auto-discounts its measured blind spots), and the first constrained T5 overnight pilot is
+built as `beat pilot` — critic-guided quality-diversity search over per-seed lineages, with
+`beat board` as the owner's morning review surface.
 
-**How it's kept honest.** 890 tests plus Playwright-driven verify scripts assert known-correct
-behavior; exploratory usability pilots — an agent driving the real app or CLI with no checklist
+**How it's kept honest.** 1,426 tests plus a manifest-run Playwright verify fleet
+(`npm run verify`, with a `verify:engine` tier) assert known-correct behavior; exploratory
+usability pilots — an agent driving the real app or CLI with no checklist
 ([`docs/usability-testing.md`](docs/usability-testing.md)) — keep finding what scripted suites
-structurally cannot, and their findings land as roadmap rows, never a second backlog. The
-phase-by-phase history that used to live in this section is in `docs/` (phase plans, 104+
+structurally cannot, and their findings land as roadmap rows, never a second backlog. A
+six-stream codebase review ([`docs/research/130`](docs/research/130-codebase-review-synthesis.md),
+2026-07-25) turned "parity by review discipline" into structure: safety gates first (CLI surface
+test, MCP parity snapshot, committed engine golden WAVs, `===` guards on frozen eval constants),
+then the top-ranked extractions (one sidecar spawn scaffold, one seeded RNG, one figure
+vocabulary, one vary-batch orchestrator) and thousands of lines of dead code deleted. The
+phase-by-phase history that used to live in this section is in `docs/` (phase plans, 130
 research passes) and the git log.
