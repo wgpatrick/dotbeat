@@ -19,16 +19,29 @@ stderr, exit codes 0/2/3/4, `--doctor` probing deps with importlib only):
 
   --doctor            probe surgepy availability + Surge factory-content path + factory patch count
   --list-patches      emit the factory patch listing as JSON {patches:[{name,category,path}]}
+  --dump-params P     emit one patch's parameters with NATIVE value + range, as JSON — what a
+                      local search needs to start AT a preset and bound how far it may travel
   (default / render)  read one render request as JSON on STDIN, write a WAV, print metadata JSON
 
   render stdin JSON:  {"patch": "<abs .fxp path>",
                        "notes": [{"midi": 48, "startSeconds": 0.0,
                                   "durationSeconds": 0.5, "velocity": 100}, ...],
                        "overrides": [{"param": "cutoff", "value": 0.62}, ...],  # optional, 0..1
+                       "nativeOverrides": [{"param": "A Filter 1 Cutoff", "value": 10.0}, ...],
                        "sampleRate": 44100,
                        "output": "<abs .wav path>"}
   render stdout JSON: {"backend":"surge","patch","patchName","category","notes","overrides",
-                       "sampleRate","seconds","output"}
+                       "nativeOverrides","sampleRate","seconds","output"}
+
+  TWO OVERRIDE SPELLINGS, on purpose. `overrides` is the original Track 1a surface and is
+  documented/validated as normalized 0..1 — but surgepy's setParamVal takes the parameter's NATIVE
+  value, so on this build that path reaches only the 0..1 slice of each parameter's real range
+  ("A Filter 1 Cutoff" spans -60..70 = 13.75 Hz..14 kHz; 0..1 reaches 440.00..466.16 Hz).
+  Parameters whose native range happens to BE 0..1 (resonance, EG sustain) were unaffected, which
+  is how it went unnoticed. `overrides` is left untouched — redefining it would reinterpret every
+  render cached against it (cli/surge-render-prep.mjs hashes the list) — and `nativeOverrides`
+  is the additive path that covers the real range, clamped to each parameter's own [min, max] and
+  echoed back with the applied value and Surge's own display string.
   exit:  0 ok · 2 usage/bad input · 3 surgepy missing · 4 render/patch failure.
          On exit 3 the LAST stderr line names how to get surgepy (there is NO PyPI wheel — it is a
          source-build artifact of Surge XT itself; see the SURGEPY_BUILD_HINT below and
@@ -262,6 +275,79 @@ def _resolve_override_param(name, index):
     raise RenderError(f"override param '{name}' did not resolve to any Surge parameter in this patch")
 
 
+def _apply_native_overrides(surge, overrides):
+    """Apply {param, value} overrides in Surge's OWN NATIVE UNITS, clamped to each parameter's
+    reported [min, max]. Returns [{param, requested, applied, min, max, display}].
+
+    WHY THIS EXISTS ALONGSIDE `overrides` (2026-07-26, preset-retargeting stream): surgepy's
+    `setParamVal` takes the parameter's native value, NOT a 0..1 normalized one. The older
+    `overrides` path documents itself as "normalized 0..1" and rejects anything outside that range,
+    so on this build it can only ever reach a sliver of most parameters' ranges — measured on
+    Basses/Theme.fxp, "A Filter 1 Cutoff" spans -60..70 (13.75 Hz .. 14 kHz) and the 0..1 window
+    reaches 440.00 .. 466.16 Hz. Parameters whose native range happens to BE 0..1 (resonance,
+    EG sustain) were unaffected, which is why the discrepancy went unnoticed.
+
+    `overrides` is left exactly as it was rather than silently redefined: changing its meaning would
+    reinterpret every cached render keyed on it (cli/surge-render-prep.mjs hashes the override list).
+    Callers that want real range coverage pass `nativeOverrides`."""
+    if not overrides:
+        return []
+    index = _index_patch_params(surge)
+    applied = []
+    for ov in overrides:
+        if not isinstance(ov, dict) or "param" not in ov or "value" not in ov:
+            raise UsageError(f"each nativeOverride needs 'param' and 'value', got {ov!r}")
+        param = _resolve_override_param(ov["param"], index)
+        requested = float(ov["value"])
+        lo = float(surge.getParamMin(param))
+        hi = float(surge.getParamMax(param))
+        value = max(lo, min(hi, requested))
+        try:
+            surge.setParamVal(param, value)
+        except Exception as e:  # pragma: no cover - needs a real surgepy build
+            raise RenderError(f"could not set nativeOverride '{ov['param']}' = {value}: {e}")
+        applied.append(
+            {
+                "param": param.getName(),
+                "requested": requested,
+                "applied": float(surge.getParamVal(param)),
+                "min": lo,
+                "max": hi,
+                "display": str(surge.getParamDisplay(param)),
+            }
+        )
+    return applied
+
+
+def dump_params(patch_path, sample_rate=44100):
+    """Every leaf parameter of `patch_path` with its native value and range — what a local search
+    needs in order to start AT the patch and bound how far it may travel."""
+    if not os.path.isfile(patch_path):
+        raise RenderError(f"patch not found: {patch_path}")
+    surge = _create_surge(sample_rate)
+    try:
+        surge.loadPatch(patch_path)
+    except Exception as e:  # pragma: no cover - needs a real surgepy build
+        raise RenderError(f"could not load patch {patch_path}: {e}")
+    out = []
+    for name, param in sorted(_index_patch_params(surge).items()):
+        try:
+            out.append(
+                {
+                    "name": param.getName(),
+                    "key": name,
+                    "value": float(surge.getParamVal(param)),
+                    "min": float(surge.getParamMin(param)),
+                    "max": float(surge.getParamMax(param)),
+                    "type": str(surge.getParamValType(param)),
+                    "display": str(surge.getParamDisplay(param)),
+                }
+            )
+        except Exception:  # pragma: no cover - build-specific leaves
+            continue
+    return {"backend": "surge", "patch": os.path.abspath(patch_path), "count": len(out), "params": out}
+
+
 def _apply_overrides(surge, overrides):
     """Apply each {param, value} override to the loaded patch via setParamVal (value is normalized
     0..1, Surge's own param space). Returns the list of resolved Surge param names (for metadata).
@@ -315,6 +401,7 @@ def render(request):
     patch = request.get("patch")
     notes = request.get("notes")
     overrides = request.get("overrides") or []
+    native_overrides = request.get("nativeOverrides") or []
     sample_rate = int(request.get("sampleRate") or 44100)
     output = request.get("output")
     if not patch or not isinstance(patch, str):
@@ -325,6 +412,8 @@ def render(request):
         raise UsageError("render request needs a non-empty 'notes' list")
     if not isinstance(overrides, list):
         raise UsageError("render request 'overrides' must be a list of {param, value}")
+    if not isinstance(native_overrides, list):
+        raise UsageError("render request 'nativeOverrides' must be a list of {param, value}")
     if not os.path.isfile(patch):
         raise RenderError(f"patch not found: {patch}")
 
@@ -336,6 +425,9 @@ def render(request):
 
     # Track 1a: normalized param overrides, applied after the patch loads and before any notes play.
     applied_overrides = _apply_overrides(surge, overrides)
+    # Preset retargeting (2026-07-26): the same idea in Surge's OWN units — see
+    # _apply_native_overrides for why both spellings exist.
+    applied_native = _apply_native_overrides(surge, native_overrides)
 
     try:
         import numpy as np  # noqa: PLC0415
@@ -392,6 +484,7 @@ def render(request):
         "category": os.path.basename(os.path.dirname(patch)),
         "notes": len(notes),
         "overrides": applied_overrides,
+        "nativeOverrides": applied_native,
         "sampleRate": sample_rate,
         "seconds": round(total_samples / sample_rate, 4),
         "ringDb": _ring_db(frames, sample_rate),
@@ -403,10 +496,14 @@ def main(argv):
     p = argparse.ArgumentParser(prog="surge_render.py", description="dotbeat Surge XT render sidecar")
     p.add_argument("--doctor", action="store_true", help="probe surgepy + factory path + patch count")
     p.add_argument("--list-patches", action="store_true", help="emit the factory patch listing as JSON")
+    p.add_argument("--dump-params", metavar="PATCH", help="emit one patch's parameters (native value + range) as JSON")
     args = p.parse_args(argv)
 
     if args.doctor:
         print(json.dumps(doctor()))
+        return 0
+    if args.dump_params:
+        print(json.dumps(dump_params(args.dump_params)))
         return 0
     if args.list_patches:
         surge = _create_surge(44100)
