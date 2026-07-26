@@ -1132,7 +1132,7 @@ export function writeShowdownBatch(
   outDir: string,
   role: string,
   clips: { file: string; source: { kind: ShowdownSourceKind; from?: string } }[],
-  opts: { seed?: number; figureSource?: 'midi' | 'bank' | 'theory' } = {},
+  opts: { seed?: number; figureSource?: 'midi' | 'bank' | 'theory' | 'ca2' } = {},
 ): VaryBatchManifest {
   if (clips.length < 2) throw new BeatBatchError('a showdown batch needs at least two source clips')
   for (const c of clips) {

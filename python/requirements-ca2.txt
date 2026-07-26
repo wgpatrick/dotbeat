@@ -1,0 +1,8 @@
+# Composer's Assistant 2 figure sidecar (python/ca2_figures.py) — the showdown `ca2` figure
+# source (research/124 §A.4, research/125 §2). Install into a SEPARATE python3.10 venv outside
+# the repo and point BEAT_CA2_PYTHON at it; CA2's own checkout + its 716MB release weights are
+# located by BEAT_CA2_DIR and never enter this repo.
+torch>=2.1
+transformers<4.50
+miditoolkit>=1.0
+mido>=1.3
