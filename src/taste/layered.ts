@@ -698,11 +698,23 @@ function finishArchitecture(
     }
   })
 
+  // `summaryHead` is the BOTTOM LAYER's line only; this appends one line per layer above it. Passing
+  // a full summary in produced a doubled string (`... + main ... + air ... + main ... + air ...`),
+  // which is what chords and lead did until 2026-07-26 — a cosmetic bug, but the summary is what
+  // lands in the manifest `from` field and in every listening-set note, so a doubled one is a
+  // rated clip whose receipt does not describe it. Register and resting lowpass are in the line
+  // because as of 2026-07-26 they are load-bearing per-layer facts, not decoration.
   const summary =
     summaryHead +
     layers
       .slice(1)
-      .map((l) => ` + ${l.id} (${l.band.mode} ${l.band.cutoffHz}) @${l.gainDb} dB`)
+      .map(
+        (l) =>
+          ` + ${l.id} (${l.band.mode} ${l.band.cutoffHz}` +
+          `${l.patch.eq7LpOn === true ? `, resting LP ${l.patch.eq7LpFreq}` : ''}` +
+          `${l.figure.transpose !== 0 ? `, ${l.figure.transpose > 0 ? '+' : ''}${l.figure.transpose} st` : ''}` +
+          `${(l.patch.unisonVoices ?? 1) > 1 ? `, ${l.patch.unisonVoices}v` : ''}) @${l.gainDb} dB`,
+      )
       .join('') +
     (pruned.length > 0 ? ` [pruned ${pruned.map((p) => p.id).join(', ')}]` : '')
 
@@ -1285,20 +1297,14 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
     })
   }
 
-  const summary =
-    `${bodyOsc} body root octave-down (anchor ${anchorLo}, lowpass ${bodyLp}) @${bodyGain} dB` +
-    layers
-      .slice(1)
-      .map((l) => ` + ${l.id} (${l.band.mode} ${l.band.cutoffHz}${l.patch.eq7LpOn === true ? `, resting LP ${l.patch.eq7LpFreq}` : ''}${l.figure.transpose !== 0 ? `, ${l.figure.transpose > 0 ? '+' : ''}${l.figure.transpose} st` : ''}) @${l.gainDb} dB`)
-      .join('')
-
   return finishArchitecture(
     rng,
     'chords',
     family.name,
     anchorLo,
     layers,
-    summary,
+    // the BOTTOM layer's line only — finishArchitecture appends the rest (and the ones pruning removed)
+    `${bodyOsc} body root octave-down (anchor ${anchorLo}, lowpass ${bodyLp}) @${bodyGain} dB`,
     { anchorLo, bodyLp, lowestHp, bodyGain, padRel, stabRel, airRel, bodyOsc, padDetune, padVoices, padWidth, padAttack, padLp, padPan, stabOctave, stabSteps, stabRelease, stabAttack, stabHp, stabLp, stabOsc, stabPick, airHp, airNoise, airAttack },
   )
 }
@@ -1499,17 +1505,14 @@ function buildLeadArch(rng: () => number): LayeredArchitecture {
     })
   }
 
-  const summary =
-    `body roots two octaves down (anchor ${anchorLo}, lowpass ${bodyLp}) @${bodyGain} dB` +
-    layers.slice(1).map((l) => ` + ${l.id} (${l.band.mode} ${l.band.cutoffHz}, ${l.patch.unisonVoices ?? 1}v) @${l.gainDb} dB`).join('')
-
   return finishArchitecture(
     rng,
     'lead',
     family.name,
     anchorLo,
     layers,
-    summary,
+    // the BOTTOM layer's line only — finishArchitecture appends the rest
+    `body roots two octaves down (anchor ${anchorLo}, lowpass ${bodyLp}) @${bodyGain} dB`,
     { anchorLo, bodyLp, mainHp, bodyGain, mainRel, octaveUnder, widthUnder, airUnder, mainVoices, mainDetune, mainWidth, mainAttack, mainOsc, octaveVoices, octaveHp, octaveOsc, widthVoices, widthDetune, widthHp, pan, airHp },
   )
 }
