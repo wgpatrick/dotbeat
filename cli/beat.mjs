@@ -2520,7 +2520,6 @@ async function showdownCmd(argv) {
               // 421-1243 Hz — 300 Hz separates them cleanly.
               let roleOk = true
               if (spec.role === 'bassline') {
-                const { analyze } = await import('../dist/src/metrics/index.js')
                 const centroidHz = 2 ** analyze(channels, sampleRate).spectral.centroidLog2
                 roleOk = centroidHz <= 300
                 if (!roleOk) process.stderr.write(`ref candidate not bass-shaped (centroid ${Math.round(centroidHz)} Hz) — trying next: ${basename(candidate)}\n`)
