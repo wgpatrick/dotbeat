@@ -104,10 +104,13 @@ would make the A/B readable straight off the scores log.
 
 Measured difference between the two banks (same parser, both banks, 2026-07-26):
 
-  role      bank  n   attack p25/med/p75 ms  <=12.5ms  release p25/med/p75 ms  osc>=2  banks
-  bassline  v1   14        3.9 / 3.9 / 3.9      100%     31.3 / 31.3 / 41.7      21%      1
-  bassline  v2   40        3.9 / 3.9 / 3.9      100%     31.3 / 31.3 / 120.7     75%     34
-  chords    v1   16    442.9 / 829.5 / 1553.7    13%   1246.5 / 2083.4 / 2920.9  38%      1
-  chords    v2   40        3.9 / 3.9 / 5.0       98%     31.3 / 42.6 / 140.1     60%     29
-  lead      v1   16        3.9 / 3.9 / 3.9       94%     31.3 / 642.8 / 1416.0   50%      1
-  lead      v2   40        3.9 / 3.9 / 3.9       98%     31.3 / 50.3 / 257.3     80%     25
+  role      bank  n   attack p25/med/p75    <=12.5  release p25/med/p75    osc>=2  oct8  banks
+  bassline  v1   14     3.9 / 3.9 / 3.9      100%    31 / 31 / 42            21%    21%     1
+  bassline  v2   40     3.9 / 3.9 / 3.9      100%    31 / 31 / 121           75%    48%    34
+  chords    v1   16   443 / 830 / 1554        13%  1246 / 2083 / 2921        38%    19%     1
+  chords    v2   40     3.9 / 3.9 / 4.7        98%    31 / 31 / 102          65%    30%    28
+  lead      v1   16     3.9 / 3.9 / 3.9        94%    31 / 643 / 1416        50%    31%     1
+  lead      v2   40     3.9 / 3.9 / 3.9       100%    31 / 31 / 115          83%    53%    24
+
+(times in ms; oct8 = fraction of patches whose active oscillators are octave-split, the dominant
+professional layering idiom at 35-39% per 141 §5.3.)

@@ -293,9 +293,13 @@ async function main() {
       if (done % 25 === 0 || done === shortlist.length) log(`  stage 2: ${done}/${shortlist.length} rendered (${scored.length} scored)`)
     }
 
-    // Cleanliness gates unchanged (D26's CURATION_GATES): a ringy or near-silent render is out
-    // regardless of how well its parameters fit.
-    const survivors = scored.filter((c) => c.ringDb <= curation.CURATION_GATES.ringDbMax && c.activeFraction >= curation.CURATION_GATES.activeFractionMin)
+    // Cleanliness gates: a ringy or near-silent render is out regardless of how well its
+    // parameters fit. Uses the PER-ROLE gates a sibling stream calibrated against the owner's own
+    // reference loops (CURATION_GATES_BY_ROLE) — the role-blind -32 dB rejects 22% of the
+    // commercial lead loops the owner ranks above everything dotbeat makes, and it cost this
+    // script 60% of its lead shortlist on the first run (220 -> 57 survivors).
+    const gates = curation.gatesForRole(role)
+    const survivors = scored.filter((c) => c.ringDb <= gates.ringDbMax && c.activeFraction >= gates.activeFractionMin)
     // Final order: parameter fit is the objective (that is the whole point of v2); ring headroom
     // breaks ties among equally well-fitting patches.
     survivors.sort((a, b) => b.fit - a.fit || a.ringDb - b.ringDb || a.patch.name.toLowerCase().localeCompare(b.patch.name.toLowerCase()))
@@ -310,6 +314,7 @@ async function main() {
       survivors: survivors.length,
       categories: [...categories],
       targets,
+      gates,
       banks: countBy(kept.map((k) => k.patch.bank)),
       distribution: summarize(kept),
       kept: kept.map(toEntry),
@@ -331,7 +336,7 @@ async function main() {
     selection: {
       method: 'paramFit (surgeCuration.paramFit) against role-parameter-stats.json, gated on CURATION_GATES',
       weights: curation.PARAM_FIT_WEIGHTS,
-      gates: curation.CURATION_GATES,
+      gatesByRole: curation.CURATION_GATES_BY_ROLE,
       statsArtifact: 'presets/role-parameter-stats.json',
       statRoleForShowdownRole: curation.SHOWDOWN_ROLE_TO_STAT_ROLE,
     },
