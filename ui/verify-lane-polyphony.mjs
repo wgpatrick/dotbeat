@@ -9,7 +9,8 @@
 // line, and it was part of the 38% pairwise nobody had attributed.
 //
 // THE MEASUREMENT. One drums track, one sample lane, one long decaying sample (a 1.5 s exponential
-// bell). Three takes of the SAME two hits a quarter note apart:
+// bell — inharmonic plus seeded noise, deliberately: see writeBellWav). Three takes of the SAME
+// two hits a quarter note apart:
 //
 //   [ONE]   only the first hit          -> the tail energy after hit 2's position is hit 1's decay
 //   [MONO]  both hits, `voices 1`       -> hit 2 RESTARTS the player; hit 1's tail is destroyed
@@ -45,15 +46,32 @@ const GAP_MS = 500 // ...and the same gap, in wall time, for the trigger-driven 
 const HIT2_VELOCITY = 0.15
 const RENDER_SECONDS = 2.2
 
-/** A 1.5 s exponentially decaying 440 Hz tone: long enough that hit 2 lands deep inside hit 1's
- * tail, which is exactly the situation the monophonic path destroys. */
+/** A 1.5 s decaying bell-ish source, long enough that hit 2 lands deep inside hit 1's tail —
+ * which is exactly the situation the monophonic path destroys.
+ *
+ * DELIBERATELY NOT A PURE TONE. The first version was one 440 Hz sine, and two copies of one sine
+ * are COHERENT: the still-ringing tail and the fresh hit interfere, so the measured sum swung with
+ * their relative phase (two runs of the identical build measured the pool at +9.94 dB and +5.57 dB
+ * over the monophonic lane, and the tail-vs-single-hit comparison crossed its own 1 dB bar in one
+ * direction on one run and the other on the next). That is a measurement artifact, not the engine
+ * moving. Three inharmonic partials plus seeded broadband noise decorrelate the two voices, so the
+ * takes add as POWER and the numbers are stable across runs. Noise comes from src/core/rng.ts's
+ * mulberry32 (the repo's only sanctioned seeded RNG), so the source file is byte-identical every
+ * run and the whole measurement stays reproducible. */
 async function writeBellWav(path) {
   const { encodeWav16 } = await importDist('src/analysis/gen-trim.js')
+  const { mulberry32 } = await importDist('src/core/rng.js')
+  const rng = mulberry32(142)
   const frames = Math.round(1.5 * SR)
   const ch = new Float64Array(frames)
   for (let i = 0; i < frames; i++) {
     const t = i / SR
-    ch[i] = 0.5 * Math.exp(-t * 2.2) * Math.sin(2 * Math.PI * 440 * t)
+    const env = Math.exp(-t * 2.2)
+    const partials =
+      0.30 * Math.sin(2 * Math.PI * 440 * t) +
+      0.18 * Math.sin(2 * Math.PI * 623 * t + 0.7) +
+      0.10 * Math.sin(2 * Math.PI * 941 * t + 1.9)
+    ch[i] = env * (partials + 0.12 * (rng() * 2 - 1))
   }
   writeFileSync(path, encodeWav16([ch, Float64Array.from(ch)], SR))
 }
