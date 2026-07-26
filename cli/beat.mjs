@@ -2280,6 +2280,7 @@ async function tasteCollectCmd(argv) {
   const genBackend = flagValue(argv, '--gen-backend') ?? 'fal'
   const { mulberry32 } = await import('../dist/src/taste/eval.js')
   const { generateGenStyleBatches } = await import('../dist/src/taste/seeds.js')
+  const { isEnvironmentFault, environmentFaultReason } = await import('../dist/src/vary/batch.js')
   const seedFiles = readdirSync(dir).filter((f) => f.startsWith('seed-') && f.endsWith('.beat')).sort()
   if (seedFiles.length === 0) throw new BeatEditError(`no seed-*.beat files in ${dir} — run beat taste-seeds ${dir} first`)
   // 'feel' rides in the synth pool so timing/velocity taste gets sampled too (its own round type
@@ -2383,15 +2384,26 @@ async function tasteCollectCmd(argv) {
         genMade += 1
       } catch (err) {
         failed += 1
-        // Pilot 112 (MEDIUM): own the message rather than leaking a child command line / a flag
-        // THIS command rejects (ours is --gen-backend, not --backend).
-        process.stderr.write(`warning: gen "${batch.id}" failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; retry with --gen-backend stub for placeholder audio, or --gen-backend stableaudio for local generation)' : ''} (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+        const detail = err instanceof Error ? err.message : String(err)
         // a failed gen can leave its empty batch dir behind — remove it so `beat rate` never
-        // queues a wav-less husk
+        // queues a wav-less husk. Do it BEFORE the environment-fault abort below, which leaves
+        // the loop for good.
         try {
           const husk = join(dir, `gen-${batch.id}-${seedFrom}`)
           if (existsSync(husk) && !readdirSync(husk).some((x) => x.endsWith('.wav'))) rmSync(husk, { recursive: true })
         } catch { /* best-effort cleanup */ }
+        // Same bug the showdown loop had (see the comment there): this hint was unconditional on
+        // the backend rather than derived from the error, so a broken ui/ build, a missing dist/
+        // or an absent venv all reported themselves as "fal needs FAL_KEY + network" — a wrong
+        // remedy in the only message anyone reads. Attribute from the error, and abort the run on
+        // an environment fault instead of burning the remaining batches on the same failure.
+        if (isEnvironmentFault(detail)) {
+          throw new BeatEditError(`gen "${batch.id}" failed for a reason every remaining batch will hit too (${environmentFaultReason(detail)}):\n  ${detail.split('\n').join('\n  ')}`)
+        }
+        // Pilot 112 (MEDIUM): own the message rather than leaking a child command line / a flag
+        // THIS command rejects (ours is --gen-backend, not --backend).
+        const falHint = genBackend === 'fal' && /fal|FAL_KEY|fetch|network|ECONN|timed out/i.test(detail)
+        process.stderr.write(`warning: gen "${batch.id}" failed — skipping${falHint ? ' (fal needs FAL_KEY + network; retry with --gen-backend stub for placeholder audio, or --gen-backend stableaudio for local generation)' : ''} (${detail.split('\n')[0]})\n`)
       }
     }
   }
@@ -2469,7 +2481,7 @@ async function showdownCmd(argv) {
   if (!dir) throw new BeatEditError('showdown needs the taste-seeds directory: beat showdown <dir> [--roles r1,r2] [--rounds 1] [--with-produced] [--ref-dir <path>] (or --report)')
   const { mulberry32 } = await import('../dist/src/taste/eval.js')
   const { genSubject, genSubjectVaried, genStyles, PHRASE_NEGATIVE } = await import('../dist/src/taste/seeds.js')
-  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch } = await import('../dist/src/vary/batch.js')
+  const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch, isEnvironmentFault, environmentFaultReason } = await import('../dist/src/vary/batch.js')
   const { mkdirSync, copyFileSync } = await import('node:fs')
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
   // Engine preset provenance + role-mapped draw (docs/engine-presets.md E0/E1/E2).
@@ -3204,7 +3216,17 @@ async function showdownCmd(argv) {
         made += 1
       } catch (err) {
         failed += 1
-        process.stderr.write(`warning: showdown ${spec.role} failed — skipping${genBackend === 'fal' ? ' (fal needs FAL_KEY + network; --gen-backend stub builds placeholder audio)' : ''} (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
+        const detail = err instanceof Error ? err.message : String(err)
+        // Round 5 and the first half of round 6 both lost EVERY batch to one broken `ui/` build,
+        // and both times this warning blamed fal — the hint was unconditional on the backend, not
+        // derived from the error. A wrong remedy in the only message anyone reads is worse than no
+        // remedy: it cost two rounds of chasing FAL_KEY. So: attribute from the error, and treat
+        // an environment fault as fatal for the whole run rather than a per-batch skip, because
+        // batch 2 cannot possibly succeed where batch 1 failed for that reason.
+        if (isEnvironmentFault(detail)) {
+          throw new BeatEditError(`showdown ${spec.role} failed for a reason every remaining batch will hit too (${environmentFaultReason(detail)}):\n  ${detail.split('\n').join('\n  ')}`)
+        }
+        process.stderr.write(`warning: showdown ${spec.role} failed — skipping${genBackend === 'fal' && /fal|FAL_KEY|fetch|network|ECONN|timed out/i.test(detail) ? ' (fal needs FAL_KEY + network; --gen-backend stub builds placeholder audio)' : ''} (${detail.split('\n')[0]})\n`)
         discardIncompleteBatch(outDir) // never leave a half-built batch for beat rate to queue
       } finally {
         // the work batch is a scoreable manifest+wavs dir of its own: `beat rate` would queue it

@@ -16,7 +16,7 @@ pre-registered gate that never fires is worse than no gate, because it launders 
 as a made one."* Two gates were designed to re-order the build queue and neither ran, while work
 proceeded as if they had. Research 140 §4.4 separately asked for a ruling on `FEATURE_KEYS` that
 two agents had declined to give. All three are settled here. Evidence and full numbers:
-[`research/142`](research/142-critic-instruments.md).
+[`research/142`](research/144-critic-instruments.md).
 
 **Gate A — the `packplus` arm (133 §7). Verdict: ELSE branch. The transient shaper and OTT jump
 the queue.** The arm was never built and `packplus` appears nowhere, so the gate as written can

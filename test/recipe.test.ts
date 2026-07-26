@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { parse, serialize, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER } from '../src/core/index.js'
-import { analyze } from '../src/metrics/index.js'
+import { analyze, analyzeRich } from '../src/metrics/index.js'
 import { metricsToFeatures, FEATURE_KEYS } from '../src/taste/features.js'
 import {
   BeatRecipeError,
@@ -376,7 +376,7 @@ test('end to end: recipe -> document -> analyzed audio -> gate report with measu
   // 2. measure a signal that DOES satisfy the recipe's register intent (a 45 Hz fundamental sits
   //    in the sub band, which is the whole point of rows 1–2 of 138's free-wins table)
   const sub = syntheticRender([{ hz: 45, amp: 0.4 }, { hz: 180, amp: 0.25 }])
-  const features = metricsToFeatures(analyze(sub.channels, sub.sampleRate))
+  const features = metricsToFeatures(analyze(sub.channels, sub.sampleRate), analyzeRich(sub.channels, sub.sampleRate))
 
   // 3. verify
   const check = checkRecipeGates(recipe, { clip: features })
@@ -388,7 +388,7 @@ test('end to end: recipe -> document -> analyzed audio -> gate report with measu
 
   // 4. the same recipe against a signal in the WRONG register fails loudly rather than sliding by
   const wrong = syntheticRender([{ hz: 900, amp: 0.4 }, { hz: 2700, amp: 0.25 }])
-  const wrongCheck = checkRecipeGates(recipe, { clip: metricsToFeatures(analyze(wrong.channels, wrong.sampleRate)) })
+  const wrongCheck = checkRecipeGates(recipe, { clip: metricsToFeatures(analyze(wrong.channels, wrong.sampleRate), analyzeRich(wrong.channels, wrong.sampleRate)) })
   assert.equal(wrongCheck.verdict, 'fail')
   assert.ok(wrongCheck.results.some((r) => r.metric === 'bandSubPct' && r.status === 'fail'))
 

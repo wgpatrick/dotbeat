@@ -59,6 +59,68 @@ export class BeatBatchError extends Error {
   }
 }
 
+// ---- environment faults vs per-batch faults --------------------------------------------------
+// Every batch loop in this project (`beat showdown`, `beat taste-collect`'s vary + gen passes,
+// `beat prodtask`) is a for-loop with a try/catch that counts a failure, warns, and moves on.
+// That is the right shape for a PER-BATCH fault — one bad reference chop, one gen request that
+// timed out, one role whose figure bank came up empty. Batch N+1 has different inputs and a fair
+// chance of succeeding, so skipping is cheap and correct.
+//
+// It is exactly the wrong shape for a fault that is a property of the MACHINE or the CHECKOUT.
+// `beat showdown` renders each batch by shelling out to cli/render.mjs --batch, which builds ui/
+// first. On 2026-07-25 (round 5) and again on 2026-07-26 09:03-09:07 (round 6, first pass), one
+// TypeScript error in ui/src/components/ArrangementView.tsx made `npm run build` fail inside
+// render.mjs — so all 18 batches of round 5 and all 18 of round 6 failed identically, and each
+// time the warning claimed the cause was "fal needs FAL_KEY + network". That hint was
+// unconditional on the backend rather than derived from the error, and it sent the investigation
+// after a network/credential problem that did not exist, for hours. 36 batches of compute were
+// spent proving the same broken build 36 times.
+//
+// So: when the message matches one of these signatures the caller ABORTS the run instead of
+// skipping, because batch N+1 provably cannot succeed where batch N failed for that reason — the
+// only fix is a human action outside the loop (build ui/, npm install, npm run build, install a
+// venv). A per-batch fault still only skips.
+//
+// This is a deliberately SMALL allowlist of exact strings the repo's own error sites emit, not a
+// heuristic. Anything unrecognized is treated as per-batch, which is the safe default: the cost of
+// a missed environment fault is the status quo (a wasted run), while the cost of a false positive
+// is aborting a run that would have produced good batches.
+const ENVIRONMENT_FAULT_SIGNATURES: { pattern: RegExp; what: string }[] = [
+  // cli/render.mjs: `npm run build` in ui/ exited non-zero. The round 5 / round 6 case above.
+  { pattern: /the ui\/ build failed/i, what: 'the ui/ build is broken' },
+  // cli/render.mjs: ui/ needs building but `npm install` has never run there.
+  { pattern: /ui\/node_modules is missing/i, what: 'ui/node_modules is missing' },
+  // cli/render.mjs: the served bundle predates engine.pendingMediaCount(), i.e. ui/dist is a stale
+  // artifact of this checkout. Every render from it is unverifiable (and probably silent).
+  { pattern: /bundle has no engine\.pendingMediaCount/i, what: 'ui/dist is stale' },
+  // The compiled repo is missing or half-built: any `await import('../dist/src/...')` in the CLI,
+  // or a require inside a sidecar's own child process. Node spells these two ways.
+  { pattern: /ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND/, what: 'dist/ is missing or stale' },
+  { pattern: /Cannot find module/i, what: 'dist/ is missing or stale' },
+  // src/analysis/{sidecar,gen,stems}.ts, src/taste/{ca2,midifig}.ts all raise this exact phrase
+  // via spawnSidecar's `enoent` result — there is no interpreter at the resolved path at all.
+  { pattern: /no Python interpreter found/i, what: 'no Python interpreter' },
+  // src/analysis/surge.ts SURGE_SETUP_HINT: surgepy is a source build of Surge XT with no wheel,
+  // so a missing one is an install task, never something the next batch resolves.
+  { pattern: /needs surgepy/i, what: 'surgepy is not installed' },
+]
+
+/**
+ * Is this failure a property of the machine/checkout rather than of one batch?
+ *
+ * True means every remaining iteration of the batch loop will hit the identical failure, so the
+ * caller should abort the whole run and say why, rather than counting a skip and continuing. See
+ * the block comment above for the two rounds of showdown compute that motivated this.
+ */
+export function isEnvironmentFault(message: string): boolean {
+  return ENVIRONMENT_FAULT_SIGNATURES.some((s) => s.pattern.test(message))
+}
+
+/** The short reason `isEnvironmentFault` matched on, for the abort message. Null when it didn't. */
+export function environmentFaultReason(message: string): string | null {
+  return ENVIRONMENT_FAULT_SIGNATURES.find((s) => s.pattern.test(message))?.what ?? null
+}
+
 // ==== Phase 40 Stream VB ====
 /** D21: the per-variant `media` field that lets a GEN batch (N seeds of one prompt) ride this one
  * manifest shape instead of forking a parallel gen-only batch contract. A gen candidate is an

@@ -137,8 +137,11 @@ export function featureSetVersionOf(vector: Record<string, unknown> | undefined 
 
 const finiteDb = (x: number) => (Number.isFinite(x) ? x : SILENCE_DB)
 
-/** Flatten MixMetrics (+ the rich DSP pass) into the stable numeric vector. */
-export function metricsToFeatures(m: MixMetrics, rich: RichMetrics): FeatureVector {
+/** The FEATURE_KEYS_V1 subset, which derives from MixMetrics alone. Consumers that only reason
+ * about loudness / bands / centroid / stereo (the layered target gate, recipe gate checks) call
+ * this instead of running a second rich DSP pass they'd discard — but there is exactly ONE
+ * mapping from metrics to each v1 key, so the two can never drift. */
+export function metricsToBaseFeatures(m: MixMetrics): Pick<FeatureVector, (typeof FEATURE_KEYS_V1)[number]> {
   return {
     lufs: finiteDb(m.integratedLufs),
     samplePeakDb: finiteDb(m.samplePeakDbfs),
@@ -154,6 +157,13 @@ export function metricsToFeatures(m: MixMetrics, rich: RichMetrics): FeatureVect
     // mono renders: perfectly correlated, no width — the honest degenerate values
     stereoCorrelation: m.stereo?.correlation ?? 1,
     stereoWidthDb: finiteDb(m.stereo?.widthDb ?? -Infinity),
+  }
+}
+
+/** Flatten MixMetrics (+ the rich DSP pass) into the stable numeric vector. */
+export function metricsToFeatures(m: MixMetrics, rich: RichMetrics): FeatureVector {
+  return {
+    ...metricsToBaseFeatures(m),
     fluxMean: rich.fluxMean,
     fluxP95: rich.fluxP95,
     fluxStd: rich.fluxStd,

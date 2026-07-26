@@ -56,7 +56,7 @@ import { applyProducedDefaults, type ProductionProfile, type ProducedResult } fr
 import { BeatBatchError } from '../vary/batch.js'
 import type { ComposedNote, ComposedPhrase } from './phrase.js'
 import type { MixMetrics } from '../metrics/index.js'
-import { metricsToFeatures } from './features.js'
+import { metricsToBaseFeatures } from './features.js'
 
 /** The pitched roles the layered source covers. drum-loop is deliberately out of scope: a kit is
  * ALREADY a multi-voice instrument (kick/snare/hat lanes), so "layer it" is a different question
@@ -916,10 +916,11 @@ export const UNMEASURABLE_TARGETS: { name: string; target: string; why: string }
 
 export type LayeredFeatures = Record<LayeredFeatureKey, number>
 
-/** The layered gate's feature view of a render — `metricsToFeatures` (the existing 13-feature
- * vector) plus centroid in Hz rather than log2, which is what every target row is quoted in. */
+/** The layered gate's feature view of a render — `metricsToBaseFeatures` (the frozen v1 13-feature
+ * vector) plus centroid in Hz rather than log2, which is what every target row is quoted in. The
+ * v2 rich axes aren't in any layered target row, so this deliberately skips the rich DSP pass. */
 export function layeredFeatures(metrics: MixMetrics): LayeredFeatures {
-  const f = metricsToFeatures(metrics)
+  const f = metricsToBaseFeatures(metrics)
   return {
     bandSubPct: f.bandSubPct,
     bandBassPct: f.bandBassPct,
