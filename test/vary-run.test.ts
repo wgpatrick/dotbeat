@@ -53,8 +53,12 @@ test('a batch varying .volume with normalization on warns — identically on CLI
   const cli = varyRenderPlan(opts({ variants: volumeVariants, surface: 'cli' }))
   const mcp = varyRenderPlan(opts({ variants: volumeVariants, surface: 'mcp' }))
   assert.equal(cli.warnings.length, 1)
-  assert.match(cli.warnings[0]!, /varies volume, but loudness normalization will gain-match the renders/)
-  assert.deepEqual(mcp.warnings, cli.warnings, 'the warning must not be a CLI-only courtesy — an agent hits the same confound')
+  assert.equal(mcp.warnings.length, 1, 'the warning must not be a CLI-only courtesy — an agent hits the same confound')
+  for (const w of [cli.warnings[0]!, mcp.warnings[0]!]) assert.match(w, /varies volume, but loudness normalization will gain-match the renders/)
+  // Only the opt-out spelling may differ: naming a CLI flag at an MCP client is a dead end.
+  assert.match(cli.warnings[0]!, /\(pass --no-normalize to hear them raw\)$/)
+  assert.match(mcp.warnings[0]!, /\(pass normalize false to hear them raw\)$/)
+  assert.equal(cli.warnings[0]!.replace('pass --no-normalize', 'X'), mcp.warnings[0]!.replace('pass normalize false', 'X'))
 })
 
 test('the volume warning is silent when normalization is off (nothing to confound) and when no edit touches .volume', () => {

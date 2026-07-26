@@ -86,8 +86,12 @@ export function varyRenderPlan(opts: VaryTailOptions): VaryRenderPlan {
   // the winner writes that volume into a project nothing normalizes. Say so, on BOTH surfaces (the
   // CLI printed this and MCP printed nothing: an agent got no warning about the same confound).
   if (opts.normalize !== false && opts.variants.some((v) => v.edits?.some((e) => e.path.endsWith('.volume')))) {
+    // The opt-out is spelled differently per surface, and a warning that names the wrong one is
+    // worse than useless to the reader it is aimed at (MCP pilot, 2026-07-25: the shared text told
+    // an agent to "pass --no-normalize", a flag no MCP client can pass).
+    const optOut = opts.surface === 'cli' ? 'pass --no-normalize' : 'pass normalize false'
     warnings.push(
-      'note: this batch varies volume, but loudness normalization will gain-match the renders — the volume differences will be largely inaudible when auditioning (pass --no-normalize to hear them raw)',
+      `note: this batch varies volume, but loudness normalization will gain-match the renders — the volume differences will be largely inaudible when auditioning (${optOut} to hear them raw)`,
     )
   }
   return {
