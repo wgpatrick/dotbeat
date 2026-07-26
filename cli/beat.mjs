@@ -2514,11 +2514,22 @@ async function showdownCmd(argv) {
             try {
               const { channels, sampleRate } = decodeWav(readFileSync(candidate))
               const active = showdown.activeFraction(channels, sampleRate)
-              if (active >= 0.5) {
-                if (offset > 0) process.stderr.write(`ref pick advanced ${offset} (skipped mostly-silent chop${offset === 1 ? '' : 's'})\n`)
+              // role-sanity screen (owner, 2026-07-25: a "synth_arp" loop filed in the pack's
+              // bassline folder reached a blind batch — "B was not a bassline"). Measured on the
+              // whole pool: true bass loops centroid 60-192 Hz, the mislabeled arps/leads
+              // 421-1243 Hz — 300 Hz separates them cleanly.
+              let roleOk = true
+              if (spec.role === 'bassline') {
+                const { analyze } = await import('../dist/src/metrics/index.js')
+                const centroidHz = 2 ** analyze(channels, sampleRate).spectral.centroidLog2
+                roleOk = centroidHz <= 300
+                if (!roleOk) process.stderr.write(`ref candidate not bass-shaped (centroid ${Math.round(centroidHz)} Hz) — trying next: ${basename(candidate)}\n`)
+              }
+              if (active >= 0.5 && roleOk) {
+                if (offset > 0) process.stderr.write(`ref pick advanced ${offset} (skipped unsuitable chop${offset === 1 ? '' : 's'})\n`)
                 return candidate
               }
-              process.stderr.write(`ref candidate mostly silent (${Math.round(active * 100)}% active) — trying next: ${basename(candidate)}\n`)
+              if (active < 0.5) process.stderr.write(`ref candidate mostly silent (${Math.round(active * 100)}% active) — trying next: ${basename(candidate)}\n`)
             } catch {
               process.stderr.write(`ref candidate unreadable — trying next: ${basename(candidate)}\n`)
             }
