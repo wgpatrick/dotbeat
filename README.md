@@ -11,7 +11,7 @@ blob you hope merges.
 
 ```bash
 npm install
-npm test                          # 890 tests: format, conversion, daemon sync, CLI, vary/humanize, DSP metrics, MCP
+npm test                          # 1,426 tests: format, conversion, daemon sync, CLI surface, vary/humanize, DSP metrics, MCP parity
 node cli/beat.mjs init song.beat --bpm 124 && node cli/beat.mjs add-track song.beat drums drums
 node cli/beat.mjs inspect examples/real-groove.beat
 node cli/beat.mjs set examples/real-groove.beat bass.cutoff 900   # prints "bass: cutoff 700 -> 900"
@@ -29,10 +29,17 @@ node cli/beat.mjs daemon examples/real-groove.beat                # two-way sync
 cd ui && npm install && npm run dev   # dotbeat's own frontend (Vite + React), talks to the daemon above
 ```
 
-Everything above runs with zero Python. The two ML-backed commands — `beat analyze` (real
-beat/downbeat detection) and `beat source gen` (local text-to-audio one-shots via Stable Audio
-Open) — additionally need a **Python 3.10** venv at `python/.venv` and, for generation, a
-Hugging Face login + accepting the gated model license at
+Everything above runs with zero Python. The ML-backed commands shell out to a fleet of **eight
+Python sidecars** (beat/downbeat detection, text-to-audio generation, Surge XT patch rendering,
+roughness curves, audio embeddings, MIDI figure extraction, Demucs stem extraction, Composer's
+Assistant 2 — the full table is in [`python/README.md`](python/README.md)); all of them share one
+spawn/doctor contract and degrade to actionable errors, and CI runs green with zero Python via
+stub backends. The two you need first — `beat analyze` (real beat/downbeat detection) and
+`beat source gen` (text-to-audio one-shots: Stable Audio Open locally, or hosted on fal.ai with
+`--backend fal`, where a provider adapter table also covers Stable Audio 2.5/3, Lyria 2, MiniMax
+Music, and ElevenLabs Music, plus BPM-aware downbeat trimming and per-role stem extraction) —
+need a **Python 3.10** venv at `python/.venv` and, for local generation, a Hugging Face login +
+accepting the gated model license at
 [stabilityai/stable-audio-open-1.0](https://huggingface.co/stabilityai/stable-audio-open-1.0):
 
 ```bash
