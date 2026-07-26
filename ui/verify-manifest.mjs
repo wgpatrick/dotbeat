@@ -1,0 +1,170 @@
+// ui/verify-manifest.mjs — the verify fleet's index and lifecycle record (W1.5 / R6-8 step 2).
+//
+// Until now the fleet had no runner and no roster: 102 scripts, each documenting one-off manual
+// invocation in its own header, with "the full verify suite" existing only as prose in phase plans
+// and, in practice, as an agent remembering to hand-run some of them. That is also how it grew to
+// ~27k LOC with ten dead members nobody noticed — no document anywhere sanctioned RETIRING a
+// verify script, so none were.
+//
+// This file is that missing lifecycle, in the cheapest form that works: one row per script.
+//
+//   area    what it verifies — the axis you actually select on when a refactor touches one
+//           surface ("run everything tagged effects").
+//   tier    engine | gui | both | cli
+//             engine  the assertion is on REAL RECORDED AUDIO off window.__engine.recordWav.
+//                     These are the engine's only real regression gate (there is no node --test
+//                     coverage of engine.ts at all) and are what `npm run verify:engine` runs —
+//                     the command R6-2/R6-3 need before engine.ts can be safely decomposed.
+//             gui     the assertion is on the DOM and the on-disk .beat file.
+//             both    audio AND DOM assertions in one script.
+//             cli     no browser at all — drives `beat`/MCP directly. (The brief's tier vocabulary
+//                     is engine|gui|both; `cli` is added rather than folding these five into
+//                     "engine", which would make `verify:engine` mean two different things.)
+//   status  live | legacy
+//             live    expected to pass against current main; `npm run verify` runs it.
+//             legacy  known not to pass, kept deliberately, with the reason stated. NOT a skip
+//                     that reads as a pass — the runner reports legacy scripts as skipped-with-
+//                     a-reason and they are excluded from the pass rate.
+//
+// Retirement rule (the thing that was missing): a script whose UI affordance is deleted is
+// retired in the SAME commit as the affordance. A script that is broken but still the only
+// coverage of a real invariant is marked `legacy` with the reason, never silently left `live`.
+//
+// Paths are relative to the repo root.
+
+/** @typedef {{ script: string, area: string, tier: 'engine'|'gui'|'both'|'cli', status: 'live'|'legacy', note?: string }} VerifyEntry */
+
+/** @type {VerifyEntry[]} */
+export const VERIFY_SCRIPTS = [
+  // ---- engine tier: assertions on real recorded audio ------------------------------------------
+  { script: 'ui/verify-clip-automation-render.mjs', area: 'automation', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-instrument.mjs', area: 'instrument', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-osc2-fix.mjs', area: 'synth', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase22-audio-region.mjs', area: 'audio-region', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase22-stream-ac.mjs', area: 'effects', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase23-stream-bd.mjs', area: 'effects', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase23-stream-be.mjs', area: 'effects', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase26-stream-da.mjs', area: 'engine-core', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase26-stream-dh.mjs', area: 'synth', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase26-stream-dl.mjs', area: 'synth', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase35-stream-of.mjs', area: 'drums', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase36-stream-pc.mjs', area: 'audio-region', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase37-stream-ra.mjs', area: 'render-export', tier: 'engine', status: 'live' },
+  { script: 'ui/verify-phase37-stream-rc.mjs', area: 'automation', tier: 'engine', status: 'live' },
+  {
+    script: 'ui/verify-phase18-lfo-depth.mjs',
+    area: 'synth',
+    tier: 'engine',
+    status: 'legacy',
+    note:
+      'Known-broken since the v0.10 note fields landed, diagnosed in ui/verify-phase26-stream-da.mjs:160-166: ' +
+      'it builds its document via setDoc() (bypassing parse()) and omits chance/cent/ratchet*, so chanceFires() ' +
+      'reads undefined as "never fires" and its note is silent — it fails at its very first check. Kept, not ' +
+      'deleted, because it is the ONLY engine-side exercise of the tempo-sync-LFO mirror (R6-13 #5): deleting it ' +
+      'would remove coverage, not dead weight. Fixing it is a small, separate, audio-affecting change.',
+  },
+
+  // ---- both: audio AND DOM ---------------------------------------------------------------------
+  { script: 'ui/verify-phase20-render-export.mjs', area: 'render-export', tier: 'both', status: 'live' },
+  { script: 'ui/verify-phase22-stream-aa.mjs', area: 'effects', tier: 'both', status: 'live' },
+  { script: 'ui/verify-phase22-tracks.mjs', area: 'drums', tier: 'both', status: 'live' },
+  { script: 'ui/verify-phase23-stream-bf.mjs', area: 'effects', tier: 'both', status: 'live' },
+  { script: 'ui/verify-phase24-stream-ch.mjs', area: 'transport', tier: 'both', status: 'live' },
+  { script: 'ui/verify-phase24-stream-ci.mjs', area: 'arrangement', tier: 'both', status: 'live' },
+  { script: 'ui/verify-phase24-stream-cj.mjs', area: 'transport', tier: 'both', status: 'live' },
+  { script: 'ui/verify-phase26-stream-dc.mjs', area: 'effects', tier: 'both', status: 'live' },
+  { script: 'ui/verify-phase26-stream-de.mjs', area: 'mixer', tier: 'both', status: 'live' },
+  { script: 'ui/verify-phase26-stream-di.mjs', area: 'automation', tier: 'both', status: 'live' },
+  { script: 'ui/verify-phase26-stream-dk.mjs', area: 'drums', tier: 'both', status: 'live' },
+  { script: 'ui/verify-volume-fader-bugfix.mjs', area: 'mixer', tier: 'both', status: 'live' },
+
+  // ---- gui tier: DOM + on-disk .beat assertions ------------------------------------------------
+  { script: 'ui/verify-focus-deeplinks.mjs', area: 'daemon-sync', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase16-velocity.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase17-arrangement.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase18-layout.mjs', area: 'layout', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase19-length.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase20-automation.mjs', area: 'automation', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase20-tracks.mjs', area: 'project-tracks', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase22-af.mjs', area: 'project-tracks', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase22-content-browser.mjs', area: 'content-browser', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase22-stream-ag.mjs', area: 'clips-scenes', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase23-bb.mjs', area: 'gui-bundle', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase23-stream-ba.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase23-stream-bc.mjs', area: 'audio-region', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase24-stream-ca.mjs', area: 'layout', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase24-stream-cb.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase24-stream-cc.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase24-stream-cd.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase24-stream-ce.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase24-stream-cf.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase24-stream-cg.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase25-effects-panel-redesign.mjs', area: 'effects', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase26-stream-db.mjs', area: 'history-undo', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase26-stream-dd.mjs', area: 'macros', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase26-stream-df.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase26-stream-dg.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase26-stream-dj.mjs', area: 'clips-scenes', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase27-stream-ea.mjs', area: 'gui-bundle', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase27-stream-eb.mjs', area: 'drag-drop', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase27-stream-ec.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase27-stream-ed.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase27-stream-ee.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase27-stream-ef.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase27-stream-eg.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase27-stream-eh.mjs', area: 'effects', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase27-stream-ei.mjs', area: 'synth-panel', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase27-stream-ej.mjs', area: 'content-browser', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase28-stream-fa.mjs', area: 'layout', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase28-stream-fb.mjs', area: 'layout', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase28-stream-fc.mjs', area: 'keyboard', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase28-stream-fd.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase28-stream-fe.mjs', area: 'synth-panel', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase28-stream-ff.mjs', area: 'content-browser', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase29-stream-ga.mjs', area: 'clips-scenes', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase29-stream-gb.mjs', area: 'synth-panel', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase29-stream-gc.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase29-stream-gd.mjs', area: 'daemon-sync', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase29-stream-ge.mjs', area: 'copy-dialogs', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase29-stream-gf.mjs', area: 'layout', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase30-stream-ja.mjs', area: 'drums', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase30-stream-jb.mjs', area: 'history-undo', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase30-stream-jc.mjs', area: 'clips-scenes', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase30-stream-jd.mjs', area: 'project-tracks', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase30-stream-je.mjs', area: 'audio-region', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase31-stream-ka.mjs', area: 'clips-scenes', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase31-stream-kb.mjs', area: 'daemon-sync', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase31-stream-kc.mjs', area: 'note-editor', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase31-stream-kd.mjs', area: 'synth-panel', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase31-stream-ke.mjs', area: 'copy-dialogs', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase32-stream-la.mjs', area: 'context-menus', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase32-stream-lb.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase36-stream-pd.mjs', area: 'audio-region', tier: 'gui', status: 'live' },
+
+  // ---- cli tier: no browser; drives `beat` / MCP directly --------------------------------------
+  { script: 'scripts/verify-phase22-stream-ad.mjs', area: 'pitch-time', tier: 'cli', status: 'live' },
+  { script: 'scripts/verify-phase33-stream-mb.mjs', area: 'cli-mcp-parity', tier: 'cli', status: 'live' },
+  { script: 'scripts/verify-phase33-stream-mc.mjs', area: 'cli-errors', tier: 'cli', status: 'live' },
+  { script: 'scripts/verify-phase33-stream-md.mjs', area: 'cli-correctness', tier: 'cli', status: 'live' },
+  { script: 'scripts/verify-phase33-stream-me.mjs', area: 'macros', tier: 'cli', status: 'live' },
+]
+
+export const TIERS = ['engine', 'gui', 'both', 'cli']
+
+/** Select by tier, area, name substring, and status. One place owns the semantics so the runner
+ * cannot disagree with the manifest.
+ *
+ * Tier matching is EXACT — `--tier engine` does NOT pull in the `both` scripts, even though those
+ * do contain audio assertions. `verify:engine` has to stay the tight ~14-script gate R6-2 asked
+ * for (a command an engine refactor runs after every step); folding in the 12 `both` scripts
+ * doubles it with runs whose slow half is DOM driving. Use `--tier both` or `npm run verify` for
+ * the wider net. */
+export function selectScripts({ tier = null, area = null, filter = null, includeLegacy = false } = {}) {
+  return VERIFY_SCRIPTS.filter((e) => {
+    if (!includeLegacy && e.status !== 'live') return false
+    if (tier && tier !== 'all' && e.tier !== tier) return false
+    if (area && e.area !== area) return false
+    if (filter && !e.script.includes(filter)) return false
+    return true
+  })
+}
