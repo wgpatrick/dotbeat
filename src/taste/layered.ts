@@ -580,10 +580,10 @@ function pruneOverlappingLayers(layers: readonly LayerSpec[]): { layers: LayerSp
  * chord clips: "it's like the layered one goes 'pop' 'pop' with two hits whenever a chord goes...
  * its sort of like a percussive hit" (chords 138 and 2156).
  *
- * 25 ms is the conservative end of the usual 20-50 ms transient-fusion window. Fusion is now the
- * DEFAULT rather than an accident: every layer's attack is clamped to within this window of the
- * stack's fastest. The prior's "deliberate offset" half stays reachable — it would be an explicit
- * draw, not the silent status quo it used to be. */
+ * 25 ms is the conservative end of the usual 20-50 ms transient-fusion window. Fusion is the
+ * DEFAULT rather than an accident: every ONSET-FORMING layer's attack is clamped to within this
+ * window of the stack's fastest. The prior's "deliberate offset" half stays reachable — it would be
+ * an explicit draw, not the silent status quo it used to be. */
 const FUSION_WINDOW_S = 0.025
 
 /** How far under the stack's loudest layer a layer may sit and still count as an ONSET-FORMING
@@ -593,14 +593,41 @@ const FUSION_WINDOW_S = 0.025
  * quarter of the perceived loudness; it is a judgement call and is labelled as one. */
 const FUSION_AUDIBILITY_DB = 12
 
+/** The attack at or under which a layer produces a TRANSIENT the ear can time against. Above it the
+ * layer swells in and has no onset to misalign — a pad or an air sheen is not a hit, it is the
+ * chord arriving. The prior's fusion rule (§6) is about "the timing of the start of each sample",
+ * i.e. about events; a 200 ms swell is not one. Set just above the 20-25 ms bottom of the fusion
+ * window so anything that could plausibly BE the second hit is inside the set. */
+const TRANSIENT_ATTACK_S = 0.03
+
+/** Make the stack's transients land as ONE event.
+ *
+ * THREE BUGS FIXED 2026-07-26, all found by checking this helper against the chord seeds the owner
+ * actually flagged ("it's like the layered one goes 'pop' 'pop' with two hits whenever a chord
+ * goes... its sort of like a percussive hit", heard independently on chords 138 and 2156):
+ *
+ *  1. IT NEVER RAN ON THE FLAGGED CASES. The bottom lowpassed layer was excluded from the
+ *     onset-forming set on the theory that "the bottom layer is the foundation, not a transient" —
+ *     but a chords stack drawn as body+stab has exactly ONE non-bottom layer, so
+ *     `onsetForming.length < 2` returned early and the helper was a no-op. Seeds 1147 and 2156 are
+ *     both body+stab. The chord's onset includes its foundation: the body attacks in 8 ms and is
+ *     the loudest thing in the stack on some draws. It is in the set now.
+ *  2. IT CLAMPED THE LAYERS THAT ARE NOT EVENTS. The ceiling was applied to every layer, so a pad
+ *     drawn with a 200 ms swell was rewritten to a 27 ms attack — i.e. the fusion fix turned the
+ *     one sustained layer in the chords stack into a second pluck, which ADDS a percussive hit
+ *     instead of removing one. Only onset-forming layers are clamped now.
+ *  3. A SLOW LAYER COULD SET THE FLOOR. `Math.min` over a set that included swells was still the
+ *     fastest attack in practice, but the set is now explicitly transient-only so the window is
+ *     measured between things that actually have transients. */
 function fuseAttacks(layers: readonly LayerSpec[]): LayerSpec[] {
   const attackOf = (l: LayerSpec): number => l.patch.attack ?? 0.01
   const loudest = Math.max(...layers.map((l) => l.gainDb))
-  // the bottom layer is the foundation, not a transient; a layer far under the stack is texture.
-  const onsetForming = layers.filter((l) => l.band.mode !== 'lowpass' && l.gainDb >= loudest - FUSION_AUDIBILITY_DB)
+  // an event, for fusion purposes: loud enough to be heard as one, and fast enough to have a
+  // transient at all. A layer far under the stack is texture; a slow swell is the chord arriving.
+  const onsetForming = layers.filter((l) => l.gainDb >= loudest - FUSION_AUDIBILITY_DB && attackOf(l) <= TRANSIENT_ATTACK_S)
   if (onsetForming.length < 2) return [...layers]
   const ceiling = Math.min(...onsetForming.map(attackOf)) + FUSION_WINDOW_S
-  return layers.map((l) => (attackOf(l) <= ceiling ? l : { ...l, patch: { ...l.patch, attack: Math.round(ceiling * 1000) / 1000 } }))
+  return layers.map((l) => (!onsetForming.includes(l) || attackOf(l) <= ceiling ? l : { ...l, patch: { ...l.patch, attack: Math.round(ceiling * 1000) / 1000 } }))
 }
 
 // ---- the shared architecture tail --------------------------------------------------------------
