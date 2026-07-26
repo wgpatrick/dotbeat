@@ -6,14 +6,14 @@
 // once instead of being re-shaped per surface (phase-34-plan.md NA item 5: "extract the shared
 // shaping into src/ helpers both surfaces import, so the next drift can't happen").
 
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, symlinkSync, copyFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, symlinkSync, copyFileSync, rmSync, accessSync, constants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse, serialize, setMediaSample, type BeatDocument } from '../core/index.js'
 import { computeBatchFeatures } from '../taste/features.js'
-import { decodeWav, integratedLoudness, truePeak } from '../metrics/index.js'
+import { decodeWav, integratedLoudness, truePeak, readWavFormat, wavSampleCodec, type WavFormatInfo } from '../metrics/index.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..') // dist/src/vary -> repo root
 
@@ -182,52 +182,54 @@ export interface NormalizeBatchResult {
 
 const round2 = (x: number) => Math.round(x * 100) / 100
 
-/** Scale every sample of a 16-bit PCM / 32-bit float wav by a pure linear gain, in place on
- * disk. Header and any extra chunks are preserved byte-for-byte; only the data chunk changes. */
+/** Parse `path`'s wav header through the ONE shared reader (src/metrics/wav.ts) and assert it can
+ * actually be gained in place, re-throwing decode failures as BeatBatchError. Split out from
+ * applyWavGain so `normalizeBatchLoudness` can validate EVERY file before it writes the first
+ * gain (see its all-or-nothing note) — a mid-batch throw used to leave some clips gained and the
+ * rest raw, i.e. a level confound in a blind batch that still looked rateable.
+ *
+ * A zero-length data chunk is an ERROR, not a no-op (2026-07-26 hunt, L3): applying a gain to a
+ * headerless/streamed stub used to succeed silently while the manifest recorded a gain that never
+ * touched a sample. */
+export function assertWavGainable(path: string): void {
+  let bytes: Buffer
+  try {
+    bytes = readFileSync(path)
+  } catch (err) {
+    throw new BeatBatchError(`${path}: cannot read for gain (${(err as Error).message})`)
+  }
+  const info = readWavInfoOrThrow(path, bytes)
+  if (info.dataLength === 0) throw new BeatBatchError(`${path}: data chunk is empty — refusing to record a gain that would touch no samples`)
+  // Writability too: a read-only clip decodes and MEASURES perfectly and only fails at the
+  // writeFileSync — i.e. exactly the mid-batch throw the pre-pass exists to prevent.
+  try {
+    accessSync(path, constants.W_OK)
+  } catch {
+    throw new BeatBatchError(`${path}: not writable — cannot apply the normalization gain`)
+  }
+}
+
+function readWavInfoOrThrow(path: string, bytes: Uint8Array): WavFormatInfo {
+  try {
+    return readWavFormat(bytes)
+  } catch (err) {
+    throw new BeatBatchError(`${path}: ${(err as Error).message}`)
+  }
+}
+
+/** Scale every sample of a wav by a pure linear gain, in place on disk — every encoding the
+ * shared reader accepts (16/24/32-bit PCM, 32/64-bit float, including WAVE_FORMAT_EXTENSIBLE).
+ * Header and any extra chunks are preserved byte-for-byte; only the data chunk changes. Integer
+ * samples SATURATE at full scale rather than wrapping. */
 export function applyWavGain(path: string, gainDb: number): void {
   const bytes = readFileSync(path)
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const ascii = (off: number, len: number) => String.fromCharCode(...bytes.subarray(off, off + len))
-  if (bytes.length < 44 || ascii(0, 4) !== 'RIFF' || ascii(8, 4) !== 'WAVE') throw new BeatBatchError(`${path} is not a RIFF/WAVE file`)
-  let off = 12
-  let fmt: { format: number; bitsPerSample: number } | null = null
-  let dataOff = -1
-  let dataLen = -1
-  while (off + 8 <= bytes.length) {
-    const id = ascii(off, 4)
-    const size = view.getUint32(off + 4, true)
-    if (id === 'fmt ') fmt = { format: view.getUint16(off + 8, true), bitsPerSample: view.getUint16(off + 22, true) }
-    else if (id === 'data') {
-      dataOff = off + 8
-      dataLen = Math.min(size, bytes.length - dataOff)
-    }
-    off += 8 + size + (size % 2) // chunks are word-aligned
-  }
-  if (!fmt || dataOff === -1) throw new BeatBatchError(`${path}: missing fmt/data chunk`)
+  const info = readWavInfoOrThrow(path, bytes)
+  if (info.dataLength === 0) throw new BeatBatchError(`${path}: data chunk is empty — refusing to record a gain that would touch no samples`)
+  const codec = wavSampleCodec(bytes, info)
   const g = Math.pow(10, gainDb / 20)
-  if (fmt.format === 1 && fmt.bitsPerSample === 16) {
-    for (let p = dataOff; p + 2 <= dataOff + dataLen; p += 2) {
-      const v = Math.round(view.getInt16(p, true) * g)
-      view.setInt16(p, Math.max(-32768, Math.min(32767, v)), true)
-    }
-  } else if (fmt.format === 1 && fmt.bitsPerSample === 24) {
-    // 24-bit refs are common in commercial packs (49/50 of refs-packs/chords) — scale the
-    // signed 3-byte LE samples in place, same header-preserving contract as the other paths.
-    for (let p = dataOff; p + 3 <= dataOff + dataLen; p += 3) {
-      let v = view.getUint8(p) | (view.getUint8(p + 1) << 8) | (view.getUint8(p + 2) << 16)
-      if (v & 0x800000) v -= 0x1000000
-      v = Math.max(-8388608, Math.min(8388607, Math.round(v * g)))
-      view.setUint8(p, v & 0xff)
-      view.setUint8(p + 1, (v >> 8) & 0xff)
-      view.setUint8(p + 2, (v >> 16) & 0xff)
-    }
-  } else if (fmt.format === 3 && fmt.bitsPerSample === 32) {
-    for (let p = dataOff; p + 4 <= dataOff + dataLen; p += 4) {
-      view.setFloat32(p, view.getFloat32(p, true) * g, true)
-    }
-  } else {
-    throw new BeatBatchError(`${path}: unsupported wav encoding (format ${fmt.format}, ${fmt.bitsPerSample}-bit — need 16-bit PCM, 24-bit PCM, or 32-bit float)`)
-  }
+  const step = info.bytesPerSample
+  const end = info.dataOffset + info.dataLength
+  for (let p = info.dataOffset; p + step <= end; p += step) codec.write(p, codec.read(p) * g)
   writeFileSync(path, bytes)
 }
 
@@ -287,6 +289,14 @@ export function normalizeBatchLoudness(outDir: string, count: number, opts: { ta
   if (measurable.length === 0) return null
   const sorted = measurable.map((m) => m.lufs).sort((a, b) => a - b)
   const targetLufs = opts.targetLufs ?? sorted[Math.floor((sorted.length - 1) / 2)]!
+
+  // All-or-nothing (2026-07-26 hunt, H1): every file that could take a gain is header-validated
+  // BEFORE the first byte is written. A throw partway through used to leave the earlier clips
+  // gained and the rest raw — a level confound baked into a blind batch that still looked
+  // perfectly rateable. Now an unreadable clip fails the whole normalization with nothing written.
+  for (let i = 1; i <= count; i++) {
+    if (measured[i - 1] !== null) assertWavGainable(resolve(outDir, `v${i}.wav`))
+  }
 
   const variants: NormalizeBatchResult['variants'] = []
   for (let i = 1; i <= count; i++) {

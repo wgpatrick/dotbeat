@@ -76,6 +76,7 @@ export {
   type ComposedDrumHit,
   type ComposedDrumPhrase,
 } from './phrase.js'
+import { readWavFormat, wavSampleCodec, type WavFormatInfo } from '../metrics/index.js'
 import { curatedKey } from './surgeCuration.js'
 import type { StemName } from '../analysis/stems.js'
 
@@ -1121,6 +1122,9 @@ export function writeShowdownBatch(
 // ---- duration matching (frame math, no DSP) ----------------------------------------------------
 
 interface WavData {
+  /** EFFECTIVE format tag (1 = integer PCM, 3 = float) — WAVE_FORMAT_EXTENSIBLE is already
+   * resolved by the shared reader, and writeWavData below emits this plain tag in its 16-byte
+   * fmt chunk, so an extensible input comes back out as an ordinary readable wav. */
   formatTag: number
   channels: number
   sampleRate: number
@@ -1129,34 +1133,27 @@ interface WavData {
   data: Uint8Array
 }
 
+/** Read a batch clip through the ONE shared wav reader (src/metrics/wav.ts) — same chunk walk,
+ * same EXTENSIBLE resolution, same format-support list as decodeWav and applyWavGain. This used
+ * to be a narrower private re-implementation that rejected WAVE_FORMAT_EXTENSIBLE, which is how
+ * most modern 24-bit encoders tag their files (2026-07-26 eval-integrity hunt, H1). */
 function readWavData(path: string): WavData {
   const bytes = readFileSync(path)
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const ascii = (off: number, len: number) => String.fromCharCode(...bytes.subarray(off, off + len))
-  if (bytes.length < 44 || ascii(0, 4) !== 'RIFF' || ascii(8, 4) !== 'WAVE') throw new BeatBatchError(`${path} is not a RIFF/WAVE file`)
-  let off = 12
-  let fmt: { formatTag: number; channels: number; sampleRate: number; bitsPerSample: number } | null = null
-  let data: Uint8Array | null = null
-  while (off + 8 <= bytes.length) {
-    const id = ascii(off, 4)
-    const size = view.getUint32(off + 4, true)
-    if (id === 'fmt ') {
-      fmt = {
-        formatTag: view.getUint16(off + 8, true),
-        channels: view.getUint16(off + 10, true),
-        sampleRate: view.getUint32(off + 12, true),
-        bitsPerSample: view.getUint16(off + 22, true),
-      }
-    } else if (id === 'data') {
-      data = bytes.subarray(off + 8, off + 8 + Math.min(size, bytes.length - off - 8))
-    }
-    off += 8 + size + (size % 2)
+  let info: WavFormatInfo
+  try {
+    info = readWavFormat(bytes)
+  } catch (err) {
+    throw new BeatBatchError(`${path}: ${(err as Error).message}`)
   }
-  if (!fmt || !data) throw new BeatBatchError(`${path}: missing fmt/data chunk`)
-  if (fmt.formatTag !== 1 && fmt.formatTag !== 3) throw new BeatBatchError(`${path}: unsupported wav encoding (format ${fmt.formatTag}; need 16-bit PCM or 32-bit float)`)
-  const blockAlign = (fmt.bitsPerSample / 8) * fmt.channels
-  const wholeFrames = Math.floor(data.length / blockAlign) * blockAlign
-  return { ...fmt, blockAlign, data: data.subarray(0, wholeFrames) }
+  const data = bytes.subarray(info.dataOffset, info.dataOffset + info.frames * info.blockAlign)
+  return {
+    formatTag: info.format,
+    channels: info.channels,
+    sampleRate: info.sampleRate,
+    bitsPerSample: info.bitsPerSample,
+    blockAlign: info.blockAlign,
+    data,
+  }
 }
 
 function writeWavData(path: string, w: WavData): void {
@@ -1183,17 +1180,20 @@ function writeWavData(path: string, w: WavData): void {
 }
 
 /** Linear fade-out over the trailing `fadeFrames` frames, in place — a hard trim mid-phrase
- * would click. Handles the same two encodings every other wav-touching module supports. */
+ * would click. Goes through the shared per-format sample codec, so EVERY encoding readWavData
+ * accepts is faded (2026-07-26 hunt, M5: this used to handle 16-bit PCM and 32-bit float only
+ * while readWavData happily accepted 24-bit, so every trimmed 24-bit clip — i.e. the ref arm, the
+ * pool is overwhelmingly 24-bit — got a HARD CUT instead of a fade, one of them ending at full
+ * scale. Silently doing nothing for an unhandled format is exactly how that hid for 950 clips). */
 function applyFadeOut(w: WavData, fadeFrames: number): void {
-  const view = new DataView(w.data.buffer, w.data.byteOffset, w.data.byteLength)
-  const totalFrames = w.data.length / w.blockAlign
+  const codec = wavSampleCodec(w.data, { format: w.formatTag, bitsPerSample: w.bitsPerSample })
+  const totalFrames = Math.floor(w.data.length / w.blockAlign)
   const start = Math.max(0, totalFrames - fadeFrames)
   for (let f = start; f < totalFrames; f++) {
     const g = fadeFrames <= 0 ? 0 : (totalFrames - f) / fadeFrames
     for (let c = 0; c < w.channels; c++) {
-      const off = f * w.blockAlign + c * (w.bitsPerSample / 8)
-      if (w.formatTag === 1 && w.bitsPerSample === 16) view.setInt16(off, Math.round(view.getInt16(off, true) * g), true)
-      else if (w.formatTag === 3 && w.bitsPerSample === 32) view.setFloat32(off, view.getFloat32(off, true) * g, true)
+      const off = f * w.blockAlign + c * w.bitsPerSample / 8
+      codec.write(off, codec.read(off) * g)
     }
   }
 }
