@@ -22,7 +22,7 @@ resolve to literal `set` lines, validate eagerly against the live `SYNTH_FIELDS`
 
 | rung | what it is | where |
 |---|---|---|
-| **preset** | a bag of `set` edits, no conditions | `src/core/preset.ts`, `presets/presets.json` |
+| **preset** | a bag of `set` edits, no conditions | `src/core/preset.ts`, `presets/factory.json` |
 | **macro** | a knob resolved to N `set` edits, kind-checked | `src/core/macro.ts`, `presets/macros.json` |
 | **trick** | a preset **with preconditions and a receipt** | `src/analysis/trick.ts`, `presets/tricks.json` |
 

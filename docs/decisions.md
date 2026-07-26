@@ -591,7 +591,11 @@ include/reference mechanism would reintroduce indirection, canonical-form ambigu
 banned from preset libraries by construction — routing names project-specific track ids.
 
 **Proven:** Phase 5 exit test (`scripts/verify-phase5.mjs`) — a real 4-track mix reproduced
-from pure text with exact per-track engine-state equivalence vs. the hand-patched original.
+from pure text with exact per-track engine-state equivalence vs. the hand-patched original. (That
+script no longer exists: it was one of the BeatLab-era verify scripts retired with D15 in
+`2b725f5a`, because it hard-required `--beatlab-dir`. The result stands as a historical
+measurement; the standing regression cover for this property is `test/roundtrip.test.ts` and the
+`test/format-v*.test.ts` suites.)
 
 **Revisit when:** a field's frozen default proves musically wrong at scale (would need a format
 version bump, not a silent default change), or preset libraries need versioning/sharing.

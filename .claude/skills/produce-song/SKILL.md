@@ -113,7 +113,9 @@ phase-3 arc.
    drop is planned. A flat arc (adjacent contrasts of 1-2 dB) is a FAIL, not an observation.
 3. Solo-stem screens re-run on final patches: `beat render --stems` + the phase-4 pathology
    checks. (`beat lint --doc <file.beat>` also renders per-track solos to name offenders.)
-4. Audio-pathology screens (`beat lint --audio`) if that flag exists by then — check `beat help`.
+4. Audio-pathology screens: `beat lint <mix.wav> --screens [--sections <file.beat>]` — the standing
+   defect suite (clicks, DC offset, mono-collapse, 2-5 kHz resonance, mud, crest collapse, dead air,
+   sub rumble); `--sections` adds the song map so the arrangement-flatness screen runs too.
 5. Advisory only: taste critic / aes scorers if reachable — log scores in NOTES.md, never gate on
    them (T5 lesson: the critic steers only once it predicts complaints).
 

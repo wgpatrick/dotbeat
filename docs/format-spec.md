@@ -288,9 +288,11 @@ the ~50 store-level params the format couldn't express. v0.3 exposes them:
   the same code path as `beat set`, so applying one produces a normal edit list and a normal
   diff. Presets never carry track references — routing stays a per-project edit.
 
-Proven exit (Phase 5, `scripts/verify-phase5.mjs`): the Night Shift v3 sound design —
-originally only reachable by patching the live store — reproduced from pure v0.3 text, with
-exact store-state equivalence on every track and render metrics matching the archived reference.
+Proven exit (Phase 5, `scripts/verify-phase5.mjs` — a historical measurement; that script was
+retired with the other BeatLab-era verify scripts in `2b725f5a`/D15): the Night Shift v3 sound
+design — originally only reachable by patching the live store — reproduced from pure v0.3 text,
+with exact store-state equivalence on every track and render metrics matching the archived
+reference.
 
 ### v0.5 additions — media block + sample-backed drum lanes (Phase 7)
 
@@ -617,7 +619,7 @@ the format-spec-level summary.
   and precision rules as `start`/`BeatNote.duration`.
 - **The 12-lane default kit** (research 19 Part VII): `kick`/`snare`/`rimshot`/`clap`/`hat`/
   `openhat`/`tom_lo`/`tom_mid`/`tom_hi`/`crash`/`ride`/`cowbell`, each carrying its GM note number —
-  a strict superset of the old 5 (same names, same meanings). `beat add-track --kind drums` writes
+  a strict superset of the old 5 (same names, same meanings). `beat add-track <file> <id> drums` writes
   this by default going forward; the low-level `addTrack()` core primitive keeps its old
   zero-lanes default for every other/internal caller (existing tests, `vary`/`humanize`/`quantize`
   internals) so nothing that doesn't ask for the new kit is affected.

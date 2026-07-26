@@ -34,32 +34,49 @@ directly in this session. **Do**: always quote the path — `beat set song.beat
 
 ## 4. Reaching for an MCP tool that doesn't exist
 
-**Wrong**: assuming every CLI verb has a `beat_*` MCP counterpart and trying `beat_vary` /
-`beat_score` / `beat_sample` / `beat_lane` / `beat_daemon`. **Confirmed**: driving a live
-`tools/list` call against `beat mcp` returns exactly 27 tools, and none of those five exist. **Do**:
-for the variation-and-audition loop and media registration/assignment, shell out to the raw CLI
-even inside an MCP-connected session — see `references/cli-reference.md` for the exact list of
-what's MCP-covered vs CLI-only.
+**Wrong**: assuming every CLI verb has a `beat_*` MCP counterpart. **Confirmed** (re-verified
+2026-07-25 by a live `tools/list` against `beat mcp`): 71 tools, covering 69 of the 87 CLI
+commands. The gap is now the *orchestration and eval* verbs, not the editing ones — `audition`,
+`board`, `daemon`, `excerpt`, `gen-kit`, `match`, `open`, `pilot`, `prodtask`, `rate`, `showdown`,
+`surge`, `taste-collect`, `taste-eval`, `taste-seeds`, `trick` have no tool. **Do**: shell out to
+the raw CLI for those even inside an MCP-connected session; for everything else use the tool.
+(This entry previously said the count was 27 and that `beat_vary`/`beat_score`/`beat_sample`/
+`beat_lane` did not exist — **all four do exist**; that was a 2026-07-11 snapshot left to rot. If
+you are unsure, run `tools/list` rather than trusting any written list.) See
+`references/cli-reference.md` for the mapping and its five naming exceptions.
 
-## 5. Trusting `beat render --offline` output without checking for the silent-failure warning
+## 5. Applying the old 9.5 LU offline-vs-browser offset (it no longer exists)
 
-**Wrong**: treating any WAV `beat render --offline` produces as real audio. **Confirmed**: without
-a locally-patched `node-web-audio-api` native build (not part of a normal `npm install`),
-`render-offline.mjs` renders **total silence with no error** — this was found the hard way in
-Phase 12 Stream 2 and is why `docs/decisions.md` D15 retires this render path in favor of
-retargeting `beat render` onto dotbeat's own `ui/` engine (`docs/phase-17-plan.md` Stream L). **Do**:
-check for the tool's own startup warning about the missing patched build, or better, check whether
-Stream L has landed and `--offline` still exists at all before relying on it; if metrics on a
-render come back suspiciously silent/short, that's the first thing to check, not a mix problem.
+**Wrong**: targeting -23.5 LUFS for an offline render because a streaming spec says -14, or
+"correcting" a cross-path comparison by 9.5 LU. **Confirmed**: that constant was measured *pre-D15*
+between BeatLab's Rust `node-web-audio-api` engine and Chromium's own `DynamicsCompressor` — two
+different implementations. D15 collapsed both CLI render paths onto dotbeat's single engine
+(`ui/src/audio/engine.ts`, with `ui/src/audio/offline.ts` as the offline construction of the *same*
+`Engine`), so the offset went with it: the full-song parity gate now has live and offline agreeing
+to **LUFS Δ0.19 / RMS Δ0.12** (D23). It is still quoted in `docs/phase-4-plan.md`, `ROADMAP.md`,
+`docs/m4-native-engine-design.md`, and the worked example in `references/render-metrics-loop.md`, so
+you *will* meet it. **Do**: target the streaming number directly on whichever path you use.
 
-## 6. Comparing LUFS/metrics across the two render paths without the calibration offset
+## 6. Comparing true-peak/crest across the live and offline render paths
 
-**Wrong**: rendering one iteration through the browser (Chromium) path and the next through
-`--offline`, then comparing their LUFS numbers directly. **Confirmed**: the two paths differ by a
-**constant, measured 9.5 LU** offset (differing `DynamicsCompressor` auto-makeup between Chromium
-and the Rust engine) — see `references/render-metrics-loop.md`. **Do**: stay on one render path for
-an entire iteration loop; only translate the final number if a cross-path target (e.g. a streaming
--14 LUFS spec) needs mapping onto the path actually in use.
+**Wrong**: treating a ~1 dB true-peak or crest difference between a live-capture render and an
+`--offline` render of the same unchanged file as a mix change. **Confirmed** (D23, third known
+live-chain exception): on a limiter-pinned dense mix the live path reads peaks ~1 dB hotter (−1.5
+vs −2.5 dBTP) while every energy metric matches — it is the live path's MediaRecorder→opus step
+overshooting, verified by round-tripping the *offline* WAV through that same codec (+0.45 dB). Same
+story for mono-width opus noise and sub-band tilt. **Do**: compare energy metrics (LUFS, RMS, band
+shares, correlation) across paths freely; for peak-domain numbers stay on one path for the whole
+loop and trust the **offline** number when they disagree.
+
+## 6b. Trusting a `--offline` WAV without reading the printed refusals
+
+**Wrong**: assuming `beat render --offline` rendered everything you hear in the GUI. **Confirmed**:
+soundfont projects (instrument tracks / sf-backed drum lanes) are refused and fall back to live
+capture, and an active `bitcrushRate` degrades to passthrough — both print a named reason rather
+than failing. (The *old* silent-total-silence failure mode is gone: `cli/render-offline.mjs` and its
+patched-`node-web-audio-api` dependency were deleted with D15. Any doc telling you to check
+`render-offline.mjs`'s startup warning is describing a file that no longer exists.) **Do**: read
+stderr — the refusal reason, the caveats, and the realtime ratio are all printed there.
 
 ## 7. Assuming track ids without running `beat inspect` first
 
