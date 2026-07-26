@@ -7,6 +7,7 @@
 // that doesn't parse is a bug, not a variant).
 
 import { mulberry32 } from './eval.js'
+import { seededShuffle } from '../core/rng.js'
 import { parse, serialize, setValue } from '../core/index.js'
 import { productionRoleFor, productionProfileFor, applyProducedDefaults } from '../analysis/produce.js'
 import { engineCuratedForRole, type EngineCuratedFile } from './enginePresets.js'
@@ -368,14 +369,24 @@ export interface StyleContrastSpec {
   prompts: string[]
 }
 
+// Shuffle note (2026-07-25, R3 finding 5): the four generators below used to draw with
+// `[...X].sort(() => rng() - 0.5)`. That is not a uniform shuffle — a random comparator biases
+// toward the input order, so the very thing these functions promise ("stratified across subjects
+// before styles repeat", "styles sampled without replacement") was systematically over-sampling
+// some prompts. It was also engine-dependent (V8's sort takes an insertion-sort path for arrays
+// <= 22, and both banks are under that) and consumed a data-dependent number of rng draws, so
+// every draw made AFTER a shuffle sat at an unspecified stream position. All six sites now use the
+// Fisher-Yates in src/core/rng.ts. Same seed still gives the same prompts; a given seed gives
+// DIFFERENT (and now unbiased) prompts than it did before this change.
+
 export function generateStyleContrasts(seed: number, count: number, stylesPer = 4): StyleContrastSpec[] {
   const rng = mulberry32(seed * 7 + 3)
-  const subjects = [...GEN_SUBJECTS].sort(() => rng() - 0.5)
+  const subjects = seededShuffle(rng, GEN_SUBJECTS)
   const out: StyleContrastSpec[] = []
   for (let i = 0; i < count; i++) {
     const s = subjects[i % subjects.length]!
     const subject = genSubjectVaried(s.id, rng).subject
-    const styles = [...GEN_STYLES].sort(() => rng() - 0.5).slice(0, stylesPer)
+    const styles = seededShuffle(rng, GEN_STYLES).slice(0, stylesPer)
     out.push({ id: `${s.id}sc${i + 1}`, subject, seconds: s.seconds, prompts: styles.map((st) => `${subject}, ${st}`) })
   }
   return out
@@ -384,7 +395,7 @@ export function generateStyleContrasts(seed: number, count: number, stylesPer = 
 /** `count` seeded prompts, stratified across subjects before styles repeat. */
 export function generateGenPrompts(seed: number, count: number): GenPromptSpec[] {
   const rng = mulberry32(seed)
-  const subjects = [...GEN_SUBJECTS].sort(() => rng() - 0.5)
+  const subjects = seededShuffle(rng, GEN_SUBJECTS)
   const out: GenPromptSpec[] = []
   for (let i = 0; i < count; i++) {
     const s = subjects[i % subjects.length]!
@@ -404,7 +415,7 @@ export function generateGenPrompts(seed: number, count: number): GenPromptSpec[]
  * vocabulary the taste loop already collects and scores. */
 export function stylePromptsFor(subject: string, n: number, seed: number): string[] {
   const rng = mulberry32(seed)
-  const shuffled = [...GEN_STYLES].sort(() => rng() - 0.5)
+  const shuffled = seededShuffle(rng, GEN_STYLES)
   const prompts: string[] = []
   for (let i = 0; i < n; i++) prompts.push(`${subject}, ${shuffled[i % shuffled.length]!}`)
   return prompts
@@ -428,12 +439,12 @@ export interface GenStyleBatchSpec {
  * without replacement, cycling only if `variants` exceeds the style-bank size. Deterministic in `seed`. */
 export function generateGenStyleBatches(seed: number, batchCount: number, variants: number): GenStyleBatchSpec[] {
   const rng = mulberry32(seed)
-  const subjects = [...GEN_SUBJECTS].sort(() => rng() - 0.5)
+  const subjects = seededShuffle(rng, GEN_SUBJECTS)
   const out: GenStyleBatchSpec[] = []
   for (let i = 0; i < batchCount; i++) {
     const s = subjects[i % subjects.length]!
     const subject = genSubjectVaried(s.id, rng).subject
-    const shuffledStyles = [...GEN_STYLES].sort(() => rng() - 0.5)
+    const shuffledStyles = seededShuffle(rng, GEN_STYLES)
     const styles: string[] = []
     for (let v = 0; v < variants; v++) styles.push(shuffledStyles[v % shuffledStyles.length]!)
     out.push({

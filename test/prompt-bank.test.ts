@@ -174,8 +174,14 @@ test('genSubject / genSubjectVaried: one-shots pass through, phrase ids draw a v
 // ---- generator determinism + output snapshots ---------------------------------------------------
 // These four generators are the only consumers of the prompt bank, and the ONLY thing that has ever
 // pinned their behavior is this file. The snapshots below are seed -> prompt mappings; they change
-// whenever the shuffle changes (see the Fisher-Yates commit) or the bank changes. Determinism (same
-// seed -> same output) is the invariant that must hold regardless.
+// whenever the shuffle changes or the bank changes. Determinism (same seed -> same output) is the
+// invariant that must hold regardless.
+//
+// The snapshots were UPDATED on 2026-07-25 when the six `sort(() => rng() - 0.5)` draws were
+// replaced with the Fisher-Yates in src/core/rng.ts (R3 finding 5). A given seed now yields
+// different — and, unlike before, unbiased and engine-independent — prompts. These are prompt
+// draws, not rated artifacts: the scores log records the resulting prompt TEXT, not the seed ->
+// prompt mapping, so no historical batch's provenance depends on the old values.
 
 test('generateGenPrompts: deterministic, stratified across subjects, snapshot at seed 11', () => {
   assert.deepEqual(generateGenPrompts(11, 6), generateGenPrompts(11, 6), 'same seed, same prompts')
@@ -185,12 +191,12 @@ test('generateGenPrompts: deterministic, stratified across subjects, snapshot at
   assert.equal(new Set(out.map((p) => p.id)).size, 6)
   for (const p of out) assert.ok(p.prompt.length > 0 && p.seconds > 0)
   assert.deepEqual(out, [
-    { id: 'vox1', prompt: 'a short wordless vocal chop, sung vowel, gritty distorted electronic', seconds: 2 },
-    { id: 'kick1', prompt: 'a punchy kick drum one-shot, gritty distorted electronic', seconds: 1 },
-    { id: 'chords1', prompt: 'a bright major arpeggiated chord progression, 4 bars, uplifting and open, isolated chords stem only, no drums, no bass, no other instruments, analog warmth, tape saturation', seconds: 8 },
-    { id: 'snare1', prompt: 'a tight snare drum one-shot, analog warmth, tape saturation', seconds: 1 },
-    { id: 'bassline1', prompt: 'a trap-influenced 808 bassline loop, 4 bars, sliding and sparse, isolated solo bassline stem only, absolutely no drums, no percussion, no other instruments, dark and cavernous, heavy reverb', seconds: 8 },
+    { id: 'snare1', prompt: 'a tight snare drum one-shot, clean and modern, club-ready', seconds: 1 },
+    { id: 'vox1', prompt: 'a short wordless vocal chop, sung vowel, lo-fi, dusty, vinyl character', seconds: 2 },
+    { id: 'impact1', prompt: 'a cinematic impact hit with a tail, dark and cavernous, heavy reverb', seconds: 3 },
+    { id: 'perc1', prompt: 'a resonant percussion hit, dark and cavernous, heavy reverb', seconds: 1 },
     { id: 'clap1', prompt: 'a layered hand clap one-shot, bright and glassy, digital sheen', seconds: 1 },
+    { id: 'melody1', prompt: 'a melodic synth lead phrase, 4 bar loop, catchy and emotive, isolated solo lead melody stem only, no drums, no other instruments, bright and glassy, digital sheen', seconds: 8 },
   ])
 })
 
@@ -201,10 +207,10 @@ test('stylePromptsFor: one subject in n DISTINCT styles, deterministic, snapshot
   const four = stylePromptsFor(subject, 4, 9)
   assert.equal(new Set(four).size, 4, 'styles are sampled WITHOUT replacement')
   assert.deepEqual(four, [
-    'a punchy kick drum one-shot, clean and modern, club-ready',
-    'a punchy kick drum one-shot, lo-fi, dusty, vinyl character',
     'a punchy kick drum one-shot, soft, intimate, close-mic feel',
-    'a punchy kick drum one-shot, organic and acoustic-leaning',
+    'a punchy kick drum one-shot, gritty distorted electronic',
+    'a punchy kick drum one-shot, dark and cavernous, heavy reverb',
+    'a punchy kick drum one-shot, lo-fi, dusty, vinyl character',
   ])
   // n beyond the 8-style bank cycles rather than throwing
   const ten = stylePromptsFor(subject, 10, 9)
@@ -221,23 +227,23 @@ test('generateGenStyleBatches: one subject x n distinct styles per batch, snapsh
   assert.equal(new Set(out.map((b) => b.id)).size, 2, 'subjects are stratified across batches')
   assert.deepEqual(out, [
     {
-      id: 'perc1',
-      label: 'a resonant percussion hit',
-      seconds: 1,
+      id: 'vox1',
+      label: 'a short wordless vocal chop, sung vowel',
+      seconds: 2,
       prompts: [
-        'a resonant percussion hit, analog warmth, tape saturation',
-        'a resonant percussion hit, clean and modern, club-ready',
-        'a resonant percussion hit, lo-fi, dusty, vinyl character',
+        'a short wordless vocal chop, sung vowel, analog warmth, tape saturation',
+        'a short wordless vocal chop, sung vowel, organic and acoustic-leaning',
+        'a short wordless vocal chop, sung vowel, gritty distorted electronic',
       ],
     },
     {
-      id: 'clap1',
-      label: 'a layered hand clap one-shot',
-      seconds: 1,
+      id: 'stab1',
+      label: 'a wide chord stab one-shot',
+      seconds: 2,
       prompts: [
-        'a layered hand clap one-shot, analog warmth, tape saturation',
-        'a layered hand clap one-shot, lo-fi, dusty, vinyl character',
-        'a layered hand clap one-shot, organic and acoustic-leaning',
+        'a wide chord stab one-shot, soft, intimate, close-mic feel',
+        'a wide chord stab one-shot, lo-fi, dusty, vinyl character',
+        'a wide chord stab one-shot, organic and acoustic-leaning',
       ],
     },
   ])
@@ -254,36 +260,38 @@ test('generateStyleContrasts: ONE subject x several styles per contrast, snapsho
   }
   assert.deepEqual(out, [
     {
-      id: 'percsc1',
-      subject: 'a resonant percussion hit',
-      seconds: 1,
+      id: 'basssc1',
+      subject: 'a deep bass stab one-shot',
+      seconds: 2,
       prompts: [
-        'a resonant percussion hit, gritty distorted electronic',
-        'a resonant percussion hit, analog warmth, tape saturation',
-        'a resonant percussion hit, organic and acoustic-leaning',
-        'a resonant percussion hit, clean and modern, club-ready',
+        'a deep bass stab one-shot, lo-fi, dusty, vinyl character',
+        'a deep bass stab one-shot, soft, intimate, close-mic feel',
+        'a deep bass stab one-shot, clean and modern, club-ready',
+        'a deep bass stab one-shot, gritty distorted electronic',
       ],
     },
     {
-      id: 'kicksc2',
-      subject: 'a punchy kick drum one-shot',
-      seconds: 1,
-      prompts: [
-        'a punchy kick drum one-shot, lo-fi, dusty, vinyl character',
-        'a punchy kick drum one-shot, dark and cavernous, heavy reverb',
-        'a punchy kick drum one-shot, bright and glassy, digital sheen',
-        'a punchy kick drum one-shot, gritty distorted electronic',
-      ],
-    },
-    {
-      id: 'stabsc3',
+      id: 'stabsc2',
       subject: 'a wide chord stab one-shot',
       seconds: 2,
       prompts: [
-        'a wide chord stab one-shot, soft, intimate, close-mic feel',
+        'a wide chord stab one-shot, analog warmth, tape saturation',
         'a wide chord stab one-shot, bright and glassy, digital sheen',
         'a wide chord stab one-shot, gritty distorted electronic',
-        'a wide chord stab one-shot, analog warmth, tape saturation',
+        'a wide chord stab one-shot, soft, intimate, close-mic feel',
+      ],
+    },
+    {
+      // a phrase-tier subject here too: the isolation clause rides through generateStyleContrasts,
+      // which the old draw happened never to reach at this seed
+      id: 'drumloopsc3',
+      subject: 'a laid-back downtempo drum loop, 4 bars, loose and swung, drums only, no melodic instruments',
+      seconds: 8,
+      prompts: [
+        'a laid-back downtempo drum loop, 4 bars, loose and swung, drums only, no melodic instruments, analog warmth, tape saturation',
+        'a laid-back downtempo drum loop, 4 bars, loose and swung, drums only, no melodic instruments, lo-fi, dusty, vinyl character',
+        'a laid-back downtempo drum loop, 4 bars, loose and swung, drums only, no melodic instruments, soft, intimate, close-mic feel',
+        'a laid-back downtempo drum loop, 4 bars, loose and swung, drums only, no melodic instruments, clean and modern, club-ready',
       ],
     },
   ])
