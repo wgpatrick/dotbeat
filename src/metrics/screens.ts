@@ -19,6 +19,7 @@
 // re-rendering an unchanged .beat can't flip a finding.
 
 import { analyze, fft, type MixMetrics } from './analyze.js'
+import { analyzeRich, type RichMetrics } from './rich.js'
 import type { SectionSpec } from './sections.js'
 import { samplesPerBar } from './sections.js'
 import { RENDER_RUN_VARIANCE_LU } from './variance.js'
@@ -48,6 +49,11 @@ export interface ScreenOptions {
   bpm?: number
   /** Whole-mix metrics, if the caller already computed them (avoids a second analyze()). */
   metrics?: MixMetrics
+  /** Rich DSP metrics, if the caller already computed them (avoids a second STFT pass). The
+   * bass-grind screen needs flatnessLoDb; computing it here rather than re-deriving a bass-band
+   * flatness from this file's own powerSpectrum is deliberate — one definition, one set of units
+   * (see the units contract in src/metrics/rich.ts). */
+  rich?: RichMetrics
 }
 
 // ---- shared DSP helpers ---------------------------------------------------------------------
@@ -161,6 +167,59 @@ const DEAD_SURROUND_DB = 35 // gap must be this far below the surrounding progra
 //    flags only clearly-infrasonic buildup.
 const RUMBLE_HI_HZ = 30
 const RUMBLE_SHARE = 0.2
+
+// 10. bass-grind: the FOUNDING owner complaint (2026-07-24, research 121 §1.3 / 122 §1) — "the bass
+//     at ~1:11-1:16 is grindy/noisy" — which every metric check of the day passed over. Research
+//     121 §3.7 proposed a three-clause detector; research 140 D18 found it had never been built,
+//     living only as prose in a skill file.
+//
+//     CALIBRATION PROVENANCE (2026-07-26). Measured on the owner's own matched A/B pair, which
+//     differs ONLY in the offending patch params (resonance 1.1->0.5, saturator 0.30/0.35->
+//     0.12/0.15, subLevel 0.5->0.45; research 122 §1):
+//       taste-dataset/covers/solo-bass-stabs.wav  (BAD, must FLAG): crestDb 9.65, sub 67.7%,
+//         definition band 28.6%, flatnessLoDb -8.19
+//       taste-dataset/covers/solo-bs2.wav         (GOOD, must PASS): crestDb 11.39, sub 59.4%,
+//         definition band 36.8%, flatnessLoDb -11.56
+//     (These reproduce 121/122's published numbers — crest 9.6/11.4, definition 28/37 — exactly.)
+//
+//     WHY 121's THREE CLAUSES ARE NOT ENOUGH, measured. Shipped verbatim (crest < 10.5 AND sub >
+//     65% AND definition < 30%) the rule fires on **37.5% of the packs commercial bass references
+//     and 19.7% of all in-scope reference clips** — it would condemn a third of the owner's own
+//     Splice bass loops as pathological. That is research 134 §5's finding reproduced ("the
+//     screens reject the quality bar itself") and it is exactly what this file's own header
+//     forbids ("thresholds are set for ~0 false positives on the commercial ref pools").
+//
+//     THE MISSING CLAUSE, and it is the one the research already named. Research 122 §4.1 called
+//     the complaint "drive/resonance intermodulation ... with NO PITCH DEFINITION" and proposed
+//     per-band spectral flatness as the cheap complement to roughness; 140 D18 recorded that it
+//     too was absent. flatnessLoDb (100-500 Hz geometric/arithmetic power ratio) IS that measure,
+//     and it separates the pair by 3.4 dB. Adding it takes the false-positive rate to **0 of 61
+//     in-scope reference clips across all four pools (0 of 24 packs)** while still flagging the
+//     bad stem and passing the good one. Every clause is load-bearing — measured ablation:
+//       121's three clauses alone .................. 19.7% ref FP (37.5% packs)
+//       flatnessLoDb alone ......................... 37.7% ref FP
+//       without the crest clause ................... 4.9% ref FP
+//       all four (shipped) ......................... 0.0% ref FP, 1 of 301 synth clips
+//
+//     ROUGHNESS IS DELIBERATELY ABSENT. Research 123 §2-N1 measured a commercial bass loop 77%
+//     ROUGHER than this very fail stem, and 131 §4 found winning references rougher than the
+//     clips they beat: absolute roughness thresholds cannot gate. The pair-relative roughness ear
+//     stays where it belongs, on `beat lint --roughness-baseline`. This screen is the ABSOLUTE
+//     signal 140 D18 says the founding complaint still lacks, built only from axes that survive
+//     an absolute threshold.
+//
+//     HONEST LIMITS. n=1 matched pair, as with every threshold in the grind family (123 §7). The
+//     crest and band-share clauses have margins (0.85 dB, 2.7 pt, 1.4 pt) at or inside the
+//     measured render-run variance floor (variance.ts: 1.0 dB peak-domain, 2.0 pt band-share), so
+//     they cannot decide a case on their own; flatnessLoDb, an energy-domain measure with a
+//     1.7 dB margin either side, carries the decision. Treat a fire as "look at this", and bank
+//     every new owner-flagged bass miss (research 140 D30) — a second pair is worth more than any
+//     amount of re-tuning against this one.
+const GRIND_CREST_DB = 10.5 // midpoint of the pair (9.65 / 11.39); research 121 §3.7's number
+const GRIND_SUB_SHARE_PCT = 65 // pair 67.7 / 59.4; research 121 §3.7's number
+const GRIND_DEFINITION_PCT = 30 // 60-250 Hz share; pair 28.6 / 36.8; research 121 §3.7's number
+const GRIND_FLATNESS_LO_DB = -9.9 // pair midpoint of -8.19 / -11.56 — the clause that kills the FPs
+const GRIND_MIN_LOW_SHARE_PCT = 85 // applicability: only bass-DOMINANT material is in scope at all
 
 // ---- individual screens ---------------------------------------------------------------------
 
@@ -469,11 +528,44 @@ function screenRumble(spec: { power: Float64Array; binHz: number } | null): Path
   return []
 }
 
+/** The bass-grind screen (research 121 §3.7 + 122 §4.1; the constants above carry the full
+ * calibration). Scoped: it only speaks about bass-DOMINANT material (a solo bass stem or a
+ * bass-only render), because every clause is a statement about how the low end is behaving. On a
+ * full mix, a lead, or a drum loop it returns nothing rather than guessing. */
+function screenBassGrind(metrics: MixMetrics, rich: RichMetrics): PathologyFinding[] {
+  const sub = metrics.spectral.bandsPct.sub
+  const definition = metrics.spectral.bandsPct.bass // 60-250 Hz: where a bass note's pitch lives
+  if (sub + definition < GRIND_MIN_LOW_SHARE_PCT) return [] // not a bass-dominant stem — out of scope
+  if (metrics.crestDb >= GRIND_CREST_DB) return []
+  if (sub <= GRIND_SUB_SHARE_PCT) return []
+  if (definition >= GRIND_DEFINITION_PCT) return []
+  if (rich.flatnessLoDb <= GRIND_FLATNESS_LO_DB) return []
+  return [
+    {
+      kind: 'bass-grind',
+      severity: severityFrom(rich.flatnessLoDb, GRIND_FLATNESS_LO_DB, -5),
+      source: 'bass-grind-screen',
+      detail:
+        `bass-dominant stem with no pitch definition: crest ${metrics.crestDb.toFixed(1)} dB (flat), ` +
+        `${sub.toFixed(0)}% of energy below 60 Hz, only ${definition.toFixed(0)}% in the 60-250 Hz ` +
+        `definition band, and 100-500 Hz flatness ${rich.flatnessLoDb.toFixed(1)} dB (noisy, not tonal) — ` +
+        `the drive/resonance intermodulation signature of the 2026-07-24 "grindy/noisy" complaint. ` +
+        `Fix that worked on the reference case: lower filter resonance (1.1 -> 0.5) and saturator ` +
+        `drive (0.30/0.35 -> 0.12/0.15), and trim subLevel (0.5 -> 0.45); it moved crest 9.6 -> 11.4 ` +
+        `and the definition band 28 -> 37%.`,
+      band: '100-500 Hz',
+      measured: rich.flatnessLoDb,
+      threshold: GRIND_FLATNESS_LO_DB,
+    },
+  ]
+}
+
 /** Run every pathology screen over one decoded mix. Findings are returned highest-severity first.
  * Screens needing a section map (arrangement-flatness) are skipped when none is supplied. */
 export function screen(channels: Float64Array[], sampleRate: number, opts: ScreenOptions = {}): PathologyFinding[] {
   const mono = toMono(channels)
   const metrics = opts.metrics ?? analyze(channels, sampleRate)
+  const rich = opts.rich ?? analyzeRich(channels, sampleRate)
   const spec = powerSpectrum(mono, sampleRate)
   const findings: PathologyFinding[] = [
     ...screenFlatness(channels, sampleRate, opts),
@@ -485,6 +577,7 @@ export function screen(channels: Float64Array[], sampleRate: number, opts: Scree
     ...screenCrest(metrics),
     ...screenDeadAir(mono, sampleRate, opts),
     ...screenRumble(spec),
+    ...screenBassGrind(metrics, rich),
   ]
   return findings.sort((a, b) => b.severity - a.severity)
 }
