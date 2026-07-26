@@ -637,7 +637,7 @@ export async function abCommand(argv) {
   }
 
   // ---- the server ------------------------------------------------------------------------------
-  const { computeBatchFeatures } = await import(pathToFileURL(join(repoRoot, 'dist/src/taste/features.js')).href)
+  const { computeBatchFeatures } = await import(pathToFileURL(join(repoRoot, 'dist/src/metrics/features.js')).href)
   const { createReviewServer, listenReviewServer, ReviewHttpError } = await import(
     pathToFileURL(join(repoRoot, 'dist/src/serve/review-server.js')).href
   )
