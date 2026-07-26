@@ -324,6 +324,41 @@ targets it therefore CANNOT see — per-band crest, attack-time statistics, spec
 flatness — are listed by name in every report rather than silently dropped; they are exactly the
 critic upgrade research 138 files as B0.
 
+**Measured, before any owner rating** (`node scripts/layered-check.mjs`, 6 clips — 2 per pitched
+role — each rendered in all three arms from ONE figure and loudness-normalized together, 2026-07-26;
+renders in the private `taste-dataset/layered-check/`). Targets passed, out of 24:
+**engineplus 3 · layered 19 · layeredplus 18.**
+
+| feature | target | engineplus | layered | layeredplus |
+|---|---|---|---|---|
+| bassline `bandSubPct` | ≥30% | **0.33** | **71.6** | **64.0** |
+| bassline `centroidHz` | ≤90 (ref 74) | **199** | **52.8** | **85.1** |
+| bassline `stereoWidthDb` | ≤−40 | **−11.0** | **−55.8** | **−58.9** |
+| chords `bandBassPct` | 18–40 | **0.02** | **29.6** | **40.5** |
+| chords `bandMidsPct` | ≤90 (was 99.35) | 79.6 | **61.7** | **46.6** |
+| chords `stereoWidthDb` | −9…−2 | **−11.0** | **−5.9** | **−6.8** |
+| chords `crestDb` | 13–18 | 13.0 | **18.2** | **14.7** |
+| lead `bandBassPct` | 5–20 | **0.03** | **5.7** | **14.6** |
+| lead `bandMidsPct` | ≤90 (was 99.19) | 82.2 | 77.6 | **61.2** |
+| lead `stereoWidthDb` | −9…−3 | **−11.1** | **−8.8** | −9.6 |
+
+Reachable now that were not before: the **entire bassline register family** (sub share, centroid and
+mono width all moved from 0/8 to 8/8 — the largest single per-role gap in the log), **bass-band body
+on chords and lead** (0.02% / 0.03% → 29.6% / 5.7%, inside the target band), **mids occupancy** on
+both, and **role-true chords width** (−11 → −5.9 dB, the first time any dotbeat arm has hit the
+packs-ref width row). Still missing: lead broadband crest (18.8–21.1 vs a 13–18 target — the lead
+figures drawn were sparse, and 131 §6 itself warns that sparse arrangements masquerade as dynamics in
+a broadband number), and `layeredplus` lead width at −9.6 dB, just outside the band.
+
+**Two findings from the render loop that generalize past this arm:**
+1. **The mid/side widener cannot widen a near-mono layer — it attenuates it.** Pushed to 0.92–0.98 it
+   cut chords' mids from 29% to 6.9%; even at 0.78 it bought *zero* width (−11.3 dB with, −10.1 dB
+   without) while costing ~6 dB on exactly the layers carrying the mids. Width on these stacks comes
+   from per-layer PAN PLACEMENT, unison and chorus. Any future width work should assume the same.
+2. **Parallel compression on a SUSTAINED low layer is the wrong lever.** It raises that layer's
+   average, which is precisely what the band-share targets read: it pushed chords' bass-band share
+   from 38% (in target) to 62% (out). Parallel comp belongs on the transient-bearing layers.
+
 **Licensing.** Layered clips are internally composed through dotbeat's own engine, so a
 layered-bearing batch carries no `.gitignore` gate (unlike ref / surge / midi batches).
 
