@@ -171,9 +171,26 @@ others: stdlib-only top level with a lazy `surgepy` import, chatter on stderr, e
 `$BEAT_PYTHON` → `python/.venv` → `python3` interpreter resolution (via `src/analysis/surge.ts`).
 
 Modes: `--doctor` (surgepy availability + Surge factory-content path + factory patch count),
-`--list-patches` (the factory catalogue as JSON, for the TS-side seeded pick), and the default
-**render** mode — the request JSON `{patch, notes, sampleRate, output}` comes in on **stdin**, the
-WAV is written to `output`, and a small metadata doc is printed on stdout.
+`--list-patches` (the factory catalogue as JSON, for the TS-side seeded pick), `--dump-params
+<patch>` (every parameter with its **native** value + range — what preset retargeting needs to
+start a local search AT a preset), and the default **render** mode — the request JSON
+`{patch, notes, sampleRate, output}` comes in on **stdin**, the WAV is written to `output`, and a
+small metadata doc is printed on stdout.
+
+### Two override spellings, and why (2026-07-26)
+
+The render request accepts `overrides` **and** `nativeOverrides`. `overrides` is the original
+Track 1a surface, documented and validated as normalized `0..1` — but `surgepy.setParamVal` takes a
+parameter's **native** value, so on this build that path can only ever reach the `0..1` slice of a
+parameter's real range. Measured on `Basses/Theme.fxp`: `A Filter 1 Cutoff` spans `-60..70`
+(13.75 Hz … 14 kHz) and the `0..1` window reaches **440.00 … 466.16 Hz**. Parameters whose native
+range happens to *be* `0..1` (resonance, EG sustain) were unaffected, which is how it went unnoticed.
+
+`overrides` is deliberately left as-is — redefining it would silently reinterpret every render
+already cached against it (`cli/surge-render-prep.mjs` hashes the override list into its cache key).
+`nativeOverrides` is the additive path: values in Surge's own units, clamped to each parameter's
+reported `[min, max]`, echoed back as `{param, requested, applied, min, max, display}`. Prefer it
+for anything that needs real range coverage. See `docs/preset-retargeting.md`.
 
 ### surgepy is NOT pip-installable — it's a Surge XT source build
 
