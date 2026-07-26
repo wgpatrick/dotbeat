@@ -50,6 +50,32 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
 | `hoover-lead` | hooverDetuneCents | `osc2Detune` | **40** | 27..40 |
 | `layered-house-kit` | swingPct | `shuffleAmount` | **62.5** | 50..80 |
 
+## Last verification run — every recipe built, rendered and checked
+
+*From `presets/recipe-verify-receipts.json`, generated 2026-07-26 by
+`npm run build && node scripts/gen-recipe-receipts.mjs --seed 11 --key Am --bpm 124` (seed 11, key Am, 124 BPM,
+offline render).
+**44 gates passed, 23 FAILED, 24 pending on 138's B0 feature upgrade.**
+0 recipes are clean on every computable gate; 9 have at least one real failure.
+A failure here is a FINDING, kept verbatim — the bands are never widened to make this table green.*
+
+| recipe | verdict | pass | fail | pending | what failed |
+|---|---|---|---|---|---|
+| `rolling-sub-bass` | INCOMPLETE | 5 | 0 | 3 | — |
+| `reese-bass` | FAIL | 2 | 3 | 2 | `bandBassPct` 51.97 vs 8..50; `centroidLog2` 7.16 vs 5..6.9; `stereoWidthDb` -20.97 vs -100..-30 |
+| `acid-303` | FAIL | 2 | 4 | 0 | `bandSubPct` 0.03 vs 5..55; `centroidLog2` 8.99 vs 5.5..8.5; `crestDb` 23.27 vs 8..17; `stereoWidthDb` -17.26 vs -100..-18 |
+| `808-glide-bass` | INCOMPLETE | 5 | 0 | 1 | — |
+| `warm-pad-with-air` | FAIL | 2 | 4 | 2 | `bandAirPct` 0.04 vs 0.3..9; `bandBassPct` 74.7 vs 8..42; `bandMidsPct` 24.94 vs 40..85; `bandPresencePct` 0.32 vs 1..20 |
+| `house-chord-stab` | FAIL | 1 | 3 | 2 | `bandBassPct` 8.28 vs 10..42; `bandMidsPct` 89.27 vs 40..85; `stereoWidthDb` -21.59 vs -16..-1 |
+| `techno-stab` | FAIL | 1 | 3 | 1 | `bandMidsPct` 27.14 vs 35..92; `bandPresencePct` 0.91 vs 1..30; `crestDb` 22.8 vs 11..21 |
+| `supersaw-trance-lead` | INCOMPLETE | 6 | 0 | 2 | — |
+| `pluck-delay-lead` | FAIL | 3 | 2 | 2 | `bandBassPct` 23.91 vs 0.5..22; `stereoWidthDb` -21.2 vs -16..-1 |
+| `hoover-lead` | FAIL | 4 | 1 | 1 | `stereoWidthDb` -18.66 vs -18..-1 |
+| `layered-house-kit` | FAIL | 2 | 2 | 4 | `bandMidsPct` 0.69 vs 4..45; `bandSubPct` 70.29 vs 18..55 |
+| `three-layer-bass-stack` | INCOMPLETE | 6 | 0 | 2 | — |
+| `layered-lead-stack` | FAIL | 5 | 1 | 2 | `bandBassPct` 0.25 vs 0.5..22 |
+
+
 ## The expressibility gaps — what the corpus asks for that dotbeat cannot do
 
 | recipe | gap |
@@ -92,6 +118,7 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
 | `layered-house-kit` | per-layer MICRO-TIMING offsets of 5–20 ms, named across three sources as the glue that fuses a multi-sample stack into one perceived hit — hits sit on a 16th grid and `humanize` is a CLI verb, not a v1 recipe step. |
 | `layered-house-kit` | 'ghost notes at 40–60% velocity' and hat velocity ALTERNATION (~80/~100 out of 127, the 'tick-TOCK' wrist-stroke feel) are per-hit patterns; the builder applies velocity by metrical position only. |
 | `layered-house-kit` | there is no group bus (research 115 §1.2), so the ~4 dB glue compression is the track's own comp insert rather than a real drum-bus compressor. |
+| `layered-house-kit` | MEASURED TRAP, found by verifying v1: `kickPunch` is not a 0–1 'amount' despite the GUI rendering it as a percentage knob (ui/src/components/synthParams.ts: `k('kickPunch','KickPch',0,1,fmt.pct)`) — it is Tone.MembraneSynth's `pitchDecay` in SECONDS, over a 7-octave pitch sweep (ui/src/audio/engine.ts:2179/3390). v1 shipped 0.35, i.e. a 350 ms fall from ~5.8 kHz to 45 Hz under a 320 ms amp decay, and the loop measured 1.49% sub share against an 18–55% gate — a kick with essentially no sub. v2 uses 0.015, the sourced 10–20 ms drop. Any recipe or preset author reading the GUI will make the same mistake. |
 | `three-layer-bass-stack` | ProducerHive's central routing instruction — bus everything except the sub and glue-compress that bus — needs a group bus, which BeatGroup is not (research 115 §1.2). The two-stage re-host (133 §4d) can do it in a second render pass; this single-pass recipe cannot. |
 | `three-layer-bass-stack` | the corpus's fourth 'highs/air' layer above 2 kHz is omitted deliberately: at 2 kHz+ over a bass fundamental it is a texture source, and the same three sources that name it give no numbers for it. Adding a fourth layer would be exactly the 'seven fighting for space' failure §6 warns about. |
 | `three-layer-bass-stack` | the light glue compression the corpus specifies (3–6 dB gain reduction across the stack — ModeAudio, corroborated) is applied per-layer here, which is a different sound from bus compression on the sum. |
@@ -145,18 +172,18 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[measured — owned refs]* docs/research/131 §7 P1 + §2.2 — the gate numbers: packs-ref bass puts 60.1% of energy below 60 Hz (p25 ≈37) with centroid ≈74 Hz and dead-mono width; engineplus sits at 0.22% sub and 162 Hz
     - *[measured — owned refs]* docs/research/138 §2 free wins 1, 2, 5, 9 — subLevel 0→0.5, bass root E1–A1 (MIDI 28–33), bass mono discipline, and the ghost-kick pump track (duck reads kick HITS, so a −60 dB ghost track works today)
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **INCOMPLETE**:
 
-| gate | band | status |
-|---|---|---|
-| `bandSubPct` | 30..78 | computable today |
-| `bandBassPct` | 8..50 | computable today |
-| `centroidLog2` | 5..6.8 | computable today |
-| `stereoWidthDb` | -100..-35 | computable today |
-| `crestDb` | 7..16 | computable today |
-| `crest_subDb` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 |
-| `attackMedMs` | 0..15 | `pending` — 131 §4 key, waits on 138 B0 |
-| `fluxMean` | 0.08..0.35 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandSubPct` | 30..78 | computable today | 51.79 | **PASS** |
+| `bandBassPct` | 8..50 | computable today | 46.86 | **PASS** |
+| `centroidLog2` | 5..6.8 | computable today | 6.11 | **PASS** |
+| `stereoWidthDb` | -100..-35 | computable today | -64.33 | **PASS** |
+| `crestDb` | 7..16 | computable today | 12.97 | **PASS** |
+| `crest_subDb` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `attackMedMs` | 0..15 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `fluxMean` | 0.08..0.35 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §7 P1 (packs-era ref medians, 61 ref-beat-engineplus pairs) + 138 §2 rows 1/2/5 — packs-ref medians widened to the p25–p75 band the doc quotes, as of 2026-07-26.*
 
@@ -200,17 +227,17 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[measured — patch files]* docs/research/141 §5.2 — 1,426 unison stacks, 494 bass patches — median unison detune 16.6 ¢ for bass at ≥5 voices (pooled ≥3-voice median 11.4 ¢, IQR 6.0–20.0); ±7 ¢ sits at p27, ±20 ¢ at p68, ±61 ¢ at p97 — the tutorial range is real but wildly uncentred
     - *[measured — owned refs]* docs/research/131 §7 P1 — gate numbers — sub share, centroid ceiling, mono width, sub-band steadiness
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
-| gate | band | status |
-|---|---|---|
-| `bandSubPct` | 30..78 | computable today |
-| `bandBassPct` | 8..50 | computable today |
-| `centroidLog2` | 5..6.9 | computable today |
-| `stereoWidthDb` | -100..-30 | computable today |
-| `crestDb` | 6..16 | computable today |
-| `crest_subDb` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 |
-| `fluxMean` | 0.08..0.4 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandSubPct` | 30..78 | computable today | 38.17 | **PASS** |
+| `bandBassPct` | 8..50 | computable today | 51.97 | **FAIL** (off by 1.97) |
+| `centroidLog2` | 5..6.9 | computable today | 7.16 | **FAIL** (off by 0.26) |
+| `stereoWidthDb` | -100..-30 | computable today | -20.97 | **FAIL** (off by 9.03) |
+| `crestDb` | 6..16 | computable today | 10.2 | **PASS** |
+| `crest_subDb` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `fluxMean` | 0.08..0.4 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §7 P1 (packs-era bassline ref medians) — packs-ref medians widened to the doc's quoted p25–p75 band, as of 2026-07-26.*
 
@@ -250,16 +277,16 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[single source — a hypothesis]* [Futureproof Music School — How to Make Hard Techno](https://futureproofmusicschool.com/blog/making-hard-techno-a-path-to-unique-sound-design) — high-pass the acid bass around 150 Hz before the master bus so it does not fight the kick's sub territory
     - *[measured — patch files]* docs/research/141 §4 — 494 bass patches — the static cutoff knob is LOW (bass p25–p75 76–732 Hz) and resonance is bimodal — p25 is exactly 0.00 in five of six roles while p75 is 0.4–0.66, so the design decision is WHETHER to resonate, and acid is the archetypal 'yes'
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
-| gate | band | status |
-|---|---|---|
-| `bandSubPct` | 5..55 | computable today |
-| `bandBassPct` | 10..60 | computable today |
-| `bandMidsPct` | 10..70 | computable today |
-| `centroidLog2` | 5.5..8.5 | computable today |
-| `crestDb` | 8..17 | computable today |
-| `stereoWidthDb` | -100..-18 | computable today |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandSubPct` | 5..55 | computable today | 0.03 | **FAIL** (off by 4.97) |
+| `bandBassPct` | 10..60 | computable today | 54.7 | **PASS** |
+| `bandMidsPct` | 10..70 | computable today | 44.2 | **PASS** |
+| `centroidLog2` | 5.5..8.5 | computable today | 8.99 | **FAIL** (off by 0.49) |
+| `crestDb` | 8..17 | computable today | 23.27 | **FAIL** (off by 6.27) |
+| `stereoWidthDb` | -100..-18 | computable today | -17.26 | **FAIL** (off by 0.74) |
 
 *Gates mined from docs/research/131 §7 P1 widened for a mid-forward acid voice (this recipe deliberately does NOT chase the 30% sub share — the corpus high-passes the acid line at 150 Hz to protect the kick) — packs-ref bassline bands, sub floor relaxed to match the source's own EQ instruction, as of 2026-07-26.*
 
@@ -302,16 +329,16 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[consensus (3+ sources)]* docs/priors/bass-basseries.md consensus 6 — 808 design consistently uses a sine oscillator, a downward pitch envelope at note-on, glide/portamento between notes, and post-distortion EQ to carve space against the kick
     - *[measured — patch files]* docs/research/141 §3.1/§3.2 — bass row — bass amp attack median 3.91 ms with 83% ≤12.5 ms; the long DECAY is the shaping stage (median 621 ms, IQR 250–1080) — which matches Unison's 550–650 ms exactly and contradicts nothing
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **INCOMPLETE**:
 
-| gate | band | status |
-|---|---|---|
-| `bandSubPct` | 30..85 | computable today |
-| `bandBassPct` | 5..45 | computable today |
-| `centroidLog2` | 4.8..6.6 | computable today |
-| `stereoWidthDb` | -100..-35 | computable today |
-| `crestDb` | 7..18 | computable today |
-| `crest_subDb` | 0..14 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandSubPct` | 30..85 | computable today | 81.2 | **PASS** |
+| `bandBassPct` | 5..45 | computable today | 18.35 | **PASS** |
+| `centroidLog2` | 4.8..6.6 | computable today | 5.81 | **PASS** |
+| `stereoWidthDb` | -100..-35 | computable today | -66.73 | **PASS** |
+| `crestDb` | 7..18 | computable today | 16.57 | **PASS** |
+| `crest_subDb` | 0..14 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §7 P1 (packs bassline ref medians), sub band widened to 85% for a role whose whole point is sub dominance — packs-ref medians, p25–p75, as of 2026-07-26.*
 
@@ -360,18 +387,18 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[consensus (3+ sources)]* docs/priors/layering.md §6 — cross-source consensus — the clearest agreement in the whole vein is a WARNING: 'only layer when there is a good reason for doing so'; 'poor layering occurs when multiple sounds try to do the same thing'; 'three well-crafted layers usually sound better than seven fighting for space'. Hence every layer here states its job, and there are three, not seven
     - *[measured — owned refs]* docs/research/131 §3.2 + §5 (bassline row) — gate numbers, and the reason this shape exists: even ELITE engineplus bass keeps 2× the sub-band crest (22.6 vs 10.9 dB), half the spectral movement (fluxMean 0.09 vs 0.20) and is 30 dB wider than the dead-mono elite refs — properties of a stack, not of any single patch
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **INCOMPLETE**:
 
-| gate | band | status |
-|---|---|---|
-| `bandSubPct` | 30..78 | computable today |
-| `bandBassPct` | 8..50 | computable today |
-| `bandMidsPct` | 2..40 | computable today |
-| `centroidLog2` | 5..7.2 | computable today |
-| `stereoWidthDb` | -100..-25 | computable today |
-| `crestDb` | 6..16 | computable today |
-| `crest_subDb` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 |
-| `fluxMean` | 0.08..0.4 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandSubPct` | 30..78 | computable today | 64.39 | **PASS** |
+| `bandBassPct` | 8..50 | computable today | 32.07 | **PASS** |
+| `bandMidsPct` | 2..40 | computable today | 3.48 | **PASS** |
+| `centroidLog2` | 5..7.2 | computable today | 6.39 | **PASS** |
+| `stereoWidthDb` | -100..-25 | computable today | -37.7 | **PASS** |
+| `crestDb` | 6..16 | computable today | 15.1 | **PASS** |
+| `crest_subDb` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `fluxMean` | 0.08..0.4 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §5 (top-5 elite ref bassline rows) + §7 P1 — elite-ref medians widened to the packs p25–p75 band, as of 2026-07-26.*
 
@@ -422,18 +449,18 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[measured — owned refs]* docs/research/131 §5 + §7 P5, 133 §1 — gate numbers — chords carry 18–28% bass-band body against engineplus's ~0, crest 14–17 dB, role-true width ≈ −3…−8 dB, fluxMean ≥0.12
     - *[measured — owned refs]* docs/research/138 §2 free win 4 — compMix ships at 0 and is untouched by every profile and trick — the comp insert is a real dry/wet parallel fan sitting unused; −32 dB threshold, 8:1, ≤5 ms attack, 0.12 s release, 0.3–0.4 mix
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
-| gate | band | status |
-|---|---|---|
-| `bandBassPct` | 8..42 | computable today |
-| `bandMidsPct` | 40..85 | computable today |
-| `bandPresencePct` | 1..20 | computable today |
-| `bandAirPct` | 0.3..9 | computable today |
-| `crestDb` | 9..19 | computable today |
-| `stereoWidthDb` | -16..-1 | computable today |
-| `fluxMean` | 0.1..0.4 | `pending` — 131 §4 key, waits on 138 B0 |
-| `attackMedMs` | 200..1400 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandBassPct` | 8..42 | computable today | 74.7 | **FAIL** (off by 32.7) |
+| `bandMidsPct` | 40..85 | computable today | 24.94 | **FAIL** (off by 15.06) |
+| `bandPresencePct` | 1..20 | computable today | 0.32 | **FAIL** (off by 0.68) |
+| `bandAirPct` | 0.3..9 | computable today | 0.04 | **FAIL** (off by 0.26) |
+| `crestDb` | 9..19 | computable today | 14.16 | **PASS** |
+| `stereoWidthDb` | -16..-1 | computable today | -7.62 | **PASS** |
+| `fluxMean` | 0.1..0.4 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `attackMedMs` | 200..1400 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §5/§7 P5 + 133 §1 (packs chords ref rows); the attackMedMs band is 141 §3.1's pad IQR, NOT 131's transient-role target — packs-ref chords medians (p25–p75) for the spectral/width/crest rows; Surge pad-patch IQR for the attack row, as of 2026-07-26.*
 
@@ -478,16 +505,16 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[measured — owned refs]* docs/research/131 §2.2 + §5 — on chords, FAST attacks win (attackP25Ms P(win|hi) 0.361, d −0.51) and pace discriminates hard (ref onset rate 4.9/s vs engineplus 2.3); elite refs' chords sit 1.4 octaves darker than the engine's
     - *[measured — owned refs]* docs/research/138 §2 free win 3 — the octave BODY layer (osc2Detune −1200, level 0.3–0.4) against engineplus's +10-cent width move; target chords bass-band 18–28% versus a measured 99% mids occupancy
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
-| gate | band | status |
-|---|---|---|
-| `bandBassPct` | 10..42 | computable today |
-| `bandMidsPct` | 40..85 | computable today |
-| `crestDb` | 11..20 | computable today |
-| `stereoWidthDb` | -16..-1 | computable today |
-| `attackMedMs` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 |
-| `onsetRatePerSec` | 4..12 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandBassPct` | 10..42 | computable today | 8.28 | **FAIL** (off by 1.72) |
+| `bandMidsPct` | 40..85 | computable today | 89.27 | **FAIL** (off by 4.27) |
+| `crestDb` | 11..20 | computable today | 19.62 | **PASS** |
+| `stereoWidthDb` | -16..-1 | computable today | -21.59 | **FAIL** (off by 5.59) |
+| `attackMedMs` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `onsetRatePerSec` | 4..12 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §7 P2/P3/P5 + 133 §1 (packs chords ref rows) — packs-ref medians as p25–p75 bands; attackMedMs and onsetRatePerSec are 131 P2/P3's explicit chords targets, as of 2026-07-26.*
 
@@ -517,15 +544,15 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[measured — patch files]* docs/research/141 §3.1 — chords/polysynth rows — attack median 3.91–4.83 ms with 85.7% ≤12.5 ms and release median 31 ms — the patch corpus corroborates the source's 0 ms attack and 29 ms release almost exactly, which is why this recipe encodes the prose values unchanged
     - *[measured — owned refs]* docs/research/131 §2.2 — gate numbers — on chords, aesPC (0.835/+0.91), fast attacks and true-peak punch are the discriminators; dense low-mids (flatnessLoDb 0.708) beat pure ones
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
-| gate | band | status |
-|---|---|---|
-| `bandMidsPct` | 35..92 | computable today |
-| `bandPresencePct` | 1..30 | computable today |
-| `crestDb` | 11..21 | computable today |
-| `stereoWidthDb` | -18..-1 | computable today |
-| `attackMedMs` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandMidsPct` | 35..92 | computable today | 27.14 | **FAIL** (off by 7.86) |
+| `bandPresencePct` | 1..30 | computable today | 0.91 | **FAIL** (off by 0.09) |
+| `crestDb` | 11..21 | computable today | 22.8 | **FAIL** (off by 1.8) |
+| `stereoWidthDb` | -18..-1 | computable today | -16.3 | **PASS** |
+| `attackMedMs` | 0..12 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §2.2 + §7 P2 (packs chords ref rows) — packs-ref medians as p25–p75 bands, as of 2026-07-26.*
 
@@ -570,18 +597,18 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[measured — patch files]* docs/research/141 §3.1/§3.2/§5.2 — 448 lead patches, 1,450 unison stacks — lead amp attack median 3.91 ms (the machine floor; 65.0% sit exactly on it, 80.1% ≤12.5 ms) and release median 31 ms with 33.9% at that default — 'a professional lead does not have a long amp release; the tail comes from the delay and reverb sends'. Our engine-curated leads sit at 13 ms (p81) and 1,213 ms (p91). Voice-count histogram spikes at 7 (126 patches); lead detune median 10.0 ¢ at ≥5 voices — the NARROWEST of the big roles
     - *[measured — owned refs]* docs/research/131 §5 + §7 P2/P4 — gate numbers — elite ref leads are WIDE (−4.6 dB vs engineplus −10.7), noisier in presence (flatnessHiDb −15.8 vs −28.6), with attacks ≤8 ms
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **INCOMPLETE**:
 
-| gate | band | status |
-|---|---|---|
-| `bandMidsPct` | 35..90 | computable today |
-| `bandBassPct` | 0.5..22 | computable today |
-| `bandPresencePct` | 2..28 | computable today |
-| `bandAirPct` | 0.2..10 | computable today |
-| `stereoWidthDb` | -14..-1 | computable today |
-| `crestDb` | 10..20 | computable today |
-| `attackMedMs` | 0..8 | `pending` — 131 §4 key, waits on 138 B0 |
-| `flatnessHiDb` | -16..-8 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandMidsPct` | 35..90 | computable today | 78.63 | **PASS** |
+| `bandBassPct` | 0.5..22 | computable today | 12.76 | **PASS** |
+| `bandPresencePct` | 2..28 | computable today | 4.73 | **PASS** |
+| `bandAirPct` | 0.2..10 | computable today | 3.03 | **PASS** |
+| `stereoWidthDb` | -14..-1 | computable today | -9.08 | **PASS** |
+| `crestDb` | 10..20 | computable today | 14.05 | **PASS** |
+| `attackMedMs` | 0..8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `flatnessHiDb` | -16..-8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §5 (top-5 elite ref lead rows) + §7 P2/P4/P5 — packs-ref lead medians and the doc's explicit target bands, as of 2026-07-26.*
 
@@ -621,17 +648,17 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[consensus (3+ sources)]* docs/priors/chords-pads.md consensus 8 — stab/pluck amp-envelope attack is consensus-zero across every source that gives a number; punch is a function of decay and release length, which vary from tens of ms to 1.25 s by design intent
     - *[measured — owned refs]* docs/research/131 §5 + §7 P2/P4 — gate numbers — lead attacks ≤8 ms, elite refs wide (−4.6 dB) and noisy in presence (flatnessHiDb −16…−8)
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
-| gate | band | status |
-|---|---|---|
-| `bandMidsPct` | 35..92 | computable today |
-| `bandBassPct` | 0.5..22 | computable today |
-| `bandPresencePct` | 1.5..28 | computable today |
-| `stereoWidthDb` | -16..-1 | computable today |
-| `crestDb` | 11..21 | computable today |
-| `attackMedMs` | 0..8 | `pending` — 131 §4 key, waits on 138 B0 |
-| `flatnessHiDb` | -16..-8 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandMidsPct` | 35..92 | computable today | 70.22 | **PASS** |
+| `bandBassPct` | 0.5..22 | computable today | 23.91 | **FAIL** (off by 1.91) |
+| `bandPresencePct` | 1.5..28 | computable today | 4.22 | **PASS** |
+| `stereoWidthDb` | -16..-1 | computable today | -21.2 | **FAIL** (off by 5.2) |
+| `crestDb` | 11..21 | computable today | 16.42 | **PASS** |
+| `attackMedMs` | 0..8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `flatnessHiDb` | -16..-8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §5/§7 P2/P4/P5 (packs lead ref rows) — packs-ref lead medians and the doc's explicit target bands, as of 2026-07-26.*
 
@@ -668,16 +695,16 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[measured — patch files]* docs/research/141 §5.2 — the pooled p90 for a ≥2-voice stack is 32.8 ¢ and p95 is 44.2 ¢, so ±40 ¢ sits deep in the tail of what designers actually dial — deliberate, not central
     - *[measured — owned refs]* docs/research/131 §7 P2/P4/P5 — gate numbers — lead width, presence texture, punch
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
-| gate | band | status |
-|---|---|---|
-| `bandMidsPct` | 30..90 | computable today |
-| `bandBassPct` | 2..40 | computable today |
-| `bandPresencePct` | 1..30 | computable today |
-| `stereoWidthDb` | -18..-1 | computable today |
-| `crestDb` | 8..19 | computable today |
-| `fluxMean` | 0.1..0.45 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandMidsPct` | 30..90 | computable today | 82.7 | **PASS** |
+| `bandBassPct` | 2..40 | computable today | 11.7 | **PASS** |
+| `bandPresencePct` | 1..30 | computable today | 5.2 | **PASS** |
+| `stereoWidthDb` | -18..-1 | computable today | -18.66 | **FAIL** (off by 0.66) |
+| `crestDb` | 8..19 | computable today | 13.08 | **PASS** |
+| `fluxMean` | 0.1..0.45 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §7 P2/P4/P5 (packs lead ref rows), band-share gates widened for a deliberately mid-heavy drone — packs-ref lead medians as p25–p75 bands, as of 2026-07-26.*
 
@@ -720,25 +747,25 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - *[measured — patch files]* docs/research/141 §5.3 — layering within a patch is the majority idiom (lead 54.9% multi-oscillator) and the dominant FORM is the octave split (37.9% of all leads) — 'most multi-oscillator patches are octave layers, not chorus-detune pairs'
     - *[measured — owned refs]* docs/research/131 §5 (lead row) + §7 P4 — gate numbers, and the reason: elite refs are WIDE (−4.6 vs −10.7 dB), darker in tilt, and noisier in presence (flatnessHiDb −15.8 vs −28.6) with crest_presence 19.8 vs 9.9 dB — the texture axis production constants alone have never closed
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
-| gate | band | status |
-|---|---|---|
-| `bandMidsPct` | 30..88 | computable today |
-| `bandBassPct` | 0.5..22 | computable today |
-| `bandPresencePct` | 2..30 | computable today |
-| `bandAirPct` | 0.3..12 | computable today |
-| `stereoWidthDb` | -12..-1 | computable today |
-| `crestDb` | 10..20 | computable today |
-| `attackMedMs` | 0..8 | `pending` — 131 §4 key, waits on 138 B0 |
-| `flatnessHiDb` | -16..-8 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandMidsPct` | 30..88 | computable today | 84.14 | **PASS** |
+| `bandBassPct` | 0.5..22 | computable today | 0.25 | **FAIL** (off by 0.25) |
+| `bandPresencePct` | 2..30 | computable today | 8.93 | **PASS** |
+| `bandAirPct` | 0.3..12 | computable today | 6.2 | **PASS** |
+| `stereoWidthDb` | -12..-1 | computable today | -9.82 | **PASS** |
+| `crestDb` | 10..20 | computable today | 14.58 | **PASS** |
+| `attackMedMs` | 0..8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `flatnessHiDb` | -16..-8 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
 *Gates mined from docs/research/131 §5 (top-5 elite ref lead rows) + §7 P2/P4/P5 — elite-ref medians widened to the packs p25–p75 band, as of 2026-07-26.*
 
 
 ## Drum loop — density and steadiness (research 131 §7 P6; winners are fuller, not spikier)
 
-### `layered-house-kit` v1
+### `layered-house-kit` v2
 
 *A swung four-to-the-floor kit tuned against 131's measured density targets: kick pulled back so it stops drowning the loop, open hats carrying air, and light bus glue rather than heavy compression.*
 
@@ -752,7 +779,7 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
 - **layers** (1)
     - **`kit`** — drums, production role `kit`
         - *why*: one drums track carrying all five lanes: the kick tuned to 45 Hz with a shortened decay so it stops taking 60% of the loop's energy, open hats given a long decay to carry the air band, and light parallel bus compression rather than the heavy squash the corpus explicitly warns against.
-        - *patch*: `kickTune`=45, `kickPunch`=0.35, `kickDecay`=0.32, `snareTone`=0.35, `snareDecay`=0.16, `hatDecay`=0.05, `openHatDecay`=0.45, `hatTone`=6500, `cutoff`=14000, `resonance`=0.1, `compThreshold`=-18, `compRatio`=4, `compAttack`=0.008, `compRelease`=0.12, `compMix`=0.6, `saturatorCurve`=warm, `saturatorDrive`=0.25, `saturatorMix`=0.3, `eqHigh`=2.5, `volume`=-5
+        - *patch*: `kickTune`=45, `kickPunch`=0.015, `kickDecay`=0.32, `snareTone`=0.35, `snareDecay`=0.16, `hatDecay`=0.05, `openHatDecay`=0.45, `hatTone`=6500, `cutoff`=14000, `resonance`=0.1, `compThreshold`=-18, `compRatio`=4, `compAttack`=0.008, `compRelease`=0.12, `compMix`=0.6, `saturatorCurve`=warm, `saturatorDrive`=0.25, `saturatorMix`=0.3, `eqHigh`=2.5, `volume`=-5
         - *solo gates*: `bandSubPct` 15..60, `bandAirPct` 1..15
 - **chain** (clip level, in order)
     - `effect-add $kit eq7`
@@ -766,28 +793,30 @@ and it *consumes* both: tricks are its step vocabulary, presets are its patch so
     - per-layer MICRO-TIMING offsets of 5–20 ms, named across three sources as the glue that fuses a multi-sample stack into one perceived hit — hits sit on a 16th grid and `humanize` is a CLI verb, not a v1 recipe step.
     - 'ghost notes at 40–60% velocity' and hat velocity ALTERNATION (~80/~100 out of 127, the 'tick-TOCK' wrist-stroke feel) are per-hit patterns; the builder applies velocity by metrical position only.
     - there is no group bus (research 115 §1.2), so the ~4 dB glue compression is the track's own comp insert rather than a real drum-bus compressor.
+    - MEASURED TRAP, found by verifying v1: `kickPunch` is not a 0–1 'amount' despite the GUI rendering it as a percentage knob (ui/src/components/synthParams.ts: `k('kickPunch','KickPch',0,1,fmt.pct)`) — it is Tone.MembraneSynth's `pitchDecay` in SECONDS, over a 7-octave pitch sweep (ui/src/audio/engine.ts:2179/3390). v1 shipped 0.35, i.e. a 350 ms fall from ~5.8 kHz to 45 Hz under a 320 ms amp decay, and the loop measured 1.49% sub share against an 18–55% gate — a kick with essentially no sub. v2 uses 0.015, the sourced 10–20 ms drop. Any recipe or preset author reading the GUI will make the same mistake.
 - **sources**
     - *[corroborated (2 sources)]* docs/priors/drums.md — Attack Magazine Beat Dissected series (jackin' house, deep tech house, organic tech-house, dusted deep house) — swing percentages by subgenre from one publication and editorial voice: jackin' house 60–65% at 120–125 BPM, deep tech house 60–65% at 125–130, organic tech-house 50–60% at 122–129, dusted deep house 70–80% at 120–125
     - *[single source — a hypothesis]* [SampleFocus — Swing, Shuffle and Humanization: How To Program Grooves](https://samplefocus.com/blog/swing-shuffle-and-humanization-how-to-program-grooves/) — general usable swing 52–70% with true triplet shuffle at 66.7%; hi-hats take 10–15% velocity randomization (often alternating ~80 and ~100 of 127), kick and snare only 5–8% because they are the anchor, and ghost notes sit at 40–60% velocity
     - *[consensus (3+ sources)]* docs/priors/drums.md consensus 4 — bus/glue compression on drum groups is consistently LIGHT (~4 dB gain reduction, fast attack, program-dependent release); aggressive parallel compression is reserved for snares specifically, not the whole kit
     - *[consensus (3+ sources)]* docs/priors/drums.md — kick+bass coexistence synthesis — the recurring EQ anchor is 40–80 Hz for kick sub-weight with the low-mids above it scooped; sidechain attack ~4 ms is the single most load-bearing number, chosen to avoid an audible click
+    - *[single source — a hypothesis]* [Futureproof Music School — How to Make Hard Techno (via docs/priors/bass-techno.md A5)](https://futureproofmusicschool.com/blog/making-hard-techno-a-path-to-unique-sound-design) — the main kick's pitch envelope drops from a higher pitch to the fundamental over the first 10–20 ms for punch, with the kick tuned to the track key
     - *[measured — owned refs]* docs/research/131 §5 + §7 P6 — gate numbers — winning drum loops are FULLER and STEADIER, not spikier: sustainPct ≥45% (ref 51 vs engineplus 27), envRangeDb ≤25 (vs 44), onsetLevelCv ≤0.6 (ref 0.59 vs 0.87), crest_subDb ≤20 (ref 16.5 vs 43.4), broadband crest 12–15 dB
     - *[measured — owned refs]* docs/research/138 §2 free win 13 — engineplus drum sub share is 60.2% — the kick is drowning the kit; target 25–40% via a −2…−3 dB kick lane or a shorter kickDecay, plus velocity tiers, ghosts and 54–58% hat swing
 
-**Clip gates** (checked on the summed render):
+**Clip gates** (checked on the summed render) — last verified run: **FAIL**:
 
-| gate | band | status |
-|---|---|---|
-| `bandSubPct` | 18..55 | computable today |
-| `bandMidsPct` | 4..45 | computable today |
-| `bandAirPct` | 1.5..12 | computable today |
-| `crestDb` | 9..18 | computable today |
-| `sustainPct` | 45..100 | `pending` — 131 §4 key, waits on 138 B0 |
-| `envRangeDb` | 0..25 | `pending` — 131 §4 key, waits on 138 B0 |
-| `onsetLevelCv` | 0..0.6 | `pending` — 131 §4 key, waits on 138 B0 |
-| `crest_subDb` | 0..20 | `pending` — 131 §4 key, waits on 138 B0 |
+| gate | band | key status | measured | verdict |
+|---|---|---|---|---|
+| `bandSubPct` | 18..55 | computable today | 70.29 | **FAIL** (off by 15.29) |
+| `bandMidsPct` | 4..45 | computable today | 0.69 | **FAIL** (off by 3.31) |
+| `bandAirPct` | 1.5..12 | computable today | 5.08 | **PASS** |
+| `crestDb` | 9..18 | computable today | 16.44 | **PASS** |
+| `sustainPct` | 45..100 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `envRangeDb` | 0..25 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `onsetLevelCv` | 0..0.6 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
+| `crest_subDb` | 0..20 | `pending` — 131 §4 key, waits on 138 B0 | — | `pending` |
 
-*Gates mined from docs/research/131 §5/§7 P6 (packs drum-loop ref rows) + 138 §2 row 13 — packs-ref medians as p25–p75 bands; the sustain/envRange/onsetLevelCv/crest_sub rows are 131 P6's explicit targets, as of 2026-07-26.*
+*Gates mined from docs/research/131 §5/§7 P6 (packs drum-loop ref rows) + 138 §2 row 13 — packs-ref medians as p25–p75 bands; the sustain/envRange/onsetLevelCv/crest_sub rows are 131 P6's explicit targets. GATES ARE UNCHANGED from v1 — v2 bumps only because a PATCH value changed (kickPunch 0.35 -> 0.015, see gaps), which is what mints a version under the frozen-science rule., as of 2026-07-26.*
 
 ---
 

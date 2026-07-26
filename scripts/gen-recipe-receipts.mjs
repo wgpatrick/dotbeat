@@ -2,6 +2,11 @@
 // presets/recipe-verify-receipts.json — the reproducible measurement behind the "verification"
 // half of the recipe library (research 139 §4.2/§6.3).
 //
+// Named `gen-*` rather than `verify-*` deliberately: `verify-<name>.mjs` is the reserved prefix of
+// the Playwright/CLI verify FLEET, whose roster ui/verify-manifest.mjs enforces (test/verify-
+// manifest.test.ts). This is a data GENERATOR in the gen-tricks-reference.mjs family — it produces
+// a committed artifact, it does not assert an invariant.
+//
 // This is the loop that turns a recipe from prose into evidence: execute it, render it through
 // dotbeat's own engine, and report each gate's measured value beside its target. A FAILING GATE IS
 // A FINDING — either the recipe is wrong for our engine, or the engine cannot express what the
@@ -9,7 +14,7 @@
 // file records the failures verbatim, with the render's full feature vector beside them so a later
 // reader can re-derive the verdict without re-rendering.
 //
-//   npm run build && node scripts/verify-recipes.mjs [--out <dir>] [--seed n] [--key Am] [--bpm n]
+//   npm run build && node scripts/gen-recipe-receipts.mjs [--out <dir>] [--seed n] [--key Am] [--bpm n]
 //                                                    [--only <name>] [--layers] [--live]
 //
 // `--layers` also renders each layer's SOLO document, which is what the per-layer gates are
@@ -34,6 +39,19 @@ const argv = process.argv.slice(2)
 const flag = (name, fallback) => {
   const i = argv.indexOf(name)
   return i === -1 ? fallback : argv[i + 1]
+}
+
+if (argv.includes('--help') || argv.includes('-h')) {
+  // This script RENDERS; an unrecognised flag must not silently kick off 38 browser renders.
+  process.stdout.write('usage: node scripts/gen-recipe-receipts.mjs [--out <dir>] [--seed n] [--key Am] [--bpm n] [--only <name>] [--layers] [--live]\n')
+  process.exit(0)
+}
+const KNOWN_FLAGS = new Set(['--out', '--seed', '--key', '--bpm', '--only', '--layers', '--live'])
+for (const a of argv) {
+  if (a.startsWith('--') && !KNOWN_FLAGS.has(a)) {
+    process.stderr.write(`error: unknown flag "${a}" (known: ${[...KNOWN_FLAGS].join(', ')})\n`)
+    process.exit(2)
+  }
 }
 
 const seed = Number(flag('--seed', '11'))
@@ -106,7 +124,7 @@ const receipts = {
   version: 1,
   generatedAt: new Date().toISOString().slice(0, 10),
   note: 'REGENERATED, never hand-edited. Each entry is one recipe built, rendered through dotbeat\'s own engine, and checked against its own declared gates. A `fail` row is a FINDING (the recipe is wrong for this engine, or this engine cannot express what the corpus describes) — never a reason to widen the band. A `pending` row names a research 131 §4 discriminator FEATURE_KEYS does not compute yet (138 B0).',
-  regenerate: `npm run build && node scripts/verify-recipes.mjs --seed ${seed} --key ${keySpec} --bpm ${bpm}${withLayers ? ' --layers' : ''}`,
+  regenerate: `npm run build && node scripts/gen-recipe-receipts.mjs --seed ${seed} --key ${keySpec} --bpm ${bpm}${withLayers ? ' --layers' : ''}`,
   build: { seed, key: keySpec, bpm, mode: mode.replace('--', ''), layerSolos: withLayers },
   totals: {
     recipes: entries.length,

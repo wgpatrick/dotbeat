@@ -17,7 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
 const recipes = parseRecipeLibrary(readFileSync(join(root, 'presets', 'recipes.json'), 'utf8'))
 
-// The last real verification run, if one has been recorded (scripts/verify-recipes.mjs). Optional
+// The last real verification run, if one has been recorded (scripts/gen-recipe-receipts.mjs). Optional
 // by design: the reference doc is readable before anything has been rendered, and gains the
 // measured column once it has.
 const receiptPath = join(root, 'presets', 'recipe-verify-receipts.json')
