@@ -22,78 +22,44 @@
 //
 // Usage: node ui/verify-volume-fader-bugfix.mjs
 
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { execFileSync, spawn } from 'node:child_process'
-import { chromium } from 'playwright-core'
+//
+// Ported to ui/verify-lib.mjs (W1.5): sleep, pollUntil, the `beat` spawn wrapper, the double
+// `npm run build`, the daemon boot, the preview spawn, the chromium launch, the page setup and the
+// teardown come from the shared harness. The real pointer drag on the real fader and every audio
+// measurement below are untouched.
 
-const uiDir = dirname(fileURLToPath(import.meta.url))
-const repoRoot = join(uiDir, '..')
-const beatCli = join(repoRoot, 'cli', 'beat.mjs')
+import { bootGui, buildAll, importDist, pollUntil, run as runVerify, scratchProject, sleep } from './verify-lib.mjs'
+
 const DAEMON_PORT = 8619
 const PREVIEW_PORT = 5619
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-function beat(args) {
-  return execFileSync(process.execPath, [beatCli, ...args], { encoding: 'utf8' })
-}
-async function pollUntil(fn, what, timeoutMs = 12000, everyMs = 40) {
-  const t0 = Date.now()
-  for (;;) {
-    const v = await fn()
-    if (v) return v
-    if (Date.now() - t0 > timeoutMs) throw new Error(`timed out (${timeoutMs}ms) waiting for: ${what}`)
-    await sleep(everyMs)
-  }
-}
 async function analyzeBase64Wav(b64) {
-  const { decodeWav, analyze } = await import(join(repoRoot, 'dist/src/metrics/index.js'))
+  const { decodeWav, analyze } = await importDist('src/metrics/index.js')
   const bytes = Buffer.from(b64, 'base64')
   const decoded = decodeWav(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength))
   return analyze(decoded.channels, decoded.sampleRate)
 }
 
 async function main() {
-  console.log('building repo core/daemon/metrics + ui...')
-  execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
-  execFileSync('npm', ['run', 'build'], { cwd: uiDir, stdio: 'inherit' })
+  buildAll()
 
   // A single synth track ("lead") holding one note across the WHOLE 2-bar loop (sustain=1) — a
   // steady tone that's trivial to meter accurately regardless of exactly when the recording window
   // starts, same discipline verify-phase18-lfo-depth.mjs's baseTrack uses.
-  const proj = mkdtempSync(join(tmpdir(), 'dotbeat-volfader-'))
-  const beatPath = join(proj, 'song.beat')
-  beat(['init', beatPath, '--bpm', '120', '--bars', '2'])
-  beat(['set', beatPath, 'lead.sustain', '1'])
-  beat(['add-note', beatPath, 'lead', '57', '0', '32', '0.9'])
+  const { file: beatPath } = scratchProject({
+    prefix: 'dotbeat-volfader-',
+    bpm: 120,
+    bars: 2,
+    edits: [
+      ['set', 'lead.sustain', '1'],
+      ['add-note', 'lead', '57', '0', '32', '0.9'],
+    ],
+  })
   console.log(`project at ${beatPath}`)
 
-  const { startDaemon } = await import(join(repoRoot, 'dist/src/daemon/daemon.js'))
-  const daemon = await startDaemon({ filePath: beatPath, port: DAEMON_PORT })
-  console.log(`daemon on :${daemon.port}`)
-
-  const preview = spawn('npm', ['run', 'preview', '--', '--port', String(PREVIEW_PORT), '--strictPort'], { cwd: uiDir, stdio: 'pipe' })
-  preview.stderr.on('data', (d) => process.stderr.write(`[preview] ${d}`))
-  await pollUntil(async () => {
-    try { return (await fetch(`http://localhost:${PREVIEW_PORT}/`)).ok } catch { return false }
-  }, 'vite preview to serve', 20000)
-  console.log(`ui served on :${PREVIEW_PORT}`)
-
-  const browser = await chromium.launch({
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-    headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required'],
-  })
+  const gui = await bootGui({ file: beatPath, daemonPort: DAEMON_PORT, previewPort: PREVIEW_PORT, viewport: { width: 1280, height: 900 } })
+  const { page, errors } = gui
   try {
-    const page = await browser.newPage()
-    await page.setViewportSize({ width: 1280, height: 900 })
-    const errors = []
-    page.on('pageerror', (e) => errors.push(String(e)))
-    await page.goto(`http://localhost:${PREVIEW_PORT}/?daw=${daemon.port}`, { waitUntil: 'load' })
-    await page.waitForFunction(() => window.__store && window.__store.getState().doc && window.__engine, { timeout: 12000 })
-    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 })
 
     // Open the real mixer overlay via the real topbar button (App.tsx: mixerOpen is an on-demand
     // overlay, not a peer tab — research 18 Q3).
@@ -227,13 +193,8 @@ async function main() {
       loud: { peak: loud.samplePeakDbfs, truePeak: loud.truePeakDbtp, crest: loud.crestDb, rms: loud.rmsDbfs },
     }, null, 2))
   } finally {
-    await browser.close()
-    preview.kill('SIGTERM')
-    await daemon.close()
+    await gui.close()
   }
 }
 
-main().catch((err) => {
-  console.error('\nVOLUME FADER BUGFIX VERIFY FAILED:', err)
-  process.exit(1)
-})
+await runVerify('volume-fader-bugfix', main)

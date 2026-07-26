@@ -12,7 +12,9 @@
     "test": "npm run build && node --test dist/test/*.test.js",
     "test:sidecars": "npm run build && node --test dist/test/*.owner.js",
     "beat": "node cli/beat.mjs",
-    "render": "node cli/render.mjs"
+    "render": "node cli/render.mjs",
+    "verify": "node scripts/verify-run.mjs",
+    "verify:engine": "node scripts/verify-run.mjs --tier engine"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
