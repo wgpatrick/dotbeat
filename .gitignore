@@ -31,3 +31,7 @@ examples/media/*.sf2
 # sidecars next to it, this one is pure deterministic DSP — recomputable in milliseconds from the
 # wav alone — so it is a speed cache, not a record. It is invalidated by FEATURE_SET_VERSION.
 *.features.json
+
+# Python bytecode — never useful in git, and it shows as permanently modified
+__pycache__/
+*.pyc
