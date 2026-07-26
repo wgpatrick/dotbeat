@@ -575,17 +575,142 @@ export function applyTrick(trick: BeatTrick, ctx: TrickContext, opts: ApplyOptio
 
 // ---- suggest -----------------------------------------------------------------------------------
 
-/** Produced-metric target bands (research 115 §6 / 118 §1.2 — ref chops: width ≈ -11 dB, air ≈
- * 1.9%). Used only to RANK suggestions by how far a failing metric sits from produced range; the
- * pass/fail contract itself is the trick's `when` clauses, not these. */
-export const PRODUCED_RANGES: Partial<Record<FeatureKey, { lo: number; hi: number }>> = {
-  stereoWidthDb: { lo: -25, hi: -8 },
-  bandAirPct: { lo: 1.0, hi: 2.5 },
-  bandSubPct: { lo: 8, hi: 22 },
-  bandPresencePct: { lo: 8, hi: 25 },
+/** The four reference roles the pack pools are filed under — the granularity every per-role
+ * measurement in research 131/133/135/138 is reported at. */
+export type ProducedRole = 'bassline' | 'chords' | 'lead' | 'drum-loop'
+
+/**
+ * Produced-metric target bands, PER ROLE, measured from the purchased pack loops in
+ * `refs-packs/` — the reference class showdown ratings say wins (~87% pairwise for the packs pool).
+ *
+ * These are a SCREEN, not a frozen eval constant. CLAUDE.md's frozen-constants guardrail governs
+ * `engineplusProfile`/`surgeplusProfile`, which pin treatments whose effects were measured in
+ * historical blind ratings; editing those invalidates every past comparison. These bands only RANK
+ * suggestions, so changing them invalidates nothing historical — see research/140 §4.3, which names
+ * the confusion between the two as the reason this table sat wrong for a week.
+ *
+ * MEASUREMENT PROVENANCE
+ * ----------------------
+ * Superseded values (until 2026-07-26), role-blind: `stereoWidthDb {lo:-25,hi:-8}`,
+ * `bandAirPct {lo:1.0,hi:2.5}`, `bandSubPct {lo:8,hi:22}`, `bandPresencePct {lo:8,hi:25}`, sourced
+ * from research 115 §6 / 118 §1.2 (whole-mix "ref chop" numbers: width ~-11 dB, air ~1.9%).
+ * Research 133 §1 measured those as WRONG when applied per role, and 131 §6 sharpened why: width
+ * "still discriminates synth-vs-synth 0.704 — it's a placement variable now, not a 'more is better'
+ * one". 133 named the live consequence: an air-shelf fired on a chords track whose reference class
+ * ships 0.00% air, while nothing fired on the missing bass octave.
+ *
+ * Current values: p25/p75 of each cleaned pack pool, measured 2026-07-26 over EVERY file in the
+ * pool (not 133's n=20 subsample) via the same `beat metrics` path 133 used. Pool sizes after the
+ * hygiene sweep below: bassline 32, chords 45, drum-loop 27, lead 55.
+ *
+ *   role       widthDb p25/med/p75      air% p25/med/p75    sub% p25/med/p75    mids% med
+ *   bassline   -232.7 / -56.8 / -27.3   0.00 / 0.00 / 0.00  10.2 / 50.1 / 94.1   0.22
+ *   chords       -8.8 /  -4.5 /  -1.8   0.00 / 0.00 / 0.05   0.0 /  0.0 /  0.1  66.55
+ *   lead        -11.2 /  -7.3 /  -2.0   0.00 / 0.08 / 0.89   0.0 /  0.0 /  0.1  83.93
+ *   drum-loop   -19.6 / -13.4 /  -7.9   0.57 / 2.38 / 14.11  2.9 / 17.8 / 49.0   4.68
+ *
+ * POOL HYGIENE THIS DEPENDS ON (2026-07-26, research/140 D4). The pools were swept before these
+ * numbers were taken: three measured drum loops were re-filed out of `lead/` into `drum-loop/`
+ * (pitch salience 1.23-1.34 and 0.4-10.1% mids energy, against a lead-pool median of 2.45 and
+ * 83.9%), and six files >= 30 s — 16-48 bar progressions and one 34 s FX sweep — were moved to
+ * `refs-packs/_unsuitable/` as not being 4-8 bar loop material. **The effect on the medians was
+ * negligible**, which is worth recording because the audit assumed otherwise: every role's shift on
+ * every axis landed inside the `beat metrics` render-noise band it declares itself (bandPct +/-2.0,
+ * widthDb +/-1.5), except drum-loop's bass share (+3.98 pts, a 25-file pool gaining 2 kick-heavy
+ * loops). Lead moved -0.33 dB crest and +0.74 dB width. Medians are robust to a handful of
+ * outliers; 133's per-role targets were NOT materially contaminated.
+ *
+ * The bassline width CEILING is the one number not taken straight from a quartile. The pool's own
+ * p75 is -27.3 dB, but 131 §7-P5, 133 §1 and 138 row 6 independently converge on <= -40 dB as the
+ * target: 21 of 32 pack basslines measure at or below -40 (many are exactly dual-mono), and the
+ * wide quartile is a minority of the class that wins. Encoded as a ceiling, not a floor, because
+ * for bass the defect is being too WIDE — the direction the old role-blind `{lo:-25}` could not
+ * express at all.
+ */
+export const PRODUCED_RANGES_BY_ROLE: Record<ProducedRole, Partial<Record<FeatureKey, { lo: number; hi: number }>>> = {
+  bassline: {
+    stereoWidthDb: { lo: -240, hi: -40 },
+    bandAirPct: { lo: 0, hi: 0.05 },
+    bandSubPct: { lo: 10.2, hi: 94.1 },
+    bandPresencePct: { lo: 0, hi: 0.05 },
+    bandMidsPct: { lo: 0, hi: 3.5 },
+  },
+  chords: {
+    stereoWidthDb: { lo: -8.8, hi: -1.8 },
+    bandAirPct: { lo: 0, hi: 0.05 },
+    bandSubPct: { lo: 0, hi: 0.1 },
+    bandPresencePct: { lo: 0, hi: 2.2 },
+    bandMidsPct: { lo: 50.4, hi: 93.8 },
+  },
+  lead: {
+    stereoWidthDb: { lo: -11.2, hi: -2.0 },
+    bandAirPct: { lo: 0, hi: 0.9 },
+    bandSubPct: { lo: 0, hi: 0.1 },
+    bandPresencePct: { lo: 0.3, hi: 7.1 },
+    bandMidsPct: { lo: 67.6, hi: 96.6 },
+  },
+  'drum-loop': {
+    stereoWidthDb: { lo: -19.6, hi: -7.9 },
+    bandAirPct: { lo: 0.6, hi: 14.1 },
+    bandSubPct: { lo: 2.9, hi: 49.0 },
+    bandPresencePct: { lo: 0.8, hi: 5.9 },
+    bandMidsPct: { lo: 2.0, hi: 11.4 },
+  },
 }
 
-const AXIS_PRIORITY: Record<TrickAxis, number> = { width: 0, air: 1, motion: 2, glue: 3 }
+/**
+ * Role-blind fallback, used only when a track's role can't be inferred (see `producedRoleForTrack`).
+ * Re-derived 2026-07-26 as the envelope of the four measured roles above rather than 115's
+ * whole-mix numbers, so an un-inferable track is ranked against something real. Prefer
+ * `PRODUCED_RANGES_BY_ROLE`: a band this wide barely discriminates, which is the honest cost of
+ * not knowing the role.
+ */
+export const PRODUCED_RANGES: Partial<Record<FeatureKey, { lo: number; hi: number }>> = {
+  stereoWidthDb: { lo: -240, hi: -1.8 },
+  bandAirPct: { lo: 0, hi: 14.1 },
+  bandSubPct: { lo: 0, hi: 94.1 },
+  bandPresencePct: { lo: 0, hi: 7.1 },
+  bandMidsPct: { lo: 0, hi: 96.6 },
+}
+
+/**
+ * Which reference-pool role a track's production role is measured against. Deliberately a mapping
+ * over the EXISTING `productionRoleFor` (produce.ts) rather than a second name-based inferrer —
+ * this file already imports it for slot `roles`/`notRoles`, and two independent role guessers
+ * drifting apart is the exact failure mode research/140 was written about.
+ *
+ * The taxonomies differ in granularity on purpose: production roles are per-instrument (kick, snare,
+ * hats…) because profiles treat them differently, while the reference pools are the four roles the
+ * packs are sold and measured in. Every drum voice therefore folds into 'drum-loop', and 'pad' and
+ * 'arp' fold into the polyphonic/monophonic classes the pools actually contain.
+ *
+ * 'default' returns null — an un-inferable track is ranked against the role-blind envelope rather
+ * than being silently assigned someone else's targets.
+ */
+export function producedRoleFor(productionRole: ProductionRole): ProducedRole | null {
+  switch (productionRole) {
+    case 'kick': case 'snare': case 'hats': case 'perc': case 'kit': return 'drum-loop'
+    case 'bass': case 'sub': return 'bassline'
+    case 'chords': case 'pad': return 'chords'
+    case 'lead': case 'arp': return 'lead'
+    case 'default': return null
+  }
+}
+
+/**
+ * Axis ranking order. Reordered 2026-07-26 (research 133 §1, seconded by 131 §6).
+ *
+ * Was `{ width: 0, air: 1, motion: 2, glue: 3 }` — 115 §6's "width first, air second", which 133
+ * measured as dead: pack basslines win ~87% pairwise at -45.5 dB width and 0.00% air, and
+ * engineplus already sits inside the pack width range, so width/air tricks were being ranked first
+ * onto gaps that are already closed. The roles where engineplus actually collapses (chords 11%,
+ * lead 17% pairwise) are stuck at 99% mids — a registration, envelope and movement problem.
+ *
+ * Motion and glue therefore lead. Width and air are NOT removed: they are per-role PLACEMENT
+ * targets now (a chords track at -1 dB or a bassline at -10 dB is wrong in the other direction),
+ * which is what making PRODUCED_RANGES_BY_ROLE two-sided above is for.
+ */
+const AXIS_PRIORITY: Record<TrickAxis, number> = { motion: 0, glue: 1, width: 2, air: 3 }
 
 export interface Suggestion {
   trick: BeatTrick
@@ -597,12 +722,23 @@ export interface Suggestion {
   reasons: string[]
 }
 
-/** How far a metric sits BELOW its produced range (0 if in/above range or unranged). The width and
- * air gaps are the measured showdown ordering (115 §6) — width first. */
-function gapBelowRange(metric: FeatureKey, value: number): number {
-  const r = PRODUCED_RANGES[metric]
+/**
+ * How far a metric sits OUTSIDE its role's produced range (0 when inside, or when the metric has no
+ * band). Distance only — the direction is deliberately not encoded, because the ranking question is
+ * "how far from the reference class is this", not "which way".
+ *
+ * Two-sided as of 2026-07-26. It used to measure distance BELOW `lo` only, which made whole classes
+ * of defect invisible: a bassline at -10 dB width or a chords track at 40% sub is too MUCH, and
+ * under the old one-sided rule scored a gap of exactly 0. That is the same failure 133 §1 described
+ * from the other end — "an air-shelf fires on a chords track whose ref class ships 0.00% air".
+ */
+function gapFromRange(metric: FeatureKey, value: number, role: ProducedRole | null): number {
+  const table = role ? PRODUCED_RANGES_BY_ROLE[role] : PRODUCED_RANGES
+  const r = table[metric] ?? PRODUCED_RANGES[metric]
   if (!r) return 0
-  return value < r.lo ? r.lo - value : 0
+  if (value < r.lo) return r.lo - value
+  if (value > r.hi) return value - r.hi
+  return 0
 }
 
 /** Rank the catalog's applicable tricks for a track. A trick is suggestible when its kind fits, no
@@ -624,13 +760,15 @@ export function suggestForTrack(tricks: BeatTrick[], ctx: TrickContext): Suggest
       if (r === 'unknown') unverified = true
     }
     if (!ok) continue
-    // gap = the largest below-range distance among this trick's metric preconditions/expects
+    // gap = the largest out-of-range distance among this trick's metric preconditions/expects,
+    // measured against THIS TRACK'S role band (research 133 §1) rather than one global table.
     let gap = 0
     const reasons: string[] = []
     if (ctx.features) {
+      const role = producedRoleFor(productionRoleFor(track.id))
       for (const c of trick.when) {
         if ('metric' in c) {
-          const g = gapBelowRange(c.metric, ctx.features[c.metric])
+          const g = gapFromRange(c.metric, ctx.features[c.metric], role)
           if (g > gap) gap = g
           reasons.push(`${c.metric}=${rnd2(ctx.features[c.metric])} ${c.op} ${c.value}`)
         }

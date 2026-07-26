@@ -447,6 +447,43 @@ dataset (`docs/taste-loop-design.md`, "Licensing note"), enforced in the tool, n
 - Nothing derived from ref audio is ever registered into a project, adopted, or redistributed —
   a clip-set batch has nothing to adopt by construction.
 
+### Ref-pool composition changed 2026-07-26 — a dated boundary for the packs pool
+
+Recorded here because it is **eval integrity, not hygiene**: any analysis that splits ratings by
+role and spans this date is comparing two slightly different `refs-packs/` populations, and
+nothing else on disk records the change. (Same failure shape as research/130 §5.3's unrecorded F3
+shuffle boundary — a dated line is the whole fix.)
+
+Research/140 D4, following 133 §7-A.4 and 138 row 14, found the pools misfiled. Verified by
+measurement rather than by filename and corrected:
+
+- **Three files re-filed `lead/` → `drum-loop/`** — `GUY_GERBER_drum_loop_synth_kit_02_120.wav`,
+  `..._03_120.wav`, `GUY_GERBER_snare_loop_synthetic_longer_decay_120.wav`. They measure at pitch
+  salience 1.23-1.34 and **0.4-10.1% mids energy**, against a `lead/` pool median of 2.45 and
+  83.9%. A "lead" carrying 0.4% mids and 55% sub is a kick pattern. Any batch before this date
+  that drew a `lead` ref may have auditioned one of them as a lead.
+- **Six files ≥ 30 s moved to `refs-packs/_unsuitable/`** (see the README there) — 16-48 bar
+  progressions plus one 34 s FX sweep that was sitting in `drum-loop/`. Not judged as bad audio;
+  they are simply not the 4-8 bar loop object the pools and the per-role targets assume.
+
+Pool sizes: bassline 32 (unchanged), chords 49 → 45, drum-loop 25 → 27, lead 59 → 55.
+
+**Effect on the per-role medians: negligible, which is the honest headline.** Research/140 assumed
+the contamination invalidated 133's per-role targets; re-measuring every file in every pool before
+and after says otherwise. Every role's shift on every band/width axis landed inside the
+run-to-run render-noise band `beat metrics` declares for itself (`bandPct ±2.0`, `widthDb ±1.5`),
+with one exception — drum-loop's bass share, +3.98 points, from a 25-file pool gaining two
+kick-heavy loops. Lead, the pool that lost the three misfiles, moved **-0.33 dB crest and
++0.74 dB width**. Medians are robust to a handful of outliers.
+
+So 133's numbers stand, and the width/air ruling that depends on them (research/140 §4.1) is not
+blocked on this. The cleaned full-pool medians agree with 133's n=20 subsample on three of four
+roles (chords -4.5 vs -3.0 dB width, lead -8.1 vs -7.9, drum-loop -11.8 vs -12.0); bassline reads
+-56.8 vs -45.5 because that pool is strongly bimodal (21 of 32 files at or below -40 dB, many
+exactly dual-mono), so a 20-of-32 subsample moves the median around. **Sampling, not
+contamination, is the larger source of disagreement in these targets** — worth knowing before
+anyone re-mines them.
+
 ## How to run a round
 
 ```

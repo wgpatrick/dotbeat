@@ -82,7 +82,7 @@ track a A #e06c75 synth
   }
 })
 
-test('prep: a surge track fails LOUDLY at render when surgepy is unavailable (never silent)', { skip: hasSurgepy }, async () => {
+test('prep: a surge track fails LOUDLY at render when surgepy is unavailable (never silent)', { skip: hasSurgepy ? 'surgepy installed — the unavailable-path assertion is not exercisable here' : false }, async () => {
   // Force an unusable interpreter so the catalogue listing (and therefore prep) fails the way it
   // would on any machine without a Surge build — the point of the whole out-of-process posture.
   const prev = process.env.BEAT_PYTHON
@@ -100,7 +100,7 @@ test('prep: a surge track fails LOUDLY at render when surgepy is unavailable (ne
   }
 })
 
-test('prep: renders a surge track to a cached WAV + provenance and desugars to a sample host', { skip: !hasSurgepy }, async () => {
+test('prep: renders a surge track to a cached WAV + provenance and desugars to a sample host', { skip: !hasSurgepy ? 'no surgepy (see python/README.md: surge XT python bindings)' : false }, async () => {
   const { prepareSurgeTracks } = await import(prepUrl)
   const { parse } = await import('../src/core/index.js')
   const dir = mkdtempSync(join(tmpdir(), 'surge-prep-'))
