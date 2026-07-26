@@ -90,10 +90,11 @@ pathology signature (the grindy-bass complaint): solo bass with crest < ~10.5 AN
 
 ## Phase 5 — Sections + assembly
 
-Instruments: `beat clip` / `beat scene` / `beat song` · `beat excerpt` **if it has landed** (check
-`beat help` — it is being built on another branch), else the manual `test-*.beat` pattern: copy
-the .beat and rewrite its `song` block down to the 8-16 bars around one transition ·
-background renders.
+Instruments: `beat clip` / `beat scene` / `beat song` · `beat excerpt` · background renders.
+
+`beat excerpt <file.beat> <section...> [--out <path>]` writes a derived .beat keeping ONLY the named
+song sections, tracks/scenes/clips/media untouched — sections named by scene id or name, requested
+order kept. Use it for every partial render. Do NOT hand-copy a .beat and rewrite its `song` block.
 
 - Render a cheap partial excerpt for EVERY transition — never iterate on full renders
   (~0.5× realtime; a full song is 7-8 minutes of waiting per iteration).
@@ -162,12 +163,13 @@ in order:
    lines, green). One line each; the owner should not have to re-derive that the mix is clip-safe.
 2. **The listening packet** — the file list from the checkpoint-listen protocol, each excerpt with
    a one-line "listen for X" (paths, not prose).
-3. **Option boards** — the phase's open picks as boards. `beat board` is the intended surface (a
-   per-batch page: 2-4 finalists, provenance + measurements, in-context renders, pick /
-   reject-with-note, writes `decision.json`) — it is being built on a sibling branch, so **check
-   `beat help` for it**. Manual fallback until it lands: list the candidate render paths under each
-   open pick and ask the owner to reply with the winner's name (you record the pick into NOTES.md
-   yourself).
+3. **Option boards** — the phase's open picks as boards. Run `beat board <dir>`: it serves an
+   option-board picking UI over every UNDECIDED rendered batch under `<dir>`, each board showing its
+   candidates with visible provenance (source kind / recipe / provider) and the measured features
+   table; the owner picks one (with an optional note) or rejects all, and it writes `decision.json`
+   into the batch dir. Put the `beat board` line in the brief. Do not fall back to pasting candidate
+   paths and asking for a name in chat — that loses the provenance the board exists to show and
+   leaves you transcribing picks by hand.
 4. **Deep links — the owner's way into the GUI.** For every suspect track and every board winner,
    a copy-pasteable `beat open` line (this shipped — item 5, research 128 §2.2):
    `beat open <file.beat> --track <id> --view device --param <knob>` drops them onto the exact
@@ -197,12 +199,13 @@ survives the session. They end their turn with the GUI's **Save checkpoint** but
 
 1. **Read board decisions** — glob the open batch dirs for `decision.json`; each names a pick,
    runner-up, and reject notes.
-2. **Diff the owner's session** — `beat diff --since <the awaiting-owner ref> --rollup`: the net
-   per-param before→after with tweak counts, the session's *story* not its hundreds of debounced
-   lines. `--since`/`--rollup` are being built on a sibling branch — **check `beat help`**; until
-   they land, fall back to `beat diff --git <awaiting-owner-ref> <now> <file>` and do the grouping
-   by hand (net endpoint per track+param; a param the owner dithered on many times is one they
-   care about and struggled with — flag it either way).
+2. **Diff the owner's session** — `beat diff --since <the awaiting-owner ref> <file> --rollup`:
+   the net per-param before→after with tweak counts, note clusters per bar, ordered by edit mass —
+   the session's *story*, not its hundreds of debounced lines. The ref is optional and defaults to
+   the last checkpoint; `--json` gives the structured form. A param with a high tweak count is one
+   the owner cared about and struggled with: read it that way. (Same rollup over HTTP, for a
+   co-present session with a daemon up: `GET /rollup?ref=<ref>` — `&format=text` returns exactly
+   what the CLI prints.)
 3. **Read `workshop/FEEDBACK.md`** — the complaints; each still triggers the localize → metric
    signature → permanent-lint-rule loop from the checkpoint-listen protocol.
 4. **Interpret owner edits into NOTES.md** — one paragraph of *musical* reading, not a re-log of
@@ -228,12 +231,12 @@ accumulated understanding).** All text, all in git's reach, all reconstructable.
 
 ## Capability truth — tools that lie cost more than tools that are absent
 
-- **Clip automation is currently defeated in offline renders**: `applyParams` stomps automated
-  values back to the static patch value every 16th tick (a −60 dB volume lane measured −4.6 dB).
-  A fix is in flight on another branch — **check whether it has landed, and verify with a
-  micro-test** (a tiny .beat with one automated lane, rendered and RMS-compared against a static
-  control) before trusting any lane. Until verified: encode ALL dynamics as note data — velocity
-  ramps + `velToFilterAmount` (per-note effect: 2^(vtf·(v−0.5)·4)).
+- **Clip automation works in renders — use it.** The old defect (`applyParams` re-asserting the
+  static patch value every 16th tick, so a −60 dB volume lane rendered at −4.6 dB) is FIXED and
+  gated: `test/clip-automation-render.test.ts` decodes four committed golden WAVs rendered by the
+  fixed engine, and a missing golden fails loudly rather than skipping. Write dynamics as
+  automation lanes. Velocity ramps + `velToFilterAmount` (per-note: 2^(vtf·(v−0.5)·4)) remain a
+  good musical tool, not a workaround you are forced into.
 - **Automation is clip-scoped only.** Section-level energy changes need cloned clip variants at
   scaled velocities (Sandstorm's `b_soft` = `b_main` × 0.735). There is no timeline/section-level
   dynamics primitive yet.
