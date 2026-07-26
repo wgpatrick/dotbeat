@@ -35,7 +35,8 @@ import {
   setMediaSample,
   setValue,
 } from '../src/core/index.js'
-import { BeatEditError } from '../src/core/edit.js'
+import { BeatEditError, setLaneBacking } from '../src/core/edit.js'
+import { diffDocuments, formatDiff } from '../src/core/diff.js'
 import { BeatParseError } from '../src/core/parse.js'
 import { KEYMAP_LANE_VOICES, buildKeymap, noteToMidi } from '../src/core/keymap.js'
 
@@ -136,4 +137,35 @@ test('a DRUM lane is untouched: no pool unless it asks for one', () => {
   doc = setMediaSample(doc, 'kick', 'c'.repeat(64), 'media/kick.wav')
   doc = setLaneSample(doc, 'kit', 'kick', { sample: 'kick', gainDb: -3, tune: 0 })
   assert.equal(serialize(doc).includes('voices='), false)
+})
+
+// ---- pilot findings (the 2026-07-26 sampling-toolkit CLI pilot) ---------------------------------
+
+test('H1: every sample-lane param is VISIBLE to the diff engine, not just gainDb/tune', () => {
+  // The pilot hit this on `voices`' own neighbours and it was a real correctness bug, older than
+  // this stream: laneBackingDesc stringified a sample lane as only `sample <id> (<dB>, <st>)`, so
+  // `beat set <t>.lane.<n>.length 8` WROTE the change and printed "no musical changes", and
+  // `beat diff` reported none either. Seven of the nine params were invisible — which also means
+  // checkpoint auto-labels, `beat diff --since`, the rollup and the GUI edit log all under-
+  // reported them. Asserted per key so a future param cannot be added and silently omitted.
+  const base = project()
+  for (const key of SAMPLE_LANE_PARAM_KEYS) {
+    const value = key === 'voices' ? 2 : key === 'cutoff' ? 400 : 0.25
+    const after = setLaneParam(base, 'kit', 'kick', key, value).doc
+    const entries = diffDocuments(base, after)
+    assert.equal(entries.length, 1, `${key}: expected exactly one diff entry, got ${entries.length}`)
+    assert.equal(entries[0]!.kind, 'lane-decl', `${key}: should read as a lane-decl change`)
+    assert.match(formatDiff(entries), new RegExp(`${key}=`), `${key} must appear in the rendered diff`)
+    assert.equal(formatDiff(entries).includes('no musical changes'), false)
+  }
+  // ...and the two backing FIELDS still report, as they always did.
+  for (const [key, value] of [['gainDb', -3], ['tune', 7]] as const) {
+    const after = setValue(base, `kit.lane.kick.${key}`, String(value))
+    assert.equal(formatDiff(diffDocuments(base, after)).includes('no musical changes'), false, key)
+  }
+  // filterType and the fx list are part of a lane's declared identity too.
+  const withFx = setLaneBacking(base, 'kit', 'kick', ['sample', 'bell', '0', '0', 'filter=highpass', 'fx=bitcrush']).doc
+  const text = formatDiff(diffDocuments(base, withFx))
+  assert.match(text, /filter=highpass/)
+  assert.match(text, /fx=bitcrush/)
 })

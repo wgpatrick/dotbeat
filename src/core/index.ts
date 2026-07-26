@@ -2,7 +2,7 @@ export * from './document.js'
 export * from './format.js'
 export { automationShapePoints, AUTOMATION_SHAPES, AutomationShapeError, type AutomationShape, type AutomationShapeOptions, type AutomationShapePoint } from './automation-shape.js'
 export { parse, BeatParseError } from './parse.js'
-export { serialize } from './serialize.js'
+export { serialize, serializeLaneBacking } from './serialize.js'
 export { unplacedContentTracks, unplacedContentWarning, type UnplacedContentTrack } from './coverage.js'
 export {
   sandboxPayloadToBeatDocument,

@@ -20,7 +20,21 @@ function laneBackingDesc(b: BeatDrumLaneDecl['backing']): string {
     const params = Object.entries(b.params).map(([k, v]) => `${k}=${formatNumber(v)}`).join(' ')
     return `synth:${b.voice}${params ? ` ${params}` : ''}`
   }
-  if (b.type === 'sample') return `sample ${b.sample} (${formatNumber(b.gainDb)} dB, ${formatNumber(b.tune)} st)`
+  if (b.type === 'sample') {
+    // Pilot (2026-07-26, the sampling-toolkit CLI pilot, finding H1): this used to stop at
+    // gainDb/tune and drop `params` entirely — so `beat set <t>.lane.<n>.length 8` WROTE the
+    // change and then printed "no musical changes", and `beat diff` reported none either, even
+    // though a raw `diff` of the two files showed the line had moved. Seven of the nine sample-lane
+    // params were invisible to the diff engine (only gainDb/tune reported), which also means
+    // checkpoint auto-labels, `beat diff --since`, the rollup and the GUI edit log all under-
+    // reported them. The synth branch two lines above always folded its own params in; only this
+    // branch did not. Same treatment now, plus filterType/fx, so a lane's whole declared identity
+    // is in the compared string.
+    const params = Object.entries(b.params).map(([k, v]) => `${k}=${formatNumber(v)}`).join(' ')
+    const fx = b.effects.length > 0 ? ` fx=${b.effects.map((e) => e.type).join(',')}` : ''
+    const filter = b.filterType !== 'lowpass' ? ` filter=${b.filterType}` : ''
+    return `sample ${b.sample} (${formatNumber(b.gainDb)} dB, ${formatNumber(b.tune)} st)${params ? ` ${params}` : ''}${filter}${fx}`
+  }
   return `sf ${b.sample} program ${formatNumber(b.program)} note ${formatNumber(b.note)}`
 }
 
