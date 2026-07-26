@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ReactNode } from 'react'
 import { useStore, isEffectivelyMuted } from '../state/store'
 import { engine } from '../audio/engine'
-import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, postClipMove, postClipRemove, postClipDuplicate, daemonBase } from '../daemon/bridge'
+import { postEdit, postSelection, postAutomation, postAddTrack, postRemoveTrack, postGroupOp, postAudioSplit, postClipMove, postClipRemove, postClipDuplicate, daemonBase, type AddTrackOpts } from '../daemon/bridge'
 import { isTauri, openProjectFolder } from '../daemon/tauri'
 import { applyPresetToTrack, installKitLane, installSoundfont, installAudioClip, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
 import { useDropTarget } from '../dragDrop'
@@ -25,7 +25,7 @@ import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 // the same honesty as the instrument case below, which refuses when no SoundFont sample is
 // registered. Surge tracks are created with `beat track add --kind surge`; the GUI RENDERS them
 // (see AUTO_OPTIONS_BY_KIND.surge). Widen this only alongside a real patch picker.
-const TRACK_KINDS: readonly TrackKind[] = ['synth', 'drums', 'instrument', 'audio']
+const TRACK_KINDS: readonly AddTrackOpts['kind'][] = ['synth', 'drums', 'instrument', 'audio']
 
 // ── Arrangement length (Phase 19 Stream V) ───────────────────────────────────────────────────────
 // Two length surfaces, matching the two document modes. Loop mode (doc.song === null) is a single
@@ -2521,7 +2521,7 @@ export function ArrangementView() {
   // sample-registration surface, so it reuses the first media sample if one exists, else the option
   // is disabled with a tooltip pointing at `beat sample` (honest: the GUI can't register samples).
   const addTrackOfKind = useCallback(
-    async (kind: TrackKind) => {
+    async (kind: AddTrackOpts['kind']) => {
       const d = useStore.getState().doc
       if (!d) return
       setAddOpen(false)

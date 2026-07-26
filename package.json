@@ -14,7 +14,9 @@
     "beat": "node cli/beat.mjs",
     "render": "node cli/render.mjs",
     "verify": "node scripts/verify-run.mjs",
-    "verify:engine": "node scripts/verify-run.mjs --tier engine"
+    "verify:engine": "node scripts/verify-run.mjs --tier engine",
+    "build:ui": "cd ui && npm run build",
+    "build:all": "npm run build && npm run build:ui"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

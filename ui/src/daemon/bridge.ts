@@ -466,6 +466,10 @@ export function postAutomation(e: AutomationEdit): void {
 
 export interface AddTrackOpts {
   id: string
+  // The GUI can only CREATE these four. `surge` is a real TrackKind the GUI must render and edit
+  // (see types.ts), but a surge track needs a patch name the daemon's /add-track route has no way
+  // to ask for — so it stays CLI-only (`beat add-track <f> <id> surge --patch "<name>"`).
+  // Deliberately narrower than TrackKind, not a stale mirror of it.
   kind: 'synth' | 'drums' | 'instrument' | 'audio'
   name?: string
   color?: string
