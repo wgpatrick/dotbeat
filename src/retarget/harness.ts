@@ -226,20 +226,16 @@ export async function runRetarget(opts: RetargetOptions): Promise<RetargetResult
   })
   log(`search: CMA-ES over ${defs.length} trust-cube dims, population ${population}, budget ${budget}`)
   // `spent` counts ASKED points so a converged run that keeps hitting the cache still terminates.
+  // The budget is the only stop condition: CMA-ES restarts and stagnation tests are out of scope
+  // for a search this local, and an early stop would silently change what a quoted budget means.
   const spentCap = budget * 3 + 50
   let spent = 0
-  let bestZBeforeGen = -1
   while (evals + es.lambda <= budget && spent + es.lambda <= spentCap) {
     const pts = es.ask()
     const losses: number[] = []
     for (const x of pts) losses.push(await evaluate(x))
     es.tell(pts, losses)
     spent += pts.length
-    if (best.loss.total === bestZBeforeGen) {
-      // no improvement this generation — keep going; CMA-ES restarts are out of scope for a local
-      // search this small, and the budget is the stop condition.
-    }
-    bestZBeforeGen = best.loss.total
   }
 
   // The winner may have come from the cache with no bytes in hand (two genomes rounding to one
