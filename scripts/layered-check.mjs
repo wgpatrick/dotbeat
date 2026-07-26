@@ -30,6 +30,7 @@ const arg = (name, fallback) => {
 const outDir = resolve(arg('--out', join(process.env.HOME, 'Documents/dotbeat/taste-dataset/layered-check')))
 const perRole = Number(arg('--per-role', '2'))
 const metaSeed = Number(arg('--seed', '41'))
+const onlyRoles = arg('--roles', '').split(',').filter(Boolean)
 
 const { parse, serialize } = await import(`${repoRoot}/dist/src/core/index.js`)
 const { generateSeedBeat } = await import(`${repoRoot}/dist/src/taste/seeds.js`)
@@ -65,7 +66,9 @@ const rows = []
 process.stdout.write(`layered check -> ${outDir}\n`)
 process.stdout.write(`arms: ${ARMS.join(' vs ')} (same figure, same key, same bpm, normalized together)\n\n`)
 
-for (const role of LAYERED_ROLES) {
+const ROLES = onlyRoles.length > 0 ? LAYERED_ROLES.filter((r) => onlyRoles.includes(r)) : LAYERED_ROLES
+
+for (const role of ROLES) {
   process.stdout.write(`=== ${role}\n`)
 
   for (let n = 0; n < perRole; n++) {
@@ -144,7 +147,7 @@ const num = (x) => (Number.isFinite(x) ? (Math.abs(x) >= 100 ? x.toFixed(0) : x.
 const mean = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length
 
 process.stdout.write('\n==== FEATURE TABLE — per role, mean over clips, by arm ====\n')
-for (const role of LAYERED_ROLES) {
+for (const role of ROLES) {
   process.stdout.write(`\n${role}\n`)
   process.stdout.write(`  ${'feature'.padEnd(18)}${ARMS.map((a) => a.padStart(13)).join('')}\n`)
   for (const key of FEATURES) {

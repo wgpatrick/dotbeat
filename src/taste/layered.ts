@@ -291,14 +291,14 @@ function buildBasslineArch(rng: () => number): LayeredArchitecture {
   const subOsc = pickOne(rng, ['sine', 'triangle'] as const)
   // presets/role-parameter-stats.json bass amp env: sustain p10 0.00 / p25 0.33 / median 1.00 —
   // capped at 0.85 because the whole point is that a bass is a pluck, not a held tone
-  const subSustain = pickOne(rng, [0, 0.15, 0.35, 0.55, 0.85] as const)
+  const subSustain = pickOne(rng, [0, 0.1, 0.25, 0.45, 0.7] as const)
   const subDecay = pickOne(rng, [0.12, 0.19, 0.25, 0.4, 0.62] as const)
   const subRelease = pickOne(rng, [0.03, 0.05, 0.09, 0.14] as const)
   const subGlide = pickOne(rng, [0, 0.01, 0.02, 0.03] as const)
   // a GATED sub leaves real silence between notes; a legato one fills to the next onset. Both are
   // attested (the "rolling" bass is legato, the plucked house bass is gated) and they sound
   // completely different, so this is one of the strongest same-ness axes available.
-  const subGate = pickOne(rng, [0, 0, 2, 3, 4] as const)
+  const subGate = pickOne(rng, [0, 2, 2, 3, 4] as const)
   const subLevel = pickRange(rng, 0.1, 0.45, 0.05)
 
   // BALANCE, drawn relative to the sub. The sources disagree in DIRECTION (MusicRadar: sub hotter;
@@ -306,29 +306,46 @@ function buildBasslineArch(rng: () => number): LayeredArchitecture {
   // absolute numbers are calibrated against measured per-layer contribution, not fader values:
   // at the frozen -5 dB nominal offset the growl arrived 14 dB under the mix.
   const subGain = pickRange(rng, -13, -8, 1)
-  const bodyRel = pickRange(rng, 1, 8, 1)
-  const growlRel = pickRange(rng, 2, 10, 1)
-  const clickRel = pickRange(rng, 6, 16, 1)
 
   const hasBody = family.optional.includes('body')
   const hasGrowl = family.optional.includes('growl')
   const hasClick = family.optional.includes('click')
 
+  // THE FLOOR THAT KEEPS THE STACK A STACK. Every character layer is drawn relative to the sub, and
+  // the loudest present one is then lifted to at least the sub's own level. The whole draw shifts
+  // together, so the balance BETWEEN character layers is whatever was drawn — only the stack's
+  // relationship to its sub is constrained. Without this a legitimate-looking draw (every relative
+  // level negative) reproduces the 2026-07-26 failure exactly: measured per layer, the frozen stack
+  // put its growl 14 dB under the mix at a nominal -5 dB offset, and sub-alone RMS came within
+  // 0.15 dB of the whole instrument. Nominal fader values are not contributions.
+  const drawnRels = { body: pickRange(rng, -1, 5, 1), growl: pickRange(rng, -3, 4, 1), click: pickRange(rng, -2, 6, 1) }
+  const presentRels = [...(hasBody ? [drawnRels.body] : []), ...(hasGrowl ? [drawnRels.growl] : []), ...(hasClick ? [drawnRels.click] : [])]
+  const lift = Math.max(0, -Math.max(...presentRels))
+  const bodyRel = drawnRels.body + lift
+  const growlRel = drawnRels.growl + lift
+  const clickRel = drawnRels.click + lift
+
   // the lowest highpassed layer must meet the sub's lowpass within an octave (checkCrossover rule 3)
   const lowestHp = pickRange(rng, subLp * 0.8, subLp * 1.0, 5)
   // when a body layer is present it takes the low slot and the growl moves up into its own band
-  const growlHp = hasBody ? pickRange(rng, 180, 460, 20) : lowestHp
+  const growlHp = hasBody ? pickRange(rng, 140, 320, 20) : lowestHp
   const bodyHp = lowestHp
-  const clickHp = pickRange(rng, 1200, 2600, 100)
+  const clickHp = pickRange(rng, 1100, 2200, 100)
 
-  const growlOsc = pickOne(rng, ['sawtooth', 'square', 'sawtooth'] as const)
+  // a saw growl is the corpus's default, but its harmonic tail is what drags the stack's centroid
+  // far above the reference pool's 76 Hz median, so the darker waveforms carry real weight here
+  const growlOsc = pickOne(rng, ['sawtooth', 'square', 'triangle', 'square'] as const)
   // -1200 is the octave-down BODY move; the cents values are the patch corpus's unison detune
   // distribution (p25 4.6 / median 10.0 / p75 20.0)
   const growlOsc2Detune = pickOne(rng, [-1200, -1200, 5, 10, 20] as const)
-  const growlOsc2Level = pickRange(rng, 0.2, 0.45, 0.05)
+  const growlOsc2Level = pickRange(rng, 0.15, 0.35, 0.05)
   const growlSustain = pickOne(rng, [0.2, 0.35, 0.5, 0.62] as const)
+  // the reference class has almost no bass energy above 250 Hz (refs-packs bassline bandMidsPct
+  // median 0.22%, bandPresencePct p90 0.98%), so a saw growl gets its harmonics tamed rather than
+  // celebrated — otherwise the stack's centroid lands 3-5x above the pool median of 76 Hz
+  const growlEqHigh = pickRange(rng, -9, -3, 1)
   const bodyOsc = pickOne(rng, ['triangle', 'sawtooth'] as const)
-  const clickNoise = pickRange(rng, 0.1, 0.5, 0.05)
+  const clickNoise = pickRange(rng, 0.05, 0.3, 0.05)
 
   const layers: LayerSpec[] = [
     {
@@ -402,7 +419,7 @@ function buildBasslineArch(rng: () => number): LayeredArchitecture {
         decay: 0.2,
         sustain: growlSustain,
         release: 0.1,
-        eqHigh: -2,
+        eqHigh: growlEqHigh,
       },
       production: {
         profile: { role: 'bass', saturator: { drive: 0.4, mix: 0.45 } },
@@ -449,7 +466,7 @@ function buildBasslineArch(rng: () => number): LayeredArchitecture {
     layers,
     draw: {
       family: family.name,
-      choices: { anchorLo, subLp, subOsc, subSustain, subDecay, subRelease, subGlide, subGate, subLevel, subGain, bodyRel, growlRel, clickRel, lowestHp, growlHp, clickHp, growlOsc, growlOsc2Detune, growlOsc2Level, growlSustain, bodyOsc, clickNoise },
+      choices: { anchorLo, subLp, subOsc, subSustain, subDecay, subRelease, subGlide, subGate, subLevel, subGain, bodyRel, growlRel, clickRel, lowestHp, growlHp, clickHp, growlOsc, growlOsc2Detune, growlOsc2Level, growlSustain, growlEqHigh, bodyOsc, clickNoise },
     },
   }
 }
@@ -497,7 +514,7 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
   const bodyGain = pickRange(rng, -17, -12, 1)
   const padRel = pickRange(rng, 1, 6, 1)
   const stabRel = pickRange(rng, 2, 7, 1)
-  const airRel = pickRange(rng, -14, -8, 1)
+  const airRel = pickRange(rng, -20, -12, 1)
   const bodyOsc = pickOne(rng, ['triangle', 'sine', 'sawtooth'] as const)
   // detune is the most CONTESTED number in the mined corpus (sub-4 cents = "warmth" in deep house,
   // the same amount called a defect in string pads, ~7.5 for trance aggression, "+/-7 to +/-61 all
@@ -685,7 +702,7 @@ function buildLeadArch(rng: () => number): LayeredArchitecture {
   // MusicTech, corroborated twice: the octave layer sits 6-10 dB under the main layer
   const octaveUnder = pickRange(rng, 6, 10, 1)
   const widthUnder = pickRange(rng, 1, 5, 1)
-  const airUnder = pickRange(rng, 10, 18, 1)
+  const airUnder = pickRange(rng, 14, 22, 1)
   // FaderPro: 7-voice unison is the default and detune past ~50% of range turns dissonant;
   // Syntorial runs 9. The patch corpus's own detune distribution: p25 9.4 / median 16.6 / p75 24.2
   // cents at >= 5 voices.
