@@ -37,7 +37,7 @@ import {
 import { type FeatureKey, type FeatureVector } from './features.js'
 import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { SPLIT_SMOKE_MIN_BATCHES } from './eval.js'
-import { tally, statLine, pct, type SourceStat } from './showdown.js'
+import { tally, statLine, pct, loadLatestRankedEntries, type SourceStat } from './showdown.js'
 
 // ---- roles & the per-role trick stacks ---------------------------------------------------------
 
@@ -279,49 +279,26 @@ export interface ProdtaskLogEntry {
 /** Scored prodtask entries from the log: `prodtask:<task>:<role>` groups only, latest entry per
  * batch dir (same supersede rule as the taste harness), entries without a sources map skipped. */
 export function loadProdtaskEntries(logPath: string): { entries: ProdtaskLogEntry[]; skipped: number } {
-  let text: string
-  try {
-    text = readFileSync(logPath, 'utf8')
-  } catch {
-    return { entries: [], skipped: 0 }
+  // Shared reader (src/taste/showdown.ts): latest-per-batch supersede FIRST, retracted batches
+  // dropped after. This used to be a third private copy of that loop and carried the same M3 bug.
+  const { entries, skipped } = loadLatestRankedEntries(logPath, 'prodtask:')
+  return {
+    entries: entries.map((e) => {
+      // group is `prodtask:<task>:<role>`; a role can itself contain no ':' (bassline, drum-loop)
+      const rest = e.group.slice('prodtask:'.length)
+      const sep = rest.indexOf(':')
+      return {
+        task: sep === -1 ? rest : rest.slice(0, sep),
+        role: sep === -1 ? '' : rest.slice(sep + 1),
+        batch: e.batch,
+        picks: e.picks,
+        rejected: e.rejected,
+        sources: e.sources,
+        ...(e.features !== undefined ? { features: e.features as Record<string, FeatureVector> } : {}),
+      }
+    }),
+    skipped,
   }
-  const latest = new Map<string, { group: string; picks: { rank: number; variant: string }[]; rejected?: string[]; sources?: Record<string, string>; features?: Record<string, FeatureVector> }>()
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    let raw: { batch?: string; group?: string; picks?: { rank: number; variant: string }[]; rejected?: string[]; sources?: Record<string, string>; features?: Record<string, FeatureVector> }
-    try {
-      raw = JSON.parse(trimmed)
-    } catch {
-      continue
-    }
-    if (typeof raw.batch !== 'string' || typeof raw.group !== 'string' || !raw.group.startsWith('prodtask:')) continue
-    if (!Array.isArray(raw.picks) || raw.picks.length === 0) continue
-    latest.set(raw.batch, { group: raw.group, picks: raw.picks, rejected: raw.rejected, sources: raw.sources, features: raw.features })
-  }
-  const entries: ProdtaskLogEntry[] = []
-  let skipped = 0
-  for (const [batch, e] of latest) {
-    if (e.sources === undefined || Object.keys(e.sources).length === 0) {
-      skipped += 1
-      continue
-    }
-    // group is `prodtask:<task>:<role>`; a role can itself contain no ':' (bassline, drum-loop)
-    const rest = e.group.slice('prodtask:'.length)
-    const sep = rest.indexOf(':')
-    const task = sep === -1 ? rest : rest.slice(0, sep)
-    const role = sep === -1 ? '' : rest.slice(sep + 1)
-    entries.push({
-      task,
-      role,
-      batch,
-      picks: [...e.picks].sort((a, b) => a.rank - b.rank).map((p) => p.variant),
-      rejected: Array.isArray(e.rejected) ? e.rejected : [],
-      sources: e.sources,
-      ...(e.features !== undefined ? { features: e.features } : {}),
-    })
-  }
-  return { entries, skipped }
 }
 
 /** Mean of a DSP metric per arm across entries that carry the feature vectors — the mechanical

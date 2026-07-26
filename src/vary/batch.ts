@@ -701,13 +701,21 @@ export interface ScoreEntry {
   /** "None of these are good" verdict (owner, twice after a showdown batch: nothing deserved a
    * pick, and the only options were picking or silently skipping — which loses the signal). A
    * none-good entry carries `picks: []`, `rejected: [every variant]`, and `verdict: 'none-good'`.
-   * The empty picks array is deliberate and load-bearing: BOTH consumers already skip empty-picks
-   * entries at LOAD (src/taste/eval.ts loadTasteBatches and src/taste/showdown.ts
-   * loadShowdownEntries), so a none-good batch is cleanly EXCLUDED from taste-model training and
-   * from the showdown win-rate/pairwise math rather than corrupting either (there is no winner to
-   * imply a pairwise comparison from). The signal is preserved in two places that read the field
-   * directly: the showdown report tallies a `noneGood` count per collection, and the taste log
-   * keeps the entry verbatim. Semantics: "all variants rejected, none worth ranking." */
+   * The empty picks array is deliberate and load-bearing: every consumer drops empty-picks entries
+   * (src/taste/eval.ts loadTasteBatches, src/taste/showdown.ts loadLatestRankedEntries — which
+   * showdown, prodtask and pilot all read through), so a none-good batch is EXCLUDED from
+   * taste-model training and from the win-rate/pairwise math rather than corrupting either (there
+   * is no winner to imply a pairwise comparison from).
+   *
+   * ORDER MATTERS, and getting it wrong is invisible (2026-07-26 hunt, M3): every loader must
+   * apply its latest-entry-per-batch SUPERSEDE first and drop empty picks SECOND. Dropping them at
+   * parse time — what all four loaders originally did — means a none-good recorded AFTER a ranking
+   * never becomes the batch's latest entry, so the retracted ranking goes on counting and training
+   * while the report claims it was excluded.
+   *
+   * The signal is preserved in two places that read the field directly: the showdown report
+   * tallies a `noneGood` count per collection, and the taste log keeps the entry verbatim.
+   * Semantics: "all variants rejected, none worth ranking." */
   verdict?: 'none-good'
 }
 

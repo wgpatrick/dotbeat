@@ -26,7 +26,7 @@ import { type FeatureVector, type FeatureKey } from './features.js'
 import { varyTrack, legalGroupsForKind, makeRng, BeatVaryError } from '../vary/vary.js'
 import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { SPLIT_SMOKE_MIN_BATCHES } from './eval.js'
-import { tally, statLine, pct, type SourceStat, type RankedArmEntry } from './showdown.js'
+import { tally, statLine, pct, loadLatestRankedEntries, type SourceStat, type RankedArmEntry } from './showdown.js'
 
 // ---- roles (the seed-track mapping, shared with prodtask/showdown) -----------------------------
 
@@ -735,42 +735,10 @@ export interface PilotLogEntry {
 /** Scored pilot entries from the log: `pilot:<role>` groups only, latest entry per batch dir (same
  * supersede rule as the taste harness), entries without a sources map skipped. */
 export function loadPilotEntries(logPath: string): { entries: PilotLogEntry[]; skipped: number } {
-  let text: string
-  try {
-    text = readFileSync(logPath, 'utf8')
-  } catch {
-    return { entries: [], skipped: 0 }
-  }
-  const latest = new Map<string, { group: string; picks: { rank: number; variant: string }[]; rejected?: string[]; sources?: Record<string, string> }>()
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    let raw: { batch?: string; group?: string; picks?: { rank: number; variant: string }[]; rejected?: string[]; sources?: Record<string, string> }
-    try {
-      raw = JSON.parse(trimmed)
-    } catch {
-      continue
-    }
-    if (typeof raw.batch !== 'string' || typeof raw.group !== 'string' || !raw.group.startsWith('pilot:')) continue
-    if (!Array.isArray(raw.picks) || raw.picks.length === 0) continue
-    latest.set(raw.batch, { group: raw.group, picks: raw.picks, rejected: raw.rejected, sources: raw.sources })
-  }
-  const entries: PilotLogEntry[] = []
-  let skipped = 0
-  for (const [batch, e] of latest) {
-    if (e.sources === undefined || Object.keys(e.sources).length === 0) {
-      skipped += 1
-      continue
-    }
-    entries.push({
-      role: e.group.slice('pilot:'.length),
-      batch,
-      picks: [...e.picks].sort((a, b) => a.rank - b.rank).map((p) => p.variant),
-      rejected: Array.isArray(e.rejected) ? e.rejected : [],
-      sources: e.sources,
-    })
-  }
-  return { entries, skipped }
+  // Shared reader (src/taste/showdown.ts): latest-per-batch supersede FIRST, retracted batches
+  // dropped after. This used to be a private copy of that loop and carried the same M3 bug.
+  const { entries, skipped } = loadLatestRankedEntries(logPath, 'pilot:')
+  return { entries: entries.map((e) => ({ role: e.group.slice('pilot:'.length), batch: e.batch, picks: e.picks, rejected: e.rejected, sources: e.sources })), skipped }
 }
 
 export interface PilotRoleReport {

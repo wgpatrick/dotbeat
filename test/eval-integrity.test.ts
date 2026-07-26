@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { applyWavGain, assertWavGainable, normalizeBatchLoudness, markBatchComplete, isBatchComplete, discardIncompleteBatch, canonicalBatchKey, scoreBatch, recordNoneGood, BATCH_COMPLETE_MARKER, NORMALIZE_MAX_BOOST_DB } from '../src/vary/batch.js'
 import { decodeWav, readWavFormat, integratedLoudness } from '../src/metrics/index.js'
-import { matchClipDurations, writeShowdownBatch, tally, computeShowdownReport } from '../src/taste/showdown.js'
+import { matchClipDurations, writeShowdownBatch, tally, computeShowdownReport, loadLatestRankedEntries } from '../src/taste/showdown.js'
 import { loadTasteBatches, trainable } from '../src/taste/eval.js'
 
 const tmp = (name: string) => mkdtempSync(join(tmpdir(), `beat-evalint-${name}-`))
@@ -255,6 +255,22 @@ test('M3: a ranking recorded AFTER a none-good wins — supersede is by order, n
 })
 
 // ---- M1: one physical batch dir is one batch, however it was spelled ------------------------------
+
+test('M3: every blind-eval report reads the ONE latest-per-batch loader', () => {
+  // showdown, prodtask transform and pilot frontier each had a private copy of this loop, and all
+  // three carried the same retraction bug. They now share loadLatestRankedEntries.
+  const root = tmp('m3c')
+  const log = join(root, 'beat-scores.jsonl')
+  const entry = (batch: string, group: string, picks: { rank: number; variant: string }[]) =>
+    JSON.stringify({ t: new Date().toISOString(), batch, group, seed: 1, parentSha256: '', picks, rejected: ['v1.wav', 'v2.wav'], sources: { 'v1.wav': 'original', 'v2.wav': 'tricked' } }) + '\n'
+  for (const [batch, group] of [
+    [join(root, 'p1'), 'prodtask:transform:bassline'],
+    [join(root, 'q1'), 'pilot:bassline'],
+  ] as const) {
+    writeFileSync(log, entry(batch, group, [{ rank: 1, variant: 'v2.wav' }]) + entry(batch, group, []))
+    assert.equal(loadLatestRankedEntries(log, group.split(':')[0]! + ':').entries.length, 0, `${group}: the retracted ranking survived`)
+  }
+})
 
 test('M1: ./x, x, /abs/x and x/ are the same batch, not four phantom ones', () => {
   const root = tmp('m1')

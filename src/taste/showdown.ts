@@ -1255,51 +1255,87 @@ export interface ShowdownLogEntry {
   sources: Record<string, string>
 }
 
-/** Scored showdown entries from the log: `showdown:<role>` groups only, latest entry per batch
- * dir (same supersede rule as the taste harness), entries without a sources map skipped (they
- * cannot be attributed). */
-export function loadShowdownEntries(logPath: string): { entries: ShowdownLogEntry[]; skipped: number } {
+/** One batch's FINAL ranking as the log records it — the shape every blind-eval report starts
+ * from, after latest-per-batch supersede and retraction handling. */
+export interface LatestRankedEntry {
+  batch: string
+  group: string
+  /** ranked pick files, best first */
+  picks: string[]
+  rejected: string[]
+  sources: Record<string, string>
+  /** score-time DSP feature vectors keyed by variant file, when the entry carries them */
+  features?: Record<string, Record<string, number>>
+}
+
+/** The ONE latest-per-batch reader every blind-eval report shares (showdown, prodtask transform,
+ * pilot frontier — all three had a copy, and all three had the same bug). Reads `<prefix>` groups
+ * from the scores log and returns each batch's FINAL entry.
+ *
+ * TWO ORDERING RULES, and they are the whole reason this is shared (2026-07-26 hunt, M3):
+ *   1. SUPERSEDE FIRST, over every entry with a picks ARRAY — including the empty one a
+ *      "none of these are good" verdict writes. Filtering empty picks at parse time (what all
+ *      three copies did) meant a retraction could never become its batch's latest entry, so a
+ *      ranking the owner had explicitly taken back kept counting in the win-rate and pairwise
+ *      math AND kept training the taste model — under a report line claiming the opposite.
+ *   2. THEN drop retracted batches (empty picks: no winner, so nothing to imply a pair from).
+ *      They are surfaced by the report's own none-good tally instead.
+ * Entries with no sources map cannot be attributed to an arm and are counted as `skipped`. */
+export function loadLatestRankedEntries(logPath: string, groupPrefix: string): { entries: LatestRankedEntry[]; skipped: number } {
   let text: string
   try {
     text = readFileSync(logPath, 'utf8')
   } catch {
     return { entries: [], skipped: 0 }
   }
-  const latest = new Map<string, { group: string; picks: { rank: number; variant: string }[]; rejected?: string[]; sources?: Record<string, string> }>()
+  type Raw = {
+    batch?: string
+    group?: string
+    picks?: { rank: number; variant: string }[]
+    rejected?: string[]
+    sources?: Record<string, string>
+    features?: Record<string, Record<string, number>>
+  }
+  const latest = new Map<string, Raw>()
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
-    let raw: { batch?: string; group?: string; picks?: { rank: number; variant: string }[]; rejected?: string[]; sources?: Record<string, string> }
+    let raw: Raw
     try {
       raw = JSON.parse(trimmed)
     } catch {
       continue
     }
-    if (typeof raw.batch !== 'string' || typeof raw.group !== 'string' || !raw.group.startsWith('showdown:')) continue
+    if (typeof raw.batch !== 'string' || typeof raw.group !== 'string' || !raw.group.startsWith(groupPrefix)) continue
     if (!Array.isArray(raw.picks)) continue
-    // SUPERSEDE FIRST, then drop empty picks (2026-07-26 hunt, M3). Dropping empty-picks entries
-    // HERE — the old order — meant a later "none of these are good" could never become the batch's
-    // latest entry, so a ranking the owner had explicitly retracted kept counting in the win-rate
-    // and pairwise math, under a report line claiming none-good batches are excluded.
-    latest.set(raw.batch, { group: raw.group, picks: raw.picks, rejected: raw.rejected, sources: raw.sources })
+    latest.set(raw.batch, raw) // rule 1
   }
-  const entries: ShowdownLogEntry[] = []
+  const entries: LatestRankedEntry[] = []
   let skipped = 0
   for (const [batch, e] of latest) {
-    if (e.picks.length === 0) continue // a retracted batch: counted by noneGoodByRole, never here
+    if (e.picks!.length === 0) continue // rule 2
     if (e.sources === undefined || Object.keys(e.sources).length === 0) {
       skipped += 1
       continue
     }
     entries.push({
-      role: e.group.slice('showdown:'.length),
       batch,
-      picks: [...e.picks].sort((a, b) => a.rank - b.rank).map((p) => p.variant),
+      group: e.group!,
+      picks: [...e.picks!].sort((a, b) => a.rank - b.rank).map((p) => p.variant),
       rejected: Array.isArray(e.rejected) ? e.rejected : [],
       sources: e.sources,
+      ...(e.features !== undefined ? { features: e.features } : {}),
     })
   }
   return { entries, skipped }
+}
+
+/** Scored showdown entries from the log: `showdown:<role>` groups only, latest entry per batch
+ * dir (same supersede rule as the taste harness), entries without a sources map skipped (they
+ * cannot be attributed). */
+export function loadShowdownEntries(logPath: string): { entries: ShowdownLogEntry[]; skipped: number } {
+  const { entries, skipped } = loadLatestRankedEntries(logPath, 'showdown:')
+  return { entries: entries.map((e) => ({ ...e, role: e.group.slice('showdown:'.length) })), skipped }
 }
 
 /** Count "none of these are good" verdicts (batch.ts recordNoneGood) per showdown role — the
