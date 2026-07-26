@@ -7,24 +7,16 @@
 // spawn + the exit-code contract; scripts/source-lib.mjs owns everything downstream (prep,
 // registration, the enforced provenance sidecar, rollback). See decisions.md D19.
 //
-// It reuses resolvePython() and the timeout/maxBuffer constants from sidecar.ts verbatim — one
-// interpreter-resolution rule, one degrade vocabulary across both sidecars.
+// The spawn scaffold (interpreter resolution, timeout/maxBuffer, exit-code vocabulary) is
+// ./spawn-sidecar.ts — shared with every other sidecar, which is what the pre-R4-1 version of this
+// comment CLAIMED while re-declaring the constants locally.
 
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { execFile } from 'node:child_process'
-import { resolvePython } from './sidecar.js'
+import { lastNonEmptyLine, resolvePython, spawnSidecar, type SpawnResult } from './spawn-sidecar.js'
 import type { StemName } from './stems.js'
 
-// dist/src/analysis/gen.js → repo root is three levels up (analysis → src → dist → root), matching
-// sidecar.ts's ANALYZE_PY handling. Kept relative so gen.py's own `pip install -r python/…` fix
-// lines are meaningful; spawned with cwd=repoRoot.
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-const GEN_PY = 'python/gen.py' // relative to repoRoot
-
-const SPAWN_TIMEOUT_MS = 600_000 // matches sidecar.ts / src/mcp/server.ts's execFile prior art
-const SPAWN_MAX_BUFFER = 64 * 1024 * 1024
+const GEN_PY = 'python/gen.py' // relative to the repo root, spawned with cwd=repoRoot so gen.py's
+// own `pip install -r python/…` fix lines are copy-pasteable where they print.
 
 /** The venv setup one-liner surfaced whenever no Python interpreter can be found. */
 const VENV_SETUP_HINT =
@@ -117,38 +109,6 @@ export interface RunGenResult {
   outPath: string
 }
 
-interface SpawnResult {
-  code: number | null
-  stdout: string
-  stderr: string
-  enoent: boolean
-}
-
-function spawnPython(python: string, args: string[]): Promise<SpawnResult> {
-  return new Promise((resolvePromise) => {
-    execFile(
-      python,
-      args,
-      { cwd: repoRoot, timeout: SPAWN_TIMEOUT_MS, maxBuffer: SPAWN_MAX_BUFFER },
-      (err, stdout, stderr) => {
-        if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-          resolvePromise({ code: null, stdout, stderr, enoent: true })
-        } else if (err) {
-          const code = typeof (err as NodeJS.ErrnoException).code === 'number' ? ((err as unknown as { code: number }).code) : 1
-          resolvePromise({ code, stdout, stderr, enoent: false })
-        } else {
-          resolvePromise({ code: 0, stdout, stderr, enoent: false })
-        }
-      },
-    )
-  })
-}
-
-function lastNonEmptyLine(text: string): string {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '')
-  return lines.length > 0 ? lines[lines.length - 1]! : ''
-}
-
 /**
  * Generate an audio one-shot into `outPath` (the Python side writes the file; we read back only the
  * metadata JSON). ENOENT → clean "no Python" error with the venv hint; exit 3 → names the
@@ -199,14 +159,10 @@ export async function runGen(opts: RunGenOptions): Promise<RunGenResult> {
   }
 
   const python = resolvePython()
-  const res = await spawnPython(python, [
-    GEN_PY,
-    '--backend', backend,
-    '--prompt', prompt,
-    '--seconds', String(seconds),
-    '--seed', String(seed),
-    '--output', outPath,
-  ])
+  const res = await spawnSidecar({
+    python,
+    args: [GEN_PY, '--backend', backend, '--prompt', prompt, '--seconds', String(seconds), '--seed', String(seed), '--output', outPath],
+  })
 
   if (res.enoent) throw new BeatGenError(`${VENV_SETUP_HINT} (tried "${python}")`)
   if (res.code !== 0) {
@@ -249,13 +205,9 @@ export async function runGen(opts: RunGenOptions): Promise<RunGenResult> {
  * sidecar.ts's sidecarDoctor). */
 export async function genDoctor(): Promise<Record<string, unknown>> {
   const python = resolvePython()
-  let res: SpawnResult
-  try {
-    res = await spawnPython(python, [GEN_PY, '--doctor'])
-  } catch (e) {
-    const { falDoctor } = await import('./gen-fal.js')
-    return { pythonFound: false, ...falDoctor(), interpreter: python, error: e instanceof Error ? e.message : String(e) }
-  }
+  // Not the generic sidecarDoctor: this report merges the HOSTED backend's status (falDoctor) into
+  // two of the four branches, so it stays hand-written on top of the shared spawn.
+  const res: SpawnResult = await spawnSidecar({ python, args: [GEN_PY, '--doctor'] })
   if (res.enoent) {
     const { falDoctor } = await import('./gen-fal.js')
     return {
