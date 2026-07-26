@@ -29,6 +29,11 @@
 //                  low layers. NO insert-chain production: no chorus, reverb, delay, saturation,
 //                  air shelf or compression. This arm's single variable versus engineplus is
 //                  LAYERING.
+//   layeredplus  — the same stack plus a per-layer production pass (the role-true width map,
+//                  parallel/NY compression — 138 row 4, the `compMix` dry/wet fan that ships at 0
+//                  and no profile has ever touched — glue, space and air). Its comparison partner
+//                  is engineplus: same production question, layered shape instead of solo shape.
+//
 // TWO PRECONDITIONS FOR LAYERING AT ALL, both checked before building this and both satisfied:
 //   1. Onset alignment. The most-repeated rule in the mined transient corpus is that layers must be
 //      sample-aligned at note starts or the transient smears. Here it holds BY CONSTRUCTION:
@@ -45,10 +50,6 @@
 //      already hard-syncs oscillator phase per note-on, on every layer, including the unison pair
 //      and sub polys. No confound; no engine fix needed. Recorded here because the opposite would
 //      have invalidated every level measurement this module makes.
-//   layeredplus  — the same stack plus a per-layer production pass (the role-true width map,
-//                  parallel/NY compression — 138 row 4, the `compMix` dry/wet fan that ships at 0
-//                  and no profile has ever touched — glue, space and air). Its comparison partner
-//                  is engineplus: same production question, layered shape instead of solo shape.
 
 import { addEffect, NOTE_FIELD_DEFAULTS, parse, type BeatDocument, type BeatSynth, type OscType } from '../core/index.js'
 import { applyProducedDefaults, type ProductionProfile, type ProducedResult } from '../analysis/produce.js'
@@ -161,9 +162,11 @@ export interface LayeredArchitecture {
   /** what the stack is, in one line — carried into the manifest `from` so a rated clip is
    * traceable to its architecture without opening the doc. */
   summary: string
-  /** the octave window the whole stack is normalized into: whichever whole-octave shift puts the
-   * figure's MEDIAN pitch closest to this window is applied to every layer, so the instrument sits
-   * in its measured register no matter which archetype/register the composer drew. */
+  /** the octave window the whole stack is normalized into: the whole-octave shift that puts the
+   * figure's MEDIAN pitch inside this window is applied to every layer, so the instrument sits in
+   * its measured register no matter which archetype/register the composer drew. MUST be a full
+   * octave wide (hiMidi - loMidi >= 12) — otherwise a median can fall in a gap no whole-octave
+   * shift can reach, and the register target silently becomes a coin flip on some figures. */
   anchor: { loMidi: number; hiMidi: number }
   layers: readonly LayerSpec[]
 }
@@ -209,7 +212,7 @@ const MONO_PATCH: Partial<BeatSynth> = { pan: 0, unisonVoices: 1, unisonWidth: 0
 const BASSLINE_ARCH: LayeredArchitecture = {
   role: 'bassline',
   summary: 'mono sine sub (G1-C2, legato, lowpass 90) + saw/square growl (+12, highpass 80, osc2 -1200) + 1-step click (+24, highpass 1600)',
-  anchor: { loMidi: 31, hiMidi: 36 },
+  anchor: { loMidi: 26, hiMidi: 38 },
   layers: [
     {
       id: 'sub',
@@ -317,7 +320,7 @@ const BASSLINE_ARCH: LayeredArchitecture = {
 const CHORDS_ARCH: LayeredArchitecture = {
   role: 'chords',
   summary: 'body root octave-down (mono, lowpass 380) + wide sustained pad (highpass 200) + ROOTLESS 2-step stab (highpass 320, 2 ms attack) + noise air (+12, highpass 2.5k)',
-  anchor: { loMidi: 60, hiMidi: 71 },
+  anchor: { loMidi: 59, hiMidi: 71 },
   layers: [
     {
       id: 'body',
@@ -446,7 +449,7 @@ const CHORDS_ARCH: LayeredArchitecture = {
 const LEAD_ARCH: LayeredArchitecture = {
   role: 'lead',
   summary: 'body roots two octaves down (mono, lowpass 400) + 5-voice main saw (3 ms attack, highpass 220) + 4-voice octave-up (+12, highpass 500, -7 dB) + 7-voice detuned width layer (highpass 400)',
-  anchor: { loMidi: 72, hiMidi: 83 },
+  anchor: { loMidi: 71, hiMidi: 83 },
   layers: [
     {
       id: 'body',
