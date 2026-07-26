@@ -128,11 +128,19 @@ export function fieldDefault(field: string): number {
 
 /** The genome the search STARTS at: each param at the preset's own value, or the engine default
  * where the preset is silent. This is the whole thesis in one function — the optimizer opens at a
- * human-designed known-good point rather than anywhere in a huge space. */
-export function presetGenome(defs: readonly RetargetParamDef[], params: Record<string, unknown>): number[] {
+ * human-designed known-good point rather than anywhere in a huge space.
+ *
+ * `fallback` resolves a field the preset doesn't mention; it defaults to the ENGINE's own field
+ * default. Other synth backends (surge, whose patches always carry every parameter) pass their
+ * own resolver — that is the only backend-specific thing about this whole module. */
+export function presetGenome(
+  defs: readonly RetargetParamDef[],
+  params: Record<string, unknown>,
+  fallback: (field: string) => number = fieldDefault,
+): number[] {
   return defs.map((d) => {
     const raw = params[d.field]
-    const value = typeof raw === 'number' ? raw : fieldDefault(d.field)
+    const value = typeof raw === 'number' ? raw : fallback(d.field)
     return normalize(d, value)
   })
 }

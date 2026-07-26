@@ -69,6 +69,12 @@ export interface RetargetOptions {
   log?: (line: string) => void
   /** override the loss's term weights (tests + ablations). */
   weights?: { regress?: number; preserve?: number; drift?: number }
+  /** Search a DIFFERENT parameter space than the engine's synth fields — the surge retargeter
+   * passes a space built from a patch's own Surge parameters. Defaults to retargetSpace(role). */
+  space?: RetargetParamDef[]
+  /** How to resolve a space field the preset bag doesn't mention. Defaults to the engine's own
+   * field defaults; surge patches always carry every parameter, so that path never fires there. */
+  fallbackValue?: (field: string) => number
 }
 
 export interface RetargetResult {
@@ -129,8 +135,9 @@ export async function runRetarget(opts: RetargetOptions): Promise<RetargetResult
   if (budget < 20) throw new RetargetError(`budget ${budget} is too small to search anything (need >= 20)`)
 
   const profile: RoleTargetProfile = targetProfileFor(opts.role)
-  const defs: RetargetParamDef[] = retargetSpace(opts.role)
-  const start = presetGenome(defs, opts.presetParams)
+  const defs: RetargetParamDef[] = opts.space ?? retargetSpace(opts.role)
+  if (defs.length === 0) throw new RetargetError('the retarget space is empty — nothing to search')
+  const start = opts.fallbackValue ? presetGenome(defs, opts.presetParams, opts.fallbackValue) : presetGenome(defs, opts.presetParams)
   const { lower, upper } = trustBounds(defs, start)
   const z0 = presetZ(start, lower, upper)
 
