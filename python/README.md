@@ -170,10 +170,43 @@ others: stdlib-only top level with a lazy `surgepy` import, chatter on stderr, e
 `0/2/3/4`, a `--doctor` mode that probes with `importlib.util.find_spec` (no import), and the same
 `$BEAT_PYTHON` → `python/.venv` → `python3` interpreter resolution (via `src/analysis/surge.ts`).
 
-Modes: `--doctor` (surgepy availability + Surge factory-content path + factory patch count),
-`--list-patches` (the factory catalogue as JSON, for the TS-side seeded pick), and the default
-**render** mode — the request JSON `{patch, notes, sampleRate, output}` comes in on **stdin**, the
-WAV is written to `output`, and a small metadata doc is printed on stdout.
+Modes: `--doctor` (surgepy availability + Surge content path + **per-pool** patch counts + whether
+this build carries the host-tempo binding), `--list-patches` (the catalogue as JSON, for the TS-side
+seeded pick), and the default **render** mode — the request JSON
+`{patch, notes, tempo, sampleRate, output}` comes in on **stdin**, the WAV is written to `output`,
+and a small metadata doc is printed on stdout.
+
+### Two pools, one tempo (both fixed 2026-07-26)
+
+Until this pass the sidecar had two silent defects, each of which invalidated part of every blind
+surge rating ever collected:
+
+- **It enumerated `patches_factory` only** — 639 of the 3,559 `.fxp` installed on the owner's
+  machine, because `patches_3rdparty` (2,920 patches by 37 named designers) sat beside it
+  unenumerated (research 132 §2.1, 141 §7). `PATCH_POOLS` now declares both explicitly, and every
+  catalogue entry carries `{pool, bank}` provenance. D23 posture is unchanged: bank names are
+  local-manifest metadata, rendered audio stays eval-private.
+- **It never set a host tempo.** `grep -ci tempo python/surge_render.py` returned **0**, and
+  upstream surgepy hard-codes `time_data.tempo = 120` in `createSurge()` while binding nothing
+  tempo-related — re-verified independently by `dir()` on the built instance. Every synced LFO,
+  delay and arp in every rated patch therefore ran at 120 BPM regardless of the batch tempo.
+
+The tempo fix needs a **local patch to the surgepy binding**, checked in at
+`python/surge-patches/0001-surgepy-expose-host-tempo.patch` (adds `setTempo`/`getTempo` and a
+`ppqPos` property, ~25 lines):
+
+```sh
+cd ~/Documents/dotbeat/tools/surge
+git apply <dotbeat>/python/surge-patches/0001-surgepy-expose-host-tempo.patch
+cmake --build build --target surgepy            # ~1 min incremental
+cp build/src/surge-python/surgepy.cpython-*-darwin.so <dotbeat>/python/.venv/lib/python3.*/site-packages/
+```
+
+`--doctor` reports `tempoBinding: true` once it is in place. **Without it, a render request that
+names a tempo fails loudly (exit 4)** rather than silently producing an off-groove clip; a request
+that names no tempo still renders at 120 and reports `tempoApplied: false`. `test/surge-tempo.test.ts`
+proves the fix physically — a synced patch's amplitude-modulation period stays at a constant number
+of BEATS across tempos (measured 1.997/2.003/1.997/2.012 beats at 60/90/120/160 BPM).
 
 ### surgepy is NOT pip-installable — it's a Surge XT source build
 
@@ -198,7 +231,7 @@ completed in the B1 probe — the probe ships with `--surge-doctor` honest about
 the feature is usable the moment someone does the build. Validate afterwards:
 
 ```sh
-beat showdown --surge-doctor          # expect surgepy: available, a factory path, a patch count (~2,779)
+beat showdown --surge-doctor          # expect surgepy: available, both pools, ~3,559 patches, tempoBinding: true
 beat showdown ~/showdown --with-surge # add a Surge factory-patch clip per pitched-role batch
 ```
 

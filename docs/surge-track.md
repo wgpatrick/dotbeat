@@ -31,7 +31,7 @@ track lead Lead #e06c75 surge
 ```
 
 - **`surge` block** (level 1, right after the track line, before the synth block):
-  - `patch "<name>"` — the factory patch name. Double-quoted because factory names have spaces;
+  - `patch "<name>"` — the patch name (factory OR third-party — see "Patch pools" below). Double-quoted because factory names have spaces;
     this is the format's one quoted string (bare `patch Formant Pulse` also parses and
     re-serializes quoted). The patch is a **display/catalogue name**, resolved to a `.fxp` path at
     render time — a `.beat` with a surge track loads fine on a machine with no Surge build.
@@ -85,16 +85,43 @@ copyleft. But the factory-**patch content** license is unresolved upstream (surg
 ## Setup (render-side only)
 
 Rendering a surge track needs `surgepy` (a **source build** of Surge XT — no PyPI wheel) and the
-factory content path:
+content path:
 
 - `BEAT_PYTHON` → an interpreter with `surgepy` on its path (or `python/.venv`).
-- `SURGE_DATA_HOME` → the Surge factory data dir (…/`resources/data`, which contains
-  `patches_factory/`).
-- Verify with `beat surge doctor` (surgepy availability + factory patch count) and list names with
-  `beat surge patches [--role lead|bassline|chords]`.
+- `SURGE_DATA_HOME` → the Surge data dir (…/`resources/data`, which contains `patches_factory/`
+  and, if installed, `patches_3rdparty/`).
+- Verify with `beat surge doctor` (surgepy availability + per-pool patch counts + `tempoBinding`)
+  and list names with `beat surge patches [--role lead|bassline|chords]`.
 
 Build steps for `surgepy` are in `python/README.md`; `beat surge doctor` names exactly what's
 missing.
+
+### Patch pools
+
+The sidecar enumerates **both** installed pools (2026-07-26; before that it saw `patches_factory`
+alone — 639 of 3,559 patches, 82% of the library invisible to the eval, research 132 §2.1 / 141 §7):
+
+| pool | layout | provenance recorded |
+|---|---|---|
+| `patches_factory` | `<Category>/<name>.fxp` | bank `Surge XT Factory` |
+| `patches_3rdparty` | `<Bank>/<Category>/<name>.fxp` | the designer bank name |
+
+`PATCH_POOLS` in `python/surge_render.py` is the single declaration; adding a pool is one row.
+Bank names are **local-manifest provenance only** — rendered patch audio stays eval-private and
+gitignore-gated exactly as before (D23).
+
+### Tempo
+
+A surge track renders at **the doc's `bpm`**, so tempo-synced LFOs, delays and arps lock to the
+project grid. The tempo is part of the render's content hash: changing a doc's tempo invalidates the
+cached WAV exactly like changing a note or an override does, and the provenance sidecar records
+`tempo` + `tempoApplied`.
+
+This needs the local surgepy tempo binding
+(`python/surge-patches/0001-surgepy-expose-host-tempo.patch` — upstream `createSurge()` hard-codes
+120 BPM and binds nothing tempo-related). Without it the render **fails loudly** rather than
+quietly producing an off-groove clip. Every surge clip rendered before 2026-07-26 ran at 120 BPM
+regardless of its project tempo — treat those renders as provenance-suspect.
 
 ## CLI
 
