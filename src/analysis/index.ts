@@ -193,6 +193,11 @@ export {
   detectPitch,
   formatPartials,
   formatPitchLine,
+  // D22 (research/132 §3): a keymap root that is confidently WRONG transposes the whole clip and
+  // nothing downstream checked. verifyRoot re-reads the spectrum independently of the estimator.
+  verifyRoot,
+  formatRootVerification,
+  type RootVerification,
   pitchConfidenceLevel,
   PITCH_CONFIDENCE_HIGH,
   PITCH_CONFIDENCE_MEDIUM,

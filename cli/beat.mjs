@@ -134,7 +134,7 @@ import {
 // Pitch-aware sampling: detection (pure TS, no Python — decisions.md D20) and the tune arithmetic
 // that turns a root into a keymap. keymap.js is deep-imported rather than routed through
 // core/index.js so this stream adds no line to a file two sibling streams are also editing.
-import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
+import { detectPitch, formatPartials, formatPitchLine, verifyRoot, formatRootVerification, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
 import { buildKeymap, planKeymap, noteToMidi, midiToNote, rateForPitch } from '../dist/src/core/keymap.js'
 // ==== end Phase 40 Stream VA ====
 
@@ -593,7 +593,11 @@ const HELP = [
                                                           percussion are exactly where detection is weakest, so expect to
                                                           use it. Refuses on a low-confidence detection (quoting the
                                                           partials and a ready-to-paste --root) rather than building a
-                                                          wrong keymap; --force takes the detection anyway.
+                                                          wrong keymap, and then VERIFIES the confident root against the
+                                                          sound's own spectrum before minting lanes — a root that is an
+                                                          octave off transposes the whole clip, and confidence cannot see
+                                                          that. A stated --root is verified too but only warns, never
+                                                          refuses. --force takes the root either way.
                                                           --key sets the scale's root (default: --from's pitch class).
                                                           --scale names: see beat fit-scale --list-scales.
                                                           --dry-run prints the lanes without writing.
@@ -4539,7 +4543,11 @@ async function genKitCmd(argv) {
     for (const h of hits) doc = addHit(doc, role, h).doc
     doc = saveClip(doc, role, clipId).doc
     slots[role] = [{ clip: clipId, at: 0 }]
-    process.stdout.write(`${role}: keymapped ${laneNames.length} lanes (${laneNames[0]}..${laneNames[laneNames.length - 1]}, ${scale} in ${pitchClassName(keyMidi)}) — root ${p.pick.rootSource} ${midiToNote(p.pick.rootMidi)}; starter phrase written (clip "${clipId}")\n`)
+    // D22: say when the root could not be verified. gen-kit never refuses on it (a playable start
+    // is the contract), so an unverified root must be LOUD here or it reaches a rating round
+    // looking like bad timbre rather than a transposed instrument.
+    const rootNote = `root ${p.pick.rootSource} ${midiToNote(p.pick.rootMidi)}${p.pick.rootVerified ? '' : ' (UNVERIFIED — tuning suspect, see the batch)'}`
+    process.stdout.write(`${role}: keymapped ${laneNames.length} lanes (${laneNames[0]}..${laneNames[laneNames.length - 1]}, ${scale} in ${pitchClassName(keyMidi)}) — ${rootNote}; starter phrase written (clip "${clipId}")\n`)
   }
   // Produced defaults (docs/research/115-production-layer-techniques.md, plan A1): every registered
   // track ships with role-appropriate production (width / air / glue / space) instead of the dry,
@@ -4684,6 +4692,34 @@ function sampleInfoCmd(argv) {
  * low-confidence detection stops here — but it must leave the user ONE copy-paste from success,
  * not with a research project. So it quotes the measured confidence, the whole partial table, and
  * the original command line with a `--root` derived from the strongest low partial appended. */
+/** D22 (research/132 §3) — the root the detector was confident about is still checked against the
+ * sound's own spectrum before six lanes are minted on it, because a CONFIDENT wrong root is the
+ * failure mode confidence cannot catch (a strong second harmonic taken for the fundamental) and it
+ * transposes the WHOLE clip, not one note. Same shape as the confidence refusal above: quote the
+ * measurement, hand back a ready-to-paste --root, keep --force available. */
+function keymapRootRefusal(argv, sampleId, pitch, verification) {
+  const lines = [
+    `the detected root for "${sampleId}" does not survive verification — refusing rather than transposing the whole clip.`,
+    '',
+    formatPitchLine(pitch),
+    '',
+    formatRootVerification(pitch.midi, verification),
+    '',
+    formatPartials(pitch.partials),
+    '',
+  ]
+  if (verification.alternateRootNote) {
+    lines.push(
+      `If the table agrees, state that root and re-run:`,
+      '',
+      `  beat keymap ${argv.join(' ')} --root ${verification.alternateRootNote}`,
+      '',
+    )
+  }
+  lines.push('Or pass --force to build the keymap on the detected root anyway.')
+  return lines.join('\n')
+}
+
 function keymapRefusal(argv, sampleId, pitch) {
   const lines = [
     `pitch detection is not confident enough to root a keymap on "${sampleId}" — refusing rather than minting six lanes of wrong tuning.`,
@@ -4739,14 +4775,34 @@ function keymapCmd(argv) {
   if (rootFlag !== undefined) {
     rootMidi = noteToMidi(rootFlag)
     rootSource = `--root ${rootFlag} (stated, not detected)`
+    // A stated root is the user's call and is never refused — `--root` exists precisely for the
+    // sounds detection cannot read (bells, found percussion). But a silent disagreement between
+    // the stated root and the spectrum is the D22 defect wearing a different hat, so say it once.
+    try {
+      const { channels, sampleRate } = readSampleAudio(file, before, sampleId)
+      const check = verifyRoot(rootMidi, detectPitch(channels, sampleRate))
+      if (!check.ok) {
+        process.stderr.write(`warning: ${formatRootVerification(rootMidi, check)}\nBuilding the keymap on your stated root anyway.\n`)
+      }
+    } catch {
+      // An unreadable/unregistered sample is buildKeymap's error to raise, with its own message.
+    }
   } else {
     const { channels, sampleRate } = readSampleAudio(file, before, sampleId)
     const pitch = detectPitch(channels, sampleRate)
     if (pitch.hz === null || (pitch.confidence < PITCH_CONFIDENCE_MEDIUM && !argv.includes('--force'))) {
       throw new BeatEditError(keymapRefusal(argv, sampleId, pitch))
     }
+    // Confidence says "there is a single periodic pitch here"; verification says "and it is THIS
+    // one" — two different questions, and only the second catches an octave error (D22).
+    const verification = verifyRoot(pitch.midi, pitch)
+    if (!verification.ok && !argv.includes('--force')) {
+      throw new BeatEditError(keymapRootRefusal(argv, sampleId, pitch, verification))
+    }
     rootMidi = pitch.midi
-    rootSource = `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)})`
+    rootSource =
+      `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)}); ` +
+      (verification.ok ? `root verified — ${verification.detail}` : `root check FAILED (${verification.reason}) and --force overrode it`)
   }
 
   // --dry-run runs the REAL build and simply doesn't write it. Computing the plan alone would skip

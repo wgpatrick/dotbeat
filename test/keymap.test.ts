@@ -10,7 +10,9 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -32,6 +34,7 @@ import { detectPitch } from '../src/analysis/pitch.js'
 import { decodeWav } from '../src/metrics/wav.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..') // dist/test -> repo root
+const beatCli = join(repoRoot, 'cli', 'beat.mjs')
 
 // ---- note names <-> MIDI --------------------------------------------------------------------
 
@@ -256,3 +259,70 @@ test('the root the refusal suggests for bell_a is the one that reproduces the so
   })
   assert.deepEqual(plan.map((l) => l.tune), [-12, -9, -7, -5, -2, 0])
 })
+
+// ---- D22: the CLI's root-verification wiring (research/132 §3) ----------------------------------
+// verifyRoot's own behaviour is pinned in test/pitch.test.ts. What is tested here is that `beat
+// keymap` actually consults it on BOTH root paths and behaves differently on each — refusing a
+// detected root it cannot confirm, and warning-but-obeying a root the user stated. The distinction
+// matters: `--root` exists precisely for the sounds detection cannot read, so refusing there would
+// break the documented escape hatch from the confidence refusal.
+
+test('beat keymap warns on a stated --root the spectrum contradicts, and still builds it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-keymap-verify-'))
+  const wav = join(dir, 'oct.wav')
+  const file = join(dir, 'song.beat')
+  // A tone whose fundamental (220) is a quiet -17 dB under its own 2nd harmonic (440) — the shape
+  // that produces octave errors. Claiming a4 as the root would tune every lane an octave sharp.
+  writeWavMono(wav, 44100, 1.5, (t) =>
+    0.55 * (0.12 * Math.sin(2 * Math.PI * 220 * t) + 0.9 * Math.sin(2 * Math.PI * 440 * t) + 0.45 * Math.sin(2 * Math.PI * 660 * t)))
+  execFileSync(process.execPath, [beatCli, 'init', file], { encoding: 'utf8' })
+  execFileSync(process.execPath, [beatCli, 'add-track', file, 'bells', 'drums'], { encoding: 'utf8' })
+  execFileSync(process.execPath, [beatCli, 'sample', file, 'oct', 'oct.wav'], { encoding: 'utf8', cwd: dir })
+
+  const res = spawnSync(process.execPath, [beatCli, 'keymap', file, 'bells', 'oct', '--scale', 'minorPentatonic', '--from', 'a4', '--to', 'a5', '--root', 'a4'], { encoding: 'utf8', cwd: dir })
+  assert.equal(res.status, 0, `a stated root must never be refused:\n${res.stderr}`)
+  assert.match(res.stderr, /octave-error/, 'the contradiction must be reported')
+  assert.match(res.stderr, /a3/, 'the warning must name the root the spectrum points at')
+  assert.match(res.stderr, /anyway/, 'and must say it is obeying the stated root regardless')
+  assert.match(readFileSync(file, 'utf8'), /lane a4 sample oct/, 'the lanes are still minted')
+})
+
+test('beat keymap reports the verification on the DETECTED path too, so a pass is visible', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-keymap-verify-ok-'))
+  const wav = join(dir, 'saw.wav')
+  const file = join(dir, 'song.beat')
+  writeWavMono(wav, 44100, 1.5, (t) => {
+    let s = 0
+    for (let n = 1; n <= 8; n++) s += Math.sin(2 * Math.PI * 220 * n * t) / n
+    return s * 0.3
+  })
+  execFileSync(process.execPath, [beatCli, 'init', file], { encoding: 'utf8' })
+  execFileSync(process.execPath, [beatCli, 'add-track', file, 'bells', 'drums'], { encoding: 'utf8' })
+  execFileSync(process.execPath, [beatCli, 'sample', file, 'saw', 'saw.wav'], { encoding: 'utf8', cwd: dir })
+
+  const out = execFileSync(process.execPath, [beatCli, 'keymap', file, 'bells', 'saw', '--scale', 'minorPentatonic', '--from', 'a3', '--to', 'a4'], { encoding: 'utf8', cwd: dir })
+  assert.match(out, /root a3: detected/)
+  assert.match(out, /root verified/, 'a silent pass is indistinguishable from no check at all')
+})
+
+/** A mono 16-bit WAV from a sample function — the smallest thing that gets a real signal through
+ * `beat sample` and out the other side of detectPitch. */
+function writeWavMono(path: string, sampleRate: number, seconds: number, fn: (t: number) => number): void {
+  const n = Math.round(sampleRate * seconds)
+  const data = Buffer.alloc(n * 2)
+  for (let i = 0; i < n; i++) data.writeInt16LE(Math.max(-32767, Math.min(32767, Math.round(fn(i / sampleRate) * 32767))), i * 2)
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + data.length, 4)
+  header.write('WAVEfmt ', 8)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(sampleRate, 24)
+  header.writeUInt32LE(sampleRate * 2, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(data.length, 40)
+  writeFileSync(path, Buffer.concat([header, data]))
+}
