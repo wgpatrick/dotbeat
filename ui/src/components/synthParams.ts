@@ -513,6 +513,9 @@ export const PARAM_GROUPS: ParamGroup[] = [
     params: [
       { key: 'duckSource', label: 'Source', kind: 'trackref', hint: "kick track that ducks this one ('none' = off)" },
       k('duckAmount', 'Amount', 0, 1, fmt.pct),
+      // The pump IS the release. 0.16 s is the legacy hardcoded value; deep house lives at
+      // 0.25-0.35 s, which is the range research/115 §4.2 asked for and 160 ms could not reach.
+      k('duckRelease', 'Release', 0.02, 1, fmt.sec),
     ],
   },
   {

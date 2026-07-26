@@ -308,6 +308,7 @@ interface EngineSynth {
   sendDelay: number
   duckSource: string | null
   duckAmount: number
+  duckRelease: number
   kickTune: number
   kickPunch: number
   kickDecay: number
@@ -347,6 +348,11 @@ function layerOscType(v: OscType): LayerOscType {
 // below reads `p.volume` (post-floor), so `-Infinity + <anything finite>` stays `-Infinity` —
 // nothing can un-silence a fader parked at its visual minimum.
 const VOLUME_SILENCE_FLOOR_DB = -60
+
+/** How fast the sidechain duck DIPS on a kick. Kept hardcoded (and short) on purpose: the
+ * ducking sound is made by the recovery, which is the `duckRelease` SYNTH_FIELDS field —
+ * a slow attack just smears the kick transient it exists to make room for. */
+const DUCK_ATTACK_SECONDS = 0.005
 function applyVolumeFloor(db: number): number {
   return db <= VOLUME_SILENCE_FLOOR_DB ? -Infinity : db
 }
@@ -501,6 +507,7 @@ function coerce(p: BeatSynth): EngineSynth {
     sendDelay: num(p.sendDelay, 0),
     duckSource: typeof p.duckSource === 'string' && p.duckSource && p.duckSource !== 'none' ? p.duckSource : null,
     duckAmount: num(p.duckAmount, 0),
+    duckRelease: num(p.duckRelease, 0.16),
     kickTune: num(p.kickTune, 32.7),
     kickPunch: num(p.kickPunch, 0.05),
     kickDecay: num(p.kickDecay, 0.4),
@@ -4187,7 +4194,8 @@ export class Engine {
 
       // Scheduled sidechain duck: not an audio-analysis sidechain — it dips this track's volume
       // whenever duckSource's kick lane has a hit at this step. Adapted to dotbeat's free-timed
-      // hits (BeatLab reads a 16-step pattern cell). duckAmount can itself be automated.
+      // hits (BeatLab reads a 16-step pattern cell). duckAmount can itself be automated; the
+      // recovery time is duckRelease (SYNTH_FIELDS, default 0.16 s = the old hardcoded value).
       if (p.duckSource) {
         const duckAuto = content.automation.get('duckAmount')
         const duckAmt = duckAuto && duckAuto.length ? interpolateAutomation(duckAuto, content.contentStep, false) : p.duckAmount
@@ -4199,10 +4207,16 @@ export class Engine {
             : false
           if (kickHit) {
             const dipDb = duckAmt * 24
+            // The recovery ramp is duckRelease (seconds), default 0.16 — the value that used to be
+            // hardcoded here, so an untouched project renders byte-identically. It is a field
+            // because 160 ms cannot make the 250-350 ms deep-house pump three separate reviews
+            // asked for (research/115 §4.2, 133 §7-B.3, 138 §B6). Clamped below at the 5 ms attack
+            // so a release shorter than the dip can never schedule a ramp backwards in time.
+            const release = Math.max(p.duckRelease, DUCK_ATTACK_SECONDS)
             chain.vol.volume.cancelScheduledValues(time)
             chain.vol.volume.setValueAtTime(p.volume, time)
-            chain.vol.volume.linearRampToValueAtTime(p.volume - dipDb, time + 0.005)
-            chain.vol.volume.linearRampToValueAtTime(p.volume, time + 0.16)
+            chain.vol.volume.linearRampToValueAtTime(p.volume - dipDb, time + DUCK_ATTACK_SECONDS)
+            chain.vol.volume.linearRampToValueAtTime(p.volume, time + release)
           }
         }
       }
