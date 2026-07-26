@@ -22,7 +22,7 @@
 // ABSOLUTE threshold, so it can never be a per-clip screen — only a pair-relative diagnostic
 // (`beat lint --roughness-baseline`).
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { featuresForAudioFile, type FeatureVector, type FeatureKey } from './features.js'
@@ -51,6 +51,10 @@ export interface RoleTargetCheck {
   bound: 'atLeast' | 'atMost' | 'band'
   min?: number
   max?: number
+  /** direction-specific fix for a two-sided band; `fix` covers the LOW side, this the HIGH side */
+  fixHigh?: string
+  /** the check only means what it says on loudness-normalized audio (truePeak, crest) */
+  assumesNormalized?: boolean
   minFrom?: 'doc' | 'refPercentile'
   maxFrom?: 'doc' | 'refPercentile'
   refPercentile?: Record<string, unknown>
@@ -59,6 +63,13 @@ export interface RoleTargetCheck {
   lever: string
   source: string
   fix: string
+}
+
+export interface RoleVerdictSpec {
+  maxMisses: number
+  refPassRate: number
+  refMissCounts: { min: number; p25: number; median: number; p75: number; max: number }
+  note: string
 }
 
 export interface RoleTargets {
@@ -74,7 +85,13 @@ export interface RoleTargets {
     docs: string[]
     caveats: string[]
   }
-  roles: Record<string, { refClips: number; checks: RoleTargetCheck[]; refDistribution: Record<string, RoleTargetDistribution> }>
+  roles: Record<string, {
+    refClips: number
+    verdict: RoleVerdictSpec
+    refLufs: RoleTargetDistribution | null
+    checks: RoleTargetCheck[]
+    refDistribution: Record<string, RoleTargetDistribution>
+  }>
 }
 
 export interface RoleCheckRow {
@@ -84,7 +101,7 @@ export interface RoleCheckRow {
   max?: number
   /** ref median for this feature+role — "what a winning reference clip typically does" */
   refMedian: number
-  verdict: 'pass' | 'miss'
+  verdict: 'pass' | 'miss' | 'advisory'
   /** which side of the target the miss is on ('low' = below min, 'high' = above max) */
   side?: 'low' | 'high'
   /** how far outside the target, in units of the ref p25..p75 spread (0 = right on the bound) */
@@ -92,6 +109,8 @@ export interface RoleCheckRow {
   lever: string
   source: string
   fix: string
+  /** why this row is advisory rather than counted (level-dependent check on un-normalized audio) */
+  advisoryReason?: string
 }
 
 export interface RoleCheckResult {
@@ -100,6 +119,13 @@ export interface RoleCheckResult {
   verdict: 'pass' | 'fail'
   passed: number
   missed: number
+  /** rows excluded from the verdict because they cannot mean what they say on this audio */
+  advisory: number
+  /** the miss budget this role's own reference clips set, and the share of them that clear it */
+  maxMisses: number
+  refPassRate: number
+  /** set when the audio does not look like the role asked for — the verdict is withheld */
+  applicability?: string
   rows: RoleCheckRow[]
   targets: { version: number; generatedAt: string; refPool: string; refClips: number; extractor: string }
 }
@@ -131,6 +157,37 @@ export function rolecheckFeatures(features: FeatureVector, role: string, targets
   if (spec === undefined) {
     throw new BeatRoleCheckError(`no targets for role "${role}" — known roles: ${knownRoles(targets).join(', ')}`)
   }
+  // APPLICABILITY. A typo in --role used to produce a confident, fully-formed wrong report: a drum
+  // loop checked as a bassline came back "6/10 checks pass" with advice to bass-mono the sub, on a
+  // clip whose spectral centroid was 5.6 kHz. The tool has that number in hand, so it should
+  // decline rather than guess. Bound generously (the reference p10..p90 widened by 2 octaves) so
+  // this only fires on material that is nowhere near the role.
+  const centroidRef = spec.refDistribution.centroidLog2
+  let applicability: string | undefined
+  if (centroidRef !== undefined) {
+    const c = features.centroidLog2
+    if (Number.isFinite(c) && (c < centroidRef.p10 - 2 || c > centroidRef.p90 + 2)) {
+      applicability =
+        `this does not look like a ${role}: spectral centroid ${(2 ** c).toFixed(0)} Hz, while ${role} reference clips ` +
+        `run ${(2 ** centroidRef.p10).toFixed(0)}-${(2 ** centroidRef.p90).toFixed(0)} Hz. Check --role (known: ${knownRoles(targets).join(', ')}).`
+    }
+  }
+
+  // NORMALIZATION. truePeakDb and crestDb only mean what they say on audio normalized the way a
+  // showdown batch is (131 §1). On a raw stem sitting 10 dB down they read LEVEL, not punch — and
+  // the old report failed the clip on them while printing the retraction two lines lower, under
+  // "why". Those rows are now marked advisory and excluded from the verdict instead.
+  let levelNote: string | undefined
+  if (spec.refLufs !== null && Number.isFinite(features.lufs)) {
+    const lo = spec.refLufs.p10 - 3
+    const hi = spec.refLufs.p90 + 3
+    if (features.lufs < lo || features.lufs > hi) {
+      levelNote =
+        `clip is ${features.lufs.toFixed(1)} LUFS, outside the ${lo.toFixed(1)}..${hi.toFixed(1)} range of the normalized ` +
+        `reference batches — this row would read level, not punch. Normalize first (beat score / the batch normalizer) to make it count.`
+    }
+  }
+
   const rows: RoleCheckRow[] = []
   for (const check of spec.checks) {
     const measured = features[check.feature as FeatureKey]
@@ -139,7 +196,7 @@ export function rolecheckFeatures(features: FeatureVector, role: string, targets
     // the reference clips themselves show". Dimensionless, so misses on dB, %, ms and ratios are
     // comparable and the report can rank them.
     const spread = Math.max(1e-9, check.ref.p75 - check.ref.p25)
-    let verdict: 'pass' | 'miss' = 'pass'
+    let verdict: 'pass' | 'miss' | 'advisory' = 'pass'
     let side: 'low' | 'high' | undefined
     let severity = 0
     if (check.min !== undefined && measured < check.min) {
@@ -151,6 +208,8 @@ export function rolecheckFeatures(features: FeatureVector, role: string, targets
       side = 'high'
       severity = (measured - check.max) / spread
     }
+    const advisory = verdict === 'miss' && check.assumesNormalized === true && levelNote !== undefined
+    if (advisory) verdict = 'advisory'
     const row: RoleCheckRow = {
       feature: check.feature,
       measured,
@@ -159,8 +218,12 @@ export function rolecheckFeatures(features: FeatureVector, role: string, targets
       severity: Math.round(severity * 100) / 100,
       lever: check.lever,
       source: check.source,
-      fix: check.fix,
+      // Direction-aware: `fix` describes the LOW side, `fixHigh` the HIGH side. A two-sided band
+      // with one fix string is wrong half the time — it used to tell a clip 5 dB TOO NOISY to add
+      // a noise oscillator.
+      fix: side === 'high' && check.fixHigh !== undefined ? check.fixHigh : check.fix,
     }
+    if (advisory) row.advisoryReason = levelNote
     if (check.min !== undefined) row.min = check.min
     if (check.max !== undefined) row.max = check.max
     if (side !== undefined) row.side = side
@@ -170,12 +233,22 @@ export function rolecheckFeatures(features: FeatureVector, role: string, targets
     throw new BeatRoleCheckError(`role "${role}" produced no evaluable checks — the targets file and the feature set disagree; regenerate with: node scripts/build-role-targets.mjs`)
   }
   const missed = rows.filter((r) => r.verdict === 'miss').length
-  return {
+  const advisoryCount = rows.filter((r) => r.verdict === 'advisory').length
+  // THE VERDICT IS A MISS BUDGET, NOT AN AND. An AND over 8-11 percentile checks rejected 98.7% of
+  // the very reference clips the targets were mined from (a 2026-07-26 usability pilot measured
+  // 157/159), because per-check miss rates compound: 0.75^10 = 5.6%. `maxMisses` is calibrated on
+  // this role's own reference pool so ~75% of the owner's winning references clear the bar; the
+  // realized rate travels with the result so the number is never left implicit again.
+  const maxMisses = spec.verdict?.maxMisses ?? 0
+  const result: RoleCheckResult = {
     audioPath,
     role,
-    verdict: missed === 0 ? 'pass' : 'fail',
-    passed: rows.length - missed,
+    verdict: missed <= maxMisses ? 'pass' : 'fail',
+    passed: rows.length - missed - advisoryCount,
     missed,
+    advisory: advisoryCount,
+    maxMisses,
+    refPassRate: spec.verdict?.refPassRate ?? 0,
     rows,
     targets: {
       version: targets.version,
@@ -185,11 +258,19 @@ export function rolecheckFeatures(features: FeatureVector, role: string, targets
       extractor: targets.provenance.extractor,
     },
   }
+  if (applicability !== undefined) result.applicability = applicability
+  return result
 }
 
 /** Measure one render and check it against a role's targets. */
 export function rolecheckFile(audioPath: string, role: string, targets: RoleTargets): RoleCheckResult {
   if (!existsSync(audioPath)) throw new BeatRoleCheckError(`no audio file at ${audioPath}`)
+  if (statSync(audioPath).isDirectory()) {
+    throw new BeatRoleCheckError(
+      `${audioPath} is a directory — rolecheck screens ONE rendered WAV at a time. For a whole batch: ` +
+        `for f in ${audioPath}/*.wav; do beat rolecheck "$f" --role ${role}; done`,
+    )
+  }
   const features = featuresForAudioFile(audioPath)
   if (features === null) throw new BeatRoleCheckError(`could not decode ${audioPath} — rolecheck needs a readable WAV`)
   return rolecheckFeatures(features, role, targets, audioPath)
@@ -209,24 +290,37 @@ function targetText(row: RoleCheckRow): string {
 export function formatRoleCheck(r: RoleCheckResult): string {
   const out: string[] = []
   const name = r.audioPath === '' ? '(features)' : r.audioPath
-  out.push(`rolecheck ${name} as ${r.role}: ${r.verdict.toUpperCase()} — ${r.passed}/${r.rows.length} checks pass`)
-  out.push(`targets v${r.targets.version} from ${r.targets.refClips} ${r.targets.refPool} reference clips (${r.targets.generatedAt.slice(0, 10)})`)
+  out.push(`rolecheck ${name} as ${r.role}: ${r.verdict.toUpperCase()} — ${r.missed} miss${r.missed === 1 ? '' : 'es'} (bar: at most ${r.maxMisses}), ${r.passed}/${r.rows.length} checks pass`)
+  out.push(`targets v${r.targets.version} from ${r.targets.refClips} ${r.targets.refPool} reference clips (${r.targets.generatedAt.slice(0, 10)}); ${(r.refPassRate * 100).toFixed(0)}% of those references clear this same bar`)
+  if (r.applicability !== undefined) {
+    out.push('')
+    out.push(`  !! ${r.applicability}`)
+    out.push('  The rows below are still printed, but read them knowing the targets are for a different kind of material.')
+  }
   out.push('')
   const w = Math.max(...r.rows.map((x) => x.feature.length), 7)
   out.push(`  ${'feature'.padEnd(w)}  ${'measured'.padStart(10)}  ${'target'.padStart(16)}  ${'ref med'.padStart(9)}  verdict`)
   for (const row of r.rows) {
-    const mark = row.verdict === 'pass' ? 'ok' : `MISS ${row.side === 'low' ? 'low' : 'high'}`
+    const mark = row.verdict === 'pass' ? 'ok' : row.verdict === 'advisory' ? `(advisory ${row.side === 'low' ? 'low' : 'high'})` : `MISS ${row.side === 'low' ? 'low' : 'high'}`
     out.push(`  ${row.feature.padEnd(w)}  ${fmt(row.measured).padStart(10)}  ${targetText(row).padStart(16)}  ${fmt(row.refMedian).padStart(9)}  ${mark}`)
+  }
+  const advisories = r.rows.filter((x) => x.verdict === 'advisory')
+  if (advisories.length > 0) {
+    out.push('')
+    out.push(`${advisories.length} row${advisories.length === 1 ? '' : 's'} NOT counted — ${advisories[0]!.advisoryReason}`)
+    out.push(`  (${advisories.map((a) => a.feature).join(', ')})`)
   }
   const misses = r.rows.filter((x) => x.verdict === 'miss').sort((a, b) => b.severity - a.severity)
   if (misses.length === 0) {
     out.push('')
     out.push('every measured axis is inside the reference band for this role. This is a SCREEN, not a')
-    out.push('quality verdict — no feature here hears harmony, groove or pocket (131 §8).')
+    out.push('quality verdict — no feature here hears harmony, groove or pocket (131 §8), and it does')
+    out.push('NOT rank clips: use `beat rank` / the taste critic for that.')
     return out.join('\n')
   }
   out.push('')
-  out.push(`${misses.length} miss${misses.length === 1 ? '' : 'es'}, worst first (severity = distance outside the band in reference-IQR units):`)
+  out.push(`${misses.length} miss${misses.length === 1 ? '' : 'es'}, worst first (severity = distance outside the band in reference-IQR units).`)
+  out.push(`The role's own reference clips miss several of these too — the BUDGET is the verdict, this list is the diagnosis:`)
   for (const m of misses) {
     out.push('')
     out.push(`  ${m.feature} — measured ${fmt(m.measured)}, wants ${targetText(m)} (ref median ${fmt(m.refMedian)}), severity ${m.severity.toFixed(2)}`)

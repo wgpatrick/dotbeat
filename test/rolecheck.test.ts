@@ -49,6 +49,56 @@ test('role targets cover the four showdown roles and carry provenance', () => {
   assert.ok(t.provenance.caveats.some((c) => /normaliz/i.test(c)), 'targets must record that level-dependent checks assume batch normalization')
 })
 
+// The defect a 2026-07-26 usability pilot found: every INDIVIDUAL bound was clamped to its role's
+// median reference clip, but the verdict was an AND over 8-11 of them, and per-check miss rates
+// compound (0.75^10 = 5.6%). Measured result: 157 of 159 reference clips failed the verdict of the
+// targets mined from those very clips — a gate with zero information content. The verdict is now a
+// MISS BUDGET calibrated on the same pool, and this is the test that keeps it calibrated.
+test('the overall verdict is calibrated so most reference clips clear it', () => {
+  const t = load()
+  for (const [role, spec] of Object.entries(t.roles)) {
+    assert.ok(spec.verdict !== undefined, `role ${role} has no calibrated verdict bar`)
+    assert.ok(spec.verdict.maxMisses >= 0 && spec.verdict.maxMisses < spec.checks.length,
+      `role ${role}: a bar of ${spec.verdict.maxMisses} out of ${spec.checks.length} checks is not a bar`)
+    assert.ok(spec.verdict.refPassRate >= 0.7,
+      `role ${role}: only ${(100 * spec.verdict.refPassRate).toFixed(0)}% of its own reference clips clear the verdict — a screen that rejects the bar is measuring the wrong thing (134 §5)`)
+    assert.ok(spec.refLufs !== null, `role ${role} has no reference loudness distribution — the normalization guard cannot work`)
+  }
+})
+
+test('a two-sided band gives direction-aware advice, not one string for both sides', () => {
+  const t = load()
+  const band = Object.values(t.roles).flatMap((r) => r.checks).filter((c) => c.min !== undefined && c.max !== undefined)
+  assert.ok(band.length >= 3, 'expected several two-sided band checks')
+  for (const c of band) {
+    assert.ok(c.fixHigh !== undefined && c.fixHigh !== c.fix,
+      `${c.feature} is a two-sided band with one fix string — it will be wrong on one side (it used to tell a too-noisy clip to add a noise oscillator)`)
+  }
+})
+
+test('level-dependent rows go advisory on un-normalized audio instead of failing the clip', () => {
+  const t = load()
+  const role = 'bassline'
+  const v = atRefMedian(t, role)
+  ;(v as Record<string, number>).lufs = (t.roles[role]!.refLufs!.p10) - 20 // a raw stem, 20 dB down
+  ;(v as Record<string, number>).truePeakDb = -30
+  const r = rolecheckFeatures(v, role, t)
+  const tp = r.rows.find((x) => x.feature === 'truePeakDb')!
+  assert.equal(tp.verdict, 'advisory', 'truePeakDb on a 20 dB-down stem reads level, not punch — it must not count as a miss')
+  assert.match(tp.advisoryReason ?? '', /LUFS/)
+  assert.equal(r.verdict, 'pass', 'a clip at the reference median must not be failed by a row the tool itself says does not apply')
+})
+
+test('a clip that is nowhere near the role is declined, not confidently mis-reported', () => {
+  const t = load()
+  const v = atRefMedian(t, 'bassline')
+  ;(v as Record<string, number>).centroidLog2 = 12.45 // ~5.6 kHz — a drum loop, not a bassline
+  const r = rolecheckFeatures(v, 'bassline', t)
+  assert.ok(r.applicability !== undefined, 'a 5.6 kHz-centroid clip checked as a bassline must say so')
+  assert.match(r.applicability!, /does not look like a bassline/)
+  assert.match(formatRoleCheck(r), /!!/)
+})
+
 test('every check names a bound, a fix, a lever and a source — D26\'s whole point', () => {
   const t = load()
   let checks = 0
@@ -89,7 +139,7 @@ test('a clip at the reference median passes every role', () => {
   for (const role of knownRoles(t)) {
     const r = rolecheckFeatures(atRefMedian(t, role), role, t)
     assert.equal(r.verdict, 'pass', `${role}: a clip at the ref median missed ${r.rows.filter((x) => x.verdict === 'miss').map((x) => `${x.feature} (${x.measured} vs ${x.min ?? ''}..${x.max ?? ''})`).join(', ')}`)
-    assert.equal(r.missed, 0)
+    assert.ok(r.missed <= r.maxMisses)
     assert.ok(r.rows.length >= 6)
   }
 })
@@ -101,17 +151,27 @@ test('pushing one axis outside its bound misses on that axis alone, with its fix
   const v = atRefMedian(t, role)
   ;(v as Record<string, number>).bandSubPct = check.min! - 10 // a bassline with no sub — the founding hole
   const r = rolecheckFeatures(v, role, t, 'synthetic.wav')
-  assert.equal(r.verdict, 'fail')
   assert.equal(r.missed, 1, `only bandSubPct should miss, got ${r.rows.filter((x) => x.verdict === 'miss').map((x) => x.feature).join(', ')}`)
+  // One miss is inside the budget — the DIAGNOSIS fires without the verdict crying wolf.
+  assert.equal(r.verdict, 'pass')
   const miss = r.rows.find((x) => x.verdict === 'miss')!
   assert.equal(miss.feature, 'bandSubPct')
   assert.equal(miss.side, 'low')
   assert.ok(miss.severity > 0)
   assert.match(miss.fix, /subLevel|octave/i, 'the sub-content fix must name the actual dotbeat knob')
   const text = formatRoleCheck(r)
-  assert.match(text, /FAIL/)
   assert.match(text, /bandSubPct/)
   assert.match(text, /fix:/)
+
+  // Blow the budget and the verdict does fire.
+  const wrecked = atRefMedian(t, role)
+  for (const c of t.roles[role]!.checks) {
+    if (c.min !== undefined) (wrecked as Record<string, number>)[c.feature] = c.min - Math.max(1, Math.abs(c.min))
+    else if (c.max !== undefined) (wrecked as Record<string, number>)[c.feature] = c.max + Math.max(1, Math.abs(c.max))
+  }
+  const bad = rolecheckFeatures(wrecked, role, t)
+  assert.equal(bad.verdict, 'fail', `a clip outside every bound must FAIL, missed ${bad.missed} of ${bad.rows.length} with bar ${bad.maxMisses}`)
+  assert.match(formatRoleCheck(bad), /FAIL/)
 })
 
 test('unknown role and unreadable audio fail loudly, never silently pass', () => {

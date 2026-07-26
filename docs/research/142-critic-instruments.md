@@ -32,14 +32,19 @@ Branch: `critic-instruments`.*
    port of 131's own pipeline, pinned to it by a fixture test; 19 of 23 features agree to 1e-11 or
    better. The port shipped with a convolution-centring off-by-one that moved every attack time by
    1.6%; the parity test caught it, which is the argument for having one. (High.) §2.1
-4. **`beat rolecheck` exists, and building it found a live calibration defect in 131 itself.**
+4. **`beat rolecheck` exists, and building it found calibration defects at two levels — one in
+   research 131 itself, one in the screen's own verdict.**
    Three of research 131 §7's targets are stated GLOBALLY while the doc's own per-role table shows
    the range varies by role — `fluxMean >= 0.17` against a bassline reference median of 0.166,
    `attackMedMs <= 12` against a chords reference median of 12.5, `slope <= -10` against a lead
    reference median of -9.9. Applied literally, each would fail **more than half of the owner's
    winning references for that role**: research 134 §5's "the screens reject the quality bar
    itself", reproduced from a different direction. Every bound is now clamped to its role's median
-   reference clip, and the clamp is a test. (High.) §3
+   reference clip, and the clamp is a test. **A usability pilot then found the same defect one level
+   up**: the verdict was an AND over 8-11 clamped checks, and per-check miss rates compound, so
+   98.7% of the reference pool failed the verdict of the targets mined from it. The verdict is now
+   a miss budget calibrated on the same pool; the screen now separates sources (packs refs 93.3%
+   pass, gen 80.8%, engine 32.0%, engineplus 17.2%) instead of rejecting everything. (High.) §3
 5. **The bass-grind detector as research 121 §3.7 specified it would have condemned 37.5% of the
    owner's own commercial bass references.** Its three clauses do separate the owner's matched A/B
    pair, but they are not selective: shipped verbatim the rule fires on 37.5% of packs bass refs
@@ -254,12 +259,72 @@ the artifact, and `test/rolecheck.test.ts` holds the invariant. It is a cheap ru
 history behind it: the ring gate was set from a global intuition and rejects 22% of the owner's own
 Splice leads.
 
-**What rolecheck is not.** Its thresholds are reference percentiles, so roughly a quarter of the
-owner's own winning references would miss any given `atLeast:25` check. It answers one question:
+### 3.2 What the usability pilot found, and the second defect it exposed
+
+A CLI pilot (methodology: `docs/usability-testing.md`, "Variant: CLI/MCP pilots") was run on the
+finished command with no checklist and no access to the source. It found the same class of defect
+one level up, and it is the more important of the two.
+
+**§3.1 clamped each check individually. The VERDICT was still an AND over 8–11 of them.** Per-check
+miss rates compound — 0.75¹⁰ = 5.6% — so the pilot measured **157 of 159 reference clips (98.7%)
+failing the overall verdict of the targets mined from those very clips**, and 100% of the generated
+clips it tried. Its summary is the right one: *"a gate that rejects 99.5% of Splice loops rejects
+100% of my batch too. I still have to listen to all five."* The individual-clamp fix was necessary
+and insufficient, and the caveat that was supposed to cover it ("~a quarter would miss any given
+check") described the failure while reading as reassurance.
+
+**The verdict is now a MISS BUDGET calibrated on the same pool.** `maxMisses` is the 75th percentile
+of how many checks a role's own reference clips miss; the realized reference pass rate travels with
+the artifact and is printed in every report, because the number that makes the caveats concrete —
+what fraction of references clear the *overall* verdict — was the one number never shown. Reference
+clips turn out to miss a median of 3–5 of their own checks: the misses are strongly correlated, not
+independent.
+
+Overall-verdict pass rate after recalibration, by source, over every showdown clip:
+
+| source | pass rate | (owner's blind pairwise win rate, 131 §1) |
+|---|---|---|
+| ref / refs-packs | **93.3%** | 87% |
+| gen | 80.8% | 75% |
+| keymap | 75.6% | 30% |
+| ref / refs-familiar, refs-unfamiliar, refs-cc | 65–83% | — |
+| surgeplus | 51.3% | 38% |
+| surge | 41.7% | 36% |
+| engine | 32.0% | 2% |
+| engineplus | **17.2%** | 31% |
+
+The screen now discriminates instead of rejecting everything, and it broadly tracks the owner's own
+ordering. The one inversion is informative: **engineplus passes LESS than raw engine (17.2% vs
+32.0%)** because its frozen profile widens every role to −10…−12 dB and busts the role-specific
+width bands — 131 §7-P5's finding ("measurably wrong in BOTH directions") arriving from a third
+independent direction.
+
+Three further pilot findings, all fixed:
+
+- **Two-sided bands gave one fix string for both directions**, so a clip 5 dB *too noisy* in the
+  presence region was told to add a noise oscillator and an exciter. Band checks now carry
+  direction-aware advice, and a test asserts every two-sided band has both.
+- **`truePeakDb` failed un-normalized stems while the tool's own `why:` line said the row "reads
+  level, not punch"** — a confident wrong instruction with its retraction two lines below it, in
+  the field labelled "why". Level-dependent rows are now marked `(advisory)` against the reference
+  loudness distribution and excluded from the verdict.
+- **A typo in `--role` produced a confident, fully-formed wrong report** — a drum loop checked as a
+  bassline returned "6/10 checks pass" and advice to bass-mono the sub, on a clip with a 5.6 kHz
+  centroid the tool already had in hand. It now declines.
+
+The pilot also correctly caught the help text overclaiming ("the specific dotbeat parameter to
+change" — the fixes name a lever and a knob family, not a pasteable `beat set` line), and that
+nothing in `showdown`/`prodtask`/`pilot` calls `rolecheck` yet, so 138's design rule remains stated
+rather than enforced. Help text corrected; the wiring is left as the next arm's job, deliberately —
+per §3.2's own numbers, gating showdown on rolecheck today would drop reference clips out of ~7% of
+batches and change what the comparison measures.
+
+**What rolecheck is still not.** It does not RANK: the pilot checked its ordering against the
+owner's recorded rank-1 picks across 17 batches and found it at or below chance (owner's #1 was
+rolecheck's top clip in 2–3 of 17). That is the critic's job (§2), not a screen's, and the report
+now says so in as many words. Its thresholds are reference percentiles; it answers one question —
 *did this clip land inside the reference band on the axes measured to matter for this role, and if
-not, which knob moves it?* The caveats saying so live in the artifact, not only here, and a test
-asserts they are there. Level-dependent checks (`truePeakDb`, `crestDb`) assume batch
-normalization — on a raw stem those rows read level, not punch.
+not, which knob moves it?*
 
 ## 4. D18 — the bass-grind detector
 

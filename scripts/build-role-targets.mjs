@@ -68,6 +68,8 @@ for (const line of readFileSync(logPath, 'utf8').split('\n')) {
 
 /** role -> feature -> values[], over ref clips from the packs pool only. */
 const byRole = new Map()
+/** role -> full feature vectors, kept so the OVERALL verdict can be calibrated on the same pool. */
+const vectorsByRole = new Map()
 let clipCount = 0
 for (const e of latest.values()) {
   if (typeof e.group !== 'string' || !e.group.startsWith('showdown:') || !e.sources) continue
@@ -79,6 +81,9 @@ for (const e of latest.values()) {
     const f = featuresForAudioFile(join(e.batch, wav), { cache: true })
     if (f === null) continue
     clipCount++
+    const vecs = vectorsByRole.get(role) ?? []
+    vecs.push(f)
+    vectorsByRole.set(role, vecs)
     const perFeature = byRole.get(role) ?? new Map()
     for (const [k, v] of Object.entries(f)) {
       if (!Number.isFinite(v)) continue
@@ -118,7 +123,7 @@ function dist(values) {
 
 const PUNCH = [
   {
-    feature: 'truePeakDb', bound: 'atLeast:25', lever: 'patch + engine', source: '131 §7-P2 (packs head-to-head d +1.38, the strongest discriminator in the log). ASSUMES the clip is loudness-normalized like a showdown batch — on a raw stem this row reads level, not punch.',
+    feature: 'truePeakDb', assumesNormalized: true, bound: 'atLeast:25', lever: 'patch + engine', source: '131 §7-P2 (packs head-to-head d +1.38, the strongest discriminator in the log). ASSUMES the clip is loudness-normalized like a showdown batch — on a raw stem this row reads level, not punch.',
     fix: 'Shorten the amp-EG attack and add a transient shaper — NOT more compression (131 §6: a compressor fixes neither half of the crest story). Research 141 §3: 65% of professional lead/bass/pluck patches leave attack at Surge\'s 3.91 ms floor, so ask for 0 and accept <= 12 ms.',
   },
   {
@@ -126,7 +131,7 @@ const PUNCH = [
     fix: 'Set the amp-EG attack to its floor and do the shaping in the filter EG — the professional idiom (141 §3.3: 65-68% of leads/plucks/basses/sequences leave amp attack at the INIT minimum, while only 8-33% leave decay at default).',
   },
   {
-    feature: 'crestDb', bound: 'atLeast:25', lever: 'engine', source: '131 §6 (broadband crest ref 15.2-20.2 dB vs engineplus 12.1-14.0)',
+    feature: 'crestDb', assumesNormalized: true, bound: 'atLeast:25', lever: 'engine', source: '131 §6 (broadband crest ref 15.2-20.2 dB vs engineplus 12.1-14.0)',
     fix: 'Sharpen transients (transient shaper node). Note the two-scale rule: broadband crest must go UP while per-band crest goes DOWN — see the crestSubDb check.',
   },
 ]
@@ -149,11 +154,13 @@ const MOVEMENT = [
 const TEXTURE = [
   {
     feature: 'flatnessHiDb', bound: 'band:25,90', lever: 'sound source', source: '131 §7-P4 (winning refs are NOISIER at 2-8 kHz, d +0.66)',
-    fix: 'Add in-band texture: a second layer, a noise oscillator, saturation or an exciter (133 §5). This is a BAND, not a direction — overshoot lands in gen\'s hiss regime, which loses for the opposite reason (131 §3.3).',
+    fix: 'TOO CLEAN in the presence region. Add in-band texture: a second layer, a noise oscillator, saturation or an exciter (133 §5).',
+    fixHigh: 'TOO NOISY in the presence region — this is gen\'s failure mode, not the synths\' (131 §3.3). Back OFF saturation/exciter/noise, or low-pass the top layer. Overshooting the texture target loses for the opposite reason to undershooting it.',
   },
   {
     feature: 'slopeDbPerOct', bound: 'band:10,90', lever: 'production', source: '131 §3.1 (ref tilt 2.1 dB/oct darker) and §3.3 (the band)',
-    fix: 'Darken the tilt toward the ref band — a gentle high shelf or lower filter cutoff. Too dark reads as dull, too bright as the "clean static simplicity" the owner rejects.',
+    fix: 'TOO DARK — the spectrum falls off faster than the reference band. Lift the top with a gentle high shelf, or open the filter cutoff.',
+    fixHigh: 'TOO BRIGHT — the spectrum is flatter than the reference band. Darken it: a gentle high shelf DOWN, or a lower filter cutoff. Winning refs are spectrally darker than the clips they beat (131 §3.1, ~2 dB/oct).',
   },
 ]
 
@@ -167,7 +174,8 @@ const LOWEND = [
 const WIDTH = [
   {
     feature: 'widthMeanDb', bound: 'band:10,90', lever: 'production', source: '131 §7-P5 (elite ref bass -43 dB mono, elite ref lead -4.6 dB; the frozen engineplus constant is -10..-12 everywhere)',
-    fix: 'Set the width from the ROLE, not a global constant. Width is a placement variable, not a more-is-better one — the frozen engineplus profile is measurably wrong in both directions.',
+    fix: 'TOO NARROW for this role. Widen it in the production profile (the `width` field of the role profile in src/analysis/produce.ts, or `beat set <track>.width`).',
+    fixHigh: 'TOO WIDE for this role. Narrow it in the production profile (the `width` field of the role profile, or `beat set <track>.width`); for bass, go to mono. Width is a PLACEMENT variable, not a more-is-better one, and the frozen engineplus constant (-10..-12 everywhere) is wrong in both directions.',
   },
 ]
 
@@ -280,6 +288,8 @@ for (const [role, checks] of Object.entries(ROLE_CHECKS)) {
     const [kind, arg] = check.bound.split(':')
     const at = (p) => d[`p${p}`] ?? d.median
     const entry = { feature: check.feature, bound: kind, lever: check.lever, source: check.source, fix: check.fix, ref: d }
+    if (check.fixHigh !== undefined) entry.fixHigh = check.fixHigh
+    if (check.assumesNormalized === true) entry.assumesNormalized = true
     const empirical = {}
     if (kind === 'atLeast') empirical.min = at(arg)
     else if (kind === 'atMost') empirical.max = at(arg)
@@ -321,7 +331,43 @@ for (const [role, checks] of Object.entries(ROLE_CHECKS)) {
     }
     emitted.push(entry)
   }
-  roles[role] = { refClips: [...perFeature.values()][0]?.length ?? 0, checks: emitted, refDistribution: refDist }
+  // ---- calibrate the OVERALL verdict on the same reference pool ----------------------------
+  //
+  // A usability pilot (2026-07-26) found the defect this fixes, and it is the same defect in a new
+  // costume. Clamping each bound to its role's median makes every INDIVIDUAL check pass most
+  // reference clips — but the verdict was an AND over 8-11 of them, and even a 25%-per-check miss
+  // rate compounds to 0.75^10 = 5.6% joint pass. Measured: 157 of 159 reference clips (98.7%)
+  // failed the overall verdict of the targets mined from those very clips. A gate that rejects
+  // 99% of the bar carries no information and costs the user nothing but time — research 134 §5
+  // one more time.
+  //
+  // So the bar is a MISS BUDGET calibrated on the pool: `maxMisses` is the 75th percentile of how
+  // many checks the role's own reference clips miss, so roughly three quarters of the owner's
+  // winning references clear it. The realized pass rate is written into the artifact and printed
+  // by `beat rolecheck`, because the number that makes the caveats concrete is exactly the one
+  // that was missing.
+  const refVectors = vectorsByRole.get(role) ?? []
+  const missCounts = refVectors.map((v) => emitted.filter((c) => {
+    const x = v[c.feature]
+    if (typeof x !== 'number' || !Number.isFinite(x)) return false
+    return (c.min !== undefined && x < c.min) || (c.max !== undefined && x > c.max)
+  }).length).sort((a, b) => a - b)
+  const maxMisses = missCounts.length > 0 ? Math.round(pct(missCounts, 75)) : 0
+  const refPassRate = missCounts.length > 0 ? missCounts.filter((m) => m <= maxMisses).length / missCounts.length : 0
+  const lufs = refVectors.map((v) => v.lufs).filter(Number.isFinite)
+  console.error(`  ${role}: reference clips miss ${missCounts[0]}-${missCounts[missCounts.length - 1]} of ${emitted.length} checks (median ${Math.round(pct(missCounts, 50))}); verdict bar set at <= ${maxMisses} misses, cleared by ${(100 * refPassRate).toFixed(0)}% of them`)
+  roles[role] = {
+    refClips: refVectors.length,
+    verdict: {
+      maxMisses,
+      refPassRate: Math.round(refPassRate * 1000) / 1000,
+      refMissCounts: { min: missCounts[0] ?? 0, p25: round(pct(missCounts, 25)), median: round(pct(missCounts, 50)), p75: round(pct(missCounts, 75)), max: missCounts[missCounts.length - 1] ?? 0 },
+      note: 'A clip FAILS only when it misses MORE checks than this role\'s own reference clips typically do. Calibrated so ~75% of the owner\'s winning references clear the bar; an AND over every check rejected 98.7% of them.',
+    },
+    refLufs: lufs.length > 0 ? dist(lufs) : null,
+    checks: emitted,
+    refDistribution: refDist,
+  }
 }
 
 const out = {
@@ -348,5 +394,5 @@ const out = {
 
 writeFileSync(outPath, `${JSON.stringify(out, null, 2)}\n`)
 console.log(`wrote ${outPath.replace(repoRoot + '/', '')}: ${Object.keys(roles).length} roles, ${clipCount} ${REF_POOL} ref clips`)
-for (const [role, r] of Object.entries(roles)) console.log(`  ${role.padEnd(10)} ${String(r.refClips).padStart(3)} ref clips, ${r.checks.length} checks`)
+for (const [role, r] of Object.entries(roles)) console.log(`  ${role.padEnd(10)} ${String(r.refClips).padStart(3)} ref clips, ${r.checks.length} checks, fail above ${r.verdict.maxMisses} misses (${(100 * r.verdict.refPassRate).toFixed(0)}% of refs pass)`)
 if (argv.includes('--print')) console.log(JSON.stringify(out, null, 2))

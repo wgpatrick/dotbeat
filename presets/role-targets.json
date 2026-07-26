@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-26T12:49:59.362Z",
+  "generatedAt": "2026-07-26T13:26:49.609Z",
   "generator": "scripts/build-role-targets.mjs",
   "note": "Per-role audio targets for `beat rolecheck`. Every threshold is a PERCENTILE of the owner's own packs-era Splice reference clips for that role — the pool D26 names as the bar — measured with the same extractor the critic uses. Regenerate whenever the ref pool grows. Aggregates only: no filenames, no per-clip values, no audio (D25).",
   "provenance": {
@@ -25,6 +25,26 @@
   "roles": {
     "bassline": {
       "refClips": 22,
+      "verdict": {
+        "maxMisses": 5,
+        "refPassRate": 0.955,
+        "refMissCounts": {
+          "min": 1,
+          "p25": 2,
+          "median": 3.5,
+          "p75": 4.75,
+          "max": 6
+        },
+        "note": "A clip FAILS only when it misses MORE checks than this role's own reference clips typically do. Calibrated so ~75% of the owner's winning references clear the bar; an AND over every check rejected 98.7% of them."
+      },
+      "refLufs": {
+        "n": 22,
+        "p10": -21.828,
+        "p25": -19.84,
+        "median": -15.384,
+        "p75": -11.173,
+        "p90": -8.347
+      },
       "checks": [
         {
           "feature": "bandSubPct",
@@ -115,6 +135,7 @@
             "p75": -0.892,
             "p90": -0.721
           },
+          "assumesNormalized": true,
           "refPercentile": {
             "bound": "atLeast:25",
             "min": -7.444
@@ -161,6 +182,7 @@
             "p75": 14.74,
             "p90": 20.036
           },
+          "assumesNormalized": true,
           "refPercentile": {
             "bound": "atLeast:25",
             "min": 7.178
@@ -243,7 +265,7 @@
           "bound": "band",
           "lever": "production",
           "source": "131 §7-P5 (elite ref bass -43 dB mono, elite ref lead -4.6 dB; the frozen engineplus constant is -10..-12 everywhere)",
-          "fix": "Set the width from the ROLE, not a global constant. Width is a placement variable, not a more-is-better one — the frozen engineplus profile is measurably wrong in both directions.",
+          "fix": "TOO NARROW for this role. Widen it in the production profile (the `width` field of the role profile in src/analysis/produce.ts, or `beat set <track>.width`).",
           "ref": {
             "n": 22,
             "p10": -80,
@@ -252,6 +274,7 @@
             "p75": -14.547,
             "p90": -6.06
           },
+          "fixHigh": "TOO WIDE for this role. Narrow it in the production profile (the `width` field of the role profile, or `beat set <track>.width`); for bass, go to mono. Width is a PLACEMENT variable, not a more-is-better one, and the frozen engineplus constant (-10..-12 everywhere) is wrong in both directions.",
           "refPercentile": {
             "bound": "band:10,90",
             "min": -80,
@@ -352,6 +375,26 @@
     },
     "chords": {
       "refClips": 20,
+      "verdict": {
+        "maxMisses": 6,
+        "refPassRate": 0.9,
+        "refMissCounts": {
+          "min": 1,
+          "p25": 4,
+          "median": 5,
+          "p75": 6,
+          "max": 8
+        },
+        "note": "A clip FAILS only when it misses MORE checks than this role's own reference clips typically do. Calibrated so ~75% of the owner's winning references clear the bar; an AND over every check rejected 98.7% of them."
+      },
+      "refLufs": {
+        "n": 20,
+        "p10": -23.907,
+        "p25": -22.183,
+        "median": -19.722,
+        "p75": -15.639,
+        "p90": -14.438
+      },
       "checks": [
         {
           "feature": "truePeakDb",
@@ -367,6 +410,7 @@
             "p75": -1.057,
             "p90": -0.618
           },
+          "assumesNormalized": true,
           "refPercentile": {
             "bound": "atLeast:25",
             "min": -9.382
@@ -420,6 +464,7 @@
             "p75": 18.139,
             "p90": 20.163
           },
+          "assumesNormalized": true,
           "refPercentile": {
             "bound": "atLeast:25",
             "min": 15.198
@@ -511,7 +556,7 @@
           "bound": "band",
           "lever": "sound source",
           "source": "131 §7-P4 (winning refs are NOISIER at 2-8 kHz, d +0.66)",
-          "fix": "Add in-band texture: a second layer, a noise oscillator, saturation or an exciter (133 §5). This is a BAND, not a direction — overshoot lands in gen's hiss regime, which loses for the opposite reason (131 §3.3).",
+          "fix": "TOO CLEAN in the presence region. Add in-band texture: a second layer, a noise oscillator, saturation or an exciter (133 §5).",
           "ref": {
             "n": 20,
             "p10": -19.442,
@@ -520,6 +565,7 @@
             "p75": -8.672,
             "p90": -7.034
           },
+          "fixHigh": "TOO NOISY in the presence region — this is gen's failure mode, not the synths' (131 §3.3). Back OFF saturation/exciter/noise, or low-pass the top layer. Overshooting the texture target loses for the opposite reason to undershooting it.",
           "refPercentile": {
             "bound": "band:25,90",
             "min": -16.068,
@@ -540,7 +586,7 @@
           "bound": "band",
           "lever": "production",
           "source": "131 §3.1 (ref tilt 2.1 dB/oct darker) and §3.3 (the band)",
-          "fix": "Darken the tilt toward the ref band — a gentle high shelf or lower filter cutoff. Too dark reads as dull, too bright as the \"clean static simplicity\" the owner rejects.",
+          "fix": "TOO DARK — the spectrum falls off faster than the reference band. Lift the top with a gentle high shelf, or open the filter cutoff.",
           "ref": {
             "n": 20,
             "p10": -21.867,
@@ -549,6 +595,7 @@
             "p75": -9.238,
             "p90": -3.63
           },
+          "fixHigh": "TOO BRIGHT — the spectrum is flatter than the reference band. Darken it: a gentle high shelf DOWN, or a lower filter cutoff. Winning refs are spectrally darker than the clips they beat (131 §3.1, ~2 dB/oct).",
           "refPercentile": {
             "bound": "band:10,90",
             "min": -21.867,
@@ -594,7 +641,7 @@
           "bound": "band",
           "lever": "production",
           "source": "131 §7-P5 (elite ref bass -43 dB mono, elite ref lead -4.6 dB; the frozen engineplus constant is -10..-12 everywhere)",
-          "fix": "Set the width from the ROLE, not a global constant. Width is a placement variable, not a more-is-better one — the frozen engineplus profile is measurably wrong in both directions.",
+          "fix": "TOO NARROW for this role. Widen it in the production profile (the `width` field of the role profile in src/analysis/produce.ts, or `beat set <track>.width`).",
           "ref": {
             "n": 20,
             "p10": -10.136,
@@ -603,6 +650,7 @@
             "p75": -2.622,
             "p90": -0.451
           },
+          "fixHigh": "TOO WIDE for this role. Narrow it in the production profile (the `width` field of the role profile, or `beat set <track>.width`); for bass, go to mono. Width is a PLACEMENT variable, not a more-is-better one, and the frozen engineplus constant (-10..-12 everywhere) is wrong in both directions.",
           "refPercentile": {
             "bound": "band:10,90",
             "min": -10.136,
@@ -736,6 +784,26 @@
     },
     "lead": {
       "refClips": 20,
+      "verdict": {
+        "maxMisses": 5,
+        "refPassRate": 0.9,
+        "refMissCounts": {
+          "min": 1,
+          "p25": 3,
+          "median": 4,
+          "p75": 5,
+          "max": 6
+        },
+        "note": "A clip FAILS only when it misses MORE checks than this role's own reference clips typically do. Calibrated so ~75% of the owner's winning references clear the bar; an AND over every check rejected 98.7% of them."
+      },
+      "refLufs": {
+        "n": 20,
+        "p10": -22.634,
+        "p25": -19.97,
+        "median": -18.352,
+        "p75": -14.46,
+        "p90": -13.859
+      },
       "checks": [
         {
           "feature": "truePeakDb",
@@ -751,6 +819,7 @@
             "p75": -0.094,
             "p90": -0.023
           },
+          "assumesNormalized": true,
           "refPercentile": {
             "bound": "atLeast:25",
             "min": -3.169
@@ -801,6 +870,7 @@
             "p75": 20.638,
             "p90": 23.201
           },
+          "assumesNormalized": true,
           "refPercentile": {
             "bound": "atLeast:25",
             "min": 15.671
@@ -888,7 +958,7 @@
           "bound": "band",
           "lever": "sound source",
           "source": "131 §7-P4 (winning refs are NOISIER at 2-8 kHz, d +0.66)",
-          "fix": "Add in-band texture: a second layer, a noise oscillator, saturation or an exciter (133 §5). This is a BAND, not a direction — overshoot lands in gen's hiss regime, which loses for the opposite reason (131 §3.3).",
+          "fix": "TOO CLEAN in the presence region. Add in-band texture: a second layer, a noise oscillator, saturation or an exciter (133 §5).",
           "ref": {
             "n": 20,
             "p10": -24.134,
@@ -897,6 +967,7 @@
             "p75": -6.683,
             "p90": -3.701
           },
+          "fixHigh": "TOO NOISY in the presence region — this is gen's failure mode, not the synths' (131 §3.3). Back OFF saturation/exciter/noise, or low-pass the top layer. Overshooting the texture target loses for the opposite reason to undershooting it.",
           "refPercentile": {
             "bound": "band:25,90",
             "min": -23.047,
@@ -917,7 +988,7 @@
           "bound": "band",
           "lever": "production",
           "source": "131 §3.1 (ref tilt 2.1 dB/oct darker) and §3.3 (the band)",
-          "fix": "Darken the tilt toward the ref band — a gentle high shelf or lower filter cutoff. Too dark reads as dull, too bright as the \"clean static simplicity\" the owner rejects.",
+          "fix": "TOO DARK — the spectrum falls off faster than the reference band. Lift the top with a gentle high shelf, or open the filter cutoff.",
           "ref": {
             "n": 20,
             "p10": -19.57,
@@ -926,6 +997,7 @@
             "p75": -4.645,
             "p90": -3.728
           },
+          "fixHigh": "TOO BRIGHT — the spectrum is flatter than the reference band. Darken it: a gentle high shelf DOWN, or a lower filter cutoff. Winning refs are spectrally darker than the clips they beat (131 §3.1, ~2 dB/oct).",
           "refPercentile": {
             "bound": "band:10,90",
             "min": -19.57,
@@ -974,7 +1046,7 @@
           "bound": "band",
           "lever": "production",
           "source": "131 §7-P5 (elite ref bass -43 dB mono, elite ref lead -4.6 dB; the frozen engineplus constant is -10..-12 everywhere)",
-          "fix": "Set the width from the ROLE, not a global constant. Width is a placement variable, not a more-is-better one — the frozen engineplus profile is measurably wrong in both directions.",
+          "fix": "TOO NARROW for this role. Widen it in the production profile (the `width` field of the role profile in src/analysis/produce.ts, or `beat set <track>.width`).",
           "ref": {
             "n": 20,
             "p10": -11.185,
@@ -983,6 +1055,7 @@
             "p75": -3.88,
             "p90": -0.911
           },
+          "fixHigh": "TOO WIDE for this role. Narrow it in the production profile (the `width` field of the role profile, or `beat set <track>.width`); for bass, go to mono. Width is a PLACEMENT variable, not a more-is-better one, and the frozen engineplus constant (-10..-12 everywhere) is wrong in both directions.",
           "refPercentile": {
             "bound": "band:10,90",
             "min": -11.185,
@@ -1079,6 +1152,26 @@
     },
     "drum-loop": {
       "refClips": 13,
+      "verdict": {
+        "maxMisses": 5,
+        "refPassRate": 1,
+        "refMissCounts": {
+          "min": 0,
+          "p25": 1,
+          "median": 3,
+          "p75": 5,
+          "max": 5
+        },
+        "note": "A clip FAILS only when it misses MORE checks than this role's own reference clips typically do. Calibrated so ~75% of the owner's winning references clear the bar; an AND over every check rejected 98.7% of them."
+      },
+      "refLufs": {
+        "n": 13,
+        "p10": -21.134,
+        "p25": -20.09,
+        "median": -18.4,
+        "p75": -16.152,
+        "p90": -13.953
+      },
       "checks": [
         {
           "feature": "sustainPct",
@@ -1169,6 +1262,7 @@
             "p75": -0.105,
             "p90": 0.07
           },
+          "assumesNormalized": true,
           "refPercentile": {
             "bound": "atLeast:25",
             "min": -4.818
@@ -1215,6 +1309,7 @@
             "p75": 19.514,
             "p90": 21.331
           },
+          "assumesNormalized": true,
           "refPercentile": {
             "bound": "atLeast:25",
             "min": 14.955
@@ -1256,7 +1351,7 @@
           "bound": "band",
           "lever": "production",
           "source": "131 §7-P5 (elite ref bass -43 dB mono, elite ref lead -4.6 dB; the frozen engineplus constant is -10..-12 everywhere)",
-          "fix": "Set the width from the ROLE, not a global constant. Width is a placement variable, not a more-is-better one — the frozen engineplus profile is measurably wrong in both directions.",
+          "fix": "TOO NARROW for this role. Widen it in the production profile (the `width` field of the role profile in src/analysis/produce.ts, or `beat set <track>.width`).",
           "ref": {
             "n": 13,
             "p10": -22.694,
@@ -1265,6 +1360,7 @@
             "p75": -4.804,
             "p90": -4.228
           },
+          "fixHigh": "TOO WIDE for this role. Narrow it in the production profile (the `width` field of the role profile, or `beat set <track>.width`); for bass, go to mono. Width is a PLACEMENT variable, not a more-is-better one, and the frozen engineplus constant (-10..-12 everywhere) is wrong in both directions.",
           "refPercentile": {
             "bound": "band:10,90",
             "min": -22.694,
