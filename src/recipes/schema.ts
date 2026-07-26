@@ -290,8 +290,19 @@ const SYNTH_FIELD_VALUES: ReadonlyMap<string, readonly string[]> = (() => {
   return m
 })()
 
+/** Track-level (non-synth) fields `setValue` also accepts on a `<track>.<field>` path — the
+ * groove pair (src/core/document.ts's BeatTrack.shuffleAmount/shuffleGrid). Legal in a chain
+ * `set` step and as a dial's `field`, but NOT in a layer `patch`, which is the synth block only
+ * (a recipe expresses groove through `figure.feel.swingPct`, which maps onto these exactly). */
+const TRACK_FIELD_KINDS: ReadonlyMap<string, 'number'> = new Map([
+  ['shuffleAmount', 'number'],
+  ['shuffleGrid', 'number'],
+] as const)
+
 /** Public accessor used by the test suite's "every referenced parameter exists" contract. */
-export const recipeFieldExists = (key: string): boolean => SYNTH_FIELD_KINDS.has(key)
+export const recipeFieldExists = (key: string): boolean => SYNTH_FIELD_KINDS.has(key) || TRACK_FIELD_KINDS.has(key)
+
+const settableKind = (key: string): 'number' | 'enum' | 'bool' | 'trackref' | undefined => SYNTH_FIELD_KINDS.get(key) ?? TRACK_FIELD_KINDS.get(key)
 
 // ---- validation ---------------------------------------------------------------------------------
 
@@ -373,8 +384,8 @@ function validateStep(v: unknown, where: string, layerIds: ReadonlySet<string>, 
     if (!m) throw new BeatRecipeError(`${where}.set must look like "$<layerId>.<field>", got "${path}"`)
     const [, ref, field] = m as unknown as [string, string, string]
     if (!known(ref)) throw new BeatRecipeError(`${where}.set references unknown layer/track "$${ref}" (have: ${[...layerIds, ...addedTracks].join(', ')})`)
-    const kind = SYNTH_FIELD_KINDS.get(field)
-    if (!kind) throw new BeatRecipeError(`${where}.set: "${field}" is not a dotbeat synth parameter`)
+    const kind = settableKind(field)
+    if (!kind) throw new BeatRecipeError(`${where}.set: "${field}" is not a settable dotbeat parameter`)
     const value = v['value']
     if (value === undefined) throw new BeatRecipeError(`${where}.set needs a \`value\``)
     if (kind === 'number' && typeof value !== 'number') throw new BeatRecipeError(`${where}.value must be a number for ${field}`)
@@ -560,7 +571,7 @@ function validateRecipe(v: unknown, index: number): Recipe {
       const range = band(d['range'], `${dw}.range`)
       if (d['value'] < range[0] || d['value'] > range[1]) throw new BeatRecipeError(`${dw}.value ${d['value']} sits outside its own range [${range[0]}, ${range[1]}]`)
       const field = d['field']
-      if (field !== undefined && (typeof field !== 'string' || !SYNTH_FIELD_KINDS.has(field))) throw new BeatRecipeError(`${dw}.field must name a real dotbeat synth parameter, got ${JSON.stringify(field)}`)
+      if (field !== undefined && (typeof field !== 'string' || !recipeFieldExists(field))) throw new BeatRecipeError(`${dw}.field must name a real dotbeat synth parameter, got ${JSON.stringify(field)}`)
       return { name: d['name'], value: d['value'], range, note: d['note'], ...(field !== undefined ? { field: field as string } : {}) }
     })
   }

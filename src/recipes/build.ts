@@ -131,6 +131,23 @@ function applyFeel(notes: readonly ComposedNote[], feel: RecipeFeel, applied: st
   return out
 }
 
+/** The drum-side of `applyFeel`: velocity tiers by metrical position. `restBeatOneSixteenth` and
+ * `gate` are deliberately NOT applied to a kit — the kick is what beat-1 is being cleared FOR, and
+ * a hit's length is a lane property, not an articulation. */
+function applyDrumFeel(phrase: ComposedDrumPhrase, feel: RecipeFeel, applied: string[]): ComposedDrumPhrase {
+  if (!feel.velocityTiers || feel.velocityTiers.length === 0) return phrase
+  const tiers = feel.velocityTiers
+  applied.push(`velocityTiers ${tiers.join('/')} by metrical position (bar / beat / off-beat)`)
+  return {
+    archetype: phrase.archetype,
+    hits: phrase.hits.map((h) => {
+      const s = Math.round(h.start)
+      const tier = s % 16 === 0 ? 0 : s % 4 === 0 ? 1 : 2
+      return { ...h, velocity: tiers[Math.min(tier, tiers.length - 1)]! }
+    }),
+  }
+}
+
 /** Which feel fields the builder cannot express, so a build report says so out loud. */
 function deferredFeel(feel: RecipeFeel): string[] {
   return [...(feel.notes ?? [])]
@@ -174,7 +191,7 @@ export function buildRecipeDoc(recipe: Recipe, opts: BuildRecipeOptions): Recipe
   let drums: ComposedDrumPhrase | null = null
   let registerShift = 0
   if (recipe.role === 'drum-loop') {
-    drums = composeDrumPhrase(opts.seed, { exclude })
+    drums = applyDrumFeel(composeDrumPhrase(opts.seed, { exclude }), recipe.figure.feel, feelApplied)
   } else {
     const phrase = composePitchedPhrase(recipe.role, opts.key, opts.seed, { exclude })
     registerShift = registerShiftFor(phrase.notes, recipe.figure.register)
