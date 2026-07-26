@@ -4,7 +4,7 @@
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatPlacement, BeatSongSection, BeatSurgeOverride, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUDIO_TRACK_FIELDS, AUDIO_TRACK_FIELD_BY_KEY, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, initAudioTrackSynth, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
 import { automationShapePoints, type AutomationShape } from './automation-shape.js'
 
@@ -333,6 +333,33 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     return replaceTrack(doc, { ...track, surge: { ...track.surge!, overrides: [...others, { param, value: v }] } })
   }
 
+  // Audio tracks: the production block research 142 §3.2 gives them — volume/pan, the pre-chain
+  // filter (cutoff/resonance/filterType), the reverb/delay sends, and the 12 EffectType chain
+  // members' own knobs. Table-driven off AUDIO_TRACK_FIELD_BY_KEY, the SAME set parse/serialize
+  // use, so a `beat set` and a hand-edited line can never diverge. Gated to this key set on
+  // purpose: before this branch existed, `beat set <audio>.attack 0.5` silently succeeded and
+  // wrote a field nothing serialized or rendered — the "half-meaningful knobs" failure the
+  // instrument branch below already refuses.
+  if (track.kind === 'audio') {
+    const def = AUDIO_TRACK_FIELD_BY_KEY.get(rest)
+    if (def) {
+      switch (def.kind) {
+        case 'number': {
+          const n = canon(parseNum(value, rest))
+          if (rest === 'pan' && (n < -1 || n > 1)) throw new BeatEditError(`pan must be -1..1, got ${value}`)
+          return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: n } })
+        }
+        case 'enum':
+          if (!def.values!.includes(value)) throw new BeatEditError(`${rest} must be one of ${def.values!.join('|')}, got "${value}"`)
+          return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: value } })
+        case 'bool':
+          if (value !== 'true' && value !== 'false') throw new BeatEditError(`${rest} must be true or false, got "${value}"`)
+          return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: value === 'true' } })
+      }
+    }
+    throw new BeatEditError(`unknown field "${rest}" on audio track "${trackId}" (have: name, color, clip.<id>.audio.<field>; production params: ${AUDIO_TRACK_FIELDS.map((f) => f.key).join(', ')})`)
+  }
+
   // v0.6 instrument tracks: their small field set, validated in place
   if (track.kind === 'instrument') {
     const inst = track.instrument!
@@ -621,8 +648,8 @@ export function duplicateNotes(doc: BeatDocument, trackId: string, opts: Duplica
  * insert chain's order — these are the only ways to change it, so every mutation stays a small,
  * explicit list edit (add one entry, drop one entry, move one entry, flip one flag) rather than a
  * hand-rolled array splice at each call site. Phase 26 Stream DC widened this from synth-only to
- * every track kind except 'audio' (which carries no live/non-clip content at all) — see
- * BeatTrack.effects's comment in document.ts. */
+ * every track kind except 'audio'; research 142 §3.2 lifts that last exclusion now that an audio
+ * track's engine voice has a real effect spine — see BeatTrack.effects's comment in document.ts. */
 
 /** Adds a new effect instance. Mints `<type>` (or `<type>_2`, `_3`, ... on collision) when `id` is
  * omitted; errors if a given id already exists on the track. `index` inserts at that position
@@ -630,7 +657,6 @@ export function duplicateNotes(doc: BeatDocument, trackId: string, opts: Duplica
  * default for "add a new insert"). */
 export function addEffect(doc: BeatDocument, trackId: string, type: EffectType, opts: { id?: string; index?: number; enabled?: boolean } = {}): { doc: BeatDocument; effect: BeatEffect } {
   const track = findTrack(doc, trackId)
-  if (track.kind === 'audio') throw new BeatEditError(`track "${trackId}" is an audio track — effect chains only belong on synth/drums/instrument tracks`)
   if (!(EFFECT_TYPES as readonly string[]).includes(type)) throw new BeatEditError(`effect type must be one of ${EFFECT_TYPES.join('|')}, got "${type}"`)
   let id = opts.id
   if (id === undefined) {
@@ -750,7 +776,7 @@ export function addTrack(
     // Drum tracks: the "synth" params drive the drum BUS in beatlab (cutoff = bus lowpass), so
     // a fresh drum track opens the filter (beatlab's own bus default) — INIT_SYNTH's 2000 Hz is
     // a lead-synth default that silently swallows hats/cymbals (found via a silent-hat render).
-    synth: kind === 'drums' ? { ...INIT_SYNTH, cutoff: 12000, resonance: 0.1 } : { ...INIT_SYNTH },
+    synth: kind === 'drums' ? { ...INIT_SYNTH, cutoff: 12000, resonance: 0.1 } : kind === 'audio' ? initAudioTrackSynth() : { ...INIT_SYNTH },
     ...(kind === 'instrument' ? { instrument: { sample: opts.soundfont!.sample, program: opts.soundfont!.program, volume: -10, pan: 0 } } : {}),
     ...(kind === 'surge' ? { surge: { patch: opts.surge!.patch.trim().replace(/^"(.*)"$/, '$1'), sampleRate: opts.surge!.sampleRate ?? SURGE_DEFAULT_SAMPLE_RATE, overrides: opts.surge!.overrides ?? [] } } : {}),
     laneSamples: {},

@@ -63,7 +63,19 @@ test('effects: a fresh synth track starts with the default eq3 -> comp -> distor
   await withDaemon(async ({ chain }) => {
     assert.deepEqual(ids(chain('lead')), ['eq3', 'comp', 'distortion', 'bitcrush'])
     assert.ok(chain('lead').every((e) => e.enabled), 'all four start active, not bypassed')
-    assert.deepEqual(ids(chain('stem')), [], 'an audio track carries no chain')
+    assert.deepEqual(ids(chain('stem')), [], 'an audio track STARTS with no chain (142 §3.2: it can carry one now, but [] is its canonical default — nothing to preserve)')
+  })
+})
+
+// Research 142 §3.2: the audio-track refusal is lifted on every surface at once — the daemon route
+// is the same edit.ts addEffect the CLI and MCP call, so this is one assertion that the lift
+// reached the HTTP surface too (it previously 400'd with "effect chains only belong on
+// synth/drums/instrument tracks").
+test('POST /effect-add: an audio track accepts an insert now', async () => {
+  await withDaemon(async ({ post, chain }) => {
+    const res = await post('/effect-add', { track: 'stem', type: 'eq7' })
+    assert.equal(res.status, 200)
+    assert.deepEqual(ids(chain('stem')), ['eq7'])
   })
 })
 
@@ -133,10 +145,6 @@ test('POST /effect-add: rejects a bad body with 400 and a type list, a bad type/
     const noTrack = await post('/effect-add', { track: 'ghost', type: 'eq7' })
     assert.equal(noTrack.status, 400)
     assert.match(noTrack.body.error, /no track "ghost"/)
-
-    const audioTrack = await post('/effect-add', { track: 'stem', type: 'eq7' })
-    assert.equal(audioTrack.status, 400)
-    assert.match(audioTrack.body.error, /audio track — effect chains only belong on synth\/drums\/instrument tracks/)
 
     assert.deepEqual(ids(chain('lead')), ['eq3', 'comp', 'distortion', 'bitcrush'], 'no failed request touched the file')
   })

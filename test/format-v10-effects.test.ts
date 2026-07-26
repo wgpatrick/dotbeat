@@ -88,8 +88,15 @@ test('a fresh addTrack drum track also carries the default chain, elided on seri
   assert.equal(serialize(doc).includes('effects none'), false)
 })
 
-test('effect lines are rejected only on audio tracks (no live/non-clip content at all)', () => {
-  const bad = `format_version 0.10
+// Research 142 §3.2 (headline 1): this test used to assert the OPPOSITE — that `effect` lines are
+// rejected on an audio track, because an audio track's whole engine voice was `player -> muteGain
+// -> master` with nothing to splice into. The refusal is lifted: an audio track now has a real
+// `fxIn -> ...effects... -> muteGain` spine, so the chain means something on a played buffer (the
+// degradation stack, filter-as-extraction, `beat trick` on a sampled loop). Its canonical default
+// is [] — like an instrument track it never had a fixed insert order to preserve — so a file that
+// declares no `effect` line still parses to an empty chain and renders exactly as before.
+test('audio tracks accept effect lines (142 §3.2) and default to an EMPTY chain', () => {
+  const src = `format_version 0.10
 bpm 120
 loop_bars 1
 selected_track atrk
@@ -97,7 +104,13 @@ selected_track atrk
 track atrk atrk #56b6c2 audio
   effect eq3 eq3
 `
-  assert.throws(() => parse(bad), BeatParseError)
+  const doc = parse(src)
+  assert.deepEqual(doc.tracks.find((t) => t.id === 'atrk')!.effects.map((e) => e.type), ['eq3'])
+  assert.equal(serialize(doc), src, 'an audio track effect chain round-trips byte-identically')
+
+  const bare = src.replace('  effect eq3 eq3\n', '')
+  assert.deepEqual(parse(bare).tracks[0]!.effects, [], 'no declaration = empty, NOT defaultEffectChain()')
+  assert.equal(serialize(parse(bare)), bare)
 })
 
 test('reordering two effects round-trips and is a small local diff (two moved lines, not a rewrite)', () => {
@@ -161,7 +174,7 @@ test('toggling one bypass on an already-non-default chain changes exactly one li
   assert.deepEqual(changed, ['  effect comp comp'])
 })
 
-test('addEffect appends by default, mints an id on collision, and rejects only audio tracks', () => {
+test('addEffect appends by default, mints an id on collision, and now accepts audio tracks too', () => {
   const { doc: withTrack } = addTrack(initDocument({ trackId: 'lead' }), { id: 'lead2', kind: 'synth' })
   const { doc, effect } = addEffect(withTrack, 'lead2', 'eq3')
   assert.equal(effect.id, 'eq3_2') // 'eq3' already taken by the default chain
@@ -175,8 +188,12 @@ test('addEffect appends by default, mints an id on collision, and rejects only a
   const { doc: drums } = addTrack(withTrack, { id: 'drums', kind: 'drums' })
   const { effect: drumEffect } = addEffect(drums, 'drums', 'eq3')
   assert.equal(drumEffect.id, 'eq3_2')
+  // 142 §3.2: audio tracks accept it now — and start from [], so the FIRST eq3 keeps its plain id
+  // (nothing to collide with, unlike synth/drums whose default chain already claims it).
   const { doc: audioDoc } = addTrack(withTrack, { id: 'atrk', kind: 'audio' })
-  assert.throws(() => addEffect(audioDoc, 'atrk', 'eq3'), BeatEditError)
+  const { doc: withFx, effect: audioEffect } = addEffect(audioDoc, 'atrk', 'eq3')
+  assert.equal(audioEffect.id, 'eq3')
+  assert.deepEqual(withFx.tracks.find((t) => t.id === 'atrk')!.effects.map((e) => e.id), ['eq3'])
 })
 
 test('addEffect at an explicit index inserts there; removeEffect drops by id', () => {

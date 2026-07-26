@@ -154,8 +154,11 @@ test('beat_effect_add: errors are tool errors, and the file is untouched', async
     assert.match(badType.text, /effect type must be one of/)
 
     assert.equal((await mcp.call('beat_effect_add', { file, track: 'ghost', type: 'eq7' })).isError, true)
-    assert.equal((await mcp.call('beat_effect_add', { file, track: 'stem', type: 'eq7' })).isError, true)
-    assert.deepEqual(ids(chainOf(file)), ['eq3', 'comp', 'distortion', 'bitcrush'])
+    // `stem` (an audio track) used to be an error here too. Research 142 §3.2 lifted that refusal
+    // on every surface at once — it is now a legal add, asserted in the positive below.
+    assert.deepEqual(ids(chainOf(file)), ['eq3', 'comp', 'distortion', 'bitcrush'], "lead's chain is untouched by the failed calls")
+    assert.notEqual((await mcp.call('beat_effect_add', { file, track: 'stem', type: 'eq7' })).isError, true)
+    assert.deepEqual(ids(chainOf(file, 'stem')), ['eq7'])
   })
 })
 

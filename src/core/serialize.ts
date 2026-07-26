@@ -1,5 +1,5 @@
 import type { BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatGroup, BeatNote, BeatScene, BeatSurge, BeatTrack } from './document.js'
-import { AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_KEYS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain, sortPlacements } from './document.js'
+import { AUDIO_TRACK_FIELDS, AUTOMATION_POINT_FIELD_DEFAULTS, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, INSTRUMENT_EFFECT_FIELD_KEYS, NOTE_FIELD_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_KEYS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELDS, SYNTH_PARAM_ORDER, declaredLaneNames, isDefaultEffectChain, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
 
 // v0.10: the effect chain serializes iff it differs from the canonical default (isDefaultEffectChain)
@@ -178,6 +178,21 @@ function serializeTrack(t: BeatTrack): string[] {
   // every audio track's content is clip-scoped (one audio-region clip = one line + its optional
   // gain automation lane), source order preserved like every other track's clip list.
   if (t.kind === 'audio') {
+    // Research 142 §3.2: an audio track's production block — bare `key value` lines, canonically
+    // elided against AUDIO_TRACK_FIELDS' own defaults (0 dB, transparent filter, no sends — NOT
+    // INIT_SYNTH's), then its reorderable insert chain. Same shape and same elision discipline as
+    // the instrument branch below; a track that sets nothing serializes byte-for-byte as before.
+    for (const def of AUDIO_TRACK_FIELDS) {
+      const value = t.synth[def.key]
+      if (value === def.default) continue
+      if (def.kind === 'number' && formatNumber(value as number) === formatNumber(def.default as number)) continue
+      const text = def.kind === 'number' ? formatNumber(value as number) : String(value)
+      lines.push(`  ${def.key} ${text}`)
+    }
+    // Empty is the canonical default for an audio track's chain (it never had a fixed insert
+    // order), so serializeInstrumentEffectLines' "[] means no lines at all" rule is the right one
+    // here too — there is no `effects none` state to represent.
+    lines.push(...serializeInstrumentEffectLines(t.effects, '  '))
     for (const clip of t.clips) {
       lines.push(`  clip ${clip.id}`)
       // Phase 29 Stream GF item 4: audio clips share the same BeatClip.loop/.signature fields as
