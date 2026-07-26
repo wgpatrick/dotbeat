@@ -2743,14 +2743,18 @@ async function showdownCmd(argv) {
         let layeredBuilt = null
         if (layeredDrawn !== null) {
           try {
-            const arch = layeredMod.layeredArchitecture(spec.role)
+            // PASS THE BATCH SEED. The architecture is DRAWN, seeded, from the sweep space in
+            // src/taste/layered.ts; leaving the seed at its default would give every clip in a
+            // round the identical stack, which is exactly the homogenization the owner reported on
+            // 2026-07-26 ("all the layering... makes everything sort of sound the same-ish").
+            const arch = layeredMod.layeredArchitecture(spec.role, batchSeed)
             layeredBuilt = {
               arch,
               figure: layeredDrawn.composed.archetype,
-              plain: layeredMod.buildLayeredClip(spec.role, layeredDrawn.composed, batchBpm),
-              produced: withProduced ? layeredMod.buildLayeredClip(spec.role, layeredDrawn.composed, batchBpm, { produced: true }) : null,
+              plain: layeredMod.buildLayeredClip(spec.role, layeredDrawn.composed, batchBpm, { arch }),
+              produced: withProduced ? layeredMod.buildLayeredClip(spec.role, layeredDrawn.composed, batchBpm, { arch, produced: true }) : null,
             }
-            process.stderr.write(`layered: ${arch.layers.length} layers — ${arch.summary} (shift ${layeredBuilt.plain.baseShift} semitones to the ${spec.role} anchor)\n`)
+            process.stderr.write(`layered: ${arch.layers.length} layers (${arch.draw.family}) — ${arch.summary} (shift ${layeredBuilt.plain.baseShift} semitones to the ${spec.role} anchor)\n`)
           } catch (err) {
             process.stderr.write(`layered skipped (${err instanceof Error ? err.message.split('\n')[0] : err})\n`)
           }

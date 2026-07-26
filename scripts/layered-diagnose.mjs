@@ -6,8 +6,8 @@
 // This renders each LAYER of a stack on its own, at the same gain staging as the full mix, so the
 // per-layer contribution can be read directly instead of inferred from a whole-file band share —
 // the measurement that distinguishes "a bass with a strong sub" from "a bass that is nothing but a
-// sub with an inaudible character layer". It also prints the extended features
-// (scripts/lib/extra-features.mjs) that MixMetrics structurally cannot produce, next to the
+// sub with an inaudible character layer". It also prints the articulation family
+// (src/taste/articulation.ts) that MixMetrics structurally cannot produce, next to the
 // reference-pool quantiles from scripts/ref-pool-stats.mjs.
 //
 //   node scripts/layered-diagnose.mjs [--role bassline] [--seeds 41,1050] [--out <dir>]
@@ -34,7 +34,7 @@ const { inferSeedKey, composePitchedPhrase } = await import(`${repoRoot}/dist/sr
 const { buildLayeredClip } = await import(`${repoRoot}/dist/src/taste/layered.js`)
 const { writeVaryBatch, renderVaryBatch } = await import(`${repoRoot}/dist/src/vary/batch.js`)
 const { analyze, decodeWav } = await import(`${repoRoot}/dist/src/metrics/index.js`)
-const { extraFeatures } = await import(`${repoRoot}/scripts/lib/extra-features.mjs`)
+const { articulationFeatures } = await import(`${repoRoot}/dist/src/taste/articulation.js`)
 
 mkdirSync(outDir, { recursive: true })
 writeFileSync(join(outDir, '.gitignore'), '# private diagnostic renders — never committed\n*\n')
@@ -52,7 +52,7 @@ for (const seed of seeds) {
   const seedDoc = parse(seedText)
   const key = inferSeedKey(seedDoc)
   const phrase = composePitchedPhrase(role, key, seed)
-  const built = buildLayeredClip(role, phrase, seedDoc.bpm)
+  const built = buildLayeredClip(role, phrase, seedDoc.bpm, { seed })
 
   const soloDocs = built.arch.layers.map((l) => ({
     id: l.id,
@@ -74,15 +74,15 @@ for (const seed of seeds) {
     const wav = join(clipDir, `v${i + 1}.wav`)
     if (!existsSync(wav)) { process.stdout.write(`  ${labels[i]}: NO RENDER\n`); continue }
     const d = decodeWav(readFileSync(wav))
-    measured.push({ label: labels[i], m: analyze(d.channels, d.sampleRate), x: extraFeatures(d.channels, d.sampleRate) })
+    measured.push({ label: labels[i], m: analyze(d.channels, d.sampleRate), x: articulationFeatures(d.channels, d.sampleRate) })
   }
   const full = measured[0]
-  process.stdout.write(`  ${'layer'.padEnd(10)}${['rms dB', 'vs FULL', 'LUFS', 'sub%', 'bass%', 'mids%', 'modDepth', 'artic'].map((h) => h.padStart(10)).join('')}\n`)
+  process.stdout.write(`  ${'layer'.padEnd(10)}${['rms dB', 'vs FULL', 'LUFS', 'sub%', 'bass%', 'mids%', 'modDepth', 'artic', 'charLvl'].map((h) => h.padStart(10)).join('')}\n`)
   for (const r of measured) {
     process.stdout.write(`  ${r.label.padEnd(10)}${[
       num(r.m.rmsDbfs), num(r.m.rmsDbfs - full.m.rmsDbfs), num(r.m.integratedLufs),
       num(r.m.spectral.bandsPct.sub), num(r.m.spectral.bandsPct.bass), num(r.m.spectral.bandsPct.mids),
-      num(r.x.modDepthDb), num(r.x.articulationDb),
+      num(r.x.modDepthDb), num(r.x.articulationDb), num(r.x.characterLevelDb),
     ].map((c) => c.padStart(10)).join('')}\n`)
   }
 }

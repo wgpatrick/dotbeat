@@ -22,13 +22,17 @@ import {
   layeredScratchText,
   monoViolations,
   verifyLayeredTargets,
+  architectureFingerprint,
+  architectureShape,
+  REF_POOL_QUANTILES,
   type LayeredFeatures,
 } from '../src/taste/layered.js'
 import { composePitchedPhrase, inferSeedKey } from '../src/taste/showdown.js'
 import { generateSeedBeat } from '../src/taste/seeds.js'
 import { engineplusProfile, surgeplusProfile } from '../src/taste/showdown.js'
 import type { ComposedPhrase } from '../src/taste/phrase.js'
-import type { MixMetrics } from '../src/metrics/index.js'
+import { analyze } from '../src/metrics/index.js'
+import { mulberry32 } from '../src/core/rng.js'
 
 const KEY = { root: 52, minor: true } // E minor — a fixed key so every assertion below is exact
 
@@ -62,62 +66,95 @@ test('every layered architecture is a valid crossover with a mono bottom layer',
 })
 
 test('checkCrossover REJECTS the failure modes it exists to catch', () => {
-  const base = layeredArchitecture('bassline')
+  // seed 3 draws a four-layer bass; the assertions below need at least three layers to mangle
+  const base = layeredArchitecture('bassline', 3)
+  assert.ok(base.layers.length >= 3, 'fixture seed no longer draws a >=3-layer stack')
   const bottom = base.layers[0]!
   const mid = base.layers[1]!
+  const rest = base.layers.slice(2)
 
   // a second layer reaching into the bottom's band (the mud failure mode)
-  const overlapping = { ...base, layers: [bottom, { ...mid, band: { ...mid.band, cutoffHz: 20 } }, base.layers[2]!] }
+  const overlapping = { ...base, layers: [bottom, { ...mid, band: { ...mid.band, cutoffHz: 20 } }, ...rest] }
   const overlap = checkCrossover(overlapping)
   assert.equal(overlap.ok, false)
   assert.match(overlap.problems.join(' '), /pour into/)
 
   // a gap in the spectrum: the bottom's lowpass below the lowest highpass
-  const gapped = { ...base, layers: [{ ...bottom, band: { ...bottom.band, cutoffHz: 40 } }, mid, base.layers[2]!] }
+  const gapped = { ...base, layers: [{ ...bottom, band: { ...bottom.band, cutoffHz: 40 } }, mid, ...rest] }
   const gap = checkCrossover(gapped)
   assert.equal(gap.ok, false)
   assert.match(gap.problems.join(' '), /hole in the spectrum/)
 
   // more than an octave of overlap between the bottom and the next layer
-  const smeared = { ...base, layers: [{ ...bottom, band: { ...bottom.band, cutoffHz: 300 } }, mid, base.layers[2]!] }
+  const smeared = { ...base, layers: [{ ...bottom, band: { ...bottom.band, cutoffHz: 400 } }, mid, ...rest] }
   assert.equal(checkCrossover(smeared).ok, false)
   assert.match(checkCrossover(smeared).problems.join(' '), /more than an octave/)
 
   // no lowpassed bottom at all — nobody owns the low end
-  const headless = { ...base, layers: [{ ...bottom, band: { mode: 'highpass' as const, cutoffHz: 90 } }, mid, base.layers[2]!] }
+  const headless = { ...base, layers: [{ ...bottom, band: { mode: 'highpass' as const, cutoffHz: 90 } }, mid, ...rest] }
   assert.equal(checkCrossover(headless).ok, false)
 
   // a widened bottom layer
-  const wideBottom = { ...base, layers: [{ ...bottom, mono: false }, mid, base.layers[2]!] }
+  const wideBottom = { ...base, layers: [{ ...bottom, mono: false }, mid, ...rest] }
   assert.equal(checkCrossover(wideBottom).ok, false)
   assert.match(checkCrossover(wideBottom).problems.join(' '), /must be mono/)
 })
 
-test('bass layers sit in the mined 75-100 Hz sub/mid crossover band', () => {
-  const arch = layeredArchitecture('bassline')
-  const sub = arch.layers.find((l) => l.id === 'sub')!
-  const mid = arch.layers.find((l) => l.id === 'mid')!
-  assert.ok(sub.band.cutoffHz >= 75 && sub.band.cutoffHz <= 100, `sub lowpass ${sub.band.cutoffHz} outside the consensus 75-100 Hz band`)
-  assert.ok(mid.band.cutoffHz >= 75 && mid.band.cutoffHz <= 100, `mid highpass ${mid.band.cutoffHz} outside the consensus 75-100 Hz band`)
-  // and the sub is the loudest layer in the stack (MusicRadar's -3 / -10 staging direction)
-  assert.ok(arch.layers.every((l) => l.id === 'sub' || l.gainDb < sub.gainDb), 'the sub must be the hottest bass layer')
+// a drawn architecture that broke the ladder must fail LOUDLY at draw time, not render silently
+test('layeredArchitecture draws a valid crossover for every seed in a long sweep', () => {
+  for (const role of LAYERED_ROLES) {
+    for (let seed = 0; seed < 250; seed++) {
+      const arch = layeredArchitecture(role, seed)
+      const cross = checkCrossover(arch)
+      assert.equal(cross.ok, true, `${role} seed ${seed} (${arch.draw.family}): ${cross.problems.join('; ')}`)
+      assert.ok(arch.layers.length >= 2 && arch.layers.length <= 4, `${role} seed ${seed}: ${arch.layers.length} layers`)
+      assert.ok(arch.anchor.hiMidi - arch.anchor.loMidi >= 12, `${role} seed ${seed}: anchor window narrower than an octave`)
+      assert.equal(new Set(arch.layers.map((l) => l.id)).size, arch.layers.length, `${role} seed ${seed}: duplicate layer ids`)
+    }
+  }
 })
 
-test('the lead octave layer implements the corroborated MusicTech recipe literally', () => {
-  const arch = layeredArchitecture('lead')
-  const main = arch.layers.find((l) => l.id === 'main')!
-  const octave = arch.layers.find((l) => l.id === 'octave')!
-  assert.equal(octave.figure.transpose, 12)
-  assert.ok(octave.band.cutoffHz >= 450 && octave.band.cutoffHz <= 550, `octave highpass ${octave.band.cutoffHz} (source: ~500 Hz)`)
-  const below = main.gainDb - octave.gainDb
-  assert.ok(below >= 6 && below <= 10, `octave sits ${below} dB below main (source: 6-10 dB)`)
-  const voices = octave.patch.unisonVoices ?? 1
-  assert.ok(voices >= 3 && voices <= 5, `octave unison ${voices} voices (source: 3-5)`)
+test('bass layers sit in the mined 75-100 Hz sub/mid crossover band, on every seed', () => {
+  for (let seed = 0; seed < 120; seed++) {
+    const arch = layeredArchitecture('bassline', seed)
+    const sub = arch.layers.find((l) => l.id === 'sub')!
+    assert.ok(sub.band.cutoffHz >= 75 && sub.band.cutoffHz <= 100, `seed ${seed}: sub lowpass ${sub.band.cutoffHz} outside the consensus 75-100 Hz band`)
+    // the layer that meets the sub does so within an octave, which is what makes it a crossover
+    const lowestHp = Math.min(...arch.layers.filter((l) => l.band.mode === 'highpass').map((l) => l.band.cutoffHz))
+    assert.ok(lowestHp >= sub.band.cutoffHz / 2 && lowestHp <= sub.band.cutoffHz, `seed ${seed}: lowest highpass ${lowestHp} does not meet the sub's ${sub.band.cutoffHz} Hz lowpass`)
+    // the sub is NEVER the whole instrument: at least one character layer, and it is never buried
+    // more than a few dB under the sub. Calibrated 2026-07-26 against the measured per-layer
+    // contributions that produced the owner's complaint — at the old -5 dB nominal offset the growl
+    // arrived 14 dB under the mix and sub-alone RMS was within 0.15 dB of the whole stack.
+    const character = arch.layers.filter((l) => l.id !== 'sub')
+    assert.ok(character.length >= 1, `seed ${seed}: a bass stack must carry at least one character layer`)
+    assert.ok(character.some((l) => l.gainDb > sub.gainDb), `seed ${seed}: every character layer sits under the sub — this is the 2026-07-26 "it is just a sine" failure`)
+    // and the sub is a pluck, not a held tone (bass-house vein: "nobody uses a long sustain")
+    assert.ok((sub.patch.sustain ?? 1) <= 0.85, `seed ${seed}: sub sustain ${sub.patch.sustain} is a drone, not a bass`)
+  }
+})
+
+test('the lead octave layer implements the corroborated MusicTech recipe literally, on every seed', () => {
+  let seen = 0
+  for (let seed = 0; seed < 120; seed++) {
+    const arch = layeredArchitecture('lead', seed)
+    const main = arch.layers.find((l) => l.id === 'main')!
+    const octave = arch.layers.find((l) => l.id === 'octave')
+    if (!octave) continue
+    seen += 1
+    assert.equal(octave.figure.transpose, 12)
+    assert.ok(octave.band.cutoffHz >= 420 && octave.band.cutoffHz <= 620, `seed ${seed}: octave highpass ${octave.band.cutoffHz} (source: ~500 Hz)`)
+    const below = main.gainDb - octave.gainDb
+    assert.ok(below >= 6 && below <= 10, `seed ${seed}: octave sits ${below} dB below main (source: 6-10 dB)`)
+    const voices = octave.patch.unisonVoices ?? 1
+    assert.ok(voices >= 3 && voices <= 5, `seed ${seed}: octave unison ${voices} voices (source: 3-5)`)
+  }
+  assert.ok(seen > 40, `the octave layer appeared in only ${seen} of 120 lead draws`)
 })
 
 test('parallel compression stays in the sourced 15-35% wet band with a punch-preserving attack', () => {
   for (const role of LAYERED_ROLES) {
-    for (const layer of layeredArchitecture(role).layers) {
+    for (const layer of [0, 1, 2, 3, 4, 5, 6, 7].flatMap((s) => layeredArchitecture(role, s).layers)) {
       const comp = layer.production?.comp
       if (!comp) continue
       assert.ok(comp.mix >= 0.15 && comp.mix <= 0.35, `${role}/${layer.id} comp mix ${comp.mix} outside 0.15-0.35`)
@@ -215,8 +252,9 @@ test('monophonic voicing removes every overlap without touching onsets', () => {
 })
 
 test('clamped layers shorten notes but keep the same onset count', () => {
-  const arch = layeredArchitecture('chords')
+  const arch = layeredArchitecture('chords', 3) // a draw that carries a stab layer
   const stab = arch.layers.find((l) => l.id === 'stab')!
+  assert.ok(stab, 'fixture seed no longer draws a stab layer')
   const phrase = phraseFor('chords')
   const shift = anchorShift(phrase, arch.anchor)
   const notes = layerNotes(phrase, stab.figure, shift)
@@ -353,92 +391,248 @@ test('buildLayeredClip REFUSES to emit a doc that broke mono discipline', () => 
 
 // ---- target verification -------------------------------------------------------------------------
 
-const metricsFrom = (over: Partial<LayeredFeatures> & { centroidHz?: number }): MixMetrics => ({
-  durationSeconds: 8,
-  sampleRate: 48000,
-  channels: 2,
-  integratedLufs: -14,
-  samplePeakDbfs: -1,
-  truePeakDbtp: over.truePeakDb ?? -1,
-  crestDb: over.crestDb ?? 15,
-  rmsDbfs: -16,
-  spectral: {
-    bandsPct: {
-      sub: over.bandSubPct ?? 0,
-      bass: over.bandBassPct ?? 0,
-      mids: over.bandMidsPct ?? 0,
-      presence: over.bandPresencePct ?? 0,
-      air: over.bandAirPct ?? 0,
-    },
-    centroidHz: over.centroidHz ?? 1000,
-  },
-  stereo: { correlation: over.stereoCorrelation ?? 1, widthDb: over.stereoWidthDb ?? -50 },
+/** A full LayeredFeatures record with every value parked in the middle of the bassline reference
+ * class, so a test can move ONE axis and nothing else. Built directly rather than through
+ * `layeredFeatures` because the verification tests are about the RANGES, not the extraction. */
+const featuresFrom = (over: Partial<LayeredFeatures>): LayeredFeatures => ({
+  bandSubPct: 50,
+  bandBassPct: 19,
+  bandMidsPct: 0.2,
+  bandPresencePct: 0,
+  bandAirPct: 0,
+  centroidHz: 76,
+  stereoWidthDb: -56,
+  stereoCorrelation: 1,
+  crestDb: 8,
+  truePeakDb: -1,
+  crestSubDb: 8,
+  crestBassDb: 11,
+  crestMidsDb: 19,
+  levelSubDb: -3,
+  levelBassDb: -6,
+  levelMidsDb: -23,
+  levelPresenceDb: -58,
+  modDepthDb: 9,
+  articulationDb: 20,
+  characterLevelDb: 0.4,
+  ...over,
 })
 
-test('layeredFeatures reads the existing metrics and converts the centroid to Hz', () => {
-  const f = layeredFeatures(metricsFrom({ bandSubPct: 55, centroidHz: 74, stereoWidthDb: -46, stereoCorrelation: 0.99 }))
-  assert.equal(f.bandSubPct, 55)
-  assert.ok(Math.abs(f.centroidHz - 74) < 0.01, `centroid ${f.centroidHz}`)
-  assert.equal(f.stereoWidthDb, -46)
-  assert.equal(f.stereoCorrelation, 0.99)
+test('layeredFeatures merges the metrics vector and the articulation family from one render', () => {
+  // a real buffer: a 55 Hz sine gated into eighth notes, i.e. a crude bassline with note boundaries
+  const sr = 48000
+  const n = sr * 2
+  const left = new Float64Array(n)
+  const right = new Float64Array(n)
+  const gateSamples = Math.round(sr * 0.25)
+  for (let i = 0; i < n; i++) {
+    const inNote = i % gateSamples < gateSamples * 0.6
+    const v = inNote ? 0.5 * Math.sin((2 * Math.PI * 55 * i) / sr) : 0
+    left[i] = v
+    right[i] = v
+  }
+  const m = analyze([left, right], sr)
+  const f = layeredFeatures(m, [left, right], sr)
+  // the metrics half
+  assert.ok(Math.abs(f.centroidHz - m.spectral.centroidHz) < 0.01, `centroid ${f.centroidHz}`)
+  assert.equal(f.bandSubPct, m.spectral.bandsPct.sub)
+  // the articulation half — a gated tone swings, and it is nearly all sub, so character is far down
+  assert.ok(f.articulationDb > 20, `a gated tone must show real articulation, got ${f.articulationDb}`)
+  // sub-dominated, but not by as much as a naive reading suggests: a HARD gate on a sine is itself
+  // a broadband transient, so the character bands carry the click energy. That is honest — a real
+  // render's transients live there too.
+  assert.ok(f.characterLevelDb < 0, `a gated 55 Hz sine must still be sub-dominated, got ${f.characterLevelDb}`)
+  assert.ok(Number.isFinite(f.crestSubDb) && Number.isFinite(f.modDepthDb) && Number.isFinite(f.levelMidsDb))
 })
 
-test('verifyLayeredTargets passes a clip inside every measured band', () => {
-  const v = verifyLayeredTargets('bassline', layeredFeatures(metricsFrom({
-    bandSubPct: 55, centroidHz: 78, stereoWidthDb: -46, stereoCorrelation: 0.995,
-  })))
+test('verifyLayeredTargets passes a clip sitting on the reference medians', () => {
+  const v = verifyLayeredTargets('bassline', featuresFrom({}))
   assert.equal(v.ok, true, formatTargetVerification(v, 'bassline'))
   assert.equal(v.passed, v.total)
   assert.equal(v.total, Object.keys(LAYERED_TARGETS.bassline).length)
+  // and every result reports its distance from the reference median, not just pass/fail
+  for (const r of v.results) assert.ok(Number.isFinite(r.fromMedian), `${r.feature} has no distance-from-median`)
 })
 
-test('verifyLayeredTargets fails the exact features that miss, and only those', () => {
-  // the engineplus bassline profile as 131 measured it: 0.22% sub, 162 Hz centroid, -11.8 dB wide
-  const v = verifyLayeredTargets('bassline', layeredFeatures(metricsFrom({
-    bandSubPct: 0.22, centroidHz: 162, stereoWidthDb: -11.8, stereoCorrelation: 0.88,
-  })))
-  assert.equal(v.ok, false)
-  assert.equal(v.passed, 0, 'the measured engineplus bass row must fail every bass target')
-  assert.deepEqual(v.results.filter((r) => !r.pass).map((r) => r.feature).sort(), ['bandSubPct', 'centroidHz', 'stereoCorrelation', 'stereoWidthDb'])
-  // one feature in range, the rest out
-  const partial = verifyLayeredTargets('bassline', layeredFeatures(metricsFrom({
-    bandSubPct: 45, centroidHz: 162, stereoWidthDb: -11.8, stereoCorrelation: 0.88,
-  })))
-  assert.equal(partial.passed, 1)
-  assert.equal(partial.results.find((r) => r.feature === 'bandSubPct')!.pass, true)
+test('EVERY derived target is two-sided and fails BOTH directions — the 2026-07-26 overshoot gate', () => {
+  // The complaint this test exists for: a floor-only `bandSubPct >= 30` could not fail the layered
+  // bassline's 96.1% sub share (reference median 50.1%) or a floor-less companion gate the 38.5 Hz
+  // centroid (reference median 76.2, p10 44.1). Both scored PASS while the owner heard them as
+  // worse than the unlayered arm. Every derived range must therefore reject overshoot.
+  for (const role of LAYERED_ROLES) {
+    for (const [key, t] of Object.entries(LAYERED_TARGETS[role]) as [keyof LayeredFeatures, { min?: number; max?: number; median?: number }][]) {
+      if (t.min !== undefined) {
+        const under = verifyLayeredTargets(role, featuresFrom({ ...roleCentre(role), [key]: t.min - Math.abs(t.min) * 0.5 - 1 }))
+        assert.equal(under.results.find((r) => r.feature === key)!.pass, false, `${role}.${key} does not reject undershoot`)
+      }
+      if (t.max !== undefined) {
+        const over = verifyLayeredTargets(role, featuresFrom({ ...roleCentre(role), [key]: t.max + Math.abs(t.max) * 0.5 + 1 }))
+        assert.equal(over.results.find((r) => r.feature === key)!.pass, false, `${role}.${key} does not reject overshoot`)
+      }
+      // the two hand-set overrides are one-sided on purpose and say so in their provenance
+      if (t.min === undefined || t.max === undefined) {
+        assert.match(LAYERED_TARGETS[role][key]!.source, /ceiling|floor/, `${role}.${key} is one-sided with no stated reason`)
+      }
+    }
+  }
 })
 
-test('both-sided target ranges reject BOTH directions', () => {
-  const tooNarrow = verifyLayeredTargets('lead', layeredFeatures(metricsFrom({ bandBassPct: 8, bandMidsPct: 80, crestDb: 15, stereoWidthDb: -30 })))
-  assert.equal(tooNarrow.results.find((r) => r.feature === 'stereoWidthDb')!.pass, false, 'a too-narrow lead must fail')
-  const tooWide = verifyLayeredTargets('lead', layeredFeatures(metricsFrom({ bandBassPct: 8, bandMidsPct: 80, crestDb: 15, stereoWidthDb: -1 })))
-  assert.equal(tooWide.results.find((r) => r.feature === 'stereoWidthDb')!.pass, false, 'a too-wide lead must fail')
-  const justRight = verifyLayeredTargets('lead', layeredFeatures(metricsFrom({ bandBassPct: 8, bandMidsPct: 80, crestDb: 15, stereoWidthDb: -6 })))
-  assert.equal(justRight.ok, true, formatTargetVerification(justRight, 'lead'))
+/** Every gated feature parked at its own role's reference median — so a single-axis test of one
+ * feature is not silently failing on a different one. */
+const roleCentre = (role: (typeof LAYERED_ROLES)[number]): Partial<LayeredFeatures> => {
+  const out: Partial<LayeredFeatures> = {}
+  for (const [key, t] of Object.entries(LAYERED_TARGETS[role])) {
+    if (t.median !== undefined) out[key as keyof LayeredFeatures] = t.median
+  }
+  return out
+}
+
+test('the measured layered-bass overshoot of 2026-07-26 now FAILS the gate', () => {
+  // the exact numbers measured on taste-dataset/layered-check/bassline-41/layered.wav, the file the
+  // owner listened to and rejected while it was scoring 4/4
+  const v = verifyLayeredTargets('bassline', featuresFrom({
+    bandSubPct: 96.1, centroidHz: 38.52, stereoWidthDb: -56.02, stereoCorrelation: 1,
+    crestSubDb: 6.68, articulationDb: 8.74, characterLevelDb: -13.04,
+  }))
+  assert.equal(v.ok, false, 'the clip the owner rejected must not pass')
+  const failed = v.results.filter((r) => !r.pass).map((r) => r.feature).sort()
+  for (const expected of ['articulationDb', 'bandSubPct', 'centroidHz', 'characterLevelDb']) {
+    assert.ok(failed.includes(expected as keyof LayeredFeatures), `${expected} must fail: ${formatTargetVerification(v, 'layered bass 41')}`)
+  }
+  // and the engineplus bass the owner PREFERRED must fail for the opposite reasons — the honest
+  // picture is that neither arm was right, not that the old one was
+  const ep = verifyLayeredTargets('bassline', featuresFrom({
+    bandSubPct: 0.26, centroidHz: 140.58, stereoWidthDb: -11.2, stereoCorrelation: 0.86,
+    crestSubDb: 19.41, articulationDb: 8.93, characterLevelDb: 19.62,
+  }))
+  assert.equal(ep.ok, false)
+  const epFailed = ep.results.filter((r) => !r.pass).map((r) => r.feature)
+  assert.ok(epFailed.includes('characterLevelDb'), 'engineplus bass has no sub at all and must fail for it')
+  assert.ok(epFailed.includes('stereoWidthDb'), 'engineplus bass is measurably too wide')
 })
 
-test('every target carries its measured provenance, and the blind spots are named', () => {
+test('every target is derived from the measured reference distribution it cites', () => {
   for (const role of LAYERED_ROLES) {
     for (const [key, t] of Object.entries(LAYERED_TARGETS[role])) {
       assert.ok(t.source.length > 10, `${role}.${key} has no provenance`)
       assert.ok(t.min !== undefined || t.max !== undefined, `${role}.${key} has no bound`)
       if (t.min !== undefined && t.max !== undefined) assert.ok(t.min < t.max, `${role}.${key} has an inverted range`)
+      const q = REF_POOL_QUANTILES[role][key as keyof LayeredFeatures]
+      assert.ok(q, `${role}.${key} is gated with no measured reference quantiles`)
+      // the median must actually sit inside the band that claims to be centred on it
+      if (t.median !== undefined) {
+        if (t.min !== undefined) assert.ok(t.median >= t.min, `${role}.${key}: median below its own floor`)
+        if (t.max !== undefined) assert.ok(t.median <= t.max, `${role}.${key}: median above its own ceiling`)
+      }
+      // and a derived (non-override) range IS the pool's interquartile range
+      if (!/ceiling|floor/.test(t.source)) {
+        assert.equal(t.min, q!.p25, `${role}.${key} floor drifted from the pool p25`)
+        assert.equal(t.max, q!.p75, `${role}.${key} ceiling drifted from the pool p75`)
+        assert.equal(t.median, q!.p50, `${role}.${key} median drifted from the pool median`)
+      }
+    }
+    // every quantile row is monotone, or a paste error has silently inverted a gate
+    for (const [key, q] of Object.entries(REF_POOL_QUANTILES[role])) {
+      assert.ok(q.p10 <= q.p25 && q.p25 <= q.p50 && q.p50 <= q.p75 && q.p75 <= q.p90, `${role}.${key} quantiles are not monotone`)
     }
   }
   // the gate must ADMIT what it cannot see rather than silently omitting it
   assert.ok(UNMEASURABLE_TARGETS.length >= 4)
   const named = UNMEASURABLE_TARGETS.map((u) => u.name)
-  for (const expected of ['crest_subDb', 'attackMedMs', 'fluxMean', 'flatnessHiDb']) {
+  for (const expected of ['attackMedMs', 'fluxMean', 'onsetRatePerSec', 'flatnessHiDb']) {
     assert.ok(named.includes(expected), `${expected} must be reported as unmeasurable, not dropped`)
   }
-  const printed = formatTargetVerification(verifyLayeredTargets('chords', layeredFeatures(metricsFrom({}))), 'x')
+  const printed = formatTargetVerification(verifyLayeredTargets('chords', featuresFrom(roleCentre('chords'))), 'x')
   for (const n of named) assert.match(printed, new RegExp(n))
+  // the printed table carries the median distance, which is the readout the overshoot needed
+  assert.match(printed, /vs med/)
+})
+
+// ---- architecture diversity — the 2026-07-26 "everything sounds the same-ish" gate ----------------
+
+test('a simulated round does not repeat layered architectures', () => {
+  // The owner's report, verbatim: "One thing I noticed with all the layering... is it makes
+  // everything sort of sound the same-ish." Before the sweep this number was 1 distinct
+  // architecture per role for the entire program — every layered clip ever rendered was the same
+  // three voices at the same three cutoffs at the same three levels. Modelled on
+  // test/theory.test.ts's "a simulated round does not repeat onset skeletons" guard, which fixed
+  // the identical failure one level down at the note layer.
+  const OFFSETS = [0, 101, 202, 977]
+  for (const role of LAYERED_ROLES) {
+    const fingerprints: string[] = []
+    const shapes: string[] = []
+    const families = new Set<string>()
+    const layerCounts = new Set<number>()
+    for (const base of [7000, 21, 130501]) {
+      const rng = mulberry32(base)
+      for (let batch = 0; batch < 6; batch++) {
+        const batchSeed = Math.floor(rng() * 100000)
+        for (const off of OFFSETS) {
+          const arch = layeredArchitecture(role, batchSeed + off)
+          fingerprints.push(architectureFingerprint(arch))
+          shapes.push(architectureShape(arch))
+          families.add(arch.draw.family)
+          layerCounts.add(arch.layers.length)
+        }
+      }
+    }
+    // 1. no two clips in a 15-draw window are the same instrument. Gate 3.0 copied from the theory
+    //    guard's shape; the pre-fix value here was 14.0 (every draw identical).
+    let repeats = 0
+    let windows = 0
+    for (let i = 0; i + 15 <= fingerprints.length; i++) {
+      repeats += 15 - new Set(fingerprints.slice(i, i + 15)).size
+      windows += 1
+    }
+    const perWindow = repeats / Math.max(1, windows)
+    assert.ok(perWindow < 3, `${role}: ${perWindow.toFixed(2)} identical-architecture repeats per 15 draws (was 14.0 before the sweep, gate 3.0)`)
+
+    // 2. the COARSE identity varies too — a round that varies only cutoffs still sounds the same-ish
+    let shapeRepeats = 0
+    for (let i = 0; i + 15 <= shapes.length; i++) shapeRepeats += 15 - new Set(shapes.slice(i, i + 15)).size
+    const shapesPerWindow = shapeRepeats / Math.max(1, windows)
+    assert.ok(shapesPerWindow < 11, `${role}: ${shapesPerWindow.toFixed(2)} identical layer-SET repeats per 15 draws (was 14.0, gate 11.0)`)
+
+    // 3. all three legitimate layer counts occur, and at least four families do
+    assert.ok(layerCounts.has(2) && layerCounts.has(3) && layerCounts.has(4), `${role}: layer counts drawn were ${[...layerCounts].sort().join(',')} — 2, 3 and 4 are all legitimate`)
+    assert.ok(families.size >= 4, `${role}: only ${families.size} distinct layer families in a whole round`)
+  }
+})
+
+test('an architecture draw is deterministic in its seed and decorrelated from the figure draw', () => {
+  for (const role of LAYERED_ROLES) {
+    for (const seed of [0, 1, 41, 1050, 99991]) {
+      assert.equal(
+        architectureFingerprint(layeredArchitecture(role, seed)),
+        architectureFingerprint(layeredArchitecture(role, seed)),
+        `${role} seed ${seed} is not deterministic`,
+      )
+    }
+    // adjacent seeds must not collide — a batch walks consecutive seeds
+    const adjacent = [0, 1, 2, 3, 4, 5, 6, 7].map((s) => architectureFingerprint(layeredArchitecture(role, s)))
+    assert.equal(new Set(adjacent).size, adjacent.length, `${role}: consecutive seeds collide`)
+  }
+})
+
+test('buildLayeredClip honours the architecture seed end to end', () => {
+  for (const role of LAYERED_ROLES) {
+    const phrase = phraseFor(role, 77)
+    const a = buildLayeredClip(role, phrase, 128, { seed: 5 })
+    const b = buildLayeredClip(role, phrase, 128, { seed: 5 })
+    const c = buildLayeredClip(role, phrase, 128, { seed: 6 })
+    assert.equal(serialize(a.doc), serialize(b.doc), `${role}: the same seed must rebuild byte-identically`)
+    assert.notEqual(serialize(a.doc), serialize(c.doc), `${role}: a different seed must build a different stack`)
+    assert.equal(a.arch.draw.family.length > 0, true)
+    // a pre-drawn architecture short-circuits the draw
+    const reused = buildLayeredClip(role, phrase, 128, { arch: a.arch })
+    assert.equal(serialize(reused.doc), serialize(a.doc))
+  }
 })
 
 test('unknown roles are refused loudly (drum-loop is deliberately out of scope)', () => {
   assert.equal(isLayeredRole('drum-loop'), false)
   assert.throws(() => layeredArchitecture('drum-loop'), /no layered architecture/)
-  assert.throws(() => verifyLayeredTargets('drum-loop', layeredFeatures(metricsFrom({}))), /no layered targets/)
+  assert.throws(() => verifyLayeredTargets('drum-loop', featuresFrom({})), /no layered targets/)
   assert.throws(() => buildLayeredClip('drum-loop', phraseFor('lead'), 120), /no layered architecture/)
   assert.throws(() => buildLayeredClip('bassline', { archetype: 'x', notes: [] }, 120), /at least one note/)
 })

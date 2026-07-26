@@ -30,8 +30,9 @@ const outPath = arg('--out', '')
 
 const { analyze, decodeWav } = await import(`${repoRoot}/dist/src/metrics/index.js`)
 const { layeredFeatures } = await import(`${repoRoot}/dist/src/taste/layered.js`)
+const { ARTICULATION_KEYS } = await import(`${repoRoot}/dist/src/taste/articulation.js`)
 
-export const FEATURES = ['bandSubPct', 'bandBassPct', 'bandMidsPct', 'bandPresencePct', 'bandAirPct', 'centroidHz', 'stereoWidthDb', 'stereoCorrelation', 'crestDb', 'truePeakDb']
+export const FEATURES = ['bandSubPct', 'bandBassPct', 'bandMidsPct', 'bandPresencePct', 'bandAirPct', 'centroidHz', 'stereoWidthDb', 'stereoCorrelation', 'crestDb', 'truePeakDb', ...ARTICULATION_KEYS]
 
 const quantile = (sorted, q) => {
   if (sorted.length === 0) return NaN
@@ -55,7 +56,7 @@ for (const role of roles) {
   for (const f of files) {
     try {
       const { channels, sampleRate } = decodeWav(readFileSync(join(dir, f)))
-      rows.push({ file: f, features: layeredFeatures(analyze(channels, sampleRate)) })
+      rows.push({ file: f, features: layeredFeatures(analyze(channels, sampleRate), channels, sampleRate) })
     } catch (err) {
       process.stderr.write(`  ${role}/${f}: unreadable (${err.message})\n`)
     }
