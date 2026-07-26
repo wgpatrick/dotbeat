@@ -23,21 +23,43 @@ export interface TrainPair {
 
 /** z-score each COLUMN across a set of row vectors; a column with zero variance (nothing to
  * distinguish) maps to 0 for every row. Generic — DSP features and PCA'd embeddings both pass
- * through here, so "standardized within the batch" means the same thing for every feature set. */
+ * through here, so "standardized within the batch" means the same thing for every feature set.
+ *
+ * Non-finite entries (a missing key on a vector written under an older FEATURE_SET_VERSION, or a
+ * NaN from a degenerate render) are EXCLUDED from the column's mean/std and then imputed as 0 —
+ * i.e. "at this batch's mean", the neutral value for z-scored data. This is the fix for the
+ * silent-degradation bug the 2026-07-26 append-safety audit found: the old code summed the whole
+ * column unconditionally, so one `undefined` made mean and std NaN, `NaN > 1e-9` evaluated FALSE,
+ * and the column stayed all-zero for EVERY row — deleting a real feature from every vector in the
+ * population because one stale vector was present. See the ruling in features.ts. */
 export function zScoreColumns(rows: number[][]): number[][] {
   const n = rows.length
   if (n === 0) return []
   const dims = rows[0]!.length
   const out: number[][] = Array.from({ length: n }, () => new Array<number>(dims).fill(0))
   for (let d = 0; d < dims; d++) {
+    let count = 0
     let mean = 0
-    for (const r of rows) mean += r[d]!
-    mean /= n
+    for (const r of rows) {
+      const v = r[d]
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        mean += v
+        count++
+      }
+    }
+    if (count === 0) continue
+    mean /= count
     let variance = 0
-    for (const r of rows) variance += (r[d]! - mean) ** 2
-    const std = Math.sqrt(variance / n)
+    for (const r of rows) {
+      const v = r[d]
+      if (typeof v === 'number' && Number.isFinite(v)) variance += (v - mean) ** 2
+    }
+    const std = Math.sqrt(variance / count)
     if (std > 1e-9) {
-      for (let i = 0; i < n; i++) out[i]![d] = (rows[i]![d]! - mean) / std
+      for (let i = 0; i < n; i++) {
+        const v = rows[i]![d]
+        if (typeof v === 'number' && Number.isFinite(v)) out[i]![d] = (v - mean) / std
+      }
     }
   }
   return out
@@ -79,11 +101,11 @@ export interface BTModel {
 const sigmoid = (z: number) => 1 / (1 + Math.exp(-z))
 
 /** Full-batch gradient descent on the Bradley-Terry logistic loss with L2 regularization.
- * 13 dims x a few hundred pairs trains in well under a millisecond — retrain-per-invocation is
+ * A few dozen dims x a few hundred pairs trains in well under a millisecond — retrain-per-invocation is
  * the intended usage, no persistence layer needed yet. */
 export function trainBT(pairs: TrainPair[], opts: { l2?: number; iterations?: number; learningRate?: number } = {}): BTModel {
-  // dims come from the data — the same trainer serves the 13-dim DSP model, PCA'd embeddings,
-  // and their concatenation (taste-eval's T2 ablation).
+  // dims come from the data — the same trainer serves the DSP model (FEATURE_KEYS.length),
+  // PCA'd embeddings, and their concatenation (taste-eval's T2 ablation).
   const dims = pairs.length > 0 ? pairs[0]!.winner.length : FEATURE_KEYS.length
   const l2 = opts.l2 ?? 0.05
   const iterations = opts.iterations ?? 500
