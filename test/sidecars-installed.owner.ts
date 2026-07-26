@@ -121,7 +121,9 @@ test('beat analyze --backend beatthis really analyzes a WAV (the path CI can onl
 
 const embedPy = join(repoRoot, 'python', 'embed.py')
 
-/** Same resolution order as src/analysis/sidecar.ts resolvePython — BEAT_PYTHON, repo venv, PATH. */
+/** Same resolution order as src/analysis/spawn-sidecar.ts resolvePython() — BEAT_PYTHON, repo venv,
+ * PATH. Kept as an independent copy ON PURPOSE: this is the owner-machine gate that proves the real
+ * sidecars are installed, so it must not inherit a bug from the module it is checking. */
 function resolveSidecarPython(): string {
   const override = process.env.BEAT_PYTHON
   if (override && override.trim() !== '') return override.trim()

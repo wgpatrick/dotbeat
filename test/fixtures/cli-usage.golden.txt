@@ -208,7 +208,7 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           GATED: fetch a specific CC0 sound from Freesound by id and
                                                           register it (label "CC0-1.0"); needs the key + egress. CC0
                                                           is the only license ever fetched (zero redistribution risk)
-  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio|fal] [--provider P] [--license L]
+  beat source gen <file.beat> <sample-id> "<prompt>" [--seconds N] [--seed N] [--backend stub|stableaudio|fal] [--provider P] [--license L] [--bpm N --bars N]
                                                           GENERATE a one-shot with Stable Audio Open (local text-to-audio)
                                                           and register it as media with a provenance sidecar. Default
                                                           --backend stableaudio (needs torch + the model, owner-side;
@@ -220,9 +220,15 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           under the Community License); --provider picks others:
                                                           fal-ai/stable-audio (Open, the local backend's model) or
                                                           fal-ai/stable-audio-25/text-to-audio (2.5, Stability
-                                                          platform terms). "Powered by Stability AI"
+                                                          platform terms). "Powered by Stability AI".
+                                                          --bpm N --bars N (fal only, both required) cuts the
+                                                          download to N bars at that tempo, starting on a DETECTED
+                                                          DOWNBEAT — so Lyria's fixed 30s or MiniMax's multi-minute
+                                                          track becomes a loop that begins on a strong beat. The cut
+                                                          is recorded in the provenance sidecar
+                                                          (generated.downbeatTrim)
   beat source gen --doctor                                report which generative backends are installed (JSON)
-  beat source gen <file.beat> <sample-id> "<prompt>" --count N [--seed-from S] [--out-dir d] [--audition]
+  beat source gen <file.beat> <sample-id> "<prompt>" --count N [--seed-from S] [--out-dir d] [--audition] [--bpm N --bars N]
                                                           BATCH: generate N candidates of ONE prompt across seeds
                                                           S..S+N-1 into gen-<sample-id>-<S>/ next to the .beat and
                                                           register NOTHING — then rank them with `beat score` and
@@ -348,7 +354,7 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           lane-aware on declared-lane drums tracks (cold start
                                                           recommends a real lane; never recommends a group that
                                                           would be an audio no-op on that track)
-  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend clap|mert|stub|off] [--embed-model M] [--aes-backend aes|stub|off]
+  beat taste-eval <file.beat | --log f> [--json] [--seed N] [--backfill] [--embed-backend off|stub|clap|mert] [--embed-model M] [--aes-backend aes|stub|off]
                                                           the taste-model eval harness (docs/taste-loop-design.md):
                                                           leave-one-batch-out held-out pick prediction over the
                                                           scores log — top-1/top-3/pairwise accuracy vs chance for
@@ -356,14 +362,18 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           renders still exist to embed — embed-bt and both-bt, the
                                                           T2 ablation) plus the learned taste directions. Embeddings
                                                           come from a Python sidecar (python/embed.py), cached next
-                                                          to each wav: clap = LAION-CLAP (default, Apache-2.0),
-                                                          mert = MERT-330M (stronger on music benchmarks; CC-BY-NC
-                                                          weights, personal use only), stub = deterministic no-deps.
-                                                          --aes-backend adds Audiobox-Aesthetics (CC-BY-4.0): four
-                                                          NAMED axes per clip — CE content enjoyment, CU content
-                                                          usefulness, PC production complexity, PQ production
-                                                          quality — as explicit features (aes-bt / dsp+aes-bt in
-                                                          the ablation) plus signed per-axis taste directions.
+                                                          to each wav, and DEFAULT TO off: clap = LAION-CLAP
+                                                          (Apache-2.0) is RETIRED — it scored below chance on
+                                                          held-out owner picks (research/122 §5) — and mert =
+                                                          MERT-330M (CC-BY-NC weights, personal use only) was never
+                                                          tried; both stay selectable to reproduce an old run.
+                                                          stub = deterministic no-deps. The endorsed representation
+                                                          is --aes-backend (Audiobox-Aesthetics, CC-BY-4.0), ON by
+                                                          default: four NAMED axes per clip — CE content enjoyment,
+                                                          CU content usefulness, PC production complexity, PQ
+                                                          production quality — as explicit features (aes-bt /
+                                                          dsp+aes-bt in the ablation) plus signed per-axis taste
+                                                          directions.
                                                           Scored batches carry per-variant DSP features in the log
                                                           since T0; --backfill derives them for older entries whose
                                                           batch renders still exist (rewrites the log, .bak kept).

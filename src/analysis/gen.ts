@@ -7,24 +7,16 @@
 // spawn + the exit-code contract; scripts/source-lib.mjs owns everything downstream (prep,
 // registration, the enforced provenance sidecar, rollback). See decisions.md D19.
 //
-// It reuses resolvePython() and the timeout/maxBuffer constants from sidecar.ts verbatim — one
-// interpreter-resolution rule, one degrade vocabulary across both sidecars.
+// The spawn scaffold (interpreter resolution, timeout/maxBuffer, exit-code vocabulary) is
+// ./spawn-sidecar.ts — shared with every other sidecar, which is what the pre-R4-1 version of this
+// comment CLAIMED while re-declaring the constants locally.
 
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { execFile } from 'node:child_process'
-import { resolvePython } from './sidecar.js'
+import { lastNonEmptyLine, resolvePython, spawnSidecar, type SpawnResult } from './spawn-sidecar.js'
 import type { StemName } from './stems.js'
 
-// dist/src/analysis/gen.js → repo root is three levels up (analysis → src → dist → root), matching
-// sidecar.ts's ANALYZE_PY handling. Kept relative so gen.py's own `pip install -r python/…` fix
-// lines are meaningful; spawned with cwd=repoRoot.
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-const GEN_PY = 'python/gen.py' // relative to repoRoot
-
-const SPAWN_TIMEOUT_MS = 600_000 // matches sidecar.ts / src/mcp/server.ts's execFile prior art
-const SPAWN_MAX_BUFFER = 64 * 1024 * 1024
+const GEN_PY = 'python/gen.py' // relative to the repo root, spawned with cwd=repoRoot so gen.py's
+// own `pip install -r python/…` fix lines are copy-pasteable where they print.
 
 /** The venv setup one-liner surfaced whenever no Python interpreter can be found. */
 const VENV_SETUP_HINT =
@@ -100,43 +92,21 @@ export interface RunGenOptions {
    * full-mix model (Lyria) still yields a single-instrument clip. Off by default — the existing
    * one-shot/batch callers are byte-unchanged. The Python backends ignore it. */
   stemExtract?: StemName
+  /** fal backend only, OPT-IN and given TOGETHER: downbeat-align-trim the generation to `bars` bars
+   * at `bpm` (src/analysis/gen-trim.ts, research/127 §4.2). This is why the trim exists — Lyria's
+   * fixed 30 s and MiniMax's multi-minute output need cutting, and those are exactly the models
+   * `beat source gen --backend fal --provider ...` selects. Until R4-4 these fields were missing
+   * from RunGenOptions entirely, so the whole capability was unreachable from the registered
+   * `beat source gen` path and only scripts/gen-bakeoff-run.mjs (which calls runGenFal directly)
+   * could trim. Off by default, so existing callers are byte-identical; the raw untrimmed download
+   * is preserved at `<outPath>.raw.wav` so the cut stays auditable and reversible. */
+  bpm?: number
+  bars?: number
 }
 
 export interface RunGenResult {
   meta: GenMeta
   outPath: string
-}
-
-interface SpawnResult {
-  code: number | null
-  stdout: string
-  stderr: string
-  enoent: boolean
-}
-
-function spawnPython(python: string, args: string[]): Promise<SpawnResult> {
-  return new Promise((resolvePromise) => {
-    execFile(
-      python,
-      args,
-      { cwd: repoRoot, timeout: SPAWN_TIMEOUT_MS, maxBuffer: SPAWN_MAX_BUFFER },
-      (err, stdout, stderr) => {
-        if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-          resolvePromise({ code: null, stdout, stderr, enoent: true })
-        } else if (err) {
-          const code = typeof (err as NodeJS.ErrnoException).code === 'number' ? ((err as unknown as { code: number }).code) : 1
-          resolvePromise({ code, stdout, stderr, enoent: false })
-        } else {
-          resolvePromise({ code: 0, stdout, stderr, enoent: false })
-        }
-      },
-    )
-  })
-}
-
-function lastNonEmptyLine(text: string): string {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '')
-  return lines.length > 0 ? lines[lines.length - 1]! : ''
 }
 
 /**
@@ -152,6 +122,20 @@ export async function runGen(opts: RunGenOptions): Promise<RunGenResult> {
   }
   if (!(seconds > 0)) throw new BeatGenError(`beat source gen: --seconds must be positive, got ${seconds}`)
   if (!Number.isInteger(seed)) throw new BeatGenError(`beat source gen: --seed must be an integer, got ${seed}`)
+
+  // The downbeat trim is fal-only and needs BOTH numbers. Say so loudly rather than accepting a
+  // flag and silently doing nothing with it (the class of bug pilot 110 found on --by-type).
+  const wantsTrim = opts.bpm !== undefined || opts.bars !== undefined
+  if (wantsTrim) {
+    if (opts.bpm === undefined || opts.bars === undefined) {
+      throw new BeatGenError('beat source gen: --bpm and --bars go together (the downbeat trim needs both to know how long a bar is)')
+    }
+    if (!(opts.bpm > 0)) throw new BeatGenError(`beat source gen: --bpm must be positive, got ${opts.bpm}`)
+    if (!Number.isInteger(opts.bars) || opts.bars < 1) throw new BeatGenError(`beat source gen: --bars must be a positive integer, got ${opts.bars}`)
+    if (backend !== 'fal') {
+      throw new BeatGenError(`beat source gen: --bpm/--bars trim the hosted download and only apply to --backend fal (got "${backend}") — the local backends generate exactly --seconds of audio`)
+    }
+  }
 
   // The hosted backend is pure TS — no Python, no venv, one API round-trip (gen-fal.ts). Same
   // GenMeta contract, so source-lib's prep/provenance pipeline never knows the difference.
@@ -169,19 +153,16 @@ export async function runGen(opts: RunGenOptions): Promise<RunGenResult> {
       outPath,
       ...(opts.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}),
       ...(opts.stemExtract ? { stemExtract: opts.stemExtract } : {}),
+      ...(opts.bpm !== undefined && opts.bars !== undefined ? { bpm: opts.bpm, bars: opts.bars } : {}),
     })
     return { meta, outPath }
   }
 
   const python = resolvePython()
-  const res = await spawnPython(python, [
-    GEN_PY,
-    '--backend', backend,
-    '--prompt', prompt,
-    '--seconds', String(seconds),
-    '--seed', String(seed),
-    '--output', outPath,
-  ])
+  const res = await spawnSidecar({
+    python,
+    args: [GEN_PY, '--backend', backend, '--prompt', prompt, '--seconds', String(seconds), '--seed', String(seed), '--output', outPath],
+  })
 
   if (res.enoent) throw new BeatGenError(`${VENV_SETUP_HINT} (tried "${python}")`)
   if (res.code !== 0) {
@@ -224,13 +205,9 @@ export async function runGen(opts: RunGenOptions): Promise<RunGenResult> {
  * sidecar.ts's sidecarDoctor). */
 export async function genDoctor(): Promise<Record<string, unknown>> {
   const python = resolvePython()
-  let res: SpawnResult
-  try {
-    res = await spawnPython(python, [GEN_PY, '--doctor'])
-  } catch (e) {
-    const { falDoctor } = await import('./gen-fal.js')
-    return { pythonFound: false, ...falDoctor(), interpreter: python, error: e instanceof Error ? e.message : String(e) }
-  }
+  // Not the generic sidecarDoctor: this report merges the HOSTED backend's status (falDoctor) into
+  // two of the four branches, so it stays hand-written on top of the shared spawn.
+  const res: SpawnResult = await spawnSidecar({ python, args: [GEN_PY, '--doctor'] })
   if (res.enoent) {
     const { falDoctor } = await import('./gen-fal.js')
     return {

@@ -568,7 +568,11 @@ function computeEnsembleUncertainty(batches: TasteBatch[], beta = PESS_BETA): En
 
 export interface EvaluateOptions {
   seed?: number
-  /** 'off' skips embeddings entirely; default 'clap' degrades to a note when the sidecar can't run */
+  /** 'off' skips the raw-vector embedding channel — and 'off' is now the DEFAULT (R4-3 /
+   * research/130 W0.4). Both real backends here are retired: clap measured below chance on held-out
+   * owner picks (research/122 §5) and mert was never tried. The endorsed representation rides
+   * `aesBackend`, which defaults to 'aes', so the harness still gets real features by default;
+   * pass 'clap'/'mert'/'stub' explicitly to reproduce an old run. */
   embedBackend?: EmbedBackend | 'off'
   embedModel?: string
   /** 'off' skips the Audiobox-Aesthetics axes; default 'aes' degrades to a note when the sidecar
@@ -585,7 +589,7 @@ export async function evaluate(logPath: string, opts: EvaluateOptions = {}): Pro
   const reports: ScorerReport[] = []
 
   let embedding: EvalReport['embedding']
-  const embedBackend = opts.embedBackend ?? 'clap'
+  const embedBackend = opts.embedBackend ?? 'off'
   if (embedBackend !== 'off' && batches.length > 0) {
     const attach = await attachEmbeddings(batches, { backend: embedBackend, model: opts.embedModel })
     const pcaDims = attach.error === undefined ? projectAllEmbeddings(batches) : 0

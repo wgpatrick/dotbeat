@@ -9,19 +9,12 @@
 // The comparison itself is a pure function of two sidecar results (roughnessFindings) so it tests
 // with stubbed data; roughnessCompare wires in the actual sidecar spawn.
 
-import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { lastNonEmptyLine, resolvePython, sidecarDoctor as runSidecarDoctor, spawnSidecar } from '../analysis/spawn-sidecar.js'
 import type { PathologyFinding } from './screens.js'
 
-// dist/src/metrics/roughness.js → repo root is three levels up, same trick as analysis/sidecar.ts.
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-const ROUGHNESS_PY = 'python/roughness.py' // relative to repoRoot (kept relative so the sidecar's
-// own `pip install -r python/...` fix line is meaningful); spawned with cwd=repoRoot.
-
-const SPAWN_TIMEOUT_MS = 600_000
-const SPAWN_MAX_BUFFER = 64 * 1024 * 1024
+const ROUGHNESS_PY = 'python/roughness.py' // relative to the repo root (kept relative so the
+// sidecar's own `pip install -r python/...` fix line is meaningful); spawned with cwd=repoRoot.
 
 // research 123 §5 thresholds — a bin flags only when BOTH clear (a small % rise on a near-zero bin
 // is noise; a small absolute rise on a loud bin is a level wobble). Bin-level application of the
@@ -68,42 +61,7 @@ export interface RoughnessResult {
  * (documented in python/README.md); the chain still falls back to the shared venv when it isn't.
  */
 export function resolveRoughnessPython(): string {
-  const override = process.env.BEAT_ROUGHNESS_PYTHON
-  if (override && override.trim() !== '') return override.trim()
-  const dedicated = join(repoRoot, 'python', 'venv-roughness', 'bin', 'python3')
-  if (existsSync(dedicated)) return dedicated
-  const shared = process.env.BEAT_PYTHON
-  if (shared && shared.trim() !== '') return shared.trim()
-  const venv = join(repoRoot, 'python', '.venv', 'bin', 'python3')
-  if (existsSync(venv)) return venv
-  return 'python3'
-}
-
-interface SpawnResult {
-  code: number | null
-  stdout: string
-  stderr: string
-  enoent: boolean
-}
-
-function spawnPython(python: string, args: string[]): Promise<SpawnResult> {
-  return new Promise((resolvePromise) => {
-    execFile(python, args, { cwd: repoRoot, timeout: SPAWN_TIMEOUT_MS, maxBuffer: SPAWN_MAX_BUFFER }, (err, stdout, stderr) => {
-      if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-        resolvePromise({ code: null, stdout, stderr, enoent: true })
-      } else if (err) {
-        const code = typeof (err as NodeJS.ErrnoException).code === 'number' ? (err as unknown as { code: number }).code : 1
-        resolvePromise({ code, stdout, stderr, enoent: false })
-      } else {
-        resolvePromise({ code: 0, stdout, stderr, enoent: false })
-      }
-    })
-  })
-}
-
-function lastNonEmptyLine(text: string): string {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '')
-  return lines.length > 0 ? lines[lines.length - 1]! : ''
+  return resolvePython({ envVar: 'BEAT_ROUGHNESS_PYTHON', dedicatedVenv: 'venv-roughness' })
 }
 
 const VENV_HINT =
@@ -156,7 +114,7 @@ export async function runRoughness(wavPath: string, opts: { binSeconds?: number 
   const python = resolveRoughnessPython()
   const args = [ROUGHNESS_PY, '--input', wavPath]
   if (opts.binSeconds !== undefined) args.push('--bin-seconds', String(opts.binSeconds))
-  const res = await spawnPython(python, args)
+  const res = await spawnSidecar({ python, args })
   if (res.enoent) throw new BeatRoughnessError(`no Python interpreter found (tried "${python}"). ${VENV_HINT}`)
   if (res.code !== 0) {
     const detail = lastNonEmptyLine(res.stderr) || `exit code ${res.code}`
@@ -227,14 +185,9 @@ export async function roughnessCompare(baselineWav: string, candidateWav: string
 
 /** Doctor: is the roughness sidecar runnable here? Never throws — mirrors sidecarDoctor. */
 export async function roughnessDoctor(): Promise<Record<string, unknown>> {
-  const python = resolveRoughnessPython()
-  const res = await spawnPython(python, [ROUGHNESS_PY, '--doctor'])
-  if (res.enoent) return { available: false, interpreter: python, pythonFound: false, error: `no Python interpreter found (tried "${python}"). ${VENV_HINT}` }
-  if (res.code !== 0) return { available: false, interpreter: python, pythonFound: true, error: lastNonEmptyLine(res.stderr) || `--doctor exited ${res.code}` }
-  try {
-    const report = JSON.parse(res.stdout) as Record<string, unknown>
-    return { ...report, interpreter: python, pythonFound: true }
-  } catch {
-    return { available: false, interpreter: python, pythonFound: true, error: 'sidecar --doctor produced non-JSON', raw: res.stdout }
-  }
+  return runSidecarDoctor(ROUGHNESS_PY, {
+    python: resolveRoughnessPython(),
+    hint: VENV_HINT,
+    failure: { available: false },
+  })
 }

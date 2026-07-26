@@ -219,6 +219,19 @@ See the refined sketch in [`docs/format-spec.md`](docs/format-spec.md).
 
 ## 5. Architecture
 
+> **Status note (2026-07-26):** this section is the original architecture thesis and still
+> describes the shape that was built, with three updates since it was written. (1) There is ONE
+> canonical audio engine, `ui/src/audio/engine.ts` (decisions D15) — every render path boots that
+> engine in headless Chromium; the separate node-web-audio-api engine described under M3 was
+> retired to a decode utility after real divergences were measured. (2) Offline rendering is a
+> native `OfflineAudioContext` computed in windows (D23): opt-in for single renders, the default
+> for vary/showdown batch renders (D22). (3) A substantial analysis/taste layer now sits beside
+> this stack — `src/analysis` (ML sidecars, generation providers, production profiles),
+> `src/taste` (blind showdowns, figure sources, the taste model), `src/metrics` (arc profiles,
+> pathology screens, roughness) — see `README.md` and `docs/product-roadmap.md` for the live
+> picture; §7's variation-and-taste loop grew into that whole program
+> (`docs/taste-loop-design.md`, research 107-130).
+
 ```
         ┌──────────────────────────────────────────────┐
         │                   .beat file                  │  ← source of truth, on disk, in git
@@ -649,7 +662,7 @@ suggested path forward).
 | Tier | Features |
 |---|---|
 | **MVP** | Synths + sampler + FX chains (inherited); piano roll / step seq / automation; `.beat` format; daemon + 2-way sync; `render`/`inspect`/`set`/`diff` CLI |
-| **v1** | MCP server; DSP metrics engine; metric-grounded AI critique as diffs; real arrangement timeline; tempo/time-sig changes; **`beat vary`/`beat score` variation-and-taste loop** (§7 — rung 1 CLI built 2026-07-10); **in-session undo/redo** (multi-level, distinct from checkpoint/history versioning — flagged 2026-07-11 during live GUI testing: the GUI has no undo stack at all right now, `Ctrl+Z` does nothing; BeatLab's own undo was deliberately stripped when the engine/components were ported in Phase 12 and never rebuilt); **real wavetable oscillator synthesis** (flagged 2026-07-11: the format/UI already has a `wtPos` param and even lets an LFO target it, but there is no wavetable oscillator in the engine at all — `OscType` is sine/triangle/sawtooth/square only, so `wtPos` is currently a dead control) |
+| **v1** | MCP server; DSP metrics engine; metric-grounded AI critique as diffs; real arrangement timeline; tempo/time-sig changes; **`beat vary`/`beat score` variation-and-taste loop** (§7 — rung 1 CLI built 2026-07-10, since grown into the full taste-model program); **in-session undo/redo** (flagged missing 2026-07-11; since BUILT — a daemon-owned session undo/redo stack with gesture coalescing, wired to `Ctrl+Z` and the transport bar, distinct from checkpoint/history versioning); **real wavetable oscillator synthesis** (flagged 2026-07-11 as a dead `wtPos` control; since BUILT — Phase 26 shipped a real wavetable oscillator, `osc: 'wavetable'`) |
 | **Parity** | Native recording + latency comp (Tauri); warping/time-stretch; comping; plugin hosting (CLAP/VST3); freeze/flatten/bounce; modulators + macro racks; MPE; note probability; browser/preset library; LUFS-normalized export |
 | **Out of scope** | In-browser VST/AU hosting; recorded-audio parity with Pro Tools; autonomous AI mix judge without metric guardrails; generator-code layer (deferred, not cancelled) |
 
@@ -738,7 +751,8 @@ research-backed rankings.)*
 
 ## Naming
 
-`dotbeat` is a working directory name only. Decide before M0 ships publicly.
+**Resolved:** `dotbeat` — owner decision 2026-07-11 (see the header note). This section used to
+say "working directory name only, decide before M0 ships publicly"; the decision was made.
 
 ---
 
