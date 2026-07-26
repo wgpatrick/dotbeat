@@ -1,0 +1,2610 @@
+{
+  "version": 2,
+  "generatedAt": "2026-07-26T12:36:37.624Z",
+  "note": "Surge patch curation v2: whole library (patches_factory + patches_3rdparty), corrected role->category mapping (SURGE_ROLE_CATEGORIES_V2), and TARGET-AWARE selection against presets/role-parameter-stats.json (research 141). presets/surge-curated.json is the v1 control and is NOT replaced by this file. D23: bank names are local provenance only — rendered patch audio stays eval-private.",
+  "probeVersion": 2,
+  "probeTempoBpm": 124,
+  "seed": 1,
+  "probe": {
+    "bassline": "sustained low C2 (midi 36, 1.6s) then its octave C3 (midi 48, 1.6s)",
+    "chords": "one held C-major triad (midi 60/64/67, 2.5s)",
+    "lead": "4-note ascending motif C5-E5-G5-C6 (midi 72/76/79/84), last note held"
+  },
+  "selection": {
+    "method": "paramFit (surgeCuration.paramFit) against role-parameter-stats.json, gated on CURATION_GATES",
+    "weights": {
+      "attack": 0.3,
+      "release": 0.25,
+      "sustain": 0.1,
+      "cutoff": 0.1,
+      "oscCount": 0.15,
+      "effects": 0.1
+    },
+    "gates": {
+      "ringDbMax": -32,
+      "activeFractionMin": 0.5
+    },
+    "statsArtifact": "presets/role-parameter-stats.json",
+    "statRoleForShowdownRole": {
+      "bassline": "bass",
+      "chords": "chords",
+      "lead": "lead"
+    }
+  },
+  "roles": {
+    "bassline": {
+      "pool": 494,
+      "measured": 494,
+      "shortlist": 220,
+      "rendered": 220,
+      "survivors": 193,
+      "categories": [
+        "Basses",
+        "Bass"
+      ],
+      "targets": {
+        "attackMs": {
+          "lo": 0,
+          "hi": 8.16,
+          "scale": "log"
+        },
+        "releaseMs": {
+          "lo": 10.99,
+          "hi": 248.38,
+          "scale": "log"
+        },
+        "sustain": {
+          "lo": 0.332,
+          "hi": 1,
+          "scale": "linear"
+        },
+        "cutoffHz": {
+          "lo": 76,
+          "hi": 732,
+          "scale": "log"
+        }
+      },
+      "banks": {
+        "Nick Moritz": 2,
+        "Slowboat": 2,
+        "Inigo Kennedy": 2,
+        "Giana Brotherz": 2,
+        "Vospi": 2,
+        "Kinsey Dulcet": 2,
+        "Damon Armani": 1,
+        "Rozzer": 1,
+        "Bluelight": 1,
+        "Lopyt": 1,
+        "Zoozither": 1,
+        "Vincent Zauhar": 1,
+        "Surge XT Factory": 1,
+        "Stefan Singer": 1,
+        "Jacky Ligon": 1,
+        "Altenberg": 1,
+        "Psiome Send Sound": 1,
+        "Emu": 1,
+        "Malfunction": 1,
+        "Cybersoda": 1,
+        "Exquis MPE": 1,
+        "John Valentine": 1,
+        "Luna": 1,
+        "TNMG": 1,
+        "A.Liv": 1,
+        "qb": 1,
+        "Aleksey Zhehanov": 1,
+        "Xenofish": 1,
+        "Rare Earth": 1,
+        "Kuniklo": 1,
+        "Databroth": 1,
+        "Dan Maurer": 1,
+        "Kyurumi": 1,
+        "LinnStrument MPE": 1
+      },
+      "distribution": {
+        "n": 40,
+        "attackMs": {
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 3.91,
+          "pctLe12_5": 100
+        },
+        "releaseMs": {
+          "p25": 31.25,
+          "median": 31.25,
+          "p75": 120.74
+        },
+        "sustain": {
+          "median": 1
+        },
+        "cutoffHz": {
+          "p25": 115.12,
+          "median": 327.73,
+          "p75": 609.86
+        },
+        "activeOscCount": {
+          "median": 2,
+          "pctGe2": 75
+        },
+        "pctOctaveSplit": 47.5,
+        "effectSlots": {
+          "median": 3
+        }
+      },
+      "kept": [
+        {
+          "name": "Shot Gun",
+          "category": "Basses",
+          "bank": "Nick Moritz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Nick Moritz/Basses/Shot Gun.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.745,
+          "params": {
+            "attackMs": 4.1,
+            "releaseMs": 205.34,
+            "sustain": 1,
+            "cutoffHz": 411.04,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Dusty Bass 2",
+          "category": "Basses",
+          "bank": "Slowboat",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Slowboat/Basses/Dusty Bass 2.fxp",
+          "fit": 1,
+          "ringDb": -51.8,
+          "activeFraction": 0.723,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 220.27,
+            "sustain": 0.418,
+            "cutoffHz": 96.59,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 6
+          }
+        },
+        {
+          "name": "Autumn 4",
+          "category": "Basses",
+          "bank": "Inigo Kennedy",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Inigo Kennedy/Basses/Autumn 4.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 78.58,
+            "sustain": 0.373,
+            "cutoffHz": 368.95,
+            "activeOscCount": 3,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Wellblech",
+          "category": "Basses",
+          "bank": "Giana Brotherz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Giana Brotherz/Basses/Wellblech.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.681,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 115.12,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "I Can Kinda Be Chordish",
+          "category": "Basses",
+          "bank": "Vospi",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Vospi/Basses/I Can Kinda Be Chordish.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 100.56,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "FX Bass",
+          "category": "Basses",
+          "bank": "Damon Armani",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Damon Armani/Basses/FX Bass.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.723,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 502.72,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Badass D'n'B Bass 2",
+          "category": "Basses",
+          "bank": "Rozzer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Rozzer/Basses/Badass D'n'B Bass 2.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.809,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 15.63,
+            "sustain": 1,
+            "cutoffHz": 199.31,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Bass 6",
+          "category": "Basses",
+          "bank": "Bluelight",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Bluelight/Basses/Bass 6.fxp",
+          "fit": 1,
+          "ringDb": -57.1,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 0.461,
+            "cutoffHz": 340.76,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Growl",
+          "category": "Bass",
+          "bank": "Lopyt",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Lopyt/Bass/Growl.fxp",
+          "fit": 1,
+          "ringDb": -56.6,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 126.71,
+            "sustain": 1,
+            "cutoffHz": 144.43,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Disabled",
+          "category": "Basses",
+          "bank": "Zoozither",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Zoozither/Basses/Disabled.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.681,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 0.641,
+            "cutoffHz": 141.73,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Waw",
+          "category": "Basses",
+          "bank": "Vincent Zauhar",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Vincent Zauhar/Basses/Waw.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 48.08,
+            "sustain": 1,
+            "cutoffHz": 198.23,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Width",
+          "category": "Basses",
+          "bank": "Surge XT Factory",
+          "pool": "factory",
+          "relPath": "patches_factory/Basses/Width.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 28.87,
+            "sustain": 1,
+            "cutoffHz": 609.86,
+            "activeOscCount": 3,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "FM Bass Lead",
+          "category": "Basses",
+          "bank": "Stefan Singer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Stefan Singer/Basses/FM Bass Lead.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.723,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 48.25,
+            "sustain": 1,
+            "cutoffHz": 327.73,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "BackWord",
+          "category": "Basses",
+          "bank": "Jacky Ligon",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Jacky Ligon/Basses/BackWord.fxp",
+          "fit": 0.9881,
+          "ringDb": -120,
+          "activeFraction": 0.723,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 82.2,
+            "sustain": 0.665,
+            "cutoffHz": 937.78,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 6
+          }
+        },
+        {
+          "name": "Neuro",
+          "category": "Basses",
+          "bank": "Altenberg",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Altenberg/Basses/Neuro.fxp",
+          "fit": 0.9871,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 957.86,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Porta Dist",
+          "category": "Basses",
+          "bank": "Psiome Send Sound",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Psiome Send Sound/Basses/Porta Dist.fxp",
+          "fit": 0.9799,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 8.06,
+            "releaseMs": 120.74,
+            "sustain": 0.673,
+            "cutoffHz": 814.49,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Beefy Boi",
+          "category": "Basses",
+          "bank": "Emu",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Emu/Basses/Beefy Boi.fxp",
+          "fit": 0.9719,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 42.41,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Concussion 1",
+          "category": "Basses",
+          "bank": "Malfunction",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Malfunction/Basses/Concussion 1.fxp",
+          "fit": 0.9693,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 5.22,
+            "releaseMs": 29.67,
+            "sustain": 0.695,
+            "cutoffHz": 1387.29,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Ghoul",
+          "category": "Basses",
+          "bank": "Cybersoda",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Cybersoda/Basses/Ghoul.fxp",
+          "fit": 0.969,
+          "ringDb": -120,
+          "activeFraction": 1,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 39.87,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Voco",
+          "category": "Basses",
+          "bank": "Exquis MPE",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Exquis MPE/Basses/Voco.fxp",
+          "fit": 0.9668,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 0,
+            "cutoffHz": 523.25,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "The Flat Eric Fan Club Has Its Perks",
+          "category": "Bass",
+          "bank": "Kinsey Dulcet",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Kinsey Dulcet/Bass/The Flat Eric Fan Club Has Its Perks.fxp",
+          "fit": 0.9457,
+          "ringDb": -67.7,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 4.08,
+            "releaseMs": 11.4,
+            "sustain": 0.729,
+            "cutoffHz": 1656.64,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Analog Bass Imaged",
+          "category": "Basses",
+          "bank": "John Valentine",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/John Valentine/Basses/Analog Bass Imaged.fxp",
+          "fit": 0.94,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 237.05,
+            "sustain": 0.565,
+            "cutoffHz": 160.67,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Scorcher",
+          "category": "Basses",
+          "bank": "Luna",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Luna/Basses/Scorcher.fxp",
+          "fit": 0.94,
+          "ringDb": -120,
+          "activeFraction": 0.894,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 595.26,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Abomination",
+          "category": "Basses",
+          "bank": "TNMG",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/TNMG/Basses/Abomination.fxp",
+          "fit": 0.94,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 523.25,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Seek And Ye Shall Find",
+          "category": "Basses",
+          "bank": "A.Liv",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/A.Liv/Basses/Seek And Ye Shall Find.fxp",
+          "fit": 0.94,
+          "ringDb": -80.8,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 29.79,
+            "sustain": 0.627,
+            "cutoffHz": 342,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Organ Hits Bass",
+          "category": "Basses",
+          "bank": "Kinsey Dulcet",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Kinsey Dulcet/Basses/Organ Hits Bass.fxp",
+          "fit": 0.9321,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 69.86,
+            "sustain": 1,
+            "cutoffHz": 18.52,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 6
+          }
+        },
+        {
+          "name": "Heavy Sub Sine",
+          "category": "Basses",
+          "bank": "qb",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/qb/Basses/Heavy Sub Sine.fxp",
+          "fit": 0.9301,
+          "ringDb": -120,
+          "activeFraction": 0.723,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 280.21,
+            "sustain": 0.637,
+            "cutoffHz": 1008.85,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "Electric Bass",
+          "category": "Basses",
+          "bank": "Aleksey Zhehanov",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Aleksey Zhehanov/Basses/Electric Bass.fxp",
+          "fit": 0.9101,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 57.97,
+            "sustain": 0.064,
+            "cutoffHz": 71.15,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Chimera",
+          "category": "Basses",
+          "bank": "Xenofish",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Xenofish/Basses/Chimera.fxp",
+          "fit": 0.9,
+          "ringDb": -120,
+          "activeFraction": 1,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 22.94,
+            "sustain": 1,
+            "cutoffHz": 25087.71,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Bass Tuba",
+          "category": "Basses",
+          "bank": "Rare Earth",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Rare Earth/Basses/Bass Tuba.fxp",
+          "fit": 0.8995,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 8.19,
+            "releaseMs": 31.25,
+            "sustain": 0.636,
+            "cutoffHz": 296.4,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "Big Moog",
+          "category": "Basses",
+          "bank": "Kuniklo",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Kuniklo/Basses/Big Moog.fxp",
+          "fit": 0.8974,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 317.07,
+            "sustain": 0,
+            "cutoffHz": 414.11,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "Crystal Rip",
+          "category": "Basses",
+          "bank": "Databroth",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Databroth/Basses/Crystal Rip.fxp",
+          "fit": 0.8957,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 1840.58,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Lucy Louise",
+          "category": "Basses",
+          "bank": "Dan Maurer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Dan Maurer/Basses/Lucy Louise.fxp",
+          "fit": 0.8885,
+          "ringDb": -62.4,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 86.23,
+            "sustain": 0,
+            "cutoffHz": 1070.42,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "FM Dubstep Bass",
+          "category": "Basses",
+          "bank": "Kyurumi",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Kyurumi/Basses/FM Dubstep Bass.fxp",
+          "fit": 0.88,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 304.41,
+            "activeOscCount": 0,
+            "octaveSplit": false,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Bass Guitar",
+          "category": "Basses",
+          "bank": "LinnStrument MPE",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/LinnStrument MPE/Basses/Bass Guitar.fxp",
+          "fit": 0.866,
+          "ringDb": -120,
+          "activeFraction": 0.723,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 215.4,
+            "sustain": 0,
+            "cutoffHz": 32.51,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Strode Impulse",
+          "category": "Basses",
+          "bank": "Nick Moritz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Nick Moritz/Basses/Strode Impulse.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 4.74,
+            "releaseMs": 32.67,
+            "sustain": 0.782,
+            "cutoffHz": 319.09,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Dusty Bass 1",
+          "category": "Basses",
+          "bank": "Slowboat",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Slowboat/Basses/Dusty Bass 1.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.723,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 200,
+            "sustain": 0.418,
+            "cutoffHz": 96.59,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Bass 5",
+          "category": "Basses",
+          "bank": "Inigo Kennedy",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Inigo Kennedy/Basses/Bass 5.fxp",
+          "fit": 0.985,
+          "ringDb": -95.2,
+          "activeFraction": 0.957,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 195.66,
+            "sustain": 1,
+            "cutoffHz": 162.95,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Tech Cabinet",
+          "category": "Basses",
+          "bank": "Giana Brotherz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Giana Brotherz/Basses/Tech Cabinet.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 81.05,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Low Problems",
+          "category": "Basses",
+          "bank": "Vospi",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Vospi/Basses/Low Problems.fxp",
+          "fit": 0.9409,
+          "ringDb": -120,
+          "activeFraction": 0.702,
+          "params": {
+            "attackMs": 10.94,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 53.54,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        }
+      ]
+    },
+    "chords": {
+      "pool": 532,
+      "measured": 532,
+      "shortlist": 220,
+      "rendered": 220,
+      "survivors": 122,
+      "categories": [
+        "Chords",
+        "Polysynths",
+        "Synths",
+        "Keys"
+      ],
+      "targets": {
+        "attackMs": {
+          "lo": 0,
+          "hi": 6.03,
+          "scale": "log"
+        },
+        "releaseMs": {
+          "lo": 22.21,
+          "hi": 63.25,
+          "scale": "log"
+        },
+        "sustain": {
+          "lo": 1,
+          "hi": 1,
+          "scale": "linear"
+        },
+        "cutoffHz": {
+          "lo": 129,
+          "hi": 3120,
+          "scale": "log"
+        }
+      },
+      "banks": {
+        "Surge XT Factory": 3,
+        "Nick Moritz": 2,
+        "Rozzer": 2,
+        "Vospi": 2,
+        "Kinsey Dulcet": 2,
+        "Dan Maurer": 2,
+        "Lopyt": 2,
+        "TNMG": 2,
+        "Luna": 2,
+        "Emu": 2,
+        "Giana Brotherz": 1,
+        "Vincent Zauhar": 1,
+        "qb": 1,
+        "Psiome Send Sound": 1,
+        "Exquis MPE": 1,
+        "Black-Sided Sun": 1,
+        "A.Liv": 1,
+        "LinnStrument MPE": 1,
+        "Malfunction": 1,
+        "Bluelight": 1,
+        "Jacky Ligon": 1,
+        "Landosonic": 1,
+        "Inigo Kennedy": 1,
+        "Aleksey Zhehanov": 1,
+        "John Valentine": 1,
+        "Zoozither": 1,
+        "Cybersoda": 1,
+        "Slowboat": 1,
+        "Noisegeek": 1
+      },
+      "distribution": {
+        "n": 40,
+        "attackMs": {
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 5.01,
+          "pctLe12_5": 97.5
+        },
+        "releaseMs": {
+          "p25": 31.25,
+          "median": 42.56,
+          "p75": 140.09
+        },
+        "sustain": {
+          "median": 0.98
+        },
+        "cutoffHz": {
+          "p25": 158.26,
+          "median": 333.46,
+          "p75": 595.14
+        },
+        "activeOscCount": {
+          "median": 2,
+          "pctGe2": 60
+        },
+        "pctOctaveSplit": 22.5,
+        "effectSlots": {
+          "median": 2
+        }
+      },
+      "kept": [
+        {
+          "name": "Forest Angels",
+          "category": "Synths",
+          "bank": "Nick Moritz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Nick Moritz/Synths/Forest Angels.fxp",
+          "fit": 1,
+          "ringDb": -43.7,
+          "activeFraction": 0.925,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 135.97,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Sunday Organist",
+          "category": "Keys",
+          "bank": "Rozzer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Rozzer/Keys/Sunday Organist.fxp",
+          "fit": 1,
+          "ringDb": -40.1,
+          "activeFraction": 1,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 58.31,
+            "sustain": 1,
+            "cutoffHz": 2564.05,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "If You Don't Need Me Then Let Me Go",
+          "category": "Chords",
+          "bank": "Vospi",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Vospi/Chords/If You Don't Need Me Then Let Me Go.fxp",
+          "fit": 1,
+          "ringDb": -73.5,
+          "activeFraction": 0.725,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 523.25,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Japanese Unison",
+          "category": "Polysynths",
+          "bank": "Surge XT Factory",
+          "pool": "factory",
+          "relPath": "patches_factory/Polysynths/Japanese Unison.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.75,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 132.81,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "New Wave Wordy",
+          "category": "Keys",
+          "bank": "Kinsey Dulcet",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Kinsey Dulcet/Keys/New Wave Wordy.fxp",
+          "fit": 0.985,
+          "ringDb": -62.9,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 40.43,
+            "sustain": 1,
+            "cutoffHz": 227.86,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Dream Plucks",
+          "category": "Keys",
+          "bank": "Nick Moritz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Nick Moritz/Keys/Dream Plucks.fxp",
+          "fit": 0.962,
+          "ringDb": -120,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 55.77,
+            "sustain": 0.62,
+            "cutoffHz": 215.95,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Minor Chord Retro Stab",
+          "category": "Chords",
+          "bank": "Surge XT Factory",
+          "pool": "factory",
+          "relPath": "patches_factory/Chords/Minor Chord Retro Stab.fxp",
+          "fit": 0.96,
+          "ringDb": -120,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 26.94,
+            "sustain": 1,
+            "cutoffHz": 383.04,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "Tri Meets Saw",
+          "category": "Keys",
+          "bank": "Giana Brotherz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Giana Brotherz/Keys/Tri Meets Saw.fxp",
+          "fit": 0.9593,
+          "ringDb": -35.6,
+          "activeFraction": 0.75,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 0.593,
+            "cutoffHz": 1579.34,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Combulabug",
+          "category": "Keys",
+          "bank": "Vincent Zauhar",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Vincent Zauhar/Keys/Combulabug.fxp",
+          "fit": 0.95,
+          "ringDb": -120,
+          "activeFraction": 0.7,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": null,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Organ 2",
+          "category": "Keys",
+          "bank": "Surge XT Factory",
+          "pool": "factory",
+          "relPath": "patches_factory/Keys/Organ 2.fxp",
+          "fit": 0.94,
+          "ringDb": -62.2,
+          "activeFraction": 0.725,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 262.76,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Metal Head",
+          "category": "Synths",
+          "bank": "Dan Maurer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Dan Maurer/Synths/Metal Head.fxp",
+          "fit": 0.9255,
+          "ringDb": -120,
+          "activeFraction": 0.675,
+          "params": {
+            "attackMs": 4.63,
+            "releaseMs": 62.76,
+            "sustain": 0.855,
+            "cutoffHz": 911.39,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Found In A Closet",
+          "category": "Keys",
+          "bank": "Vospi",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Vospi/Keys/Found In A Closet.fxp",
+          "fit": 0.925,
+          "ringDb": -120,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 199.26,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Soft Vibrato Keys",
+          "category": "Keys",
+          "bank": "qb",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/qb/Keys/Soft Vibrato Keys.fxp",
+          "fit": 0.9194,
+          "ringDb": -83.7,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 6.81,
+            "releaseMs": 42.56,
+            "sustain": 0.77,
+            "cutoffHz": 333.46,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "Eldorado",
+          "category": "Synths",
+          "bank": "Psiome Send Sound",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Psiome Send Sound/Synths/Eldorado.fxp",
+          "fit": 0.9128,
+          "ringDb": -120,
+          "activeFraction": 0.85,
+          "params": {
+            "attackMs": 8.06,
+            "releaseMs": 31.25,
+            "sustain": 0.546,
+            "cutoffHz": 523.25,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Hammorgan",
+          "category": "Keys",
+          "bank": "Exquis MPE",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Exquis MPE/Keys/Hammorgan.fxp",
+          "fit": 0.9002,
+          "ringDb": -120,
+          "activeFraction": 0.6,
+          "params": {
+            "attackMs": 5,
+            "releaseMs": 31.25,
+            "sustain": 0.002,
+            "cutoffHz": 158.26,
+            "activeOscCount": 3,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Distortia",
+          "category": "Polysynths",
+          "bank": "Black-Sided Sun",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Black-Sided Sun/Polysynths/Distortia.fxp",
+          "fit": 0.9,
+          "ringDb": -120,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 595.14,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "Granular Supersaw",
+          "category": "Polysynths",
+          "bank": "Lopyt",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Lopyt/Polysynths/Granular Supersaw.fxp",
+          "fit": 0.8721,
+          "ringDb": -120,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 10.66,
+            "releaseMs": 21.18,
+            "sustain": 1,
+            "cutoffHz": 523.25,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "Synth Basics",
+          "category": "Polysynths",
+          "bank": "TNMG",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/TNMG/Polysynths/Synth Basics.fxp",
+          "fit": 0.8657,
+          "ringDb": -36.4,
+          "activeFraction": 0.6,
+          "params": {
+            "attackMs": 6.68,
+            "releaseMs": 35.54,
+            "sustain": 0,
+            "cutoffHz": 85.94,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 8
+          }
+        },
+        {
+          "name": "Vaguely Rhodesish",
+          "category": "Keys",
+          "bank": "Luna",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Luna/Keys/Vaguely Rhodesish.fxp",
+          "fit": 0.8491,
+          "ringDb": -120,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 9.62,
+            "releaseMs": 76.95,
+            "sustain": 1,
+            "cutoffHz": 523.25,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Window Warp",
+          "category": "Synths",
+          "bank": "Luna",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Luna/Synths/Window Warp.fxp",
+          "fit": 0.8425,
+          "ringDb": -37.5,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 11.86,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 523.25,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "July",
+          "category": "Keys",
+          "bank": "A.Liv",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/A.Liv/Keys/July.fxp",
+          "fit": 0.8421,
+          "ringDb": -41.4,
+          "activeFraction": 0.6,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 102.34,
+            "sustain": 0,
+            "cutoffHz": 752.45,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Rhody EP",
+          "category": "Keys",
+          "bank": "LinnStrument MPE",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/LinnStrument MPE/Keys/Rhody EP.fxp",
+          "fit": 0.835,
+          "ringDb": -56.5,
+          "activeFraction": 0.55,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 0,
+            "cutoffHz": null,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Old Skool Detroit Minor Stab",
+          "category": "Chords",
+          "bank": "Rozzer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Rozzer/Chords/Old Skool Detroit Minor Stab.fxp",
+          "fit": 0.8235,
+          "ringDb": -37.6,
+          "activeFraction": 0.625,
+          "params": {
+            "attackMs": 9.77,
+            "releaseMs": 15.63,
+            "sustain": 1,
+            "cutoffHz": 33.71,
+            "activeOscCount": 3,
+            "octaveSplit": false,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Soft Key",
+          "category": "Keys",
+          "bank": "Malfunction",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Malfunction/Keys/Soft Key.fxp",
+          "fit": 0.8168,
+          "ringDb": -50.1,
+          "activeFraction": 0.7,
+          "params": {
+            "attackMs": 4.1,
+            "releaseMs": 26.51,
+            "sustain": 0.368,
+            "cutoffHz": 503.03,
+            "activeOscCount": 0,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Treated Rhodes",
+          "category": "Keys",
+          "bank": "Bluelight",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Bluelight/Keys/Treated Rhodes.fxp",
+          "fit": 0.8165,
+          "ringDb": -120,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 126.71,
+            "sustain": 0,
+            "cutoffHz": 269.68,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "FM Piano 3",
+          "category": "Keys",
+          "bank": "Dan Maurer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Dan Maurer/Keys/FM Piano 3.fxp",
+          "fit": 0.8044,
+          "ringDb": -37,
+          "activeFraction": 0.625,
+          "params": {
+            "attackMs": 4.27,
+            "releaseMs": 140.09,
+            "sustain": 0,
+            "cutoffHz": 1451.19,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Thin and Gaseous Organ",
+          "category": "Keys",
+          "bank": "Emu",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Emu/Keys/Thin and Gaseous Organ.fxp",
+          "fit": 0.7918,
+          "ringDb": -120,
+          "activeFraction": 0.6,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 94.35,
+            "sustain": 0.049,
+            "cutoffHz": null,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Mark II A",
+          "category": "Keys",
+          "bank": "Lopyt",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Lopyt/Keys/Mark II A.fxp",
+          "fit": 0.79,
+          "ringDb": -77.1,
+          "activeFraction": 0.625,
+          "params": {
+            "attackMs": 5.01,
+            "releaseMs": 25.39,
+            "sustain": 0,
+            "cutoffHz": null,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Palm Mute Pi",
+          "category": "Keys",
+          "bank": "Jacky Ligon",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Jacky Ligon/Keys/Palm Mute Pi.fxp",
+          "fit": 0.773,
+          "ringDb": -120,
+          "activeFraction": 0.675,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 100,
+            "sustain": 0.981,
+            "cutoffHz": null,
+            "activeOscCount": 0,
+            "octaveSplit": false,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Like Old Analog Gear 1",
+          "category": "Keys",
+          "bank": "Landosonic",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Landosonic/Keys/Like Old Analog Gear 1.fxp",
+          "fit": 0.7544,
+          "ringDb": -120,
+          "activeFraction": 0.675,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 212.16,
+            "sustain": 0.999,
+            "cutoffHz": 160.91,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "Dust Mote",
+          "category": "Chords",
+          "bank": "TNMG",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/TNMG/Chords/Dust Mote.fxp",
+          "fit": 0.7276,
+          "ringDb": -120,
+          "activeFraction": 0.5,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 9.81,
+            "sustain": 0,
+            "cutoffHz": 4186.01,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 8
+          }
+        },
+        {
+          "name": "Glitter 1",
+          "category": "Keys",
+          "bank": "Inigo Kennedy",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Inigo Kennedy/Keys/Glitter 1.fxp",
+          "fit": 0.7243,
+          "ringDb": -33.7,
+          "activeFraction": 0.975,
+          "params": {
+            "attackMs": 4.74,
+            "releaseMs": 887.98,
+            "sustain": 1,
+            "cutoffHz": 5323.24,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Soft Piano",
+          "category": "Keys",
+          "bank": "Aleksey Zhehanov",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Aleksey Zhehanov/Keys/Soft Piano.fxp",
+          "fit": 0.7116,
+          "ringDb": -53.2,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 111.77,
+            "sustain": 0,
+            "cutoffHz": 261.5,
+            "activeOscCount": 0,
+            "octaveSplit": false,
+            "effectSlots": 6
+          }
+        },
+        {
+          "name": "Harpsichord",
+          "category": "Keys",
+          "bank": "John Valentine",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/John Valentine/Keys/Harpsichord.fxp",
+          "fit": 0.7016,
+          "ringDb": -34.8,
+          "activeFraction": 0.575,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 200,
+            "sustain": 0,
+            "cutoffHz": 677.91,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Mono & Poly Reverser",
+          "category": "Polysynths",
+          "bank": "Kinsey Dulcet",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Kinsey Dulcet/Polysynths/Mono & Poly Reverser.fxp",
+          "fit": 0.6737,
+          "ringDb": -32.4,
+          "activeFraction": 0.625,
+          "params": {
+            "attackMs": 4.17,
+            "releaseMs": 749.15,
+            "sustain": 1,
+            "cutoffHz": 26.41,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Station",
+          "category": "Keys",
+          "bank": "Zoozither",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Zoozither/Keys/Station.fxp",
+          "fit": 0.6727,
+          "ringDb": -38.4,
+          "activeFraction": 0.675,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 489.59,
+            "sustain": 0.311,
+            "cutoffHz": 99.78,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Vintage EP",
+          "category": "Keys",
+          "bank": "Cybersoda",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Cybersoda/Keys/Vintage EP.fxp",
+          "fit": 0.6445,
+          "ringDb": -43.2,
+          "activeFraction": 0.65,
+          "params": {
+            "attackMs": 19.78,
+            "releaseMs": 177.65,
+            "sustain": 1,
+            "cutoffHz": 157.83,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 6
+          }
+        },
+        {
+          "name": "Strange Declarations",
+          "category": "Synths",
+          "bank": "Emu",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Emu/Synths/Strange Declarations.fxp",
+          "fit": 0.64,
+          "ringDb": -37.5,
+          "activeFraction": 1,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 6293.72,
+            "sustain": 1,
+            "cutoffHz": null,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Holiday Chords",
+          "category": "Keys",
+          "bank": "Slowboat",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Slowboat/Keys/Holiday Chords.fxp",
+          "fit": 0.6176,
+          "ringDb": -48.3,
+          "activeFraction": 0.625,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 3376.11,
+            "sustain": 0.338,
+            "cutoffHz": 113.46,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 10
+          }
+        },
+        {
+          "name": "Kinda Fearless FM",
+          "category": "Keys",
+          "bank": "Noisegeek",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Noisegeek/Keys/Kinda Fearless FM.fxp",
+          "fit": 0.5749,
+          "ringDb": -120,
+          "activeFraction": 0.675,
+          "params": {
+            "attackMs": 10.26,
+            "releaseMs": 442.88,
+            "sustain": 0.755,
+            "cutoffHz": null,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 0
+          }
+        }
+      ]
+    },
+    "lead": {
+      "pool": 912,
+      "measured": 912,
+      "shortlist": 220,
+      "rendered": 220,
+      "survivors": 57,
+      "categories": [
+        "Leads",
+        "Plucks",
+        "Sequences",
+        "Arps",
+        "Rhythms"
+      ],
+      "targets": {
+        "attackMs": {
+          "lo": 0,
+          "hi": 9.77,
+          "scale": "log"
+        },
+        "releaseMs": {
+          "lo": 6.19,
+          "hi": 331.51,
+          "scale": "log"
+        },
+        "sustain": {
+          "lo": 0.659,
+          "hi": 1,
+          "scale": "linear"
+        },
+        "cutoffHz": {
+          "lo": 147,
+          "hi": 1258,
+          "scale": "log"
+        }
+      },
+      "banks": {
+        "Dan Maurer": 3,
+        "Nick Moritz": 3,
+        "Rozzer": 2,
+        "Surge XT Factory": 2,
+        "Vincent Zauhar": 2,
+        "Zoozither": 2,
+        "Xenofish": 2,
+        "Jacky Ligon": 2,
+        "Stefan Singer": 2,
+        "Luna": 2,
+        "TNMG": 2,
+        "Damon Armani": 2,
+        "qb": 2,
+        "Argitoth": 1,
+        "Vospi": 1,
+        "Inigo Kennedy": 1,
+        "Bluelight": 1,
+        "Exquis MPE": 1,
+        "Giana Brotherz": 1,
+        "Black-Sided Sun": 1,
+        "Databroth": 1,
+        "LinnStrument MPE": 1,
+        "John Valentine": 1,
+        "Emu": 1,
+        "Rare Earth": 1
+      },
+      "distribution": {
+        "n": 40,
+        "attackMs": {
+          "p25": 3.91,
+          "median": 3.91,
+          "p75": 3.91,
+          "pctLe12_5": 97.5
+        },
+        "releaseMs": {
+          "p25": 31.25,
+          "median": 50.32,
+          "p75": 257.34
+        },
+        "sustain": {
+          "median": 1
+        },
+        "cutoffHz": {
+          "p25": 153.22,
+          "median": 590.18,
+          "p75": 1128.7
+        },
+        "activeOscCount": {
+          "median": 2,
+          "pctGe2": 80
+        },
+        "pctOctaveSplit": 45,
+        "effectSlots": {
+          "median": 3
+        }
+      },
+      "kept": [
+        {
+          "name": "He Never Lost His Hardcore",
+          "category": "Leads",
+          "bank": "Rozzer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Rozzer/Leads/He Never Lost His Hardcore.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.872,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 15.63,
+            "sustain": 1,
+            "cutoffHz": 228.45,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Drum Loop 3",
+          "category": "Sequences",
+          "bank": "Dan Maurer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Dan Maurer/Sequences/Drum Loop 3.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 85.69,
+            "sustain": 0.975,
+            "cutoffHz": 844.78,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 6
+          }
+        },
+        {
+          "name": "Rhythm and Lead",
+          "category": "Rhythms",
+          "bank": "Dan Maurer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Dan Maurer/Rhythms/Rhythm and Lead.fxp",
+          "fit": 1,
+          "ringDb": -35.5,
+          "activeFraction": 1,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 43.86,
+            "sustain": 1,
+            "cutoffHz": 1128.7,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 6
+          }
+        },
+        {
+          "name": "Screaming Saw",
+          "category": "Leads",
+          "bank": "Argitoth",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Argitoth/Leads/Screaming Saw.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.744,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 153.22,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "µcomputer",
+          "category": "Leads",
+          "bank": "Surge XT Factory",
+          "pool": "factory",
+          "relPath": "patches_factory/Leads/µcomputer.fxp",
+          "fit": 1,
+          "ringDb": -39.3,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 147.36,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Play High Or Low",
+          "category": "Plucks",
+          "bank": "Vincent Zauhar",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Vincent Zauhar/Plucks/Play High Or Low.fxp",
+          "fit": 1,
+          "ringDb": -120,
+          "activeFraction": 0.59,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 277.19,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "5th House",
+          "category": "Leads",
+          "bank": "Nick Moritz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Nick Moritz/Leads/5th House.fxp",
+          "fit": 1,
+          "ringDb": -36.1,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 115.05,
+            "sustain": 0.887,
+            "cutoffHz": 147.36,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Barrelish",
+          "category": "Sequences",
+          "bank": "Surge XT Factory",
+          "pool": "factory",
+          "relPath": "patches_factory/Sequences/Barrelish.fxp",
+          "fit": 1,
+          "ringDb": -77.9,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 15.63,
+            "sustain": 1,
+            "cutoffHz": 674.18,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Segur",
+          "category": "Leads",
+          "bank": "Zoozither",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Zoozither/Leads/Segur.fxp",
+          "fit": 0.9982,
+          "ringDb": -49.5,
+          "activeFraction": 1,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 0.641,
+            "cutoffHz": 635.88,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Brain Out",
+          "category": "Sequences",
+          "bank": "Nick Moritz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Nick Moritz/Sequences/Brain Out.fxp",
+          "fit": 0.9967,
+          "ringDb": -39.4,
+          "activeFraction": 1,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 1346.69,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Harmony Chords",
+          "category": "Sequences",
+          "bank": "Vospi",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Vospi/Sequences/Harmony Chords.fxp",
+          "fit": 0.9946,
+          "ringDb": -51.6,
+          "activeFraction": 0.513,
+          "params": {
+            "attackMs": 4.17,
+            "releaseMs": 12.85,
+            "sustain": 1,
+            "cutoffHz": 131.49,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Saturn Saw",
+          "category": "Leads",
+          "bank": "Xenofish",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Xenofish/Leads/Saturn Saw.fxp",
+          "fit": 0.9856,
+          "ringDb": -120,
+          "activeFraction": 0.974,
+          "params": {
+            "attackMs": 4.74,
+            "releaseMs": 62.62,
+            "sustain": 1,
+            "cutoffHz": 109.01,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Fat Detuned Sync",
+          "category": "Leads",
+          "bank": "Inigo Kennedy",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Inigo Kennedy/Leads/Fat Detuned Sync.fxp",
+          "fit": 0.985,
+          "ringDb": -120,
+          "activeFraction": 0.872,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 317.07,
+            "sustain": 0.668,
+            "cutoffHz": 847.92,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Stories In One Voice",
+          "category": "Leads",
+          "bank": "Jacky Ligon",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Jacky Ligon/Leads/Stories In One Voice.fxp",
+          "fit": 0.9687,
+          "ringDb": -33.6,
+          "activeFraction": 0.795,
+          "params": {
+            "attackMs": 10,
+            "releaseMs": 305.39,
+            "sustain": 0.85,
+            "cutoffHz": 2249.69,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 6
+          }
+        },
+        {
+          "name": "Stranger Surges",
+          "category": "Sequences",
+          "bank": "Jacky Ligon",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Jacky Ligon/Sequences/Stranger Surges.fxp",
+          "fit": 0.9673,
+          "ringDb": -120,
+          "activeFraction": 0.821,
+          "params": {
+            "attackMs": 10,
+            "releaseMs": 250,
+            "sustain": 0.365,
+            "cutoffHz": 684.94,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 8
+          }
+        },
+        {
+          "name": "A Rattle In The Old Man's Sax",
+          "category": "Leads",
+          "bank": "Bluelight",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Bluelight/Leads/A Rattle In The Old Man's Sax.fxp",
+          "fit": 0.9662,
+          "ringDb": -120,
+          "activeFraction": 0.667,
+          "params": {
+            "attackMs": 9.31,
+            "releaseMs": 331.51,
+            "sustain": 0.321,
+            "cutoffHz": 743.2,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Kicks 'n' Hats",
+          "category": "Sequences",
+          "bank": "Exquis MPE",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Exquis MPE/Sequences/Kicks 'n' Hats.fxp",
+          "fit": 0.9603,
+          "ringDb": -120,
+          "activeFraction": 0.564,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 2874.23,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Reeseliner",
+          "category": "Rhythms",
+          "bank": "Giana Brotherz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Giana Brotherz/Rhythms/Reeseliner.fxp",
+          "fit": 0.96,
+          "ringDb": -34.2,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 683,
+            "activeOscCount": 3,
+            "octaveSplit": false,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "Complex Drone",
+          "category": "Leads",
+          "bank": "Black-Sided Sun",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Black-Sided Sun/Leads/Complex Drone.fxp",
+          "fit": 0.96,
+          "ringDb": -69.2,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 51.63,
+            "sustain": 1,
+            "cutoffHz": 1169.82,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "Trance Pluck",
+          "category": "Plucks",
+          "bank": "Stefan Singer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Stefan Singer/Plucks/Trance Pluck.fxp",
+          "fit": 0.9511,
+          "ringDb": -120,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 106.29,
+            "sustain": 0.17,
+            "cutoffHz": 286.99,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Tofu Delivery",
+          "category": "Leads",
+          "bank": "Luna",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Luna/Leads/Tofu Delivery.fxp",
+          "fit": 0.95,
+          "ringDb": -120,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 9.62,
+            "releaseMs": 50.32,
+            "sustain": 0.806,
+            "cutoffHz": null,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Metric Complications",
+          "category": "Sequences",
+          "bank": "Databroth",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Databroth/Sequences/Metric Complications.fxp",
+          "fit": 0.94,
+          "ringDb": -120,
+          "activeFraction": 0.769,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 257.34,
+            "sustain": 1,
+            "cutoffHz": 182.5,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Goose",
+          "category": "Rhythms",
+          "bank": "Zoozither",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Zoozither/Rhythms/Goose.fxp",
+          "fit": 0.9362,
+          "ringDb": -32,
+          "activeFraction": 0.744,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 4736.11,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Suppressor",
+          "category": "Plucks",
+          "bank": "TNMG",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/TNMG/Plucks/Suppressor.fxp",
+          "fit": 0.9341,
+          "ringDb": -74.7,
+          "activeFraction": 0.718,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 0,
+            "cutoffHz": 523.25,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Psyvoice",
+          "category": "Sequences",
+          "bank": "Damon Armani",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Damon Armani/Sequences/Psyvoice.fxp",
+          "fit": 0.9137,
+          "ringDb": -120,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 2174.17,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Quick Portamento",
+          "category": "Leads",
+          "bank": "qb",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/qb/Leads/Quick Portamento.fxp",
+          "fit": 0.9069,
+          "ringDb": -48.8,
+          "activeFraction": 0.59,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 459.37,
+            "sustain": 0.52,
+            "cutoffHz": 212.51,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 0
+          }
+        },
+        {
+          "name": "JP80x0 Pluck",
+          "category": "Plucks",
+          "bank": "Rozzer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Rozzer/Plucks/JP80x0 Pluck.fxp",
+          "fit": 0.9,
+          "ringDb": -120,
+          "activeFraction": 0.59,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 13.75,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Demon Power",
+          "category": "Arps",
+          "bank": "Nick Moritz",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Nick Moritz/Arps/Demon Power.fxp",
+          "fit": 0.9,
+          "ringDb": -82.2,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 317.07,
+            "sustain": 1,
+            "cutoffHz": 13.75,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Pluck And Sing",
+          "category": "Plucks",
+          "bank": "LinnStrument MPE",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/LinnStrument MPE/Plucks/Pluck And Sing.fxp",
+          "fit": 0.8977,
+          "ringDb": -41.4,
+          "activeFraction": 0.615,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 607.53,
+            "sustain": 0.364,
+            "cutoffHz": 523.25,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Hoove",
+          "category": "Leads",
+          "bank": "Stefan Singer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Stefan Singer/Leads/Hoove.fxp",
+          "fit": 0.8922,
+          "ringDb": -120,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 1,
+            "cutoffHz": 8667.27,
+            "activeOscCount": 3,
+            "octaveSplit": false,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Psychedelic Silver Box",
+          "category": "Sequences",
+          "bank": "Luna",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Luna/Sequences/Psychedelic Silver Box.fxp",
+          "fit": 0.8912,
+          "ringDb": -120,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 13.7,
+            "releaseMs": 249.07,
+            "sustain": 1,
+            "cutoffHz": 590.18,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 6
+          }
+        },
+        {
+          "name": "Disto",
+          "category": "Plucks",
+          "bank": "Damon Armani",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Damon Armani/Plucks/Disto.fxp",
+          "fit": 0.8841,
+          "ringDb": -52.4,
+          "activeFraction": 0.513,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 0,
+            "cutoffHz": null,
+            "activeOscCount": 3,
+            "octaveSplit": true,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Guitarp",
+          "category": "Plucks",
+          "bank": "John Valentine",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/John Valentine/Plucks/Guitarp.fxp",
+          "fit": 0.8741,
+          "ringDb": -47.3,
+          "activeFraction": 0.615,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 200,
+            "sustain": 0,
+            "cutoffHz": 221.76,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 3
+          }
+        },
+        {
+          "name": "Shroom Sequence",
+          "category": "Sequences",
+          "bank": "Xenofish",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Xenofish/Sequences/Shroom Sequence.fxp",
+          "fit": 0.8672,
+          "ringDb": -120,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 7.53,
+            "releaseMs": 8.41,
+            "sustain": 1,
+            "cutoffHz": 32.34,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 5
+          }
+        },
+        {
+          "name": "Mid Layer",
+          "category": "Sequences",
+          "bank": "TNMG",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/TNMG/Sequences/Mid Layer.fxp",
+          "fit": 0.8659,
+          "ringDb": -120,
+          "activeFraction": 0.667,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 31.25,
+            "sustain": 0,
+            "cutoffHz": 1491.66,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 6
+          }
+        },
+        {
+          "name": "Dirty Saws",
+          "category": "Sequences",
+          "bank": "Emu",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Emu/Sequences/Dirty Saws.fxp",
+          "fit": 0.8241,
+          "ringDb": -120,
+          "activeFraction": 0.641,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 61.43,
+            "sustain": 0,
+            "cutoffHz": null,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        },
+        {
+          "name": "Muther Plucker",
+          "category": "Plucks",
+          "bank": "Dan Maurer",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Dan Maurer/Plucks/Muther Plucker.fxp",
+          "fit": 0.8143,
+          "ringDb": -35.1,
+          "activeFraction": 0.564,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 548.03,
+            "sustain": 0.006,
+            "cutoffHz": 979.98,
+            "activeOscCount": 1,
+            "octaveSplit": false,
+            "effectSlots": 4
+          }
+        },
+        {
+          "name": "Comfy Koto",
+          "category": "Plucks",
+          "bank": "qb",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/qb/Plucks/Comfy Koto.fxp",
+          "fit": 0.8035,
+          "ringDb": -34.5,
+          "activeFraction": 0.744,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 1354.46,
+            "sustain": 1,
+            "cutoffHz": 1624.34,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Acid Buzz",
+          "category": "Sequences",
+          "bank": "Vincent Zauhar",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Vincent Zauhar/Sequences/Acid Buzz.fxp",
+          "fit": 0.7638,
+          "ringDb": -120,
+          "activeFraction": 0.744,
+          "params": {
+            "attackMs": 3.91,
+            "releaseMs": 3.91,
+            "sustain": 0,
+            "cutoffHz": 13.75,
+            "activeOscCount": 2,
+            "octaveSplit": true,
+            "effectSlots": 1
+          }
+        },
+        {
+          "name": "Mixed Feelings",
+          "category": "Plucks",
+          "bank": "Rare Earth",
+          "pool": "thirdparty",
+          "relPath": "patches_3rdparty/Rare Earth/Plucks/Mixed Feelings.fxp",
+          "fit": 0.7181,
+          "ringDb": -39.8,
+          "activeFraction": 0.538,
+          "params": {
+            "attackMs": 8.46,
+            "releaseMs": 1306.51,
+            "sustain": 0,
+            "cutoffHz": 50.75,
+            "activeOscCount": 2,
+            "octaveSplit": false,
+            "effectSlots": 2
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,4 +1,4 @@
-FOR THE COORDINATOR — two one-line changes in files owned by the layered-arm stream.
+FOR THE COORDINATOR — three small changes in files owned by the layered-arm stream.
 Prepared by the surge-unlock branch, which is forbidden from touching src/taste/showdown.ts and
 cli/beat.mjs's showdown sections. Neither hunk is applied on surge-unlock.
 
@@ -83,3 +83,31 @@ The tempo binding is a local patch to the surgepy source build:
 `node cli/beat.mjs showdown --surge-doctor` reports `tempoBinding: true` once it is in place. Until
 then a render that names a tempo fails loudly (exit 4) rather than silently producing an
 off-groove clip — which is the point.
+
+-------------------------------------------------------------------------------------------------
+HUNK 3 (OPTIONAL, and the point of the whole exercise) — cli/beat.mjs: use the v2 bank
+
+`presets/surge-curated-v2.json` is a NEW file; `presets/surge-curated.json` is untouched so it can
+serve as the control in a blind A/B. Both have the identical `roles[role].kept[].{category,name}`
+shape, so `loadCuratedFile` / `curatedKeysForRole` read either one with no code change.
+
+--- a/cli/beat.mjs
++++ b/cli/beat.mjs
+@@ ~line 2418
+-        const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', 'surge-curated.json')
++        const curatedBank = process.env.BEAT_SURGE_BANK ?? 'surge-curated-v2.json'
++        const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', curatedBank)
+
+...and the log line three lines below it should name `curatedBank` instead of the literal, so the
+manifest/stderr says which bank a batch drew from. Threading the bank name into the batch manifest
+would make the A/B readable straight off the scores log.
+
+Measured difference between the two banks (same parser, both banks, 2026-07-26):
+
+  role      bank  n   attack p25/med/p75 ms  <=12.5ms  release p25/med/p75 ms  osc>=2  banks
+  bassline  v1   14        3.9 / 3.9 / 3.9      100%     31.3 / 31.3 / 41.7      21%      1
+  bassline  v2   40        3.9 / 3.9 / 3.9      100%     31.3 / 31.3 / 120.7     75%     34
+  chords    v1   16    442.9 / 829.5 / 1553.7    13%   1246.5 / 2083.4 / 2920.9  38%      1
+  chords    v2   40        3.9 / 3.9 / 5.0       98%     31.3 / 42.6 / 140.1     60%     29
+  lead      v1   16        3.9 / 3.9 / 3.9       94%     31.3 / 642.8 / 1416.0   50%      1
+  lead      v2   40        3.9 / 3.9 / 3.9       98%     31.3 / 50.3 / 257.3     80%     25
