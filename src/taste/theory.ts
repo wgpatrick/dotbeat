@@ -674,46 +674,185 @@ export function chooseVoicing(key: PhraseKey, chord: ChordTrackChord, style: Cho
 
 const CHORD_STYLES: readonly ChordVoicingStyle[] = ['triad', 'm7', 'm9', 'omit5']
 
+/** Pick the OPENING voicing seeded from the most compact candidates, rather than always the single
+ * most compact one (owner ear-report 2026-07-26: every figure over the same chord opened on the
+ * same inversion in the same octave, so the whole pad part was pinned by chord choice alone). The
+ * candidates are sorted by spread and the draw is confined to the compact end, so the opening is
+ * still a tidy close-position voicing — just not always the SAME one. Voice-leading from the second
+ * chord on is unchanged: minimal motion from wherever the figure opened. */
+export function chooseOpeningVoicing(key: PhraseKey, chord: ChordTrackChord, style: ChordVoicingStyle, rng: () => number): number[] {
+  const cands = candidateVoicings(styleToneOffsets(key, chord, style), key.root)
+    .slice()
+    .sort((a, b) => voiceLeadingCost(a, null) - voiceLeadingCost(b, null))
+  return pickOne(rng, cands.slice(0, Math.min(4, cands.length)))
+}
+
+/** One bar's SINGLE change in a chord figure's variation schedule — the chord analogue of
+ * `bassBarSchedule`'s menu (a stab dropped, delayed a 16th behind the beat in Chandler's
+ * groove-via-offset move, or answered by an extra hit). */
+export type ChordBarChange = { kind: 'full' } | { kind: 'skip'; slot: number } | { kind: 'push'; slot: number } | { kind: 'add'; slot: number }
+
+const CHORD_CHANGE_KINDS = ['skip', 'push', 'add'] as const
+
+/** The seeded one-change-per-bar schedule for a chord figure: first bar states the rhythm, last bar
+ * restates it, each bar between carries exactly one change. */
+export function chordBarSchedule(rng: () => number, slots: readonly number[], bars: number): ChordBarChange[] {
+  const sched: ChordBarChange[] = Array.from({ length: bars }, () => ({ kind: 'full' }) as ChordBarChange)
+  if (slots.length === 0 || bars < 3) return sched
+  const late = slots.filter((s) => s >= 8)
+  const pool = late.length > 0 ? late : slots
+  const free: number[] = []
+  for (let s = 1; s < 16; s++) if (!slots.includes(s)) free.push(s)
+  for (let b = 1; b < bars - 1; b++) {
+    const kind = pickOne(rng, CHORD_CHANGE_KINDS)
+    if (kind === 'add') {
+      sched[b] = free.length > 0 ? { kind, slot: pickOne(rng, free) } : { kind: 'full' }
+      continue
+    }
+    const kindPool = kind === 'push' ? pool.filter((s) => s < 15) : pool
+    sched[b] = kindPool.length > 0 ? { kind, slot: pickOne(rng, kindPool) } : { kind: 'full' }
+  }
+  return sched
+}
+
+/** Seeded off-beat stab placements. The plain 8th offbeats keep two of the seven slots so the
+ * archetype still sounds like itself; the rest thin it, double it, or push it onto the 3-against-4
+ * grid — all placements a house/techno stab part actually uses. */
+const STAB_PATTERNS: readonly (readonly number[])[] = [
+  [2, 6, 10, 14],
+  [2, 6, 10, 14],
+  [2, 6, 14],
+  [2, 5, 8, 11, 14],
+  [2, 10],
+  [2, 6, 10, 13, 14],
+  [3, 7, 11, 15],
+]
+
+/** Seeded house-pulse grids: straight 8ths (dominant) plus Euclidean timelines E(k,16) rotated to a
+ * downbeat onset (§C.5). */
+const PULSE_PATTERNS: readonly (readonly number[])[] = [
+  [0, 2, 4, 6, 8, 10, 12, 14],
+  [0, 2, 4, 6, 8, 10, 12, 14],
+  [0, 2, 4, 6, 8, 10, 12],
+  [0, 2, 4, 6, 8, 10, 14],
+  euclidSteps(6, 16, 1),
+  euclidSteps(7, 16, 1),
+  euclidSteps(9, 16, 1),
+]
+
+/** Seeded charleston placements — the downbeat hit plus a syncopated answer, at the several offsets
+ * the figure is actually played at. */
+const CHARLESTON_PATTERNS: readonly (readonly number[])[] = [
+  [0, 6],
+  [0, 6],
+  [0, 6, 12],
+  [0, 7],
+  [0, 3, 6],
+  [0, 6, 10],
+  [0, 6, 11, 14],
+]
+
+/** Seeded pad shapes over ONE chord's span (a pad's identity is holding, so this stays chord-scoped
+ * rather than per-bar): held, held with a release gap, a two-part swell, an anticipated entry a 16th
+ * before the chord, and a breathing re-articulation near the end. */
+type PadShape = 'held' | 'held-gap' | 'swell' | 'anticipated' | 'breathing'
+const PAD_SHAPES: readonly PadShape[] = ['held', 'held', 'held-gap', 'swell', 'anticipated', 'breathing']
+
 /** One theory-aware chord figure over a chord track: a per-chord voicing chosen by minimal-motion
- * voice-leading, rendered with the archetype's rhythm and honouring the track's harmonic rhythm (the
+ * voice-leading from a SEEDED opening voicing, rendered with a seeded realization of the archetype's
+ * rhythm plus a one-change-per-bar variation schedule, honouring the track's harmonic rhythm (the
  * voicing changes only at chord boundaries, never re-drawn per bar). Deterministic in `seed`. */
 export function composeTheoryChords(archetype: string, track: ChordTrack, seed: number): ComposedNote[] {
   const rng = mulberry32(seed + 1487)
-  const style = CHORD_STYLES[Math.floor(rng() * CHORD_STYLES.length)]!
-  const notes: ComposedNote[] = []
+  const style = pickOne(rng, CHORD_STYLES)
+
+  // one voicing per CHORD: seeded opening, minimal motion thereafter
+  const voicings: number[][] = []
   let prev: number[] | null = null
   for (const chord of track.chords) {
-    const voicing = chooseVoicing(track.key, chord, style, prev)
-    prev = voicing
-    const o = chord.startBar * 16
-    const len = chord.bars * 16
-    const stack = (start: number, duration: number, v: number): void => {
-      for (const pitch of voicing) notes.push({ pitch, start, duration, velocity: clampVel(v) })
+    const v: number[] = prev === null ? chooseOpeningVoicing(track.key, chord, style, rng) : chooseVoicing(track.key, chord, style, prev)
+    voicings.push(v)
+    prev = v
+  }
+  const voicingAtBar = (bar: number): number[] => {
+    for (let i = 0; i < track.chords.length; i++) {
+      const c = track.chords[i]!
+      if (bar >= c.startBar && bar < c.startBar + c.bars) return voicings[i]!
     }
-    switch (archetype) {
-      case 'lush-pad':
-        stack(o, len - (rng() < 0.3 ? 2 : 0), 0.6)
-        break
-      case 'offbeat-stabs':
-        for (let s = 2; s < len; s += 4) stack(o + s, rng() < 0.5 ? 1 : 2, 0.62)
-        break
-      case 'house-pulse':
-        for (let s = 0; s < len; s += 2) {
-          if (s % 16 === 14 && rng() < 0.3) continue // seeded breath before a barline
-          stack(o + s, 1, s % 8 === 0 ? 0.7 : 0.52)
-        }
-        break
-      default: {
-        // charleston: a downbeat hit + a syncopated "and", per bar of the chord's span
-        for (let b = 0; b < chord.bars; b++) {
-          const bo = o + b * 16
-          stack(bo, 3, 0.66)
-          stack(bo + 6, 2, 0.55)
-          if (rng() < 0.4) stack(bo + 12, 2, 0.5)
-        }
-        break
+    return voicings[voicings.length - 1]!
+  }
+
+  const notes: ComposedNote[] = []
+  const stack = (voicing: readonly number[], start: number, duration: number, v: number): void => {
+    for (const pitch of voicing) notes.push({ pitch, start: rnd2(start), duration, velocity: clampVel(v) })
+  }
+
+  if (archetype === 'lush-pad') {
+    const shape = pickOne(rng, PAD_SHAPES)
+    const level = pickOne(rng, [0.54, 0.6, 0.66])
+    track.chords.forEach((chord, i) => {
+      const o = chord.startBar * 16
+      const len = chord.bars * 16
+      const voicing = voicings[i]!
+      switch (shape) {
+        case 'held-gap':
+          stack(voicing, o, len - 2, level)
+          break
+        case 'swell':
+          stack(voicing, o, Math.floor(len / 2), level - 0.06)
+          stack(voicing, o + Math.floor(len / 2), len - Math.floor(len / 2), level + 0.06)
+          break
+        case 'anticipated':
+          // a 16th early, except at the very top of the clip where there is nothing to anticipate
+          if (i === 0) stack(voicing, o, len, level)
+          else stack(voicing, o - 1, len + 1, level)
+          break
+        case 'breathing':
+          stack(voicing, o, len - 4, level)
+          stack(voicing, o + len - 3, 3, level - 0.08)
+          break
+        default:
+          stack(voicing, o, len, level)
+          break
       }
+    })
+    notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+    return notes
+  }
+
+  // the rhythmic archetypes are laid out per BAR, so the seeded variation schedule applies
+  const slots = archetype === 'offbeat-stabs'
+    ? pickOne(rng, STAB_PATTERNS)
+    : archetype === 'house-pulse'
+      ? pickOne(rng, PULSE_PATTERNS)
+      : pickOne(rng, CHARLESTON_PATTERNS)
+  const gate = archetype === 'offbeat-stabs'
+    ? pickOne(rng, [1, 1.5, 2])
+    : archetype === 'house-pulse'
+      ? pickOne(rng, [0.75, 1, 1.5])
+      : pickOne(rng, [2, 3])
+  const accent = pickOne(rng, [0.66, 0.7, 0.74])
+  const soft = accent - pickOne(rng, [0.1, 0.16, 0.22])
+  const sched = chordBarSchedule(rng, slots, track.bars)
+
+  for (let bar = 0; bar < track.bars; bar++) {
+    const voicing = voicingAtBar(bar)
+    const change = sched[bar] ?? { kind: 'full' }
+    let events = slots.map((slot) => ({ slot, shift: 0, velocity: slot % 8 === 0 ? accent : soft, gate }))
+    switch (change.kind) {
+      case 'skip':
+        events = events.filter((e) => e.slot !== change.slot)
+        break
+      case 'push':
+        events = events.map((e) => (e.slot === change.slot ? { ...e, shift: 1 } : e))
+        break
+      case 'add':
+        if (!events.some((e) => e.slot === change.slot)) events.push({ slot: change.slot, shift: 0, velocity: soft, gate })
+        break
+      default:
+        break
     }
+    for (const e of events) stack(voicing, bar * 16 + e.slot + e.shift, e.gate, e.velocity)
   }
   notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
   return notes

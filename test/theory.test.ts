@@ -31,6 +31,8 @@ import {
   grooveConsistency,
   lintFigure,
   bassBarSchedule,
+  chooseOpeningVoicing,
+  THEORY_CHORD_ARCHETYPES,
 } from '../src/taste/theory.js'
 
 const MINOR = { root: 48, minor: true }
@@ -295,6 +297,37 @@ test('composeTheoryChords stays register-separated from the sub bass across styl
     const track = buildChordTrack(MINOR, seed)
     const notes = composeTheoryChords('lush-pad', track, seed)
     for (const n of notes) assert.ok(n.pitch >= track.key.root, 'a pad note never enters the sub octave')
+  }
+})
+
+test('each chord archetype has a family of rhythmic realizations, and the opening voicing is seeded', () => {
+  for (const archetype of THEORY_CHORD_ARCHETYPES) {
+    const skeletons = new Set<string>()
+    for (let seed = 0; seed < 40; seed++) {
+      const track = buildChordTrack(MINOR, seed)
+      skeletons.add(onsetKey(composeTheoryChords(archetype, track, seed)))
+    }
+    assert.ok(skeletons.size >= 6, `${archetype} produced only ${skeletons.size} distinct skeletons in 40 draws`)
+  }
+  // the SAME chord, drawn many times, opens on more than one voicing — but always a compact one
+  const track = buildChordTrack(MINOR, 9, { barsPerChord: 1, mode: 'natural-minor' })
+  const chord = track.chords[0]!
+  const openings = new Set<string>()
+  for (let seed = 0; seed < 60; seed++) {
+    const v = chooseOpeningVoicing(track.key, chord, 'triad', mulberry32(seed))
+    openings.add(v.join(','))
+    assert.ok(Math.min(...v) >= track.key.root, 'an opening voicing never dips into the sub')
+    assert.ok(Math.max(...v) - Math.min(...v) <= 24, 'an opening voicing stays close-position')
+  }
+  assert.ok(openings.size >= 2, `the opening voicing is seeded, got ${openings.size} distinct`)
+})
+
+test('chord figures are deterministic in the seed across the new seeded realizations', () => {
+  for (const archetype of THEORY_CHORD_ARCHETYPES) {
+    for (let seed = 0; seed < 20; seed++) {
+      const track = buildChordTrack(MINOR, seed)
+      assert.deepEqual(composeTheoryChords(archetype, track, seed), composeTheoryChords(archetype, track, seed))
+    }
   }
 })
 
