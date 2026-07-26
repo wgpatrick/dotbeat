@@ -60,7 +60,8 @@ file is literally a recipe.
 
 Run `node cli/beat.mjs` with no arguments for the full command list — it's grown a lot (track
 groups, drum kits, audio-clip splitting, effect chains, checkpoint/restore/pin history, selection
-sync with the GUI) since the walkthrough above.
+sync with the GUI, production tricks, per-section mix feedback, blind source showdowns, the
+`beat board` review surface) since the walkthrough above.
 
 ## The idea in one picture
 
