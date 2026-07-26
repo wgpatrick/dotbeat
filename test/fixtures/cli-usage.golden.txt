@@ -648,10 +648,12 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           (headless Chromium driving ui/; no BeatLab needed)
   beat render <file> --offline [-o out.wav]               compute the mix through an offline context instead
                                                           of capturing the realtime clock — same engine, no
-                                                          lossy recorder step. Repeatable to ~1 LSB for
-                                                          oscillator content; noise-based voices (e.g. the
-                                                          default kit's snare/hats) vary per run, exactly as
-                                                          they do live. CPU-bound: fast for short/small
+                                                          lossy recorder step. REPRODUCIBLE: the same file
+                                                          renders the same audio every run, to ~1 LSB — the
+                                                          drum kit's noise voices are seeded per (track, lane)
+                                                          with a read offset that is a function of the hit's
+                                                          time, so nothing is drawn from the clock or from
+                                                          process state. CPU-bound: fast for short/small
                                                           projects, can be SLOWER than live capture for long
                                                           dense songs (the measured ratio is printed).
                                                           Refuses soundfont (instrument/sf-lane) projects;

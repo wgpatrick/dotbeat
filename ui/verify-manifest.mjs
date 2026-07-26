@@ -192,6 +192,10 @@ export const VERIFY_SCRIPTS = [
   { script: 'scripts/verify-phase33-stream-mc.mjs', area: 'cli-errors', tier: 'cli', status: 'live' },
   { script: 'scripts/verify-phase33-stream-md.mjs', area: 'cli-correctness', tier: 'cli', status: 'live' },
   { script: 'scripts/verify-phase33-stream-me.mjs', area: 'macros', tier: 'cli', status: 'live' },
+  // D20: two --offline renders of an all-noise project must be sample-identical. Tier `cli`
+  // because it drives `beat render` rather than asserting inside the page, but what it gates is
+  // engine audio — pilot 109's HIGH finding, which had been closed by editing the help text.
+  { script: 'scripts/verify-offline-noise-reproducible.mjs', area: 'render-determinism', tier: 'cli', status: 'live' },
 ]
 
 export const TIERS = ['engine', 'gui', 'both', 'cli']
