@@ -34,7 +34,7 @@ import {
   sampleValueInRange,
   type VaryParamDef,
 } from '../vary/vary.js'
-import { type FeatureKey, type FeatureVector } from './features.js'
+import { type FeatureKey, type FeatureVector } from '../metrics/features.js'
 import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { SPLIT_SMOKE_MIN_BATCHES } from './eval.js'
 import { tally, statLine, pct, loadLatestRankedEntries, type SourceStat } from './showdown.js'

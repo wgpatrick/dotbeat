@@ -3188,7 +3188,7 @@ async function pilotCmd(argv) {
 
   const { criticWithUncertainty } = await import('../dist/src/taste/eval.js')
   const { embedAudioFile } = await import('../dist/src/taste/embeddings.js')
-  const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+  const { computeBatchFeatures } = await import('../dist/src/metrics/features.js')
   const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch } = await import('../dist/src/vary/batch.js')
   const showdown = await import('../dist/src/taste/showdown.js')
   const { copyFileSync } = await import('node:fs')
@@ -3763,7 +3763,7 @@ async function tasteEvalCmd(argv) {
     // Rewrite entries that lack features but whose batch renders still exist — making the log
     // self-contained before batch dirs get cleaned up. A .bak of the original is kept.
     const lines = readFileSync(logPath, 'utf8').split('\n')
-    const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+    const { computeBatchFeatures } = await import('../dist/src/metrics/features.js')
     let filled = 0
     const rewritten = lines.map((line) => {
       const trimmed = line.trim()
@@ -3861,7 +3861,7 @@ async function tasteSuggestCmd(argv) {
   const logPath = explicitLog ?? (existsSync(siblingLog) ? siblingLog : null)
   if (logPath === null || !existsSync(logPath)) throw new BeatEditError(`no scores log found next to ${dir} — pass --log <beat-scores.jsonl> (the taste model needs YOUR past ratings to rank with)`)
   const { loadTasteBatches, trainOnBatches } = await import('../dist/src/taste/eval.js')
-  const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+  const { computeBatchFeatures } = await import('../dist/src/metrics/features.js')
   const { standardizeBatch, scoreVector } = await import('../dist/src/taste/ranker.js')
   const { batches } = loadTasteBatches(logPath)
   const training = batches.filter((b) => resolve(b.dir) !== resolve(dir)) // never train on the batch being ranked

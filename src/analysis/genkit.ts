@@ -18,8 +18,8 @@
 //     centroid sits at 6 kHz is not a kick — the same centroid comparison that picked the
 //     recipe-song's snare by hand on 2026-07-14).
 
-import { mulberry32 } from '../taste/eval.js'
-import { stylePromptsFor } from '../taste/seeds.js'
+import { mulberry32 } from '../core/rng.js'
+import { stylePromptsFor } from './gen-styles.js'
 import { hzToMidi, midiToNote } from '../core/keymap.js'
 import { PITCH_CONFIDENCE_MEDIUM, type PitchDetection } from './pitch.js'
 

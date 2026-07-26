@@ -3,7 +3,7 @@
 // receipt." This is the rung above macros (src/core/macro.ts) and produced-defaults
 // (src/analysis/produce.ts): a validated catalog of named production MOVES, each carrying
 //   (1) machine-readable PRECONDITIONS over the metric vector the eval loop already computes
-//       (taste/features.ts FEATURE_KEYS) AND over document state (SYNTH_FIELDS values, song mode,
+//       (metrics/features.ts FEATURE_KEYS) AND over document state (SYNTH_FIELDS values, song mode,
 //       lane hits) — so "this track is mono and shouldn't be" is a computable fact, not vibes;
 //   (2) a multi-verb RECIPE in a closed step vocabulary (set / effect-add / macro / automate /
 //       hits), every step resolving through an EXISTING edit primitive — the trick engine composes,
@@ -16,7 +16,7 @@
 // posture: every field/effect/param/macro/lane a trick names is checked against the LIVE format
 // vocabulary at load time, so a SYNTH_FIELDS rename breaks the trick library loudly in CI, before
 // any agent trusts a stale recipe. Lives in src/analysis/ (not src/core/, despite research 118's
-// sketch) because the metric-precondition half binds to taste/features.ts FEATURE_KEYS, and core
+// sketch) because the metric-precondition half binds to metrics/features.ts FEATURE_KEYS, and core
 // must not depend upward on taste/metrics — exactly the layer produce.ts already occupies.
 
 import {
@@ -37,7 +37,7 @@ import {
   type EffectType,
   type SynthFieldKind,
 } from '../core/index.js'
-import { FEATURE_KEYS, featuresForAudioFile, type FeatureKey, type FeatureVector } from '../taste/features.js'
+import { FEATURE_KEYS, featuresForAudioFile, type FeatureKey, type FeatureVector } from '../metrics/features.js'
 import { productionRoleFor, type ProductionRole } from './produce.js'
 
 export class BeatTrickError extends Error {

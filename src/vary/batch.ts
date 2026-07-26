@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse, serialize, setMediaSample, type BeatDocument } from '../core/index.js'
-import { computeBatchFeatures } from '../taste/features.js'
+import { computeBatchFeatures } from '../metrics/features.js'
 import { decodeWav, integratedLoudness, truePeak, readWavFormat, wavSampleCodec, type WavFormatInfo } from '../metrics/index.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..') // dist/src/vary -> repo root

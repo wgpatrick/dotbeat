@@ -11,7 +11,7 @@
 // batch also makes the learned weights read directly as taste directions ("negative on
 // centroidLog2 = picks darker variants").
 
-import { FEATURE_KEYS, type FeatureVector } from './features.js'
+import { FEATURE_KEYS, type FeatureVector } from '../metrics/features.js'
 import { mulberry32 } from '../core/rng.js'
 
 export interface TrainPair {
