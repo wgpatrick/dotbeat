@@ -328,18 +328,18 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     const param = surgeOverrideMatch[1]!
     const others = track.surge!.overrides.filter((o) => o.param !== param)
     if (value.trim() === '') return replaceTrack(doc, { ...track, surge: { ...track.surge!, overrides: others } })
-    const v = parseNum(value, `surge.override.${param}`)
-    if (v < 0 || v > 1) throw new BeatEditError(`surge override value must be normalized 0..1, got ${v}`)
-    return replaceTrack(doc, { ...track, surge: { ...track.surge!, overrides: [...others, { param, value: canon(v) }] } })
+    const v = canon(parseNum(value, `surge.override.${param}`))
+    if (v < 0 || v > 1) throw new BeatEditError(`surge override value must be normalized 0..1, got ${value}`)
+    return replaceTrack(doc, { ...track, surge: { ...track.surge!, overrides: [...others, { param, value: v }] } })
   }
 
   // v0.6 instrument tracks: their small field set, validated in place
   if (track.kind === 'instrument') {
     const inst = track.instrument!
-    if (rest === 'volume') return replaceTrack(doc, { ...track, instrument: { ...inst, volume: parseNum(value, 'volume') } })
+    if (rest === 'volume') return replaceTrack(doc, { ...track, instrument: { ...inst, volume: canon(parseNum(value, 'volume')) } })
     if (rest === 'pan') {
-      const p = parseNum(value, 'pan')
-      if (p < -1 || p > 1) throw new BeatEditError(`pan must be -1..1, got ${p}`)
+      const p = canon(parseNum(value, 'pan'))
+      if (p < -1 || p > 1) throw new BeatEditError(`pan must be -1..1, got ${value}`)
       return replaceTrack(doc, { ...track, instrument: { ...inst, pan: p } })
     }
     if (rest === 'program') {
@@ -360,7 +360,7 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
       const def = SYNTH_FIELD_BY_KEY.get(rest)!
       switch (def.kind) {
         case 'number':
-          return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: parseNum(value, rest) } })
+          return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: canon(parseNum(value, rest)) } })
         case 'enum':
           if (!def.values!.includes(value)) throw new BeatEditError(`${rest} must be one of ${def.values!.join('|')}, got "${value}"`)
           return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: value } })
@@ -372,14 +372,18 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     throw new BeatEditError(`unknown field "${rest}" on instrument track "${trackId}" (have: soundfont, program, volume, pan, name, color; effect-chain params: ${[...INSTRUMENT_EFFECT_FIELD_KEYS].join(', ')})`)
   }
 
-  // required core synth params
+  // required core synth params. canon() on the way in for the same reason as everywhere else in
+  // this file: the file can only carry 4 decimals, so `beat set lead.cutoff 0.00005` stored
+  // 0.00005 and reloaded as 0.0001 — the document changed under a no-op save, D4's canonical-bytes
+  // guarantee broken by one generation. (Found by core-serialize.test.ts's property test, not by
+  // hand — which is the argument for having it.)
   if ((SYNTH_PARAM_ORDER as readonly string[]).includes(rest)) {
     const param = rest as keyof BeatSynth
     if (param === 'osc') {
       if (!(OSC_TYPES as readonly string[]).includes(value)) throw new BeatEditError(`osc must be one of ${OSC_TYPES.join('|')}, got "${value}"`)
       return replaceTrack(doc, { ...track, synth: { ...track.synth, osc: value as OscType } })
     }
-    return replaceTrack(doc, { ...track, synth: { ...track.synth, [param]: parseNum(value, rest) } })
+    return replaceTrack(doc, { ...track, synth: { ...track.synth, [param]: canon(parseNum(value, rest)) } })
   }
 
   // v0.3 optional synth fields, table-driven
@@ -387,7 +391,7 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   if (def) {
     switch (def.kind) {
       case 'number':
-        return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: parseNum(value, rest) } })
+        return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: canon(parseNum(value, rest)) } })
       case 'enum':
         if (!def.values!.includes(value)) throw new BeatEditError(`${rest} must be one of ${def.values!.join('|')}, got "${value}"`)
         return replaceTrack(doc, { ...track, synth: { ...track.synth, [def.key]: value } })

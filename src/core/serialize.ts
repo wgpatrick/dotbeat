@@ -129,11 +129,21 @@ function serializeAutomationLanes(trackId: string, lanes: BeatAutomationLane[], 
   return lines
 }
 
-// v0.10 groove/shuffle: a single `groove <amount> <grid>` line, entirely absent while amount is
-// 0 (the canonical default — see BeatTrack.shuffleAmount). Shared by both the instrument and the
-// synth/drums branches below so there's exactly one place that knows the line's shape.
+// v0.10 groove/shuffle: a single `groove <amount> <grid>` line, elided while the track's WHOLE
+// groove state is at its canonical default — amount 0 AND the neutral 1-step grid (see
+// BeatTrack.shuffleAmount). Shared by both the instrument and the synth/drums branches below so
+// there's exactly one place that knows the line's shape.
+//
+// The condition used to be `amount !== 0` alone, which silently dropped a grid the user had
+// already dialled in: `beat set lead.shuffleGrid 0.25` before touching the amount wrote nothing at
+// all, and the next load handed back the default grid of 1. parse() has always ACCEPTED
+// `groove 0 0.25` and stored the 0.25, so the reader and the writer disagreed about whether that
+// state exists — the same reader/writer asymmetry as the rest of this fix, just losing data
+// quietly instead of loudly. Every pre-existing file is byte-identical under the new condition (a
+// grid is only interesting once an amount is set, so no serialized file has one without the other).
 function grooveLine(t: BeatTrack): string[] {
-  return t.shuffleAmount !== 0 ? [`  groove ${formatNumber(t.shuffleAmount)} ${formatNumber(t.shuffleGrid)}`] : []
+  if (t.shuffleAmount === 0 && t.shuffleGrid === 1) return []
+  return [`  groove ${formatNumber(t.shuffleAmount)} ${formatNumber(t.shuffleGrid)}`]
 }
 
 // Track 1a: a surge track's sound-source block — the factory `patch`, an optional `sampleRate`

@@ -21,8 +21,16 @@ import {
   BeatMacroError,
   MACRO_CATEGORIES,
   AUTOMATABLE_SYNTH_PARAMS,
+  formatNumber,
   type MacroTarget,
 } from '../src/core/index.js'
+
+/** applyMacro lands its resolved values through `setValue`, which snaps them to the format's
+ * canonical 4-decimal precision — so a curve that computes 3.5300000000000002 stores 3.53, the
+ * value the file can actually carry and hand back. Asserting the raw float here would be asserting
+ * that a writer may hold a value serialize can't represent, which is the drift these tests exist
+ * to rule out (adversarial hunt #2, finding 8). */
+const stored = (n: number) => Number(formatNumber(n))
 
 const macrosJson = readFileSync(fileURLToPath(new URL('../presets/macros.json', import.meta.url)), 'utf8')
 
@@ -103,7 +111,7 @@ test('applying a macro is exactly a bag of synth-param edits — nothing else ch
   }
   // the resolved values landed literally
   for (const { param, value } of resolveMacro(macro, 70)) {
-    assert.equal(next.tracks.find((t) => t.id === 'lead')!.synth[param as keyof (typeof next.tracks)[0]['synth']], value)
+    assert.equal(next.tracks.find((t) => t.id === 'lead')!.synth[param as keyof (typeof next.tracks)[0]['synth']], stored(value))
   }
   // and the serialized text contains no trace of the macro's own name/identity — only real params
   const text = serialize(next)
@@ -118,7 +126,7 @@ test('every factory macro applies cleanly to a fresh track of its kind', () => {
     const target = macro.kind === 'drums' ? 'drums' : 'lead'
     const next = applyMacro(doc, target, macro, 60)
     for (const { param, value } of resolveMacro(macro, 60)) {
-      assert.equal(next.tracks.find((t) => t.id === target)!.synth[param as keyof (typeof next.tracks)[0]['synth']], value, `${macro.name}: ${param}`)
+      assert.equal(next.tracks.find((t) => t.id === target)!.synth[param as keyof (typeof next.tracks)[0]['synth']], stored(value), `${macro.name}: ${param}`)
     }
   }
 })
