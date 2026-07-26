@@ -183,6 +183,82 @@ future showdown arm can draw from it the same way `beat showdown` draws from the
 does and carries a `nativeOverrides` list per row — no patch content is copied into the repo, so
 the open Surge factory-content licence question (surge #6741) is unchanged by it.
 
+## Results, 12 presets (2026-07-26)
+
+Engine: 300 evaluations each (289 renders after cache hits), 6–11 min/preset. Surge: 250 each.
+`gap` is the weighted distance to the role's targets; 0 means every target hit. `held-out` is the
+same patch on a composed figure the search never saw.
+
+| backend | role | preset | source | targets hit | gap | held-out gap |
+|---|---|---|---|---|---|---|
+| engine | bassline | roll-bassline-349 | curated | 5/9 → 6/9 | 1.213 → **0.185** | 1.893 → 0.992 |
+| engine | bassline | deep-sub-bass | factory | 6/9 → **9/9** | 0.521 → **0.000** | 1.231 → 0.778 |
+| engine | chords | warm-pad | curated | 5/10 → **10/10** | 0.609 → **0.000** | 1.396 → 1.358 |
+| engine | chords | lush-pad | factory | 4/10 → **10/10** | 0.984 → **0.000** | 1.366 → **0.000** |
+| engine | lead | roll-lead-224 | curated | 3/9 → 8/9 | 1.244 → **0.194** | 1.489 → 0.544 |
+| engine | lead | bright-lead | factory | 5/9 → 6/9 | 0.695 → **0.133** | 1.009 → 0.834 |
+| surge | bassline | Theme | curated | 4/9 → 5/9 | 0.828 → 0.658 | 0.954 → 0.901 |
+| surge | bassline | FM Slap | curated | 4/9 → 4/9 | 1.572 → 0.577 | 1.677 → 1.408 |
+| surge | chords | Bright | curated | 6/10 → **10/10** | 0.342 → **0.000** | 0.972 → 0.279 |
+| surge | chords | Verb Pad | curated | 5/10 → 5/10 | 1.371 → 0.268 | 0.382 → **1.368** |
+| surge | lead | The 1980s | curated | 2/9 → 2/9 | 1.391 → 0.239 | 1.583 → 0.576 |
+| surge | lead | Frog | curated | 4/9 → 5/9 | 1.003 → 0.069 | 1.176 → 0.236 |
+
+**Engine 28/56 → 45/56 targets. Surge 25/56 → 31/56.** Four of twelve presets reach every target
+in their role.
+
+Three things in that table are worth more than the headline:
+
+1. **The search rediscovered research/138 §2's free-wins checklist from audio alone.** Nobody told
+   it about `subLevel` or `osc2Detune`. `subLevel` is in the top-6 moves for **5 of 6** engine
+   presets; `osc2Detune` and `osc2Level` for 3 each; `compMix` (138 row 4's "true dry/wet fan
+   sitting unused") for 3. On `roll-bassline-349` it went `subLevel 0 → 0.63`, `osc2Detune
+   12 → −1200`, `osc2Level 0 → 0.45` — row 1 and row 3 of that checklist, exactly, with the sign
+   right. That is independent confirmation that 138's diagnosis is not just plausible but
+   recoverable from the measurements.
+2. **Generalization is real but partial.** Held-out gaps fall for 11 of 12 presets, and `lush-pad`
+   holds a perfect 0.000 on a figure it never saw. But held-out gaps are consistently *worse* than
+   search-figure gaps, and `surge/Verb Pad` is an outright overfit — its search gap fell
+   1.371 → 0.268 while its held-out gap rose **0.382 → 1.368**. Single-figure search overfits, the
+   held-out check catches it, and averaging two figures per evaluation is the obvious next step.
+3. **Register is reachable when the preset starts near it, and not otherwise.** `deep-sub-bass`
+   took `bandSubPct` and `centroidHz` cleanly (`subLevel` 0.6 → 0.9, `cutoff` 700 → 270 Hz).
+   `roll-bassline-349`, a bright square patch, got to 27.3 % sub and 111 Hz centroid and stalled
+   just short of the 30 % / 90 Hz thresholds — inside its trust region there was nowhere further
+   to go. Retargeting is a nudge, and where you start decides what you can reach.
+
+### The ceiling: what the engine could not reach
+
+Only six target misses survive across all six engine presets, and one of them repeats:
+
+| target | role | missed | best value reached | verdict |
+|---|---|---|---|---|
+| **`fluxMean` ≥ 0.7** | lead | **2 of 2 lead presets** | 0.52 / 0.65 | **A real ceiling.** |
+| `centroidHz` ≤ 90 | bassline | 1 of 2 | 111 Hz | reachable from the right start |
+| `bandSubPct` ≥ 30 | bassline | 1 of 2 | 27.3 % | reachable from the right start |
+| `crestPresenceDb` ≥ 9 | lead | 1 of 2 | 6.0 dB | probably a ceiling (n=1) |
+| `slopeDbPerOct` −12..−4 | lead | 1 of 2 | −3.2 | near-miss |
+| `crestDb` 6..12 | bassline | 1 of 2 | 12.2 | near-miss (0.06 units) |
+
+**`fluxMean` on lead is the finding.** Both lead presets missed it, on both backends (surge's two
+leads missed it too), and it is the *only* target that no lead patch in either engine could reach.
+It is also, by research/131 §3.1, the **second-strongest discriminator in the whole log** (paired d
++1.06 — refs move ~2× as much spectrally as engineplus). The engine's only per-note motion source
+is the filter envelope, and a filter envelope makes a note *decay*, not *evolve*: it cannot produce
+the ongoing spectral change a produced loop has. This is exactly what 131 P3 predicted from the
+other direction — it names composition (onset rate, velocity contrast, ghost notes) and LFO depth
+as the levers for movement, not patch envelopes.
+
+So the honest read: **a preset retarget can close register, punch, texture and tilt, and it cannot
+close movement.** Movement needs either the LFO surface this space deliberately excludes, or the
+composition/expression layer 131 P3 and 138 §2 row 8 point at. That is a build item, not a search
+budget.
+
+Two smaller ceilings worth recording: `crestPresenceDb` on lead (6.0 dB against a ≥9 target, where
+131 §5 measured elite refs at 19.8) suggests the presence band's dynamics are a layering property
+rather than a patch one, consistent with 138's composite-arm argument; and surge's `bandMidsPct
+≤ 90` failed on both leads, i.e. Surge's leads are as mids-locked as the engine's.
+
 ## Honest gaps
 
 - **The features are a re-implementation, not a port.** Ten axes reproduce research/131's published
