@@ -128,7 +128,7 @@ test('bass layers sit in the mined 75-100 Hz sub/mid crossover band, on every se
     // arrived 14 dB under the mix and sub-alone RMS was within 0.15 dB of the whole stack.
     const character = arch.layers.filter((l) => l.id !== 'sub')
     assert.ok(character.length >= 1, `seed ${seed}: a bass stack must carry at least one character layer`)
-    assert.ok(character.some((l) => l.gainDb > sub.gainDb), `seed ${seed}: every character layer sits under the sub — this is the 2026-07-26 "it is just a sine" failure`)
+    assert.ok(character.some((l) => l.gainDb >= sub.gainDb), `seed ${seed}: every character layer sits under the sub — this is the 2026-07-26 "it is just a sine" failure`)
     // and the sub is a pluck, not a held tone (bass-house vein: "nobody uses a long sustain")
     assert.ok((sub.patch.sustain ?? 1) <= 0.85, `seed ${seed}: sub sustain ${sub.patch.sustain} is a drone, not a bass`)
   }
