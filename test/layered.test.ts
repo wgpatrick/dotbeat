@@ -31,7 +31,7 @@ import { composePitchedPhrase, inferSeedKey } from '../src/taste/showdown.js'
 import { generateSeedBeat } from '../src/taste/seeds.js'
 import { engineplusProfile, surgeplusProfile } from '../src/taste/showdown.js'
 import type { ComposedPhrase } from '../src/taste/phrase.js'
-import { analyze } from '../src/metrics/index.js'
+import { analyze, analyzeRich } from '../src/metrics/index.js'
 import { mulberry32 } from '../src/core/rng.js'
 
 const KEY = { root: 52, minor: true } // E minor — a fixed key so every assertion below is exact
@@ -541,6 +541,16 @@ test('every target is derived from the measured reference distribution it cites'
   const named = UNMEASURABLE_TARGETS.map((u) => u.name)
   for (const expected of ['attackMedMs', 'fluxMean', 'onsetRatePerSec', 'flatnessHiDb']) {
     assert.ok(named.includes(expected), `${expected} must be reported as unmeasurable, not dropped`)
+  }
+  // ...and it must admit it for the RIGHT reason. Until 2026-07-26 all four rows claimed these
+  // features were UNCOMPUTABLE ("onset detection exists nowhere in the codebase", "spectral flux
+  // needs an STFT"). analyzeRich computes every one of them and has since a parallel stream landed,
+  // so the comment was inviting the next reader to re-derive a wrong conclusion from prose instead
+  // of from the code. What is actually missing is calibration against the reference pool.
+  const rich = analyzeRich([new Float64Array(4096).fill(0.1), new Float64Array(4096).fill(0.1)], 48000)
+  for (const u of UNMEASURABLE_TARGETS) {
+    assert.ok(u.name in rich, `${u.name} is listed as unmeasurable but analyzeRich does not compute it — one of the two is wrong`)
+    assert.doesNotMatch(u.why, /exists nowhere|not in MixMetrics|needs an STFT;/, `${u.name}'s reason claims the feature cannot be computed, but analyzeRich computes it`)
   }
   const printed = formatTargetVerification(verifyLayeredTargets('chords', featuresFrom(roleCentre('chords'))), 'x')
   for (const n of named) assert.match(printed, new RegExp(n))

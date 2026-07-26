@@ -1404,15 +1404,32 @@ function deriveTargets(): Record<LayeredRole, Partial<Record<LayeredFeatureKey, 
  * no number here can drift away from the distribution it claims to come from. */
 export const LAYERED_TARGETS: Record<LayeredRole, Partial<Record<LayeredFeatureKey, TargetRange>>> = deriveTargets()
 
-/** Targets named in 131/133/138 that this gate still cannot check. The list is much shorter than it
- * was: `crest_subDb`, `articulationDb`, `characterLevelDb` and the per-band levels moved OUT of it
- * on 2026-07-26 when src/taste/articulation.ts was written to close the exact gap the owner's ear
- * had found. What is left needs onset detection or an STFT, neither of which exists yet. */
+/** Targets named in 131/133/138 that this gate does not check YET.
+ *
+ * The list shrank once on 2026-07-26 when src/taste/articulation.ts was written and `crest_subDb`,
+ * `articulationDb`, `characterLevelDb` and the per-band levels moved out of it — those closed the
+ * exact gap the owner's ear had found.
+ *
+ * CORRECTED 2026-07-26 (second pass). The four rows below used to claim these features were
+ * UNCOMPUTABLE — "onset detection exists nowhere in the codebase", "spectral flux needs an STFT",
+ * "spectral flatness is not in MixMetrics". That was true when this file was written and is false
+ * now: `analyzeRich` in src/metrics/rich.ts computes ALL FOUR (fluxMean, flatnessHiDb,
+ * onsetRatePerSec, attackMedMs — it runs a real STFT and a real onset detector), and it landed via a
+ * parallel stream this file's author could not see. A wrong `why` is worse than a missing feature:
+ * the next reader re-derives "we can't measure this" from a comment instead of from the code.
+ *
+ * WHAT IS ACTUALLY MISSING is CALIBRATION, not measurement. Every other row in LAYERED_TARGETS is
+ * derived from measured refs-packs quantiles (`deriveTargets` above, scripts/ref-pool-stats.mjs);
+ * the thresholds quoted here are 131's hand-written prose numbers against an unstated reference and
+ * an unstated measurement method. Turning these on without first running analyzeRich over the
+ * reference pool and deriving p25/p50/p75 the same way as everything else would gate renders on
+ * numbers with no provenance — precisely what `deriveTargets`'s own docstring says this file will
+ * not do. So they stay OFF, honestly labelled, until that measurement exists. */
 export const UNMEASURABLE_TARGETS: { name: string; target: string; why: string }[] = [
-  { name: 'attackMedMs', target: '<=12 ms chords / <=8 ms lead (131 P2)', why: 'onset attack-time extraction exists nowhere in the codebase' },
-  { name: 'fluxMean', target: '>=0.17 (131 P3)', why: 'spectral flux needs an STFT; analyze() takes one whole-file spectrum' },
-  { name: 'onsetRatePerSec', target: '>=4/s on chords (131 P3)', why: 'onset detection exists nowhere in the codebase' },
-  { name: 'flatnessHiDb', target: '-16..-8 dB (131 P4)', why: 'spectral flatness is not in MixMetrics' },
+  { name: 'attackMedMs', target: '<=12 ms chords / <=8 ms lead (131 P2)', why: 'computed by analyzeRich (src/metrics/rich.ts) — not gated: 131 quotes a hand-written threshold, and no refs-packs quantiles have been measured for it' },
+  { name: 'fluxMean', target: '>=0.17 (131 P3)', why: 'computed by analyzeRich (real STFT) — not gated: no measured reference quantiles, and 0.17 is scale-dependent on the flux definition' },
+  { name: 'onsetRatePerSec', target: '>=4/s on chords (131 P3)', why: 'computed by analyzeRich (real onset detector) — not gated: no measured reference quantiles, and the rate is tempo-dependent so a flat threshold is wrong' },
+  { name: 'flatnessHiDb', target: '-16..-8 dB (131 P4)', why: 'computed by analyzeRich (2-8 kHz presence band) — not gated: no measured reference quantiles' },
 ]
 
 export type LayeredFeatures = Record<LayeredFeatureKey, number>
