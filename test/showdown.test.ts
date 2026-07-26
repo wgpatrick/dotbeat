@@ -927,6 +927,68 @@ test('foldBpmToRange: half/double-time readings fold into [70,180], integers out
   assert.throws(() => foldBpmToRange(-120))
 })
 
+// I5 — the shared scores log is KIND-ONLY. This is the projection D25 and both licensing stances
+// rest on: `source.from` (a ref chop's absolute path, a midi file's basename, a Surge factory patch
+// name) stays in the batch dir's local manifest and NEVER reaches the shared log, while the one
+// label the spec does permit — `figureSource` — does. The projection itself is two duplicated
+// one-liners in src/vary/batch.ts (`[v.file, v.source!.kind]` at ~800 and ~863); changing either to
+// `v.source!` leaks every path, filename and patch name at once.
+//
+// The refPools test below covers the ref case (one substring, one kind). It did NOT cover the other
+// two payloads with licensing exposure: midi file paths/basenames (D25: "never a song title,
+// artist, filename, or path") and Surge factory-patch names (unresolved upstream content license).
+// Both ride the same field through the same projection.
+test('the shared log leaks no midi path and no surge patch name — only kinds and figureSource', () => {
+  const container = mkdtempSync(join(tmpdir(), 'beat-showdown-leak-'))
+  const dir = join(container, 'showdown-lead-77')
+  mkdirSync(dir)
+  for (const f of ['v1.wav', 'v2.wav', 'v3.wav']) writeFileSync(join(dir, f), toneWav(330, 0.35))
+
+  // every `from` payload the pipeline can carry, in one batch
+  const midiPath = '/private/midi-packs/Artist Name - Famous Song (Lead).mid'
+  const midiLabel = 'midi:Artist Name - Famous Song (Lead)'
+  const surgePatch = 'Lead/Snarly Sync Lead'
+  const refPath = '/private/taste-dataset/refs-packs/lead/commercial-chop-9.wav'
+  writeShowdownBatch(dir, 'lead', [
+    { file: 'v1.wav', source: { kind: 'engine', from: `${midiLabel}, transposed +3 st` } },
+    { file: 'v2.wav', source: { kind: 'surge', from: `surge patch "${surgePatch}", ${midiLabel}` } },
+    { file: 'v3.wav', source: { kind: 'ref', from: refPath } },
+  ], { seed: 77, figureSource: 'midi' })
+  const result = scoreBatch(dir, ['2', '1', '3'])
+  const log = readFileSync(result.logPath, 'utf8')
+
+  // nothing identifying survives the projection — not the path, not the basename, not the patch
+  for (const secret of [midiPath, midiLabel, 'Famous Song', 'Artist Name', '.mid', surgePatch, 'Snarly', refPath, 'refs-packs']) {
+    assert.ok(!log.includes(secret), `"${secret}" must never reach the shared scores log`)
+  }
+  // ...while the entry is still fully useful: kinds per file, and the ONE permitted label
+  const entry = JSON.parse(log.trim().split('\n').pop()!) as { sources: Record<string, string>; figureSource?: string }
+  assert.deepEqual(entry.sources, { 'v1.wav': 'engine', 'v2.wav': 'surge', 'v3.wav': 'ref' })
+  assert.equal(entry.figureSource, 'midi', 'figureSource IS permitted — it names an arm, not content')
+  // and the local manifest keeps the full provenance (that is where it is supposed to live)
+  const manifest = readBatchManifest(dir)
+  assert.ok(manifest.variants.some((v) => v.source?.from?.includes(surgePatch)), 'the local manifest keeps the patch name')
+  assert.ok(manifest.variants.some((v) => v.source?.from === refPath), 'the local manifest keeps the ref path')
+})
+
+test('none-good entries use the SAME kind-only projection (a second, easily-forgotten write site)', () => {
+  // recordNoneGood duplicates scoreBatch's enrichment lines verbatim; a fix applied to one and not
+  // the other leaks through the less-travelled path.
+  const dir = mkdtempSync(join(tmpdir(), 'beat-showdown-leak-ng-'))
+  for (const f of ['v1.wav', 'v2.wav']) writeFileSync(join(dir, f), toneWav(330, 0.35))
+  writeShowdownBatch(dir, 'chords', [
+    { file: 'v1.wav', source: { kind: 'engine', from: 'midi:Some Copyrighted Track' } },
+    { file: 'v2.wav', source: { kind: 'surgeplus', from: 'surge patch "Keys/Grand Piano", produced' } },
+  ], { seed: 5, figureSource: 'midi' })
+  const result = recordNoneGood(dir)
+  const log = readFileSync(result.logPath, 'utf8')
+  for (const secret of ['Some Copyrighted Track', 'Grand Piano', 'Keys/']) {
+    assert.ok(!log.includes(secret), `"${secret}" must never reach the shared scores log`)
+  }
+  assert.deepEqual(result.entry.sources, { 'v1.wav': 'engine', 'v2.wav': 'surgeplus' })
+  assert.equal(result.entry.figureSource, 'midi')
+})
+
 test('refPools: ref rows split by origin pool from local manifests; the log itself stays kind-only', () => {
   const container = mkdtempSync(join(tmpdir(), 'beat-showdown-pools-'))
   const mk = (name: string, refFrom: string, picks: string[]) => {
