@@ -13,7 +13,7 @@ for (const [role, seeds] of Object.entries(SEEDS)) {
     for (const l of a.layers) {
       console.log(
         `   ${l.id.padEnd(7)} ${String(l.patch.osc).padEnd(9)} osc2=${String(l.patch.osc2Type ?? '-')}@${l.patch.osc2Detune ?? '-'}c lvl${l.patch.osc2Level ?? 0} noise=${l.patch.noiseLevel ?? 0}` +
-          ` | ${l.band.mode} ${l.band.cutoffHz}Hz | ${l.gainDb}dB | mono=${l.mono}` +
+          ` | ${l.band.mode} ${l.band.cutoffHz}Hz restLP=${l.patch.eq7LpOn === true ? l.patch.eq7LpFreq : '-'} ${l.figure.transpose > 0 ? '+' : ''}${l.figure.transpose}st | ${l.gainDb}dB | mono=${l.mono}` +
           ` | rev=${l.patch.sendReverb ?? 'unset'} del=${l.patch.sendDelay ?? 'unset'} | eqHigh=${l.patch.eqHigh ?? 0}` +
           ` | sus=${l.patch.sustain} dec=${l.patch.decay} rel=${l.patch.release} | maxDur=${l.figure.maxDurationSteps ?? '-'} pick=${l.figure.pick}`,
       )
