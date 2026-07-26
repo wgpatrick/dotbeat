@@ -12,6 +12,7 @@
 // centroidLog2 = picks darker variants").
 
 import { FEATURE_KEYS, type FeatureVector } from './features.js'
+import { mulberry32 } from '../core/rng.js'
 
 export interface TrainPair {
   /** standardized feature vector of the preferred variant */
@@ -146,18 +147,6 @@ export interface BTEnsemble {
   members: BTModel[]
   seed: number
   n: number
-}
-
-/** Local mulberry32 — the same generator eval.ts exports, duplicated here so the ranker stays a
- * leaf module (eval.ts imports ranker.ts, not the reverse; importing back would cycle). */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
 }
 
 /** Train an N-member bootstrap ensemble of BT heads. Each member resamples the pair set WITH
