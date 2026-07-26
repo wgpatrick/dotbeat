@@ -2672,7 +2672,9 @@ async function showdownCmd(argv) {
 
   // ---- collection ------------------------------------------------------------------------------
   if (!dir) throw new BeatEditError('showdown needs the taste-seeds directory: beat showdown <dir> [--roles r1,r2] [--rounds 1] [--with-produced] [--ref-dir <path>] (or --report)')
-  const { mulberry32 } = await import('../dist/src/taste/eval.js')
+  // NOTE: showdownCmd deliberately imports NO rng. Every seeded choice a batch makes comes either
+  // from showdown.drawShowdownBatchPlan (the nuisance draws) or from a module seeded with that
+  // plan's batchSeed — so no arm-conditional branch can shift another batch's draws.
   const { genSubject, genSubjectVaried, genStyles, PHRASE_NEGATIVE } = await import('../dist/src/taste/seeds.js')
   const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch, isEnvironmentFault, environmentFaultReason } = await import('../dist/src/vary/batch.js')
   const { mkdirSync, copyFileSync } = await import('node:fs')
@@ -2873,7 +2875,6 @@ async function showdownCmd(argv) {
     }
   }
 
-  const rng = mulberry32(metaSeed)
   let made = 0
   let failed = 0
   // per-role archetypes already composed this session — threaded into the composer's exclude
@@ -2884,13 +2885,7 @@ async function showdownCmd(argv) {
   const usedPresets = new Map()
   for (let round = 0; round < rounds; round++) {
     for (const spec of roles) {
-      const batchSeed = Math.floor(rng() * 100000)
-      const genSeed = Math.floor(rng() * 100000)
-      const kmSeed = Math.floor(rng() * 100000)
       const styles = genStyles()
-      const style = styles[Math.floor(rng() * styles.length)]
-      const kmStyle = styles[Math.floor(rng() * styles.length)]
-      const refPick = Math.floor(rng() * 100000) // drawn unconditionally so --ref-dir never shifts the other seeds
       // a seed song that actually carries this role's track (the arp track is optional per seed)
       const candidates = seeds.filter((s) => s.doc.tracks.some((t) => t.id === spec.seedTrack))
       if (candidates.length === 0) {
@@ -2898,7 +2893,21 @@ async function showdownCmd(argv) {
         process.stderr.write(`warning: no seed song has a "${spec.seedTrack}" track for role ${spec.role} — skipping (generate more seeds: beat taste-seeds ${dir})\n`)
         continue
       }
-      const seed = candidates[Math.floor(rng() * candidates.length)]
+      // EVERY nuisance variable for this batch comes from ONE pure draw keyed on (--seed, round,
+      // role) — see showdown.ts's "per-batch nuisance draws" section. Nothing below may call an
+      // rng: an arm-conditional draw here is exactly how a figure-source comparison stops being a
+      // comparison (round 6, 2026-07-25). test/showdown-pairing.test.ts asserts both halves.
+      const plan = showdown.drawShowdownBatchPlan({
+        metaSeed,
+        round,
+        role: spec.role,
+        styleCount: styles.length,
+        candidateCount: candidates.length,
+      })
+      const { batchSeed, genSeed, kmSeed, refPick } = plan
+      const style = styles[plan.styleIndex]
+      const kmStyle = styles[plan.kmStyleIndex]
+      const seed = candidates[plan.seedIndex]
       const seedPath = join(dir, seed.file)
       const outDir = join(dir, `showdown-${spec.role}-${batchSeed}`)
       const workDir = join(outDir, 'work')

@@ -1068,6 +1068,88 @@ export function applySurgeplusProduction(doc: BeatDocument, role: string): Produ
   return applyProducedDefaults(doc, SURGEPLUS_TRACK_ID, surgeplusProfile(role), { sampleHostWidth: true })
 }
 
+// ---- per-batch nuisance draws (the figure-source experiment's control) -------------------------
+// A showdown batch has exactly ONE variable under test at a time — today, `figureSource` (bank /
+// theory / ca2 / midi). Everything else the batch happens to need — WHICH taste-seed song supplies
+// the host doc and therefore the key, WHICH engine preset the engine/engineplus clips wear, WHICH
+// ref chop is drawn, WHICH gen/keymap prompt style is asked for, and the gen/keymap generation
+// seeds — are NUISANCE variables. They must be identical between two arms run at the same
+// `--seed`, or the comparison measures arm + four confounds.
+//
+// WHY THIS IS A FUNCTION AND NOT SEVEN `rng()` CALLS IN THE CLI LOOP. The draws used to come off a
+// single sequential `mulberry32(metaSeed)` stream walked across the whole run. That happened to be
+// correct — every draw sat at the TOP of the loop body, above any arm-conditional code — but only
+// by accident of statement order, and nothing tested it. Adding one `rng()` call anywhere lower in
+// that ~500-line body (i.e. anywhere in the arm-specific code) would shift every subsequent
+// batch's nuisance draws, which is precisely the hazard src/core/rng.ts's header describes. Round
+// 6 (2026-07-25) shipped an unreadable figure-source comparison for the adjacent reason — three
+// arms run at three different `--seed`s — so the failure mode is not hypothetical.
+//
+// Keying the sub-stream on the ROLE NAME rather than its index in `--roles` is deliberate and buys
+// a second property the sequential stream did not have: `--roles chords` and `--roles bassline,chords`
+// now produce the SAME chords batch, so a round can be re-run one role at a time (e.g. after a
+// per-role failure) without disturbing the others.
+
+/** The nuisance draws for ONE showdown batch — everything the batch needs that is NOT the variable
+ * under test. A pure function of (metaSeed, round, role) plus the two pool sizes it indexes into;
+ * it takes no figure-source / arm parameter BY CONSTRUCTION, which is what makes two arms at one
+ * seed comparable. */
+export interface ShowdownBatchPlan {
+  /** seeds the composed figure, the engine-preset pick, the surge-patch pick and the clip shuffle */
+  batchSeed: number
+  /** `--count`-style seed passed to the gen backend for the gen clip */
+  genSeed: number
+  /** generation seed for the keymap clip's one-shot(s) */
+  kmSeed: number
+  /** index into `genStyles()` for the gen clip's prompt style */
+  styleIndex: number
+  /** index into `genStyles()` for the keymap one-shot's prompt style */
+  kmStyleIndex: number
+  /** rotation offset into the role's ref pool (the audibility/role screens scan forward from it) */
+  refPick: number
+  /** index into the taste-seed songs that actually carry this role's track */
+  seedIndex: number
+}
+
+/** FNV-1a over the batch's identity, so the sub-stream seed is stable across machines and across
+ * any reordering of `--roles`. Kept private: the seed is an implementation detail of the plan, and
+ * `drawShowdownBatchPlan` is the only supported way to obtain the draws. */
+function batchStreamSeed(metaSeed: number, round: number, role: string): number {
+  let h = 0x811c9dc5
+  for (const ch of `${metaSeed}|${round}|${role}`) {
+    h ^= ch.charCodeAt(0)
+    h = Math.imul(h, 0x01000193)
+  }
+  return h >>> 0
+}
+
+/** Draw one batch's nuisance variables. Deterministic in (metaSeed, round, role); independent of
+ * the figure source, of which optional arms (`--with-produced` / `--with-surge` / `--with-layered`)
+ * are on, and of how many roles the run asks for. */
+export function drawShowdownBatchPlan(opts: {
+  metaSeed: number
+  round: number
+  role: string
+  /** `genStyles().length` — the prompt-style pool the two style indices address */
+  styleCount: number
+  /** how many taste-seed songs carry this role's track */
+  candidateCount: number
+}): ShowdownBatchPlan {
+  const { metaSeed, round, role, styleCount, candidateCount } = opts
+  if (!(styleCount > 0)) throw new BeatBatchError(`showdown batch plan needs a non-empty style pool (got ${styleCount})`)
+  if (!(candidateCount > 0)) throw new BeatBatchError(`showdown batch plan needs at least one candidate seed song (got ${candidateCount})`)
+  const rng = mulberry32(batchStreamSeed(metaSeed, round, role))
+  return {
+    batchSeed: Math.floor(rng() * 100000),
+    genSeed: Math.floor(rng() * 100000),
+    kmSeed: Math.floor(rng() * 100000),
+    styleIndex: Math.floor(rng() * styleCount),
+    kmStyleIndex: Math.floor(rng() * styleCount),
+    refPick: Math.floor(rng() * 100000),
+    seedIndex: Math.floor(rng() * candidateCount),
+  }
+}
+
 // ---- batch assembly ----------------------------------------------------------------------------
 
 
@@ -1393,6 +1475,164 @@ export interface SourceStat {
   pairCount: number
 }
 
+// ---- the figure-source axis (research 124 §B.7/§C.7 and 125 §4, audit 140 D7) ------------------
+// `figureSource` records where a showdown batch's COMPOSED figures came from: 'midi' (private
+// transcriptions of commercial tracks), 'theory' (the deterministic theory-aware layer, theory.ts),
+// 'ca2' (Composer's Assistant 2 composing over that layer's chord track, ca2.ts) or 'bank' (the
+// internal archetype bank). It is written into the batch manifest and copied into the scores-log
+// entry — and for its whole existence NOTHING READ IT: the report tallied overall / by role / by
+// ref-pool and no fourth axis, so the theory layer (1,294 lines) and the CA2 sidecar (a 716 MB
+// out-of-repo model, a Python sidecar, guards, tests, a doctor) both shipped specifically to be
+// measured by an experiment whose readout did not exist.
+//
+// WHY IT WAS MISSED (worth keeping, because it generalizes): `figureSource` was built as PROVENANCE
+// — D25 licensing hygiene, "the shared log records only the kind, never a song title or path" — and
+// the privacy framing masked that the same field is also the experimental factor.
+//
+// This landed first as a separate module (src/taste/figure-source-report.ts) because showdown.ts was
+// being actively edited by another stream; its own header named the integration point. That stream
+// merged, so the code is inlined here — the module remains as a re-export barrel so existing import
+// paths and its tests keep working. Reading the split requires the batches to be COMPARABLE, which
+// is what drawShowdownBatchPlan above guarantees.
+
+/** The four labels `figureSource` can carry. Deliberately not treated as a closed union below — an
+ * unknown label must show up in the report rather than being silently dropped, which is the whole
+ * failure mode this readout exists to fix. */
+export const FIGURE_SOURCES = ['midi', 'theory', 'ca2', 'bank'] as const
+export type FigureSource = (typeof FIGURE_SOURCES)[number]
+
+/** The label used for batches whose entry carries no `figureSource`. */
+export const UNLABELLED = '(none recorded)'
+
+export interface FigureSourceGroup {
+  figureSource: string
+  /** scored showdown batches carrying this label */
+  batches: number
+  /** per-source-kind scoreboard WITHIN this figure source — the same math the overall board uses */
+  stats: SourceStat[]
+  /** too few batches to read as a result — same convention and threshold as the per-role splits. */
+  smoke: boolean
+}
+
+export interface FigureSourceSplit {
+  logPath: string
+  /** batches that had a figureSource on their entry */
+  labelled: number
+  /** batches with no figureSource recorded — mostly pre-dating the field */
+  unlabelled: number
+  groups: FigureSourceGroup[]
+  /** the small-n threshold the `smoke` flags use, echoed so a caller need not import it */
+  smokeMinBatches: number
+  /** the transpose, and the more direct readout: for one source kind, how it fared under each
+   * figure source. Comparing `engine` across 'theory' and 'ca2' is the actual experiment. */
+  byKind: { kind: string; rows: { figureSource: string; stat: SourceStat }[] }[]
+  /** labels declared in FIGURE_SOURCES that appear in NO scored batch. A build with zero evidence
+   * is the finding, not an empty row to skip past — CA2 sat here for its whole existence. */
+  neverRated: string[]
+}
+
+/**
+ * Map batch dir -> figureSource, read straight from the scores log.
+ *
+ * The shared latest-per-batch reader (`loadLatestRankedEntries`) projects entries down to
+ * picks/rejected/sources and drops `figureSource`, so it has to be recovered separately. LAST
+ * writer per batch wins, matching that reader's own supersede convention: a re-scored batch's
+ * newer entry is the authority. Malformed lines are skipped, exactly as the shared reader does.
+ */
+export function figureSourceByBatch(logPath: string): Map<string, string> {
+  const out = new Map<string, string>()
+  if (!existsSync(logPath)) return out
+  for (const line of readFileSync(logPath, 'utf8').split('\n')) {
+    const t = line.trim()
+    if (t === '') continue
+    let e: { batch?: unknown; group?: unknown; figureSource?: unknown }
+    try {
+      e = JSON.parse(t)
+    } catch {
+      continue
+    }
+    if (typeof e.group !== 'string' || !e.group.startsWith('showdown:')) continue
+    if (typeof e.batch !== 'string' || typeof e.figureSource !== 'string') continue
+    out.set(e.batch, e.figureSource)
+  }
+  return out
+}
+
+function figureRank(label: string): number {
+  if (label === UNLABELLED) return FIGURE_SOURCES.length + 1
+  const i = (FIGURE_SOURCES as readonly string[]).indexOf(label)
+  return i === -1 ? FIGURE_SOURCES.length : i
+}
+
+/** The scoreboard split by `figureSource` — the readout 124 and 125 were built to produce. */
+export function figureSourceSplit(logPath: string): FigureSourceSplit {
+  const { entries } = loadShowdownEntries(logPath)
+  const byBatch = figureSourceByBatch(logPath)
+
+  const buckets = new Map<string, typeof entries>()
+  for (const e of entries) {
+    const label = byBatch.get(e.batch) ?? UNLABELLED
+    if (!buckets.has(label)) buckets.set(label, [])
+    buckets.get(label)!.push(e)
+  }
+
+  const groups: FigureSourceGroup[] = [...buckets.entries()]
+    .map(([figureSource, es]) => ({ figureSource, batches: es.length, stats: tally(es), smoke: es.length < SPLIT_SMOKE_MIN_BATCHES }))
+    // declared order first (midi, theory, ca2, bank), then anything unexpected, then the unlabelled
+    // bucket last — it is the least interesting and usually the largest.
+    .sort((a, b) => figureRank(a.figureSource) - figureRank(b.figureSource) || a.figureSource.localeCompare(b.figureSource))
+
+  const kinds = [...new Set(groups.flatMap((g) => g.stats.map((s) => s.kind)))].sort()
+  const byKind = kinds.map((kind) => ({
+    kind,
+    rows: groups
+      .map((g) => ({ figureSource: g.figureSource, stat: g.stats.find((s) => s.kind === kind) }))
+      .filter((r): r is { figureSource: string; stat: SourceStat } => r.stat !== undefined),
+  }))
+
+  const seen = new Set(groups.map((g) => g.figureSource))
+  return {
+    logPath,
+    labelled: entries.filter((e) => byBatch.has(e.batch)).length,
+    unlabelled: entries.filter((e) => !byBatch.has(e.batch)).length,
+    groups,
+    smokeMinBatches: SPLIT_SMOKE_MIN_BATCHES,
+    byKind,
+    neverRated: FIGURE_SOURCES.filter((f) => !seen.has(f)),
+  }
+}
+
+/** Human-facing block, in the same voice and column widths as `formatShowdownReport`. */
+export function formatFigureSourceSplit(r: FigureSourceSplit): string {
+  let out = `\nby figure source — where each batch's COMPOSED figures came from (research 124/125's validation axis)\n`
+  if (r.labelled === 0) {
+    out += `  no scored showdown batch records a figureSource yet — nothing to split.\n`
+    // Still name the arms: "zero evidence" is the finding, and an early return that says only
+    // "nothing to split" is how ca2 stayed invisible for its whole existence.
+    if (r.neverRated.length > 0) out += `  NEVER RATED: ${r.neverRated.join(', ')} — built, integrated, and carrying zero evidence.\n`
+    return out
+  }
+  out += `  ${r.labelled} labelled batch(es), ${r.unlabelled} without a recorded figureSource\n`
+  for (const g of r.groups) {
+    out += `\n  ${g.figureSource} (${g.batches} batch${g.batches === 1 ? '' : 'es'}${g.smoke ? ', SMOKE — too few to read as a result' : ''})\n`
+    for (const s of g.stats) out += statLine(s, '    ')
+  }
+  // The transpose is the actual comparison, so print it explicitly rather than making the reader
+  // hold four blocks in their head.
+  const comparable = r.byKind.filter((k) => k.rows.length > 1)
+  if (comparable.length > 0) {
+    out += `\n  same source kind across figure sources (the comparison the experiment is for)\n`
+    for (const k of comparable) {
+      const cells = k.rows.map((row) => `${row.figureSource} ${pct(row.stat.pairsWon, row.stat.pairCount)} of ${row.stat.pairCount}`)
+      out += `    ${k.kind.padEnd(11)} pairwise  ${cells.join('   ')}\n`
+    }
+  }
+  if (r.neverRated.length > 0) {
+    out += `\n  NEVER RATED: ${r.neverRated.join(', ')} — built, integrated, and carrying zero evidence.\n`
+  }
+  return out
+}
+
 export interface ShowdownReport {
   logPath: string
   totalBatches: number
@@ -1408,6 +1648,8 @@ export interface ShowdownReport {
   /** "None of these are good" verdicts per role (recordNoneGood) — excluded from the win-rate math
    * above (empty picks, no winner to imply pairs from) but surfaced here so the signal isn't lost. */
   noneGood: { byRole: { role: string; batches: number }[]; total: number }
+  /** the figure-source axis (bank / theory / ca2 / midi) — research 124/125's validation experiment */
+  figureSources: FigureSourceSplit
 }
 
 /** The minimal ranked-batch shape the per-arm tally needs — a set of ranked picks, the rejected
@@ -1530,6 +1772,7 @@ export function computeShowdownReport(logPath: string): ShowdownReport {
     roles,
     smokeMinBatches: SPLIT_SMOKE_MIN_BATCHES,
     noneGood: noneGoodByRole(logPath),
+    figureSources: figureSourceSplit(logPath),
   }
 }
 
@@ -1569,6 +1812,7 @@ export function formatShowdownReport(r: ShowdownReport): string {
     out += `  ${role.role} (${role.batches} batch${role.batches === 1 ? '' : 'es'})${role.smoke ? '  [small n — smoke, not evidence]' : ''}\n`
     for (const s of role.stats) out += statLine(s, '    ')
   }
+  out += formatFigureSourceSplit(r.figureSources)
   out += `(win = ranked best; top-half = ranked in the top ceil(n/2) picks; pairwise = implied comparisons won; ref clips are counted by KIND only — their identity stays in the batch dir)\n`
   return out
 }
