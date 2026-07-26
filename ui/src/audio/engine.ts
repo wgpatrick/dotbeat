@@ -1837,13 +1837,42 @@ interface InstrumentVoice extends EffectHost {
 /** Phase 22 Stream AE: one live audio-region-clip track. `player` is a shared, reused Tone.Player
  * — its `.buffer` is swapped (not rebuilt) when the currently-active clip references different
  * media, and `.playbackRate`/`.volume` are set per-trigger from the active BeatAudioRegion (repitch
- * rate, static gain + gain-automation ramps). `player` → `muteGain` → master, the same dedicated-
- * gate discipline as SynthChain/DrumBus/InstrumentVoice so mute/solo never fights the region's own
- * gain value. No separate track-level volume/pan this stream (documented gap, see
- * docs/phase-22-stream-ae.md) — a clip's own `gainDb` is the only level control. */
-interface AudioTrackVoice {
+ * rate, static gain + gain-automation ramps).
+ *
+ * Research 142 headline 1 / §3.2: this voice used to be THREE nodes — `player -> muteGain ->
+ * master`, with `reconcileEffectChain` never called for an audio track — while a sample-backed
+ * DRUM LANE had a filter, an AHD envelope, its own ordered effect chain and the drum bus's whole
+ * production block. "The drum machine can mangle a sample; the thing named audio cannot." The
+ * voice now carries the production subset that genuinely applies to a played buffer, in the SAME
+ * node shapes every other track kind uses:
+ *
+ *   player -> filter -> fxIn -> ...reorderable effects... -> muteGain -> vol -> pan -> master
+ *                                                                        vol -> reverbSend -> reverb bus
+ *                                                                        vol -> delaySend  -> delay bus
+ *
+ * `filter` is the same Tone.Filter primitive SynthChain/DrumBus/SampleLaneVoice use, sitting
+ * PRE-chain exactly as it does on those (filtering-as-extraction, and the band a sampled layer's
+ * crossover needs). `fxIn` exists only to give reconcileEffectChain a stable entry node, exactly
+ * as on InstrumentVoice. Sends tap post-fader off `vol` (Ableton's Post default) and downstream of
+ * `muteGain`, so muting silences the sends too — identical wiring and identical reasoning to
+ * SynthChain's, see that build's own comment.
+ *
+ * Deliberately NO fixed saturator/chorus/phaser/pingPong tail (same call InstrumentVoice made):
+ * audio tracks never had one, and saturation/tape/vinyl/bitcrush are all reachable as REORDERABLE
+ * inserts (`distortion`, `vinylDistortion`, `bitcrush`, `grainDelay`), which is what the mined
+ * degradation stack actually wants — an explicit, orderable tape -> vinyl -> bitcrush, not a
+ * fixed tail. No duck either: `duckSource` is a drum-lane-trigger concept and widening it is a
+ * separate call. And the clip's own `gainDb` + gain-automation lane are untouched — they still
+ * ride `player.volume`, upstream of everything here. */
+interface AudioTrackVoice extends EffectHost {
   player: Tone.Player
+  filter: Tone.Filter
+  fxIn: Tone.Gain
   muteGain: Tone.Gain
+  vol: Tone.Volume
+  pan: Tone.Panner
+  reverbSend: Tone.Gain
+  delaySend: Tone.Gain
   levelTap: Tone.Analyser
 }
 
@@ -3165,13 +3194,43 @@ export class Engine {
     }
   }
 
+  /** Research 142 §3.2 — see AudioTrackVoice's own doc comment for the full graph and for what is
+   * deliberately absent. Node DEFAULTS here are the transparent ones (0 dB, 20 kHz / Q 0 filter,
+   * silent sends, empty chain), matching AUDIO_TRACK_FIELDS' defaults in src/core/document.ts, so
+   * a track that sets nothing sounds exactly like the old three-node voice did. `fxIn -> muteGain`
+   * is NOT wired here: reconcileEffectChain (from applyAudioTrackParams) owns that whole link, and
+   * effectsSig starts at the sentinel no real signature equals, so the very first sync() tick
+   * always makes it — even for an empty chain. Same discipline as SynthChain/InstrumentVoice. */
   private buildAudioTrackVoice(): AudioTrackVoice {
+    const { reverb, delay } = this.getBuses()
     const player = new Tone.Player()
+    const filter = new Tone.Filter(20000, 'lowpass')
+    filter.Q.value = 0
+    const fxIn = new Tone.Gain()
     const muteGain = new Tone.Gain(1)
+    const vol = new Tone.Volume(0)
+    // channelCount 2, for the same reason SynthChain's panner declares it and for one more that is
+    // specific to sampled material: a StereoPannerNode fed a MONO-downmixed input applies the
+    // equal-power law at centre (cos(pi/4) = 0.707 per side), so a default-2-channel panner would
+    // quietly cost every audio track 3 dB AND fold a stereo loop's image to mono. Measured: with
+    // the default, a -10.5 dBFS two-tone rendered -13.5 dB (ui/verify-audio-track-fx.mjs's
+    // [BASELINE] check, which exists precisely to catch this).
+    const pan = new Tone.Panner({ pan: 0, channelCount: 2 })
+    const reverbSend = new Tone.Gain(0)
+    const delaySend = new Tone.Gain(0)
     const levelTap = new Tone.Analyser('waveform', 256)
-    player.chain(muteGain, this.getMaster())
-    muteGain.connect(levelTap) // post-fader side-tap, same discipline as every other levelTap
-    return { player, muteGain, levelTap }
+    player.connect(filter)
+    filter.connect(fxIn)
+    muteGain.chain(vol, pan, this.getMaster())
+    pan.connect(levelTap) // post-fader side-tap, same discipline as every other levelTap
+    vol.connect(reverbSend)
+    reverbSend.connect(reverb)
+    vol.connect(delaySend)
+    delaySend.connect(delay)
+    return {
+      player, filter, fxIn, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET,
+      muteGain, vol, pan, reverbSend, delaySend, levelTap,
+    }
   }
 
   private disposeAudioTrackVoice(voice: AudioTrackVoice): void {
@@ -3181,8 +3240,40 @@ export class Engine {
       // best-effort: a not-yet-started player may reject stop()
     }
     voice.player.dispose()
+    voice.filter.dispose()
+    voice.fxIn.dispose()
+    for (const runtime of voice.effects.values()) {
+      for (const n of runtime.nodes) n.dispose()
+      if (runtime.raw) for (const n of runtime.raw) n.disconnect()
+    }
     voice.muteGain.dispose()
+    voice.vol.dispose()
+    voice.pan.dispose()
+    voice.reverbSend.dispose()
+    voice.delaySend.dispose()
     voice.levelTap.dispose()
+  }
+
+  /** Research 142 §3.2: apply one audio track's production block every sync() tick — the same
+   * per-tick re-assert applyParams/applyDrumBusParams do for synth/drum tracks, restricted to the
+   * fields AUDIO_TRACK_FIELDS says an audio track may carry (see document.ts for the honest
+   * "what does not apply" list). Ramped level/cutoff, instant Q/pan/sends, then the reorderable
+   * chain in the literal three-line shape the instrument voice uses.
+   *
+   * `coerce(track.synth)` fills every other BeatSynth key from INIT defaults; only the keys
+   * touched below are ever read for an audio track, and applyEffectParams reads only the ~12
+   * EffectType param groups — all of which ARE serializable on an audio track. */
+  private applyAudioTrackParams(voice: AudioTrackVoice, track: BeatTrack): void {
+    const p = coerce(track.synth)
+    voice.filter.type = p.filterType
+    voice.filter.frequency.rampTo(p.cutoff, 0.02)
+    voice.filter.Q.value = p.resonance
+    voice.vol.volume.linearRampTo(p.volume, 0.02) // ramped: same anti-click reasoning as everywhere else
+    voice.pan.pan.value = p.pan
+    voice.reverbSend.gain.value = p.sendReverb
+    voice.delaySend.gain.value = p.sendDelay
+    this.reconcileEffectChain(voice, voice.fxIn, voice.muteGain, track.effects ?? [], track.id)
+    for (const runtime of voice.effects.values()) applyEffectParams(runtime, p)
   }
 
   /** Reconcile live audio-track voices with the document: dispose vanished tracks, build voices
@@ -3201,6 +3292,9 @@ export class Engine {
     }
     for (const track of audioTracks) {
       if (!this.audioTracks.has(track.id)) this.audioTracks.set(track.id, this.buildAudioTrackVoice())
+      // Research 142 §3.2: the production block + reorderable chain, re-asserted every sync() tick
+      // so a live knob edit or an effect reorder reaches the graph on the next 16th.
+      this.applyAudioTrackParams(this.audioTracks.get(track.id)!, track)
       for (const clip of track.clips) {
         if (!clip.audio) continue
         const mediaId = clip.audio.media

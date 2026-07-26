@@ -69,6 +69,7 @@
 /** @type {VerifyEntry[]} */
 export const VERIFY_SCRIPTS = [
   // ---- engine tier: assertions on real recorded audio ------------------------------------------
+  { script: 'ui/verify-audio-track-fx.mjs', area: 'audio-region', tier: 'engine', status: 'live' },
   { script: 'ui/verify-clip-automation-render.mjs', area: 'automation', tier: 'engine', status: 'live' },
   { script: 'ui/verify-instrument.mjs', area: 'instrument', tier: 'engine', status: 'live' },
   { script: 'ui/verify-osc2-fix.mjs', area: 'synth', tier: 'engine', status: 'live' },
