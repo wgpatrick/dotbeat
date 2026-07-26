@@ -476,8 +476,11 @@ const VALUE_FLAGS = new Set(['--port', '--log', '--answer', '--prefer', '--note'
 const MODES = ['--status', '--digest', '--bank-listen-bench', '--answer']
 
 export async function abCommand(argv) {
-  // Loud unknown-flag stance, same as rate/board/render/vary (pilots 109-112).
-  for (const a of argv) {
+  // Loud unknown-flag stance, same as rate/board/render/vary (pilots 109-112). A flag's own VALUE
+  // is skipped, so an owner's note may start with dashes without being mistaken for a typo.
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (VALUE_FLAGS.has(argv[i - 1])) continue
     if (a.startsWith('--') && !KNOWN_FLAGS.includes(a)) {
       console.error(`error: unknown flag "${a}" (known: ${KNOWN_FLAGS.join(', ')})`)
       process.exit(2)
