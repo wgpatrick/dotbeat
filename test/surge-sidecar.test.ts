@@ -38,7 +38,7 @@ test('surgeAvailable: reads the doctor report defensively', () => {
   assert.equal(surgeAvailable({ surgepy: null as unknown as object }), false)
 })
 
-test('surgeDoctor: reports honestly, never throws', { skip: !hasPython }, async () => {
+test('surgeDoctor: reports honestly, never throws', { skip: !hasPython ? 'no python3' : false }, async () => {
   const report = await surgeDoctor()
   assert.equal(report.backend, 'surge')
   assert.equal(report.pythonFound, true)
@@ -56,14 +56,14 @@ test('surgeDoctor: reports honestly, never throws', { skip: !hasPython }, async 
   }
 })
 
-test('listSurgePatches: throws BeatSurgeError when surgepy is unavailable (CLI catches → skip)', { skip: !hasPython || hasSurgepy }, async () => {
+test('listSurgePatches: throws BeatSurgeError when surgepy is unavailable (CLI catches → skip)', { skip: !hasPython ? 'no python3' : hasSurgepy ? 'surgepy installed — the unavailable-path assertion is not exercisable here' : false }, async () => {
   await assert.rejects(() => listSurgePatches(), (err) => {
     assert.ok(err instanceof BeatSurgeError, `expected BeatSurgeError, got ${err}`)
     return true
   })
 })
 
-test('runSurgeRender: throws BeatSurgeError when surgepy is unavailable (CLI catches → skip)', { skip: !hasPython || hasSurgepy }, async () => {
+test('runSurgeRender: throws BeatSurgeError when surgepy is unavailable (CLI catches → skip)', { skip: !hasPython ? 'no python3' : hasSurgepy ? 'surgepy installed — the unavailable-path assertion is not exercisable here' : false }, async () => {
   await assert.rejects(
     () => runSurgeRender({ patch: '/nonexistent/patch.fxp', notes: [{ midi: 48, startSeconds: 0, durationSeconds: 0.5, velocity: 100 }], sampleRate: 44100, outPath: '/tmp/surge-test-should-not-exist.wav' }),
     (err) => {

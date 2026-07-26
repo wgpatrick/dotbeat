@@ -122,7 +122,7 @@ function writePcm16(path: string, samples: Float64Array, sampleRate: number): vo
   writeFileSync(path, buf)
 }
 
-test('roughnessCompare: rough candidate flags vs smooth baseline; reverse does not (real sidecar)', { skip: !sidecarAvailable }, async () => {
+test('roughnessCompare: rough candidate flags vs smooth baseline; reverse does not (real sidecar)', { skip: !sidecarAvailable ? 'no roughness sidecar (pip install -r python/requirements-roughness.txt into python/venv-roughness)' : false }, async () => {
   const FS = 44100
   const secs = 6
   const n = FS * secs

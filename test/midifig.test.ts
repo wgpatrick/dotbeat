@@ -244,7 +244,7 @@ test('scoreBatch: copies the figureSource LABEL into the log entry — never the
 
 // ---- the sidecar against the original fixture (gated on python + mido) -------------------------
 
-test('midiExtractDoctor: honest availability report', { skip: !hasMido }, async () => {
+test('midiExtractDoctor: honest availability report', { skip: !hasMido ? 'no mido in python/.venv (pip install -r python/requirements-midi.txt)' : false }, async () => {
   const report = await midiExtractDoctor()
   assert.equal(report.backend, 'midi')
   assert.equal(midiExtractAvailable(report), true)
@@ -256,7 +256,7 @@ test('midiExtractAvailable: defensive on malformed reports', () => {
   assert.equal(midiExtractAvailable({ mido: { available: true } }), true)
 })
 
-test('runMidiExtract: picks the right voice per part on the fixture', { skip: !hasMido }, async () => {
+test('runMidiExtract: picks the right voice per part on the fixture', { skip: !hasMido ? 'no mido in python/.venv (pip install -r python/requirements-midi.txt)' : false }, async () => {
   const expected: Record<string, string> = { bass: 'Sub Bass', chords: 'Stab Chords', lead: 'Lead Pluck' }
   for (const part of ['bass', 'chords', 'lead'] as const) {
     const fig = await runMidiExtract({ midiPath: fixtureMid, part })
@@ -274,7 +274,7 @@ test('runMidiExtract: picks the right voice per part on the fixture', { skip: !h
   }
 })
 
-test('runMidiExtract: chords part is actually polyphonic, bass/lead monophonic-ish', { skip: !hasMido }, async () => {
+test('runMidiExtract: chords part is actually polyphonic, bass/lead monophonic-ish', { skip: !hasMido ? 'no mido in python/.venv (pip install -r python/requirements-midi.txt)' : false }, async () => {
   const chords = await runMidiExtract({ midiPath: fixtureMid, part: 'chords' })
   const byStart = new Map<number, number>()
   for (const n of chords.notes) byStart.set(n.start, (byStart.get(n.start) ?? 0) + 1)
@@ -283,7 +283,7 @@ test('runMidiExtract: chords part is actually polyphonic, bass/lead monophonic-i
   assert.ok(bass.notes.every((n) => n.pitch < 60), 'bass stays in bass register')
 })
 
-test('runMidiExtract: unusable input fails loudly (CLI catches and falls back)', { skip: !hasMido }, async () => {
+test('runMidiExtract: unusable input fails loudly (CLI catches and falls back)', { skip: !hasMido ? 'no mido in python/.venv (pip install -r python/requirements-midi.txt)' : false }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'beat-midifig-bad-'))
   const bad = join(dir, 'bad.mid')
   writeFileSync(bad, 'this is not a midi file')
@@ -291,7 +291,7 @@ test('runMidiExtract: unusable input fails loudly (CLI catches and falls back)',
   await assert.rejects(() => runMidiExtract({ midiPath: join(dir, 'missing.mid'), part: 'bass' }), /no midi file/)
 })
 
-test('end-to-end: fixture -> sidecar -> ComposedPhrase in the seed key', { skip: !hasMido }, async () => {
+test('end-to-end: fixture -> sidecar -> ComposedPhrase in the seed key', { skip: !hasMido ? 'no mido in python/.venv (pip install -r python/requirements-midi.txt)' : false }, async () => {
   const seed = parse(generateSeedBeat(31).text)
   const fig = await runMidiExtract({ midiPath: fixtureMid, part: 'bass' })
   const { inferSeedKey } = await import('../src/taste/showdown.js')
