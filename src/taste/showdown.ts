@@ -46,6 +46,36 @@ import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { shuffledOrder } from '../vary/audition.js'
 import { genSubject } from './seeds.js'
 import { SPLIT_SMOKE_MIN_BATCHES, mulberry32 } from './eval.js'
+import {
+  scalePitchClasses,
+  degreePitch,
+  seededShuffle,
+  chooseSeeded,
+  MAJOR_SCALE,
+  NATURAL_MINOR_SCALE,
+  type PhraseKey,
+  type ComposedNote,
+  type ComposedPhrase,
+  type ComposedDrumLane,
+  type ComposedDrumHit,
+  type ComposedDrumPhrase,
+} from './phrase.js'
+// Barrel: the shared figure vocabulary now lives in ./phrase.ts (a near-leaf), but every consumer —
+// theory.ts, ca2.ts, midifig.ts, the tests, and cli/beat.mjs's dynamic imports — has always reached
+// for it here. Re-exporting keeps all of those import paths working with no edit.
+export {
+  scalePitchClasses,
+  degreePitch,
+  seededShuffle,
+  chooseSeeded,
+  type ScaleMode,
+  type PhraseKey,
+  type ComposedNote,
+  type ComposedPhrase,
+  type ComposedDrumLane,
+  type ComposedDrumHit,
+  type ComposedDrumPhrase,
+} from './phrase.js'
 import { curatedKey } from './surgeCuration.js'
 import type { StemName } from '../analysis/stems.js'
 
@@ -321,40 +351,6 @@ export function phraseFromSeed(doc: BeatDocument, trackId: string): PhraseNote[]
 // diatonic in the seed's inferred key — the point is a fair fight for the engine, so every
 // archetype is something a producer would actually play, not random notes.
 
-/** Genre-palette modes (research 124 §C.4): the base major/natural-minor pair plus Phrygian
- * (melodic techno / psytrance, featured b2) and Dorian (house / deep house). `minor` stays the
- * coarse tonality flag every existing caller sets; `mode`, when present, is the precise scale and
- * overrides `minor`. Absent `mode` keeps the historical major/natural-minor behavior byte-for-byte. */
-export type ScaleMode = 'major' | 'natural-minor' | 'phrygian' | 'dorian'
-
-export interface PhraseKey {
-  /** midi root of the key, folded into 48..59 (the taste-seed generator's own range) */
-  root: number
-  minor: boolean
-  /** optional precise mode; overrides `minor` when set (natural-minor/major mirror the flag) */
-  mode?: ScaleMode
-}
-
-const MAJOR_SCALE: readonly number[] = [0, 2, 4, 5, 7, 9, 11]
-const NATURAL_MINOR_SCALE: readonly number[] = [0, 2, 3, 5, 7, 8, 10]
-const PHRYGIAN_SCALE: readonly number[] = [0, 1, 3, 5, 7, 8, 10] // natural minor with a b2
-const DORIAN_SCALE: readonly number[] = [0, 2, 3, 5, 7, 9, 10] // natural minor with a natural 6
-
-export function scalePitchClasses(key: PhraseKey): readonly number[] {
-  switch (key.mode) {
-    case 'phrygian':
-      return PHRYGIAN_SCALE
-    case 'dorian':
-      return DORIAN_SCALE
-    case 'major':
-      return MAJOR_SCALE
-    case 'natural-minor':
-      return NATURAL_MINOR_SCALE
-    default:
-      return key.minor ? NATURAL_MINOR_SCALE : MAJOR_SCALE
-  }
-}
-
 /** Best-fit key of a seed doc: score every (root, mode) candidate by how many synth-note pitch
  * classes fall inside its diatonic scale, with a small bonus for rooting on the bass's opening
  * note (breaks the relative-major/minor pitch-class tie toward the pitch the loop actually
@@ -382,31 +378,6 @@ export function inferSeedKey(doc: BeatDocument): PhraseKey {
   return { root: 48 + best!.root, minor: best!.minor }
 }
 
-export interface ComposedNote {
-  pitch: number
-  start: number
-  duration: number
-  velocity: number
-}
-
-export interface ComposedPhrase {
-  archetype: string
-  notes: ComposedNote[]
-}
-
-export type ComposedDrumLane = 'kick' | 'snare' | 'hat'
-
-export interface ComposedDrumHit {
-  lane: ComposedDrumLane
-  start: number
-  velocity: number
-}
-
-export interface ComposedDrumPhrase {
-  archetype: string
-  hits: ComposedDrumHit[]
-}
-
 export const BASSLINE_ARCHETYPES = ['rolling-8ths', 'offbeat-stabs', 'pickup-sync', 'sparse-sub', 'walking', 'octave-bounce'] as const
 export const CHORDS_ARCHETYPES = ['sustained-pad', 'half-bar-hits', 'offbeat-house', 'pulse-8ths', 'charleston', 'anticipation'] as const
 export const LEAD_ARCHETYPES = ['arp-16ths', 'arp-8ths', 'motif-repeat', 'call-response', 'long-tones', 'offbeat-riff'] as const
@@ -424,33 +395,14 @@ const PHRASE_PROGRESSIONS: readonly (readonly number[])[] = [
   [0, 5, 3, 2],
 ]
 
-/** `degree` is any integer scale degree (0 = the key root; ±7 wraps an octave). Exported so the
- * theory-aware composition layer (src/taste/theory.ts) resolves scale degrees the same way. */
-export const degreePitch = (key: PhraseKey, degree: number, octaveShift: number): number => {
-  const scale = scalePitchClasses(key)
-  const idx = ((degree % 7) + 7) % 7
-  const oct = Math.floor(degree / 7)
-  return Math.min(127, Math.max(0, key.root + octaveShift + oct * 12 + scale[idx]!))
-}
-
 const rnd2 = (x: number) => Math.round(x * 100) / 100
 const vel = (rng: () => number, lo: number, hi: number) => rnd2(Math.min(0.95, lo + rng() * (hi - lo)))
 
-function seededShuffle<T>(rng: () => number, arr: readonly T[]): T[] {
-  const out = [...arr]
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
-    ;[out[i], out[j]] = [out[j]!, out[i]!]
-  }
-  return out
-}
-
 /** First archetype of a seeded shuffle not yet used this session; every archetype used → seeded
- * pick anyway (a 7th batch may repeat an archetype, never a realization). */
-function chooseArchetype(rng: () => number, names: readonly string[], exclude: readonly string[]): string {
-  const shuffled = seededShuffle(rng, names)
-  return shuffled.find((n) => !exclude.includes(n)) ?? shuffled[0]!
-}
+ * pick anyway (a 7th batch may repeat an archetype, never a realization). The bank's labels are the
+ * bare archetype names — that is its namespace in the CLI's shared exclude chain. */
+const chooseArchetype = (rng: () => number, names: readonly string[], exclude: readonly string[]): string =>
+  chooseSeeded(rng, names, (n) => n, exclude)
 
 function bassNotes(archetype: string, key: PhraseKey, prog: readonly number[], rng: () => number): ComposedNote[] {
   const reg = rng() < 0.3 ? 0 : -12 // sub register most batches, upper bass sometimes
