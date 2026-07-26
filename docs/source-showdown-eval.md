@@ -275,6 +275,93 @@ dead-mono / no-air deficit the whole showdown effort is chasing.
 same still-unresolved Surge XT factory-**content** license as `surge`, so a `surgeplus`-bearing batch
 gets the identical `.gitignore` (`*`) gate and the scores log stays kind-only (`"surgeplus"`).
 
+## The layered arm (`--with-layered`, + `layeredplus` with `--with-produced`)
+
+**The variable is the clip SHAPE, not the sound source.** Every other arm in this eval renders
+exactly one voice — `soloForShowdown` takes the composed doc and mutes every track but the role's.
+A commercial pack loop is the opposite by construction: 2–4 sound layers, registration decided,
+each in its own frequency slot, summed into one "instrument." Research 131 measured the
+consequences on the owner's own 1,612 preference pairs:
+
+| role | pack refs | engineplus (single voice) |
+|---|---|---|
+| bassline | 60.1% of energy below 60 Hz, centroid ~74 Hz | **0.22%** sub, centroid ~162 Hz |
+| chords | 78.4% mids, 9.5% bass-band body | **99.35%** mids, ~0 body |
+| lead | 81.2% mids, 5.0% body; elite width −4.6 dB | **99.19%** mids; width −10.7 dB |
+
+None of those are reachable by one voice with one filter and one pan position. `--with-layered`
+builds the alternative: `src/taste/layered.ts` assembles a MULTI-TRACK `.beat` (bass sub + growl +
+click; chords body + pad + rootless stab + air; lead body + main + octave + width) where every layer
+plays the SAME composed figure at its own register, in its own crossover slot, at its own level, and
+the engine renders the whole project as one clip. Pitched roles only — a drum kit is already a
+multi-voice instrument, so "layer it" is a different question (131 P6).
+
+**Two arms, one variable each.** `layered` is the ARCHITECTURE alone (register, crossover, balance,
+layer-intrinsic voice design, mono discipline on the low layers) with no insert-chain production at
+all — its single difference from engineplus is layering. `layeredplus` adds a per-layer production
+pass (role-true width, parallel/NY compression on the `compMix` fan that ships at 0 and no profile
+has ever touched, glue, space, air). Neither touches the frozen `engineplusProfile` /
+`surgeplusProfile` constants; the layered production lives on the layer specs.
+
+**Design rules the module enforces, not just intends** (all covered by `test/layered.test.ts`):
+
+- *One crossover, not four voices fighting.* Exactly one layer is lowpassed and owns the low end;
+  every other layer is highpassed at or above half that cutoff; the bottom lowpass and the lowest
+  highpass meet within one octave (no hole, no octave of mud). `checkCrossover` refuses an
+  architecture that breaks any of the three, and `buildLayeredClip` refuses to emit one.
+- *Mono discipline.* Every `mono: true` layer is asserted field-for-field on the ASSEMBLED doc —
+  after production — for pan, unison voices/width, chorus, utility width, auto-pan and both sends.
+  A widened low layer is the single largest measured width error in the log.
+- *Onsets never move.* A layer may change register, voice selection, note LENGTH and velocity; it
+  may never change a `start`. Layers are sample-aligned by construction.
+- *Anchored register.* Whatever register the composer drew, a whole-octave shift puts the figure's
+  median inside the role's anchor window, so the register target is not a coin flip on some figures.
+
+**Target gate.** `verifyLayeredTargets` checks a render against the measured per-role rows and
+reports PASS/FAIL **per feature** — never an aggregate, because 131 §5's finding is that the distance
+is many medium axes with role-specific signs. It reuses the existing `analyze()` metrics only. The
+targets it therefore CANNOT see — per-band crest, attack-time statistics, spectral flux, spectral
+flatness — are listed by name in every report rather than silently dropped; they are exactly the
+critic upgrade research 138 files as B0.
+
+**Measured, before any owner rating** (`node scripts/layered-check.mjs`, 6 clips — 2 per pitched
+role — each rendered in all three arms from ONE figure and loudness-normalized together, 2026-07-26;
+renders in the private `taste-dataset/layered-check/`). Targets passed, out of 24:
+**engineplus 3 · layered 19 · layeredplus 18.**
+
+| feature | target | engineplus | layered | layeredplus |
+|---|---|---|---|---|
+| bassline `bandSubPct` | ≥30% | **0.33** | **71.6** | **64.0** |
+| bassline `centroidHz` | ≤90 (ref 74) | **199** | **52.8** | **85.1** |
+| bassline `stereoWidthDb` | ≤−40 | **−11.0** | **−55.8** | **−58.9** |
+| chords `bandBassPct` | 18–40 | **0.02** | **29.6** | **40.5** |
+| chords `bandMidsPct` | ≤90 (was 99.35) | 79.6 | **61.7** | **46.6** |
+| chords `stereoWidthDb` | −9…−2 | **−11.0** | **−5.9** | **−6.8** |
+| chords `crestDb` | 13–18 | 13.0 | **18.2** | **14.7** |
+| lead `bandBassPct` | 5–20 | **0.03** | **5.7** | **14.6** |
+| lead `bandMidsPct` | ≤90 (was 99.19) | 82.2 | 77.6 | **61.2** |
+| lead `stereoWidthDb` | −9…−3 | **−11.1** | **−8.8** | −9.6 |
+
+Reachable now that were not before: the **entire bassline register family** (sub share, centroid and
+mono width all moved from 0/8 to 8/8 — the largest single per-role gap in the log), **bass-band body
+on chords and lead** (0.02% / 0.03% → 29.6% / 5.7%, inside the target band), **mids occupancy** on
+both, and **role-true chords width** (−11 → −5.9 dB, the first time any dotbeat arm has hit the
+packs-ref width row). Still missing: lead broadband crest (18.8–21.1 vs a 13–18 target — the lead
+figures drawn were sparse, and 131 §6 itself warns that sparse arrangements masquerade as dynamics in
+a broadband number), and `layeredplus` lead width at −9.6 dB, just outside the band.
+
+**Two findings from the render loop that generalize past this arm:**
+1. **The mid/side widener cannot widen a near-mono layer — it attenuates it.** Pushed to 0.92–0.98 it
+   cut chords' mids from 29% to 6.9%; even at 0.78 it bought *zero* width (−11.3 dB with, −10.1 dB
+   without) while costing ~6 dB on exactly the layers carrying the mids. Width on these stacks comes
+   from per-layer PAN PLACEMENT, unison and chorus. Any future width work should assume the same.
+2. **Parallel compression on a SUSTAINED low layer is the wrong lever.** It raises that layer's
+   average, which is precisely what the band-share targets read: it pushed chords' bass-band share
+   from 38% (in target) to 62% (out). Parallel comp belongs on the transient-bearing layers.
+
+**Licensing.** Layered clips are internally composed through dotbeat's own engine, so a
+layered-bearing batch carries no `.gitignore` gate (unlike ref / surge / midi batches).
+
 ## The midi figure source (`--midi-dir`)
 
 The archetype bank fixed the un-blinding problem, but it left a CONFOUND in every composed
