@@ -1191,12 +1191,24 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
   // So the stab is drawn 2 to 6 dB OVER the bed, which measures as 8-13 dB under the full mix —
   // audible as an accent, never the instrument. The floor is 2 rather than 0 because 0 was tried
   // and measured: at stabOverPad 0 on seed 138 the stab arrived 14.6 dB under the mix, still past
-  // `FUSION_AUDIBILITY_DB`. When no pad was drawn the stab is the only voice over the body and keeps
-  // its old standalone range. Both are drawn unconditionally so the rng stream does not depend on
-  // the family. Same shape as the bassline's `lift`: the balance is constrained against MEASURED
+  // `FUSION_AUDIBILITY_DB`. Both are drawn unconditionally so the rng stream does not depend on the
+  // family. Same shape as the bassline's `lift`: the balance is constrained against MEASURED
   // contribution, not left to two independent faders.
   const stabOverPad = pickRange(rng, 2, 6, 1)
-  const stabSolo = pickRange(rng, 2, 7, 1)
+  // WHEN NO PAD WAS DRAWN the stab is the ONLY mid voice over the body, and its floor came up from
+  // 2 to 4 dB, 2026-07-26, for the same measured reason. The worst draws in a rendered chords sweep
+  // are all no-pad stacks whose stab drew near the bottom of the old 2..7 range: seed 7201 put
+  // 61.4% of its energy in the bass band against a refs-packs chords p75 of 47.2%, with 35.9% in
+  // the mids against a p25 of 50.4% — the body swallowing the instrument, which is the failure
+  // `deriveTargets` was made two-sided to catch.
+  //
+  // HONEST LIMIT, because the +2 dB was measured too: it moved 7201 from 61.4% to 56.1% bass-band
+  // and did NOT rescue it. The rest of that draw's problem is structural rather than a level —
+  // `body+stab` is one SUSTAINED low layer plus one GATED mid layer, so whole-file band share reads
+  // the body almost alone whatever the stab's fader says. Recorded here rather than fixed, because
+  // the fix is a different question (should a gated stab be the only voice over the body at all?)
+  // and guessing at it inside a balance draw would hide it.
+  const stabSolo = pickRange(rng, 4, 8, 1)
   const airRel = pickRange(rng, -20, -12, 1)
   const bodyOsc = pickOne(rng, ['triangle', 'sine', 'sawtooth'] as const)
 
@@ -1301,7 +1313,19 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
   // five times higher than the pad. That gap IS the bright/dark half of "two different jobs".
   // Scaled with `padLp` when that was calibrated against the reference pool (see its comment), so
   // the RATIO between the two layers, which is the part that carries the meaning, is unchanged.
-  const stabLp = pickRange(rng, 3600, 6800, 200)
+  //
+  // CAME DOWN FROM 3600-6800 TO 3000-5600, 2026-07-26. The stab got 2-6 dB hotter and gained a
+  // third oscillator in the same pass, and both add energy the instrument's centroid reads; taking
+  // the resting lowpass down moves the added weight from the top of the stab to its bottom, which
+  // is the direction "full, not thin" points anyway — fullness is the fundamental and the
+  // oscillator count, not the top octave. Still 3-5x the pad's resting lowpass, so the bright/dark
+  // gap that makes the two layers two different jobs is unchanged.
+  //
+  // Measured, this is a SMALL move and is recorded as one: across the three rated seeds it took the
+  // rendered centroid down 3, 9 and 3 Hz (480->478, 657->648, 670->667) against the refs-packs
+  // chords IQR of 344-630. It is the right direction and it is not the reason those seeds sit where
+  // they sit.
+  const stabLp = pickRange(rng, 3000, 5600, 200)
   // GATE FLOOR MOVED FROM 1 TO 2 STEPS, and the release lengthened, 2026-07-26. A 1-step gate is a
   // 16th note — ~120 ms at the 120-128 BPM this arm renders at — under a chord that sustains, which
   // is a percussive chop, not a chord. Identical complaint shape to the bass gate raised earlier on

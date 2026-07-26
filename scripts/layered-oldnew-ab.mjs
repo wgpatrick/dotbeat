@@ -11,6 +11,13 @@
 // the thing being judged.
 //
 //   node scripts/layered-oldnew-ab.mjs --old /tmp/oldbuild [--out <dir>] [--per-role 3] [--seed 41]
+//                                      [--roles chords] [--seeds 138,1147,2156]
+//
+// `--seeds` names the batch seeds EXACTLY instead of generating them from --seed/--per-role. That
+// matters because the owner rates specific clips and refers back to them by seed ("chords seed
+// 1147"), and a re-render of a case he has already judged is worth more than a fresh random one:
+// he is comparing against a memory of that exact clip. Without it the only way to reach a rated
+// case was to solve `metaSeed + n * 1009 + roleIndex * 97` backwards.
 //
 // The reference build is prepared outside this script, e.g.
 //   mkdir /tmp/oldbuild && git archive <ref> | tar -x -C /tmp/oldbuild
@@ -36,6 +43,8 @@ const outDir = resolve(arg('--out', join(process.env.HOME, 'Documents/dotbeat/ta
 const perRole = Number(arg('--per-role', '3'))
 const metaSeed = Number(arg('--seed', '41'))
 const onlyRoles = arg('--roles', '').split(',').filter(Boolean)
+const explicitSeeds = arg('--seeds', '').split(',').filter(Boolean).map(Number)
+if (explicitSeeds.some((s) => !Number.isFinite(s))) throw new Error('--seeds must be a comma-separated list of numbers')
 
 const { parse } = await import(`${repoRoot}/dist/src/core/index.js`)
 const { generateSeedBeat } = await import(`${repoRoot}/dist/src/taste/seeds.js`)
@@ -111,8 +120,8 @@ const comparisons = []
 const report = []
 
 for (const role of onlyRoles.length > 0 ? LAYERED_ROLES.filter((r) => onlyRoles.includes(r)) : LAYERED_ROLES) {
-  for (let n = 0; n < perRole; n++) {
-    const batchSeed = metaSeed + n * 1009 + LAYERED_ROLES.indexOf(role) * 97
+  const seedsForRole = explicitSeeds.length > 0 ? explicitSeeds : Array.from({ length: perRole }, (_, n) => metaSeed + n * 1009 + LAYERED_ROLES.indexOf(role) * 97)
+  for (const batchSeed of seedsForRole) {
     const clipDir = join(outDir, `${role}-${batchSeed}`)
     rmSync(clipDir, { recursive: true, force: true })
     mkdirSync(clipDir, { recursive: true })
