@@ -13,6 +13,7 @@
     "test:sidecars": "npm run build && node --test dist/test/*.owner.js",
     "beat": "node cli/beat.mjs",
     "render": "node cli/render.mjs",
+    "check:docs": "node scripts/check-doc-numbering.mjs",
     "verify": "node scripts/verify-run.mjs",
     "verify:engine": "node scripts/verify-run.mjs --tier engine",
     "build:ui": "cd ui && npm run build",

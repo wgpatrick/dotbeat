@@ -26,7 +26,7 @@ No format bump this phase — all streams are additive tooling over existing gra
 | RB | Symbolic song analysis (`src/analysis/`) | no | `src/analysis/` (new), `cli/beat.mjs`, `src/mcp/server.ts` |
 | RC | Automation generation + vary | yes (proof) | `src/core/edit.ts`, `src/vary/`, `cli/beat.mjs`, `src/mcp/server.ts` |
 | RD | Freesound CC0 into the taste loop | no | `cli/beat.mjs`, `src/mcp/server.ts`, `scripts/freesound-*.mjs` |
-| RE | Research 103: generative-audio APIs (no code) | no | `docs/research/103-*.md` |
+| RE | Research 145 (filed as 103; renumbered 2026-07-26): generative-audio APIs (no code) | no | `docs/research/145-generative-audio-apis.md` |
 
 ### RA — section-aware feedback (audio-domain)
 `beat feedback <file> [--sections] [--ref profile.json]` (+ `beat_feedback` MCP): render the song
@@ -62,8 +62,8 @@ through `$HTTPS_PROXY`** (see `/root/.ccr/README.md`); if blocked, ship the offl
 `prep-oneshot` ingestion of a supplied file → registered media) and flag the egress gap loudly in
 the result. Zero licensing risk (CC0 hard-filtered). API key from env only, never committed.
 
-### RE — research 103: generative-audio APIs (no code)
-`docs/research/103-generative-audio-apis.md`, house research format (claims + sources + confidence
+### RE — research 145 (filed as 103): generative-audio APIs (no code)
+`docs/research/145-generative-audio-apis.md`, house research format (claims + sources + confidence
 labels + honest gaps). Questions: can generated vocal-chops/SFX legally ship inside a user's MIT
 `.beat` project (ElevenLabs & peers' per-plan/commercial terms)? quality for musical use; cost;
 network reality through the proxy; and a recommended integration slice with an effort estimate.

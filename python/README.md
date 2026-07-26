@@ -156,7 +156,7 @@ Stable Audio Open 1.0 ships under the **Stability AI Community License**
 Community License with Stability (the license terminates above $1M, where an Enterprise license is
 required). You **own** the generated outputs, and the license's distribution/attribution obligations
 attach to the **model/Materials**, not to the individual output `.wav` files — so committing
-generated one-shots into a public `.beat` project's `media/` folder is clean (research 103, D19).
+generated one-shots into a public `.beat` project's `media/` folder is clean (research 145, D19).
 
 > **Powered by Stability AI.** dotbeat carries this attribution as the tool-integration obligation
 > for wrapping Stable Audio Open; the per-output files themselves need no attribution.
@@ -184,7 +184,7 @@ surge rating ever collected:
 - **It enumerated `patches_factory` only** — 639 of the 3,559 `.fxp` installed on the owner's
   machine, because `patches_3rdparty` (2,920 patches by 37 named designers) sat beside it
   unenumerated (research 132 §2.1, 141 §7). `PATCH_POOLS` now declares both explicitly, and every
-  catalogue entry carries `{pool, bank}` provenance. D23 posture is unchanged: bank names are
+  catalogue entry carries `{pool, bank}` provenance. D31 posture is unchanged: bank names are
   local-manifest metadata, rendered audio stays eval-private.
 - **It never set a host tempo.** `grep -ci tempo python/surge_render.py` returned **0**, and
   upstream surgepy hard-codes `time_data.tempo = 120` in `createSurge()` while binding nothing

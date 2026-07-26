@@ -675,7 +675,7 @@ top"* — dated 07-17, it sits above D27, D26, D25 and D24 (all 07-22). Move it 
 ### 5.3 Research doc `103` is duplicated — the identical pathology
 
 ```
-docs/research/103-generative-audio-apis.md
+docs/research/145-generative-audio-apis.md
 docs/research/103-usability-pilot-lane-taste-loop.md
 ```
 
@@ -765,7 +765,7 @@ list** — the same shape as W0.1's golden gate. **Cost: S.**
 - **No decisions.md entry for edit telemetry**, required explicitly by *both* 116 §Honest-gaps
   (*"opt-in default matters even for a single owner"*) and 128 §2.4. It landed. Two research passes
   asked; neither got it.
-- `README.md` has zero "Stability" mentions; research 103 asked for "Powered by Stability AI" in
+- `README.md` has zero "Stability" mentions; research 145 (then numbered 103) asked for "Powered by Stability AI" in
   dotbeat's own docs. It's in `decisions.md`, `python/README.md` and `beat help source gen` — likely
   satisfied under D19, but one line to be certain.
 

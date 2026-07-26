@@ -11,7 +11,7 @@ down mid-research-window); re-verify before betting user-facing licensing copy o
 Confidence labels per claim: **confirmed** = primary source fetched (verbatim where quoted);
 **single-source** = one secondary source, plausible, unverified; **inconclusive** = couldn't
 establish. Companions: `docs/source-showdown-eval.md` (the eval machinery any new backend enters),
-`docs/research/103-generative-audio-apis.md` (the 2026-07-14 licensing pass this updates —
+`docs/research/145-generative-audio-apis.md` (the 2026-07-14 licensing pass this updates —
 several of its verdicts have since changed), `src/analysis/gen-fal.ts` (the integration surface).*
 
 ## Headline answers

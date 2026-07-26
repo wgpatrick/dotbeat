@@ -4,7 +4,7 @@ A `surge` track makes a Surge XT factory patch a first-class **compositional** c
 `.beat` format: a track whose sound source is a named factory patch, whose parameters and notes are
 ordinary diffable text, rendered deterministically at render time by the existing out-of-process
 sidecar (`python/surge_render.py`). GPL stays out-of-process — nothing links Surge, ever
-(`docs/decisions.md` D23).
+(`docs/decisions.md` D31).
 
 ## Grammar (as shipped)
 
@@ -78,7 +78,7 @@ At render time (`beat render`, before the engine boots — `cli/surge-render-pre
 The rendered WAV is real Surge audio; the whole file is unchanged in git terms (a patch-name
 reference), and the audio regenerates from it.
 
-### Licensing (D23)
+### Licensing (D31)
 
 Surge XT is GPLv3 — fine for a local, out-of-process render tool; the render OUTPUT carries no code
 copyleft. But the factory-**patch content** license is unresolved upstream (surge issue #6741), so
@@ -111,7 +111,7 @@ alone — 639 of 3,559 patches, 82% of the library invisible to the eval, resear
 
 `PATCH_POOLS` in `python/surge_render.py` is the single declaration; adding a pool is one row.
 Bank names are **local-manifest provenance only** — rendered patch audio stays eval-private and
-gitignore-gated exactly as before (D23).
+gitignore-gated exactly as before (D31).
 
 ### Tempo
 

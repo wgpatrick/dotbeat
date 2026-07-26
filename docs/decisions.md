@@ -16,7 +16,7 @@ pre-registered gate that never fires is worse than no gate, because it launders 
 as a made one."* Two gates were designed to re-order the build queue and neither ran, while work
 proceeded as if they had. Research 140 §4.4 separately asked for a ruling on `FEATURE_KEYS` that
 two agents had declined to give. All three are settled here. Evidence and full numbers:
-[`research/142`](research/144-critic-instruments.md).
+[`research/144`](research/144-critic-instruments.md).
 
 **Gate A — the `packplus` arm (133 §7). Verdict: ELSE branch. The transient shaper and OTT jump
 the queue.** The arm was never built and `packplus` appears nowhere, so the gate as written can
@@ -61,6 +61,17 @@ pin *treatments whose effects were measured in blind ratings* and stay frozen; `
 *measurement vector*, and the right protection for a measurement vector is a version plus a
 snapshot, not a taboo.
 
+**Revisit when:** (a) the **M1 run** this entry defers actually happens — its own text says
+*"Running M1 as specified is now a live task, not an open pre-registration"*, which was a deferral
+with no slot until `scripts/roadmap-data.mjs`'s "Run M1 as specified" row was pointed at it; when
+that row closes, record whether M1's result agrees with the ELSE-branch verdict taken here. (b) A
+head-to-head measurement contradicts "production-chain depth is not where the remaining gap lives"
+— the specific evidence would be a second chain on a different source beating chance by a
+meaningful margin (surgeplus over surge was 46.2%). (c) `FEATURE_SET_VERSION` moves without the
+key-set snapshot test and the re-baselined accuracy numbers moving with it in the same commit —
+that would mean the versioning rule has stopped being enforced and needs a stronger mechanism than
+a test.
+
 ---
 
 ## D29 — the owner–agent session rhythm is a file protocol, and owner GUI edits are ground truth (2026-07-25)
@@ -87,6 +98,13 @@ that signal and breaks trust. **Why now.** Research 128 operationalizes the log-
 §3 item 2, S-effort, the highest-ROI artifact class in this repo per 121) and every other item in
 128's build plan is *named* by it. Cites `research/128-agent-owner-gui-loop.md` §2.5/§2.2.
 
+**Revisit when:** the owner reports the checkpoint rhythm costing them more than it returns — the
+concrete signal is a `BRIEF.md` cycle where the owner's turn produces no `decision.json`, no GUI
+edit and no `FEEDBACK.md`, twice running, which means the brief is asking for attention it does not
+need. Also revisit if the ground-truth rule ever collides with a hard gate in practice: an owner
+edit that breaks a lint gate is currently *raised, never applied* — if that ends up leaving a
+project un-renderable rather than merely off-target, the exception list needs widening.
+
 ## D28 — full-song production runs follow the `produce-song` skill, not ad-hoc prompts (2026-07-24)
 
 **The decision.** Any agent asked to produce a complete song/cover uses the stage-gated workflow
@@ -97,6 +115,12 @@ of the Sandstorm-cover sessions showed the craftsman process worked but lived on
 prompt names, so the skill names every instrument per phase (`feedback --sections`,
 `render --stems`, `produce`/`trick`, lint gates incl. ≤ −1 dBTP) instead of describing quality in
 the abstract. The skill is 121 §3.7's change #1+#2 (both rated S-effort, highest ROI).
+
+**Revisit when:** a full-song run following the skill misses in a way the skill's own gates should
+have caught — that is the signal the phases/gates are wrong rather than the prompt. Also revisit
+when the skill's capability-truth notes go stale again (the failure mode `f489bc40` had to fix:
+the skill telling agents that shipped features may not exist); a periodic re-audit of it against
+`beat help` is cheaper than the next agent building around a feature that already ships.
 
 ## D23 — offline renders build on a raw NATIVE OfflineAudioContext, rendered in windows with dispose-behind-the-frontier (2026-07-17)
 
@@ -200,7 +224,7 @@ mismatch, shared figures — all found by the owner mid-rating), and owner liste
 **Revisit when:** a batch design needs both blindness and same-figure control simultaneously
 (e.g. rate two shared-figure batches with disjoint figure draws).
 
-## D23 — GPL synths may run as out-of-process sound factories; the live-engine GPL ban stands (2026-07-22)
+## D31 — GPL synths may run as out-of-process sound factories; the live-engine GPL ban stands (2026-07-22, renumbered from a duplicate D23 on 2026-07-26)
 
 **The decision.** The MIT-license decision closed the GPL engine tier for *ported/linked* code.
 Surge XT (GPLv3) is now used WITHOUT reopening that: it runs as a local out-of-process tool
@@ -211,6 +235,12 @@ shipped engine. webdx7/msfa (Apache/MIT) remains the only license-clean LIVE-dev
 (research/114). Found and fixed along the way: surgepy's `getOutput()` stride bug (upstream issue
 draft in `docs/research/surge-right-ear-ring-rootcause.md`). **Revisit when:** factory-patch
 content licensing resolves upstream, or a surge-derived asset would ship beyond the private eval.
+
+> **Bookkeeping note (2026-07-26).** This decision was minted as a second **D23** on 2026-07-22,
+> colliding with the offline-render D23 above (research/140 §5.2, research/142). Research 140 §5.2
+> proposed D30 for it; D30 was subsequently minted for the `FEATURE_KEYS` ruling, so it is **D31**.
+> All citations were updated in the same commit. Cite the offline-render decision as D23 and the
+> GPL/surge posture as D31.
 
 ## D22 — offline render is opt-in (`--offline`), exact but not unconditionally fast; live capture stays the default (2026-07-17)
 
@@ -305,6 +335,33 @@ prompts/seeds win") is answerable off the same log by `prompt`/`media.seed`, and
 `suggest`-for-generation is a separate feature with a separate output shape. Revisit if that
 feature is ever wanted.
 
+## D20 — pitch detection is pure TS, not a third Python sidecar (2026-07-14)
+
+**The decision.** `src/metrics/` already has a zero-dep FFT and WAV decoder; a one-shot's
+fundamental needs no torch. Keeping pitch detection in TypeScript keeps the feature available to
+every user with no venv, keeps it CI-testable (the thing that day proved matters), and holds the
+line that Python is only for what genuinely needs the ML ecosystem — D17/D18's contained-dependency
+stance. Implemented in `src/analysis/pitch.ts`; used by `beat sample-info`/keymap (`cli/beat.mjs`),
+`src/analysis/index.ts` and `src/mcp/server.ts`. Context: `docs/phase-40-plan.md` §VA.
+
+**Keymap-as-lanes is the v1, not the endgame — recorded so it doesn't calcify.** N declared lanes
+cap a melody at N pitches inside the ±24-semitone lane clamp; the eventual "real DAW" answer for
+pitch-mapped samples is a sampler *instrument* track type — piano roll, any MIDI note, tune computed
+per note from the sample's detected root. Lanes are right for v1 because they're the format's
+existing vocabulary and the diffable-pitch-map property is the product's signature; but keymap's
+implementation (detected-root → tune arithmetic in `src/core/keymap.ts`) is written as a function of
+`(rootMidi, targetMidi)` that a future sampler track can reuse unchanged.
+
+**Revisit when:** polyphonic/chord detection is wanted — that *is* ML and reopens the sidecar
+question; or a melody wants more than ~a dozen pitches or chromatic freedom, which is the
+sampler-track trigger and a format/engine phase of its own.
+
+> **Bookkeeping note (2026-07-26).** This entry existed only as prose in `docs/phase-40-plan.md:220`
+> while six source files cited "decisions.md D20" as though it were here (research/140 §5.1); it is
+> pasted in unchanged. Beware a name collision: `research/140` numbers its *own* recommendations
+> D1…D32, and its D20 is a different subject (seed the drum-kit noise sources so `--offline` renders
+> reproduce). Citations of that one are spelled "research/140 D20".
+
 ## D19 — the gen sidecar writes the WAV to a told path; TS owns registration + the Stability license posture (2026-07-14)
 
 **The decision (contract variation).** `beat source gen` (Phase 39, Stable Audio Open local
@@ -330,7 +387,7 @@ dotbeat-specific (provenance, media block, rollback) stays in testable TypeScrip
 surface is tiny and swappable. Reusing `ingest()` rather than a parallel registration path means the
 generative provenance record is the same shape as RD's Freesound one.
 
-**The license posture (Stability AI Community License, research 103).** Stable Audio Open 1.0 is the
+**The license posture (Stability AI Community License, research 145).** Stable Audio Open 1.0 is the
 one licensing-clean, egress-free generative path for dotbeat's shareable-project thesis. You **own**
 the generated outputs; commercial use is free for individuals/orgs under **$1M annual revenue**
 provided you register a Community License with Stability (it terminates above $1M → Enterprise). The
