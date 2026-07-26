@@ -213,7 +213,7 @@ export function validateSelection(sel: BeatSelection, doc: BeatDocument): void {
  */
 export function selectionToNoteIds(sel: BeatSelection, doc: BeatDocument): { track: string; notes: string[] }[] {
   const trackFilter = sel.tracks ? new Set(sel.tracks) : null
-  const noteFilter = sel.notes ? new Set(sel.notes.map((n) => `${n.track} ${n.note}`)) : null
+  const noteFilter = sel.notes ? new Set(sel.notes.map((n) => `${n.track}\x00${n.note}`)) : null
   const lo = sel.bars ? sel.bars.start * 16 : null
   const hi = sel.bars ? sel.bars.end * 16 : null
 
@@ -223,7 +223,7 @@ export function selectionToNoteIds(sel: BeatSelection, doc: BeatDocument): { tra
     const covered: string[] = []
     for (const note of track.notes) {
       if (lo !== null && (note.start < lo || note.start >= hi!)) continue
-      if (noteFilter && !noteFilter.has(`${track.id} ${note.id}`)) continue
+      if (noteFilter && !noteFilter.has(`${track.id}\x00${note.id}`)) continue
       covered.push(note.id)
     }
     if (covered.length > 0) out.push({ track: track.id, notes: covered })

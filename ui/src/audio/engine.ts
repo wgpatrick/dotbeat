@@ -817,7 +817,7 @@ function buildEffectRuntimeCore(id: string, type: EffectType, trackId: string): 
 // emptied chain, "effects none" in the file). Used to seed SynthChain.effectsSig so a freshly built
 // chain's very first reconcileEffectChain call always runs, even when the track's first-ever
 // effects list happens to be empty.
-const EFFECTS_SIG_UNSET = ' '
+const EFFECTS_SIG_UNSET = '\x00'
 
 // `automated` (optional): clip-automation lane params this track drives this tick — the
 // eq/comp/distortion/bitcrush MIX destinations here are re-asserted every tick unless automated,

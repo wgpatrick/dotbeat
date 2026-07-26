@@ -376,10 +376,10 @@ export const PRODTASK_RECEIPT_METRICS: FeatureKey[] = ['stereoWidthDb', 'bandAir
  * per-arm DSP metric means (the mechanical receipt). Reuses the showdown's `tally` verbatim. */
 export function computeProdtaskReport(logPath: string): ProdtaskReport {
   const { entries, skipped } = loadProdtaskEntries(logPath)
-  const keyOf = (e: ProdtaskLogEntry) => `${e.task} ${e.role}`
+  const keyOf = (e: ProdtaskLogEntry) => `${e.task}\x00${e.role}`
   const roleKeys = [...new Set(entries.map(keyOf))].sort()
   const roles: ProdtaskRoleReport[] = roleKeys.map((k) => {
-    const [task, role] = k.split(' ') as [string, string]
+    const [task, role] = k.split('\x00') as [string, string]
     const roleEntries = entries.filter((e) => keyOf(e) === k)
     return {
       task,
