@@ -9,7 +9,17 @@ import { formatNumber } from './format.js'
 import { automationShapePoints, type AutomationShape } from './automation-shape.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
- * in a document survive a serialize→parse round-trip deep-equal. */
+ * in a document survive a serialize→parse round-trip deep-equal.
+ *
+ * CANON-THEN-VALIDATE. Every range check in this file must run on the CANONICAL value, never on
+ * the caller's raw one — the document stores (and the file carries) the rounded number, so
+ * checking the raw one checks a value that never gets written. Adversarial hunt #2 found four
+ * writers doing it backwards (addHit velocity/duration, setClipLoop, shuffleGrid, addNote's
+ * ratchetLength): each range-checked the raw input, then rounded it straight THROUGH the boundary
+ * it had just validated, so `--velocity 0.00001` was accepted as "in (0, 1]" and stored 0, and the
+ * saved file no longer parsed. addNote's `duration` guard was the one that already had it right;
+ * it is now the shape all of them use. Where a value can't be made valid, the edit FAILS rather
+ * than writing an unloadable file. */
 const canon = (n: number): number => Number(formatNumber(n))
 
 export class BeatEditError extends Error {
@@ -88,11 +98,14 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
     const step = Number(patternMatch[2]!)
     const maxStep = doc.loopBars * 16
     if (step >= maxStep) throw new BeatEditError(`step ${step} out of range (loop is ${maxStep} steps, 0-${maxStep - 1}); use beat add-hit for an off-grid hit past the loop`)
-    const vel = parseNum(value, `pattern.${lane}[${step}]`)
-    if (vel < 0 || vel > 1) throw new BeatEditError(`step velocities must be 0..1, got ${vel}`)
+    // canon-then-validate (see canon's doc comment): the "is this step on?" test has to read the
+    // canonical velocity too, or a raw 0.00001 counts as ON and then stores a velocity-0 hit line
+    // that the parser rejects. At canonical precision it is simply off, which is the honest answer.
+    const vel = canon(parseNum(value, `pattern.${lane}[${step}]`))
+    if (vel < 0 || vel > 1) throw new BeatEditError(`step velocities must be 0..1, got ${value}`)
     const id = `${lane}${step}`
     const rest2 = track.hits.filter((h) => h.id !== id && !(h.lane === lane && h.start === step))
-    const nextHits = vel > 0 ? [...rest2, { id, lane, start: step, velocity: canon(vel) }] : rest2
+    const nextHits = vel > 0 ? [...rest2, { id, lane, start: step, velocity: vel }] : rest2
     return replaceTrack(doc, { ...track, hits: nextHits })
   }
 
@@ -279,14 +292,16 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   // BeatTrack.shuffleAmount/shuffleGrid) — same `beat set <track>.<field> <value>` grammar as
   // name/color, so no new CLI verb or daemon route is needed to dial groove in.
   if (rest === 'shuffleAmount') {
-    const amount = parseNum(value, 'shuffleAmount')
-    if (amount < 0 || amount > 1) throw new BeatEditError(`shuffleAmount must be 0..1, got ${amount}`)
-    return replaceTrack(doc, { ...track, shuffleAmount: canon(amount) })
+    const amount = canon(parseNum(value, 'shuffleAmount'))
+    if (amount < 0 || amount > 1) throw new BeatEditError(`shuffleAmount must be 0..1, got ${value}`)
+    return replaceTrack(doc, { ...track, shuffleAmount: amount })
   }
   if (rest === 'shuffleGrid') {
-    const grid = parseNum(value, 'shuffleGrid')
-    if (grid <= 0) throw new BeatEditError(`shuffleGrid must be > 0, got ${grid}`)
-    return replaceTrack(doc, { ...track, shuffleGrid: canon(grid) })
+    // canon-then-validate (see canon's doc comment): a raw 0.00001 passed "> 0" and then stored
+    // 0, writing a `groove <amount> 0` line the parser rejects.
+    const grid = canon(parseNum(value, 'shuffleGrid'))
+    if (grid <= 0) throw new BeatEditError(`shuffleGrid must be > 0 at the format's 4-decimal precision, got ${value}`)
+    return replaceTrack(doc, { ...track, shuffleGrid: grid })
   }
 
   // Track 1a surge tracks: the sound-source block's addressable fields. patch/sampleRate live on
@@ -419,19 +434,24 @@ export function addNote(
   // v0.7: fractional steps are legal — live/tapped input lands between grid lines. Values are
   // snapped to the canonical 4-decimal precision on the way in (see format.ts) so a stored doc
   // always deep-equals parse(serialize(doc)).
-  if (!Number.isFinite(note.start) || note.start < 0) throw new BeatEditError(`start must be a step position >= 0, got ${note.start}`)
-  if (!Number.isFinite(note.duration) || note.duration <= 0) throw new BeatEditError(`duration must be > 0 steps, got ${note.duration}`)
-  if (note.velocity < 0 || note.velocity > 1) throw new BeatEditError(`velocity must be 0..1, got ${note.velocity}`)
+  // canon-then-validate (see canon's doc comment): every one of these is checked at the precision
+  // it will actually be STORED at, so no value can round through a boundary it just passed.
+  const start = canon(note.start)
+  const duration = canon(note.duration)
+  const velocity = canon(note.velocity)
+  if (!Number.isFinite(start) || start < 0) throw new BeatEditError(`start must be a step position >= 0, got ${note.start}`)
+  if (!Number.isFinite(duration) || duration <= 0) throw new BeatEditError(`duration must be > 0 steps at canonical precision (4 decimals), got ${note.duration}`)
+  if (!Number.isFinite(velocity) || velocity < 0 || velocity > 1) throw new BeatEditError(`velocity must be 0..1, got ${note.velocity}`)
   const chance = note.chance ?? NOTE_FIELD_DEFAULTS.chance
   if (!Number.isInteger(chance) || chance < 0 || chance > 100) throw new BeatEditError(`chance must be an integer 0-100, got ${note.chance}`)
-  const cent = note.cent ?? NOTE_FIELD_DEFAULTS.cent
+  const cent = canon(note.cent ?? NOTE_FIELD_DEFAULTS.cent)
   if (!Number.isFinite(cent) || cent < -50 || cent > 50) throw new BeatEditError(`cent must be -50..50, got ${note.cent}`)
   const ratchetCount = note.ratchetCount ?? NOTE_FIELD_DEFAULTS.ratchetCount
   if (!Number.isInteger(ratchetCount) || ratchetCount < 1 || ratchetCount > 16) throw new BeatEditError(`ratchetCount must be an integer 1-16, got ${note.ratchetCount}`)
-  const ratchetCurve = note.ratchetCurve ?? NOTE_FIELD_DEFAULTS.ratchetCurve
+  const ratchetCurve = canon(note.ratchetCurve ?? NOTE_FIELD_DEFAULTS.ratchetCurve)
   if (!Number.isFinite(ratchetCurve) || ratchetCurve < -1 || ratchetCurve > 1) throw new BeatEditError(`ratchetCurve must be -1..1, got ${note.ratchetCurve}`)
-  const ratchetLength = note.ratchetLength ?? NOTE_FIELD_DEFAULTS.ratchetLength
-  if (!Number.isFinite(ratchetLength) || ratchetLength <= 0 || ratchetLength > 1) throw new BeatEditError(`ratchetLength must be >0..1, got ${note.ratchetLength}`)
+  const ratchetLength = canon(note.ratchetLength ?? NOTE_FIELD_DEFAULTS.ratchetLength)
+  if (!Number.isFinite(ratchetLength) || ratchetLength <= 0 || ratchetLength > 1) throw new BeatEditError(`ratchetLength must be >0..1 at canonical precision (4 decimals), got ${note.ratchetLength}`)
 
   let id = note.id
   if (id === undefined) {
@@ -445,20 +465,7 @@ export function addNote(
     throw new BeatEditError(`note id "${id}" already exists`)
   }
 
-  const duration = canon(note.duration)
-  if (duration <= 0) throw new BeatEditError(`duration must be > 0 steps at canonical precision (4 decimals), got ${note.duration}`)
-  const added: BeatNote = {
-    id,
-    pitch: note.pitch,
-    start: canon(note.start),
-    duration,
-    velocity: canon(note.velocity),
-    chance,
-    cent: canon(cent),
-    ratchetCount,
-    ratchetCurve: canon(ratchetCurve),
-    ratchetLength: canon(ratchetLength),
-  }
+  const added: BeatNote = { id, pitch: note.pitch, start, duration, velocity, chance, cent, ratchetCount, ratchetCurve, ratchetLength }
   return { doc: replaceTrack(doc, { ...track, notes: [...track.notes, added] }), note: added }
 }
 
@@ -759,9 +766,14 @@ export function addHit(
   if (track.kind !== 'drums') throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — hits only belong on drum tracks`)
   const laneNames = declaredLaneNames(track)
   if (!laneNames.includes(hit.lane)) throw new BeatEditError(`unknown drum lane "${hit.lane}" (expected one of ${laneNames.join('|')})`)
-  if (!Number.isFinite(hit.start) || hit.start < 0) throw new BeatEditError(`hit start must be a step position >= 0, got ${hit.start}`)
-  if (hit.velocity <= 0 || hit.velocity > 1) throw new BeatEditError(`hit velocity must be in (0, 1], got ${hit.velocity}`)
-  if (hit.duration !== undefined && (!Number.isFinite(hit.duration) || hit.duration <= 0)) throw new BeatEditError(`hit duration must be > 0 steps, got ${hit.duration}`)
+  // canon-then-validate (see canon's doc comment): a raw velocity of 0.00001 passed "in (0, 1]"
+  // and then stored 0, writing a `hit` line whose velocity the parser rejects.
+  const start = canon(hit.start)
+  const velocity = canon(hit.velocity)
+  const duration = hit.duration === undefined ? undefined : canon(hit.duration)
+  if (!Number.isFinite(start) || start < 0) throw new BeatEditError(`hit start must be a step position >= 0, got ${hit.start}`)
+  if (!Number.isFinite(velocity) || velocity <= 0 || velocity > 1) throw new BeatEditError(`hit velocity must be in (0, 1] at canonical precision (4 decimals), got ${hit.velocity}`)
+  if (duration !== undefined && (!Number.isFinite(duration) || duration <= 0)) throw new BeatEditError(`hit duration must be > 0 steps at canonical precision (4 decimals), got ${hit.duration}`)
   let id = hit.id
   if (id === undefined) {
     let max = 0
@@ -773,8 +785,8 @@ export function addHit(
   } else if (track.hits.some((h) => h.id === id)) {
     throw new BeatEditError(`hit id "${id}" already exists on track "${trackId}"`)
   }
-  const added: BeatDrumHit = { id, lane: hit.lane, start: canon(hit.start), velocity: canon(hit.velocity) }
-  if (hit.duration !== undefined) added.duration = canon(hit.duration)
+  const added: BeatDrumHit = { id, lane: hit.lane, start, velocity }
+  if (duration !== undefined) added.duration = duration
   return { doc: replaceTrack(doc, { ...track, hits: [...track.hits, added] }), hit: added }
 }
 
@@ -1501,9 +1513,13 @@ export function setClipLoop(doc: BeatDocument, trackId: string, clipId: string, 
   const track = findTrack(doc, trackId)
   const clip = findClip(track, clipId)
   if (loop === null) return replaceClip(doc, trackId, { ...clip, loop: null })
-  if (!Number.isFinite(loop.start) || loop.start < 0) throw new BeatEditError(`clip loop start must be >= 0, got ${loop.start}`)
-  if (!Number.isFinite(loop.end) || loop.end <= loop.start) throw new BeatEditError(`clip loop end must be > start, got start ${loop.start} end ${loop.end}`)
-  return replaceClip(doc, trackId, { ...clip, loop: { start: canon(loop.start), end: canon(loop.end) } })
+  // canon-then-validate (see canon's doc comment): a raw 0..0.00003 range passed "end > start"
+  // and then stored 0..0, writing a `loop 0 0` line the parser rejects.
+  const start = canon(loop.start)
+  const end = canon(loop.end)
+  if (!Number.isFinite(start) || start < 0) throw new BeatEditError(`clip loop start must be >= 0, got ${loop.start}`)
+  if (!Number.isFinite(end) || end <= start) throw new BeatEditError(`clip loop end must be > start at canonical precision (4 decimals), got start ${loop.start} end ${loop.end}`)
+  return replaceClip(doc, trackId, { ...clip, loop: { start, end } })
 }
 
 /** v0.10: sets or clears a clip's own time signature (metadata only — the audio engine is still
