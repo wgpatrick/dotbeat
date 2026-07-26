@@ -132,6 +132,19 @@ import {
 // that turns a root into a keymap. keymap.js is deep-imported rather than routed through
 // core/index.js so this stream adds no line to a file two sibling streams are also editing.
 import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
+// The executable recipe library (docs/research/139 §4) — one altitude above tricks: a named,
+// layered, gate-carrying procedure per clip role. Deliberately NOT re-exported through
+// src/analysis/index.js (`RecipeStep` already means the trick step vocabulary there).
+import {
+  parseRecipeLibrary,
+  buildRecipeDoc,
+  checkRecipeRenders,
+  formatGateReport,
+  formatRecipeList,
+  formatRecipeCard,
+  soloLayer,
+  BeatRecipeError,
+} from '../dist/src/recipes/index.js'
 import { buildKeymap, planKeymap, noteToMidi, midiToNote, rateForPitch } from '../dist/src/core/keymap.js'
 // ==== end Phase 40 Stream VA ====
 
@@ -319,6 +332,20 @@ const HELP = [
   beat trick suggest <file> [<track>] [--json]             rank the tricks whose preconditions pass (reads a
                                                           sibling <file>.wav render for metrics if present, else
                                                           document state only — renders nothing itself)`,
+  },
+  {
+    cmd: 'recipe',
+    text: `  beat recipe list [--json] [--role bassline|chords|lead|drum-loop]
+                                                          list the executable recipe library (research 139 §4)
+  beat recipe show <name> [--json]                        full card: figure, layers, chain, gates, dials, sources
+  beat recipe build <name> <out.beat> [--seed n] [--bpm n] [--key C|Am|...]
+                                                          write the multi-track document the recipe describes
+                                                          (one track per layer over one shared figure)
+  beat recipe check <name> <clip.wav> [--layer id=wav ...] [--json]
+                                                          verify a render against the recipe's gates: measured
+                                                          value beside the target, per gate. A failing gate is a
+                                                          FINDING, never a reason to widen the band; a gate on a
+                                                          metric FEATURE_KEYS cannot compute yet reports pending`,
   },
   {
     cmd: 'produce',
@@ -2007,6 +2034,125 @@ function trickSuggestCmd(argv) {
     process.stdout.write(`  ${s.trackId.padEnd(trackW)}  ${s.trick.name.padEnd(nameW)}  [${s.trick.axis}]${flag}\n`)
   }
   process.stdout.write(`then: beat trick show <name>, then beat trick apply ${basename(file)} <track> <name>\n`)
+}
+
+// ---- recipe library (docs/research/139 §4) ------------------------------------------------------
+// Same shape as the trick verbs above, one altitude up: `list`/`show` read the catalog, `build`
+// writes the layered document a recipe describes, and `check` verifies a render against the
+// recipe's own gates. BEAT_RECIPES overrides the path (BEAT_PRESETS/BEAT_MACROS/BEAT_TRICKS
+// convention). The loader is pure — path resolution lives here, never in src/recipes.
+function loadRecipes() {
+  const dir = resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets')
+  const path = process.env.BEAT_RECIPES ?? resolve(dir, 'recipes.json')
+  return parseRecipeLibrary(readFileSync(path, 'utf8'))
+}
+
+function findRecipe(recipes, name) {
+  const found = recipes.find((r) => r.name === name)
+  if (!found) throw new BeatRecipeError(`no recipe "${name}" (have: ${recipes.map((r) => r.name).join(', ')})`)
+  return found
+}
+
+function recipeListCmd(argv) {
+  const recipes = loadRecipes()
+  const role = flagValue(argv, '--role')
+  const roles = ['bassline', 'chords', 'lead', 'drum-loop']
+  if (role !== undefined && !roles.includes(role)) throw new BeatRecipeError(`--role must be one of ${roles.join('|')}, got "${role}"`)
+  const filtered = role ? recipes.filter((r) => r.role === role) : recipes
+  process.stdout.write(argv.includes('--json') ? JSON.stringify(filtered, null, 2) + '\n' : formatRecipeList(filtered))
+}
+
+function recipeShowCmd(argv) {
+  const name = argv.find((a) => !a.startsWith('--'))
+  if (!name) throw new BeatRecipeError('recipe show needs a recipe name (see `beat recipe list`)')
+  const recipe = findRecipe(loadRecipes(), name)
+  process.stdout.write(argv.includes('--json') ? JSON.stringify(recipe, null, 2) + '\n' : formatRecipeCard(recipe))
+}
+
+// Key spelling shared with the rest of the CLI's musical surface: "C", "Am", "F#m", ... mapped onto
+// the PhraseKey shape src/taste/phrase.ts defines (root 48..59 + minor flag).
+const RECIPE_PITCH_CLASSES = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11 }
+function recipeKey(spec) {
+  const m = String(spec).match(/^([A-G][#b]?)(m)?$/)
+  if (!m) throw new BeatRecipeError(`--key must look like C, Am, F#m — got "${spec}"`)
+  const pc = RECIPE_PITCH_CLASSES[m[1]]
+  return { root: 48 + pc, minor: m[2] === 'm' }
+}
+
+function recipeBuildCmd(argv) {
+  const known = new Set(['--seed', '--bpm', '--key', '--bars', '--solo'])
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !known.has(argv[i - 1]))
+  const [name, out] = positional
+  if (!name || !out) throw new BeatRecipeError('recipe build needs <name> <out.beat> (see `beat recipe list`)')
+  if (existsSync(out)) throw new BeatRecipeError(`${out} already exists — refusing to overwrite`)
+  const recipe = findRecipe(loadRecipes(), name)
+  const seedFlag = flagValue(argv, '--seed')
+  const bpmFlag = flagValue(argv, '--bpm')
+  const barsFlag = flagValue(argv, '--bars')
+  const keyFlag = flagValue(argv, '--key')
+  const { doc, report } = buildRecipeDoc(recipe, {
+    key: recipeKey(keyFlag ?? 'Am'),
+    seed: seedFlag === undefined ? 1 : Number(seedFlag),
+    ...(bpmFlag === undefined ? {} : { bpm: Number(bpmFlag) }),
+    ...(barsFlag === undefined ? {} : { bars: Number(barsFlag) }),
+  })
+  const solo = flagValue(argv, '--solo')
+  // A per-layer SOLO document: the render the recipe's per-layer gates are checked against
+  // (research 139 §4.2). Same doc, every sibling muted to the showdown floor.
+  const written = solo === undefined ? doc : soloLayer(doc, solo)
+  writeFileSync(out, serialize(written))
+  if (argv.includes('--json')) {
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n')
+    return
+  }
+  process.stdout.write(`wrote ${out} — ${recipe.name} v${recipe.version} (${recipe.role}), ${doc.tracks.length} tracks, figure ${report.archetype}\n`)
+  for (const f of report.feelApplied) process.stdout.write(`  feel: ${f}\n`)
+  for (const f of report.feelDeferred) process.stdout.write(`  feel NOT applied: ${f}\n`)
+  for (const g of report.gaps) process.stdout.write(`  gap: ${g}\n`)
+  process.stdout.write(`then: render it, and \`beat recipe check ${recipe.name} <clip.wav>\`\n`)
+}
+
+function recipeCheckCmd(argv) {
+  const known = new Set(['--layer'])
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !known.has(argv[i - 1]))
+  const [name, wav] = positional
+  if (!name) throw new BeatRecipeError('recipe check needs <name> [<clip.wav>] (see `beat recipe list`)')
+  const recipe = findRecipe(loadRecipes(), name)
+  const layers = {}
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== '--layer') continue
+    const pair = String(argv[i + 1] ?? '')
+    const eq = pair.indexOf('=')
+    if (eq === -1) throw new BeatRecipeError(`--layer expects <layerId>=<wav>, got "${pair}"`)
+    layers[pair.slice(0, eq)] = pair.slice(eq + 1)
+  }
+  const report = checkRecipeRenders(recipe, wav ?? null, layers)
+  process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : formatGateReport(report))
+  if (report.verdict === 'fail') process.exitCode = 1
+}
+
+// Per-subcommand flag allowlists, checked BEFORE dispatch so an unknown flag is a loud exit-2
+// rather than a silent no-op (test/cli-surface.test.ts's shrinking-ledger contract, R1-F2).
+const RECIPE_FLAGS = {
+  list: ['--json', '--role'],
+  show: ['--json'],
+  build: ['--json', '--seed', '--bpm', '--key', '--bars', '--solo'],
+  check: ['--json', '--layer'],
+}
+
+function recipeCmd(argv) {
+  const [sub, ...rest] = argv
+  const known = RECIPE_FLAGS[sub]
+  if (!known) {
+    const bogus = argv.find((a) => a.startsWith('--'))
+    if (bogus) throw new BeatRecipeError(`unknown flag "${bogus}" — recipe takes a subcommand first: \`beat recipe list|show|build|check\``)
+    throw new BeatRecipeError('recipe needs a subcommand: `beat recipe list|show|build|check` (see `beat recipe --help`)')
+  }
+  for (const a of rest) if (a.startsWith('--') && !known.includes(a)) throw new BeatRecipeError(`unknown flag "${a}" (known: ${known.join(', ')})`)
+  if (sub === 'list') return recipeListCmd(rest)
+  if (sub === 'show') return recipeShowCmd(rest)
+  if (sub === 'build') return recipeBuildCmd(rest)
+  return recipeCheckCmd(rest)
 }
 
 function trickCmd(argv) {
@@ -6126,6 +6272,9 @@ async function main() {
     case 'trick':
       trickCmd(rest)
       break
+    case 'recipe':
+      recipeCmd(rest)
+      break
     case 'produce':
       produceCmd(rest)
       break
@@ -6211,6 +6360,7 @@ main().catch((err) => {
     err instanceof BeatPresetError ||
     err instanceof BeatMacroError ||
     err instanceof BeatTrickError ||
+    err instanceof BeatRecipeError ||
     err instanceof BeatProduceError ||
     err instanceof BeatPitchTimeError ||
     err instanceof BeatHumanizeError ||

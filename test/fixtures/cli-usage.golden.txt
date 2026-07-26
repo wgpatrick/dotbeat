@@ -85,6 +85,17 @@ usage (one command's block: beat help <command>, or beat <command> --help):
   beat trick suggest <file> [<track>] [--json]             rank the tricks whose preconditions pass (reads a
                                                           sibling <file>.wav render for metrics if present, else
                                                           document state only — renders nothing itself)
+  beat recipe list [--json] [--role bassline|chords|lead|drum-loop]
+                                                          list the executable recipe library (research 139 §4)
+  beat recipe show <name> [--json]                        full card: figure, layers, chain, gates, dials, sources
+  beat recipe build <name> <out.beat> [--seed n] [--bpm n] [--key C|Am|...]
+                                                          write the multi-track document the recipe describes
+                                                          (one track per layer over one shared figure)
+  beat recipe check <name> <clip.wav> [--layer id=wav ...] [--json]
+                                                          verify a render against the recipe's gates: measured
+                                                          value beside the target, per gate. A failing gate is a
+                                                          FINDING, never a reason to widen the band; a gate on a
+                                                          metric FEATURE_KEYS cannot compute yet reports pending
   beat produce <file> <track> [--role bass|lead|pad|keys|drums] [--dry-run]
                                                           retrofit an existing track with its role's produced-
                                                           defaults profile — width/air/glue/space, the same layer
