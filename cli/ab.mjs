@@ -83,9 +83,13 @@ export function buildComparisonDetail(set, comparison, computeBatchFeatures) {
 // The two things that make an A/B honest and are therefore not optional here:
 //   1. INSTANT switching — every option is preloaded and PLAYING at once, all but one muted, so
 //      pressing 1/2/3 swaps which one you hear with no load, no seek, no gap.
-//   2. The SAME MOMENT — because they all started together they stay in sync; a drift guard
-//      re-aligns anything more than 50 ms out. Comparing bar 1 of A against bar 3 of B is the
-//      classic way an A/B lies to you.
+//   2. The SAME MOMENT — comparing bar 1 of A against bar 3 of B is the classic way an A/B lies to
+//      you. Two mechanisms, both found necessary by ui/verify-ab-page.mjs: play() waits for EVERY
+//      element to be ready before starting any (without it they each started when their own
+//      buffering finished, measured up to 880 ms apart, which is bar-1-vs-bar-3 territory), and a
+//      coarse watchdog catches a stall or a loop-wrap mismatch afterwards. `resync` documents why
+//      the watchdog is coarse rather than a tight controller — the short version is that
+//      `currentTime` is too noisy a clock to control against.
 
 const PAGE = `<!doctype html><meta charset="utf-8"><title>beat ab</title>
 <style>
@@ -118,7 +122,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>beat ab</title>
   .opt.hearing .key{color:var(--accent)}
   .opt .body{flex:1;min-width:0}
   .opt .name{font-size:14px;font-weight:700}
-  .opt .note{color:var(--text-dim);font-size:11.5px;margin-top:2px;font-family:var(--font-mono);overflow-wrap:anywhere}
+  .opt .prov{color:var(--text-dim);font-size:11.5px;margin-top:2px;font-family:var(--font-mono);overflow-wrap:anywhere}
   .opt .live{font-size:10px;letter-spacing:var(--label-tracking);text-transform:uppercase;color:var(--accent);font-weight:700;min-width:56px;text-align:right;opacity:0}
   .opt.hearing .live{opacity:1}
   .prefbtn{background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:var(--radius-md);padding:7px 12px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap}
@@ -222,8 +226,8 @@ function renderOptions(){
     return '<div class="opt" id="o'+o.n+'" onclick="switchTo('+o.n+')">'+
       '<span class="key">'+o.n+'</span>'+
       '<div class="body"><div class="name">'+esc(o.name)+'</div>'+
-      (o.note?'<div class="note">'+esc(o.note)+'</div>':'')+
-      '<div class="note">'+esc(o.wav)+'</div></div>'+
+      (o.note?'<div class="prov">'+esc(o.note)+'</div>':'')+
+      '<div class="prov">'+esc(o.wav)+'</div></div>'+
       '<span class="live">hearing</span>'+
       '<button class="prefbtn" onclick="event.stopPropagation();setPref('+o.n+')">prefer this</button></div>'
   }).join('')
@@ -255,26 +259,78 @@ function buildAudio(){
   auds[0].addEventListener('loadedmetadata',updateTime)
 }
 function activeAud(){return auds[hearing-1]}
-function play(){
+function ready(a){
+  // HAVE_FUTURE_DATA. Starting before every element can play is what staggers them: each one
+  // begins whenever its own buffering finishes, so pressing 2 a second later drops you somewhere
+  // else in the bar. Verified: without this wait the three clips started up to ~880 ms apart.
+  if(a.readyState>=3)return Promise.resolve()
+  return new Promise(function(res){
+    var done=function(){a.removeEventListener('canplay',done);res()}
+    a.addEventListener('canplay',done)
+    setTimeout(done,4000)
+  })
+}
+async function play(){
   if(auds.length===0)return
+  $('play').textContent='\\u2026'
+  var mine=auds
+  await Promise.all(auds.map(ready))
+  if(mine!==auds)return // comparison changed while buffering
   var at=activeAud().currentTime
-  auds.forEach(function(a){a.currentTime=at;a.muted=true;a.play().catch(function(){})})
+  auds.forEach(function(a){a.currentTime=at;a.muted=true})
+  await Promise.all(auds.map(function(a){return a.play().catch(function(){})}))
+  if(mine!==auds)return
+  resync()
   activeAud().muted=false
   $('play').textContent='pause'
 }
 function pause(){auds.forEach(function(a){a.pause()});$('play').textContent='play'}
 function toggle(){if(auds.length===0)return;activeAud().paused?play():pause()}
+/**
+ * The sync watchdog — deliberately a COARSE safety net, not a fine controller. It only acts on a
+ * gap big enough to be real: a stalled element, or a loop wrap against an option of a different
+ * length. Sync itself comes from the coordinated start in play() above.
+ *
+ * Two earlier versions of this function were wrong, and the reason is worth keeping because it is
+ * not obvious from the spec:
+ *
+ *   1. Seeking every element more than 40 ms out could never converge below ~43 ms — a seek takes
+ *      about that long to complete, so each correction landed one seek-latency behind and
+ *      immediately needed another. Measured, repeatedly.
+ *   2. Nudging playbackRate instead (no seek latency, inaudible on a muted element) converged
+ *      fine and then oscillated: 12 ms, reopening to 30 ms, corrected, reopening again. The cause
+ *      is that HTMLMediaElement.currentTime is NOT a precise clock — the spec lets the official
+ *      playback position update on a coarse timer (why timeupdate fires ~4x/s), so readings
+ *      across elements carry tens of ms of phase noise. The controller was chasing that noise, and
+ *      by acting on it it was INJECTING the drift it thought it was removing.
+ *
+ * Elements started together in one browser render off one device clock; they do not meaningfully
+ * drift, and the residual "spread" visible in any measurement is mostly the clock granularity
+ * above. So: start them together, then leave them alone unless something is unambiguously wrong.
+ */
+var SYNC_HARD=0.25
+function resync(){
+  var act=activeAud()
+  if(!act||act.paused)return
+  auds.forEach(function(a){
+    if(a===act||a.seeking||a.paused)return
+    if(Math.abs(act.currentTime-a.currentTime)>SYNC_HARD)a.currentTime=act.currentTime
+  })
+}
 function switchTo(n){
   if(!detail||n<1||n>auds.length)return
-  var was=activeAud(),at=was?was.currentTime:0
+  var was=activeAud()
+  // The position the owner was actually HEARING is the truth to carry across.
+  var at=was&&!was.paused&&!was.seeking?was.currentTime:null
   hearing=n
   var now=activeAud()
-  // Instant: swap which element is audible. Correct only if the elements have drifted apart —
-  // seeking on every switch would insert a gap and destroy the whole point.
-  if(Math.abs(now.currentTime-at)>0.05)now.currentTime=at
+  // Instant: swap which element is audible, normally with no seek at all — the watchdog has been
+  // keeping them aligned all along. This guard only fires on a real desync.
+  if(at!==null&&Math.abs(now.currentTime-at)>SYNC_HARD)now.currentTime=at
   auds.forEach(function(a){a.muted=true})
   now.muted=false
   paint()
+  resync()
 }
 function setPref(n){pref=n;armed=false;$('record').classList.remove('armed');$('msg').textContent='';paint()}
 function paint(){
@@ -292,7 +348,7 @@ function updateTime(){
   $('seek').value=d?Math.round((a.currentTime/d)*1000):0
   $('time').textContent=fmtTime(a.currentTime)+' / '+fmtTime(d)
 }
-setInterval(function(){if(auds.length)updateTime()},120)
+setInterval(function(){if(auds.length){updateTime();resync()}},120)
 $('play').onclick=toggle
 $('loop').onchange=function(){auds.forEach(function(a){a.loop=$('loop').checked})}
 $('seek').oninput=function(){
