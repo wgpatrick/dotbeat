@@ -115,7 +115,7 @@ The core loop this project was built to prove works and is exercised daily: a ha
 turn a knob in the GUI and `git diff` shows exactly one changed line; edit the file by hand and
 the GUI hot-reloads without stopping playback.
 
-**Built and stable** (152 of 342 tracked features done — the live list is
+**Built and stable** (177 of 375 tracked features done, 9 more in progress — the live list is
 [`docs/product-roadmap.md`](docs/product-roadmap.md)):
 
 - **The format and edit surface** — round-trip parser/serializer, semantic diff, edit primitives
@@ -125,11 +125,26 @@ the GUI hot-reloads without stopping playback.
   panel, content browser, in-session undo/redo alongside the git-backed checkpoint/restore
   history. Its design was shaped by three research passes against Ableton Live 12's own reference
   manual and hardened by ~30 exploratory usability pilots.
-- **CLI/MCP parity** — the whole toolchain as MCP tools for AI agents, with shared batch logic so
-  parity is structural rather than reviewed-in; per-command `--help`; only `daemon` stays CLI-only.
-- **Render and guardrails** — headless renders (offline-exact by default, ~3-4× realtime), BS.1770
-  LUFS / true-peak / spectral / stereo metrics, and `beat lint` mix critique, including against
-  reference profiles derived from music the owner loves.
+- **CLI/MCP parity** — 71 MCP tools mirror the project-editing toolchain for AI agents, with
+  per-command `--help`. Parity is increasingly structural rather than reviewed-in: a `tools/list`
+  golden snapshot, a table-driven CLI↔MCP byte-parity test, a CLI surface test
+  (help↔dispatch integrity, unknown-flag rejection), and shared orchestrators like
+  `runVaryBatch`. The daemon, the human review surfaces (`beat rate`, `beat board`), and the
+  owner-side taste/eval loop (showdown, prodtask, pilot, taste-*) stay deliberately CLI-only.
+- **Render and guardrails** — headless renders through dotbeat's one canonical engine
+  (live-capture by default; `--offline` computes the same mix through an offline context, and
+  batch renders default to offline where it's both exact and fast), BS.1770 LUFS / true-peak /
+  spectral / stereo metrics, and `beat lint` mix critique against reference profiles derived from
+  music the owner loves — now joined by per-section energy-arc feedback
+  (`beat feedback --sections`, arc reference profiles), a calibrated pathology-screen suite
+  (clicks, silence, arrangement flatness), and a psychoacoustic roughness ear. Clip automation
+  renders truthfully — automation lanes win over static patch values (the research/121 stomp bug,
+  fixed and golden-WAV-gated).
+- **The agent↔owner loop** — `beat board` (a non-blind picking UI over undecided batches, with a
+  separate decisions log that never mixes with the blind scores log), `beat open` (deep-link the
+  running GUI to a track/param), `beat diff --since --rollup` (the agent's morning read of what
+  the owner changed), and opt-in edit telemetry across all three write surfaces (research/128,
+  D29).
 - **ML sidecars, contained** — `beat analyze` (Beat This beat/downbeat detection), `beat source
   gen` (Stable Audio Open locally, fal hosted), and CLAP + Audiobox-Aesthetics embeddings. Python
   stays tiny and dumb; TypeScript owns caching/hashing/contracts; stub backends keep CI green with
