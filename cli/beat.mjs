@@ -3453,9 +3453,7 @@ async function varyCmd(argv) {
   // instead of jittering around the parent's value. For preference-data collection (taste-collect),
   // where local mutation around a range-edge value yields near-identical variants (owner, 2026-07-17).
   const spread = argv.includes('--spread')
-  // Seed default (and its zero guard) is shared with beat_vary in src/vary/run.ts (W1.3):
-  // Date.now() % 2147483647 lands on 0 roughly once every ~24.8 days, and two of the four
-  // sites guarded against it while two did not (review R5-F2).
+  // varySeed owns the clock default AND its zero guard, shared with beat_vary (W1.3, R5-F2).
   const { varySeed } = await import('../dist/src/vary/run.js')
   const seed = varySeed(flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : undefined)
   // Default out-dir sits NEXT TO the .beat file, not under the process cwd (Phase 35 OC,
@@ -3572,9 +3570,7 @@ async function fetchSelectionScope(port, doc, track) {
 async function varyFeelCmd(argv, file, track) {
   const { varyFeel, BeatVaryError } = await import('../dist/src/vary/vary.js')
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
-  // Seed default (and its zero guard) is shared with beat_vary in src/vary/run.ts (W1.3):
-  // Date.now() % 2147483647 lands on 0 roughly once every ~24.8 days, and two of the four
-  // sites guarded against it while two did not (review R5-F2).
+  // varySeed owns the clock default AND its zero guard, shared with beat_vary (W1.3, R5-F2).
   const { varySeed } = await import('../dist/src/vary/run.js')
   const seed = varySeed(flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : undefined)
   // Same next-to-the-.beat out-dir default as the param rung above (Phase 35 OC).
@@ -3645,9 +3641,7 @@ async function varyAutomationCmd(argv, file, track, param) {
     throw new BeatEditError('vary --scope selection only applies to "feel" (automation:<param> generates a whole-doc lane, not per-note/hit content)')
   }
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 9
-  // Seed default (and its zero guard) is shared with beat_vary in src/vary/run.ts (W1.3):
-  // Date.now() % 2147483647 lands on 0 roughly once every ~24.8 days, and two of the four
-  // sites guarded against it while two did not (review R5-F2).
+  // varySeed owns the clock default AND its zero guard, shared with beat_vary (W1.3, R5-F2).
   const { varySeed } = await import('../dist/src/vary/run.js')
   const seed = varySeed(flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : undefined)
   const { defaultBatchDir } = await import('../dist/src/vary/batch.js')
