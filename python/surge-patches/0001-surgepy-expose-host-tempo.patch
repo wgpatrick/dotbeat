@@ -1,0 +1,43 @@
+diff --git a/src/surge-python/surgepy.cpp b/src/surge-python/surgepy.cpp
+index b15bbb9..18ff7eb 100644
+--- a/src/surge-python/surgepy.cpp
++++ b/src/surge-python/surgepy.cpp
+@@ -1032,6 +1032,21 @@ class SurgeSynthesizerWithPythonExtensions : public SurgeSynthesizer
+         return storage.tuningApplicationMode;
+     }
+ 
++    // dotbeat local patch (2026-07-26): expose the host tempo. `time_data.tempo` is public and
++    // already drives every tempo-synced LFO / delay / envelope and the per-block ppqPos advance in
++    // processMultiBlock; createSurge() just hard-codes 120 and nothing binds it, so every offline
++    // render was locked to 120 BPM. Setting it AFTER loadPatch() is what a caller wants: loadPatchPy
++    // re-applies `storage.unstreamedTempo` when the patch streams one.
++    void setTempoPy(float t)
++    {
++        if (!(t > 0.f) || t > 1000.f)
++            throw std::invalid_argument("tempo must be in (0, 1000] BPM");
++        time_data.tempo = t;
++    }
++    float getTempoPy() const { return (float)time_data.tempo; }
++    void setPPQPosPy(double p) { time_data.ppqPos = p; }
++    double getPPQPosPy() const { return time_data.ppqPos; }
++
+     void setMPEEnabled(bool m) { storage.mpeEnabled = m; }
+ 
+     bool getMPEEnabled() const { return storage.mpeEnabled; }
+@@ -1082,6 +1097,16 @@ PYBIND11_MODULE(surgepy, m)
+         .def("getSampleRate",
+              [](SurgeSynthesizerWithPythonExtensions &s) { return s.storage.samplerate; })
+ 
++        .def("setTempo", &SurgeSynthesizerWithPythonExtensions::setTempoPy,
++             "Set the host tempo in BPM. Drives every tempo-synced LFO, delay and envelope, and the "
++             "ppqPos advance. Call AFTER loadPatch(): loading a patch that streams its own tempo "
++             "overwrites this value.",
++             py::arg("tempo"))
++        .def("getTempo", &SurgeSynthesizerWithPythonExtensions::getTempoPy,
++             "The host tempo in BPM currently seen by this instance.")
++        .def_property("ppqPos", &SurgeSynthesizerWithPythonExtensions::getPPQPosPy,
++                      &SurgeSynthesizerWithPythonExtensions::setPPQPosPy)
++
+         .def("fromSynthSideId", &SurgeSynthesizer::fromSynthSideId)
+         .def("createSynthSideId", &SurgeSynthesizerWithPythonExtensions::createSynthSideId)
+ 

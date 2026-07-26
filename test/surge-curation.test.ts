@@ -5,7 +5,7 @@
 // exercised by the owner-gated pilot, not here.
 
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -22,10 +22,17 @@ import {
   curatedKey,
   curatedKeysForRole,
   loadCuratedFile,
+  SURGE_ROLE_CATEGORIES_V2,
+  surgeRoleCategoriesV2,
+  bandFit,
+  paramFit,
+  roleParamTargets,
+  PARAM_FIT_WEIGHTS,
+  SHOWDOWN_ROLE_TO_STAT_ROLE,
   type CurationCandidate,
   type CurationRawScores,
 } from '../src/taste/surgeCuration.js'
-import { pickSurgePatch, type SurgePatch } from '../src/taste/showdown.js'
+import { pickSurgePatch, patchInCategories, SURGE_ROLE_CATEGORIES, type SurgePatch } from '../src/taste/showdown.js'
 
 const scores = (o: Partial<CurationRawScores>): CurationRawScores => ({
   ringDb: -60,
@@ -268,4 +275,121 @@ test('pickSurgePatch: a curated pick is still deterministic and enumeration-orde
   const b = pickSurgePatch([...patches].reverse(), 'bassline', 55, { curatedKeys: keys })
   assert.ok(a && b && a.name === b.name, 'stable across enumeration order')
   assert.ok(a!.name === 'A' || a!.name === 'C', 'the pick is inside the curated pool')
+})
+
+// ---- the corrected role -> category mapping (research 141 §7.3) -----------------------------------
+// The old `SURGE_ROLE_CATEGORIES.chords = ['Pads','Keys']` sent every chords draw to a shelf whose
+// measured amp-EG attack median is 537.8 ms across the installed corpus (829.5 ms in the factory
+// pool alone, 4.6% within the <= 12 ms target 131 measured for chords) — and all 16 curated chords
+// picks in presets/surge-curated.json did come from Pads, zero from Keys. These assertions pin the
+// correction so it cannot silently regress back.
+
+test('SURGE_ROLE_CATEGORIES_V2: chords no longer draws from Pads, and CAN draw from Chords/Polysynths', () => {
+  const chords = surgeRoleCategoriesV2('chords')
+  assert.ok(chords, 'chords is a surge-eligible role')
+  const lower = chords!.map((c) => c.toLowerCase())
+  assert.ok(!lower.includes('pads'), 'Pads (median attack 537.8 ms, 18% <= 12.5 ms) must NOT be a chords source')
+  assert.ok(lower.includes('chords'), "Surge's own Chords category (median 3.9 ms) must be eligible")
+  assert.ok(lower.includes('polysynths'), 'Polysynths (median 3.9 ms) must be eligible')
+  assert.ok(lower.includes('keys'), 'Keys (median 4.8 ms) stays eligible')
+})
+
+test('SURGE_ROLE_CATEGORIES_V2: lead gains Sequences (unblocked by the tempo fix)', () => {
+  const lead = surgeRoleCategoriesV2('lead')!.map((c) => c.toLowerCase())
+  assert.ok(lead.includes('leads') && lead.includes('plucks'), 'the original lead sources stay')
+  assert.ok(lead.includes('sequences'), 'Sequences is only safe once the sidecar renders at the project tempo (D6)')
+})
+
+test('SURGE_ROLE_CATEGORIES_V2: covers the third-party pool synonym vocabulary via substring match', () => {
+  // patchInCategories is case-insensitive substring, so 'Bass' catches both 'Bass' and 'Basses'.
+  const cases: [string, string, boolean][] = [
+    ['bassline', 'Basses', true],
+    ['bassline', 'Bass', true],
+    ['chords', 'Polysynths', true],
+    ['chords', 'Synths', true],
+    ['chords', 'Pads', false],
+    ['chords', 'Ambiances', false],
+    ['lead', 'Arps', true],
+    ['lead', 'Rhythms', true],
+    ['lead', 'Pads', false],
+  ]
+  for (const [role, category, expected] of cases) {
+    const cats = surgeRoleCategoriesV2(role)!
+    assert.equal(patchInCategories(patch('X', category), cats), expected, `${role} x ${category}`)
+  }
+})
+
+test('SURGE_ROLE_CATEGORIES_V2: drum-loop still skips surge, unknown roles degrade to null', () => {
+  assert.equal(surgeRoleCategoriesV2('drum-loop'), null)
+  assert.equal(surgeRoleCategoriesV2('nonsense'), null)
+})
+
+test('SURGE_ROLE_CATEGORIES_V2 covers exactly the roles showdown knows about', () => {
+  // Stable across the coordinator's one-line swap: whichever mapping showdown.ts points at, the two
+  // must agree on WHICH roles are surge-eligible — only on which categories each draws from.
+  assert.deepEqual(Object.keys(SURGE_ROLE_CATEGORIES_V2).sort(), Object.keys(SURGE_ROLE_CATEGORIES).sort())
+  for (const role of Object.keys(SURGE_ROLE_CATEGORIES)) {
+    assert.equal(
+      SURGE_ROLE_CATEGORIES_V2[role] === null,
+      SURGE_ROLE_CATEGORIES[role] === null,
+      `${role}: a role that skips surge must skip it in both mappings`,
+    )
+  }
+})
+
+// ---- target-aware selection (research 141 §8) -----------------------------------------------------
+
+test('bandFit: 1.0 inside the band, decaying outside, neutral on a missing measurement', () => {
+  const b = { lo: 0, hi: 10, scale: 'log' } as const
+  assert.equal(bandFit(5, b), 1)
+  assert.equal(bandFit(10, b), 1)
+  assert.equal(bandFit(null, b), 0.5, 'unknown is neutral — never a free pass, never a veto')
+  assert.equal(bandFit(undefined, b), 0.5)
+  assert.equal(bandFit(NaN, b), 0.5)
+  assert.ok(bandFit(20, b) < 1 && bandFit(20, b) > 0, 'one octave out is penalised, not zeroed')
+  assert.ok(bandFit(40, b) < bandFit(20, b), 'further out scores worse')
+  assert.equal(bandFit(80, b), 0, 'three octaves out scores zero')
+  const lin = { lo: 0.6, hi: 0.9, scale: 'linear' } as const
+  assert.equal(bandFit(0.7, lin), 1)
+  assert.ok(Math.abs(bandFit(0.4, lin) - 0.8) < 1e-9, 'linear params are penalised by absolute distance')
+})
+
+test('paramFit: the professional profile scores near 1, our measured banks score much lower', () => {
+  // lead targets, straight from research 141 §3: attack <= p75 9.77 ms, release p10..p75 6..332 ms
+  const targets = {
+    attackMs: { lo: 0, hi: 9.77, scale: 'log' as const },
+    releaseMs: { lo: 6.19, hi: 331.51, scale: 'log' as const },
+    sustain: { lo: 0.659, hi: 1, scale: 'linear' as const },
+    cutoffHz: { lo: 147, hi: 1258, scale: 'log' as const },
+  }
+  // the corpus's own median lead
+  const professional = { attackMs: 3.91, releaseMs: 31.25, sustain: 1, cutoffHz: 419, activeOscCount: 2, effectSlots: 2 }
+  // engine-curated's measured lead median (141 §7.1): 13 ms attack, 1,213 ms release, 1 oscillator
+  const ours = { attackMs: 13, releaseMs: 1213, sustain: 0.67, cutoffHz: 1172, activeOscCount: 1, effectSlots: 0 }
+  const good = paramFit(professional, targets)
+  const bad = paramFit(ours, targets)
+  assert.ok(good > 0.99, `the corpus median should score ~1, got ${good}`)
+  assert.ok(bad < 0.8, `our measured lead profile should score well below it, got ${bad}`)
+  assert.ok(good - bad > 0.2, 'the screen must actually separate the two profiles')
+})
+
+test('paramFit: weights sum to 1 so the score stays a 0..1 quantity', () => {
+  const sum = Object.values(PARAM_FIT_WEIGHTS).reduce((a, b) => a + b, 0)
+  assert.ok(Math.abs(sum - 1) < 1e-9, `weights sum to ${sum}`)
+})
+
+test('roleParamTargets: reads the real stats artifact, and throws rather than inventing defaults', () => {
+  const stats = JSON.parse(readFileSync(new URL('../presets/role-parameter-stats.json', import.meta.url), 'utf8')) as { roles?: Record<string, unknown> }
+  for (const role of ['bassline', 'chords', 'lead']) {
+    const t = roleParamTargets(stats, role)
+    assert.ok(t.attackMs.hi > 0 && t.attackMs.hi < 100, `${role}: attack band top ${t.attackMs.hi} ms should be a transient-role number`)
+    assert.ok(t.releaseMs.hi > t.releaseMs.lo)
+    assert.ok(t.cutoffHz.hi > t.cutoffHz.lo)
+  }
+  // chords now targets Surge's own chords role, NOT pads — the §7.3 fix restated as data
+  assert.equal(SHOWDOWN_ROLE_TO_STAT_ROLE.chords, 'chords')
+  assert.ok(roleParamTargets(stats, 'chords').attackMs.hi <= 12.5, 'chords targets a <= 12 ms attack band')
+  assert.throws(() => roleParamTargets(stats, 'drum-loop'), /no parameter targets/)
+  assert.throws(() => roleParamTargets({ roles: {} }, 'lead'), /has no "lead" role/)
+  assert.throws(() => roleParamTargets({ roles: { lead: {} } }, 'lead'), /missing ampEnv/)
 })

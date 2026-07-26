@@ -38,6 +38,12 @@ export interface SurgeRenderRequest {
   outPath: string
   /** Track 1a: normalized (0..1) param overrides applied to the patch before notes play. */
   overrides?: { param: string; value: number }[]
+  /** D6 (research 132 §2.3 / 140): the project tempo in BPM. Surge's tempo-synced LFOs, delays and
+   * arps read this; upstream surgepy hard-codes 120 and binds nothing, so until
+   * python/surge-patches/0001-surgepy-expose-host-tempo.patch is applied to the local build a
+   * request that names a tempo FAILS rather than silently rendering off-groove. Omitting it
+   * reproduces the historic 120 BPM behaviour and comes back as `tempoApplied: false`. */
+  tempo?: number
 }
 
 export interface SurgeRenderMeta {
@@ -48,6 +54,12 @@ export interface SurgeRenderMeta {
   notes: number
   /** the resolved Surge param names the overrides landed on (sidecar echoes these back). */
   overrides: string[]
+  /** the tempo Surge actually ran at, in BPM. */
+  tempo: number
+  /** false means the render fell back to Surge's 120 BPM default because this build has no tempo
+   * binding — every tempo-synced element in the patch is off-groove and the clip must be treated
+   * as provenance-suspect (this is the state EVERY historic surge rating was collected in). */
+  tempoApplied: boolean
   sampleRate: number
   seconds: number
   output: string
@@ -74,9 +86,22 @@ export function surgeAvailable(doctorReport: Record<string, unknown>): boolean {
   return typeof s === 'object' && s !== null && (s as { available?: unknown }).available === true
 }
 
-/** List the factory patch catalogue for the TS-side seeded pick. Throws BeatSurgeError on any
- * failure (surgepy missing, non-JSON, bad shape) so the CLI can warn + skip surge cleanly. */
-export async function listSurgePatches(): Promise<SurgePatch[]> {
+/** A catalogue entry with its provenance. `pool` is which of the sidecar's PATCH_POOLS it came
+ * from (`factory` | `thirdparty`) and `bank` is the designer collection — "Surge XT Factory" for
+ * factory content, the third-party author folder otherwise. Structurally a SurgePatch, so every
+ * existing consumer keeps working; D23 posture: bank NAMES are provenance for local manifests, the
+ * rendered audio stays eval-private and gitignore-gated. */
+export interface SurgeCataloguePatch extends SurgePatch {
+  pool: string
+  bank: string
+}
+
+/** List the WHOLE patch catalogue for the TS-side seeded pick — `patches_factory` AND
+ * `patches_3rdparty` (639 + 2,920 on the owner's install; the third-party pool was invisible to
+ * every blind rating collected before 2026-07-26, research 132 §2.1 / 141 §7). Throws
+ * BeatSurgeError on any failure (surgepy missing, non-JSON, bad shape) so the CLI can warn + skip
+ * surge cleanly. */
+export async function listSurgePatches(): Promise<SurgeCataloguePatch[]> {
   const python = resolvePython()
   const res = await spawnSidecar({ python, args: [SURGE_PY, '--list-patches'] })
   if (res.enoent) throw new BeatSurgeError(`${SURGE_SETUP_HINT} (tried "${python}")`)
@@ -92,8 +117,8 @@ export async function listSurgePatches(): Promise<SurgePatch[]> {
   }
   if (!Array.isArray(parsed.patches)) throw new BeatSurgeError('surge --list-patches returned no patches array')
   return parsed.patches
-    .filter((p): p is SurgePatch => !!p && typeof (p as SurgePatch).name === 'string' && typeof (p as SurgePatch).category === 'string' && typeof (p as SurgePatch).path === 'string')
-    .map((p) => ({ name: p.name, category: p.category, path: p.path }))
+    .filter((p): p is SurgeCataloguePatch => !!p && typeof (p as SurgePatch).name === 'string' && typeof (p as SurgePatch).category === 'string' && typeof (p as SurgePatch).path === 'string')
+    .map((p) => ({ name: p.name, category: p.category, path: p.path, pool: typeof p.pool === 'string' ? p.pool : 'factory', bank: typeof p.bank === 'string' ? p.bank : '' }))
 }
 
 /** Render `req.notes` through `req.patch`, writing a WAV to `req.outPath`; returns the sidecar's
@@ -103,9 +128,21 @@ export async function runSurgeRender(req: SurgeRenderRequest): Promise<{ meta: S
   if (!req.patch) throw new BeatSurgeError('surge render needs a patch path')
   if (!req.notes || req.notes.length === 0) throw new BeatSurgeError('surge render needs at least one note')
   if (!(req.sampleRate > 0)) throw new BeatSurgeError(`surge render: sampleRate must be positive, got ${req.sampleRate}`)
+  if (req.tempo !== undefined && !(req.tempo > 0 && req.tempo <= 1000)) {
+    throw new BeatSurgeError(`surge render: tempo must be in (0, 1000] BPM, got ${req.tempo}`)
+  }
 
   const python = resolvePython()
-  const stdin = JSON.stringify({ patch: req.patch, notes: req.notes, overrides: req.overrides ?? [], sampleRate: req.sampleRate, output: req.outPath })
+  const stdin = JSON.stringify({
+    patch: req.patch,
+    notes: req.notes,
+    overrides: req.overrides ?? [],
+    sampleRate: req.sampleRate,
+    output: req.outPath,
+    // omitted entirely when the caller named no tempo, so the sidecar can tell "120 by default"
+    // from "120 on purpose" and report tempoApplied honestly.
+    ...(req.tempo === undefined ? {} : { tempo: req.tempo }),
+  })
   const res = await spawnSidecar({ python, args: [SURGE_PY], stdin })
 
   if (res.enoent) throw new BeatSurgeError(`${SURGE_SETUP_HINT} (tried "${python}")`)
@@ -130,6 +167,8 @@ export async function runSurgeRender(req: SurgeRenderRequest): Promise<{ meta: S
     category: typeof meta.category === 'string' ? meta.category : '',
     notes: typeof meta.notes === 'number' ? meta.notes : req.notes.length,
     overrides: Array.isArray(meta.overrides) ? (meta.overrides as unknown[]).filter((x): x is string => typeof x === 'string') : [],
+    tempo: typeof meta.tempo === 'number' ? meta.tempo : (req.tempo ?? 120),
+    tempoApplied: meta.tempoApplied === true,
     sampleRate: typeof meta.sampleRate === 'number' ? meta.sampleRate : req.sampleRate,
     seconds: typeof meta.seconds === 'number' ? meta.seconds : 0,
     output: typeof meta.output === 'string' ? meta.output : req.outPath,

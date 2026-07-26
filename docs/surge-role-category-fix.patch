@@ -1,0 +1,116 @@
+FOR THE COORDINATOR — three small changes in files owned by the layered-arm stream.
+Prepared by the surge-unlock branch, which is forbidden from touching src/taste/showdown.ts and
+cli/beat.mjs's showdown sections. Neither hunk is applied on surge-unlock.
+
+Both are guarded by tests that already exist on this branch:
+  - test/surge-curation.test.ts  pins SURGE_ROLE_CATEGORIES_V2 (Pads out of chords, Chords/
+    Polysynths/Sequences in) and asserts the two mappings agree on WHICH roles are surge-eligible.
+  - test/surge-tempo.test.ts     proves a synced patch's modulation period tracks the tempo.
+
+-------------------------------------------------------------------------------------------------
+HUNK 1 — src/taste/showdown.ts, the category mapping (research 141 §7.3)
+
+Measured over the installed corpus (amp-EG attack of the sounding scene, 3,559 .fxp, re-verified
+independently 2026-07-26): Pads median 537.8 ms / 18% <= 12.5 ms — 829.5 ms and 4.6% in the factory
+pool alone — against 131's measured chords target of <= 12 ms. All 16 curated chords picks in the
+old presets/surge-curated.json came from Pads; zero from Keys. Surge's own Chords (28 patches,
+3.9 ms) and Polysynths (122, 3.9 ms) were never eligible.
+
+--- a/src/taste/showdown.ts
++++ b/src/taste/showdown.ts
+@@
+-/** Role -> Surge factory patch-categories to draw a patch from. Pitched roles only; drum-loop
+- * maps to null (skipped for v1 — see the section note). Matching is case-insensitive and by
+- * substring so "Basses" also catches sub-categories like "Basses/Acid". */
+-export const SURGE_ROLE_CATEGORIES: Record<string, readonly string[] | null> = {
+-  bassline: ['Basses'],
+-  chords: ['Pads', 'Keys'],
+-  lead: ['Leads', 'Plucks'],
+-  'drum-loop': null,
+-}
++/** Role -> Surge patch-categories to draw a patch from. Pitched roles only; drum-loop maps to null
++ * (skipped for v1 — see the section note). Matching is case-insensitive and by substring so
++ * "Bass" also catches "Basses". The mapping itself lives in surgeCuration.ts so the curation
++ * script and the showdown draw share ONE definition — see SURGE_ROLE_CATEGORIES_V2 there for the
++ * measured justification (research 141 §7.3). */
++export const SURGE_ROLE_CATEGORIES: Record<string, readonly string[] | null> = SURGE_ROLE_CATEGORIES_V2
+
+...and extend the existing import at line 80:
+
+-import { curatedKey } from './surgeCuration.js'
++import { curatedKey, SURGE_ROLE_CATEGORIES_V2 } from './surgeCuration.js'
+
+(surgeCuration.ts imports nothing from showdown.ts, so this does not create a cycle — showdown.ts
+already imports curatedKey from it.)
+
+If you prefer to keep the literal in showdown.ts rather than re-export, the exact replacement value
+is:
+
+  bassline: ['Basses', 'Bass'],
+  chords: ['Chords', 'Polysynths', 'Synths', 'Keys'],
+  lead: ['Leads', 'Plucks', 'Sequences', 'Arps', 'Rhythms'],
+  'drum-loop': null,
+
+...but then the two definitions can drift, which is the failure mode CLAUDE.md's parity rule names.
+
+-------------------------------------------------------------------------------------------------
+HUNK 2 — cli/beat.mjs, the showdown surge render: pass the batch tempo (D6)
+
+`batchBpm` is already in scope three lines above. Without this the showdown arm keeps rendering
+every tempo-synced LFO/delay/arp at 120 BPM even though the sidecar now supports the tempo — and
+because it is now Sequences-eligible (hunk 1), the mistiming would get MORE audible, not less.
+
+--- a/cli/beat.mjs
++++ b/cli/beat.mjs
+@@ (in showdownCmd, the ring-screen redraw loop, ~line 2862)
+-                const res = await surgeMod.runSurgeRender({ patch: candidate.path, notes, sampleRate: 44100, outPath: attemptWav })
++                const res = await surgeMod.runSurgeRender({ patch: candidate.path, notes, sampleRate: 44100, outPath: attemptWav, tempo: batchBpm })
+
+Optional but recommended alongside it: record `res.meta.tempoApplied` in the batch manifest so a
+clip rendered on a build without the binding is visibly provenance-suspect rather than silently
+mixed in with correct ones.
+
+-------------------------------------------------------------------------------------------------
+PREREQUISITE for hunk 2 on any machine that renders surge
+
+The tempo binding is a local patch to the surgepy source build:
+
+  cd ~/Documents/dotbeat/tools/surge
+  git apply <repo>/python/surge-patches/0001-surgepy-expose-host-tempo.patch
+  cmake --build build --target surgepy          # and build-py310, if that is what the venv uses
+  cp build-py310/src/surge-python/surgepy.cpython-310-darwin.so python/.venv/lib/python3.10/site-packages/
+
+`node cli/beat.mjs showdown --surge-doctor` reports `tempoBinding: true` once it is in place. Until
+then a render that names a tempo fails loudly (exit 4) rather than silently producing an
+off-groove clip — which is the point.
+
+-------------------------------------------------------------------------------------------------
+HUNK 3 (OPTIONAL, and the point of the whole exercise) — cli/beat.mjs: use the v2 bank
+
+`presets/surge-curated-v2.json` is a NEW file; `presets/surge-curated.json` is untouched so it can
+serve as the control in a blind A/B. Both have the identical `roles[role].kept[].{category,name}`
+shape, so `loadCuratedFile` / `curatedKeysForRole` read either one with no code change.
+
+--- a/cli/beat.mjs
++++ b/cli/beat.mjs
+@@ ~line 2418
+-        const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', 'surge-curated.json')
++        const curatedBank = process.env.BEAT_SURGE_BANK ?? 'surge-curated-v2.json'
++        const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', curatedBank)
+
+...and the log line three lines below it should name `curatedBank` instead of the literal, so the
+manifest/stderr says which bank a batch drew from. Threading the bank name into the batch manifest
+would make the A/B readable straight off the scores log.
+
+Measured difference between the two banks (same parser, both banks, 2026-07-26):
+
+  role      bank  n   attack p25/med/p75    <=12.5  release p25/med/p75    osc>=2  oct8  banks
+  bassline  v1   14     3.9 / 3.9 / 3.9      100%    31 / 31 / 42            21%    21%     1
+  bassline  v2   40     3.9 / 3.9 / 3.9      100%    31 / 31 / 121           75%    48%    34
+  chords    v1   16   443 / 830 / 1554        13%  1246 / 2083 / 2921        38%    19%     1
+  chords    v2   40     3.9 / 3.9 / 4.7        98%    31 / 31 / 102          65%    30%    28
+  lead      v1   16     3.9 / 3.9 / 3.9        94%    31 / 643 / 1416        50%    31%     1
+  lead      v2   40     3.9 / 3.9 / 3.9       100%    31 / 31 / 115          83%    53%    24
+
+(times in ms; oct8 = fraction of patches whose active oscillators are octave-split, the dominant
+professional layering idiom at 35-39% per 141 §5.3.)

@@ -67,6 +67,7 @@ export async function prepareSurgeTracks(beatPath) {
   // render request wants a path). This is the render-time surgepy/patch check: listSurgePatches
   // throws BeatSurgeError when surgepy is missing, and an unknown patch name is a loud error here —
   // exactly the "fails loudly when surgepy/patch unavailable AT RENDER, not at parse" contract.
+  const notes = [] // human-readable prep notes surfaced by the caller (collisions, renders, cache hits)
   let catalogue
   try {
     catalogue = await listSurgePatches()
@@ -74,25 +75,40 @@ export async function prepareSurgeTracks(beatPath) {
     const msg = err instanceof BeatSurgeError ? err.message : String(err && err.message ? err.message : err)
     throw new Error(`surge render prep failed (cannot list Surge factory patches): ${msg}`)
   }
+  // Bare names COLLIDE now that both patch pools are enumerated: 88 names are carried by more than
+  // one patch across the 3,559-patch library (e.g. two designers each shipping a "Reese 2"). Bare
+  // names stay legal and resolve deterministically to the first by (category, bank, name) — the
+  // order listSurgePatches already returns — but a collision is WARNED about rather than resolved
+  // in silence, and a qualified name disambiguates it:
+  //     patch "Reese 2"                  -> first match, warns if ambiguous
+  //     patch "Basses/Reese 2"           -> category-qualified
+  //     patch "Lopyt/Basses/Reese 2"     -> bank+category-qualified (always unique)
   const byName = new Map()
+  const qualified = new Map()
   for (const p of catalogue) {
     const key = p.name.toLowerCase()
-    // deterministic on name collisions across categories: keep the first by (category, name) —
-    // listSurgePatches already returns them sorted that way.
-    if (!byName.has(key)) byName.set(key, p.path)
+    if (!byName.has(key)) byName.set(key, [])
+    byName.get(key).push(p)
+    qualified.set(`${p.category}/${p.name}`.toLowerCase(), p)
+    qualified.set(`${p.bank}/${p.category}/${p.name}`.toLowerCase(), p)
   }
   const resolvePatchPath = (name) => {
-    const hit = byName.get(name.toLowerCase())
+    const q = qualified.get(String(name).toLowerCase())
+    if (q) return q.path
+    const matches = byName.get(String(name).toLowerCase()) ?? []
+    if (matches.length > 1) {
+      notes.push(`surge: patch name "${name}" is carried by ${matches.length} patches (${matches.slice(0, 3).map((m) => `${m.bank}/${m.category}`).join(', ')}${matches.length > 3 ? ', …' : ''}) — using ${matches[0].bank}/${matches[0].category}. Qualify it as "<Bank>/<Category>/${name}" to pin one.`)
+    }
+    const hit = matches[0]?.path
     if (!hit) {
       const near = catalogue.map((p) => p.name).filter((n) => n.toLowerCase().includes(name.toLowerCase())).slice(0, 5)
-      throw new Error(`surge render prep: patch "${name}" not found in the factory catalogue (${catalogue.length} patches)${near.length ? `; did you mean: ${near.join(', ')}` : ''}. List names with \`beat surge patches\`.`)
+      throw new Error(`surge render prep: patch "${name}" not found in the patch catalogue (${catalogue.length} patches across the factory + third-party pools)${near.length ? `; did you mean: ${near.join(', ')}` : ''}. List names with \`beat surge patches\`.`)
     }
     return hit
   }
 
   const projectDir = dirname(beatPath)
   const mediaDir = join(projectDir, 'media')
-  const notes = []
 
   // Build the rewritten doc: extra media entries + each surge track replaced by its drums host.
   const media = [...doc.media]
@@ -112,7 +128,10 @@ export async function prepareSurgeTracks(beatPath) {
       continue
     }
     const overrides = [...surge.overrides].sort((a, b) => a.param.localeCompare(b.param)).map((o) => ({ param: o.param, value: o.value }))
-    const keyObj = { patch: surge.patch, overrides, notes: surgeNotes, sampleRate: surge.sampleRate }
+    // D6: the doc's bpm is part of the render, not just of the note timing — every tempo-synced
+    // LFO/delay/arp in the patch locks to it. It therefore belongs in the cache key: changing the
+    // doc's tempo must invalidate the cached WAV exactly like changing a note or an override does.
+    const keyObj = { patch: surge.patch, overrides, notes: surgeNotes, sampleRate: surge.sampleRate, tempo: doc.bpm }
     const hash = createHash('sha256').update(JSON.stringify(keyObj)).digest('hex')
     const short = hash.slice(0, 12)
     const sampleId = `surge_${sanitizeId(track.id)}_${short}`
@@ -133,7 +152,7 @@ export async function prepareSurgeTracks(beatPath) {
 
     if (!cached) {
       mkdirSync(mediaDir, { recursive: true })
-      const { meta } = await runSurgeRender({ patch: resolvePatchPath(surge.patch), notes: surgeNotes, sampleRate: surge.sampleRate, outPath: wavPath, overrides })
+      const { meta } = await runSurgeRender({ patch: resolvePatchPath(surge.patch), notes: surgeNotes, sampleRate: surge.sampleRate, outPath: wavPath, overrides, tempo: doc.bpm })
       const prov = {
         generator: 'surge-render (Track 1a)',
         track: track.id,
@@ -142,6 +161,8 @@ export async function prepareSurgeTracks(beatPath) {
         appliedOverrides: meta.overrides,
         overrides,
         sampleRate: surge.sampleRate,
+        tempo: meta.tempo,
+        tempoApplied: meta.tempoApplied,
         notes: surgeNotes.length,
         seconds: meta.seconds,
         hash,

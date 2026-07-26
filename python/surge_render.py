@@ -17,8 +17,10 @@ the private ref chops.
 CONTRACT (mirrors gen.py: stdlib-only top level, lazy surgepy import, JSON on stdout, chatter on
 stderr, exit codes 0/2/3/4, `--doctor` probing deps with importlib only):
 
-  --doctor            probe surgepy availability + Surge factory-content path + factory patch count
-  --list-patches      emit the factory patch listing as JSON {patches:[{name,category,path}]}
+  --doctor            probe surgepy availability + Surge content path + per-pool patch counts +
+                      whether this build carries the host-tempo binding
+  --list-patches      emit the whole patch listing as JSON
+                      {pools:[...], patches:[{name,category,path,pool,bank}]}
   --dump-params P     emit one patch's parameters with NATIVE value + range, as JSON — what a
                       local search needs to start AT a preset and bound how far it may travel
   (default / render)  read one render request as JSON on STDIN, write a WAV, print metadata JSON
@@ -28,10 +30,11 @@ stderr, exit codes 0/2/3/4, `--doctor` probing deps with importlib only):
                                   "durationSeconds": 0.5, "velocity": 100}, ...],
                        "overrides": [{"param": "cutoff", "value": 0.62}, ...],  # optional, 0..1
                        "nativeOverrides": [{"param": "A Filter 1 Cutoff", "value": 10.0}, ...],
+                       "tempo": 128,          # optional BPM; omitting it renders at Surge's 120
                        "sampleRate": 44100,
                        "output": "<abs .wav path>"}
   render stdout JSON: {"backend":"surge","patch","patchName","category","notes","overrides",
-                       "nativeOverrides","sampleRate","seconds","output"}
+                       "nativeOverrides","tempo","tempoApplied","sampleRate","seconds","output"}
 
   TWO OVERRIDE SPELLINGS, on purpose. `overrides` is the original Track 1a surface and is
   documented/validated as normalized 0..1 — but surgepy's setParamVal takes the parameter's NATIVE
@@ -42,6 +45,11 @@ stderr, exit codes 0/2/3/4, `--doctor` probing deps with importlib only):
   render cached against it (cli/surge-render-prep.mjs hashes the list) — and `nativeOverrides`
   is the additive path that covers the real range, clamped to each parameter's own [min, max] and
   echoed back with the applied value and Surge's own display string.
+
+TWO POOLS, ONE TEMPO. Both fixed 2026-07-26: this sidecar used to enumerate `patches_factory` only
+(639 of 3,559 installed .fxp) and never told Surge the project tempo (every synced LFO/delay/arp ran
+at 120 BPM regardless of the batch). See PATCH_POOLS and TEMPO_BINDING_HINT below; an explicit
+`tempo` on a build without the binding is a loud exit-4, never a silent mistimed render.
   exit:  0 ok · 2 usage/bad input · 3 surgepy missing · 4 render/patch failure.
          On exit 3 the LAST stderr line names how to get surgepy (there is NO PyPI wheel — it is a
          source-build artifact of Surge XT itself; see the SURGEPY_BUILD_HINT below and
@@ -101,6 +109,59 @@ def _create_surge(sample_rate):
         raise RenderError(f"surgepy.createSurge({sample_rate}) failed: {e}")
 
 
+# surgepy upstream hard-codes `surge->time_data.tempo = 120` in createSurge() and binds NOTHING
+# tempo-related (verified by dir() on the built instance, 2026-07-26 — no setTempo/bpm/time member),
+# so every clip this sidecar ever rendered ran its tempo-synced LFOs, delays and envelopes at
+# 120 BPM no matter what the project bpm was (research 132 §2.3, 140 D6). The fix is a 25-line local
+# patch to the binding, checked in at python/surge-patches/0001-surgepy-expose-host-tempo.patch, and
+# this sidecar REFUSES to render at a tempo it cannot actually deliver rather than silently lying.
+TEMPO_BINDING_HINT = (
+    "This surgepy build has no setTempo() binding, so tempo-synced modulation cannot be rendered "
+    "at the project tempo. Apply python/surge-patches/0001-surgepy-expose-host-tempo.patch to the "
+    "Surge XT source tree and rebuild the surgepy target, then reinstall the module "
+    "(see python/README.md)."
+)
+
+# What Surge assumes when nobody tells it otherwise; also what every pre-fix render used.
+DEFAULT_TEMPO_BPM = 120.0
+
+
+def _has_tempo_binding(surge):
+    """True iff this surgepy build exposes the host-tempo setter."""
+    return callable(getattr(surge, "setTempo", None))
+
+
+def _apply_tempo(surge, tempo, required):
+    """Set the host tempo on `surge` and return (tempoApplied: bool, tempoBpm: float).
+
+    MUST be called AFTER loadPatch(): surgepy's loadPatchPy re-applies `storage.unstreamedTempo`
+    when the patch streams a tempo of its own, which would silently overwrite an earlier setting.
+
+    `required` is True when the caller explicitly asked for a tempo. In that case a build without
+    the binding is a loud RenderError — the whole point of D6 is that a mistimed render must never
+    again pass silently. When the caller asked for nothing we fall back to Surge's own 120 BPM and
+    say so in the metadata.
+    """
+    tempo = float(tempo)
+    if not (0.0 < tempo <= 1000.0):
+        raise UsageError(f"tempo must be in (0, 1000] BPM, got {tempo}")
+    if not _has_tempo_binding(surge):
+        if required:
+            raise RenderError(f"cannot render at {tempo:g} BPM: {TEMPO_BINDING_HINT}")
+        print(f"warning: no setTempo binding; rendering at Surge's default {DEFAULT_TEMPO_BPM:g} BPM", file=sys.stderr)
+        return False, DEFAULT_TEMPO_BPM
+    try:
+        surge.setTempo(tempo)
+    except Exception as e:  # pragma: no cover - needs a real surgepy build
+        raise RenderError(f"could not set tempo to {tempo:g} BPM: {e}")
+    getter = getattr(surge, "getTempo", None)
+    if callable(getter):
+        seen = float(getter())
+        if abs(seen - tempo) > 1e-3:
+            raise RenderError(f"tempo did not take: asked for {tempo:g} BPM, Surge reports {seen:g}")
+    return True, tempo
+
+
 def _factory_data_path(surge):
     """Best-effort Surge factory-content root. The exact accessor has drifted across surgepy
     builds, so try the known names in order and fall back to None rather than crashing."""
@@ -117,44 +178,122 @@ def _factory_data_path(surge):
     return None
 
 
-def _patches_root(factory_path):
-    """The dir that actually holds factory patches. Surge lays them out under
-    <factory>/patches_factory/<Category>/<name>.fxp; be tolerant of a path already pointing at
-    patches_factory."""
+# The patch pools this sidecar enumerates, in order. EXPLICIT and testable on purpose: for two
+# years the eval drew from `patches_factory` alone (639 .fxp) while `patches_3rdparty` sat beside it
+# on disk with 2,920 more by 37 named designers — 82% of the installed library, invisible to every
+# blind rating ever collected (research 132 §2.1, 141 §7). The layouts differ by exactly one level:
+#
+#   patches_factory/<Category>/<name>.fxp             -> bank "Surge XT Factory", category <Category>
+#   patches_3rdparty/<Bank>/<Category>/<name>.fxp     -> bank <Bank>,             category <Category>
+#
+# `bankDepth` is how many directory components sit ABOVE the category. Adding a pool is one row.
+PATCH_POOLS = (
+    {"pool": "factory", "dir": "patches_factory", "bankDepth": 0, "bank": "Surge XT Factory"},
+    {"pool": "thirdparty", "dir": "patches_3rdparty", "bankDepth": 1, "bank": None},
+)
+
+# D23 licensing posture, restated where the code acts on it: bank NAMES are provenance metadata and
+# stay in local manifests; the third-party patch CONTENT carries the same unresolved upstream
+# licence question as the factory set (surge#6741), so rendered audio remains eval-private and
+# gitignore-gated exactly as before. Enumerating more patches changes nothing about that.
+
+
+def _data_root(factory_path):
+    """The Surge `resources/data` dir that holds the patch pools. Tolerant of the three shapes
+    surgepy builds have returned: the data dir itself, a path already pointing INTO a pool, and a
+    repo root one level up."""
     if not factory_path:
         return None
-    if os.path.basename(os.path.normpath(factory_path)) == "patches_factory":
-        return factory_path
-    candidate = os.path.join(factory_path, "patches_factory")
-    if os.path.isdir(candidate):
-        return candidate
-    # some builds return the resources dir one level up
-    alt = os.path.join(factory_path, "resources", "data", "patches_factory")
-    return alt if os.path.isdir(alt) else (candidate if os.path.isdir(factory_path) else None)
+    norm = os.path.normpath(factory_path)
+    pool_dirs = {p["dir"] for p in PATCH_POOLS}
+    if os.path.basename(norm) in pool_dirs:
+        return os.path.dirname(norm)
+    if any(os.path.isdir(os.path.join(norm, p["dir"])) for p in PATCH_POOLS):
+        return norm
+    alt = os.path.join(norm, "resources", "data")
+    if any(os.path.isdir(os.path.join(alt, p["dir"])) for p in PATCH_POOLS):
+        return alt
+    return norm if os.path.isdir(norm) else None
 
 
-def enumerate_patches(patches_root):
-    """List every factory .fxp as {name, category, path}. `category` is the first directory
-    component under patches_root (Surge's top-level patch category, e.g. Basses / Leads / Pads);
-    a patch sitting directly in the root gets category "" . Sorted by (category, name) so the TS
-    seeded pick is stable across machines with the same factory content."""
-    if not patches_root or not os.path.isdir(patches_root):
+def patch_roots(factory_path):
+    """Resolve PATCH_POOLS against `factory_path` -> [{pool, dir, root, bank, bankDepth, exists}].
+    Every declared pool is reported whether or not it exists on disk, so `--doctor` can say WHICH
+    pool is missing instead of silently rendering a smaller library."""
+    data_root = _data_root(factory_path)
+    out = []
+    for spec in PATCH_POOLS:
+        root = os.path.join(data_root, spec["dir"]) if data_root else None
+        out.append({
+            "pool": spec["pool"],
+            "dir": spec["dir"],
+            "root": root,
+            "bank": spec["bank"],
+            "bankDepth": spec["bankDepth"],
+            "exists": bool(root and os.path.isdir(root)),
+        })
+    return out
+
+
+def _patches_root(factory_path):
+    """The factory pool's root, kept for callers that only want `patches_factory` (and for the
+    doctor's `patchesRoot` field). New code should use patch_roots()."""
+    for entry in patch_roots(factory_path):
+        if entry["pool"] == "factory":
+            return entry["root"]
+    return None
+
+
+def enumerate_pool(root, pool, bank_depth, fixed_bank=None):
+    """Every .fxp under one pool root as {name, category, path, pool, bank}.
+
+    `category` is the directory component at depth `bank_depth` (Surge's top-level patch category:
+    Basses / Leads / Pads / Polysynths / Chords / Sequences / ...); `bank` is the component above
+    it, or `fixed_bank` when bankDepth is 0. A patch too shallow to have a category gets "".
+    """
+    if not root or not os.path.isdir(root):
         return []
     out = []
-    for path in glob.glob(os.path.join(patches_root, "**", "*.fxp"), recursive=True):
-        rel = os.path.relpath(path, patches_root)
+    for path in glob.glob(os.path.join(root, "**", "*.fxp"), recursive=True):
+        rel = os.path.relpath(path, root)
         parts = rel.split(os.sep)
-        category = parts[0] if len(parts) > 1 else ""
+        dirs = parts[:-1]  # directory components above the file
+        category = dirs[bank_depth] if len(dirs) > bank_depth else ""
+        if fixed_bank is not None:
+            bank = fixed_bank
+        else:
+            bank = dirs[bank_depth - 1] if bank_depth >= 1 and len(dirs) >= bank_depth else ""
         name = os.path.splitext(os.path.basename(path))[0]
-        out.append({"name": name, "category": category, "path": os.path.abspath(path)})
-    out.sort(key=lambda p: (p["category"].lower(), p["name"].lower()))
+        out.append({
+            "name": name,
+            "category": category,
+            "path": os.path.abspath(path),
+            "pool": pool,
+            "bank": bank,
+        })
+    return out
+
+
+def enumerate_patches(factory_path_or_root):
+    """List every .fxp across EVERY pool in PATCH_POOLS as {name, category, path, pool, bank}.
+
+    Sorted by (category, bank, name) so the TS seeded pick is stable across machines with the same
+    installed content. Accepts either a `resources/data` path or a legacy `patches_factory` path —
+    both resolve through patch_roots(), so a caller that used to pass the factory root now
+    transparently gets the whole library.
+    """
+    out = []
+    for entry in patch_roots(factory_path_or_root):
+        out.extend(enumerate_pool(entry["root"], entry["pool"], entry["bankDepth"], entry["bank"]))
+    out.sort(key=lambda p: (p["category"].lower(), p["bank"].lower(), p["name"].lower()))
     return out
 
 
 def doctor():
-    """Probe surgepy availability + factory path + patch count. When surgepy is absent this stays
-    a pure importlib/filesystem probe (no import); when present it constructs a synth to read the
-    real factory path, and degrades to available:true/patchCount:null if that construction fails."""
+    """Probe surgepy availability + factory path + per-pool patch counts + the tempo binding. When
+    surgepy is absent this stays a pure importlib/filesystem probe (no import); when present it
+    constructs a synth to read the real factory path, and degrades to available:true/patchCount:null
+    if that construction fails."""
     available = _surgepy_available()
     report = {
         "backend": "surge",
@@ -162,6 +301,8 @@ def doctor():
         "factoryPath": None,
         "patchesRoot": None,
         "patchCount": None,
+        "pools": None,
+        "tempoBinding": None,
     }
     if not available:
         report["surgepy"]["missing"] = ["surgepy"]
@@ -170,10 +311,19 @@ def doctor():
     try:
         surge = _create_surge(44100)
         factory = _factory_data_path(surge)
-        root = _patches_root(factory)
         report["factoryPath"] = factory
-        report["patchesRoot"] = root
-        report["patchCount"] = len(enumerate_patches(root))
+        report["patchesRoot"] = _patches_root(factory)
+        report["tempoBinding"] = _has_tempo_binding(surge)
+        if not report["tempoBinding"]:
+            report["tempoFix"] = TEMPO_BINDING_HINT
+        pools = []
+        total = 0
+        for entry in patch_roots(factory):
+            count = len(enumerate_pool(entry["root"], entry["pool"], entry["bankDepth"], entry["bank"]))
+            total += count
+            pools.append({"pool": entry["pool"], "root": entry["root"], "exists": entry["exists"], "patchCount": count})
+        report["pools"] = pools
+        report["patchCount"] = total
     except Exception as e:  # pragma: no cover - needs a real surgepy build
         report["surgepy"]["constructError"] = str(e)
     return report
@@ -404,6 +554,13 @@ def render(request):
     native_overrides = request.get("nativeOverrides") or []
     sample_rate = int(request.get("sampleRate") or 44100)
     output = request.get("output")
+    # D6: an explicit `tempo` is the caller promising the render is tempo-accurate. Omitting it is
+    # legal (and reproduces the historic behaviour) but is reported as tempoApplied:false.
+    tempo_requested = request.get("tempo")
+    tempo_required = tempo_requested is not None
+    if tempo_required and not isinstance(tempo_requested, (int, float)):
+        raise UsageError(f"render request 'tempo' must be a number in BPM, got {tempo_requested!r}")
+    tempo = float(tempo_requested) if tempo_required else DEFAULT_TEMPO_BPM
     if not patch or not isinstance(patch, str):
         raise UsageError("render request needs a 'patch' path")
     if not output or not isinstance(output, str):
@@ -422,6 +579,10 @@ def render(request):
         surge.loadPatch(patch)
     except Exception as e:  # pragma: no cover - needs a real surgepy build
         raise RenderError(f"could not load patch {patch}: {e}")
+
+    # Tempo goes on AFTER loadPatch (loadPatchPy re-applies the patch's own streamed tempo) and
+    # before any notes play, so synced LFOs/delays/arps run on the caller's grid from sample 0.
+    tempo_applied, tempo_bpm = _apply_tempo(surge, tempo, tempo_required)
 
     # Track 1a: normalized param overrides, applied after the patch loads and before any notes play.
     applied_overrides = _apply_overrides(surge, overrides)
@@ -485,6 +646,8 @@ def render(request):
         "notes": len(notes),
         "overrides": applied_overrides,
         "nativeOverrides": applied_native,
+        "tempo": tempo_bpm,
+        "tempoApplied": tempo_applied,
         "sampleRate": sample_rate,
         "seconds": round(total_samples / sample_rate, 4),
         "ringDb": _ring_db(frames, sample_rate),
@@ -507,8 +670,13 @@ def main(argv):
         return 0
     if args.list_patches:
         surge = _create_surge(44100)
-        root = _patches_root(_factory_data_path(surge))
-        print(json.dumps({"patchesRoot": root, "patches": enumerate_patches(root)}))
+        factory = _factory_data_path(surge)
+        roots = patch_roots(factory)
+        print(json.dumps({
+            "patchesRoot": _patches_root(factory),
+            "pools": [{"pool": r["pool"], "root": r["root"], "exists": r["exists"]} for r in roots],
+            "patches": enumerate_patches(factory),
+        }))
         return 0
 
     raw = sys.stdin.read()
