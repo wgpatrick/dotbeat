@@ -6,22 +6,15 @@
 // the showdown's gen arm gets its guarantee from EXTRACTION instead: separate the download with
 // htdemucs and keep the one stem the role asked for.
 //
-// Same spawn/exit-code/interpreter conventions as sidecar.ts, gen.ts and metrics/roughness.ts —
-// one degrade vocabulary across every sidecar. Like gen.py, the Python side WRITES the audio file
-// and prints only metadata.
+// Same spawn/exit-code/interpreter scaffold as every other sidecar — ./spawn-sidecar.ts, which as
+// of R4-1 is a shared MODULE rather than a shared convention. Like gen.py, the Python side WRITES
+// the audio file and prints only metadata.
 
-import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { lastNonEmptyLine, resolvePython, spawnSidecar } from './spawn-sidecar.js'
 
-// dist/src/analysis/stems.js → repo root is three levels up, matching sidecar.ts/gen.ts.
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-const STEM_PY = 'python/stem_extract.py' // relative to repoRoot; spawned with cwd=repoRoot so the
-// sidecar's own `pip install -r python/...` fix line is copy-pasteable where it prints.
-
-const SPAWN_TIMEOUT_MS = 600_000
-const SPAWN_MAX_BUFFER = 64 * 1024 * 1024
+const STEM_PY = 'python/stem_extract.py' // relative to the repo root; spawned with cwd=repoRoot so
+// the sidecar's own `pip install -r python/...` fix line is copy-pasteable where it prints.
 
 /** The four sources htdemucs separates. `other` is where solo synths/keys/guitars land. */
 export type StemName = 'bass' | 'other' | 'drums' | 'vocals'
@@ -91,46 +84,13 @@ export type StemExtractor = (opts: ExtractStemOptions) => Promise<StemExtractRes
  * second multi-GB torch install to save nothing would be worse than the coupling.
  */
 export function resolveStemPython(): string {
-  const override = process.env.BEAT_STEM_PYTHON
-  if (override && override.trim() !== '') return override.trim()
-  const shared = process.env.BEAT_PYTHON
-  if (shared && shared.trim() !== '') return shared.trim()
-  const venv = join(repoRoot, 'python', '.venv', 'bin', 'python3')
-  if (existsSync(venv)) return venv
-  return 'python3'
+  return resolvePython({ envVar: 'BEAT_STEM_PYTHON' })
 }
 
 const VENV_HINT =
   'the stem-extract sidecar needs demucs + torch in the shared venv: ' +
   'python/.venv/bin/pip install -r python/requirements-demucs.txt ' +
   '(or point $BEAT_STEM_PYTHON at a demucs-bearing interpreter). See python/README.md.'
-
-interface SpawnResult {
-  code: number | null
-  stdout: string
-  stderr: string
-  enoent: boolean
-}
-
-function spawnPython(python: string, args: string[]): Promise<SpawnResult> {
-  return new Promise((resolvePromise) => {
-    execFile(python, args, { cwd: repoRoot, timeout: SPAWN_TIMEOUT_MS, maxBuffer: SPAWN_MAX_BUFFER }, (err, stdout, stderr) => {
-      if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-        resolvePromise({ code: null, stdout, stderr, enoent: true })
-      } else if (err) {
-        const code = typeof (err as NodeJS.ErrnoException).code === 'number' ? (err as unknown as { code: number }).code : 1
-        resolvePromise({ code, stdout, stderr, enoent: false })
-      } else {
-        resolvePromise({ code: 0, stdout, stderr, enoent: false })
-      }
-    })
-  })
-}
-
-function lastNonEmptyLine(text: string): string {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '')
-  return lines.length > 0 ? lines[lines.length - 1]! : ''
-}
 
 /** Validate + shape the sidecar's stdout JSON. Pure, so the parse contract tests without a spawn. */
 export function parseStemResult(text: string, label = 'stem-extract sidecar'): StemExtractResult {
@@ -178,7 +138,7 @@ export const extractStem: StemExtractor = async (opts) => {
   if (opts.model !== undefined) args.push('--model', opts.model)
   if (opts.device !== undefined) args.push('--device', opts.device)
   if (opts.silenceMarginDb !== undefined) args.push('--silence-margin-db', String(opts.silenceMarginDb))
-  const res = await spawnPython(python, args)
+  const res = await spawnSidecar({ python, args })
   if (res.enoent) throw new BeatStemError(`no Python interpreter found (tried "${python}"). ${VENV_HINT}`)
   if (res.code !== 0) {
     const detail = lastNonEmptyLine(res.stderr) || `exit code ${res.code}`
@@ -195,7 +155,9 @@ export const extractStem: StemExtractor = async (opts) => {
 /** Doctor fragment: the sidecar's own probe plus the TS-resolved interpreter. Never throws. */
 export async function stemDoctor(): Promise<Record<string, unknown>> {
   const python = resolveStemPython()
-  const res = await spawnPython(python, [STEM_PY, '--doctor'])
+  // Not the generic sidecarDoctor: this one nests the whole report under `stemExtract` and names
+  // its interpreter field `stemInterpreter`, because it is MERGED into gen's doctor output.
+  const res = await spawnSidecar({ python, args: [STEM_PY, '--doctor'] })
   if (res.enoent) return { stemExtract: { available: false, error: `no Python interpreter found (tried "${python}"). ${VENV_HINT}` }, stemInterpreter: python }
   if (res.code !== 0) return { stemExtract: { available: false, error: lastNonEmptyLine(res.stderr) || `--doctor exited ${res.code}` }, stemInterpreter: python }
   try {
