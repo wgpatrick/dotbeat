@@ -94,10 +94,19 @@ clean) also carried the artifact before the fix (-28.2) and renders **dead clean
 (-120.0) — confirming the bug affected *every* Surge render, not just the three flagged patches, and
 that the fix removes it rather than merely attenuating a loud few.
 
-## This is an UPSTREAM surgepy bug — report it
+## This is an UPSTREAM surgepy bug — DECLINED TO FILE (owner, 2026-07-26)
 
-The defect is in Surge XT's own `surge-python` bindings, not dotbeat code. Draft issue text for the
-Surge XT project (github.com/surge-synthesizer/surge):
+The defect is in Surge XT's own `surge-python` bindings, not dotbeat code. **The owner has ruled
+that we will not file it upstream** ("let's just skip filing this bug"), so the text below is a
+RECORD OF THE DIAGNOSIS, not a pending TODO. The same ruling covers the second confirmed surgepy
+defect (`createSurge()` hardcodes `time_data.tempo = 120` and binds nothing tempo-related).
+Both are fixed locally — this one via `processMultiBlock`, the tempo one via
+`python/surge-patches/0001-surgepy-expose-host-tempo.patch`. Reopen only if the owner asks to
+contribute upstream. Historical note: an issue WAS filed once without the owner's consent and then
+closed at their request; that incident is the origin of the standing no-external-publishing rule.
+
+The text that would have been filed, for the Surge XT project
+(github.com/surge-synthesizer/surge):
 
 ---
 **Title:** `surgepy` `getOutput()` returns wrong strides — right channel is left delayed by 2 samples
