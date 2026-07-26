@@ -25,7 +25,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { featuresForAudioFile, type FeatureVector, type FeatureKey } from './features.js'
+import { featuresForAudioFile, type FeatureVector, type FeatureKey } from '../metrics/features.js'
 
 export class BeatRoleCheckError extends Error {
   constructor(message: string) {

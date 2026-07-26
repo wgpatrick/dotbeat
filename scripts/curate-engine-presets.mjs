@@ -150,7 +150,7 @@ async function main() {
   const showdown = await import('../dist/src/taste/showdown.js')
   const { ringDb } = await import('../dist/src/metrics/ring.js')
   const metrics = await import('../dist/src/metrics/index.js')
-  const features = await import('../dist/src/taste/features.js')
+  const features = await import('../dist/src/metrics/features.js')
   const embeddings = await import('../dist/src/taste/embeddings.js')
   const evalMod = await import('../dist/src/taste/eval.js')
   const curation = await import('../dist/src/taste/surgeCuration.js')

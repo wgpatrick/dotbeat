@@ -104,7 +104,10 @@ import { runAnalysis, sidecarDoctor, defaultAnalysisPath } from '../dist/src/ana
 // ==== Phase 38 Stream SB end ====
 // ==== production tricks (research 118) ====
 import {
-  parseTrickLibrary,
+  loadTrickLibrary,
+  trickByName,
+  knobsForTrick,
+  formatSuggestions,
   applyTrick,
   suggestForDocument,
   siblingRenderFeatures,
@@ -131,7 +134,7 @@ import {
 // Pitch-aware sampling: detection (pure TS, no Python — decisions.md D20) and the tune arithmetic
 // that turns a root into a keymap. keymap.js is deep-imported rather than routed through
 // core/index.js so this stream adds no line to a file two sibling streams are also editing.
-import { detectPitch, formatPartials, formatPitchLine, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
+import { detectPitch, formatPartials, formatPitchLine, verifyRoot, formatRootVerification, PITCH_CONFIDENCE_MEDIUM } from '../dist/src/analysis/index.js'
 // The executable recipe library (docs/research/139 §4) — one altitude above tricks: a named,
 // layered, gate-carrying procedure per clip role. Deliberately NOT re-exported through
 // src/analysis/index.js (`RecipeStep` already means the trick step vocabulary there).
@@ -617,7 +620,11 @@ const HELP = [
                                                           percussion are exactly where detection is weakest, so expect to
                                                           use it. Refuses on a low-confidence detection (quoting the
                                                           partials and a ready-to-paste --root) rather than building a
-                                                          wrong keymap; --force takes the detection anyway.
+                                                          wrong keymap, and then VERIFIES the confident root against the
+                                                          sound's own spectrum before minting lanes — a root that is an
+                                                          octave off transposes the whole clip, and confidence cannot see
+                                                          that. A stated --root is verified too but only warns, never
+                                                          refuses. --force takes the root either way.
                                                           --key sets the scale's root (default: --from's pitch class).
                                                           --scale names: see beat fit-scale --list-scales.
                                                           --dry-run prints the lanes without writing.
@@ -1080,10 +1087,14 @@ const HELP = [
                                                           (headless Chromium driving ui/; no BeatLab needed)
   beat render <file> --offline [-o out.wav]               compute the mix through an offline context instead
                                                           of capturing the realtime clock — same engine, no
-                                                          lossy recorder step. Repeatable to ~1 LSB for
-                                                          oscillator content; noise-based voices (e.g. the
-                                                          default kit's snare/hats) vary per run, exactly as
-                                                          they do live. CPU-bound: fast for short/small
+                                                          lossy recorder step. REPRODUCIBLE to ~1 LSB: every
+                                                          stochastic element is seeded from the DOCUMENT, not
+                                                          the clock or process state — the kit's noise voices
+                                                          per (track, lane) with a read offset that is a
+                                                          function of the hit's time, and the shared reverb
+                                                          send's impulse response from a fixed seed. The ~1 LSB
+                                                          residual is float-rounding in the offline mix, not
+                                                          randomness. CPU-bound: fast for short/small
                                                           projects, can be SLOWER than live capture for long
                                                           dense songs (the measured ratio is printed).
                                                           Refuses soundfont (instrument/sf-lane) projects;
@@ -1945,10 +1956,7 @@ function macroCmd(argv) {
 // validates the trick library against the live format vocabulary. BEAT_TRICKS overrides the path,
 // same convention as BEAT_PRESETS/BEAT_MACROS/BEAT_DRUM_KITS.
 function loadTricks() {
-  const dir = resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets')
-  const macros = parseMacroLibrary(readFileSync(resolve(dir, 'macros.json'), 'utf8'))
-  const path = process.env.BEAT_TRICKS ?? resolve(dir, 'tricks.json')
-  return { tricks: parseTrickLibrary(readFileSync(path, 'utf8'), macros), macros }
+  return loadTrickLibrary(resolve(dirname(new URL(import.meta.url).pathname), '..', 'presets'))
 }
 
 function trickListCmd(argv) {
@@ -1965,8 +1973,7 @@ function trickShowCmd(argv) {
   const name = argv.find((a) => !a.startsWith('--'))
   if (!name) throw new BeatEditError('trick show needs a trick name (see `beat trick list`)')
   const { tricks } = loadTricks()
-  const trick = tricks.find((t) => t.name === name)
-  if (!trick) throw new BeatEditError(`no trick "${name}" (have: ${tricks.map((t) => t.name).join(', ')})`)
+  const trick = trickByName(tricks, name)
   process.stdout.write(argv.includes('--json') ? JSON.stringify(trick, null, 2) + '\n' : formatTrickCard(trick))
 }
 
@@ -1980,17 +1987,10 @@ function trickApplyCmd(argv) {
   const clipId = flagValue(argv, '--clip')
   const knobStr = flagValue(argv, '--knob')
   const { tricks, macros } = loadTricks()
-  const trick = tricks.find((t) => t.name === name)
-  if (!trick) throw new BeatEditError(`no trick "${name}" (have: ${tricks.map((t) => t.name).join(', ')})`)
+  const trick = trickByName(tricks, name)
   // --knob fills the trick's (single) declared knob slot
-  const knobs = {}
-  if (knobStr !== undefined) {
-    const v = Number(knobStr)
-    if (!Number.isFinite(v)) throw new BeatEditError(`--knob must be a number, got "${knobStr}"`)
-    const slot = (trick.slots.knobs ?? [])[0]
-    if (!slot) throw new BeatEditError(`trick "${name}" has no knob slot to fill with --knob`)
-    knobs[slot.name] = v
-  }
+  if (knobStr !== undefined && !Number.isFinite(Number(knobStr))) throw new BeatEditError(`--knob must be a number, got "${knobStr}"`)
+  const knobs = knobsForTrick(trick, knobStr === undefined ? undefined : Number(knobStr))
   const before = readDoc(file)
   const features = siblingRenderFeatures(file) // sibling <file>.wav metrics if present, else null
   const result = applyTrick(trick, { doc: before, trackId: track, features }, { ...(clipId ? { clipId } : {}), knobs, macros, force })
@@ -2021,19 +2021,7 @@ function trickSuggestCmd(argv) {
     process.stdout.write(JSON.stringify({ render: hasWav ? wav : null, suggestions: suggestions.map((s) => ({ trick: s.trick.name, track: s.trackId, axis: s.trick.axis, gap: s.gap, unverified: s.unverified })) }, null, 2) + '\n')
     return
   }
-  const src = hasWav ? `metrics from ${basename(wav)}` : 'document state only (no sibling render — metric preconditions unverified)'
-  process.stdout.write(`suggested tricks for ${basename(file)} — ${src}:\n`)
-  if (suggestions.length === 0) {
-    process.stdout.write('  (nothing applicable — every trick either fails a precondition, is counter-indicated, or is already applied)\n')
-    return
-  }
-  const nameW = Math.max(...suggestions.map((s) => s.trick.name.length))
-  const trackW = Math.max(...suggestions.map((s) => s.trackId.length))
-  for (const s of suggestions) {
-    const flag = s.unverified ? '  (needs a render to confirm)' : s.gap > 0 ? `  (gap ${s.gap.toFixed(1)})` : ''
-    process.stdout.write(`  ${s.trackId.padEnd(trackW)}  ${s.trick.name.padEnd(nameW)}  [${s.trick.axis}]${flag}\n`)
-  }
-  process.stdout.write(`then: beat trick show <name>, then beat trick apply ${basename(file)} <track> <name>\n`)
+  process.stdout.write(formatSuggestions(file, hasWav ? wav : null, suggestions))
 }
 
 // ---- recipe library (docs/research/139 §4) ------------------------------------------------------
@@ -3444,7 +3432,7 @@ async function pilotCmd(argv) {
 
   const { criticWithUncertainty } = await import('../dist/src/taste/eval.js')
   const { embedAudioFile } = await import('../dist/src/taste/embeddings.js')
-  const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+  const { computeBatchFeatures } = await import('../dist/src/metrics/features.js')
   const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch } = await import('../dist/src/vary/batch.js')
   const showdown = await import('../dist/src/taste/showdown.js')
   const { copyFileSync } = await import('node:fs')
@@ -4019,7 +4007,7 @@ async function tasteEvalCmd(argv) {
     // Rewrite entries that lack features but whose batch renders still exist — making the log
     // self-contained before batch dirs get cleaned up. A .bak of the original is kept.
     const lines = readFileSync(logPath, 'utf8').split('\n')
-    const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+    const { computeBatchFeatures } = await import('../dist/src/metrics/features.js')
     let filled = 0
     const rewritten = lines.map((line) => {
       const trimmed = line.trim()
@@ -4117,7 +4105,7 @@ async function tasteSuggestCmd(argv) {
   const logPath = explicitLog ?? (existsSync(siblingLog) ? siblingLog : null)
   if (logPath === null || !existsSync(logPath)) throw new BeatEditError(`no scores log found next to ${dir} — pass --log <beat-scores.jsonl> (the taste model needs YOUR past ratings to rank with)`)
   const { loadTasteBatches, trainOnBatches } = await import('../dist/src/taste/eval.js')
-  const { computeBatchFeatures } = await import('../dist/src/taste/features.js')
+  const { computeBatchFeatures } = await import('../dist/src/metrics/features.js')
   const { standardizeBatch, scoreVector } = await import('../dist/src/taste/ranker.js')
   const { batches } = loadTasteBatches(logPath)
   const training = batches.filter((b) => resolve(b.dir) !== resolve(dir)) // never train on the batch being ranked
@@ -4813,7 +4801,11 @@ async function genKitCmd(argv) {
     for (const h of hits) doc = addHit(doc, role, h).doc
     doc = saveClip(doc, role, clipId).doc
     slots[role] = [{ clip: clipId, at: 0 }]
-    process.stdout.write(`${role}: keymapped ${laneNames.length} lanes (${laneNames[0]}..${laneNames[laneNames.length - 1]}, ${scale} in ${pitchClassName(keyMidi)}) — root ${p.pick.rootSource} ${midiToNote(p.pick.rootMidi)}; starter phrase written (clip "${clipId}")\n`)
+    // D22: say when the root could not be verified. gen-kit never refuses on it (a playable start
+    // is the contract), so an unverified root must be LOUD here or it reaches a rating round
+    // looking like bad timbre rather than a transposed instrument.
+    const rootNote = `root ${p.pick.rootSource} ${midiToNote(p.pick.rootMidi)}${p.pick.rootVerified ? '' : ' (UNVERIFIED — tuning suspect, see the batch)'}`
+    process.stdout.write(`${role}: keymapped ${laneNames.length} lanes (${laneNames[0]}..${laneNames[laneNames.length - 1]}, ${scale} in ${pitchClassName(keyMidi)}) — ${rootNote}; starter phrase written (clip "${clipId}")\n`)
   }
   // Produced defaults (docs/research/115-production-layer-techniques.md, plan A1): every registered
   // track ships with role-appropriate production (width / air / glue / space) instead of the dry,
@@ -4958,6 +4950,34 @@ function sampleInfoCmd(argv) {
  * low-confidence detection stops here — but it must leave the user ONE copy-paste from success,
  * not with a research project. So it quotes the measured confidence, the whole partial table, and
  * the original command line with a `--root` derived from the strongest low partial appended. */
+/** D22 (research/132 §3) — the root the detector was confident about is still checked against the
+ * sound's own spectrum before six lanes are minted on it, because a CONFIDENT wrong root is the
+ * failure mode confidence cannot catch (a strong second harmonic taken for the fundamental) and it
+ * transposes the WHOLE clip, not one note. Same shape as the confidence refusal above: quote the
+ * measurement, hand back a ready-to-paste --root, keep --force available. */
+function keymapRootRefusal(argv, sampleId, pitch, verification) {
+  const lines = [
+    `the detected root for "${sampleId}" does not survive verification — refusing rather than transposing the whole clip.`,
+    '',
+    formatPitchLine(pitch),
+    '',
+    formatRootVerification(pitch.midi, verification),
+    '',
+    formatPartials(pitch.partials),
+    '',
+  ]
+  if (verification.alternateRootNote) {
+    lines.push(
+      `If the table agrees, state that root and re-run:`,
+      '',
+      `  beat keymap ${argv.join(' ')} --root ${verification.alternateRootNote}`,
+      '',
+    )
+  }
+  lines.push('Or pass --force to build the keymap on the detected root anyway.')
+  return lines.join('\n')
+}
+
 function keymapRefusal(argv, sampleId, pitch) {
   const lines = [
     `pitch detection is not confident enough to root a keymap on "${sampleId}" — refusing rather than minting six lanes of wrong tuning.`,
@@ -5013,14 +5033,42 @@ function keymapCmd(argv) {
   if (rootFlag !== undefined) {
     rootMidi = noteToMidi(rootFlag)
     rootSource = `--root ${rootFlag} (stated, not detected)`
+    // A stated root is the user's call and is never refused — `--root` exists precisely for the
+    // sounds detection cannot read (bells, found percussion). But a silent disagreement between
+    // the stated root and the spectrum is the D22 defect wearing a different hat, so say it once.
+    try {
+      const { channels, sampleRate } = readSampleAudio(file, before, sampleId)
+      const check = verifyRoot(rootMidi, detectPitch(channels, sampleRate))
+      // Both directions must be reported here. The CLI/MCP pilot (2026-07-26) found `--root a3` on
+      // an unambiguous a4 sample passing silently: octave-DOWN cannot fail the hard checks, so it
+      // arrives as a WARNING, and a warning nobody prints is the defect all over again.
+      if (!check.ok || check.warnings.length > 0) {
+        process.stderr.write(`warning: ${formatRootVerification(rootMidi, check)}\nBuilding the keymap on your stated root anyway.\n`)
+      }
+    } catch {
+      // An unreadable/unregistered sample is buildKeymap's error to raise, with its own message.
+    }
   } else {
     const { channels, sampleRate } = readSampleAudio(file, before, sampleId)
     const pitch = detectPitch(channels, sampleRate)
     if (pitch.hz === null || (pitch.confidence < PITCH_CONFIDENCE_MEDIUM && !argv.includes('--force'))) {
       throw new BeatEditError(keymapRefusal(argv, sampleId, pitch))
     }
+    // Confidence says "there is a single periodic pitch here"; verification says "and it is THIS
+    // one" — two different questions, and only the second catches an octave error (D22).
+    const verification = verifyRoot(pitch.midi, pitch)
+    if (!verification.ok && !argv.includes('--force')) {
+      throw new BeatEditError(keymapRootRefusal(argv, sampleId, pitch, verification))
+    }
+    for (const w of verification.warnings) process.stderr.write(`warning: root check ${pitch.note}: SUSPECT — ${w}\n`)
     rootMidi = pitch.midi
-    rootSource = `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)})`
+    rootSource =
+      `detected ${pitch.hz.toFixed(1)} Hz = ${pitch.note} (${pitch.level} confidence ${pitch.confidence.toFixed(2)}); ` +
+      (!verification.ok
+        ? `root check FAILED (${verification.reason}) and --force overrode it`
+        : verification.warnings.length > 0
+          ? 'root SUSPECT — see the warning above'
+          : `root verified — ${verification.detail}`)
   }
 
   // --dry-run runs the REAL build and simply doesn't write it. Computing the plan alone would skip

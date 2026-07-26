@@ -454,6 +454,11 @@ export interface BeatSynth {
   sendDelay: number // 0..1
   duckSource: string | null // track id whose kick ducks this track; null = off ("none" in text)
   duckAmount: number // 0..1
+  /** Seconds for the duck's volume to ramp back UP after a kick (the pump's release/recovery).
+   * Default 0.16 is the value the engine hardcoded before this field existed, so an untouched
+   * file sounds byte-identical; the reason it is a field is that a deep-house pump lives at
+   * 0.25-0.35 s and 160 ms cannot make it (research/115 §4.2, 133 §7-B.3, 138 §B6). */
+  duckRelease: number // seconds
   // drum-voice shaping (audible on drum tracks; harmless defaults on synth tracks)
   kickTune: number // Hz
   kickPunch: number
@@ -1247,6 +1252,7 @@ export const SYNTH_FIELDS: readonly SynthFieldDef[] = [
   { key: 'sendDelay', kind: 'number', default: 0 },
   { key: 'duckSource', kind: 'trackref', default: null },
   { key: 'duckAmount', kind: 'number', default: 0 },
+  { key: 'duckRelease', kind: 'number', default: 0.16 },
   { key: 'kickTune', kind: 'number', default: 32.7 },
   { key: 'kickPunch', kind: 'number', default: 0.05 },
   { key: 'kickDecay', kind: 'number', default: 0.4 },

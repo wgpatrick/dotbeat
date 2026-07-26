@@ -15,8 +15,8 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
-import { analyze, analyzeRich, decodeWav } from '../metrics/index.js'
-import type { MixMetrics, RichMetrics } from '../metrics/index.js'
+import { analyze, analyzeRich, decodeWav } from './index.js'
+import type { MixMetrics, RichMetrics } from './index.js'
 
 /** Clamp for -Infinity dB readings (true digital silence). */
 const SILENCE_DB = -80

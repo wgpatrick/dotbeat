@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { FEATURE_KEYS, type FeatureVector } from '../src/taste/features.js'
+import { FEATURE_KEYS, type FeatureVector } from '../src/metrics/features.js'
 import {
   loadRoleTargets,
   rolecheckFeatures,

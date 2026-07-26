@@ -41,7 +41,7 @@ import {
   OSC_TYPES,
   type EffectType,
 } from '../core/index.js'
-import { FEATURE_KEYS, type FeatureKey } from '../taste/features.js'
+import { FEATURE_KEYS, type FeatureKey } from '../metrics/features.js'
 import { BASSLINE_ARCHETYPES, CHORDS_ARCHETYPES, LEAD_ARCHETYPES, DRUM_ARCHETYPES } from '../taste/showdown.js'
 
 /** Thrown by every validation path here. `cli/beat.mjs` allowlists it by name so a bad library

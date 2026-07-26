@@ -56,7 +56,7 @@ import { applyProducedDefaults, type ProductionProfile, type ProducedResult } fr
 import { BeatBatchError } from '../vary/batch.js'
 import type { ComposedNote, ComposedPhrase } from './phrase.js'
 import type { MixMetrics } from '../metrics/index.js'
-import { metricsToBaseFeatures } from './features.js'
+import { metricsToBaseFeatures } from '../metrics/features.js'
 
 /** The pitched roles the layered source covers. drum-loop is deliberately out of scope: a kit is
  * ALREADY a multi-voice instrument (kick/snare/hat lanes), so "layer it" is a different question

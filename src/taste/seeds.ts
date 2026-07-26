@@ -8,6 +8,9 @@
 
 import { mulberry32 } from './eval.js'
 import { seededShuffle } from '../core/rng.js'
+// The style bank lives DAW-side (research/136's import-boundary rule: the DAW may not import
+// taste, so the shared prompt vocabulary is owned by src/analysis and imported back here).
+import { GEN_STYLES } from '../analysis/gen-styles.js'
 import { parse, serialize, setValue } from '../core/index.js'
 import { productionRoleFor, productionProfileFor, applyProducedDefaults } from '../analysis/produce.js'
 import { engineCuratedForRole, type EngineCuratedFile } from './enginePresets.js'
@@ -325,16 +328,6 @@ export function genSubjectVaried(id: string, rng: () => number): { id: string; s
   const isolation = PHRASE_ISOLATION[id]
   return { ...base, subject: isolation !== undefined ? `${subject}, ${isolation}` : subject }
 }
-const GEN_STYLES = [
-  'analog warmth, tape saturation',
-  'clean and modern, club-ready',
-  'lo-fi, dusty, vinyl character',
-  'dark and cavernous, heavy reverb',
-  'bright and glassy, digital sheen',
-  'organic and acoustic-leaning',
-  'gritty distorted electronic',
-  'soft, intimate, close-mic feel',
-]
 
 /** Look up one subject of the prompt bank by id — the source-showdown eval (src/taste/showdown.ts)
  * builds its gen and keymap clips from NAMED bank entries (phrase tier for the role's gen clip,
@@ -406,21 +399,6 @@ export function generateGenPrompts(seed: number, count: number): GenPromptSpec[]
   return out
 }
 
-// ==== gen-kit (docs/gen-kit-pipeline.md) ====
-/** ONE subject in `n` DISTINCT styles — the per-candidate prompt convention taste-collect's
- * style-contrast batches use (owner insight 2026-07-17: N seeds of one prompt are near-clones;
- * N style treatments of one subject span real feature-space distance). Styles are sampled without
- * replacement from the shared GEN_STYLES bank, cycling only if `n` exceeds the bank. Deterministic
- * in `seed`. Exported for `beat gen-kit`, whose role batches must land in the SAME prompt
- * vocabulary the taste loop already collects and scores. */
-export function stylePromptsFor(subject: string, n: number, seed: number): string[] {
-  const rng = mulberry32(seed)
-  const shuffled = seededShuffle(rng, GEN_STYLES)
-  const prompts: string[] = []
-  for (let i = 0; i < n; i++) prompts.push(`${subject}, ${shuffled[i % shuffled.length]!}`)
-  return prompts
-}
-// ==== end gen-kit ====
 
 export interface GenStyleBatchSpec {
   /** media-id-safe slug, unique within one collect run */

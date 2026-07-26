@@ -10,7 +10,7 @@ import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 
 const dist = (p) => pathToFileURL(join(process.cwd(), 'dist', p)).href
-const { featuresForAudioFile } = await import(dist('src/taste/features.js'))
+const { featuresForAudioFile } = await import(dist('src/metrics/features.js'))
 const { embedAudioFile } = await import(dist('src/taste/embeddings.js'))
 
 const OUT_ROOT = join(homedir(), 'Documents', 'dotbeat', 'taste-dataset', 'gen-bakeoff')

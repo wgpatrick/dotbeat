@@ -275,3 +275,50 @@ test('gen-kit refuses to overwrite an existing project and rejects unknown flags
   assert.equal(badBackend.status, 2)
   assert.match(badBackend.stderr, /--gen-backend must be/)
 })
+
+// ---- D22: gen-kit prefers a candidate whose root VERIFIES (research/132 §3) ----------------------
+// A wrong keymap root transposes the whole instrument, and gen-kit picks its root unattended — no
+// human reads a refusal message in that path. It still never refuses (a playable start is the
+// contract), so the defence is the ORDER of the pick plus an honest `rootVerified` flag the CLI
+// prints loudly. See test/pitch.test.ts for verifyRoot's own behaviour.
+
+/** A partial table for a harmonic series on `f0` — magnitude 1/n, the shape of a real sawtooth. */
+const seriesPartials = (f0: number, n = 8) =>
+  Array.from({ length: n }, (_, i) => {
+    const k = i + 1
+    return { hz: f0 * k, magnitude: 1 / k, relDb: 20 * Math.log10(1 / k), ratio: k }
+  })
+
+test('pickTonalCandidate: a verified root beats a MORE confident one an octave off', () => {
+  // Candidate 0: claims a3 (220) and the spectrum agrees — a clean series on 220.
+  // Candidate 1: more confident, claims a4 (440), but its own partials run 220, 440, 660 … — the
+  // classic octave error, where the detector locked onto the second harmonic. Unchecked, gen-kit
+  // would take candidate 1 on confidence alone and keymap every lane an octave sharp.
+  const pick = pickTonalCandidate([
+    pitchStub({ hz: 220, midi: 57, note: 'a3', confidence: 0.7, level: 'medium', partials: seriesPartials(220) }),
+    pitchStub({ hz: 440, midi: 69, note: 'a4', confidence: 0.95, level: 'high', partials: seriesPartials(220) }),
+  ])
+  assert.equal(pick.index, 0, 'the octave-error candidate must not win on confidence')
+  assert.equal(pick.rootMidi, 57)
+  assert.equal(pick.rootVerified, true)
+})
+
+test('pickTonalCandidate: when NO candidate verifies it still picks, and says the root is unverified', () => {
+  const pick = pickTonalCandidate([
+    pitchStub({ hz: 440, midi: 69, note: 'a4', confidence: 0.8, level: 'high', partials: seriesPartials(220) }),
+    pitchStub({ hz: 880, midi: 81, note: 'a5', confidence: 0.9, level: 'high', partials: seriesPartials(220) }),
+  ])
+  // gen-kit's contract is a playable starting point, so it proceeds — but never silently.
+  assert.equal(pick.rootVerified, false)
+  assert.equal(pick.verification.ok, false)
+  assert.match(pick.reason, /UNVERIFIED/)
+  assert.equal(pick.index, 1, 'with nothing verified, confidence decides as before')
+})
+
+test('pickTonalCandidate: a candidate with no partial table is neither blocked nor falsely confirmed', () => {
+  // 'no-evidence' counts as ok (refusing on absence of evidence would block every quiet one-shot),
+  // which is what keeps the existing empty-stub tests above meaningful.
+  const pick = pickTonalCandidate([pitchStub({ hz: 220, midi: 57, note: 'a3', confidence: 0.9, level: 'high' })])
+  assert.equal(pick.rootVerified, true)
+  assert.equal(pick.verification.reason, 'no-evidence')
+})

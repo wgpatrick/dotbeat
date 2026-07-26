@@ -306,7 +306,11 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           percussion are exactly where detection is weakest, so expect to
                                                           use it. Refuses on a low-confidence detection (quoting the
                                                           partials and a ready-to-paste --root) rather than building a
-                                                          wrong keymap; --force takes the detection anyway.
+                                                          wrong keymap, and then VERIFIES the confident root against the
+                                                          sound's own spectrum before minting lanes — a root that is an
+                                                          octave off transposes the whole clip, and confidence cannot see
+                                                          that. A stated --root is verified too but only warns, never
+                                                          refuses. --force takes the root either way.
                                                           --key sets the scale's root (default: --from's pitch class).
                                                           --scale names: see beat fit-scale --list-scales.
                                                           --dry-run prints the lanes without writing.
@@ -699,10 +703,14 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           (headless Chromium driving ui/; no BeatLab needed)
   beat render <file> --offline [-o out.wav]               compute the mix through an offline context instead
                                                           of capturing the realtime clock — same engine, no
-                                                          lossy recorder step. Repeatable to ~1 LSB for
-                                                          oscillator content; noise-based voices (e.g. the
-                                                          default kit's snare/hats) vary per run, exactly as
-                                                          they do live. CPU-bound: fast for short/small
+                                                          lossy recorder step. REPRODUCIBLE to ~1 LSB: every
+                                                          stochastic element is seeded from the DOCUMENT, not
+                                                          the clock or process state — the kit's noise voices
+                                                          per (track, lane) with a read offset that is a
+                                                          function of the hit's time, and the shared reverb
+                                                          send's impulse response from a fixed seed. The ~1 LSB
+                                                          residual is float-rounding in the offline mix, not
+                                                          randomness. CPU-bound: fast for short/small
                                                           projects, can be SLOWER than live capture for long
                                                           dense songs (the measured ratio is printed).
                                                           Refuses soundfont (instrument/sf-lane) projects;

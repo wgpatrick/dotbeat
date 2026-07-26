@@ -19,7 +19,7 @@
 // The anti-Goodhart property is structural: a band cannot be maximized. Nothing here ever ranks;
 // metrics may reject and verify, they may never rank the survivors (139 §1.3).
 
-import { featuresForAudioFile, type FeatureVector } from '../taste/features.js'
+import { featuresForAudioFile, type FeatureVector } from '../metrics/features.js'
 import { isComputableGateKey, isPendingGateKey, type GateBand, type Recipe } from './schema.js'
 
 export type GateStatus = 'pass' | 'fail' | 'pending' | 'unmeasured'

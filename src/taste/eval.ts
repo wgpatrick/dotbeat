@@ -13,7 +13,7 @@
 
 import { readFileSync, existsSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
-import { computeBatchFeatures, featureSetVersionOf, FEATURE_SET_VERSION, type FeatureVector } from './features.js'
+import { computeBatchFeatures, featureSetVersionOf, FEATURE_SET_VERSION, type FeatureVector } from '../metrics/features.js'
 import { trainingExcludedFiles, type VaryBatchManifest } from '../vary/batch.js'
 import { pairsFromRanking, standardizeBatch, zScoreColumns, trainBT, scoreVector, describeWeights, trainBTEnsemble, scoreVectorEnsemble, pessimisticScore, type TrainPair, type BTModel, type BTEnsemble } from './ranker.js'
 import { embedAudioFile, BeatEmbedError, fitPCA, projectPCA, AES_AXES, type EmbedBackend, type AesBackend } from './embeddings.js'

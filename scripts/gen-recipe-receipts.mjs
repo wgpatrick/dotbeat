@@ -31,7 +31,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseRecipeLibrary, buildRecipeDoc, checkRecipeGates, soloLayer, formatGateReport } from '../dist/src/recipes/index.js'
 import { serialize } from '../dist/src/core/index.js'
-import { featuresForAudioFile } from '../dist/src/taste/features.js'
+import { featuresForAudioFile } from '../dist/src/metrics/features.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')

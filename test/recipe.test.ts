@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { parse, serialize, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER } from '../src/core/index.js'
 import { analyze, analyzeRich } from '../src/metrics/index.js'
-import { metricsToFeatures, FEATURE_KEYS } from '../src/taste/features.js'
+import { metricsToFeatures, FEATURE_KEYS } from '../src/metrics/features.js'
 import {
   BeatRecipeError,
   buildRecipeDoc,

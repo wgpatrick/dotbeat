@@ -22,7 +22,7 @@ import {
   DEFAULT_SCORES_LOG,
   type VaryBatchManifest,
 } from '../vary/batch.js'
-import { computeBatchFeatures } from '../taste/features.js'
+import { computeBatchFeatures } from '../metrics/features.js'
 
 /** Where `beat board` appends and `beat board --status` reads, absent an override. Deliberately a
  * SEPARATE filename from DEFAULT_SCORES_LOG (beat-scores.jsonl) — same directory, never the same

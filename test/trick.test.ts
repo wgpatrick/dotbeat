@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { parse, serialize, parseMacroLibrary, initDocument, addTrack, addNote, addHit, saveClip, setScene, setSong } from '../src/core/index.js'
-import { FEATURE_KEYS, type FeatureVector } from '../src/taste/features.js'
+import { FEATURE_KEYS, type FeatureVector } from '../src/metrics/features.js'
 import {
   parseTrickLibrary,
   applyTrick,

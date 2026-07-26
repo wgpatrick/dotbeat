@@ -256,6 +256,34 @@ const ROWS: ParityRow[] = [
     mcp: (c) => ({ name: 'beat_adopt', arguments: { dir: join(c.dir, 'b-param'), pick: 'v2' } }),
     artifacts: ['song.beat'],
   },
+  // D11 — the trick family. `beat_trick` was ADVERTISED in beat_produce's description for months
+  // with no tool behind it (research/140 D11), and the CLI's `beat trick` had no parity row, which
+  // is how the two facts coexisted. These four run last so they operate on the adopted song.beat,
+  // which both surfaces have just proven byte-identical.
+  {
+    name: 'trick list (the catalog, filtered by axis)',
+    cli: () => ['trick', 'list', '--axis', 'width'],
+    mcp: () => ({ name: 'beat_trick_list', arguments: { axis: 'width' } }),
+    artifacts: [],
+  },
+  {
+    name: 'trick show (the full card an agent must read before applying)',
+    cli: () => ['trick', 'show', 'detune-double'],
+    mcp: () => ({ name: 'beat_trick_show', arguments: { trick: 'detune-double' } }),
+    artifacts: [],
+  },
+  {
+    name: 'trick suggest (ranking without a sibling render — the unverified path)',
+    cli: (c) => ['trick', 'suggest', c.file, 'lead'],
+    mcp: (c) => ({ name: 'beat_trick_suggest', arguments: { file: c.file, track: 'lead' } }),
+    artifacts: [],
+  },
+  {
+    name: 'trick apply (recipe as ordinary edits — the file must come out byte-identical)',
+    cli: (c) => ['trick', 'apply', c.file, 'lead', 'detune-double'],
+    mcp: (c) => ({ name: 'beat_trick', arguments: { file: c.file, track: 'lead', trick: 'detune-double' } }),
+    artifacts: ['song.beat'],
+  },
 ]
 
 function project(): Ctx {
@@ -324,6 +352,10 @@ test('the parity table covers every MCP tool in the vary/score/audition family (
   const golden = JSON.parse(readFileSync(GOLDEN_PATH, 'utf8')) as ToolShape[]
   // The family as the review scoped it (R5-F2/F9): generate -> record -> read the exhaust -> take
   // the winner. beat_render is the render verb itself and needs a browser, so it is out of scope.
-  const family = golden.map((t) => t.name).filter((n) => ['beat_vary', 'beat_score', 'beat_adopt', 'beat_suggest'].includes(n))
-  assert.deepEqual([...covered].sort(), family.sort(), 'a vary-family tool has no parity row')
+  // Plus the whole beat_trick* family (D11): the tool that was advertised-but-absent arrives WITH
+  // its rows, and any future beat_trick_* tool is caught by the prefix rather than by memory.
+  const family = golden
+    .map((t) => t.name)
+    .filter((n) => ['beat_vary', 'beat_score', 'beat_adopt', 'beat_suggest'].includes(n) || n.startsWith('beat_trick'))
+  assert.deepEqual([...covered].sort(), family.sort(), 'a vary-family or trick tool has no parity row')
 })

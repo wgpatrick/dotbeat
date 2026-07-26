@@ -308,6 +308,7 @@ interface EngineSynth {
   sendDelay: number
   duckSource: string | null
   duckAmount: number
+  duckRelease: number
   kickTune: number
   kickPunch: number
   kickDecay: number
@@ -347,6 +348,11 @@ function layerOscType(v: OscType): LayerOscType {
 // below reads `p.volume` (post-floor), so `-Infinity + <anything finite>` stays `-Infinity` —
 // nothing can un-silence a fader parked at its visual minimum.
 const VOLUME_SILENCE_FLOOR_DB = -60
+
+/** How fast the sidechain duck DIPS on a kick. Kept hardcoded (and short) on purpose: the
+ * ducking sound is made by the recovery, which is the `duckRelease` SYNTH_FIELDS field —
+ * a slow attack just smears the kick transient it exists to make room for. */
+const DUCK_ATTACK_SECONDS = 0.005
 function applyVolumeFloor(db: number): number {
   return db <= VOLUME_SILENCE_FLOOR_DB ? -Infinity : db
 }
@@ -501,6 +507,7 @@ function coerce(p: BeatSynth): EngineSynth {
     sendDelay: num(p.sendDelay, 0),
     duckSource: typeof p.duckSource === 'string' && p.duckSource && p.duckSource !== 'none' ? p.duckSource : null,
     duckAmount: num(p.duckAmount, 0),
+    duckRelease: num(p.duckRelease, 0.16),
     kickTune: num(p.kickTune, 32.7),
     kickPunch: num(p.kickPunch, 0.05),
     kickDecay: num(p.kickDecay, 0.4),
@@ -1345,6 +1352,215 @@ function buildVinylNoiseBuffer(seed: number): Tone.ToneAudioBuffer {
 /** Authored once (curve never changes per-tick — Vinyl Distortion has one fixed curve, unlike
  * Saturator's curve-family enum): a mild asymmetric tanh soft-clip, the "worn tape/record
  * playback" character rather than a harsh digital clip. */
+// ---- Seeded noise voice (D20 / pilot 109 HIGH finding) -----------------------------------------
+// `Tone.NoiseSynth` is unseeded TWICE over, and both halves break "the same document always renders
+// the same audio":
+//   1. Tone.Noise fills its buffer from `Math.random()` at construction (node_modules/tone
+//      source/Noise.js `_noiseBuffers`), so the noise is different in every PROCESS; and
+//   2. `Noise._start` picks a FRESH `Math.random()` read offset into that buffer on EVERY trigger,
+//      so it is different on every HIT even within one render.
+// Pilot 109 measured the consequence — two `--offline` renders of the same project differing by up
+// to 5.7% FS wherever a snare/clap/`synth:noise` lane fired — and the finding was closed by making
+// `beat help render` honest instead of by fixing it. The stakes have since risen: src/taste
+// caches per-wav embeddings keyed on the audio's sha256, so an unseeded voice means one .beat file
+// has unboundedly many "identities" and every golden/regression comparison over a drum project is
+// comparing noise.
+//
+// This is the same answer VinylNodes above already reached for the same reason ("Tone.Noise's own
+// internal buffer generation has no public seed API"), generalized into a voice: a seeded buffer
+// via makeNoiseStream, and — the part vinyl did not need — a read offset that is a PURE FUNCTION
+// of (seed, trigger time) rather than a counter. Pure-function-of-time is what makes it robust:
+// reproducibility does not depend on triggers arriving in the same order or the same number of
+// times, only on the document scheduling them at the same times, which is what a .beat file IS.
+//
+// The noise-generation math is ported verbatim from Tone's own white/pink generators, so the
+// timbre is the one every existing project was written against — only the draw is seeded.
+const NOISE_BUFFER_SECONDS = 3
+const NOISE_BUFFER_CHANNELS = 2
+
+type SeededNoiseType = 'white' | 'pink'
+
+interface NoiseEnvelopeOptions {
+  attack?: number
+  decay?: number
+  sustain?: number
+  release?: number
+}
+
+/** One buffer per (type, seed, sampleRate) — a kit with four noise lanes on one seed family must
+ * not allocate four multi-megabyte copies of the same samples. The sample rate is part of the key
+ * because `beat render --offline` swaps in an OfflineAudioContext that may not share the live
+ * context's rate, and a buffer built at the wrong rate would play back transposed. */
+const seededNoiseBufferCache = new Map<string, Tone.ToneAudioBuffer>()
+
+function buildSeededNoiseBuffer(type: SeededNoiseType, seed: number): Tone.ToneAudioBuffer {
+  const sr = (Tone.getContext().rawContext as unknown as AudioContext).sampleRate
+  const key = `${type}:${seed >>> 0}:${sr}`
+  const hit = seededNoiseBufferCache.get(key)
+  if (hit) return hit
+  const length = Math.max(1, Math.round(sr * NOISE_BUFFER_SECONDS))
+  const channels: Float32Array[] = []
+  for (let c = 0; c < NOISE_BUFFER_CHANNELS; c++) {
+    const channel = new Float32Array(length)
+    // Per-channel seed offset: two identical channels would collapse the voice to mono, and Tone's
+    // own generator draws each channel independently.
+    const rand = makeNoiseStream(hashSeed(seed, 'noise-ch', c))
+    if (type === 'white') {
+      for (let i = 0; i < length; i++) channel[i] = rand() * 2 - 1
+    } else {
+      // Tone's pink filter cascade (source/Noise.js), Math.random swapped for the seeded stream.
+      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0
+      for (let i = 0; i < length; i++) {
+        const white = rand() * 2 - 1
+        b0 = 0.99886 * b0 + white * 0.0555179
+        b1 = 0.99332 * b1 + white * 0.0750759
+        b2 = 0.969 * b2 + white * 0.153852
+        b3 = 0.8665 * b3 + white * 0.3104856
+        b4 = 0.55 * b4 + white * 0.5329522
+        b5 = -0.7616 * b5 - white * 0.016898
+        channel[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11
+        b6 = white * 0.115926
+      }
+    }
+    channels.push(channel)
+  }
+  const buffer = new Tone.ToneAudioBuffer().fromArray(channels)
+  seededNoiseBufferCache.set(key, buffer)
+  return buffer
+}
+
+/** The shared reverb send's decay time, seconds — unchanged from the Tone.Reverb it replaced. */
+const REVERB_DECAY_SECONDS = 2.2
+/** Fixed: the reverb bus is ONE shared send, so there is no per-track identity to derive a seed
+ * from, and a constant is what makes the same project render the same reverb tail in every
+ * process. Arbitrary but frozen — changing it changes the tail of every project ever rendered. */
+const REVERB_IMPULSE_SEED = 0x5eed_1e55
+
+/** A seeded, decaying stereo noise impulse response — the same thing `Tone.Reverb.generate()`
+ * builds (a noise burst with an exponential decay envelope, rendered offline into a Convolver),
+ * with the one difference that matters: its noise comes from makeNoiseStream instead of
+ * `Math.random()`.
+ *
+ * Found by the CLI/MCP pilot run against the D20 seeding work: seeding the drum voices made
+ * `--offline` reproducible for drums, and the help text was updated to say renders reproduce — but
+ * a track with `sendReverb > 0` still varied by up to 197 LSB across ~84% of samples, moving the
+ * measured loudness 0.4 LU and the stereo width 0.6 dB between identical runs. That is the same
+ * order as the deltas `beat feedback` and the vary->score loop are asked to adjudicate, and
+ * `beat produce` sets `sendReverb 0.2` on lead/pad/keys/hats BY DEFAULT — so the recommended happy
+ * path walked straight into it and the taste loop was scoring partly on reverb noise.
+ *
+ * Both of Tone.Noise's unseeded halves are gone here: the samples are drawn from the seeded stream,
+ * and there is no per-trigger random read offset because the IR is a one-shot buffer, not a loop. */
+function buildReverbImpulse(decaySeconds: number, seed: number): Tone.ToneAudioBuffer {
+  const sr = (Tone.getContext().rawContext as unknown as AudioContext).sampleRate
+  const length = Math.max(1, Math.round(sr * decaySeconds))
+  const channels: Float32Array[] = []
+  for (let c = 0; c < 2; c++) {
+    const channel = new Float32Array(length)
+    // Independent draw per channel — two identical channels would make a mono reverb, and Tone's
+    // own generate() runs a separate Noise per side for exactly that reason.
+    const rand = makeNoiseStream(hashSeed(seed, 'reverb-ch', c))
+    for (let i = 0; i < length; i++) {
+      // exponentialApproachValueAtTime(0, 0, decay) is a time constant of `decay`: e^(-t/decay).
+      channel[i] = (rand() * 2 - 1) * Math.exp(-(i / sr) / decaySeconds)
+    }
+    channels.push(channel)
+  }
+  return new Tone.ToneAudioBuffer().fromArray(channels)
+}
+
+/** A drop-in replacement for the `Tone.NoiseSynth` surface this engine actually uses
+ * (`connect`/`volume`/`set({ envelope })`/`triggerAttackRelease`/`dispose`), with every source of
+ * `Math.random()` replaced by a seed. */
+class SeededNoiseSynth {
+  readonly volume: Tone.Param<'decibels'>
+  private readonly env: Tone.AmplitudeEnvelope
+  private readonly out: Tone.Volume
+  private readonly buffer: Tone.ToneAudioBuffer
+  private readonly seed: number
+  /** Pinned at construction. `beat render --offline` runs the whole engine under a swapped-in
+   * OfflineAudioContext, and a per-trigger source built from the AMBIENT context would land in the
+   * wrong one and throw on connect ("cannot connect to an AudioNode belonging to a different audio
+   * context"). Tone's own Noise._start pins `context: this.context` for exactly this reason. */
+  private readonly ctx: Tone.BaseContext
+  private readonly live = new Set<Tone.ToneBufferSource>()
+  private disposed = false
+
+  constructor(opts: { noise?: { type?: SeededNoiseType }; envelope?: NoiseEnvelopeOptions }, seed: number) {
+    this.seed = seed >>> 0
+    this.buffer = buildSeededNoiseBuffer(opts.noise?.type ?? 'white', this.seed)
+    this.env = new Tone.AmplitudeEnvelope({
+      attack: opts.envelope?.attack ?? 0.005,
+      decay: opts.envelope?.decay ?? 0.1,
+      sustain: opts.envelope?.sustain ?? 0,
+      release: opts.envelope?.release ?? 0.1,
+    })
+    this.out = new Tone.Volume(0)
+    this.ctx = this.env.context
+    this.env.connect(this.out)
+    this.volume = this.out.volume
+  }
+
+  connect(destination: Tone.InputNode): this {
+    this.out.connect(destination)
+    return this
+  }
+
+  /** Tone's serial-connect helper, forwarded from the output so a noise voice drops into the same
+   * `noise.chain(noiseGain, filter)` wiring line the oscillator voices use. */
+  chain(...nodes: Tone.InputNode[]): this {
+    this.out.chain(...nodes)
+    return this
+  }
+
+  /** The choke path (chokeDeclaredLane) — release the envelope without killing the voice. */
+  triggerRelease(time?: Tone.Unit.Time): void {
+    if (this.disposed) return
+    this.env.triggerRelease(time)
+  }
+
+  /** Mirrors `Tone.NoiseSynth.set` for the only shape this engine passes: an envelope patch. */
+  set(opts: { envelope?: NoiseEnvelopeOptions }): void {
+    const e = opts.envelope
+    if (!e) return
+    if (e.attack !== undefined) this.env.attack = e.attack
+    if (e.decay !== undefined) this.env.decay = e.decay
+    if (e.sustain !== undefined) this.env.sustain = e.sustain
+    if (e.release !== undefined) this.env.release = e.release
+  }
+
+  triggerAttackRelease(duration: Tone.Unit.Time, time?: Tone.Unit.Time, velocity = 1): void {
+    if (this.disposed) return
+    const t = time === undefined ? Tone.now() : Tone.Time(time).toSeconds()
+    const dur = Tone.Time(duration).toSeconds()
+    // The read offset is a pure function of (voice seed, trigger time) — see the block comment.
+    // Quantized to microseconds so float noise in the scheduled time can't perturb the draw.
+    const offset = mulberry32(hashSeed(this.seed, Math.round(t * 1e6))) * Math.max(0, this.buffer.duration - dur - 0.05)
+    const src = new Tone.ToneBufferSource({
+      url: this.buffer,
+      context: this.ctx,
+      loop: true,
+      onended: () => {
+        this.live.delete(src)
+        src.dispose()
+      },
+    }).connect(this.env)
+    this.live.add(src)
+    src.start(t, offset)
+    src.stop(t + dur + Number(this.env.release) + 0.05)
+    this.env.triggerAttackRelease(duration, time, velocity)
+  }
+
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    for (const src of [...this.live]) src.dispose()
+    this.live.clear()
+    this.env.dispose()
+    this.out.dispose()
+  }
+}
+
 function buildVinylCurve(): Float32Array {
   const n = 1024
   const curve = new Float32Array(n)
@@ -1588,7 +1804,7 @@ interface SynthChain extends EffectHost {
   uniPairs: { poly: Tone.PolySynth<Tone.Synth>; pan: Tone.Panner; gain: Tone.Gain; mul: number; minVoices: number; level: number }[]
   sub: Tone.PolySynth<Tone.Synth>
   subGain: Tone.Gain
-  noise: Tone.NoiseSynth
+  noise: SeededNoiseSynth
   /** Pilot 111's night-shift render failure: chain.noise is ONE persistent Tone.Noise source
    * shared by every note on the track, and a CHORD triggers it once per note at the identical
    * slot time — Tone.Source.start throws "Start time must be strictly greater than previous
@@ -1687,11 +1903,11 @@ interface DrumBus extends EffectHost {
 
 interface DrumKit {
   kick: Tone.MembraneSynth
-  snare: Tone.NoiseSynth
+  snare: SeededNoiseSynth
   snareFilter: Tone.Filter // held so a per-track kit can be disposed without leaking (Phase 35 OF)
   snareTone: Tone.MembraneSynth
   snareToneGain: Tone.Gain
-  clap: Tone.NoiseSynth
+  clap: SeededNoiseSynth
   clapFilter: Tone.Filter // same disposal-bookkeeping as snareFilter
   hat: Tone.MetalSynth
   openhat: Tone.MetalSynth
@@ -1729,7 +1945,7 @@ interface DrumTrackState {
 interface SynthLaneVoice {
   kind: 'synth'
   voiceType: DrumVoiceType
-  node: Tone.MembraneSynth | Tone.NoiseSynth | Tone.MetalSynth
+  node: Tone.MembraneSynth | SeededNoiseSynth | Tone.MetalSynth
   // noise voices only: a quiet tonal "shell" layer blended in by the `tone` param — the same idea
   // as the legacy kit's snareTone/snareToneGain (a MembraneSynth blended under the noise voice).
   toneLayer?: { synth: Tone.MembraneSynth; gain: Tone.Gain }
@@ -1952,7 +2168,7 @@ export class Engine {
     return this.nativeCtx
   }
 
-  private reverbBus: Tone.Reverb | null = null
+  private reverbBus: Tone.Convolver | null = null
   private delayBus: Tone.FeedbackDelay | null = null
 
   private masterBus: Tone.Gain | null = null
@@ -2008,7 +2224,12 @@ export class Engine {
   // already live one-instance-per-track — research 17 §4.2). reverb/delay stay shared sends.
   private getBuses() {
     if (!this.reverbBus) {
-      this.reverbBus = new Tone.Reverb({ decay: 2.2, wet: 1 }).connect(this.getMaster())
+      // A Convolver over a SEEDED impulse response, not Tone.Reverb — Tone.Reverb generates its IR
+      // from Tone.Noise (Math.random at construction), which made every render of a project with any
+      // sendReverb different. See buildReverbImpulse. Same topology and decay; a Convolver is 100%
+      // wet by construction, which is what `wet: 1` said on the Reverb it replaces — the send GAIN
+      // (reverbSend, driven by sendReverb) is what sets how much of each track reaches this bus.
+      this.reverbBus = new Tone.Convolver({ url: buildReverbImpulse(REVERB_DECAY_SECONDS, REVERB_IMPULSE_SEED), normalize: true }).connect(this.getMaster())
       this.delayBus = new Tone.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 1 }).connect(this.getMaster())
     }
     return { reverb: this.reverbBus, delay: this.delayBus! }
@@ -2187,14 +2408,14 @@ export class Engine {
   /** Build one legacy implicit-5-lane kit into a drums track's OWN bus (Phase 35 Stream OF: was
    * the singleton buildDrums()/this.drums; now built lazily per legacy-mode track, so legacy mode
    * works per-track too — same voices, same wiring, just one instance per track). */
-  private buildDrumKit(busIn: Tone.InputNode): DrumKit {
+  private buildDrumKit(busIn: Tone.InputNode, trackId: string): DrumKit {
     // Every voice feeds the drum bus's filter (not master directly), so the bus's filter/EQ/comp/
     // distortion/sends apply to the whole kit — same as BeatLab.
     const kick = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 7, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.1 } }).connect(busIn)
     kick.volume.value = -2
 
     const snareFilter = new Tone.Filter(1800, 'highpass').connect(busIn)
-    const snare = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.13, sustain: 0 } }).connect(snareFilter)
+    const snare = new SeededNoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.13, sustain: 0 } }, hashSeed(trackId, 'snare')).connect(snareFilter)
     snare.volume.value = -8
 
     // Tonal "shell" layer blended under the snare noise — silent (gain 0) at the default snareTone 0.
@@ -2203,7 +2424,7 @@ export class Engine {
 
     const clapFilter = new Tone.Filter(1100, 'bandpass').connect(busIn)
     clapFilter.Q.value = 1.2
-    const clap = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.004, decay: 0.2, sustain: 0 } }).connect(clapFilter)
+    const clap = new SeededNoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.004, decay: 0.2, sustain: 0 } }, hashSeed(trackId, 'clap')).connect(clapFilter)
     clap.volume.value = -2
 
     const hat = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.05, release: 0.01 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5 }).connect(busIn)
@@ -2217,7 +2438,7 @@ export class Engine {
 
   // ---- Phase 22 Stream AB: declared-lane dispatch (research 19 Part VII step 5) ---------------
 
-  private buildSynthLaneNode(voiceType: DrumVoiceType, busIn: Tone.InputNode): Tone.MembraneSynth | Tone.NoiseSynth | Tone.MetalSynth {
+  private buildSynthLaneNode(voiceType: DrumVoiceType, busIn: Tone.InputNode, seed: number): Tone.MembraneSynth | SeededNoiseSynth | Tone.MetalSynth {
     // Reuses the exact same MembraneSynth/NoiseSynth/MetalSynth building blocks the legacy kit builder (buildDrumKit) hand-
     // wires per lane above — the point of the dispatch table is that this is now parameterized and
     // data-driven (one constructor per voice TYPE, not per lane).
@@ -2225,7 +2446,7 @@ export class Engine {
       return new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 7, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.1 } }).connect(busIn)
     }
     if (voiceType === 'noise') {
-      return new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.13, sustain: 0 } }).connect(busIn)
+      return new SeededNoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.13, sustain: 0 } }, seed).connect(busIn)
     }
     return new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.05, release: 0.01 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5 }).connect(busIn)
   }
@@ -2245,7 +2466,7 @@ export class Engine {
     if (voice.voiceType === 'membrane') {
       ;(voice.node as Tone.MembraneSynth).set({ pitchDecay: p.punch ?? defaults.punch, envelope: { decay } })
     } else if (voice.voiceType === 'noise') {
-      ;(voice.node as Tone.NoiseSynth).set({ envelope: { decay } })
+      ;(voice.node as SeededNoiseSynth).set({ envelope: { decay } })
       if (voice.toneLayer) {
         voice.toneLayer.synth.set({ envelope: { decay } })
         voice.toneLayer.gain.gain.value = p.tone ?? defaults.tone ?? 0
@@ -2444,7 +2665,7 @@ export class Engine {
         let v = state.lanes.get(decl.name)
         if (!v || v.kind !== 'synth' || v.voiceType !== backing.voice) {
           if (v) this.disposeLaneVoice(v)
-          const node = this.buildSynthLaneNode(backing.voice, busIn)
+          const node = this.buildSynthLaneNode(backing.voice, busIn, hashSeed(track.id, 'lane', decl.name))
           const toneLayer = backing.voice === 'noise' ? this.buildNoiseToneLayer(busIn) : undefined
           v = { kind: 'synth', voiceType: backing.voice, node, toneLayer, params: {} }
           state.lanes.set(decl.name, v)
@@ -2568,7 +2789,7 @@ export class Engine {
     this.started = true
   }
 
-  private buildSynthChain(): SynthChain {
+  private buildSynthChain(noiseSeed: number): SynthChain {
     const { reverb, delay } = this.getBuses()
     const filter = new Tone.Filter(2000, 'lowpass')
     // Fixed headroom trim (bug investigation, see docs/volume-fader-bugfix.md's Symptom 2): the
@@ -2606,7 +2827,7 @@ export class Engine {
     ].map((d) => ({ ...d, poly: new Tone.PolySynth(Tone.Synth), pan: new Tone.Panner(0), gain: new Tone.Gain(0) }))
     const sub = new Tone.PolySynth(Tone.Synth)
     const subGain = new Tone.Gain(0)
-    const noise = new Tone.NoiseSynth({ noise: { type: 'white' } })
+    const noise = new SeededNoiseSynth({ noise: { type: 'white' } }, noiseSeed)
     const noiseGain = new Tone.Gain(0)
     const fm = new Tone.PolySynth(Tone.FMSynth)
     const fmGain = new Tone.Gain(0)
@@ -2819,9 +3040,10 @@ export class Engine {
   }
 
   private disposeChain(chain: SynthChain): void {
+    chain.noise.dispose() // SeededNoiseSynth is a composite, not a ToneAudioNode — it owns its parts
     const nodes: Tone.ToneAudioNode[] = [
       chain.synth, chain.osc2, chain.osc2Gain, chain.osc2Pan, chain.osc3, chain.osc3Gain, chain.osc3Pan,
-      chain.sub, chain.subGain, chain.noise, chain.noiseGain, chain.fm, chain.fmGain, chain.filter, chain.headroom,
+      chain.sub, chain.subGain, chain.noiseGain, chain.fm, chain.fmGain, chain.filter, chain.headroom,
       ...saturatorNodeList(chain.saturator), chain.chorus, chain.phaser, ...pingPongNodeList(chain.pingPong),
       chain.muteGain, chain.levelTap, chain.panner, chain.vol, chain.reverbSend, chain.delaySend,
     ]
@@ -2847,7 +3069,7 @@ export class Engine {
     for (const track of synthTracks) {
       let chain = this.chains.get(track.id)
       if (!chain) {
-        chain = this.buildSynthChain()
+        chain = this.buildSynthChain(hashSeed(track.id, 'noiseLayer'))
         this.chains.set(track.id, chain)
       }
       this.applyParams(chain, coerce(track.synth), track.effects ?? [], track.id, automated.get(track.id))
@@ -2891,7 +3113,7 @@ export class Engine {
           for (const voice of state.lanes.values()) this.disposeLaneVoice(voice)
           state.lanes.clear()
         }
-        if (!state.kit) state.kit = this.buildDrumKit(state.bus.filter)
+        if (!state.kit) state.kit = this.buildDrumKit(state.bus.filter, track.id)
         this.applyDrumVoiceParams(state, p)
       }
     }
@@ -3365,7 +3587,7 @@ export class Engine {
    * track would use), so a preset's partial param bag previews correctly with no merging here. */
   async previewSynthPreset(params: Partial<BeatSynth>, pitch = 60, velocity = 0.85): Promise<void> {
     await this.ensureStarted()
-    const chain = this.buildSynthChain()
+    const chain = this.buildSynthChain(hashSeed('__preview__', 'noiseLayer'))
     // effects is always [] here (an ephemeral preview voice never carries a chain), so the
     // placeholder trackId below is never actually read (buildEffectRuntime only fires for a
     // non-empty effects list) — see applyParams'/reconcileEffectChain's own trackId doc comment.
@@ -3388,7 +3610,7 @@ export class Engine {
     const p = coerce(params as BeatSynth)
     const out = new Tone.Gain(0.9).connect(this.getMaster())
     const kick = new Tone.MembraneSynth({ pitchDecay: p.kickPunch, octaves: 7, envelope: { attack: 0.001, decay: p.kickDecay, sustain: 0, release: 0.1 } }).connect(out)
-    const snare = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: p.snareDecay, sustain: 0 } }).connect(out)
+    const snare = new SeededNoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: p.snareDecay, sustain: 0 } }, hashSeed('__preview__', 'snare')).connect(out)
     const hat = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: p.hatDecay, release: 0.01 }, harmonicity: 5.1, modulationIndex: 32, resonance: p.hatTone, octaves: 1.5 }).connect(out)
     const t = Tone.now() + 0.02
     kick.triggerAttackRelease(p.kickTune, '8n', t)
@@ -4187,7 +4409,8 @@ export class Engine {
 
       // Scheduled sidechain duck: not an audio-analysis sidechain — it dips this track's volume
       // whenever duckSource's kick lane has a hit at this step. Adapted to dotbeat's free-timed
-      // hits (BeatLab reads a 16-step pattern cell). duckAmount can itself be automated.
+      // hits (BeatLab reads a 16-step pattern cell). duckAmount can itself be automated; the
+      // recovery time is duckRelease (SYNTH_FIELDS, default 0.16 s = the old hardcoded value).
       if (p.duckSource) {
         const duckAuto = content.automation.get('duckAmount')
         const duckAmt = duckAuto && duckAuto.length ? interpolateAutomation(duckAuto, content.contentStep, false) : p.duckAmount
@@ -4199,10 +4422,16 @@ export class Engine {
             : false
           if (kickHit) {
             const dipDb = duckAmt * 24
+            // The recovery ramp is duckRelease (seconds), default 0.16 — the value that used to be
+            // hardcoded here, so an untouched project renders byte-identically. It is a field
+            // because 160 ms cannot make the 250-350 ms deep-house pump three separate reviews
+            // asked for (research/115 §4.2, 133 §7-B.3, 138 §B6). Clamped below at the 5 ms attack
+            // so a release shorter than the dip can never schedule a ramp backwards in time.
+            const release = Math.max(p.duckRelease, DUCK_ATTACK_SECONDS)
             chain.vol.volume.cancelScheduledValues(time)
             chain.vol.volume.setValueAtTime(p.volume, time)
-            chain.vol.volume.linearRampToValueAtTime(p.volume - dipDb, time + 0.005)
-            chain.vol.volume.linearRampToValueAtTime(p.volume, time + 0.16)
+            chain.vol.volume.linearRampToValueAtTime(p.volume - dipDb, time + DUCK_ATTACK_SECONDS)
+            chain.vol.volume.linearRampToValueAtTime(p.volume, time + release)
           }
         }
       }

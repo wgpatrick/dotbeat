@@ -22,6 +22,11 @@
 //                    the format stores drums as free-timed hits absolute across loop_bars, so a
 //                    16-step-pattern round-trip would tile a single step-toggle across every bar
 //                    (N lines, not one). A path-scoped edit lands on exactly the one hit.
+//   GET  /rollup   → the agent's "what happened while I was away" read (research/137 §3.2): the
+//                    diff from a checkpoint (?ref=, defaulting to the latest) to the working tree,
+//                    collapsed by src/core/rollup.ts to net-per-param + note clusters ordered by
+//                    edit mass. ?format=text returns exactly what `beat diff --since --rollup`
+//                    prints. rollup.ts is pure and IO-free, so this is a passthrough, not a twin.
 //
 // Canonical serialization (docs/decisions.md D4) is the entire sync mechanism: "should this
 // write?" and "is this watcher event an echo of my own write?" are both plain string
@@ -124,7 +129,11 @@ import { decodeWav } from '../metrics/index.js'
 // history`/`beat restore`/`beat pin` expose. A restore/pin writes the .beat file on disk, which the
 // daemon's own directory watcher picks up and broadcasts as a `doc` SSE event, so the GUI hot-reloads
 // through the exact same external-edit path a hand edit or `beat set` uses — no special echo needed.
-import { checkpoint, history, collapsedHistory, restore, pin, unpin, HistoryError } from '../history/index.js'
+import { checkpoint, history, collapsedHistory, restore, pin, unpin, showFileAt, HistoryError } from '../history/index.js'
+// D32: the agent's / session drawer's "what happened while I was away" read (research/137 §3.2).
+// src/core/rollup.ts is pure and IO-free, so the route is a passthrough over the SAME rollupDiff
+// the CLI's `beat diff --since --rollup` calls — no daemon-side reimplementation of the collapse.
+import { diffDocuments, rollupDiff, formatRollup } from '../core/index.js'
 import { noteDaemonEdit, flushEditLog, type EditSurface } from '../telemetry/index.js'
 // D2/D5 vary-and-audition surface over HTTP (Phase 15 Stream I): the GUI's inline "vary" affordance
 // POSTs /vary, which resolves the daemon's live pointing selection into a (track, param-group) and
@@ -2085,6 +2094,48 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
         }
       } catch (err) {
         json(res, 500, { error: err instanceof Error ? err.message : String(err) })
+      }
+      return
+    }
+
+    // D32 (research/137 §3.2) — GET /rollup?ref=<checkpoint-or-pin>[&limit=N][&format=text]
+    //
+    // The agent's morning read, and the session drawer's data source: what changed between a
+    // checkpoint and the CURRENT on-disk state, collapsed to net-per-param + note clusters ordered
+    // by edit mass. Identical output to `beat diff --since <ref> <file> --rollup --json`, because
+    // it is literally the same two calls (showFileAt -> diffDocuments -> rollupDiff) — parity here
+    // is structural, not a promise to keep two collapses in sync.
+    //
+    // `ref` is optional and defaults to the most recent checkpoint, the same sugar the CLI applies
+    // and the interval a resuming agent always wants. A project with no checkpoints yet is not an
+    // error: it returns ref: null and an empty rollup, because "nothing has been saved yet" is a
+    // real answer a drawer has to render, not a failure.
+    if (req.method === 'GET' && url.pathname === '/rollup') {
+      try {
+        let ref = url.searchParams.get('ref')
+        if (ref === null) {
+          const latest = history(filePath, { limit: 1 })
+          if (latest.length === 0) {
+            json(res, 200, { ref: null, label: `${basename(filePath)}: no checkpoints yet`, rollup: rollupDiff([]) })
+            return
+          }
+          ref = latest[0]!.ref
+        }
+        const before = parse(showFileAt(filePath, ref))
+        const after = parse(readFileSync(filePath, 'utf8'))
+        const entries = diffDocuments(before, after)
+        const rollup = rollupDiff(entries)
+        const label = `${basename(filePath)}: ${ref} -> working tree`
+        if (url.searchParams.get('format') === 'text') {
+          res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', ...CORS_HEADERS })
+          res.end(`# ${label} (rollup)\n` + formatRollup(rollup))
+          return
+        }
+        json(res, 200, { ref, label, entryCount: entries.length, rollup })
+      } catch (err) {
+        // An unknown ref is a HistoryError -> 400 (the caller typo'd); anything else is ours.
+        const status = err instanceof HistoryError ? 400 : 500
+        json(res, status, { error: err instanceof Error ? err.message : String(err) })
       }
       return
     }

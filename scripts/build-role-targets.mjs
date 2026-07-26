@@ -29,8 +29,8 @@ const logPath = resolve(argOf('--log', join(repoRoot, 'examples', 'taste-t1', 'b
 const outPath = resolve(argOf('--out', join(repoRoot, 'presets', 'role-targets.json')))
 const REF_POOL = 'refs-packs'
 
-const { featuresForAudioFile } = await import(join(repoRoot, 'dist/src/taste/features.js'))
-const { FEATURE_SET_VERSION } = await import(join(repoRoot, 'dist/src/taste/features.js'))
+const { featuresForAudioFile } = await import(join(repoRoot, 'dist/src/metrics/features.js'))
+const { FEATURE_SET_VERSION } = await import(join(repoRoot, 'dist/src/metrics/features.js'))
 
 // ---- collect packs-era ref clips per role ------------------------------------------------------
 
