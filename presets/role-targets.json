@@ -1,0 +1,1347 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-26T12:49:59.362Z",
+  "generator": "scripts/build-role-targets.mjs",
+  "note": "Per-role audio targets for `beat rolecheck`. Every threshold is a PERCENTILE of the owner's own packs-era Splice reference clips for that role — the pool D26 names as the bar — measured with the same extractor the critic uses. Regenerate whenever the ref pool grows. Aggregates only: no filenames, no per-clip values, no audio (D25).",
+  "provenance": {
+    "log": "/Users/willpatrick/Documents/dotbeat/dotbeat/examples/taste-t1/beat-scores.jsonl",
+    "refPool": "refs-packs",
+    "refClipsTotal": 75,
+    "extractor": "src/metrics/analyze.ts + src/metrics/rich.ts, FEATURE_SET_VERSION 2",
+    "docs": [
+      "docs/research/131-quality-gap-empirical.md §2, §5, §7",
+      "docs/research/138-splice-parity-plan.md §2, §3-B2",
+      "docs/research/141-preset-parameter-ground-truth.md §3, §5",
+      "docs/research/140-research-action-audit.md D26"
+    ],
+    "caveats": [
+      "Observational, not causal (131 §8): matching a target does not guarantee the rating moves. These are pre-batch screens, not a proof of quality.",
+      "Percentile bounds mean roughly a quarter of the owner's own winning refs would themselves miss any given atLeast:25 check. rolecheck is a \"did this clip land in the reference band\" screen, not a quality verdict — 134 measured what happens when a screen is treated as the bar (the ring gate rejects 22% of the owner's own leads).",
+      "Attack-time extraction is heuristic (131 §8): treat exact ms thresholds as +/-30%.",
+      "Roughness is deliberately absent: 123 and 131 §4 both concluded it has no valid ABSOLUTE threshold.",
+      "LEVEL-DEPENDENT CHECKS ASSUME BATCH NORMALIZATION. The reference clips were measured inside loudness-normalized showdown batches (common LUFS, -1 dBTP ceiling, 131 §1), so truePeakDb and crestDb targets only mean what they say on audio normalized the same way. Checking a raw un-normalized stem will report a truePeakDb miss that is an artifact of its level, not of its transients — normalize first, or read that row as advisory."
+    ]
+  },
+  "roles": {
+    "bassline": {
+      "refClips": 22,
+      "checks": [
+        {
+          "feature": "bandSubPct",
+          "bound": "atLeast",
+          "lever": "composition + patch",
+          "source": "131 §7-P1 (ref bass 60.1% sub vs engineplus 0.22% — the single biggest per-role hole)",
+          "fix": "Put the figure an octave down (root E1-A1) and raise the patch's `subLevel` from 0 to ~0.5; `osc2Detune -1200` adds body. All three knobs exist today (133 §4).",
+          "ref": {
+            "n": 22,
+            "p10": 0.03,
+            "p25": 1.104,
+            "median": 45.618,
+            "p75": 87.21,
+            "p90": 96.52
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 1.104
+          },
+          "docTarget": {
+            "min": 30,
+            "source": "131 §7-P1 (\"bandSubPct >= 30%\", ref med 60.1)"
+          },
+          "min": 30,
+          "minFrom": "doc"
+        },
+        {
+          "feature": "centroidLog2",
+          "bound": "atMost",
+          "lever": "composition",
+          "source": "131 §2.2, §7-P1 (ref bass centroid ~74 Hz vs engineplus ~162 Hz, over an octave high)",
+          "fix": "The bass is written too high, not filtered wrong. Drop the figure an octave before reaching for the filter.",
+          "ref": {
+            "n": 22,
+            "p10": 5.466,
+            "p25": 5.711,
+            "median": 6.27,
+            "p75": 7.19,
+            "p90": 9.836
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 7.19
+          },
+          "docTarget": {
+            "max": 6.5,
+            "source": "131 §7-P1 (\"centroid <= ~90 Hz\", log2 6.2-6.5)"
+          },
+          "max": 6.5,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "crestSubDb",
+          "bound": "atMost",
+          "lever": "patch + production",
+          "source": "131 §1(c), §7-P1 (engineplus sub crest 24.3 dB vs ref 7.2)",
+          "fix": "Steady the low end: bass-mono the sub, cut filter-env depth on the sub oscillator, and let the sustain sit. A flapping sub is measurably worse than no sub — this axis runs BACKWARDS from broadband crest.",
+          "ref": {
+            "n": 22,
+            "p10": 0.361,
+            "p25": 3.524,
+            "median": 7.219,
+            "p75": 12.322,
+            "p90": 17.908
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 12.322
+          },
+          "docTarget": {
+            "max": 11,
+            "source": "131 §7-P1 (\"crest_subDb <= ~11 dB\"; ref 7.2, engineplus 24.3)"
+          },
+          "max": 11,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "truePeakDb",
+          "bound": "atLeast",
+          "lever": "patch + engine",
+          "source": "131 §7-P2 (packs head-to-head d +1.38, the strongest discriminator in the log). ASSUMES the clip is loudness-normalized like a showdown batch — on a raw stem this row reads level, not punch.",
+          "fix": "Shorten the amp-EG attack and add a transient shaper — NOT more compression (131 §6: a compressor fixes neither half of the crest story). Research 141 §3: 65% of professional lead/bass/pluck patches leave attack at Surge's 3.91 ms floor, so ask for 0 and accept <= 12 ms.",
+          "ref": {
+            "n": 22,
+            "p10": -11.217,
+            "p25": -7.444,
+            "median": -0.999,
+            "p75": -0.892,
+            "p90": -0.721
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": -7.444
+          },
+          "docTarget": {
+            "min": -5,
+            "source": "131 §7-P2 (\"truePeakDb >= -5 dB after batch normalization\")"
+          },
+          "min": -5,
+          "minFrom": "doc"
+        },
+        {
+          "feature": "attackMedMs",
+          "bound": "atMost",
+          "lever": "patch",
+          "source": "131 §7-P2; 141 §3 (3,559-patch attack distribution)",
+          "fix": "Set the amp-EG attack to its floor and do the shaping in the filter EG — the professional idiom (141 §3.3: 65-68% of leads/plucks/basses/sequences leave amp attack at the INIT minimum, while only 8-33% leave decay at default).",
+          "ref": {
+            "n": 22,
+            "p10": 1.765,
+            "p25": 4.087,
+            "median": 10.499,
+            "p75": 12.724,
+            "p90": 109.441
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 12.724
+          },
+          "max": 12.724,
+          "maxFrom": "refPercentile"
+        },
+        {
+          "feature": "crestDb",
+          "bound": "atLeast",
+          "lever": "engine",
+          "source": "131 §6 (broadband crest ref 15.2-20.2 dB vs engineplus 12.1-14.0)",
+          "fix": "Sharpen transients (transient shaper node). Note the two-scale rule: broadband crest must go UP while per-band crest goes DOWN — see the crestSubDb check.",
+          "ref": {
+            "n": 22,
+            "p10": 5.46,
+            "p25": 7.178,
+            "median": 9.302,
+            "p75": 14.74,
+            "p90": 20.036
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 7.178
+          },
+          "min": 7.178,
+          "minFrom": "refPercentile"
+        },
+        {
+          "feature": "fluxMean",
+          "bound": "atLeast",
+          "lever": "composition + patch",
+          "source": "131 §7-P3 (fluxMean d +1.06 in the core matchup)",
+          "fix": "Give notes somewhere to go: filter-env / LFO depth so the timbre evolves, plus more onsets and velocity contrast. The per-note expression surface (velocity tiers, swing, chance, ratchets, humanize) is built and unused (135 §D).",
+          "ref": {
+            "n": 22,
+            "p10": 0.075,
+            "p25": 0.094,
+            "median": 0.166,
+            "p75": 0.201,
+            "p90": 0.246
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 0.094
+          },
+          "docTarget": {
+            "min": 0.17,
+            "source": "131 §7-P3 (\"fluxMean >= 0.17\")"
+          },
+          "min": 0.166,
+          "minFrom": "refMedianClamp",
+          "clamped": [
+            "min 0.17 -> ref median 0.166"
+          ]
+        },
+        {
+          "feature": "onsetRatePerSec",
+          "bound": "atLeast",
+          "lever": "composition",
+          "source": "131 §7-P3 (ref chords 4.9/s vs engineplus 2.3, surge 1.3)",
+          "fix": "Add onsets — ghost notes, ratchets, a busier figure. If the source is surge, check the tempo binding FIRST: surge renders every tempo-synced patch at a hard-coded 120 BPM (132 §2.3), whose fingerprint is exactly this number collapsing to ~1.3/s.",
+          "ref": {
+            "n": 22,
+            "p10": 0.104,
+            "p25": 2.609,
+            "median": 2.948,
+            "p75": 5.047,
+            "p90": 7.5
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 2.609
+          },
+          "min": 2.609,
+          "minFrom": "refPercentile"
+        },
+        {
+          "feature": "attackCv",
+          "bound": "atLeast",
+          "lever": "composition (MIDI expression)",
+          "source": "131 §2.1 (attackCv P(win|hi) 0.631 globally)",
+          "fix": "Vary the articulation: velocity tiers and humanize, so not every note has the same attack. Uniform attacks are what a rendered-dry patch sounds like.",
+          "ref": {
+            "n": 22,
+            "p10": 0.001,
+            "p25": 0.012,
+            "median": 0.393,
+            "p75": 0.595,
+            "p90": 0.894
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 0.012
+          },
+          "min": 0.012,
+          "minFrom": "refPercentile"
+        },
+        {
+          "feature": "widthMeanDb",
+          "bound": "band",
+          "lever": "production",
+          "source": "131 §7-P5 (elite ref bass -43 dB mono, elite ref lead -4.6 dB; the frozen engineplus constant is -10..-12 everywhere)",
+          "fix": "Set the width from the ROLE, not a global constant. Width is a placement variable, not a more-is-better one — the frozen engineplus profile is measurably wrong in both directions.",
+          "ref": {
+            "n": 22,
+            "p10": -80,
+            "p25": -80,
+            "median": -47.463,
+            "p75": -14.547,
+            "p90": -6.06
+          },
+          "refPercentile": {
+            "bound": "band:10,90",
+            "min": -80,
+            "max": -6.06
+          },
+          "docTarget": {
+            "max": -40,
+            "source": "131 §7-P1/P5 (\"width <= -40 dB\"; elite ref bass -43 to -51)"
+          },
+          "min": -80,
+          "minFrom": "refPercentile",
+          "max": -40,
+          "maxFrom": "doc"
+        }
+      ],
+      "refDistribution": {
+        "bandSubPct": {
+          "n": 22,
+          "p10": 0.03,
+          "p25": 1.104,
+          "median": 45.618,
+          "p75": 87.21,
+          "p90": 96.52
+        },
+        "centroidLog2": {
+          "n": 22,
+          "p10": 5.466,
+          "p25": 5.711,
+          "median": 6.27,
+          "p75": 7.19,
+          "p90": 9.836
+        },
+        "crestSubDb": {
+          "n": 22,
+          "p10": 0.361,
+          "p25": 3.524,
+          "median": 7.219,
+          "p75": 12.322,
+          "p90": 17.908
+        },
+        "truePeakDb": {
+          "n": 22,
+          "p10": -11.217,
+          "p25": -7.444,
+          "median": -0.999,
+          "p75": -0.892,
+          "p90": -0.721
+        },
+        "attackMedMs": {
+          "n": 22,
+          "p10": 1.765,
+          "p25": 4.087,
+          "median": 10.499,
+          "p75": 12.724,
+          "p90": 109.441
+        },
+        "crestDb": {
+          "n": 22,
+          "p10": 5.46,
+          "p25": 7.178,
+          "median": 9.302,
+          "p75": 14.74,
+          "p90": 20.036
+        },
+        "fluxMean": {
+          "n": 22,
+          "p10": 0.075,
+          "p25": 0.094,
+          "median": 0.166,
+          "p75": 0.201,
+          "p90": 0.246
+        },
+        "onsetRatePerSec": {
+          "n": 22,
+          "p10": 0.104,
+          "p25": 2.609,
+          "median": 2.948,
+          "p75": 5.047,
+          "p90": 7.5
+        },
+        "attackCv": {
+          "n": 22,
+          "p10": 0.001,
+          "p25": 0.012,
+          "median": 0.393,
+          "p75": 0.595,
+          "p90": 0.894
+        },
+        "widthMeanDb": {
+          "n": 22,
+          "p10": -80,
+          "p25": -80,
+          "median": -47.463,
+          "p75": -14.547,
+          "p90": -6.06
+        }
+      }
+    },
+    "chords": {
+      "refClips": 20,
+      "checks": [
+        {
+          "feature": "truePeakDb",
+          "bound": "atLeast",
+          "lever": "patch + engine",
+          "source": "131 §7-P2 (packs head-to-head d +1.38, the strongest discriminator in the log). ASSUMES the clip is loudness-normalized like a showdown batch — on a raw stem this row reads level, not punch.",
+          "fix": "Shorten the amp-EG attack and add a transient shaper — NOT more compression (131 §6: a compressor fixes neither half of the crest story). Research 141 §3: 65% of professional lead/bass/pluck patches leave attack at Surge's 3.91 ms floor, so ask for 0 and accept <= 12 ms.",
+          "ref": {
+            "n": 20,
+            "p10": -11.111,
+            "p25": -9.382,
+            "median": -4.847,
+            "p75": -1.057,
+            "p90": -0.618
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": -9.382
+          },
+          "docTarget": {
+            "min": -5,
+            "source": "131 §7-P2"
+          },
+          "min": -5,
+          "minFrom": "doc"
+        },
+        {
+          "feature": "attackMedMs",
+          "bound": "atMost",
+          "lever": "patch",
+          "source": "131 §7-P2; 141 §3 (3,559-patch attack distribution)",
+          "fix": "Set the amp-EG attack to its floor and do the shaping in the filter EG — the professional idiom (141 §3.3: 65-68% of leads/plucks/basses/sequences leave amp attack at the INIT minimum, while only 8-33% leave decay at default).",
+          "ref": {
+            "n": 20,
+            "p10": 9.376,
+            "p25": 11.405,
+            "median": 12.542,
+            "p75": 27.747,
+            "p90": 38.163
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 27.747
+          },
+          "docTarget": {
+            "max": 12,
+            "source": "131 §7-P2 (\"attackMedMs <= 12 ms chords\", now 30.2)"
+          },
+          "max": 12.542,
+          "maxFrom": "refMedianClamp",
+          "clamped": [
+            "max 12 -> ref median 12.542"
+          ]
+        },
+        {
+          "feature": "crestDb",
+          "bound": "atLeast",
+          "lever": "engine",
+          "source": "131 §6 (broadband crest ref 15.2-20.2 dB vs engineplus 12.1-14.0)",
+          "fix": "Sharpen transients (transient shaper node). Note the two-scale rule: broadband crest must go UP while per-band crest goes DOWN — see the crestSubDb check.",
+          "ref": {
+            "n": 20,
+            "p10": 15.083,
+            "p25": 15.198,
+            "median": 16.249,
+            "p75": 18.139,
+            "p90": 20.163
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 15.198
+          },
+          "docTarget": {
+            "min": 15,
+            "source": "131 §7-P2 (\"crestDb 15-18 dB on chords/lead/drums\")"
+          },
+          "min": 15.198,
+          "minFrom": "refPercentile"
+        },
+        {
+          "feature": "fluxMean",
+          "bound": "atLeast",
+          "lever": "composition + patch",
+          "source": "131 §7-P3 (fluxMean d +1.06 in the core matchup)",
+          "fix": "Give notes somewhere to go: filter-env / LFO depth so the timbre evolves, plus more onsets and velocity contrast. The per-note expression surface (velocity tiers, swing, chance, ratchets, humanize) is built and unused (135 §D).",
+          "ref": {
+            "n": 20,
+            "p10": 0.164,
+            "p25": 0.17,
+            "median": 0.224,
+            "p75": 0.247,
+            "p90": 0.312
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 0.17
+          },
+          "docTarget": {
+            "min": 0.17,
+            "source": "131 §7-P3"
+          },
+          "min": 0.17,
+          "minFrom": "refPercentile"
+        },
+        {
+          "feature": "onsetRatePerSec",
+          "bound": "atLeast",
+          "lever": "composition",
+          "source": "131 §7-P3 (ref chords 4.9/s vs engineplus 2.3, surge 1.3)",
+          "fix": "Add onsets — ghost notes, ratchets, a busier figure. If the source is surge, check the tempo binding FIRST: surge renders every tempo-synced patch at a hard-coded 120 BPM (132 §2.3), whose fingerprint is exactly this number collapsing to ~1.3/s.",
+          "ref": {
+            "n": 20,
+            "p10": 2.273,
+            "p25": 2.636,
+            "median": 4.864,
+            "p75": 5.906,
+            "p90": 6.435
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 2.636
+          },
+          "docTarget": {
+            "min": 4,
+            "source": "131 §7-P3 (\"onsetRatePerSec >= 4 on chords\"; ref 4.9 vs 2.3)"
+          },
+          "min": 4,
+          "minFrom": "doc"
+        },
+        {
+          "feature": "attackCv",
+          "bound": "atLeast",
+          "lever": "composition (MIDI expression)",
+          "source": "131 §2.1 (attackCv P(win|hi) 0.631 globally)",
+          "fix": "Vary the articulation: velocity tiers and humanize, so not every note has the same attack. Uniform attacks are what a rendered-dry patch sounds like.",
+          "ref": {
+            "n": 20,
+            "p10": 0.541,
+            "p25": 0.544,
+            "median": 0.706,
+            "p75": 0.978,
+            "p90": 1.168
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 0.544
+          },
+          "docTarget": {
+            "min": 0.7,
+            "source": "131 §7-P3 (\"attackCv ~0.7-0.8\")"
+          },
+          "min": 0.7,
+          "minFrom": "doc"
+        },
+        {
+          "feature": "flatnessHiDb",
+          "bound": "band",
+          "lever": "sound source",
+          "source": "131 §7-P4 (winning refs are NOISIER at 2-8 kHz, d +0.66)",
+          "fix": "Add in-band texture: a second layer, a noise oscillator, saturation or an exciter (133 §5). This is a BAND, not a direction — overshoot lands in gen's hiss regime, which loses for the opposite reason (131 §3.3).",
+          "ref": {
+            "n": 20,
+            "p10": -19.442,
+            "p25": -16.068,
+            "median": -15.747,
+            "p75": -8.672,
+            "p90": -7.034
+          },
+          "refPercentile": {
+            "bound": "band:25,90",
+            "min": -16.068,
+            "max": -7.034
+          },
+          "docTarget": {
+            "min": -16,
+            "max": -8,
+            "source": "131 §7-P4 (\"flatnessHiDb -16..-8 dB\")"
+          },
+          "min": -16,
+          "minFrom": "doc",
+          "max": -8,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "slopeDbPerOct",
+          "bound": "band",
+          "lever": "production",
+          "source": "131 §3.1 (ref tilt 2.1 dB/oct darker) and §3.3 (the band)",
+          "fix": "Darken the tilt toward the ref band — a gentle high shelf or lower filter cutoff. Too dark reads as dull, too bright as the \"clean static simplicity\" the owner rejects.",
+          "ref": {
+            "n": 20,
+            "p10": -21.867,
+            "p25": -14.83,
+            "median": -13.575,
+            "p75": -9.238,
+            "p90": -3.63
+          },
+          "refPercentile": {
+            "bound": "band:10,90",
+            "min": -21.867,
+            "max": -3.63
+          },
+          "docTarget": {
+            "min": -14,
+            "max": -10,
+            "source": "131 §7-P4 (\"slope at -10..-14 dB/oct on melodic roles\")"
+          },
+          "min": -14,
+          "minFrom": "doc",
+          "max": -10,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "crestSubDb",
+          "bound": "atMost",
+          "lever": "patch + production",
+          "source": "131 §1(c), §7-P1 (engineplus sub crest 24.3 dB vs ref 7.2)",
+          "fix": "Steady the low end: bass-mono the sub, cut filter-env depth on the sub oscillator, and let the sustain sit. A flapping sub is measurably worse than no sub — this axis runs BACKWARDS from broadband crest.",
+          "ref": {
+            "n": 20,
+            "p10": 10.527,
+            "p25": 15.538,
+            "median": 17.995,
+            "p75": 23.777,
+            "p90": 29.145
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 23.777
+          },
+          "docTarget": {
+            "max": 20,
+            "source": "131 §7-P6 / §1(c) (low-end steadiness)"
+          },
+          "max": 20,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "widthMeanDb",
+          "bound": "band",
+          "lever": "production",
+          "source": "131 §7-P5 (elite ref bass -43 dB mono, elite ref lead -4.6 dB; the frozen engineplus constant is -10..-12 everywhere)",
+          "fix": "Set the width from the ROLE, not a global constant. Width is a placement variable, not a more-is-better one — the frozen engineplus profile is measurably wrong in both directions.",
+          "ref": {
+            "n": 20,
+            "p10": -10.136,
+            "p25": -7.461,
+            "median": -4.871,
+            "p75": -2.622,
+            "p90": -0.451
+          },
+          "refPercentile": {
+            "bound": "band:10,90",
+            "min": -10.136,
+            "max": -0.451
+          },
+          "docTarget": {
+            "max": -0.5,
+            "source": "131 §7-P5 (chords ~-5 dB)"
+          },
+          "min": -10.136,
+          "minFrom": "refPercentile",
+          "max": -0.5,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "onsetLevelCv",
+          "bound": "atLeast",
+          "lever": "composition (MIDI expression)",
+          "source": "131 §7-P3 (ref chords onsetLevelCv 0.51 vs engineplus 0.26)",
+          "fix": "Vary hit-to-hit level — velocity tiers and accents. Every note at the same level is the machine-gun signature.",
+          "ref": {
+            "n": 20,
+            "p10": 0.287,
+            "p25": 0.398,
+            "median": 0.511,
+            "p75": 0.69,
+            "p90": 0.939
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 0.398
+          },
+          "docTarget": {
+            "min": 0.5,
+            "source": "131 §7-P3 (\"onsetLevelCv >= 0.5 on chords/lead\")"
+          },
+          "min": 0.5,
+          "minFrom": "doc"
+        }
+      ],
+      "refDistribution": {
+        "truePeakDb": {
+          "n": 20,
+          "p10": -11.111,
+          "p25": -9.382,
+          "median": -4.847,
+          "p75": -1.057,
+          "p90": -0.618
+        },
+        "attackMedMs": {
+          "n": 20,
+          "p10": 9.376,
+          "p25": 11.405,
+          "median": 12.542,
+          "p75": 27.747,
+          "p90": 38.163
+        },
+        "crestDb": {
+          "n": 20,
+          "p10": 15.083,
+          "p25": 15.198,
+          "median": 16.249,
+          "p75": 18.139,
+          "p90": 20.163
+        },
+        "fluxMean": {
+          "n": 20,
+          "p10": 0.164,
+          "p25": 0.17,
+          "median": 0.224,
+          "p75": 0.247,
+          "p90": 0.312
+        },
+        "onsetRatePerSec": {
+          "n": 20,
+          "p10": 2.273,
+          "p25": 2.636,
+          "median": 4.864,
+          "p75": 5.906,
+          "p90": 6.435
+        },
+        "attackCv": {
+          "n": 20,
+          "p10": 0.541,
+          "p25": 0.544,
+          "median": 0.706,
+          "p75": 0.978,
+          "p90": 1.168
+        },
+        "flatnessHiDb": {
+          "n": 20,
+          "p10": -19.442,
+          "p25": -16.068,
+          "median": -15.747,
+          "p75": -8.672,
+          "p90": -7.034
+        },
+        "slopeDbPerOct": {
+          "n": 20,
+          "p10": -21.867,
+          "p25": -14.83,
+          "median": -13.575,
+          "p75": -9.238,
+          "p90": -3.63
+        },
+        "crestSubDb": {
+          "n": 20,
+          "p10": 10.527,
+          "p25": 15.538,
+          "median": 17.995,
+          "p75": 23.777,
+          "p90": 29.145
+        },
+        "widthMeanDb": {
+          "n": 20,
+          "p10": -10.136,
+          "p25": -7.461,
+          "median": -4.871,
+          "p75": -2.622,
+          "p90": -0.451
+        },
+        "onsetLevelCv": {
+          "n": 20,
+          "p10": 0.287,
+          "p25": 0.398,
+          "median": 0.511,
+          "p75": 0.69,
+          "p90": 0.939
+        }
+      }
+    },
+    "lead": {
+      "refClips": 20,
+      "checks": [
+        {
+          "feature": "truePeakDb",
+          "bound": "atLeast",
+          "lever": "patch + engine",
+          "source": "131 §7-P2 (packs head-to-head d +1.38, the strongest discriminator in the log). ASSUMES the clip is loudness-normalized like a showdown batch — on a raw stem this row reads level, not punch.",
+          "fix": "Shorten the amp-EG attack and add a transient shaper — NOT more compression (131 §6: a compressor fixes neither half of the crest story). Research 141 §3: 65% of professional lead/bass/pluck patches leave attack at Surge's 3.91 ms floor, so ask for 0 and accept <= 12 ms.",
+          "ref": {
+            "n": 20,
+            "p10": -7.253,
+            "p25": -3.169,
+            "median": -0.995,
+            "p75": -0.094,
+            "p90": -0.023
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": -3.169
+          },
+          "docTarget": {
+            "min": -5,
+            "source": "131 §7-P2"
+          },
+          "min": -3.169,
+          "minFrom": "refPercentile"
+        },
+        {
+          "feature": "attackMedMs",
+          "bound": "atMost",
+          "lever": "patch",
+          "source": "131 §7-P2; 141 §3 (3,559-patch attack distribution)",
+          "fix": "Set the amp-EG attack to its floor and do the shaping in the filter EG — the professional idiom (141 §3.3: 65-68% of leads/plucks/basses/sequences leave amp attack at the INIT minimum, while only 8-33% leave decay at default).",
+          "ref": {
+            "n": 20,
+            "p10": 1.905,
+            "p25": 2.168,
+            "median": 6.117,
+            "p75": 9.751,
+            "p90": 11.871
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 9.751
+          },
+          "docTarget": {
+            "max": 8,
+            "source": "131 §7-P2 (\"<= 8 ms lead\", now 26.6)"
+          },
+          "max": 8,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "crestDb",
+          "bound": "atLeast",
+          "lever": "engine",
+          "source": "131 §6 (broadband crest ref 15.2-20.2 dB vs engineplus 12.1-14.0)",
+          "fix": "Sharpen transients (transient shaper node). Note the two-scale rule: broadband crest must go UP while per-band crest goes DOWN — see the crestSubDb check.",
+          "ref": {
+            "n": 20,
+            "p10": 14.294,
+            "p25": 15.671,
+            "median": 18.432,
+            "p75": 20.638,
+            "p90": 23.201
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 15.671
+          },
+          "docTarget": {
+            "min": 15,
+            "source": "131 §7-P2"
+          },
+          "min": 15.671,
+          "minFrom": "refPercentile"
+        },
+        {
+          "feature": "fluxMean",
+          "bound": "atLeast",
+          "lever": "composition + patch",
+          "source": "131 §7-P3 (fluxMean d +1.06 in the core matchup)",
+          "fix": "Give notes somewhere to go: filter-env / LFO depth so the timbre evolves, plus more onsets and velocity contrast. The per-note expression surface (velocity tiers, swing, chance, ratchets, humanize) is built and unused (135 §D).",
+          "ref": {
+            "n": 20,
+            "p10": 0.178,
+            "p25": 0.189,
+            "median": 0.237,
+            "p75": 0.255,
+            "p90": 0.291
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 0.189
+          },
+          "docTarget": {
+            "min": 0.17,
+            "source": "131 §7-P3"
+          },
+          "min": 0.189,
+          "minFrom": "refPercentile"
+        },
+        {
+          "feature": "onsetRatePerSec",
+          "bound": "atLeast",
+          "lever": "composition",
+          "source": "131 §7-P3 (ref chords 4.9/s vs engineplus 2.3, surge 1.3)",
+          "fix": "Add onsets — ghost notes, ratchets, a busier figure. If the source is surge, check the tempo binding FIRST: surge renders every tempo-synced patch at a hard-coded 120 BPM (132 §2.3), whose fingerprint is exactly this number collapsing to ~1.3/s.",
+          "ref": {
+            "n": 20,
+            "p10": 3.292,
+            "p25": 4.267,
+            "median": 5.532,
+            "p75": 8.242,
+            "p90": 8.697
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 4.267
+          },
+          "min": 4.267,
+          "minFrom": "refPercentile"
+        },
+        {
+          "feature": "attackCv",
+          "bound": "atLeast",
+          "lever": "composition (MIDI expression)",
+          "source": "131 §2.1 (attackCv P(win|hi) 0.631 globally)",
+          "fix": "Vary the articulation: velocity tiers and humanize, so not every note has the same attack. Uniform attacks are what a rendered-dry patch sounds like.",
+          "ref": {
+            "n": 20,
+            "p10": 0.577,
+            "p25": 0.629,
+            "median": 0.836,
+            "p75": 1.049,
+            "p90": 1.189
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 0.629
+          },
+          "docTarget": {
+            "min": 0.7,
+            "source": "131 §7-P3"
+          },
+          "min": 0.7,
+          "minFrom": "doc"
+        },
+        {
+          "feature": "flatnessHiDb",
+          "bound": "band",
+          "lever": "sound source",
+          "source": "131 §7-P4 (winning refs are NOISIER at 2-8 kHz, d +0.66)",
+          "fix": "Add in-band texture: a second layer, a noise oscillator, saturation or an exciter (133 §5). This is a BAND, not a direction — overshoot lands in gen's hiss regime, which loses for the opposite reason (131 §3.3).",
+          "ref": {
+            "n": 20,
+            "p10": -24.134,
+            "p25": -23.047,
+            "median": -13.694,
+            "p75": -6.683,
+            "p90": -3.701
+          },
+          "refPercentile": {
+            "bound": "band:25,90",
+            "min": -23.047,
+            "max": -3.701
+          },
+          "docTarget": {
+            "min": -16,
+            "max": -8,
+            "source": "131 §7-P4"
+          },
+          "min": -16,
+          "minFrom": "doc",
+          "max": -8,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "slopeDbPerOct",
+          "bound": "band",
+          "lever": "production",
+          "source": "131 §3.1 (ref tilt 2.1 dB/oct darker) and §3.3 (the band)",
+          "fix": "Darken the tilt toward the ref band — a gentle high shelf or lower filter cutoff. Too dark reads as dull, too bright as the \"clean static simplicity\" the owner rejects.",
+          "ref": {
+            "n": 20,
+            "p10": -19.57,
+            "p25": -16.004,
+            "median": -9.947,
+            "p75": -4.645,
+            "p90": -3.728
+          },
+          "refPercentile": {
+            "bound": "band:10,90",
+            "min": -19.57,
+            "max": -3.728
+          },
+          "docTarget": {
+            "min": -14,
+            "max": -10,
+            "source": "131 §7-P4"
+          },
+          "min": -14,
+          "minFrom": "doc",
+          "max": -9.947,
+          "maxFrom": "refMedianClamp",
+          "clamped": [
+            "max -10 -> ref median -9.947"
+          ]
+        },
+        {
+          "feature": "crestSubDb",
+          "bound": "atMost",
+          "lever": "patch + production",
+          "source": "131 §1(c), §7-P1 (engineplus sub crest 24.3 dB vs ref 7.2)",
+          "fix": "Steady the low end: bass-mono the sub, cut filter-env depth on the sub oscillator, and let the sustain sit. A flapping sub is measurably worse than no sub — this axis runs BACKWARDS from broadband crest.",
+          "ref": {
+            "n": 20,
+            "p10": 7.399,
+            "p25": 11.978,
+            "median": 14.976,
+            "p75": 24.941,
+            "p90": 38.101
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 24.941
+          },
+          "docTarget": {
+            "max": 20,
+            "source": "131 §7-P6 / §1(c); lead crest_subDb is the role's single strongest discriminator (131 §2.2, P(win|hi) 0.281)"
+          },
+          "max": 20,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "widthMeanDb",
+          "bound": "band",
+          "lever": "production",
+          "source": "131 §7-P5 (elite ref bass -43 dB mono, elite ref lead -4.6 dB; the frozen engineplus constant is -10..-12 everywhere)",
+          "fix": "Set the width from the ROLE, not a global constant. Width is a placement variable, not a more-is-better one — the frozen engineplus profile is measurably wrong in both directions.",
+          "ref": {
+            "n": 20,
+            "p10": -11.185,
+            "p25": -8.485,
+            "median": -5.666,
+            "p75": -3.88,
+            "p90": -0.911
+          },
+          "refPercentile": {
+            "bound": "band:10,90",
+            "min": -11.185,
+            "max": -0.911
+          },
+          "min": -11.185,
+          "minFrom": "refPercentile",
+          "max": -0.911,
+          "maxFrom": "refPercentile"
+        }
+      ],
+      "refDistribution": {
+        "truePeakDb": {
+          "n": 20,
+          "p10": -7.253,
+          "p25": -3.169,
+          "median": -0.995,
+          "p75": -0.094,
+          "p90": -0.023
+        },
+        "attackMedMs": {
+          "n": 20,
+          "p10": 1.905,
+          "p25": 2.168,
+          "median": 6.117,
+          "p75": 9.751,
+          "p90": 11.871
+        },
+        "crestDb": {
+          "n": 20,
+          "p10": 14.294,
+          "p25": 15.671,
+          "median": 18.432,
+          "p75": 20.638,
+          "p90": 23.201
+        },
+        "fluxMean": {
+          "n": 20,
+          "p10": 0.178,
+          "p25": 0.189,
+          "median": 0.237,
+          "p75": 0.255,
+          "p90": 0.291
+        },
+        "onsetRatePerSec": {
+          "n": 20,
+          "p10": 3.292,
+          "p25": 4.267,
+          "median": 5.532,
+          "p75": 8.242,
+          "p90": 8.697
+        },
+        "attackCv": {
+          "n": 20,
+          "p10": 0.577,
+          "p25": 0.629,
+          "median": 0.836,
+          "p75": 1.049,
+          "p90": 1.189
+        },
+        "flatnessHiDb": {
+          "n": 20,
+          "p10": -24.134,
+          "p25": -23.047,
+          "median": -13.694,
+          "p75": -6.683,
+          "p90": -3.701
+        },
+        "slopeDbPerOct": {
+          "n": 20,
+          "p10": -19.57,
+          "p25": -16.004,
+          "median": -9.947,
+          "p75": -4.645,
+          "p90": -3.728
+        },
+        "crestSubDb": {
+          "n": 20,
+          "p10": 7.399,
+          "p25": 11.978,
+          "median": 14.976,
+          "p75": 24.941,
+          "p90": 38.101
+        },
+        "widthMeanDb": {
+          "n": 20,
+          "p10": -11.185,
+          "p25": -8.485,
+          "median": -5.666,
+          "p75": -3.88,
+          "p90": -0.911
+        }
+      }
+    },
+    "drum-loop": {
+      "refClips": 13,
+      "checks": [
+        {
+          "feature": "sustainPct",
+          "bound": "atLeast",
+          "lever": "composition + kit",
+          "source": "131 §7-P6 (ref 51% vs engineplus 27%)",
+          "fix": "Fill the holes: fills, ghost hits, layered percussion, longer tails. Winning drum loops are fuller and STEADIER, not spikier (131 §2.2 — envStdDb and crest_mids both run backwards here).",
+          "ref": {
+            "n": 13,
+            "p10": 32.364,
+            "p25": 38.288,
+            "median": 51.389,
+            "p75": 59.697,
+            "p90": 60.424
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 38.288
+          },
+          "docTarget": {
+            "min": 45,
+            "source": "131 §7-P6 (\"sustainPct >= 45%\"; ref 51 vs 27)"
+          },
+          "min": 45,
+          "minFrom": "doc"
+        },
+        {
+          "feature": "envRangeDb",
+          "bound": "atMost",
+          "lever": "composition + kit",
+          "source": "131 §7-P6 (ref envRange 22 dB vs engineplus 44)",
+          "fix": "Same fix as sustainPct: the range is wide because the pattern has holes, not because the hits are dynamic.",
+          "ref": {
+            "n": 13,
+            "p10": 19.985,
+            "p25": 20.597,
+            "median": 23.62,
+            "p75": 34.627,
+            "p90": 45.66
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 34.627
+          },
+          "docTarget": {
+            "max": 25,
+            "source": "131 §7-P6 (\"envRangeDb <= ~25\"; vs 44)"
+          },
+          "max": 25,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "onsetLevelCv",
+          "bound": "atMost",
+          "lever": "kit",
+          "source": "131 §5 (refs' hits are consistent at 0.59; the synth kit's are all-or-nothing at 0.87)",
+          "fix": "Even out hit levels — the synth kit is all-or-nothing where a real kit is consistent. Note this bound runs OPPOSITE to chords/lead, where level variety wins.",
+          "ref": {
+            "n": 13,
+            "p10": 0.346,
+            "p25": 0.368,
+            "median": 0.556,
+            "p75": 0.719,
+            "p90": 0.871
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 0.719
+          },
+          "docTarget": {
+            "max": 0.6,
+            "source": "131 §7-P6 (\"onsetLevelCv <= 0.6\"; ref 0.59 vs 0.87)"
+          },
+          "max": 0.6,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "truePeakDb",
+          "bound": "atLeast",
+          "lever": "patch + engine",
+          "source": "131 §7-P2 (packs head-to-head d +1.38, the strongest discriminator in the log). ASSUMES the clip is loudness-normalized like a showdown batch — on a raw stem this row reads level, not punch.",
+          "fix": "Shorten the amp-EG attack and add a transient shaper — NOT more compression (131 §6: a compressor fixes neither half of the crest story). Research 141 §3: 65% of professional lead/bass/pluck patches leave attack at Surge's 3.91 ms floor, so ask for 0 and accept <= 12 ms.",
+          "ref": {
+            "n": 13,
+            "p10": -9.737,
+            "p25": -4.818,
+            "median": -1.048,
+            "p75": -0.105,
+            "p90": 0.07
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": -4.818
+          },
+          "docTarget": {
+            "min": -5,
+            "source": "131 §7-P2"
+          },
+          "min": -4.818,
+          "minFrom": "refPercentile"
+        },
+        {
+          "feature": "attackMedMs",
+          "bound": "atMost",
+          "lever": "patch",
+          "source": "131 §7-P2; 141 §3 (3,559-patch attack distribution)",
+          "fix": "Set the amp-EG attack to its floor and do the shaping in the filter EG — the professional idiom (141 §3.3: 65-68% of leads/plucks/basses/sequences leave amp attack at the INIT minimum, while only 8-33% leave decay at default).",
+          "ref": {
+            "n": 13,
+            "p10": 6.889,
+            "p25": 8.844,
+            "median": 9.456,
+            "p75": 12.018,
+            "p90": 12.37
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 12.018
+          },
+          "max": 12.018,
+          "maxFrom": "refPercentile"
+        },
+        {
+          "feature": "crestDb",
+          "bound": "atLeast",
+          "lever": "engine",
+          "source": "131 §6 (broadband crest ref 15.2-20.2 dB vs engineplus 12.1-14.0)",
+          "fix": "Sharpen transients (transient shaper node). Note the two-scale rule: broadband crest must go UP while per-band crest goes DOWN — see the crestSubDb check.",
+          "ref": {
+            "n": 13,
+            "p10": 11.746,
+            "p25": 14.955,
+            "median": 17.941,
+            "p75": 19.514,
+            "p90": 21.331
+          },
+          "refPercentile": {
+            "bound": "atLeast:25",
+            "min": 14.955
+          },
+          "docTarget": {
+            "min": 15,
+            "source": "131 §7-P2"
+          },
+          "min": 15,
+          "minFrom": "doc"
+        },
+        {
+          "feature": "crestSubDb",
+          "bound": "atMost",
+          "lever": "patch + production",
+          "source": "131 §1(c), §7-P1 (engineplus sub crest 24.3 dB vs ref 7.2)",
+          "fix": "Steady the low end: bass-mono the sub, cut filter-env depth on the sub oscillator, and let the sustain sit. A flapping sub is measurably worse than no sub — this axis runs BACKWARDS from broadband crest.",
+          "ref": {
+            "n": 13,
+            "p10": 10.771,
+            "p25": 14.232,
+            "median": 17.23,
+            "p75": 25.521,
+            "p90": 28.631
+          },
+          "refPercentile": {
+            "bound": "atMost:75",
+            "max": 25.521
+          },
+          "docTarget": {
+            "max": 20,
+            "source": "131 §7-P6 (\"crest_subDb <= ~20 dB\")"
+          },
+          "max": 20,
+          "maxFrom": "doc"
+        },
+        {
+          "feature": "widthMeanDb",
+          "bound": "band",
+          "lever": "production",
+          "source": "131 §7-P5 (elite ref bass -43 dB mono, elite ref lead -4.6 dB; the frozen engineplus constant is -10..-12 everywhere)",
+          "fix": "Set the width from the ROLE, not a global constant. Width is a placement variable, not a more-is-better one — the frozen engineplus profile is measurably wrong in both directions.",
+          "ref": {
+            "n": 13,
+            "p10": -22.694,
+            "p25": -19.066,
+            "median": -13.598,
+            "p75": -4.804,
+            "p90": -4.228
+          },
+          "refPercentile": {
+            "bound": "band:10,90",
+            "min": -22.694,
+            "max": -4.228
+          },
+          "min": -22.694,
+          "minFrom": "refPercentile",
+          "max": -4.228,
+          "maxFrom": "refPercentile"
+        }
+      ],
+      "refDistribution": {
+        "sustainPct": {
+          "n": 13,
+          "p10": 32.364,
+          "p25": 38.288,
+          "median": 51.389,
+          "p75": 59.697,
+          "p90": 60.424
+        },
+        "envRangeDb": {
+          "n": 13,
+          "p10": 19.985,
+          "p25": 20.597,
+          "median": 23.62,
+          "p75": 34.627,
+          "p90": 45.66
+        },
+        "onsetLevelCv": {
+          "n": 13,
+          "p10": 0.346,
+          "p25": 0.368,
+          "median": 0.556,
+          "p75": 0.719,
+          "p90": 0.871
+        },
+        "truePeakDb": {
+          "n": 13,
+          "p10": -9.737,
+          "p25": -4.818,
+          "median": -1.048,
+          "p75": -0.105,
+          "p90": 0.07
+        },
+        "attackMedMs": {
+          "n": 13,
+          "p10": 6.889,
+          "p25": 8.844,
+          "median": 9.456,
+          "p75": 12.018,
+          "p90": 12.37
+        },
+        "crestDb": {
+          "n": 13,
+          "p10": 11.746,
+          "p25": 14.955,
+          "median": 17.941,
+          "p75": 19.514,
+          "p90": 21.331
+        },
+        "crestSubDb": {
+          "n": 13,
+          "p10": 10.771,
+          "p25": 14.232,
+          "median": 17.23,
+          "p75": 25.521,
+          "p90": 28.631
+        },
+        "widthMeanDb": {
+          "n": 13,
+          "p10": -22.694,
+          "p25": -19.066,
+          "median": -13.598,
+          "p75": -4.804,
+          "p90": -4.228
+        }
+      }
+    }
+  }
+}
