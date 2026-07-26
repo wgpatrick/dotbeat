@@ -26,6 +26,20 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           stub is a deterministic no-deps grid for testing). --force re-analyzes.
                                                           NOTE: for the SYMBOLIC analysis of a .beat file, use analyze-structure.
   beat analyze --doctor                                   report the Python interpreter + which backends are installed
+  beat chop <audio.wav> [--grid bar|beat|section] [--bars N] [--max N] [--out <dir>]
+                        [--analysis <file>] [--backend beatthis|stub|allin1] [--license "..."] [--json]
+                                                          cut a real audio file into candidate chops on its DETECTED grid
+                                                          (runs/reuses beat analyze's cached <audio>.analysis.json), into
+                                                          chop-<name>/ as c001.wav … + one <chop>.wav.json provenance sidecar
+                                                          each + chops.json + a clip-set manifest, so beat board / beat
+                                                          audition / beat rate work on the result immediately.
+                                                          --grid bar (default, --bars N bars per chop) | beat | section
+                                                          (section needs a section-detecting backend, e.g. allin1).
+                                                          RAW cuts: no normalize, no silence-trim — both destroy the level
+                                                          and timing relationships BETWEEN chops that you are listening for.
+                                                          Cuts snap to a zero crossing (±2ms) with a 3ms seam fade.
+                                                          Registers NOTHING into any project, and writes a .gitignore into
+                                                          the chop dir (chops of a record are that record).
   beat analyze-structure <file> [--json] [--root N] [--scale name]
                                                           symbolic song analysis (no rendering): per-section onset
                                                           density, syncopation, pitch-class vs scale, repetition/novelty.
