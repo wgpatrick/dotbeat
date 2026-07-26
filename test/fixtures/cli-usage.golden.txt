@@ -457,7 +457,7 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           score-able batches.
   beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
                 [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--with-layered]
-                [--random-patches] [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
+                [--random-patches | --retargeted-patches] [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
                 [--gen-stem-extract]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
@@ -466,7 +466,15 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           preset — docs/engine-presets.md; --random-patches keeps the
                                                           seed's historical random patch for era comparison, and the
                                                           engine/engineplus manifest from-strings record the patch
-                                                          source [patch: random-seed-patch|factory:<name>|curated:<id>]),
+                                                          source [patch: random-seed-patch|factory:<name>|curated:<id>|
+                                                          retargeted:<id>]; --retargeted-patches draws instead from
+                                                          presets/engine-retargeted.json — the same curated presets
+                                                          after a CMA-ES local search toward the per-role scalar
+                                                          targets in src/retarget/targets.ts, inside a per-parameter
+                                                          trust region (docs/preset-retargeting.md). Hold every other
+                                                          flag AND --seed constant against a default run and the
+                                                          engine patch is the only thing that moves, so the two
+                                                          rounds pair batch-for-batch),
                                                           gen (a fal-generated phrase from
                                                           the prompt bank's phrase tier), keymap (a generated
                                                           one-shot played as an instrument through the engine's

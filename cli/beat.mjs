@@ -820,7 +820,7 @@ const HELP = [
     cmd: 'showdown',
     text: `  beat showdown <dir> [--roles bassline,chords,lead,drum-loop] [--rounds 1] [--seed 41]
                 [--gen-backend fal|stub|stableaudio] [--with-produced] [--with-surge] [--with-layered]
-                [--random-patches] [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
+                [--random-patches | --retargeted-patches] [--ref-dir <path>] [--midi-dir <path>] [--theory] [--ca2] [--seconds S]
                 [--gen-stem-extract]
                                                           build blind SOURCE-SHOWDOWN batches from a taste-seeds
                                                           dir: each batch is ONE musical role x one clip per
@@ -829,7 +829,15 @@ const HELP = [
                                                           preset — docs/engine-presets.md; --random-patches keeps the
                                                           seed's historical random patch for era comparison, and the
                                                           engine/engineplus manifest from-strings record the patch
-                                                          source [patch: random-seed-patch|factory:<name>|curated:<id>]),
+                                                          source [patch: random-seed-patch|factory:<name>|curated:<id>|
+                                                          retargeted:<id>]; --retargeted-patches draws instead from
+                                                          presets/engine-retargeted.json — the same curated presets
+                                                          after a CMA-ES local search toward the per-role scalar
+                                                          targets in src/retarget/targets.ts, inside a per-parameter
+                                                          trust region (docs/preset-retargeting.md). Hold every other
+                                                          flag AND --seed constant against a default run and the
+                                                          engine patch is the only thing that moves, so the two
+                                                          rounds pair batch-for-batch),
                                                           gen (a fal-generated phrase from
                                                           the prompt bank's phrase tier), keymap (a generated
                                                           one-shot played as an instrument through the engine's
@@ -2618,7 +2626,7 @@ function flagValue(argv, flag) {
 // report, same seeds dir and rating loop.
 async function showdownCmd(argv) {
   const valued = ['--roles', '--rounds', '--seed', '--gen-backend', '--gen-provider', '--ref-dir', '--midi-dir', '--seconds', '--log']
-  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--with-layered', '--surge-doctor', '--shared-figure', '--random-patches', '--theory', '--ca2', '--ca2-doctor', '--gen-stem-extract', '--stem-doctor'])
+  const known = new Set([...valued, '--report', '--json', '--with-produced', '--with-surge', '--with-layered', '--surge-doctor', '--shared-figure', '--random-patches', '--retargeted-patches', '--theory', '--ca2', '--ca2-doctor', '--gen-stem-extract', '--stem-doctor'])
   for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
   const dir = positional[0]
@@ -2738,6 +2746,15 @@ async function showdownCmd(argv) {
   // instead of the seed's randomly rolled patch. --random-patches restores the historical behavior
   // (the seed's own random synthBlock) so the two patch eras stay directly comparable in one report.
   const randomPatches = argv.includes('--random-patches')
+  // E3 (docs/preset-retargeting.md): draw the engine/engineplus voicing from presets/engine-
+  // retargeted.json — curated presets locally optimized by CMA-ES toward the per-role scalar targets
+  // in src/retarget/targets.ts — instead of presets/engine-curated.json. The retargeting run shipped
+  // 2026-07-26 claiming "same shape ... so a showdown arm can draw from it", and then no showdown arm
+  // did: nothing referenced the file, so 6 engine presets of search were unreachable from any batch.
+  // This flag IS the arm. Hold every other flag and --seed constant against a default run and the
+  // engine patch is the only thing that moves (see drawShowdownBatchPlan in src/taste/showdown.ts).
+  const retargetedPatches = argv.includes('--retargeted-patches')
+  if (retargetedPatches && randomPatches) throw new BeatEditError('--retargeted-patches and --random-patches both choose the engine voicing — pick one')
   const refDir = flagValue(argv, '--ref-dir')
   if (refDir !== undefined && !existsSync(refDir)) throw new BeatEditError(`no directory at --ref-dir ${refDir}`)
 
@@ -2866,10 +2883,17 @@ async function showdownCmd(argv) {
   if (!randomPatches) {
     try {
       enginePresets = loadPresets()
-      const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', 'engine-curated.json')
+      const bankFile = retargetedPatches ? 'engine-retargeted.json' : 'engine-curated.json'
+      const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', bankFile)
       engineCurated = loadEngineCuratedFile(curatedPath)
-      const bankSize = Object.entries(engineCurated?.roles ?? {}).map(([r, v]) => `${r} ${v.kept?.length ?? 0}`).join(', ')
-      process.stderr.write(`engine patches: factory (${enginePresets.length} presets)${engineCurated ? ` + curated bank (${bankSize || 'no roles'})` : ''} — engine/engineplus draw a role-mapped voicing (--random-patches for the historical random-seed-patch era)\n`)
+      if (retargetedPatches && engineCurated === null) {
+        // --retargeted-patches names an ARM. Falling back to the curated bank would label the batch
+        // as retargeted in the run header while rendering curated patches — silently corrupting the
+        // very comparison the flag exists for, which is the --ca2 posture (fail, never substitute).
+        throw new BeatEditError(`--retargeted-patches: no readable preset bank at ${curatedPath} — regenerate it with scripts/retarget-presets.mjs`)
+      }
+      const bankSize = Object.entries(engineCurated?.roles ?? {}).map(([r, v]) => `${r} ${(v.kept?.length ?? 0) + (v.retargeted?.length ?? 0)}`).join(', ')
+      process.stderr.write(`engine patches: factory (${enginePresets.length} presets)${engineCurated ? ` + ${retargetedPatches ? 'RETARGETED' : 'curated'} bank from ${bankFile} (${bankSize || 'no roles'})` : ''} — engine/engineplus draw a role-mapped voicing (--random-patches for the historical random-seed-patch era)\n`)
     } catch (err) {
       process.stderr.write(`warning: engine preset pool failed to load (${err instanceof Error ? err.message.split('\n')[0] : err}) — falling back to random-seed-patch\n`)
     }
