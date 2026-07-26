@@ -104,12 +104,16 @@ ref-beat-engineplus head-to-head (truePeak 1.38, fluxMean 1.06, crest_sub 0.74, 
 flatnessHi 0.66, attack 0.63, crest_bass 0.54, slope 0.47), with §2.2's per-role discriminators
 where the head-to-head has no row.
 
-**`widthMeanDb` is never scored.** 131 P5's role width map is real, but the engine renders a solo
-synth voice in mono, so width is a production decision no patch parameter can move — scoring it
-would hand the optimizer a free, meaningless axis. It is reported as informational. Surge renders
-*are* stereo, so width is measurable there; it is still not scored, because the profiles are shared
-and scoring an axis on one backend but not the other would make their losses incomparable. A
-surge-specific width target is a stated follow-up.
+**`widthMeanDb` is never scored.** 131 P5's role width map is real, but a soloed engine voice
+renders essentially mono: measured before/after on the first retarget, `widthMeanDb` sat at
+−62.7 dB and the whole 22-dimension search could only lift it to −38.9 dB (the osc-bank unison and
+the chorus insert are the only width the patch space owns at all). So on bass the axis is
+satisfied before the search starts, and on chords/lead — where the refs sit at −3 to −7 dB — it is
+unreachable by any patch edit; scoring it would hand the optimizer either a free axis or a hopeless
+one, depending on role. Width is a production-profile decision, and it is reported as
+informational. Surge renders *are* genuinely stereo, so width is measurable there; it is still not
+scored, because the profiles are shared and scoring an axis on one backend but not the other would
+make their losses incomparable. A surge-specific width target is a stated follow-up.
 
 ### The loss: four terms, each aimed at a measured failure mode
 
