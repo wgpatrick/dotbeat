@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -134,6 +134,29 @@ test('prep: renders a surge track to a cached WAV + provenance and desugars to a
     assert.match(r2.info, /cache hit/)
     r.cleanup()
     r2.cleanup()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('prep: a bank/category-qualified patch name resolves, and the tempo reaches the provenance', { skip: !hasSurgepy }, async () => {
+  // 88 patch names are carried by more than one patch now that both pools are enumerated, so a bare
+  // name can be ambiguous. A "<Bank>/<Category>/<Name>" (or "<Category>/<Name>") form pins one.
+  const { prepareSurgeTracks } = await import(prepUrl)
+  const dir = mkdtempSync(join(tmpdir(), 'surge-prep-qual-'))
+  try {
+    const p = join(dir, 'surge.beat')
+    // 137 BPM, deliberately not Surge's 120 default, so the provenance proves the tempo travelled.
+    writeFileSync(p, SURGE_BEAT.replace('bpm 120', 'bpm 137').replace('patch "Init Saw"', 'patch "Surge XT Factory/Templates/Init Saw"'))
+    const r = await prepareSurgeTracks(p)
+    assert.equal(r.isSurge, true)
+    const mediaDir = join(dir, 'media')
+    const provFiles = readdirSync(mediaDir).filter((f) => f.endsWith('.wav.json'))
+    assert.equal(provFiles.length, 1, `expected one provenance sidecar in ${mediaDir}, got ${provFiles.join(', ')}`)
+    const prov = JSON.parse(readFileSync(join(mediaDir, provFiles[0]!), 'utf8')) as { tempo: number; tempoApplied: boolean; resolvedPatch: string }
+    assert.equal(prov.tempo, 137, 'the doc bpm is the render tempo, not Surge\'s 120 default')
+    assert.equal(prov.tempoApplied, true, 'and the sidecar confirms it actually applied it')
+    assert.match(prov.resolvedPatch, /Templates.*Init Saw\.fxp$/, 'the qualified name resolved to that exact patch')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
