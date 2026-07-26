@@ -4,7 +4,7 @@
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatPlacement, BeatSongSection, BeatSurgeOverride, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUDIO_TRACK_FIELDS, AUDIO_TRACK_FIELD_BY_KEY, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, initAudioTrackSynth, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError, sortPlacements } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUDIO_TRACK_FIELDS, AUDIO_TRACK_FIELD_BY_KEY, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, initAudioTrackSynth, isSampleLaneFilterType, isSampleLaneParamKey, sampleLaneParamError, scenePlacementError, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
 import { automationShapePoints, type AutomationShape } from './automation-shape.js'
 
@@ -878,7 +878,10 @@ function parseSampleLaneExtraTokens(name: string, tokens: string[]): { params: R
       }
       effects = types.map((t) => ({ id: t, type: t as EffectType, enabled: true }))
     } else if (isSampleLaneParamKey(key)) {
-      params[key] = canon(parseNum(raw, `lane ${name} ${key}`))
+      const v = canon(parseNum(raw, `lane ${name} ${key}`))
+      const err = sampleLaneParamError(key, v)
+      if (err) throw new BeatEditError(`lane "${name}": ${err}`)
+      params[key] = v
     } else {
       throw new BeatEditError(`lane "${name}": unknown sample lane field "${key}" (expected filter|fx|${Object.keys(SAMPLE_LANE_PARAM_DEFAULTS).join('|')})`)
     }
@@ -1046,7 +1049,16 @@ export function setLaneParam(doc: BeatDocument, trackId: string, name: string, k
   }
   const params = { ...lane.backing.params }
   if (value === undefined) delete params[key]
-  else params[key] = canon(value)
+  else {
+    const canonValue = canon(value)
+    // Shared with parse.ts's own lane-extras path (sampleLaneParamError in document.ts) so a hand
+    // edit and a `beat set` can never disagree about what is legal — today that is `voices`.
+    if (lane.backing.type === 'sample') {
+      const err = sampleLaneParamError(key, canonValue)
+      if (err) throw new BeatEditError(`lane "${name}": ${err}`)
+    }
+    params[key] = canonValue
+  }
   const lanes = track.lanes.map((l, i) => (i === idx ? { ...l, backing: { ...l.backing, params } as BeatLaneBacking } : l))
   return { doc: replaceTrack(doc, { ...track, lanes }), lane: lanes[idx]! }
 }

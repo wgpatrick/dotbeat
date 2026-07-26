@@ -1,6 +1,6 @@
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
 import { formatNumber } from './format.js'
-import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUDIO_TRACK_FIELD_BY_KEY, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, initAudioTrackSynth, isSampleLaneFilterType, isSampleLaneParamKey, scenePlacementError } from './document.js'
+import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUDIO_TRACK_FIELD_BY_KEY, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, initAudioTrackSynth, isSampleLaneFilterType, isSampleLaneParamKey, sampleLaneParamError, scenePlacementError } from './document.js'
 
 export class BeatParseError extends Error {
   line: number
@@ -373,7 +373,10 @@ export function parse(text: string): BeatDocument {
         }
         effects = types.map((t) => ({ id: t, type: t as EffectType, enabled: true }))
       } else if (isSampleLaneParamKey(key)) {
-        params[key] = parseFloatStrict(raw, lineNo, `lane ${name} ${key}`)
+        const v = parseFloatStrict(raw, lineNo, `lane ${name} ${key}`)
+        const err = sampleLaneParamError(key, v)
+        if (err) throw new BeatParseError(`lane "${name}": ${err}`, lineNo)
+        params[key] = v
       } else {
         throw new BeatParseError(`lane "${name}": unknown sample lane field "${key}" (expected filter|fx|${Object.keys(SAMPLE_LANE_PARAM_DEFAULTS).join('|')})`, lineNo)
       }

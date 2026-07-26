@@ -12,7 +12,7 @@
 // arithmetic is not lane-shaped, on purpose.
 
 import type { BeatDocument, BeatDrumLaneDecl } from './document.js'
-import { BeatEditError, addLane, setLaneSample } from './edit.js'
+import { BeatEditError, addLane, setLaneParam, setLaneSample } from './edit.js'
 import { formatNumber } from './format.js'
 import { SCALES, SCALE_NAMES } from './pitchtime.js'
 
@@ -92,6 +92,24 @@ export interface KeymapLanePlan {
   tune: number // semitones, relative to the sample's root
 }
 
+/** Polyphony every keymap-minted lane gets (research 142 D6). A keymap lane is a PITCHED
+ * instrument built out of drum lanes, and a drum lane is monophonic and self-choking by
+ * construction: one Tone.Player, and `Source.start()` on a started source restarts it, so a
+ * repeated note cuts its own tail and there is no legato. On the decaying bells, plucks and pads
+ * this workflow generates, that is audible as a chopped, mechanical line — plausibly part of the
+ * 38% pairwise nobody had attributed.
+ *
+ * FOUR, not more: it covers the actual failure (a line revisiting a pitch inside the sample's own
+ * decay, and a two-or-three-note overlap at a phrase join) at four node triples per lane, and
+ * 142's D7 already flags that a 15-lane keymap's per-lane node/buffer duplication is what caps how
+ * many zones this shape can afford. A lane that genuinely needs more can say so
+ * (`beat set <track>.lane.<name>.voices 8`); the format's ceiling is SAMPLE_LANE_VOICES_MAX.
+ *
+ * This does NOT make keymap polyphonic in the sampler-instrument sense — chords still come from
+ * DIFFERENT lanes, as they always did. It stops a lane choking ITSELF. Real multi-zone /
+ * round-robin / velocity layers are keymap-v2 and are scoped separately (142 §4.1). */
+export const KEYMAP_LANE_VOICES = 4
+
 export interface KeymapOptions {
   /** The SAMPLE's root — what it sounds like untuned. Fractional is normal (a generated one-shot
    * rarely lands on a semitone); it is what makes the tunes come out right anyway. */
@@ -167,9 +185,14 @@ export function buildKeymap(
   for (const lane of plan) {
     if (existing.has(lane.name)) {
       next = setLaneSample(next, trackId, lane.name, { sample: sampleId, gainDb, tune: lane.tune })
+      // Re-backing preserves an existing lane's own shaping (setLaneSample's documented
+      // semantics), so a lane that predates `voices` keeps params.voices absent — i.e. 1. Set it
+      // explicitly here: re-running keymap with a better root is the normal way to fix a keymap,
+      // and it should also fix the self-choking (D6) rather than leaving the old lanes chopped.
+      next = setLaneParam(next, trackId, lane.name, 'voices', KEYMAP_LANE_VOICES).doc
       rebacked.push(lane.name)
     } else {
-      next = addLane(next, trackId, lane.name, ['sample', sampleId, String(gainDb), String(lane.tune)]).doc
+      next = addLane(next, trackId, lane.name, ['sample', sampleId, String(gainDb), String(lane.tune), `voices=${KEYMAP_LANE_VOICES}`]).doc
       added.push(lane.name)
     }
   }

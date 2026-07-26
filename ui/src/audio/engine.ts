@@ -61,7 +61,7 @@ import { useStore, isEffectivelyMuted } from '../state/store'
 import { daemonBase } from '../daemon/bridge'
 import { audioBufferToWav } from './wavEncode'
 import type { AutomationInterpolation, BeatAudioRegion, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatEffect, BeatInstrument, BeatNote, BeatSynth, BeatTrack, DrumVoiceType, OscType, SampleLaneFilterType, WtTable } from '../types'
-import { DRUM_VOICE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS, WT_TABLES } from '../types'
+import { DRUM_VOICE_PARAM_DEFAULTS, SAMPLE_LANE_PARAM_DEFAULTS, SAMPLE_LANE_VOICES_MAX, SAMPLE_LANE_VOICES_MIN, WT_TABLES } from '../types'
 import { buildWavetablePartials } from './wavetables'
 
 // Phase 18 Stream R: ONE shared, widened destination set for both LFO1 and LFO2 — mirrors
@@ -1750,8 +1750,26 @@ interface SampleLaneVoice {
   // envGain -> gain (static level*velocity, unchanged) -> [effectChain] -> effectsOut -> busIn.
   params: Record<string, number>
   filterType: SampleLaneFilterType
-  filter: Tone.Filter
-  envGain: Tone.Gain
+  /** Research 142 D6 — THE POLYPHONY FIX. This used to be a single `player`/`filter`/`envGain`
+   * triple, i.e. one Tone.Player per lane. `Source.start()` on an already-started source calls
+   * `restart()`, and `Player._restart` stops the most recently created source, so a repeated hit
+   * on one lane CUT ITS OWN TAIL: no legato, no overlap. Fine (and wanted) on a kick; wrong on the
+   * keymap lanes that are really a pitched instrument, where a line revisiting a pitch inside the
+   * sample's own decay came out chopped.
+   *
+   * `slots` is a small round-robin voice pool, sized by the lane's `voices` param (default 1 —
+   * exactly the old behavior, bit-for-bit, for every existing drum kit and golden render). Each
+   * slot carries its OWN player, filter and envGain because each hit needs its own AHD envelope,
+   * and the filter stays per-slot rather than shared-and-after so the signal ORDER is unchanged
+   * from the single-voice path (player -> filter -> envGain), not merely similar. The shared
+   * `gain` downstream sums them.
+   *
+   * Signal path per slot: player -> filter -> envGain -> [shared] gain -> [effectChain] ->
+   * effectsOut -> busIn. */
+  slots: SampleLaneSlot[]
+  /** Round-robin cursor into `slots` — next hit takes slots[nextSlot]. Oldest-recycled by
+   * construction, which is the standard voice-stealing rule and needs no age bookkeeping. */
+  nextSlot: number
   gain: Tone.Gain
   // A short, ordered playback-effect chain reusing buildEffectRuntime/applyEffectParams wholesale
   // (the same per-EffectType node builders a track's own insert chain uses) — rebuilt only when
@@ -1759,7 +1777,22 @@ interface SampleLaneVoice {
   effectsSig: string
   effectRuntimes: EffectRuntime[]
   effectsOut: Tone.Gain // fixed endpoint, connected to busIn once at construction
+}
+
+/** One voice of a sample lane's pool (research 142 D6). `player` is null until the lane's sample
+ * has loaded — the same "not loaded yet, skip this hit" state the old single `player` field had. */
+interface SampleLaneSlot {
   player: Tone.Player | null
+  filter: Tone.Filter
+  envGain: Tone.Gain
+  /** Per-hit VELOCITY, per slot. This used to be folded into the lane-shared `gain`
+   * (`dbToGain(gainDb) * velocity`), which was invisible while a lane was monophonic and became a
+   * real bug the moment it was not: a quiet second hit would drop the shared gain and attenuate
+   * the FIRST hit's still-ringing tail along with itself — measured at only 1.1 dB of recovery
+   * where the pool should have given ~6 (ui/verify-lane-polyphony.mjs's [POLY vs MONO] check,
+   * which caught exactly this). The lane's static `gainDb` stays shared; velocity is per voice.
+   * For a voices=1 lane the product is identical to before, so nothing existing moves. */
+  velGain: Tone.Gain
 }
 interface SfLaneVoice {
   kind: 'sf'
@@ -2292,9 +2325,12 @@ export class Engine {
         voice.toneLayer.gain.dispose()
       }
     } else if (voice.kind === 'sample') {
-      voice.player?.dispose()
-      voice.filter.dispose()
-      voice.envGain.dispose()
+      for (const slot of voice.slots) {
+        slot.player?.dispose()
+        slot.filter.dispose()
+        slot.envGain.dispose()
+        slot.velGain.dispose()
+      }
       voice.gain.dispose()
       for (const r of voice.effectRuntimes) {
         for (const n of r.nodes) n.dispose()
@@ -2345,12 +2381,15 @@ export class Engine {
    * when playback stops, instead of the ramp overshooting past a player.stop() and clicking.
    * decay === 0 (the default) is a deliberate no-op past attack/hold — "unshaped," today's
    * pre-Stream-DK Trigger behavior, relying on Tone.Player's own short fadeOut for click-safety. */
-  private scheduleSampleLaneEnvelope(voice: SampleLaneVoice, t: number, effectiveDur: number): void {
+  private scheduleSampleLaneEnvelope(voice: SampleLaneVoice, slot: SampleLaneSlot, t: number, effectiveDur: number): void {
     const p = voice.params
     const attack = Math.max(0, p.attack ?? SAMPLE_LANE_PARAM_DEFAULTS.attack)
     const hold = Math.max(0, p.hold ?? SAMPLE_LANE_PARAM_DEFAULTS.hold)
     const decay = Math.max(0, p.decay ?? SAMPLE_LANE_PARAM_DEFAULTS.decay)
-    const env = voice.envGain.gain
+    // Research 142 D6: the envelope is scheduled on THIS SLOT's own envGain, not a lane-shared
+    // one — that is what lets two overlapping hits keep independent AHD contours instead of the
+    // second hit's cancelScheduledValues wiping the first hit's decay ramp.
+    const env = slot.envGain.gain
     env.cancelScheduledValues(t)
     if (attack > 0) {
       env.setValueAtTime(0, t)
@@ -2374,32 +2413,69 @@ export class Engine {
    * syncDeclaredDrumLanes(); best-effort like buildInstrument(). Pending-set lives on the TRACK's
    * own state (Phase 35 Stream OF) so two drums tracks' same-named lanes can't block each other. */
   private loadLaneSample(state: DrumTrackState, laneName: string, sampleId: string, mediaPath: string, voice: SampleLaneVoice): void {
-    const old = voice.player
+    const previous = voice.slots.map((s) => s.player)
     // Already-decoded buffer (an offline instance seeded from the live engine's caches — see
     // EngineOptions.seedBuffers/exportAudioBuffers): build the player synchronously from sample
     // data instead of URL-fetching, which an offline render can't wait on (play() doesn't await
     // lane loads; the render would race the fetch and capture the silent fallback).
+    // Research 142 D6: every pool slot gets its own Player over the SAME ToneAudioBuffer, so a
+    // voices>1 lane costs N players but still exactly ONE decoded copy of the audio (142's D7 is
+    // about per-LANE duplication, which this deliberately does not make worse).
     const seeded = this.audioBuffers.get(sampleId)
     if (seeded && seeded.loaded) {
-      voice.player = new Tone.Player(seeded).connect(voice.filter)
+      for (const slot of voice.slots) slot.player = new Tone.Player(seeded).connect(slot.filter)
       voice.loadedSample = sampleId
-      if (old) old.dispose()
+      for (const p of previous) p?.dispose()
       return
     }
     state.samplePending.add(laneName)
-    const player = new Tone.Player({
+    // ONE fetch for the lane: slot 0 loads from the URL and the rest share its buffer once it
+    // arrives. Issuing N fetches for one lane would be a real regression on a 15-lane keymap.
+    let pending = 1
+    const settle = () => {
+      pending--
+      if (pending <= 0) state.samplePending.delete(laneName)
+    }
+    const first = new Tone.Player({
       url: `${daemonBase()}/media/${mediaPath}`,
       onload: () => {
-        state.samplePending.delete(laneName)
+        for (const slot of voice.slots) {
+          if (slot.player === first || !slot.player) continue
+          slot.player.buffer = first.buffer
+        }
+        settle()
       },
       onerror: (err: Error) => {
         console.warn(`[engine] drum lane "${laneName}" sample failed to load:`, err)
-        state.samplePending.delete(laneName)
+        settle()
       },
-    }).connect(voice.filter)
-    voice.player = player
+    }).connect(voice.slots[0]!.filter)
+    voice.slots[0]!.player = first
+    for (let i = 1; i < voice.slots.length; i++) {
+      voice.slots[i]!.player = new Tone.Player().connect(voice.slots[i]!.filter)
+    }
     voice.loadedSample = sampleId
-    if (old) old.dispose()
+    for (const p of previous) p?.dispose()
+  }
+
+  /** Grow or shrink a sample lane's voice pool to `size` (research 142 D6). Slots are plain
+   * player/filter/envGain triples wired into the lane's shared `gain`; the caller clears
+   * `loadedSample` so the next sync reloads the buffer into every (possibly new) slot. */
+  private resizeSampleLanePool(voice: SampleLaneVoice, size: number): void {
+    for (const slot of voice.slots.slice(size)) {
+      slot.player?.dispose()
+      slot.filter.dispose()
+      slot.envGain.dispose()
+      slot.velGain.dispose()
+    }
+    voice.slots = voice.slots.slice(0, size)
+    while (voice.slots.length < size) {
+      const velGain = new Tone.Gain(1).connect(voice.gain)
+      const envGain = new Tone.Gain(1).connect(velGain)
+      const filter = new Tone.Filter(SAMPLE_LANE_PARAM_DEFAULTS.cutoff, 'lowpass').connect(envGain)
+      voice.slots.push({ player: null, filter, envGain, velGain })
+    }
+    voice.nextSlot = 0
   }
 
   /** (Re)loads the ONE shared drum-channel WorkletSynthesizer every sf-backed lane on this track
@@ -2486,12 +2562,14 @@ export class Engine {
           if (v) this.disposeLaneVoice(v)
           // Phase 26 Stream DK: player -> filter -> envGain -> gain (static level*velocity,
           // unchanged) -> [effect chain, wired lazily by applySampleLaneEffects] -> effectsOut ->
-          // busIn. filter/envGain/gain/effectsOut are all built once here; only the effect chain
-          // in between gain and effectsOut is ever rebuilt (on an actual fx-list change).
+          // busIn. gain/effectsOut are built once here; only the effect chain in between gain and
+          // effectsOut is ever rebuilt (on an actual fx-list change).
+          // Research 142 D6: the player/filter/envGain part of that path is now PER VOICE SLOT
+          // (see SampleLaneVoice.slots) so a repeated hit can ring over its own tail instead of
+          // restarting the one player and cutting it. One slot (the default) is the old graph
+          // exactly.
           const effectsOut = new Tone.Gain(1).connect(busIn)
           const gain = new Tone.Gain(1).connect(effectsOut) // reconciled below once effectsSig is known
-          const envGain = new Tone.Gain(1).connect(gain)
-          const filter = new Tone.Filter(SAMPLE_LANE_PARAM_DEFAULTS.cutoff, 'lowpass').connect(envGain)
           v = {
             kind: 'sample',
             sample: backing.sample,
@@ -2500,24 +2578,32 @@ export class Engine {
             tune: backing.tune,
             params: {},
             filterType: 'lowpass',
-            filter,
-            envGain,
+            slots: [],
+            nextSlot: 0,
             gain,
             effectsSig: '',
             effectRuntimes: [],
             effectsOut,
-            player: null,
           }
           state.lanes.set(decl.name, v)
+        }
+        // Pool size changes (a `voices` edit) rebuild the pool and force a reload — cheap, and it
+        // keeps the "every slot holds the current buffer" invariant with no partial states.
+        const wantVoices = Math.max(SAMPLE_LANE_VOICES_MIN, Math.min(SAMPLE_LANE_VOICES_MAX, Math.round(backing.params.voices ?? SAMPLE_LANE_PARAM_DEFAULTS.voices)))
+        if (v.slots.length !== wantVoices) {
+          this.resizeSampleLanePool(v, wantVoices)
+          v.loadedSample = null
         }
         v.gainDb = backing.gainDb
         v.tune = backing.tune
         v.gain.gain.value = Tone.dbToGain(backing.gainDb)
         v.params = backing.params
         v.filterType = backing.filterType
-        v.filter.frequency.value = backing.params.cutoff ?? SAMPLE_LANE_PARAM_DEFAULTS.cutoff
-        v.filter.Q.value = backing.params.resonance ?? SAMPLE_LANE_PARAM_DEFAULTS.resonance
-        v.filter.type = backing.filterType
+        for (const slot of v.slots) {
+          slot.filter.frequency.value = backing.params.cutoff ?? SAMPLE_LANE_PARAM_DEFAULTS.cutoff
+          slot.filter.Q.value = backing.params.resonance ?? SAMPLE_LANE_PARAM_DEFAULTS.resonance
+          slot.filter.type = backing.filterType
+        }
         this.applySampleLaneEffects(v, decl.name, track.id, backing.effects, trackParams)
         if (v.loadedSample !== backing.sample && !state.samplePending.has(decl.name)) {
           const m = media.find((x) => x.id === backing.sample)
@@ -2550,11 +2636,15 @@ export class Engine {
     try {
       if (voice.kind === 'synth') voice.node.triggerRelease(time)
       else if (voice.kind === 'sample') {
-        voice.player?.stop(time)
-        // Cancel any in-flight AHD envelope ramp so a choked hit doesn't keep fading toward a
-        // stale target after the player itself has already stopped.
-        voice.envGain.gain.cancelScheduledValues(time)
-        voice.envGain.gain.setValueAtTime(1, time)
+        // A choke silences the WHOLE lane, every pool slot — that is what a choke group means
+        // (research 142 D6 gave lanes polyphony; it did not make hat/openhat a per-voice rule).
+        for (const slot of voice.slots) {
+          slot.player?.stop(time)
+          // Cancel any in-flight AHD envelope ramp so a choked hit doesn't keep fading toward a
+          // stale target after the player itself has already stopped.
+          slot.envGain.gain.cancelScheduledValues(time)
+          slot.envGain.gain.setValueAtTime(1, time)
+        }
       } else if (voice.kind === 'sf' && state.sfVoice) state.sfVoice.synth.noteOff(DRUM_CHANNEL, voice.note, { time })
     } catch {
       // best-effort — see comment above
@@ -3347,15 +3437,23 @@ export class Engine {
           voice.node.triggerAttackRelease(300, durSec ?? '16n', t, velocity)
         }
       } else if (voice.kind === 'sample') {
-        if (!voice.player || !voice.player.loaded) return
-        voice.player.playbackRate = Math.pow(2, voice.tune / 12)
-        voice.gain.gain.setValueAtTime(Tone.dbToGain(voice.gainDb) * velocity, t)
+        // Research 142 D6: round-robin across the lane's voice pool so a repeated hit lands on a
+        // DIFFERENT Tone.Player and the previous one rings out, instead of restarting the single
+        // player and cutting its own tail. A voices=1 lane (the default, and every drum kit) has a
+        // one-element pool and therefore behaves exactly as it did before.
+        const slot = voice.slots[voice.nextSlot % Math.max(1, voice.slots.length)]
+        if (!slot || !slot.player || !slot.player.loaded) return
+        voice.nextSlot = (voice.nextSlot + 1) % Math.max(1, voice.slots.length)
+        slot.player.playbackRate = Math.pow(2, voice.tune / 12)
+        // Velocity on THIS slot (see SampleLaneSlot.velGain); the lane's static gainDb stays on
+        // the shared `gain`, applied in syncDeclaredDrumLanes. Product is unchanged for voices=1.
+        slot.velGain.gain.setValueAtTime(velocity, t)
         // Phase 26 Stream DK: Start/Length (params.start/length) trims the SAMPLE BUFFER itself —
         // distinct from, and combined with, the hit-level `duration` gate above (Simpler-Gate
         // analogue): whichever ends playback sooner wins. length<=0 (the default/"unset" value,
         // see SAMPLE_LANE_PARAM_DEFAULTS) means "no trim beyond Start" — play to the buffer's
         // natural end from `start`, exactly the pre-Stream-DK behavior when start is also 0.
-        const bufferDur = voice.player.buffer.duration
+        const bufferDur = slot.player.buffer.duration
         const start = Math.max(0, Math.min(voice.params.start ?? SAMPLE_LANE_PARAM_DEFAULTS.start, bufferDur))
         const lengthOverride = voice.params.length ?? SAMPLE_LANE_PARAM_DEFAULTS.length
         const naturalRemaining = Math.max(0, bufferDur - start)
@@ -3364,10 +3462,10 @@ export class Engine {
         // duration present -> gate/truncate, with a short fade so truncation doesn't click; a
         // lane-level Start/Length trim gets the same treatment (it's the same "cut the buffer
         // short" case) — only a totally untrimmed, ungated hit keeps the original longer fade.
-        voice.player.fadeOut = durSec !== undefined || lengthOverride > 0 ? 0.015 : 0.005
-        if (durSec !== undefined || lengthOverride > 0) voice.player.start(t, start, Math.max(0.001, effectiveDur))
-        else voice.player.start(t, start)
-        this.scheduleSampleLaneEnvelope(voice, t, effectiveDur)
+        slot.player.fadeOut = durSec !== undefined || lengthOverride > 0 ? 0.015 : 0.005
+        if (durSec !== undefined || lengthOverride > 0) slot.player.start(t, start, Math.max(0.001, effectiveDur))
+        else slot.player.start(t, start)
+        this.scheduleSampleLaneEnvelope(voice, slot, t, effectiveDur)
       } else {
         // sf-backed
         if (!state.sfVoice || state.sfVoice.sample !== voice.sample) return
@@ -3712,10 +3810,12 @@ export class Engine {
       }
       for (const voice of drumState.lanes.values()) {
         if (voice.kind === 'sample') {
-          try {
-            voice.player?.stop()
-          } catch {
-            // best-effort: a not-yet-loaded player may reject stop
+          for (const slot of voice.slots) {
+            try {
+              slot.player?.stop()
+            } catch {
+              // best-effort: a not-yet-loaded player may reject stop
+            }
           }
         }
       }
@@ -4402,8 +4502,10 @@ export class Engine {
     const merged = new Map(this.audioBuffers)
     for (const state of this.drumStates.values()) {
       for (const voice of state.lanes.values()) {
-        if (voice.kind === 'sample' && voice.loadedSample !== null && voice.player?.buffer.loaded && !merged.has(voice.loadedSample)) {
-          merged.set(voice.loadedSample, voice.player.buffer)
+        // Research 142 D6: every pool slot shares one decoded buffer, so slot 0's is the lane's.
+        const slot0 = voice.kind === 'sample' ? voice.slots[0] : undefined
+        if (voice.kind === 'sample' && voice.loadedSample !== null && slot0?.player?.buffer.loaded && !merged.has(voice.loadedSample)) {
+          merged.set(voice.loadedSample, slot0.player.buffer)
         }
       }
     }

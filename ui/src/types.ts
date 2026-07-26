@@ -31,7 +31,10 @@ export interface BeatLaneSynthBacking {
 // 68/decisions.md #145): Start/Length trim + AHD amplitude envelope + one filter, layered onto
 // the sample backing as elided-default `params` overrides, settable through the SAME setLaneParam
 // primitive synth-backed lanes already use, plus a short reused-EffectType playback-effect list.
-export const SAMPLE_LANE_PARAM_KEYS = ['start', 'length', 'attack', 'hold', 'decay', 'cutoff', 'resonance'] as const
+// Research 142 D6: `voices` is per-lane polyphony — see src/core/document.ts's
+// SAMPLE_LANE_PARAM_DEFAULTS for the full reasoning (default 1 = today's monophonic,
+// self-choking behavior, so nothing existing changes; keymap lanes mint a real pool).
+export const SAMPLE_LANE_PARAM_KEYS = ['start', 'length', 'attack', 'hold', 'decay', 'cutoff', 'resonance', 'voices'] as const
 export type SampleLaneParamKey = (typeof SAMPLE_LANE_PARAM_KEYS)[number]
 export const SAMPLE_LANE_PARAM_DEFAULTS: Record<SampleLaneParamKey, number> = {
   start: 0,
@@ -41,7 +44,11 @@ export const SAMPLE_LANE_PARAM_DEFAULTS: Record<SampleLaneParamKey, number> = {
   decay: 0,
   cutoff: 18000,
   resonance: 0.7,
+  voices: 1,
 }
+/** Mirrors src/core/document.ts. */
+export const SAMPLE_LANE_VOICES_MIN = 1
+export const SAMPLE_LANE_VOICES_MAX = 8
 export const SAMPLE_LANE_FILTER_TYPES = ['lowpass', 'bandpass', 'highpass'] as const
 export type SampleLaneFilterType = (typeof SAMPLE_LANE_FILTER_TYPES)[number]
 export interface BeatLaneSampleBacking {

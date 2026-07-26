@@ -24,6 +24,7 @@ import {
   tuneForPitch,
   LANE_TUNE_MAX,
   LANE_TUNE_MIN,
+  KEYMAP_LANE_VOICES,
 } from '../src/core/keymap.js'
 import { BeatEditError } from '../src/core/edit.js'
 import { initDocument, addTrack, setMediaSample, defaultDrumKitLanes, parse, serialize } from '../src/core/index.js'
@@ -240,7 +241,21 @@ test('keymap reproduces examples/recipe-song\'s six hand-written bell lanes EXAC
     rootMidi: noteToMidi('a6'), scaleRootMidi: noteToMidi('a5'), scale: 'minorPentatonic', fromMidi: noteToMidi('a5'), toMidi: noteToMidi('a6'),
   })
   const minted = serialize(doc).split('\n').filter((l) => /^\s+lane \w+ sample bell_a /.test(l)).map((l) => l.trim())
-  assert.deepEqual(minted, handWritten)
+  // Research 142 D6: keymap-minted lanes now carry an explicit `voices=4` — the ONE difference
+  // from the hand-written lines, and a deliberate one. Every sample lane is a single Tone.Player,
+  // and `Source.start()` on a started source restarts it, so a repeated note on one lane cut its
+  // own tail: on exactly these decaying bells, that is a chopped, mechanical line. A drum lane
+  // stays monophonic by default (voices 1, so no existing kit or golden render moves); a KEYMAP
+  // lane is a pitched instrument and opts in. Everything else about the six lines — the note
+  // names, the sample, the gain and each tune — still reproduces the hand-written instrument
+  // exactly, which is Stream VA's premise and what this assertion is really for.
+  assert.deepEqual(minted, handWritten.map((l) => `${l} voices=${KEYMAP_LANE_VOICES}`))
+  assert.equal(KEYMAP_LANE_VOICES, 4)
+  assert.deepEqual(
+    minted.map((l) => l.replace(/ voices=\d+$/, '')),
+    handWritten,
+    'strip the polyphony token and the minted lanes are byte-identical to the hand-written ones',
+  )
 })
 
 test('the root the refusal suggests for bell_a is the one that reproduces the song', () => {

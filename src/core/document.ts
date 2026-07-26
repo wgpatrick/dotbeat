@@ -149,7 +149,7 @@ export interface BeatLaneSampleBacking {
  * and `hold`/`decay: 0` are real, meaningful defaults (not sentinels needing special-casing at
  * the type level): 0 hold/decay just means "no envelope shaping past attack" and 0 length means
  * "no trim" since a real zero-length hit would be silent anyway. */
-export const SAMPLE_LANE_PARAM_KEYS = ['start', 'length', 'attack', 'hold', 'decay', 'cutoff', 'resonance'] as const
+export const SAMPLE_LANE_PARAM_KEYS = ['start', 'length', 'attack', 'hold', 'decay', 'cutoff', 'resonance', 'voices'] as const
 export type SampleLaneParamKey = (typeof SAMPLE_LANE_PARAM_KEYS)[number]
 export const SAMPLE_LANE_PARAM_DEFAULTS: Record<SampleLaneParamKey, number> = {
   start: 0,
@@ -159,9 +159,43 @@ export const SAMPLE_LANE_PARAM_DEFAULTS: Record<SampleLaneParamKey, number> = {
   decay: 0,
   cutoff: 18000,
   resonance: 0.7,
+  // Research 142 D6 (new this pass, previously unattributed): every sample-backed lane is ONE
+  // Tone.Player, and `Source.start()` on an already-started source calls `restart()`, which stops
+  // the most recently created source. So a repeated hit on one lane CUTS ITS OWN TAIL — there is
+  // no legato and no overlap. On a drum lane that is usually what you want (and is exactly how
+  // every existing project sounds), but a KEYMAP lane is a pitched instrument built out of drum
+  // lanes: on the bells, plucks and pads that workflow generates, a line that revisits a pitch
+  // inside the sample's own decay comes out chopped and mechanical.
+  //
+  // `voices` is that lane's polyphony — how many hits may ring at once before the oldest is
+  // recycled. DEFAULT 1, deliberately: 1 is exactly today's behavior, so every committed project,
+  // every golden render and every drum kit is bit-for-bit unchanged, and self-choking stays the
+  // default for drums where it belongs. `beat keymap` mints its lanes with a real pool (see
+  // KEYMAP_LANE_VOICES in src/core/keymap.ts), and any lane can opt in with
+  // `beat set <track>.lane.<name>.voices <n>`.
+  //
+  // Bounded at SAMPLE_LANE_VOICES_MAX because each pool slot is a real player+filter+gain triple:
+  // a 15-lane keymap at 8 voices is 120 node triples, and 142's D7 already flags per-lane buffer
+  // duplication as the thing that caps how many zones this shape can afford.
+  voices: 1,
 }
+/** Legal polyphony range for a sample-backed lane's `voices` param — validated at parse and edit
+ * time (not silently clamped: a `voices 0` lane would be silent and a `voices 2.5` lane would be
+ * a rounding surprise, and both are user errors with obvious fixes). */
+export const SAMPLE_LANE_VOICES_MIN = 1
+export const SAMPLE_LANE_VOICES_MAX = 8
 export function isSampleLaneParamKey(s: string): s is SampleLaneParamKey {
   return (SAMPLE_LANE_PARAM_KEYS as readonly string[]).includes(s)
+}
+/** The one validation rule any sample-lane param carries today, shared by parse.ts and edit.ts so
+ * a hand-edited file and a `beat set` can never disagree about what is legal. Returns an error
+ * MESSAGE (not a thrown error) because the two callers throw different error classes. */
+export function sampleLaneParamError(key: string, value: number): string | null {
+  if (key !== 'voices') return null
+  if (!Number.isInteger(value) || value < SAMPLE_LANE_VOICES_MIN || value > SAMPLE_LANE_VOICES_MAX) {
+    return `voices must be an integer ${SAMPLE_LANE_VOICES_MIN}-${SAMPLE_LANE_VOICES_MAX} (1 = monophonic/self-choking, the default), got ${value}`
+  }
+  return null
 }
 export const SAMPLE_LANE_FILTER_TYPES = ['lowpass', 'bandpass', 'highpass'] as const
 export type SampleLaneFilterType = (typeof SAMPLE_LANE_FILTER_TYPES)[number]
