@@ -83,6 +83,12 @@ export const VERIFY_SCRIPTS = [
   { script: 'ui/verify-phase26-stream-dl.mjs', area: 'synth', tier: 'engine', status: 'live' },
   { script: 'ui/verify-phase35-stream-of.mjs', area: 'drums', tier: 'engine', status: 'live' },
   { script: 'ui/verify-phase36-stream-pc.mjs', area: 'audio-region', tier: 'engine', status: 'live' },
+  // Phase 41 Stream A. Note its shape: the fleet's recordWav() helper defaults to play-then-settle-
+  // 250ms-then-record, so every OTHER audio-region script structurally cannot see a missed
+  // DOWNBEAT — which is exactly the bug this one exists for. It arms the recorder first (render's
+  // order) and, because the audible symptom is a race a fast machine can win, its real gate is the
+  // deterministic [COLD PLAY] pair rather than the audio assertions.
+  { script: 'ui/verify-phase41-stream-a.mjs', area: 'audio-region', tier: 'engine', status: 'live' },
   { script: 'ui/verify-phase37-stream-ra.mjs', area: 'render-export', tier: 'engine', status: 'live' },
   { script: 'ui/verify-phase37-stream-rc.mjs', area: 'automation', tier: 'engine', status: 'live' },
   {

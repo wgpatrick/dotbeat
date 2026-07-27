@@ -323,6 +323,17 @@ async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPo
   // but a headless render plays ~immediately, and anything still pending sounds as its silent
   // fallback (synth voice / nothing) instead of the sample. Timeout = warn and render anyway (an
   // honest degraded render beats a hang; the console forwarding above names the failed load).
+  // Phase 41 Stream A: KICK the loads before polling them. pendingMediaCount() counts loads that
+  // are in flight, and audio-region buffers are only ever kicked from the engine's sync() — which
+  // runs from play()/tick(), i.e. AFTER this gate. So for an audio-region project the poll below
+  // used to pass instantly against a set nothing had populated: a vacuous "ready" that let the
+  // render start the transport on a graph with no decoded audio at all. warmMediaLoads() is the
+  // engine's own "kick every decode this doc needs without starting playback" entry point (the
+  // offline path has always called it) — with it, the poll measures something real. Guarded so an
+  // older bundle without it still reaches the -1 hard error below rather than throwing here.
+  await page.evaluate(async () => {
+    if (typeof window.__engine.warmMediaLoads === 'function') await window.__engine.warmMediaLoads()
+  })
   try {
     await page.waitForFunction(() => typeof window.__engine.pendingMediaCount === 'function' && window.__engine.pendingMediaCount() === 0, { timeout: 30000 })
   } catch {
@@ -660,6 +671,11 @@ export async function renderBatchCommand(argv) {
         // passed — without re-waiting here, the offline path refuses ("media not decoded yet")
         // and live capture would play the silent fallback. Same guarded wait as boot: timeout =
         // warn and render anyway (the console forwarding names the failed load).
+        // Same kick-before-poll as boot (Phase 41 Stream A) — a swapped-in variant's NEW media has
+        // had no sync() yet either, so without this the poll is vacuous exactly as it was there.
+        await session.page.evaluate(async () => {
+          if (typeof window.__engine.warmMediaLoads === 'function') await window.__engine.warmMediaLoads()
+        })
         try {
           await session.page.waitForFunction(() => typeof window.__engine.pendingMediaCount === 'function' && window.__engine.pendingMediaCount() === 0, { timeout: 30000 })
         } catch {
