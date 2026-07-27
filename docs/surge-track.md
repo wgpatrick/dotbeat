@@ -140,9 +140,22 @@ regardless of its project tempo — treat those renders as provenance-suspect.
 
 ## v1 limitations (honest deferrals)
 
-- **No live GUI playback / re-synthesis.** In the GUI a surge track plays its **last rendered WAV**;
-  a knob edit (`beat set` on a surge param) invalidates the cache and re-renders on the **next
-  render**, not live. Editing a surge track in the GUI before it has ever been rendered has no audio.
+- **No live re-synthesis — render-on-edit instead.** Surge is a native C++ synth behind a Python
+  sidecar and the GUI engine is Web Audio in a browser tab (D23 keeps that GPLv3 code
+  out-of-process), so the GUI never synthesizes a surge track live. What it does instead: the
+  daemon serves one generated **playback companion** per surge track — the same drums-kind sample
+  host `beat render` uses (`src/analysis/surge-host.ts`), appended right after the track it shadows
+  in `GET /document` and never written to the `.beat` file. The surge track itself keeps its piano
+  roll; the companion carries the sound. Edit a note, the patch, an override or the tempo and the
+  daemon re-runs the sidecar and pushes the new render to the GUI: **measured ~1.1 s from edit to
+  hearing it** on a 4-bar phrase (~0.8 s of that is Surge itself), so it is a beat late, not
+  instant. Production edits on the surge track (volume, pan, effects) reach the ear immediately —
+  the companion carries the synth block, and only the render key (patch/overrides/notes/sample
+  rate/tempo) costs a re-render. A project whose renders are already cached needs no surgepy at
+  all; a machine without one keeps the silent piano roll and says so once on stderr.
+  (Before 2026-07-27 this section claimed "in the GUI a surge track plays its last rendered WAV".
+  Nothing implemented it — `grep surge ui/src/audio/engine.ts` matched nothing — and a surge track
+  in the GUI was simply silent.)
 - **Track-level notes only.** A surge track's **clips / scenes / song arrangement do not yet render**
   — only the track's top-level notes are synthesized (the host plays that one phrase per loop). Clips
   parse and round-trip; they just aren't rendered through Surge in v1.

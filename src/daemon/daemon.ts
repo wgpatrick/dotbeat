@@ -40,7 +40,8 @@ import { readFileSync, writeFileSync, watch, existsSync, mkdirSync, copyFileSync
 import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { AutomationInterpolation, BeatDocument, BeatPlacement, BeatSelection, BeatSongSection, DrumLane } from '../core/index.js'
+import type { AutomationInterpolation, BeatDocument, BeatMediaSample, BeatPlacement, BeatSelection, BeatSongSection, DrumLane } from '../core/index.js'
+import { renderSurgeTrack, surgePatchResolver, surgeRenderHash, surgeSampleHostTrack, type SurgeTrackRender } from '../analysis/surge-host.js'
 import {
   parse,
   serialize,
@@ -632,6 +633,12 @@ export interface Daemon {
   getUndoDepth: () => number
   /** Test hook: depth of the in-session redo stack. */
   getRedoDepth: () => number
+  /** Test hook: the document GET /document serves — the file's document PLUS the surge playback
+   * companions (see surgePlayback below). Identical to getDoc() for a project with no surge track. */
+  getServedDoc: () => BeatDocument
+  /** Test hook: resolves once no surge re-render is in flight or queued (the GUI's own signal is
+   * the `doc` SSE event that follows one). */
+  surgeIdle: () => Promise<void>
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -891,6 +898,169 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     for (const client of sseClients) client.write(frame)
   }
 
+  // ─── surge playback companions (Track 1a's missing GUI half) ─────────────────────────────────
+  //
+  // docs/surge-track.md claimed "in the GUI a surge track plays its last rendered WAV". Nothing
+  // ever implemented it — `grep surge ui/src/audio/engine.ts` matches nothing — so a surge track
+  // showed a piano roll and made no sound at all.
+  //
+  // The browser engine schedules exactly four track kinds (synth / drums / instrument / audio,
+  // each gated on `track.kind === …`), so the only way to make a surge track sound without
+  // teaching the engine a fifth kind is to hand the browser a track it ALREADY knows how to play:
+  // the drums-kind sample host `beat render` has used since Track 1a (src/analysis/surge-host.ts).
+  //
+  // What this does NOT do is rewrite the surge track into that host, the way the render path does.
+  // `kind` also decides which editor the GUI opens (NoteView's `isDrums`), so a rewritten track
+  // would lose the piano roll that is the entire point of editing it, and every note edit the GUI
+  // posted back would name a track shape the file on disk does not have. The host therefore rides
+  // ALONGSIDE its source track: one generated, never-written companion appended right after the
+  // track it shadows, present only in what GET /document serves. The owner edits the piano roll
+  // and hears the re-render underneath it.
+  //
+  // The companion is rebuilt from the CURRENT document on every change, so production edits on the
+  // surge track (volume, pan, the effect chain — everything the synth block carries) reach the ear
+  // immediately, with no sidecar involved; only a change to the RENDER key (patch, overrides,
+  // notes, sampleRate, tempo) costs a re-render, and that key is surge-host.ts's, shared with
+  // `beat render`, so the GUI and the CLI can never disagree about which WAV a document means.
+  const SURGE_COMPANION_SUFFIX = '__surge'
+  const projectDir = dirname(resolve(filePath))
+  /** trackId -> the render currently backing its companion (may be one edit stale while the next
+   * render is in flight — a stale sound for ~1s beats a silent gap on every keystroke). */
+  const surgeRenders = new Map<string, SurgeTrackRender>()
+  let surgeCompanions: { sourceId: string; track: BeatTrack }[] = []
+  let surgeMedia: BeatMediaSample[] = []
+  let surgeRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  let surgeRefreshRunning = false
+  let surgeRefreshQueued = false
+  let surgeIdleWaiters: (() => void)[] = []
+  /** Degrade ONCE per session, loudly, on stderr: a project whose surgepy build is missing must not
+   * spam a line per keystroke, and must not fail the GUI either — it keeps the silent piano roll it
+   * had before this existed. */
+  let surgeDegraded: string | null = null
+
+  const isSurgeCompanionId = (id: string): boolean => surgeCompanions.some((c) => c.track.id === id)
+
+  /** What GET /document serves: the file's document plus the companions, each right after the
+   * track it shadows. Byte-identical to `doc` for a project with no surge track. */
+  function servedDoc(): BeatDocument {
+    if (surgeCompanions.length === 0) return doc
+    const tracks: BeatTrack[] = []
+    for (const t of doc.tracks) {
+      tracks.push(t)
+      const companion = surgeCompanions.find((c) => c.sourceId === t.id)
+      if (companion) tracks.push(companion.track)
+    }
+    return { ...doc, tracks, media: [...doc.media, ...surgeMedia] }
+  }
+
+  /** Rebuild the companion list from `doc` + whatever renders we hold. Pure and sidecar-free.
+   * Returns true when what /document serves changed (i.e. the GUI should re-pull). */
+  function rebuildSurgeCompanions(): boolean {
+    const before = JSON.stringify([surgeCompanions, surgeMedia])
+    const companions: { sourceId: string; track: BeatTrack }[] = []
+    const media: BeatMediaSample[] = []
+    for (const t of doc.tracks) {
+      if (t.kind !== 'surge') continue
+      const id = `${t.id}${SURGE_COMPANION_SUFFIX}`
+      // Never shadow a real track: if the document itself declares that id, the companion would be
+      // a duplicate the GUI could not tell apart from a track the owner can actually edit.
+      if (doc.tracks.some((x) => x.id === id)) continue
+      const render = surgeRenders.get(t.id)
+      if (!render) continue
+      companions.push({ sourceId: t.id, track: surgeSampleHostTrack(t, render.sampleId, { id, name: `${t.name}_render` }) })
+      if (!media.some((m) => m.id === render.sampleId)) media.push({ id: render.sampleId, sha256: render.sha256, path: render.relPath })
+    }
+    surgeCompanions = companions
+    surgeMedia = media
+    return JSON.stringify([surgeCompanions, surgeMedia]) !== before
+  }
+
+  function settleSurgeIdle() {
+    const waiters = surgeIdleWaiters
+    surgeIdleWaiters = []
+    for (const w of waiters) w()
+  }
+
+  /** Debounced so a knob drag or a burst of note edits costs ONE render, not one per tick — the
+   * same reason /edit itself debounces. 150 ms is under the ~800 ms the sidecar takes, so it adds
+   * nothing an owner can hear waiting for. */
+  function scheduleSurgeRefresh() {
+    if (surgeRefreshTimer) clearTimeout(surgeRefreshTimer)
+    surgeRefreshTimer = setTimeout(() => {
+      surgeRefreshTimer = null
+      void refreshSurgePlayback()
+    }, 150)
+  }
+
+  async function refreshSurgePlayback(): Promise<void> {
+    if (surgeRefreshRunning) {
+      // A render is in flight against a now-stale document — remember to run again after it, so
+      // the last edit always wins. (One queued run, not a queue: only the newest doc matters.)
+      surgeRefreshQueued = true
+      return
+    }
+    const surgeTracks = doc.tracks.filter((t) => t.kind === 'surge')
+    if (surgeTracks.length === 0) {
+      surgeRenders.clear()
+      if (rebuildSurgeCompanions()) broadcast('doc', beatDocumentToPartialTracks(servedDoc()))
+      settleSurgeIdle()
+      return
+    }
+    // Cheap pass first: re-host what we already have against the current production block, and
+    // work out whether any track's RENDER key actually moved.
+    if (rebuildSurgeCompanions()) broadcast('doc', beatDocumentToPartialTracks(servedDoc()))
+    const stale = surgeTracks.filter((t) => {
+      const key = surgeRenderHash(t, doc)
+      if (key === null) return surgeRenders.has(t.id) // notes all removed -> drop the render
+      return surgeRenders.get(t.id)?.hash !== key.hash
+    })
+    if (stale.length === 0) {
+      settleSurgeIdle()
+      return
+    }
+    if (surgeDegraded !== null) {
+      settleSurgeIdle()
+      return
+    }
+
+    surgeRefreshRunning = true
+    try {
+      // Lazy on purpose (see renderSurgeTrack): the FIRST refresh of an already-rendered project is
+      // a pure cache lookup, so opening a project whose renders are on disk gives the GUI sound
+      // without a sidecar spawn — and without surgepy installed at all.
+      type Resolver = Awaited<ReturnType<typeof surgePatchResolver>>
+      const held: { resolver: Resolver | null } = { resolver: null }
+      const getResolver = async (): Promise<Resolver> => {
+        if (held.resolver === null) held.resolver = await surgePatchResolver()
+        return held.resolver
+      }
+      for (const track of stale) {
+        // Re-read the track from the CURRENT doc: it may have moved on during the await above.
+        const live = doc.tracks.find((t) => t.id === track.id)
+        if (!live || live.kind !== 'surge') continue
+        const render = await renderSurgeTrack(live, doc, projectDir, getResolver)
+        if (render === null) surgeRenders.delete(live.id)
+        else surgeRenders.set(live.id, render)
+      }
+      for (const w of held.resolver?.warnings ?? []) process.stderr.write(`[beat daemon] ${w}\n`)
+      if (rebuildSurgeCompanions()) broadcast('doc', beatDocumentToPartialTracks(servedDoc()))
+    } catch (err) {
+      // Fail SOFT here, unlike `beat render`'s fail-loudly contract: a GUI session with no surgepy
+      // build must keep working (silent surge track, exactly as before this existed) rather than
+      // wedging the daemon. Said once, on stderr, with the reason.
+      surgeDegraded = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`[beat daemon] surge playback unavailable — the GUI will show surge tracks without sound: ${surgeDegraded}\n`)
+    } finally {
+      surgeRefreshRunning = false
+      if (surgeRefreshQueued) {
+        surgeRefreshQueued = false
+        void refreshSurgePlayback()
+      } else {
+        settleSurgeIdle()
+      }
+    }
+  }
+
   // Editors (vim included) save via atomic rename, which orphans a watcher attached to the file's
   // inode — so watch the *directory* and filter by name (docs/phase-1-plan.md).
   const dir = dirname(filePath)
@@ -951,6 +1121,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
     broadcast('doc', beatDocumentToPartialTracks(doc))
     revalidateSelection()
+    scheduleSurgeRefresh()
   }
 
   /**
@@ -1056,6 +1227,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     // unless BEAT_EDIT_LOG is set — the enabled check inside is the only cost on the hot path.
     noteDaemonEdit(preDoc, doc, { coalesced, gestureKey, surface, file: filePath })
     broadcastUndoState()
+    // Every mutating route funnels through here, so this is the one place a surge track's audio can
+    // go stale — the same choke-point argument the undo stack made for itself above.
+    scheduleSurgeRefresh()
     return true
   }
 
@@ -1069,6 +1243,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     lastFileText = nextText
     canonicalText = nextText
     doc = parse(nextText)
+    scheduleSurgeRefresh() // an undo/redo can move notes/patch/tempo like any other write
   }
 
   const server: Server = createServer((req, res) => {
@@ -1086,9 +1261,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     }
 
     // dotbeat's own frontend reads the RAW document (absolute hits/notes, full synth), not the
-    // 16-step-collapsed /doc projection — it renders the free-timed event model directly.
+    // 16-step-collapsed /doc projection — it renders the free-timed event model directly. It gets
+    // the surge playback companions too (see servedDoc): they exist for the browser engine only,
+    // and this is the one route that browser reads.
     if (req.method === 'GET' && url.pathname === '/document') {
-      json(res, 200, doc)
+      json(res, 200, servedDoc())
       return
     }
 
@@ -1098,7 +1275,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
     // (declared paths are validated relative-only at parse time).
     if (req.method === 'GET' && url.pathname.startsWith('/media/')) {
       const wanted = decodeURIComponent(url.pathname.slice('/media/'.length))
-      const entry = doc.media.find((m) => m.path === `media/${wanted}` || m.path === wanted)
+      // The surge renders are declared media too — of the document /document serves, not of the
+      // file on disk (the .beat never references them; they are derived, content-addressed audio).
+      const entry = [...doc.media, ...surgeMedia].find((m) => m.path === `media/${wanted}` || m.path === wanted)
       if (!entry) {
         json(res, 404, { error: `no media entry with path "${wanted}" in the document` })
         return
@@ -1253,6 +1432,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
             json(res, 400, { error: 'body is not a sandbox payload' })
             return
           }
+          // A surge playback companion is generated, not stored (see servedDoc). A client that
+          // pulled the served document and pushes it back must not write one into the .beat file —
+          // it would become a real track the owner can edit, shadowing the surge track it exists to
+          // voice, and `beat render` would then render the phrase twice.
+          // A surge TRACK cannot survive this conversion either, and used to be silently mangled by
+          // it: the external payload shape has no `surge` block and its converter keeps notes only
+          // for `kind === 'synth'`, so a surge track came back as a kind-"surge" track with neither
+          // its patch nor its notes — a document the parser cannot read. Same never-erase treatment
+          // as instrument tracks (below): drop it from the payload, reinsert the real one after.
+          const surgeIds = new Set(doc.tracks.filter((t) => t.kind === 'surge').map((t) => t.id))
+          payload.tracks = payload.tracks.filter((t) => !isSurgeCompanionId(t.id) && !surgeIds.has(t.id))
           // Same pre-write conflict check writeIfChanged makes (this route writes directly because
           // it carries media/groups/instrument tracks across itself). A whole-document GUI push is
           // the MOST destructive thing to land on top of an external write, so it gets the guard
@@ -1297,7 +1487,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           // v0.6: instrument tracks never reach the GUI, so they never come back in a GUI push —
           // reinsert them at their original positions (same never-erase rule as media).
           for (const [i, t] of doc.tracks.entries()) {
-            if (t.kind === 'instrument') carried.splice(Math.min(i, carried.length), 0, t)
+            if (t.kind === 'instrument' || t.kind === 'surge') carried.splice(Math.min(i, carried.length), 0, t)
           }
           // v0.10: the GUI's whole-document push has no group-editing surface (groups are edited
           // through the dedicated POST /group route below), so a /state push must never erase them —
@@ -1307,8 +1497,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           // internally consistent even if the browser payload silently omitted a track.
           const carriedIds = new Set(carried.map((t) => t.id))
           const groups = doc.groups.map((g) => ({ ...g, tracks: g.tracks.filter((tid) => carriedIds.has(tid)) })).filter((g) => g.tracks.length > 0)
+          // `selected_track` must name a track that exists, and the converter picked its fallback
+          // BEFORE the never-erase reinsertions above — so a document whose only tracks are the
+          // kinds the payload cannot carry (instrument, surge) came out of the converter pointing
+          // at nothing and serialized as a bare `selected_track` line the parser then refused.
+          // Prefer what the payload asked for, then what the file had, then the first track left.
+          const selectedTrack = [converted.selectedTrack, payload.selectedTrackId, doc.selectedTrack].find((id) => carried.some((t) => t.id === id)) ?? carried[0]?.id ?? ''
           const nextDoc = {
             ...converted,
+            selectedTrack,
             media: doc.media,
             tracks: carried,
             groups,
@@ -1346,6 +1543,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           const { path, value, gestureId, source } = JSON.parse(body) as { path?: unknown; value?: unknown; gestureId?: unknown; source?: unknown }
           if (typeof path !== 'string' || typeof value !== 'string') {
             json(res, 400, { error: 'body must be {path: string, value: string}' })
+            return
+          }
+          // Editing a surge playback companion is meaningless — it is regenerated from its source
+          // track on every change, so any edit would be silently reverted a moment later. Say which
+          // track to edit instead, rather than letting setValue report "unknown track" for a track
+          // the owner can plainly see on screen.
+          const companionTarget = surgeCompanions.find((c) => path === c.track.id || path.startsWith(`${c.track.id}.`))
+          if (companionTarget) {
+            json(res, 400, {
+              error: `"${companionTarget.track.id}" is the live Surge render of "${companionTarget.sourceId}" — it is generated for playback, never stored. Edit "${companionTarget.sourceId}" (its notes, patch or overrides) and the render follows.`,
+            })
             return
           }
           // `path` doubles as the undo-coalescing gesture key (research/28 §5.3): repeated /edit
@@ -2803,16 +3011,32 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
   })
   const address = server.address()
   const port = typeof address === 'object' && address !== null ? address.port : requestedPort
+  // Boot the surge companions for a project that already has surge tracks, so the GUI has sound on
+  // its FIRST connect rather than only after the first edit. Deliberately not awaited: a cold
+  // render is ~800 ms of sidecar and the daemon must be listening before then (the GUI's initial
+  // GET /document simply arrives before the companion does, and the render's own `doc` event brings
+  // it in).
+  scheduleSurgeRefresh()
   return {
     port,
     filePath,
     getDoc: () => doc,
+    getServedDoc: () => servedDoc(),
+    surgeIdle: () =>
+      new Promise<void>((done) => {
+        if (!surgeRefreshRunning && !surgeRefreshQueued && surgeRefreshTimer === null) {
+          done()
+          return
+        }
+        surgeIdleWaiters.push(done)
+      }),
     getSelection: () => selection,
     getUndoDepth: () => undoStack.length,
     getRedoDepth: () => redoStack.length,
     close: () =>
       new Promise<void>((done) => {
         if (watchTimer) clearTimeout(watchTimer)
+        if (surgeRefreshTimer) clearTimeout(surgeRefreshTimer)
         flushEditLog() // emit any gesture still buffered so a session's last drag isn't lost
         watcher.close()
         for (const client of sseClients) client.end()

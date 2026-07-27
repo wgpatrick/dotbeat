@@ -170,8 +170,13 @@ export function surgeRenderHash(track: BeatTrack, doc: BeatDocument): { hash: st
  * — there is nothing to synthesize, and the caller decides what silence looks like on its surface.
  * Throws BeatSurgeError when surgepy or the patch is unavailable: the fail-loudly-at-render
  * contract, never a silent skip.
+ *
+ * `getResolver` is a THUNK, not a resolver, and that is load-bearing: resolving a patch name means
+ * a sidecar spawn and a 3,559-entry catalogue walk, and a cache HIT needs neither. Taking it lazily
+ * is what lets a fully-cached project (the daemon's steady state, and any `beat render` of an
+ * unchanged document) work on a machine with no surgepy build at all.
  */
-export async function renderSurgeTrack(track: BeatTrack, doc: BeatDocument, projectDir: string, resolver: SurgePatchResolver): Promise<SurgeTrackRender | null> {
+export async function renderSurgeTrack(track: BeatTrack, doc: BeatDocument, projectDir: string, getResolver: () => Promise<SurgePatchResolver>): Promise<SurgeTrackRender | null> {
   const key = surgeRenderHash(track, doc)
   if (key === null) return null
   const surge = track.surge!
@@ -199,6 +204,7 @@ export async function renderSurgeTrack(track: BeatTrack, doc: BeatDocument, proj
 
   if (!cached) {
     mkdirSync(mediaDir, { recursive: true })
+    const resolver = await getResolver()
     const { meta } = await runSurgeRender({
       patch: resolver.resolve(surge.patch),
       notes: key.surgeNotes,
@@ -291,7 +297,13 @@ export async function prepareSurgeDocument(doc: BeatDocument, projectDir: string
   const surgeTracks = doc.tracks.filter((t) => t.kind === 'surge')
   if (surgeTracks.length === 0) return { doc, renders: [], notes: [], isSurge: false }
 
-  const resolver = await surgePatchResolver()
+  // Lazy, and memoized across the tracks in this document: a fully-cached project never touches the
+  // sidecar, and a document with three surge tracks that all miss pays for the catalogue once.
+  const held: { resolver: SurgePatchResolver | null } = { resolver: null }
+  const getResolver = async (): Promise<SurgePatchResolver> => {
+    if (held.resolver === null) held.resolver = await surgePatchResolver()
+    return held.resolver
+  }
   const notes: string[] = []
   const renders: SurgeTrackRender[] = []
   const media: BeatMediaSample[] = [...doc.media]
@@ -301,7 +313,7 @@ export async function prepareSurgeDocument(doc: BeatDocument, projectDir: string
       tracks.push(track)
       continue
     }
-    const render = await renderSurgeTrack(track, doc, projectDir, resolver)
+    const render = await renderSurgeTrack(track, doc, projectDir, getResolver)
     if (render === null) {
       // No notes -> nothing to synthesize. Desugar to a silent drums host (no lane/hit) so the doc
       // still loads and the render simply carries no surge audio for this track.
@@ -314,6 +326,6 @@ export async function prepareSurgeDocument(doc: BeatDocument, projectDir: string
     if (!media.some((m) => m.id === render.sampleId)) media.push({ id: render.sampleId, sha256: render.sha256, path: render.relPath })
     tracks.push(surgeSampleHostTrack(track, render.sampleId))
   }
-  notes.unshift(...resolver.warnings)
+  notes.unshift(...(held.resolver?.warnings ?? []))
   return { doc: { ...doc, media, tracks }, renders, notes, isSurge: true }
 }
