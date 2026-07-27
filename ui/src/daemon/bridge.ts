@@ -36,6 +36,36 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
   if (path === 'loop_bars') return { ...doc, loopBars: Number(value) }
   if (path === 'selected_track') return { ...doc, selectedTrack: value }
 
+  // v0.11 locators (Phase 41 Stream D) — mirrors core setValue's `locator.*` paths, and it has to.
+  // The daemon does NOT echo an /edit back over SSE (the client is expected to have applied it
+  // optimistically here), so a path this mirror doesn't recognize is written correctly to disk and
+  // then never appears in the GUI at all: the marker landed in the .beat file and the ruler stayed
+  // empty. That is exactly how it failed the first time this ran. Sits ABOVE the `<track>.<field>`
+  // split below because `locator` is a document-level namespace, not a track id — same as core.
+  if (path === 'locator' || path.startsWith('locator.')) {
+    const m = path.slice('locator.'.length).match(/^([A-Za-z0-9_-]+)(?:\.(bar|name))?$/)
+    if (!m) return null
+    const id = m[1]!
+    const field = m[2] as 'bar' | 'name' | undefined
+    const current = doc.locators ?? []
+    const existing = current.find((l) => l.id === id)
+    const others = current.filter((l) => l.id !== id)
+    if (!field) {
+      if (value.trim() === '') return existing ? { ...doc, locators: others } : null
+      const parts = value.trim().split(/\s+/)
+      const bar = Number(parts[0])
+      if (!Number.isInteger(bar) || bar < 1) return null
+      return { ...doc, locators: [...others, { id, bar, name: parts[1] ?? existing?.name ?? id }] }
+    }
+    if (!existing) return null
+    if (field === 'bar') {
+      const bar = Number(value)
+      if (!Number.isInteger(bar) || bar < 1) return null
+      return { ...doc, locators: [...others, { ...existing, bar }] }
+    }
+    return { ...doc, locators: [...others, { ...existing, name: value.trim() }] }
+  }
+
   const dot = path.indexOf('.')
   if (dot === -1) return null
   const trackId = path.slice(0, dot)

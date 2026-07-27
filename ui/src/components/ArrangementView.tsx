@@ -145,7 +145,10 @@ const TICK_ROW_H = 13 // Phase 24 Stream CD: bar-number tick strip along the bot
 // playhead's `top: RULER_H` and the track rows below it without a second edit.
 // Minimum px between consecutive LABELLED bar ticks before the ruler also prints a wall-clock
 // figure beside the bar number (Phase 41 Stream D). Below this the two labels collide.
-const TICK_CLOCK_MIN_PX = 64
+// 56px: measured, not guessed — at the ruler's 9px type a 3-digit bar number plus a m:ss
+// clock plus the 4px gap needs ~52px, and 64 (the first guess) suppressed the labels entirely at
+// the very zoom the verify script exercises (2-bar tick interval * 31.9px/bar = 63.8px).
+const TICK_CLOCK_MIN_PX = 56
 const LOCATOR_ROW_H = 16
 const SECTION_LABEL_H = 26
 const RULER_H = LOCATOR_ROW_H + SECTION_LABEL_H + TICK_ROW_H
@@ -2450,6 +2453,18 @@ export function ArrangementView() {
   const locators = useMemo(() => [...(doc?.locators ?? [])].sort((a, b) => a.bar - b.bar), [doc])
   const [locatorRename, setLocatorRename] = useState<{ id: string; draft: string } | null>(null)
 
+  // The last bar the playhead was actually at, remembered ACROSS a stop. `currentStep` goes to -1
+  // the moment the transport stops (engine.stop's own reset), which means every "where am I"
+  // question — drop a marker here, jump to the previous marker — silently answered "bar 1" as soon
+  // as you pressed stop. Caught by verification, not by reading the code: pressing "," after
+  // stopping at bar 101 reported "already at the first marker" and went nowhere, because `here`
+  // had quietly become 1. Stopping does not move you, so the reference point must survive it.
+  const lastPlayheadBarRef = useRef(1)
+  useEffect(() => {
+    if (currentStep >= 0) lastPlayheadBarRef.current = Math.floor(currentStep / 16) + 1
+  }, [currentStep])
+  const playheadBar = useCallback(() => (currentStep >= 0 ? Math.floor(currentStep / 16) + 1 : lastPlayheadBarRef.current), [currentStep])
+
   // Scroll a bar into view without touching the transport — the shared half of "jump to marker" and
   // the zoom-to-selection framing below. Centres the target when it isn't already comfortably on
   // screen, which for a jump (unlike follow's forward-only paging) is the right instinct: you asked
@@ -2484,8 +2499,8 @@ export function ArrangementView() {
   const newLocatorBar = useCallback((): number => {
     if (currentStep >= 0) return Math.floor(currentStep / 16) + 1
     if (selection.bars) return selection.bars.start + 1
-    return 1
-  }, [currentStep, selection.bars])
+    return playheadBar() // where the playhead last was, which survives a stop (see lastPlayheadBarRef)
+  }, [currentStep, selection.bars, playheadBar])
 
   const addLocator = useCallback(() => {
     const bar = Math.min(Math.max(1, newLocatorBar()), Math.max(1, totalBars))
@@ -2526,7 +2541,7 @@ export function ArrangementView() {
         showToast('No markers yet — press M (or "+ marker") to drop one at the playhead.')
         return
       }
-      const here = currentStep >= 0 ? Math.floor(currentStep / 16) + 1 : 1
+      const here = playheadBar()
       const target = dir === 1 ? locators.find((l) => l.bar > here) : [...locators].reverse().find((l) => l.bar < here)
       if (!target) {
         showToast(dir === 1 ? 'Already at the last marker.' : 'Already at the first marker.')
@@ -2534,7 +2549,7 @@ export function ArrangementView() {
       }
       jumpToLocator(target.bar)
     },
-    [locators, currentStep, jumpToLocator],
+    [locators, playheadBar, jumpToLocator],
   )
 
   // ── Arrangement keyboard shortcuts (Phase 41 Stream D) ───────────────────────────────────────
