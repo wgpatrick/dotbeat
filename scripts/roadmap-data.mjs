@@ -1432,6 +1432,12 @@ export const rows = [
     core: 'missing', cli: 'na', gui: 'na', status: 'not-started',
     research: null, plan: null,
   },
+  {
+    area: 'Taste loop', feature: 'Every rated drum clip was lowpassed at 8 kHz by a default nobody chose',
+    description: 'FOUND 2026-07-27 while producing songs/twin-souls-study, and it lands on the worst-scoring role in the whole showdown. A fresh drums track is created with `cutoff: 12000` (src/core/edit.ts:779), and EVERY taste-seed ships its drums bus at `cutoff 8000` — verified on seed-001 through seed-008, all eight. That is a lowpass over the entire kit, applied before any rating anyone has ever given. Measured on seed-001\'s drum stem, changing only that one value: at the shipped 8000 the stem reads air 0.72% / centroid 177 Hz; opened to 20000 it reads air 2.15% / centroid 389 Hz — the default costs TWO-THIRDS of the air band and HALVES the centroid. The reference point that makes it matter: a Demucs-separated commercial drum stem (Luttrell, Twin Souls, final drop) measures air 7.40% / centroid 862 Hz, and drum-loop is the role where the engine has never once placed in the top half (0 of 27 batches; gen 62% vs ref 100%). TWO HONEST CAVEATS, so this is not oversold: opening the filter still leaves us at 2.15% against 7.40%, so the cap is NOT the whole drum deficit; and because it changes a rendering default it cannot be applied retroactively — the preference effect is unmeasured until a fresh round runs. The same fix moved the twin-souls mix centroid from 393 Hz to 548 Hz against a 572 Hz target, from that one parameter, with low end and width untouched. TRIGGER: the next drum-loop showdown round — change the seed default, keep everything else pinned, and it pairs batch-for-batch against the existing 27.',
+    core: 'partial', cli: 'na', gui: 'na', status: 'not-started',
+    research: null, plan: null,
+  },
 
   // ── Render / export ──────────────────────────────────────────────────────
   {
