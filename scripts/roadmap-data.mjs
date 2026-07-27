@@ -2003,7 +2003,13 @@ export const rows = [
   {
     area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Surge sidecar-instrument track kind (`surge`) — Track 1a',
     description: 'Track 1a (decisions.md D31, docs/surge-track.md, docs/format-spec.md v0.12): a Surge XT factory patch as a first-class COMPOSITIONAL track. `track <id> <name> <color> surge` carries a `surge` block (patch "<name>" / sampleRate / normalized override <param> <0..1> lines) plus the standard synth production block, notes, clips — all ordinary diffable text. At render the notes convert to the sidecar note-list, render (or reuse a content-hash-keyed cached) WAV under media/ with a provenance sidecar via python/surge_render.py, and host as a drums-kind sample voice through the track\'s own production/effect/send chain (the surgeplus mechanism promoted to an engine feature). GPL stays out-of-process (nothing links Surge); parse never needs Surge (surgepy/patch check is fail-loudly AT RENDER, not parse). Full parse/serialize round-trip, semantic diff (surge-param/surge-override), `beat set <t>.surge.patch|.sampleRate|.override.<p>`, `beat add-track surge --patch`, `beat surge patches|doctor`. Proven end-to-end: examples/surge-pilot (2-track surge lead + engine bass) renders non-silent (-24.2 LUFS, real spectrum). v1 limits (honest): no live GUI re-synthesis (plays last render, knob edit re-renders next render), track-level notes only (clips/song arrangement deferred), --batch hot-swap deferred, osc-bank synth fields are no-ops on the hosted playback.',
-    core: 'done', cli: 'done', gui: 'missing', status: 'done',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/114-synth-engine-alternatives.md', plan: 'docs/surge-track.md',
+  },
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'A surge track SOUNDS in the GUI — render-on-edit playback companion',
+    description: 'docs/surge-track.md claimed "in the GUI a surge track plays its last rendered WAV" and nothing implemented it (`grep surge ui/src/audio/engine.ts` matched nothing) — a surge track drew a piano roll and was silent. The browser engine schedules four track kinds, each gated on `track.kind`, and true live synthesis is off the table (Surge is native C++ behind a Python sidecar; D23 keeps that GPLv3 code out-of-process), so the daemon serves what the engine already plays: one generated drums-kind sample host per surge track (the same host `beat render` uses — extracted to src/analysis/surge-host.ts so the CLI and the daemon cannot disagree about which WAV a document means), appended right after the track it shadows in GET /document and NEVER written to the .beat file. Deliberately alongside, not instead-of: `kind` also picks the GUI editor (NoteView\'s isDrums), so rewriting the track would trade the piano roll for the sound. Every write funnels through writeIfChanged, so that is where the render is invalidated; the companion is rebuilt from the current doc each time, so production edits (volume/pan/effects) re-host with no sidecar and only a render-key change (patch/overrides/notes/rate/tempo) costs one. MEASURED edit→hear (2026-07-27, ui/verify-surge-gui-playback.mjs driving the real app at a real 24-bar Surge project): 1123 ms for a 4-bar phrase, 3778 ms for the 24-bar project — a beat late, not instant, and ~0.8 s of the 4-bar figure is Surge itself. A cached project needs no surgepy at all; without one the daemon degrades to the old silence and says so once on stderr. Two latent corruptions fixed on the way: a POST /state push mangled a surge track into a kind-"surge" track with no patch and no notes, and the converter\'s selected_track fallback ran before the never-erase reinsertions, serializing a bare `selected_track` line the parser refuses.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
     research: 'research/114-synth-engine-alternatives.md', plan: 'docs/surge-track.md',
   },
   {
@@ -2908,6 +2914,31 @@ export const rows = [
     core: 'na', cli: 'na', gui: 'na', status: 'not-started',
     research: 'research/122-perceptual-quality-models.md', plan: null,
   },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Surge render-on-edit: cut the ~1.1 s edit→hear round trip',
+    description: 'MEASURED 2026-07-27 (ui/verify-surge-gui-playback.mjs, real app, real project): 1123 ms from a note edit to hearing the new render for a 4-bar phrase, 3778 ms for a 24-bar project. The breakdown for the 4-bar case is ~810 ms inside python/surge_render.py (a fresh interpreter + surgepy instance + patch load per render), ~150 ms of daemon debounce, and ~50 ms of browser fetch+decode. DEFERRED because the mechanism is honest and usable at ~1 s and the fix is a real piece of engineering: a persistent surgepy WORKER process holding the loaded patch, so a re-render is a note-list write and a buffer read rather than a process spawn (the same worker the "Board v2 set" row already names). RE-TRIGGER, either of: the owner reports the lag breaks the edit loop in a real session, OR any surge project reaches the point where a routine edit is over ~2 s (long phrases already are — the 24-bar case is 3.8 s, so this fires the moment surge is used for a whole arrangement rather than a 4-bar figure).',
+    core: 'missing', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/114-synth-engine-alternatives.md', plan: 'docs/surge-track.md',
+  },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Surge playback companion: say in the GUI that it is generated',
+    description: 'The daemon serves a surge track\'s render as a companion drums track (see the Phase 37 row). It appears in the arrangement and mixer as an ordinary track — its own name, mute/solo, volume, delete button — with nothing on screen saying it is generated from the track above it and cannot be edited. The daemon answers an /edit aimed at it with a sentence naming the track to edit instead, so nothing breaks, but the owner has to try it to find out. DEFERRED because the fix is in ui/src/components/ArrangementView.tsx and MixerView.tsx, owned by other streams this round. RE-TRIGGER: the first pilot or owner session where someone edits, mutes or deletes the companion expecting it to affect the surge track — or the moment ArrangementView is open for other work.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: null, plan: 'docs/surge-track.md',
+  },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Surge renders accumulate one WAV per edited state under media/',
+    description: 'Each distinct (patch, overrides, notes, sampleRate, tempo) state renders its own content-addressed WAV into the project\'s media/ — 1.7 MB per 4-bar render, 8.3 MB for the 24-bar study project — and nothing prunes them. That is exactly right for `beat render` (a cache hit is free and reproducible) but a GUI session that edits notes for an hour writes one file per state it passes through. DEFERRED rather than pruned on the spot because deleting files inside the owner\'s project directory is not something to add casually, and the renders are derived, content-addressed and reproducible in about a second, so cleanup is safe whenever it is deliberate. RE-TRIGGER, either of: the first report of a project\'s media/ growing unexpectedly, OR a long GUI session measured at more than ~50 renders (`ls media/surge_*.wav | wc -l`). Fix when triggered: prune renders THIS daemon session created and no longer serves, or add `beat media prune --surge`.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: null, plan: 'docs/surge-track.md',
+  },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Surge clips / scenes / song arrangement still do not render',
+    description: 'Unchanged v1 limit, restated because the GUI now makes it visible: only a surge track\'s TOP-LEVEL notes are synthesized, so the host plays that one phrase per loop and a surge track placed in a song\'s scenes contributes nothing. In the GUI this reads as "my surge track plays in loop mode and goes silent in song mode", which is a sharper complaint than it was when only `beat render` could hit it. DEFERRED with Track 1a\'s original scope. RE-TRIGGER: the first project that puts a surge track in a scene — which the twin-souls-study workflow is one step away from (its owner-made study-playable.beat already hand-converts the surge track to an audio track precisely so it can be placed in a scene).',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: null, plan: 'docs/surge-track.md',
+  },
+
   // ── Deferred with triggers ──────────────────────────────────────────────
   // Owner-requested 2026-07-26, on research/140's core finding: a deferral with no written trigger
   // is indistinguishable from a drop. Every row here states the specific evidence that promotes it.

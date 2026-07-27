@@ -22,8 +22,14 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { BeatDocument, BeatMediaSample, BeatNote, BeatTrack } from '../core/document.js'
-import type { SurgeNote } from '../taste/showdown.js'
-import { BeatSurgeError, listSurgePatches, runSurgeRender, type SurgeCataloguePatch } from './surge.js'
+import { BeatSurgeError, listSurgePatches, runSurgeRender, type SurgeCataloguePatch, type SurgeRenderRequest } from './surge.js'
+
+/** The sidecar's note shape, taken from the request type this module already speaks rather than
+ * imported from src/taste — the DAW does not import the taste program (research/136 §4), and
+ * surge.ts's own `import type { SurgeNote }` is a known, ratcheted exception, not a door to walk
+ * through again (test/import-boundary.test.ts asserts that list by equality for exactly this
+ * reason). */
+type SurgeNote = SurgeRenderRequest['notes'][number]
 
 const round4 = (x: number): number => Math.round(x * 10000) / 10000
 
