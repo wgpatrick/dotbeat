@@ -721,6 +721,20 @@
     }
   },
   {
+    "name": "beat_scale",
+    "required": [
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "root": "number",
+      "name": "string",
+      "pitch_classes": "array<number>"
+    }
+  },
+  {
     "name": "beat_scene",
     "required": [
       "file",
@@ -1020,6 +1034,37 @@
       "normalize": "boolean",
       "mode": "string",
       "exclude": "array<string>"
+    }
+  },
+  {
+    "name": "beat_velocity_ramp",
+    "required": [
+      "file",
+      "from",
+      "to",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "from": "number",
+      "to": "number",
+      "note_ids": "array<string>"
+    }
+  },
+  {
+    "name": "beat_velocity_randomize",
+    "required": [
+      "amount",
+      "file",
+      "track"
+    ],
+    "args": {
+      "file": "string",
+      "track": "string",
+      "amount": "number",
+      "seed": "number",
+      "note_ids": "array<string>"
     }
   }
 ]

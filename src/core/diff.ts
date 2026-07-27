@@ -51,6 +51,15 @@ export type DiffEntry =
   // v0.10 groove/shuffle: a track-level playback field, so it diffs alongside track-meta rather
   // than per-note.
   | { kind: 'track-groove'; trackId: string; field: 'shuffleAmount' | 'shuffleGrid'; before: number; after: number }
+  // v0.12 (Phase 41 Stream E): the track's declared scale. Like groove, a track-level PROPERTY
+  // rather than a note edit — declaring a scale changes no notes, so without its own event kind a
+  // `beat scale` edit reported "no musical changes" while visibly rewriting the file.
+  | { kind: 'track-scale'; trackId: string; before: string | null; after: string | null }
+  // v0.12: a note's active/muted state. Deliberately NOT folded into the numeric `note-changed`
+  // field list below — those are all numbers with a "x -> y" reading, and "0 -> 1" for a mute is
+  // strictly worse than saying "muted". A mute is also the one note edit whose whole purpose is to
+  // be reviewed and reverted, so it earns a legible line in the diff.
+  | { kind: 'note-active'; trackId: string; noteId: string; active: boolean }
   // v0.8 drum hits (match by id, like notes)
   | { kind: 'hit-added'; trackId: string; hit: BeatDrumHit }
   | { kind: 'hit-removed'; trackId: string; hit: BeatDrumHit }
@@ -272,6 +281,10 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
     if (ta.color !== tb.color) out.push({ kind: 'track-meta', trackId: id, field: 'color', before: ta.color, after: tb.color })
     if (ta.shuffleAmount !== tb.shuffleAmount) out.push({ kind: 'track-groove', trackId: id, field: 'shuffleAmount', before: ta.shuffleAmount, after: tb.shuffleAmount })
     if (ta.shuffleGrid !== tb.shuffleGrid) out.push({ kind: 'track-groove', trackId: id, field: 'shuffleGrid', before: ta.shuffleGrid, after: tb.shuffleGrid })
+    // v0.12 scale: compared by its canonical STRING form, so a root change, a name change and a
+    // custom-set change are one comparison rather than three field-by-field ones.
+    const scaleText = (s: BeatTrack['scale']): string | null => (s ? `${s.root} ${s.name}${s.pitchClasses ? ` ${s.pitchClasses.join(',')}` : ''}` : null)
+    if (scaleText(ta.scale) !== scaleText(tb.scale)) out.push({ kind: 'track-scale', trackId: id, before: scaleText(ta.scale), after: scaleText(tb.scale) })
 
     if (ta.kind === 'instrument' && tb.kind === 'instrument' && ta.instrument && tb.instrument) {
       if (ta.instrument.sample !== tb.instrument.sample) out.push({ kind: 'instrument-param', trackId: id, param: 'soundfont', before: ta.instrument.sample, after: tb.instrument.sample })
@@ -325,6 +338,8 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
         if (before[field] !== n[field]) changes.push({ field, before: before[field], after: n[field] })
       }
       if (changes.length) out.push({ kind: 'note-changed', trackId: id, noteId: nid, changes })
+      // v0.12: the mute state, reported on its own line (see the event kind's comment).
+      if (before.active !== n.active) out.push({ kind: 'note-active', trackId: id, noteId: nid, active: n.active })
     }
 
     // v0.8 drum hits: match by id (like notes). Added/removed/changed(lane|start|velocity).
@@ -527,6 +542,18 @@ export function formatDiff(entries: DiffEntry[]): string {
         break
       case 'track-groove':
         lines.push(`${e.trackId}: ${e.field} ${formatNumber(e.before)} -> ${formatNumber(e.after)}`)
+        break
+      case 'track-scale':
+        lines.push(
+          e.after === null
+            ? `${e.trackId}: scale cleared (was ${e.before})`
+            : e.before === null
+              ? `${e.trackId}: scale set to ${e.after}`
+              : `${e.trackId}: scale ${e.before} -> ${e.after}`,
+        )
+        break
+      case 'note-active':
+        lines.push(`${e.trackId}: note ${e.noteId} ${e.active ? 'unmuted' : 'muted (kept in the clip, silent)'}`)
         break
       case 'synth-param':
         lines.push(`${e.trackId}: ${e.param} ${fmtVal(e.before)} -> ${fmtVal(e.after)}`)

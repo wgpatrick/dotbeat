@@ -1584,6 +1584,57 @@ body {
   font-weight: 600;
 }
 
+/* ---- Velocity Ramp/Randomize toolbar (Phase 41 Stream E) -------------------------------------
+   Same chip shape as its neighbours; its own left-border hue because it is a third kind of thing
+   again — neither a persistent declaration (Scale) nor a structural one-shot (Pitch & Time), but a
+   shaping gesture over the velocity lane directly above it. Warm hue to match that lane. */
+.velocity-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--surface-recessed);
+  border: 1px solid var(--line);
+  border-left: 3px solid #e5c07b;
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  color: var(--muted, #9aa0ab);
+}
+.velocity-tools-scope {
+  color: var(--muted, #9aa0ab);
+  font-style: italic;
+}
+.velocity-tools-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.velocity-tools-field input {
+  font: inherit;
+  font-size: 11px;
+  width: 52px;
+  background: var(--surface-recessed);
+  color: var(--text, #d8dbe2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+}
+.velocity-tools button {
+  background: var(--panel-2, #23262e);
+  color: var(--text, #d8dbe2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.velocity-tools button:hover {
+  border-color: var(--accent);
+}
+
 .pitch-time-panel {
   display: flex;
   align-items: center;

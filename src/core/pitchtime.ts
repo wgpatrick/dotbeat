@@ -15,6 +15,8 @@
 
 import type { BeatDocument, BeatNote, BeatScale, BeatTrack } from './document.js'
 import { formatNumber } from './format.js'
+// Seeded randomness comes from the ONE generator (CLAUDE.md's guardrail) — never a local copy.
+import { mulberry32 } from './rng.js'
 
 const canon = (n: number): number => Number(formatNumber(n))
 
@@ -297,6 +299,80 @@ export function legatoNotes(doc: BeatDocument, trackId: string, opts: NoteScopeO
     if (duration === undefined || duration === n.duration) return n
     changed++
     return { ...n, duration }
+  })
+  return { doc: replaceTrack(doc, { ...track, notes }), changed }
+}
+
+// ---- Velocity shaping: Ramp and Randomize (Phase 41 Stream E) ---------------------------------
+//
+// The motivating case is a loop that repeats: a 4-bar melody played for 242 bars is the same eight
+// notes 60 times, and uniform velocity is what makes that read as a loop rather than a part.
+// humanize.ts already offers seeded Gaussian JITTER, which is the "randomize" half; there was no
+// DETERMINISTIC shaped half at all — no way to say "get louder across this phrase", which is the
+// single most common velocity edit there is.
+//
+// Deliberately NOT a breakpoint envelope: that is its own roadmap row with its own GUI widget. This
+// is the two-endpoint case, which covers crescendo/decrescendo and costs a line of math.
+
+/** THE ramp formula, shared by the CLI/MCP path and the piano roll's own toolbar (which computes
+ * it client-side to paint the velocity lane in the same gesture — ui/ has no build-time dependency
+ * on src/core, so it mirrors this and test/velocity-ramp-parity.test.ts pins both against the same
+ * expected values). Position `i` of `n` maps linearly from `from` to `to`; a single note takes
+ * `to`, the phrase's destination, since "ramp to 0.9" on one note plainly means 0.9. */
+export function rampVelocityAt(from: number, to: number, i: number, n: number): number {
+  if (n <= 1) return to
+  return from + (to - from) * (i / (n - 1))
+}
+
+/** Linearly ramps the scoped notes' velocities from `from` to `to`, ordered by START TIME (ties by
+ * id, the same total order legatoNotes uses) — a ramp is a statement about the phrase's shape in
+ * time, so two notes in a chord at the same start get adjacent ramp positions rather than one
+ * being arbitrarily skipped. Both endpoints are 0..1, the same unit `velocity` always uses. */
+export function rampVelocity(doc: BeatDocument, trackId: string, from: number, to: number, opts: NoteScopeOptions = {}): { doc: BeatDocument; changed: number } {
+  const track = findNoteTrack(doc, trackId)
+  for (const [label, v] of [['from', from], ['to', to]] as const) {
+    if (!Number.isFinite(v) || v < 0 || v > 1) throw new BeatPitchTimeError(`${label} must be a velocity 0..1, got ${v}`)
+  }
+  const wanted = scopeNoteIds(track, opts.noteIds)
+  const ordered = track.notes.filter((n) => wanted.has(n.id)).sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+  if (ordered.length === 0) return { doc, changed: 0 }
+  const target = new Map<string, number>()
+  ordered.forEach((n, i) => target.set(n.id, canon(rampVelocityAt(from, to, i, ordered.length))))
+  let changed = 0
+  const notes = track.notes.map((n) => {
+    const velocity = target.get(n.id)
+    if (velocity === undefined || velocity === n.velocity) return n
+    changed++
+    return { ...n, velocity }
+  })
+  return { doc: replaceTrack(doc, { ...track, notes }), changed }
+}
+
+/** Randomizes the scoped notes' velocities by up to +/-`amount` (0..1), seeded so the same seed
+ * over the same notes always produces the same result — reproducibility is the whole reason this
+ * isn't `Math.random()`, and it is what lets a variation be re-derived rather than stored.
+ *
+ * Draws come from src/core/rng.ts's mulberry32, the ONE generator (CLAUDE.md's own rule), and are
+ * consumed in a fixed order — notes sorted by (start, id) — so adding a note later in the phrase
+ * cannot shift every earlier note's draw. Results clamp to 0..1 rather than wrapping. */
+export function randomizeVelocity(doc: BeatDocument, trackId: string, amount: number, opts: NoteScopeOptions & { seed?: number } = {}): { doc: BeatDocument; changed: number } {
+  const track = findNoteTrack(doc, trackId)
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1) throw new BeatPitchTimeError(`amount must be > 0 and <= 1, got ${amount}`)
+  const wanted = scopeNoteIds(track, opts.noteIds)
+  const ordered = track.notes.filter((n) => wanted.has(n.id)).sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+  if (ordered.length === 0) return { doc, changed: 0 }
+  const rng = mulberry32(opts.seed ?? 1)
+  const target = new Map<string, number>()
+  for (const n of ordered) {
+    const delta = (rng() * 2 - 1) * amount
+    target.set(n.id, canon(Math.max(0, Math.min(1, n.velocity + delta))))
+  }
+  let changed = 0
+  const notes = track.notes.map((n) => {
+    const velocity = target.get(n.id)
+    if (velocity === undefined || velocity === n.velocity) return n
+    changed++
+    return { ...n, velocity }
   })
   return { doc: replaceTrack(doc, { ...track, notes }), changed }
 }

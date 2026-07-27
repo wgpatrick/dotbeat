@@ -195,6 +195,16 @@ function scaleLabel(scale: BeatScale): string {
   return `${root} ${scale.name}`
 }
 
+/** THE ramp formula — hand-mirrors src/core/pitchtime.ts's `rampVelocityAt` exactly (ui/ has no
+ * build-time dependency on src/core; test/velocity-ramp-parity.test.ts pins BOTH against the same
+ * expected values, so `beat velocity ramp` and this toolbar cannot produce different curves).
+ * Position `i` of `n` maps linearly from `from` to `to`; a single note takes `to`, the phrase's
+ * destination, since "ramp to 0.9" on one note plainly means 0.9. */
+function rampVelocityAt(from: number, to: number, i: number, n: number): number {
+  if (n <= 1) return to
+  return from + (to - from) * (i / (n - 1))
+}
+
 /** Scale-LOCK is deliberately session-only UI state, never written to the .beat file — the same
  * call mute/solo and group-collapsed already make (see BeatGroup's comment in src/core/document.ts).
  * The scale itself is a musical fact worth storing; "am I currently constraining my own mouse" is a
@@ -560,6 +570,13 @@ export function NoteView({ track }: { track: BeatTrack }) {
   function announceSnap(from: number, to: number) {
     showToast(`${pitchName(from)} is not in ${scaleLabel(trackScale!)} — placed ${pitchName(to)} instead. Uncheck Scale lock to write it anyway.`)
   }
+
+  // Velocity Ramp/Randomize field state (Phase 41 Stream E). Defaults chosen to be USEFUL on the
+  // first click rather than neutral: 0.6 -> 0.95 is an audible crescendo, and ±0.12 is a scatter you
+  // can hear without it sounding broken. A toolbar whose defaults do nothing teaches nothing.
+  const [rampFrom, setRampFrom] = useState(0.6)
+  const [rampTo, setRampTo] = useState(0.95)
+  const [randAmount, setRandAmount] = useState(0.12)
 
   const pitchWindowRef = useRef<{ trackId: string; lo: number; hi: number } | null>(null)
   // Phase 29 Stream GC bug 2 (research 80/83): freeze the pitch window per-track, in a ref, instead
@@ -1341,6 +1358,63 @@ export function NoteView({ track }: { track: BeatTrack }) {
     for (const [id, value] of Object.entries(p)) postEdit(`${track.id}.${editPrefix}.${id}.velocity`, String(value))
   }
 
+  // ---- velocity Ramp / Randomize (Phase 41 Stream E) ------------------------------------------
+  // The draw-across gesture above shapes velocities freehand; these are the two shapes you almost
+  // always actually want, in one click. The case that motivated them: a 4-bar loop repeated for
+  // hundreds of bars is the same eight notes over and over, and flat velocity is precisely what
+  // makes that read as a loop instead of a part.
+  //
+  // Both write through the same per-note `.velocity` /edit path the paint gesture uses, stamped
+  // with ONE gestureId so the whole shape is a single Undo — the same multi-note coalescing every
+  // other batch gesture in this file already does. No new daemon route: velocity is a scalar field
+  // and the generic {path,value} channel already expresses it exactly.
+  //
+  // Scope follows the same rule as the Pitch & Time panel: the current selection when there is one,
+  // the whole track otherwise. Ordered by START TIME (ties by id) — a ramp is a claim about the
+  // phrase's shape in time, and that is the same total order core's `rampVelocity` uses.
+  function scopedNotesInOrder(): BeatNote[] {
+    const t = useStore.getState().doc?.tracks.find((x) => x.id === track.id)
+    if (!t) return []
+    const chosen = sel.length > 0 ? t.notes.filter((n) => sel.includes(n.id)) : t.notes
+    return [...chosen].sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+  }
+
+  function applyVelocityRamp(from: number, to: number) {
+    const ordered = scopedNotesInOrder()
+    if (ordered.length === 0) {
+      showToast('No notes to ramp — select some notes, or add some to this track first.')
+      return
+    }
+    const gestureId = newGestureId()
+    ordered.forEach((n, i) => {
+      const value = Number(rampVelocityAt(from, to, i, ordered.length).toFixed(4))
+      if (value === n.velocity) return
+      postEdit(`${track.id}.note.${n.id}.velocity`, String(value), gestureId)
+    })
+    showToast(`Ramped ${ordered.length} note${ordered.length === 1 ? '' : 's'} from ${from} to ${to}.`)
+  }
+
+  function applyVelocityRandomize(amount: number) {
+    const ordered = scopedNotesInOrder()
+    if (ordered.length === 0) {
+      showToast('No notes to randomize — select some notes, or add some to this track first.')
+      return
+    }
+    // Unlike the ramp, this one is NOT mirrored math: it goes through the daemon's own humanize/
+    // velocity primitive... except that route belongs to another stream tonight. So the GUI draws
+    // here with Math.random deliberately and says so — a one-off scatter the user judges by ear and
+    // re-rolls if they don't like it, exactly like re-clicking a dice button. `beat velocity
+    // randomize --seed N` is the reproducible path, and the toast points at it.
+    const gestureId = newGestureId()
+    for (const n of ordered) {
+      const delta = (Math.random() * 2 - 1) * amount
+      const value = Number(Math.max(0, Math.min(1, n.velocity + delta)).toFixed(4))
+      if (value === n.velocity) continue
+      postEdit(`${track.id}.note.${n.id}.velocity`, String(value), gestureId)
+    }
+    showToast(`Scattered ${ordered.length} velocit${ordered.length === 1 ? 'y' : 'ies'} by up to ±${amount}. Click again to re-roll; use \`beat velocity randomize --seed N\` for a reproducible one.`)
+  }
+
   // ---- chance (draw-across-notes paint gesture, Phase 23 Stream BA) ----
   // Y within the lane -> 0-100 chance (top = 100%/always fires, bottom = 0%/never) — same convention
   // as velocityFromY, just an int percent instead of a 0..1 float.
@@ -1932,6 +2006,71 @@ export function NoteView({ track }: { track: BeatTrack }) {
         </div>
       </div>
       {!isDrums && <ScalePanel track={track} locked={scaleLocked} onLockedChange={setScaleLocked} />}
+      {!isDrums && editable && (
+        <div
+          className="velocity-tools"
+          data-testid="velocity-tools"
+          title="shape the velocities of the selection (or the whole track when nothing is selected) — the freehand alternative is dragging across the velocity lane above"
+        >
+          <span className="velocity-tools-title section-heading">Velocity</span>
+          <span className="velocity-tools-scope">{sel.length > 0 ? `${sel.length} selected` : 'whole track'}</span>
+          <label className="velocity-tools-field" title="starting velocity of the ramp (0..1)">
+            from
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={rampFrom}
+              data-velocity-input="from"
+              onChange={(e) => setRampFrom(Math.max(0, Math.min(1, Number(e.target.value))))}
+            />
+          </label>
+          <label className="velocity-tools-field" title="ending velocity of the ramp (0..1)">
+            to
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={rampTo}
+              data-velocity-input="to"
+              onChange={(e) => setRampTo(Math.max(0, Math.min(1, Number(e.target.value))))}
+            />
+          </label>
+          <button data-velocity-op="ramp" title="linearly ramp velocities across the phrase in start-time order" onClick={() => applyVelocityRamp(rampFrom, rampTo)}>
+            Ramp
+          </button>
+          {/* Swapping the endpoints is the single most common follow-up ("no, the other way"), and
+              doing it by hand means retyping two fields. */}
+          <button
+            data-velocity-op="ramp-flip"
+            title="swap from/to and ramp the other way"
+            onClick={() => {
+              setRampFrom(rampTo)
+              setRampTo(rampFrom)
+              applyVelocityRamp(rampTo, rampFrom)
+            }}
+          >
+            ⇄
+          </button>
+          <label className="velocity-tools-field" title="maximum deviation for Randomize (0..1)">
+            ±
+            <input
+              type="number"
+              min={0.01}
+              max={1}
+              step={0.05}
+              value={randAmount}
+              data-velocity-input="amount"
+              onChange={(e) => setRandAmount(Math.max(0.01, Math.min(1, Number(e.target.value))))}
+            />
+          </label>
+          <button data-velocity-op="randomize" title="scatter velocities by up to ±amount; click again to re-roll" onClick={() => applyVelocityRandomize(randAmount)}>
+            Randomize
+          </button>
+        </div>
+      )}
       {!isDrums && <PitchTimePanel track={track} noteIds={sel} totalSteps={totalSteps} />}
       {!isDrums && <NoteNameReadout track={track} noteIds={sel} />}
       {editable && eventKind === 'note' && sel.length === 1 && (

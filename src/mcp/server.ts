@@ -40,6 +40,10 @@ import {
   invertNotes,
   reverseNotes,
   legatoNotes,
+  rampVelocity,
+  randomizeVelocity,
+  setTrackScale,
+  parseScaleValue,
   consolidateRatchet,
   SCALE_NAMES,
   addTrack,
@@ -1114,6 +1118,96 @@ const TOOLS: ToolDef[] = [
       writeFileSync(file, serialize(doc))
       const diff = formatDiff(diffDocuments(before, doc))
       return changed === 0 ? 'no notes resized\n' : diff
+    },
+  },
+  {
+    // Phase 41 Stream E. The deterministic half of velocity shaping — humanize's seeded jitter was
+    // the only velocity tool that existed, so there was no way to say "get louder across this
+    // phrase". Matters most for loops: a 4-bar part repeated for 200 bars is the same notes over
+    // and over, and uniform velocity is what makes that read as a loop rather than a performance.
+    name: 'beat_velocity_ramp',
+    description: 'Linearly ramps the scoped notes\' velocities from `from` to `to` (both 0..1), ordered by START TIME (ties by id) — a crescendo or decrescendo across the phrase. Notes in a chord at the same start take adjacent ramp positions rather than one being skipped. A single scoped note takes `to`. note_ids restricts to a selection; without it the whole track ramps. Deterministic — for jitter use beat_velocity_randomize or beat_humanize.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        from: { type: 'number', description: 'starting velocity, 0..1' },
+        to: { type: 'number', description: 'ending velocity, 0..1' },
+        note_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track', 'from', 'to'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = rampVelocity(before, str(args, 'track'), num(args, 'from'), num(args, 'to'), {
+        ...(Array.isArray(args.note_ids) ? { noteIds: (args.note_ids as unknown[]).map(String) } : {}),
+      })
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'no velocities changed (already at those values)\n' : diff
+    },
+  },
+  {
+    name: 'beat_velocity_randomize',
+    description: 'Jitters the scoped notes\' velocities by up to +/-amount (0..1), clamped to 0..1. SEEDED and reproducible: the same seed over the same notes always gives the same result, and draws are consumed in (start, id) order so adding a note later in the phrase does not shift every earlier note\'s draw. note_ids restricts to a selection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        amount: { type: 'number', description: 'maximum deviation, > 0 and <= 1' },
+        seed: { type: 'number', description: 'reproducibility seed, default 1' },
+        note_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['file', 'track', 'amount'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const { doc, changed } = randomizeVelocity(before, str(args, 'track'), num(args, 'amount'), {
+        ...(typeof args.seed === 'number' ? { seed: args.seed } : {}),
+        ...(Array.isArray(args.note_ids) ? { noteIds: (args.note_ids as unknown[]).map(String) } : {}),
+      })
+      writeFileSync(file, serialize(doc))
+      const diff = formatDiff(diffDocuments(before, doc))
+      return changed === 0 ? 'no velocities changed\n' : diff
+    },
+  },
+  {
+    // Phase 41 Stream E. The STORED half of Scale Mode — beat_fit_scale is the one-shot transform,
+    // this is the persistent declaration the piano roll shades rows from and locks entry to.
+    name: 'beat_scale',
+    description: 'Declares (or clears) a track\'s scale — Scale Mode\'s stored Root + Scale pair. The GUI piano roll shades this scale\'s rows and can lock note entry to them; unlike beat_fit_scale it changes no notes, only what the project says it is in. `root` is a pitch class 0-11 (0=C). `name` is a scale name (same vocabulary as beat_fit_scale) OR the literal "custom", in which case `pitch_classes` gives the root-relative set explicitly — needed because every NAMED scale contains a third and so commits the melody to major or minor, which suspended/modal music (sus2/sus4/add9) deliberately does not: for that, pass e.g. root 1 with pitch_classes [0,2,5,7,10]. Omit both name and pitch_classes to clear the declaration. Rejected on drums/audio tracks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string' },
+        root: { type: 'number', description: 'pitch class 0-11, 0=C' },
+        name: { type: 'string', description: 'a scale name, or "custom" with pitch_classes' },
+        pitch_classes: { type: 'array', items: { type: 'number' }, description: 'root-relative pitch classes 0-11 for a custom scale; must include 0' },
+      },
+      required: ['file', 'track'],
+    },
+    handler: (args) => {
+      const file = str(args, 'file')
+      const before = parse(readFileSync(file, 'utf8'))
+      const track = str(args, 'track')
+      let doc
+      if (args.name === undefined && args.pitch_classes === undefined) {
+        doc = setTrackScale(before, track, null)
+      } else {
+        const root = num(args, 'root')
+        const name = str(args, 'name')
+        const pcs = Array.isArray(args.pitch_classes) ? (args.pitch_classes as unknown[]).map(Number).join(',') : ''
+        // Same value grammar, same parser, as `beat scale` and `beat set <track>.scale` — one
+        // implementation across the three surfaces (the house parity rule), not three.
+        doc = setTrackScale(before, track, parseScaleValue(pcs ? `${root} ${name} ${pcs}` : `${root} ${name}`))
+      }
+      writeFileSync(file, serialize(doc))
+      return formatDiff(diffDocuments(before, doc))
     },
   },
   {

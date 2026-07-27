@@ -83,6 +83,19 @@ usage (one command's block: beat help <command>, or beat <command> --help):
   beat invert <file> <track> [axis-pitch] [--notes id,id]  mirror pitch around axis (default: selection's own mean)
   beat reverse <file> <track> [--notes id,id]              tape-reverse the scoped notes' time span
   beat legato <file> <track> [--gap 0] [--notes id,id]     extend each note to the next note's start
+  beat velocity ramp <file> <track> <from> <to> [--notes id,id]   linearly ramp velocities across the phrase, in
+                                                          start-time order (0..1); the cheapest way to stop a
+                                                          repeating loop reading as one
+  beat velocity randomize <file> <track> <amount> [--seed N] [--notes id,id]
+                                                          jitter velocities by +/-amount (0..1), seeded and
+                                                          reproducible
+  beat scale <file> <track> <root 0-11> <name> [<pc,pc,...>]      declare the track's scale (Scale Mode); the
+                                                          piano roll shades its rows and can lock entry to them.
+                                                          <name> is a scale name or "custom" plus explicit
+                                                          root-relative pitch classes (e.g. 0,2,5,7,10 — a set
+                                                          with no third, for suspended/modal writing)
+  beat scale <file> <track> --clear                       remove the declaration
+  beat scale --list-scales                                list the valid <name> values
   beat consolidate <file> <track> [--notes id,id]          bake ratcheted notes (ratchetCount>1) back into
                                                           discrete notes (the ratchet "consolidate" action)
   beat diff <a.beat> <b.beat>                             semantic (musical) diff — reads like an edit list

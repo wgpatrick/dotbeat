@@ -54,6 +54,10 @@ import {
   invertNotes,
   reverseNotes,
   legatoNotes,
+  rampVelocity,
+  randomizeVelocity,
+  setTrackScale,
+  parseScaleValue,
   consolidateRatchet,
   SCALE_NAMES,
   addTrack,
@@ -328,6 +332,25 @@ const HELP = [
   { cmd: 'invert', text: `  beat invert <file> <track> [axis-pitch] [--notes id,id]  mirror pitch around axis (default: selection's own mean)` },
   { cmd: 'reverse', text: `  beat reverse <file> <track> [--notes id,id]              tape-reverse the scoped notes' time span` },
   { cmd: 'legato', text: `  beat legato <file> <track> [--gap 0] [--notes id,id]     extend each note to the next note's start` },
+  {
+    cmd: 'velocity',
+    text: `  beat velocity ramp <file> <track> <from> <to> [--notes id,id]   linearly ramp velocities across the phrase, in
+                                                          start-time order (0..1); the cheapest way to stop a
+                                                          repeating loop reading as one
+  beat velocity randomize <file> <track> <amount> [--seed N] [--notes id,id]
+                                                          jitter velocities by +/-amount (0..1), seeded and
+                                                          reproducible`,
+  },
+  {
+    cmd: 'scale',
+    text: `  beat scale <file> <track> <root 0-11> <name> [<pc,pc,...>]      declare the track's scale (Scale Mode); the
+                                                          piano roll shades its rows and can lock entry to them.
+                                                          <name> is a scale name or "custom" plus explicit
+                                                          root-relative pitch classes (e.g. 0,2,5,7,10 — a set
+                                                          with no third, for suspended/modal writing)
+  beat scale <file> <track> --clear                       remove the declaration
+  beat scale --list-scales                                list the valid <name> values`,
+  },
   {
     cmd: 'consolidate',
     text: `  beat consolidate <file> <track> [--notes id,id]          bake ratcheted notes (ratchetCount>1) back into
@@ -2087,6 +2110,75 @@ function legatoCmd(argv) {
   const { doc, changed } = legatoNotes(before, track, opts)
   writeDoc(file, before, doc)
   if (changed === 0) process.stdout.write('no notes resized\n')
+}
+
+// Phase 41 Stream E. Velocity shaping — `ramp` is deterministic (crescendo/decrescendo), `randomize`
+// is seeded jitter. Both are thin wrappers on src/core/pitchtime.ts, the same shape every other
+// pitch-time verb here has, so the CLI/MCP/GUI trio share one implementation rather than three.
+function velocityCmd(argv) {
+  // Loud exit on an unknown flag (R1-F2 / pilot 109's "silent mode changes are the worst failure
+  // mode"). New verbs reject from day one — test/cli-surface.test.ts's UNKNOWN_FLAG_HOLES ledger
+  // is a hole that only ever shrinks, never a list to join.
+  const known = ['--notes', '--seed']
+  for (const a of argv) {
+    if (a.startsWith('--') && !known.includes(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${known.join(', ')})`)
+  }
+  const sub = argv[0]
+  if (sub !== 'ramp' && sub !== 'randomize') {
+    throw new BeatEditError('velocity needs a subcommand: `beat velocity ramp <file> <track> <from> <to>` or `beat velocity randomize <file> <track> <amount> [--seed N]`')
+  }
+  const rest = argv.slice(1)
+  const positional = rest.filter((a, i) => !a.startsWith('--') && !['--notes', '--seed'].includes(rest[i - 1]))
+  const noteIds = notesFlag(rest)
+  const scope = noteIds ? { noteIds } : {}
+  if (sub === 'ramp') {
+    const [file, track, from, to] = positional
+    if (!file || !track || from === undefined || to === undefined) throw new BeatEditError('velocity ramp needs <file> <track> <from 0..1> <to 0..1> [--notes id,id]')
+    const before = readDoc(file)
+    const { doc, changed } = rampVelocity(before, track, Number(from), Number(to), scope)
+    writeDoc(file, before, doc)
+    if (changed === 0) process.stdout.write('no velocities changed (already at those values)\n')
+    return
+  }
+  const [file, track, amount] = positional
+  if (!file || !track || amount === undefined) throw new BeatEditError('velocity randomize needs <file> <track> <amount 0..1> [--seed N] [--notes id,id]')
+  const seedIdx = rest.indexOf('--seed')
+  const before = readDoc(file)
+  const { doc, changed } = randomizeVelocity(before, track, Number(amount), {
+    ...scope,
+    ...(seedIdx !== -1 ? { seed: Number(rest[seedIdx + 1]) } : {}),
+  })
+  writeDoc(file, before, doc)
+  if (changed === 0) process.stdout.write('no velocities changed\n')
+}
+
+// Phase 41 Stream E. Declares (or clears) a track's scale — the stored half of Scale Mode. The
+// value grammar is parsed by core's parseScaleValue, the SAME function `beat set <track>.scale` and
+// POST /edit use, so the three spellings of this edit cannot drift.
+function scaleCmd(argv) {
+  const known = ['--clear', '--list-scales']
+  for (const a of argv) {
+    if (a.startsWith('--') && !known.includes(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${known.join(', ')})`)
+  }
+  if (argv.includes('--list-scales')) {
+    process.stdout.write(`${SCALE_NAMES.join('\n')}\ncustom  (then give explicit root-relative pitch classes, e.g. 0,2,5,7,10)\n`)
+    return
+  }
+  const positional = argv.filter((a) => !a.startsWith('--'))
+  const [file, track, ...valueParts] = positional
+  if (!file || !track) throw new BeatEditError('scale needs <file> <track> <root 0-11> <name> [<pc,pc,...>]  |  <file> <track> --clear  |  --list-scales')
+  const before = readDoc(file)
+  if (argv.includes('--clear')) {
+    writeDoc(file, before, setTrackScale(before, track, null))
+    return
+  }
+  if (valueParts.length === 0) {
+    const t = before.tracks.find((x) => x.id === track)
+    if (!t) throw new BeatEditError(`no track "${track}"`)
+    process.stdout.write(t.scale ? `${t.scale.root} ${t.scale.name}${t.scale.pitchClasses ? ` ${t.scale.pitchClasses.join(',')}` : ''}\n` : 'no scale declared\n')
+    return
+  }
+  writeDoc(file, before, setTrackScale(before, track, parseScaleValue(valueParts.join(' '))))
 }
 
 function consolidateCmd(argv) {
@@ -6571,6 +6663,12 @@ async function main() {
     case 'reverse':
       reverseCmd(rest)
       break
+    case 'velocity':
+      velocityCmd(rest)
+      return
+    case 'scale':
+      scaleCmd(rest)
+      return
     case 'legato':
       legatoCmd(rest)
       break
