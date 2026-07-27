@@ -4115,13 +4115,40 @@ body {
 }
 
 /* ---- Phase 24 Stream CD: timeline zoom controls (arrangement toolbar) ---- */
+/* Phase 41 Stream D: the navigation cluster (zoom, zoom-to-selection/back, marker, follow, loop
+   region). `margin-left: auto` moved here from .arr-zoom-controls so the whole group is what gets
+   pushed right — and, crucially, what wraps as a unit when the row runs out of width. Before this,
+   each control was an independent flex item after the auto margin and the last one ("loop
+   selection") simply overflowed the viewport. */
+.arr-nav-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+  /* flex-shrink: 0 is the load-bearing declaration. As a shrinkable flex item this group was being
+     squeezed narrower than its own content by .arr-length-bar, which then squashed the last control
+     inside it ("loop selection" -> an 18px stub reading "loop select…") instead of letting the row
+     wrap. Refusing to shrink makes .arr-length-bar's existing flex-wrap move the whole cluster to
+     its own line, which is what you want on a narrow window anyway. */
+  flex-shrink: 0;
+}
+/* flex-shrink: 0 is what actually makes the wrap happen. Without it the children stay on one line
+   and get SQUEEZED instead — "loop selection" rendered as an 18px sliver reading "loop select…",
+   fully inside the viewport (so an off-screen check passed) and completely unusable. Squashing, not
+   overflow, is how a flex toolbar runs out of room. */
+.arr-nav-controls > *,
+.arr-nav-controls .arr-toolbtn,
+.arr-nav-controls .arr-chip-btn {
+  flex: 0 0 auto;
+}
 .arr-zoom-controls {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 11px;
   color: var(--text-dim);
-  margin-left: auto;
 }
 .arr-zoom-readout {
   min-width: 54px;

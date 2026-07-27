@@ -3482,6 +3482,12 @@ export function ArrangementView() {
             ))}
           </select>
         </label>
+        {/* Phase 41 Stream D: one wrappable cluster for every navigation control. Stream D added
+            four buttons (zoom-to-selection, zoom-back, + marker, follow) to a row that was already
+            at capacity, and pushed "loop selection" clean off the right edge at 1280px — caught by
+            reading this stream's own verify screenshot, not by any assertion. Grouping them means
+            the whole cluster wraps to a second line together instead of the last item overflowing. */}
+        <div className="arr-nav-controls">
         {/* Phase 24 Stream CD: timeline zoom, independent of container width. "fit" (disabled once
             already at fit) returns to the pre-Stream-CD default; +/- step pxPerBar by ZOOM_FACTOR;
             Cmd/Ctrl+scroll-wheel over the timeline (onWheelZoom below) does the same, anchored to the
@@ -3555,7 +3561,7 @@ export function ArrangementView() {
                 looping bars {loopRegion.start + 1}–{loopRegion.end}
               </span>
               <button
-                className="arr-chip-btn"
+                className="arr-toolbtn"
                 data-loop-clear="1"
                 title="stop looping just this range — back to the full song/loop"
                 onClick={() => setLoopRange(null)}
@@ -3565,7 +3571,13 @@ export function ArrangementView() {
             </>
           ) : (
             <button
-              className="arr-chip-btn"
+              // Phase 41 Stream D: was `.arr-chip-btn` — an 18px FIXED SQUARE meant for the section
+              // chips' single-glyph +/-/x/o icons. A two-word text label never fitted it: Phase 24
+              // Stream CE's own verify screenshot shows "loop selection" spilling out of the box as
+              // bare unstyled text, and it stayed that way for seventeen phases because nothing
+              // asserts layout and nobody re-read the screenshot. `.arr-toolbtn` is the auto-width
+              // padded text button the rest of this toolbar already uses.
+              className="arr-toolbtn"
               data-loop-selection="1"
               disabled={!selection.bars}
               title={selection.bars ? `loop bars ${selection.bars.start + 1}–${selection.bars.end}` : 'drag the ruler or a track to select a bar range first'}
@@ -3574,6 +3586,7 @@ export function ArrangementView() {
               loop selection
             </button>
           )}
+        </div>
         </div>
       </div>
 

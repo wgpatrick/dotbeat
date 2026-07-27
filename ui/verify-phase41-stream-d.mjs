@@ -96,6 +96,27 @@ async function main() {
     const overflow = await page.$eval('.arr-scroll', (el) => el.scrollWidth - el.clientWidth)
     check(overflow > 500, `D0 the zoomed 240-bar timeline overflows its container by ${overflow}px, so there is something to navigate`)
 
+    // ── D0b: every toolbar control is actually reachable ──────────────────────────────────────
+    // Stream D added four buttons to a row that was already at capacity and pushed "loop
+    // selection" clean off the right edge of a 1280px viewport. Nothing asserted it, because
+    // "the button exists in the DOM" was still true — it was only visible in a screenshot. So
+    // assert the thing that actually matters: no control's right edge lies outside the window.
+    // Two distinct failures, and the second is the one that actually happened: a control can run
+    // OFF the right edge, or it can stay on screen and be flex-SQUASHED to an unusable sliver
+    // (clientWidth < scrollWidth). The first cut of this check only tested the former and passed
+    // while "loop selection" was rendering as an 18px stub reading "loop select…".
+    const clipped = await page.evaluate(() =>
+      [...document.querySelectorAll('.arr-length-bar button, .arr-length-bar select')]
+        .filter((el) => el.offsetParent !== null)
+        .map((el) => ({
+          label: (el.textContent || el.getAttribute('data-action') || '?').trim().slice(0, 24),
+          right: Math.round(el.getBoundingClientRect().right),
+          squashedBy: el.scrollWidth - el.clientWidth,
+        }))
+        .filter((b) => b.right > window.innerWidth + 1 || b.squashedBy > 1),
+    )
+    check(clipped.length === 0, `D0b every arrangement toolbar control is fully visible and unsquashed${clipped.length ? ` — bad: ${clipped.map((c) => `${c.label}(right ${c.right}, squashed ${c.squashedBy}px)`).join(', ')}` : ''}`)
+
     // ── D1: follow ────────────────────────────────────────────────────────────────────────────
     check(await page.$eval('[data-action="follow-toggle"]', (el) => el.getAttribute('data-follow')) === '1', 'D1 follow is on by default')
 
