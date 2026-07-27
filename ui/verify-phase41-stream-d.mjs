@@ -19,6 +19,7 @@
 //   D7  help        every key the handler implements is documented in ShortcutHelp
 //   D8  minimap     the overview strip tracks the real viewport, and clicking it moves the timeline
 //   D0c sticky      track headers (and their mute/solo) stay pinned at every horizontal scroll depth
+//   D0d nojump      showing the contextual vary bar does not move the track rows under the pointer
 //
 // Usage: node ui/verify-phase41-stream-d.mjs
 
@@ -145,6 +146,24 @@ async function main() {
       )
     }
     await page.evaluate(() => { document.querySelector('.arr-scroll').scrollLeft = 0 })
+
+    // ── D0d: making a selection must not move the arrangement ─────────────────────────────────
+    // Stream A's pilot lost a drag to this: the contextual vary bar mounts only when a selection
+    // exists, so the first drag's own selection pushed every track row down 39px, and the second
+    // drag — aimed with pre-shift positions — landed on the wrong track. A layout jump that
+    // silently retargets a gesture is worse than a cosmetic bug.
+    await page.evaluate((port) => fetch(`http://localhost:${port}/selection`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
+    }), gui.daemonPort)
+    await sleep(400)
+    const rowTopBefore = await page.$eval('.arr-row', (el) => Math.round(el.getBoundingClientRect().top))
+    await page.evaluate((port) => fetch(`http://localhost:${port}/selection`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bars: { start: 4, end: 12 } }),
+    }), gui.daemonPort)
+    await pollUntil(async () => (await page.evaluate(() => !!window.__store.getState().selection.bars)) ? true : null, 'the D0d selection', 5000)
+    await sleep(300)
+    const rowTopAfter = await page.$eval('.arr-row', (el) => Math.round(el.getBoundingClientRect().top))
+    check(rowTopAfter === rowTopBefore, `D0d the first track row stayed at y=${rowTopBefore} when a selection appeared (was ${rowTopBefore}, now ${rowTopAfter}) — no mid-workflow layout jump`)
 
     // ── D1: follow ────────────────────────────────────────────────────────────────────────────
     check(await page.$eval('[data-action="follow-toggle"]', (el) => el.getAttribute('data-follow')) === '1', 'D1 follow is on by default')

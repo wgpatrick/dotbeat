@@ -284,6 +284,14 @@ body {
 }
 
 /* ---- vary-and-audition affordance (Phase 15 Stream I) ---- */
+/* Phase 41 Stream D — see App.tsx's comment on the slot. The height is pinned to what the bar
+   actually measures (padding 7px top+bottom + a 12px/1.4 line + 1px border = 39px); the verify
+   script asserts the arrangement does not move when a selection appears, so if the bar's own
+   metrics ever drift this fails loudly rather than silently reintroducing the jump. */
+.vary-slot {
+  min-height: 39px;
+  flex: 0 0 auto;
+}
 .vary-bar {
   display: flex;
   align-items: center;
