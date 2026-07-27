@@ -45,14 +45,33 @@ const SEGMENT_HIT = 6 // px distance to grab a segment (Phase 26 Stream DI: alt/
 // curve rather than a staircase, and the reduction below is what stops that resolution from
 // costing 64 file lines per gesture.
 const PAINT_QUANTUM = 1
-// Simplify tolerance as a fraction of the param's own min..max range — 1% is below the resolution
-// of a 46px-tall lane (one pixel is ~3% of the range), so nothing the user could see or aim at is
-// discarded, while hand jitter and collinear runs are. Expressed as a fraction, not an absolute,
-// because a lane's units are whatever the param uses (20..18000 Hz for cutoff, -60..6 dB for gain).
-const PAINT_SIMPLIFY_FRACTION = 0.01
+// Simplify tolerance as a fraction of the LANE'S HEIGHT — i.e. applied in normalized axis space,
+// after valueToNorm, never in the param's raw units. It has to be normalized rather than a fraction
+// of min..max because a log-axis param's raw units are not uniform across the lane: 1% of cutoff's
+// 20..18000 range is 180 Hz, which is most of the bottom third of the axis and nothing at all at
+// the top, so a painted arc came back with its lower half flattened and its upper half carrying
+// every sample. Set just under one pixel: the drawable height is AUTO_H - 2*AUTO_PAD = 34px, so one
+// pixel is 1/34 = 2.9% and 2% is ~0.68px — nothing anyone could see or aim at is discarded, while
+// sub-pixel hand jitter and collinear runs are.
+const PAINT_SIMPLIFY_FRACTION = 0.02
 // Two points at the same clip-local time are not representable as a curve, so a run is keyed by
 // quantized time; this is the slack used when matching EXISTING points against the painted span.
 const RUN_SPAN_EPS = 1e-6
+
+// ── Log-scale y-axis (Phase 41 Stream C) ─────────────────────────────────────────────────────────
+// The params the ENGINE interpolates in log space, and therefore the params this lane must draw in
+// log space. This is a mirror of one specific fact in ui/src/audio/engine.ts: `interpolateAutomation
+// (points, step, log)` is called with log=true at exactly one call site, the cutoff branch
+// ("cutoff only — frequency perception is logarithmic"); every other call passes false. Grep
+// `interpolateAutomation(` there before adding to this set.
+//
+// The roadmap filed this as readability ("frequency-style params read better on a log axis than
+// linear") and it is — a 20..4000 Hz sweep occupies the bottom 22% of a linear 20..18000 lane, which
+// a pilot on the owner's own project made unmissable. But it is first a CORRECTNESS bug: on a
+// linear axis the straight line the lane draws between two cutoff breakpoints is not the curve the
+// engine plays between them, so the picture disagreed with the sound. On a log axis the engine's own
+// `a * (b/a)^t` IS a straight line, so the drawing becomes exact.
+const LOG_AXIS_PARAMS = new Set(['cutoff'])
 
 /** Every knob param, keyed — the value ranges (min/max) that map a raw automation value to the
  * sub-lane's y-axis. Reuses synthParams.ts's declarative table (the same one SynthPanel renders),
@@ -301,14 +320,35 @@ export function AutomationLane({
     if (!points.some((p) => p.id === selectedSegment.aId) || !points.some((p) => p.id === selectedSegment.bId)) setSelectedSegment(null)
   }, [points, selectedSegment])
 
+  // Log axis only where the ENGINE is also logarithmic (LOG_AXIS_PARAMS above) AND the range is
+  // strictly positive — ln(0) has no answer, so a param whose min is 0 or negative silently stays
+  // linear rather than producing NaN pixels.
+  const logAxis = LOG_AXIS_PARAMS.has(param) && min > 0 && max > min
+  const valueToNorm = useCallback(
+    (v: number) => (logAxis ? (Math.log(Math.max(min, Math.min(max, v))) - Math.log(min)) / (Math.log(max) - Math.log(min)) : (v - min) / (max - min || 1)),
+    [logAxis, min, max],
+  )
+  const normToValue = useCallback((n: number) => (logAxis ? min * Math.pow(max / min, n) : min + n * (max - min)), [logAxis, min, max])
+
   const valueToY = useCallback((v: number) => {
-    const norm = Math.max(0, Math.min(1, (v - min) / (max - min || 1)))
+    const norm = Math.max(0, Math.min(1, valueToNorm(v)))
     return AUTO_PAD + (1 - norm) * (AUTO_H - 2 * AUTO_PAD)
-  }, [min, max])
+  }, [valueToNorm])
   const yToValue = useCallback((y: number) => {
     const norm = Math.max(0, Math.min(1, 1 - (y - AUTO_PAD) / (AUTO_H - 2 * AUTO_PAD)))
-    return min + norm * (max - min)
-  }, [min, max])
+    return normToValue(norm)
+  }, [normToValue])
+
+  /** The value the ENGINE reads a fraction `t` of the way through the segment a->b, so the curve
+   * this lane draws between two breakpoints is the curve that plays between them. Mirrors
+   * interpolateAutomation in ui/src/audio/engine.ts: `a * (b/a)^t` for the log params, plain lerp
+   * otherwise. (A plain LINEAR segment needs no sampling at all — on a log axis the engine's own
+   * geometric interpolation is a straight line in screen space — so this is only reached by the
+   * eased 'curve' segments, which is exactly where the two used to disagree.) */
+  const segValue = useCallback(
+    (a: number, b: number, t: number) => (logAxis && a > 0 && b > 0 ? a * Math.pow(b / a, t) : a + (b - a) * t),
+    [logAxis],
+  )
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -427,7 +467,7 @@ export function AutomationLane({
             for (let s = 1; s <= STEPS; s++) {
               const t = s / STEPS
               const shaped = t * t // quadratic ease-in — mirrors engine.ts's curveEase exactly
-              ctx.lineTo(ax + (bx - ax) * t, valueToY(a.value + (b.value - a.value) * shaped))
+              ctx.lineTo(ax + (bx - ax) * t, valueToY(segValue(a.value, b.value, shaped)))
             }
           } else {
             ctx.lineTo(bx, by)
@@ -490,7 +530,7 @@ export function AutomationLane({
 
     markersRef.current = markers
     segmentsRef.current = segments
-  }, [points, totalBars, pxPerBar, occurrences, loopSteps, track.color, valueToY, drawMode, selectedSegment, clampTime, clampValue])
+  }, [points, totalBars, pxPerBar, occurrences, loopSteps, track.color, valueToY, segValue, drawMode, selectedSegment, clampTime, clampValue])
 
   useEffect(() => {
     draw()
@@ -683,7 +723,21 @@ export function AutomationLane({
           const to = stroke[stroke.length - 1]!.time
           // A single tap in draw mode is one point, not a "run" — no reduction to do, and calling
           // it a run would let the span logic wipe a neighbouring point for no reason.
-          const run = stroke.length < 3 ? stroke : simplifyAutomationPoints(stroke, { tolerance: Math.abs(max - min) * PAINT_SIMPLIFY_FRACTION })
+          //
+          // Reduce in NORMALIZED axis space, not in the param's raw units. On a log-axis param the
+          // two are wildly different: a tolerance of 1% of cutoff's 20..18000 range is 180 Hz, which
+          // erases everything below ~400 Hz (the whole bottom half of the lane) while removing
+          // almost nothing above 2 kHz — a painted arc came back with its lower half flattened and
+          // its upper half still carrying every sample. Caught by looking at the drawn result during
+          // the pilot, not by any assertion. Normalized, `tolerance` means what its comment says:
+          // 1% of the lane's HEIGHT, the same everywhere on the axis, linear params included.
+          const run =
+            stroke.length < 3
+              ? stroke
+              : simplifyAutomationPoints(
+                  stroke.map((p, i) => ({ time: p.time, value: valueToNorm(p.value), i })),
+                  { tolerance: PAINT_SIMPLIFY_FRACTION },
+                ).map((k) => stroke[k.i]!)
           writeRun({ track: track.id, clip: clipId, param }, points, run, { from, to })
           draw()
         }
@@ -788,7 +842,7 @@ export function AutomationLane({
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [points, clipTimeFromX, yToValue, draw, hitTestSegment, fmt, track.id, clipId, param, drawMode, min, max, pxPerBar, clampTime, clampValue],
+    [points, clipTimeFromX, yToValue, valueToNorm, draw, hitTestSegment, fmt, track.id, clipId, param, drawMode, pxPerBar, clampTime, clampValue],
   )
 
   /** Sample the chosen shape across the clip's own tiling period and write it as one run.
