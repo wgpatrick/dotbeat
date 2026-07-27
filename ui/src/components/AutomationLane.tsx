@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { postAutomation } from '../daemon/bridge'
 import { type AutomationInterpolation, type BeatAutomationPoint, type BeatTrack, type TrackKind } from '../types'
@@ -213,6 +213,9 @@ export function AutomationLane({
     // so re-crossing a time you already painted overwrites it (the natural "keep correcting the
     // stroke until you let go" behavior) instead of stacking two points at one instant.
     | { mode: 'paint'; pts: Map<number, number> }
+    // Phase 41 Stream C: a whole SEGMENT being moved — its two flanking points travel together by
+    // the same (dt, dv), so the segment keeps its slope and length while it slides.
+    | { mode: 'segment'; aId: string; bId: string; dt: number; dv: number }
   const dragRef = useRef<DragState | null>(null)
   /** Previous paint sample position, so a fast sweep can be filled in rather than left as isolated
    * samples (see onPointerDown's paint branch). Null whenever no stroke is in progress. */
@@ -228,6 +231,18 @@ export function AutomationLane({
   // lane header next to the controls it modifies, with the pointer changing to a crosshair-pencil
   // and the lane tinted while it is armed.
   const [drawMode, setDrawMode] = useState(false)
+
+  // ── Segment selection (Phase 41 Stream C) ─────────────────────────────────────────────────────
+  // research/65: "dotbeat has no concept of a segment as a selectable/draggable unit — only
+  // individual points." Shift+pointerdown anywhere within SEGMENT_HIT of a segment selects the pair
+  // of points that flank it and drags BOTH by the same delta, so the segment slides without
+  // changing its own slope or length — which is the entire point of treating it as one object.
+  //
+  // Shift rather than the plain "click near, not on, a point" tier that row sketched: this lane's
+  // plain click on empty space already means "add a breakpoint here", and a proximity tier would
+  // make that gesture stop working within 6px of any existing curve — i.e. exactly where people
+  // add points. Ableton offers Shift-click for the same reason and dotbeat has shift free here.
+  const [selectedSegment, setSelectedSegment] = useState<{ aId: string; bId: string } | null>(null)
 
   // ── Predefined shapes (Phase 41 Stream C) ─────────────────────────────────────────────────────
   // `beat automate-shape` / `beat_automate_shape` have sampled these five shapes since Phase 37;
@@ -271,6 +286,20 @@ export function AutomationLane({
       document.removeEventListener('keydown', onKeyDown)
     }
   }, [popup])
+
+  // A dragged segment must stay inside the lane it lives in: clip-local time within one tiling
+  // period (points past it would never be drawn or played), value within the param's own range.
+  // Shared by the live preview and the committed write so they cannot disagree.
+  const clampTime = useCallback((t: number) => Number(Math.max(0, Math.min(loopSteps, t)).toFixed(2)), [loopSteps])
+  const clampValue = useCallback((v: number) => Number(Math.max(min, Math.min(max, v)).toFixed(4)), [min, max])
+
+  // A selection is a pair of point IDS, so it outlives ordinary redraws but not the points
+  // themselves — alt-deleting an endpoint, or a shape insert replacing the lane, must not leave a
+  // highlight pointing at breakpoints that no longer exist.
+  useEffect(() => {
+    if (!selectedSegment) return
+    if (!points.some((p) => p.id === selectedSegment.aId) || !points.some((p) => p.id === selectedSegment.bId)) setSelectedSegment(null)
+  }, [points, selectedSegment])
 
   const valueToY = useCallback((v: number) => {
     const norm = Math.max(0, Math.min(1, (v - min) / (max - min || 1)))
@@ -346,6 +375,9 @@ export function AutomationLane({
       const hi = Math.max(...times)
       eff = eff.filter((p) => p.time < lo - RUN_SPAN_EPS || p.time > hi + RUN_SPAN_EPS)
       for (const [t, v] of drag.pts) eff.push({ id: '__draft__', time: t, value: v })
+    }
+    if (drag?.mode === 'segment') {
+      eff = eff.map((p) => (p.id === drag.aId || p.id === drag.bId ? { ...p, time: clampTime(p.time + drag.dt), value: clampValue(p.value + drag.dv) } : p))
     }
     eff.sort((a, b) => a.time - b.time)
     const draggedId = drag?.mode === 'move' ? drag.id : undefined
@@ -426,9 +458,39 @@ export function AutomationLane({
         }
       }
     }
+    // Phase 41 Stream C: the selected segment (or the one being dragged) redrawn on top, thicker
+    // and in white, with fatter caps on its two flanking points. Drawn as a SECOND pass over the
+    // segments the loop above already laid out rather than branching inside it, so the ordinary
+    // curve path stays one uninterrupted stroke and the highlight is never half-painted under a
+    // later tile. Every tiled repeat of the segment highlights, matching how the curve itself tiles.
+    const sel = drag?.mode === 'segment' ? { aId: drag.aId, bId: drag.bId } : selectedSegment
+    if (sel) {
+      ctx.save()
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 3
+      ctx.lineCap = 'round'
+      for (const s of segments) {
+        if (s.aId !== sel.aId || s.bId !== sel.bId) continue
+        ctx.beginPath()
+        ctx.moveTo(s.ax, s.ay)
+        ctx.lineTo(s.bx, s.by)
+        ctx.stroke()
+        for (const [cx, cy] of [
+          [s.ax, s.ay],
+          [s.bx, s.by],
+        ] as const) {
+          ctx.beginPath()
+          ctx.arc(cx, cy, 4.2, 0, Math.PI * 2)
+          ctx.fillStyle = '#fff'
+          ctx.fill()
+        }
+      }
+      ctx.restore()
+    }
+
     markersRef.current = markers
     segmentsRef.current = segments
-  }, [points, totalBars, pxPerBar, occurrences, loopSteps, track.color, valueToY, drawMode])
+  }, [points, totalBars, pxPerBar, occurrences, loopSteps, track.color, valueToY, drawMode, selectedSegment, clampTime, clampValue])
 
   useEffect(() => {
     draw()
@@ -495,6 +557,63 @@ export function AutomationLane({
       // alt-click deletes a breakpoint
       if (hit && e.altKey) {
         postAutomation({ op: 'remove', track: track.id, clip: clipId, param, id: hit })
+        return
+      }
+      // Phase 41 Stream C — shift+drag moves a whole SEGMENT. Checked before every other branch
+      // (including draw mode) so the modifier always means the same thing on this lane. A shift
+      // press that lands nowhere near a segment clears the selection rather than doing something
+      // else, which keeps "shift is the segment key" true with no exceptions to remember.
+      if (e.shiftKey) {
+        e.preventDefault()
+        const seg = hitTestSegment(localX, localY)
+        if (!seg) {
+          setSelectedSegment(null)
+          return
+        }
+        setSelectedSegment({ aId: seg.aId, bId: seg.bId })
+        const drag: DragState = { mode: 'segment', aId: seg.aId, bId: seg.bId, dt: 0, dv: 0 }
+        dragRef.current = drag
+        draw()
+        const showLabel = (lx: number, ly: number, text: string) => {
+          const label = dragLabelRef.current
+          if (!label) return
+          label.style.display = 'block'
+          label.style.left = `${lx + 10}px`
+          label.style.top = `${ly - 18}px`
+          label.textContent = text
+        }
+        const onMove = (ev: PointerEvent) => {
+          const d = dragRef.current
+          if (!d || d.mode !== 'segment') return
+          const lx = ev.clientX - rect.left
+          const ly = ev.clientY - rect.top
+          // Deltas straight from pixel deltas — NOT from clipTimeFromX, whose modulo-loopSteps wrap
+          // would make a drag across a tile boundary jump a whole period backwards.
+          d.dt = ((lx - localX) / pxPerBar) * 16
+          d.dv = yToValue(ly) - yToValue(localY)
+          draw()
+          showLabel(lx, ly, `${d.dt >= 0 ? '+' : ''}${d.dt.toFixed(2)} steps, ${d.dv >= 0 ? '+' : ''}${fmt(d.dv)}`)
+        }
+        const onUp = () => {
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+          const label = dragLabelRef.current
+          if (label) label.style.display = 'none'
+          const d = dragRef.current
+          dragRef.current = null
+          if (d && d.mode === 'segment' && (d.dt !== 0 || d.dv !== 0)) {
+            // Both endpoints move by the same delta, each written through the ordinary move path
+            // (op 'set' WITH an id), so the segment keeps its slope, its length and its ids — and
+            // so a segment drag reads in `beat diff` as two point moves, which is what it is.
+            for (const id of [d.aId, d.bId]) {
+              const p = points.find((pt) => pt.id === id)
+              if (p) postAutomation({ op: 'set', track: track.id, clip: clipId, param, id, time: clampTime(p.time + d.dt), value: clampValue(p.value + d.dv) })
+            }
+          }
+          draw()
+        }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
         return
       }
       // Phase 41 Stream C — Draw Mode: drag paints a run of breakpoints. Checked AFTER alt-delete
@@ -639,7 +758,7 @@ export function AutomationLane({
 
       const onMove = (ev: PointerEvent) => {
         const drag = dragRef.current
-        if (!drag || drag.mode === 'bow' || drag.mode === 'paint') return
+        if (!drag || drag.mode === 'bow' || drag.mode === 'paint' || drag.mode === 'segment') return
         const lx = ev.clientX - rect.left
         const ly = ev.clientY - rect.top
         const t = clipTimeFromX(lx)
@@ -654,7 +773,7 @@ export function AutomationLane({
         hideLabel()
         const drag = dragRef.current
         dragRef.current = null
-        if (!drag || drag.mode === 'bow' || drag.mode === 'paint') {
+        if (!drag || drag.mode === 'bow' || drag.mode === 'paint' || drag.mode === 'segment') {
           draw()
           return
         }
@@ -669,7 +788,7 @@ export function AutomationLane({
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [points, clipTimeFromX, yToValue, draw, hitTestSegment, fmt, track.id, clipId, param, drawMode, min, max],
+    [points, clipTimeFromX, yToValue, draw, hitTestSegment, fmt, track.id, clipId, param, drawMode, min, max, pxPerBar, clampTime, clampValue],
   )
 
   /** Sample the chosen shape across the clip's own tiling period and write it as one run.
@@ -885,6 +1004,31 @@ export function AutomationPicker({
     const idx = prevIdx === -1 ? 0 : Math.min(prevIdx, available.length - 1)
     setPick(available[idx]?.key ?? '')
   }, [available, pick])
+
+  // ── Automation discovery (Phase 41 Stream C) ──────────────────────────────────────────────────
+  // research/65: Ableton lights an LED next to any control carrying automation plus a "Show
+  // Automated Parameters Only" filter; dotbeat had no glance-able signal at all.
+  //
+  // The row proposed a dot on the picker's own <option>s. On its own that is nearly a no-op here:
+  // ArrangementView's visibleParamsFor already auto-opens a lane for every automated param on the
+  // PRIMARY clip and then subtracts those from `available`, so an option carrying automation on the
+  // clip you are looking at is never in the list to be dotted. What IS invisible — and what the row
+  // was actually after — is automation on this track's OTHER clips, i.e. the sections you are not
+  // currently looking at. That is the whole track scanned below, not one clip.
+  const automated = useMemo(() => {
+    const byParam = new Map<string, { clips: string[]; points: number }>()
+    for (const c of track.clips) {
+      for (const l of c.automation) {
+        if (l.points.length === 0) continue
+        const cur = byParam.get(l.param) ?? { clips: [], points: 0 }
+        cur.clips.push(c.id)
+        cur.points += l.points.length
+        byParam.set(l.param, cur)
+      }
+    }
+    return byParam
+  }, [track.clips])
+
   return (
     <div className="arr-auto-picker" style={{ height: PICKER_H }}>
       <div className="arr-auto-picker-head" style={{ width: headerWidth }}>
@@ -894,6 +1038,9 @@ export function AutomationPicker({
         <select className="arr-auto-select" value={pick} data-auto-select={track.id} onChange={(e) => setPick(e.target.value)}>
           {available.map((a) => (
             <option key={a.key} value={a.key}>
+              {/* A native <option> cannot carry markup, so the badge is a leading glyph — the same
+                  trick every browser-native "already used" list uses. */}
+              {automated.has(a.key) ? '● ' : ''}
               {laneLabel(track, a.key)}
             </option>
           ))}
@@ -901,6 +1048,24 @@ export function AutomationPicker({
         <button className="arr-auto-add" data-auto-add={track.id} onClick={() => pick && onAdd(pick)} disabled={!pick}>
           + add lane
         </button>
+        {automated.size > 0 && (
+          <div className="arr-auto-automated" data-auto-automated={track.id}>
+            <span className="arr-auto-automated-label">automated:</span>
+            {[...automated.entries()].map(([p, info]) => (
+              <button
+                key={p}
+                type="button"
+                className="arr-auto-chip"
+                data-auto-chip={`${track.id}.${p}`}
+                title={`${info.points} point${info.points === 1 ? '' : 's'} across clip${info.clips.length === 1 ? '' : 's'} ${info.clips.join(', ')} — click to show this lane`}
+                onClick={() => onAdd(p)}
+              >
+                {laneLabel(track, p)}
+                <span className="arr-auto-chip-count">{info.points}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
