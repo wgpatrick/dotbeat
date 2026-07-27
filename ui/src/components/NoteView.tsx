@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { declaredLaneNames, firstPlacementClip, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatScale, type BeatTrack } from '../types'
-import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, newGestureId, type PitchTimeOp } from '../daemon/bridge'
+import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, commitVaryFeel, newGestureId, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
@@ -2351,6 +2351,44 @@ function PitchTimePanel({ track, noteIds, totalSteps }: { track: BeatTrack; note
           Quantize
         </button>
       </div>
+
+      {/* Phase 41 Stream E (roadmap: "One-click Humanize inside the Pitch & Time panel" — "the
+          cheapest item on this list relative to value; the hard part, the algorithm, is already
+          done"). Ableton keeps a plain Humanize button in the same selection-transform panel as
+          Transpose/Invert/Legato (ch.10 pp.207-210); dotbeat had the primitive (src/core/
+          humanize.ts, `beat humanize`) with no affordance here.
+
+          It goes through the EXISTING POST /vary-feel/commit route, which is already exactly this
+          call — humanize(doc, track, {timing: 0.15, velocity: 0.06, seed}) — rather than adding a
+          `humanize` case to /pitch-time. That route lives in daemon.ts, which another stream owns
+          tonight; reusing a route that already does the thing beats duplicating the handler, which
+          is what "parity is structural" would advise regardless.
+
+          The consequence is that this one op is WHOLE-TRACK where its neighbours honour the
+          selection, because /vary-feel/commit only note-scopes drum lanes. That is stated in the
+          label, not buried in a tooltip: a button reading "Humanize" in a panel headed "3 notes
+          selected" would be a quiet lie, and a user who selects three notes and watches forty move
+          has been misled by the control, not by the docs. Note-scoped humanize needs `ids` plumbed
+          through that route — reported to the stream that owns it.
+
+          A fresh seed per click, so clicking again re-rolls rather than replaying the same
+          deviation — the same "click to re-roll" contract the Randomize button has. */}
+      <button
+        disabled={busy}
+        data-pitch-time-op="humanize"
+        title="nudge every note on this track slightly off the grid (timing 0.15, velocity 0.06) — the same `beat humanize` the CLI runs. Whole track, not the selection. Click again to re-roll."
+        onClick={() => {
+          setBusy(true)
+          setMsg(null)
+          const seed = Math.floor(Math.random() * 1000000)
+          void commitVaryFeel(track.id, seed)
+            .then(() => setMsg(`humanized the whole track (seed ${seed})`))
+            .catch((e) => setMsg(e instanceof Error ? e.message : String(e)))
+            .finally(() => setBusy(false))
+        }}
+      >
+        Humanize track
+      </button>
 
       <button
         disabled={busy}
