@@ -193,7 +193,22 @@ export interface LayerSpec {
    * ownership... pads are wide and diffuse by design, so distinguishing layers by frequency (which
    * would narrow them) works against the goal." So chords/lead voice layers preserve their
    * fundamental; the bass stack keeps its sourced sub/mid/growl band ladder (§1's table is explicit
-   * that the growl layer IS the 500-2000 Hz band) and leans on the de-harsh pair instead. */
+   * that the growl layer IS the 500-2000 Hz band) and leans on the de-harsh pair instead.
+   *
+   * IT WAS DECLARED AND NEVER READ until 2026-07-26. `grep -rn preserveFundamental src/` returned
+   * exactly this line: the field existed, the comment above described the defect precisely, and no
+   * code implemented it — so the fix it describes had never shipped. Measured on the three chords
+   * seeds the owner has now rated twice, every one of them had its STAB highpassed above its own
+   * lowest fundamental:
+   *   seed 138  notes MIDI 64-76 (330-659 Hz), highpass 660 Hz
+   *   seed 1147 notes MIDI 65-84 (349-1047 Hz), highpass 800 Hz
+   *   seed 2156 notes MIDI 67-88 (392-1319 Hz), highpass 640 Hz
+   * i.e. the bottom of the stab's range was the bare upper harmonic series with the fundamental
+   * gone — this comment's own words, "thin and metallic". The owner's words, independently, on the
+   * same clips: "The stabs in the layered after and production feels... just thin and not complex?"
+   *
+   * Realized by `preservedCutoffHz`, at BUILD time rather than at draw time, because the lowest
+   * fundamental is a property of the notes and the architecture is drawn before there are any. */
   preserveFundamental?: boolean
   production?: LayerProduction
 }
@@ -619,6 +634,86 @@ const TRANSIENT_ATTACK_S = 0.03
  *  3. A SLOW LAYER COULD SET THE FLOOR. `Math.min` over a set that included swells was still the
  *     fastest attack in practice, but the set is now explicitly transient-only so the window is
  *     measured between things that actually have transients. */
+/** Seconds per 16th-note step at a tempo — the conversion the two build-time fits below both need. */
+const stepSeconds = (bpm: number): number => 60 / bpm / 4
+
+/** How much of its own SHORTEST note a swell layer may spend getting to full level.
+ *
+ * THE DEFECT THIS FIXES, measured 2026-07-26 with `scripts/layered-diagnose.mjs` on chords seed 1147
+ * — the seed the owner reported as "The dark pad on the layered-after is not loud enough and is
+ * barely audible":
+ *
+ *   layer      rms dB   vs FULL
+ *   FULL       -29.08      0.00
+ *   pad        -40.00    -10.93     <- nominal gain -11 dB, the SECOND LOUDEST layer in the stack
+ *   stab       -30.70     -1.62     <- nominal gain -10 dB, one dB above the pad
+ *
+ * One dB of nominal difference, 9.3 dB of measured difference. The cause is not the darkness and not
+ * the fader: seed 1147's figure is 16th notes at 154 BPM, so every pad note lasts **97 ms**, and the
+ * pad drew a **240 ms** attack from `padAttack`'s `[0.06, 0.1, 0.16, 0.24]` — the amplitude envelope
+ * was still climbing when the note ended, on every note. The cross-check is seed 2156: the same
+ * 240 ms attack, but at 90 BPM with 2-10 step notes (333-1666 ms), and there the pad measures
+ * -1.57 dB under the mix. Same draw, same balance, opposite outcome, entirely explained by attack
+ * against note length.
+ *
+ * This is the same class of bug as the per-layer audibility failure the bass diagnostic caught (a
+ * nominal -5 dB offset measuring as -14 dB): a layer's fader is not its contribution. The
+ * architecture is drawn without the figure, so it cannot know; the fit therefore lives at BUILD
+ * time, where the notes exist.
+ *
+ * 0.5 means the layer is at full level for at least the back half of its shortest note. Calibrated
+ * to the complaint, not to a source, and labelled as such — nothing in the mined corpus states an
+ * attack-to-note-length ratio (docs/priors/organic-vs-mechanical.md §6 records "envelope variation
+ * between layers" as an OPEN gap with nothing found). */
+const SWELL_ATTACK_NOTE_FRACTION = 0.5
+
+/** The fit never takes a swell layer below this, even on a very short note.
+ *
+ * `TRANSIENT_ATTACK_S` is 30 ms and `FUSION_WINDOW_S` is 25 ms: a "pad" clamped under 30 ms stops
+ * being the chord arriving and becomes a second hit on the chord's onset, which is precisely the
+ * "'pop' 'pop' with two hits" the owner reported and that `fuseAttacks` bug #2 was fixed for. 40 ms
+ * keeps every fitted swell comfortably outside both windows, so a swell layer can be made audible
+ * without ever being made percussive. */
+const SWELL_ATTACK_FLOOR_S = 0.04
+
+/** Fit a SWELL layer's attack to the notes it will actually play. Transient layers are returned
+ * untouched — their onset alignment belongs to `fuseAttacks`, and this must never speed one up. */
+export function fitSwellAttack(patch: Partial<BeatSynth>, notes: readonly ComposedNote[], bpm: number): Partial<BeatSynth> {
+  const attack = patch.attack ?? 0.01
+  if (attack <= TRANSIENT_ATTACK_S || notes.length === 0) return patch
+  const shortestS = Math.min(...notes.map((n) => n.duration)) * stepSeconds(bpm)
+  const ceiling = Math.max(SWELL_ATTACK_FLOOR_S, Math.round(shortestS * SWELL_ATTACK_NOTE_FRACTION * 1000) / 1000)
+  return attack <= ceiling ? patch : { ...patch, attack: ceiling }
+}
+
+/** A highpass may never be pulled below this by fundamental preservation.
+ *
+ * At or under `MUD_HI_HZ` the layer becomes an OWNER of the 250-450 Hz boxy/muddy region, and
+ * `pruneOverlappingLayers` already decided this stack's mud ownership from the DRAWN cutoffs. A
+ * build-time clamp that silently changed the answer would invalidate a decision already taken — so
+ * the clamp stops just above the region rather than reaching into it. This is why the fix below is
+ * PARTIAL by construction on a stab whose lowest note sits inside the mud band. */
+const FUNDAMENTAL_HP_FLOOR_HZ = MUD_HI_HZ + 10
+
+const midiHz = (midi: number): number => 440 * Math.pow(2, (midi - 69) / 12)
+
+/** This layer's effective highpass once `preserveFundamental` is honoured: the drawn cutoff, pulled
+ * down to the lowest fundamental the layer actually plays, floored so neither the mud rule (above)
+ * nor `checkCrossover` rule 2/3 (a highpass below half the bottom layer's lowpass pours into its
+ * band, and opens an octave-wide overlap) can be broken by the clamp. Returns the drawn cutoff
+ * unchanged for every layer that does not ask, which is every bass layer and the bottom of each
+ * stack. */
+export function preservedCutoffHz(layer: LayerSpec, notes: readonly ComposedNote[], bottomLowpassHz: number): number {
+  if (layer.preserveFundamental !== true || layer.band.mode !== 'highpass' || notes.length === 0) return layer.band.cutoffHz
+  const lowestHz = midiHz(Math.min(...notes.map((n) => n.pitch)))
+  const floor = Math.max(FUNDAMENTAL_HP_FLOOR_HZ, bottomLowpassHz / 2)
+  // LOWER-ONLY, and the nesting order is what guarantees it: aim at the lowest fundamental, refuse
+  // to go under the floor, then never exceed what was drawn. Written the other way round
+  // (`max(floor, min(drawn, lowest))`) it would RAISE a highpass drawn below the floor — which is
+  // every chords pad — and punch the hole in the crossover ladder that rule 3 exists to reject.
+  return Math.round(Math.min(layer.band.cutoffHz, Math.max(floor, lowestHz)))
+}
+
 function fuseAttacks(layers: readonly LayerSpec[]): LayerSpec[] {
   const attackOf = (l: LayerSpec): number => l.patch.attack ?? 0.01
   const loudest = Math.max(...layers.map((l) => l.gainDb))
@@ -1067,9 +1162,60 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
   const lowestHp = pickRange(rng, bodyLp * 0.65, bodyLp * 0.95, 10)
   const bodyGain = pickRange(rng, -17, -12, 1)
   const padRel = pickRange(rng, 1, 6, 1)
-  const stabRel = pickRange(rng, 2, 7, 1)
+  // BALANCE: THE STAB IS DRAWN AGAINST THE PAD, NOT INDEPENDENTLY OF IT (2026-07-26), AND IT IS
+  // DRAWN *ABOVE* IT — which is the opposite of what the fader values suggest and is why this is
+  // decided from the per-layer diagnostic rather than from taste.
+  //
+  // `padRel` and `stabRel` used to be two unrelated draws over overlapping ranges (1..6 and 2..7),
+  // so the two layers' relationship was whatever the two draws happened to land on. Rendered per
+  // layer at the stack's own gain staging (scripts/layered-diagnose.mjs, the three seeds the owner
+  // has rated twice), a pad and a stab at comparable faders are NOT at comparable contributions:
+  //
+  //   seed   pad fader  stab fader   pad vs FULL   stab vs FULL
+  //   138      -13         -15          -1.37         -18.35
+  //   2156     -12          -8          -1.57         -12.11
+  //
+  // On 2156 the stab is drawn FOUR dB hotter than the pad and still arrives ten dB under it. The
+  // cause is duty cycle, not band: the pad sustains through the whole clip (sustain 0.85, no gate)
+  // while the stab is a 2-4 step blip with sustain 0.05, so whole-file RMS reads the pad's fader
+  // almost directly and reads the stab's through however much of the bar it is silent for. Equal
+  // faders are therefore a stab that disappears, and that is measurably what happened on 138, where
+  // the stab landed 18 dB under the mix — past `FUSION_AUDIBILITY_DB`, the file's own threshold for
+  // "an event the ear still times against".
+  //
+  // (Seed 1147, the one the owner called out — "The dark pad on the layered-after is not loud enough
+  // and is barely audible" — is NOT in that table because its pad was broken by a different defect
+  // entirely: a 240 ms attack on 97 ms notes. See `SWELL_ATTACK_NOTE_FRACTION`. Reading 1147's
+  // balance as a fader problem would have moved the wrong knob.)
+  //
+  // So the stab is drawn 2 to 6 dB OVER the bed, which measures as 8-13 dB under the full mix —
+  // audible as an accent, never the instrument. The floor is 2 rather than 0 because 0 was tried
+  // and measured: at stabOverPad 0 on seed 138 the stab arrived 14.6 dB under the mix, still past
+  // `FUSION_AUDIBILITY_DB`. Both are drawn unconditionally so the rng stream does not depend on the
+  // family. Same shape as the bassline's `lift`: the balance is constrained against MEASURED
+  // contribution, not left to two independent faders.
+  const stabOverPad = pickRange(rng, 2, 6, 1)
+  // WHEN NO PAD WAS DRAWN the stab is the ONLY mid voice over the body, and its floor came up from
+  // 2 to 4 dB, 2026-07-26, for the same measured reason. The worst draws in a rendered chords sweep
+  // are all no-pad stacks whose stab drew near the bottom of the old 2..7 range: seed 7201 put
+  // 61.4% of its energy in the bass band against a refs-packs chords p75 of 47.2%, with 35.9% in
+  // the mids against a p25 of 50.4% — the body swallowing the instrument, which is the failure
+  // `deriveTargets` was made two-sided to catch.
+  //
+  // HONEST LIMIT, because the +2 dB was measured too: it moved 7201 from 61.4% to 56.1% bass-band
+  // and did NOT rescue it. The rest of that draw's problem is structural rather than a level —
+  // `body+stab` is one SUSTAINED low layer plus one GATED mid layer, so whole-file band share reads
+  // the body almost alone whatever the stab's fader says. Recorded here rather than fixed, because
+  // the fix is a different question (should a gated stab be the only voice over the body at all?)
+  // and guessing at it inside a balance draw would hide it.
+  const stabSolo = pickRange(rng, 4, 8, 1)
   const airRel = pickRange(rng, -20, -12, 1)
   const bodyOsc = pickOne(rng, ['triangle', 'sine', 'sawtooth'] as const)
+
+  const hasPad = family.optional.includes('pad')
+  const hasStab = family.optional.includes('stab')
+  const hasAir = family.optional.includes('air')
+  const stabRel = hasPad ? padRel + stabOverPad : stabSolo
 
   // ---- PAD: the dark sustained bed -------------------------------------------------------------
   // detune is the most CONTESTED number in the mined prose corpus (sub-4 cents = "warmth" in deep
@@ -1119,14 +1265,67 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
   // the stab's band follows its register. At +12 it starts above the 250-450 Hz mud region (§2) and
   // above the pad's crossover, so the two layers own different bands as well as different octaves;
   // at +0 it sits in the pad's neighbourhood, which is what keeps the overlap pruner reachable.
-  const stabHp = stabOctave === 12 ? pickRange(rng, 500, 900, 20) : pickRange(rng, 300, 520, 20)
+  //
+  // THE TOP OF THE +12 RANGE CAME DOWN FROM 900 TO 780 Hz, 2026-07-26. 900 Hz is A5 — above the
+  // fundamental of every note a chords stab plays on any of the three seeds the owner has rated
+  // (their stabs span MIDI 64-88, i.e. 330-1319 Hz, with the BOTTOM of each range at 330/349/392 Hz)
+  // so the top of the old range deleted the fundamental of most of the layer and left the bare upper
+  // harmonic series: the `preserveFundamental` field's own words for that are "thin and metallic",
+  // and the owner's, independently, were "just thin and not complex". `preserveFundamental` (below)
+  // is the general fix and pulls the cutoff to the layer's own lowest note at build time; narrowing
+  // the draw means fewer stacks need rescuing in the first place. The floor stays clear of
+  // `MUD_HI_HZ` so the stab is still never a mud owner and `pruneOverlappingLayers` sees a stack
+  // whose mud ownership the build-time clamp cannot change.
+  const stabHp = stabOctave === 12 ? pickRange(rng, 480, 780, 20) : pickRange(rng, 300, 520, 20)
   const stabOsc = pickOne(rng, ['square', 'sawtooth'] as const)
   const stabPick = pickOne(rng, ['dropRoot', 'dropRoot', 'all'] as const)
+  // VOICES / OSCILLATOR COUNT — the "thin and not complex" half of the 2026-07-26 report, and the
+  // one place where §4a and §4e have to be read as the two DIFFERENT measurements they are.
+  //
+  //   §4a measures INCIDENCE: what fraction of chord patches switch unison on at all. 50.0% do, and
+  //       of those, 42.9/50 = 86% run three or more voices, median 3. It says nothing about how
+  //       thick the ones that DO use it should be.
+  //   §4e measures OSCILLATOR COUNT: 71.4% of chord patches run THREE oscillators and 78.6% split by
+  //       octave — both the highest of any of the ten roles measured. That is a claim about how many
+  //       tones sound at once, which is a different axis from whether unison is engaged.
+  //
+  // The previous pass folded the two together and read §4a as a depth claim, cutting the pad from
+  // [3,4,5,6] voices to [1,1,3,4]. For the PAD that lands correctly by accident — [1,1,3,4] is a 50%
+  // incidence with the corpus median when on, which is exactly §4a — and the owner's verdict on the
+  // pad afterwards was "The pads seems more warm and have more tones / more voices", so the pad's
+  // draw stays untouched. What the pass did NOT do is apply §4e anywhere: it left the stab at osc +
+  // osc2 with no sub and no unison, i.e. TWO oscillators, on the most oscillator-dense role in the
+  // corpus. That is the miss, and it is the layer the owner called thin.
+  //
+  // dotbeat's engine cannot separate the two axes the way Surge can: `osc3` is gated on
+  // `unisonVoices >= 3` (ui/src/audio/engine.ts:3132/4132 — osc3 runs the MIRRORED -osc2Detune, so
+  // three voices really is a third oscillator, not a chorus of the second). So §4e's 71.4% is
+  // reachable only through the unison control, and the stab is drawn at exactly that rate: 5 in 7.
+  const stabVoices = pickWeighted(rng, [[3, 5], [1, 2]] as const)
+  // narrower than the pad's 0.35-0.7. The stab is the focused accent of the pair and §4f's width
+  // mechanism for chords is chorus (32.1%), not spread — this is thickness, not width.
+  const stabWidth = pickRange(rng, 0.2, 0.45, 0.05)
+  // §4b: chords' own detune distribution is median 12.1 cents, p90 21.6 — half a lead's p90 of 41.2.
+  // Swept around the median and stopping well short of the p90, because with three voices the same
+  // number of cents buys more beating than it did with two.
+  const stabDetune = pickRange(rng, 8, 16, 1)
   // still lowpassed — §4d's 82.1% is the ROLE's rate, not the pad layer's — but resting three to
   // five times higher than the pad. That gap IS the bright/dark half of "two different jobs".
   // Scaled with `padLp` when that was calibrated against the reference pool (see its comment), so
   // the RATIO between the two layers, which is the part that carries the meaning, is unchanged.
-  const stabLp = pickRange(rng, 3600, 6800, 200)
+  //
+  // CAME DOWN FROM 3600-6800 TO 3000-5600, 2026-07-26. The stab got 2-6 dB hotter and gained a
+  // third oscillator in the same pass, and both add energy the instrument's centroid reads; taking
+  // the resting lowpass down moves the added weight from the top of the stab to its bottom, which
+  // is the direction "full, not thin" points anyway — fullness is the fundamental and the
+  // oscillator count, not the top octave. Still 3-5x the pad's resting lowpass, so the bright/dark
+  // gap that makes the two layers two different jobs is unchanged.
+  //
+  // Measured, this is a SMALL move and is recorded as one: across the three rated seeds it took the
+  // rendered centroid down 3, 9 and 3 Hz (480->478, 657->648, 670->667) against the refs-packs
+  // chords IQR of 344-630. It is the right direction and it is not the reason those seeds sit where
+  // they sit.
+  const stabLp = pickRange(rng, 3000, 5600, 200)
   // GATE FLOOR MOVED FROM 1 TO 2 STEPS, and the release lengthened, 2026-07-26. A 1-step gate is a
   // 16th note — ~120 ms at the 120-128 BPM this arm renders at — under a chord that sustains, which
   // is a percussive chop, not a chord. Identical complaint shape to the bass gate raised earlier on
@@ -1152,9 +1351,6 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
   // `TRANSIENT_ATTACK_S`, so `fuseAttacks` classifies it as the chord arriving, not as an event).
   const airAttack = pickOne(rng, [0.05, 0.09, 0.14] as const)
 
-  const hasPad = family.optional.includes('pad')
-  const hasStab = family.optional.includes('stab')
-  const hasAir = family.optional.includes('air')
   // the LOWEST highpass must meet the body's lowpass within an octave; whichever voice sits lowest
   // takes that slot
   const padHp = hasPad ? lowestHp : stabHp
@@ -1206,6 +1402,9 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
       band: { mode: 'highpass', cutoffHz: padHp, resonance: 0.05 },
       gainDb: bodyGain + padRel,
       mono: false,
+      // NO `preserveFundamental` here, and the absence is a decision: `padHp` is drawn at 0.65-0.95
+      // of a 300-460 Hz body lowpass, so its whole range (195-437 Hz) already sits BELOW
+      // `FUNDAMENTAL_HP_FLOOR_HZ`. Declaring the flag would be declaring a fix that can never fire.
       patch: {
         // §4d: chord patches are filtered saws, and the filtering is what makes them lush. The saw
         // pair stays; the octave-split second oscillator is §4e's thickening move (78.6% of chord
@@ -1255,12 +1454,25 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
       band: { mode: 'highpass', cutoffHz: firstStabHp, resonance: 0.15 },
       gainDb: bodyGain + stabRel,
       mono: false,
+      // THE THIN-STAB FIX. Measured on all three seeds the owner has rated twice, this layer was
+      // highpassed ABOVE its own lowest fundamental (660/800/640 Hz against lowest notes of
+      // 330/349/392 Hz) — the bare upper harmonic series with the fundamental gone. See the field's
+      // own comment, which described this exact defect and had never been implemented.
+      preserveFundamental: true,
       patch: {
         osc: stabOsc as OscType,
         osc2Type: 'sawtooth' as OscType,
-        osc2Level: 0.3,
-        // §4b: chords' own detune distribution is median 12.1 / p90 21.6 cents. 12 is the median.
-        osc2Detune: 12,
+        // osc2 was a garnish at 0.3 against a role the corpus measures as the most oscillator-dense
+        // of the ten (§4e, 71.4% three-oscillator). At 0.45 it is a partner, and `unisonVoices >= 3`
+        // gives osc3 the same level (engine: `osc3Gain = unisonVoices >= 3 ? osc2Level : 0`), so
+        // this number sets the weight of BOTH added tones.
+        osc2Level: 0.45,
+        osc2Detune: stabDetune,
+        // §4e's three oscillators, at §4e's own rate — see `stabVoices` for why the unison control
+        // is the only route to a third oscillator in this engine, and for why §4a's 50% incidence
+        // governs the pad while §4e's 71.4% governs this layer.
+        unisonVoices: stabVoices,
+        unisonWidth: stabWidth,
         attack: stabAttack,
         decay: 0.16,
         sustain: 0.05,
@@ -1325,7 +1537,7 @@ function buildChordsArch(rng: () => number): LayeredArchitecture {
     layers,
     // the BOTTOM layer's line only — finishArchitecture appends the rest (and the ones pruning removed)
     `${bodyOsc} body root octave-down (anchor ${anchorLo}, lowpass ${bodyLp}) @${bodyGain} dB`,
-    { anchorLo, bodyLp, lowestHp, bodyGain, padRel, stabRel, airRel, bodyOsc, padDetune, padVoices, padWidth, padAttack, padLp, padPan, stabOctave, stabSteps, stabRelease, stabAttack, stabHp, stabLp, stabOsc, stabPick, airHp, airNoise, airAttack },
+    { anchorLo, bodyLp, lowestHp, bodyGain, padRel, stabRel, airRel, bodyOsc, padDetune, padVoices, padWidth, padAttack, padLp, padPan, stabOctave, stabSteps, stabRelease, stabAttack, stabHp, stabLp, stabOsc, stabPick, stabVoices, stabWidth, stabDetune, airHp, airNoise, airAttack },
   )
 }
 
@@ -1821,10 +2033,20 @@ export function buildLayeredClip(role: string, phrase: ComposedPhrase, bpm: numb
   let doc = parse(layeredScratchText(arch, bpm))
   const receipts: LayeredClip['layers'] = []
   const applied: string[] = []
+  // the two BUILD-TIME fits below both need the stack's bottom layer, which `checkCrossover` has
+  // just guaranteed is exactly one lowpassed layer
+  const bottomLowpassHz = arch.layers.find((l) => l.band.mode === 'lowpass')?.band.cutoffHz ?? 0
 
   for (const layer of arch.layers) {
     const notes = layerNotes(phrase, layer.figure, baseShift)
     if (notes.length === 0) throw new BeatBatchError(`layer "${layer.id}" derived no notes from the figure`)
+    // TWO FITS THE DRAW COULD NOT MAKE, because both depend on the notes and the architecture is
+    // drawn before there are any (see each helper for the measurement that motivates it):
+    //   - the highpass is pulled down to the layer's own lowest fundamental where it asks
+    //     (`preserveFundamental`) — the "thin and not complex" stab;
+    //   - a swell layer's attack is fitted to its own shortest note — the "barely audible" pad.
+    const cutoffHz = preservedCutoffHz(layer, notes, bottomLowpassHz)
+    const patch = fitSwellAttack(layer.patch, notes, bpm)
     doc = {
       ...doc,
       tracks: doc.tracks.map((t) => {
@@ -1834,9 +2056,9 @@ export function buildLayeredClip(role: string, phrase: ComposedPhrase, bpm: numb
           notes: notes.map((n, i) => ({ id: `l${i + 1}`, pitch: n.pitch, start: n.start, duration: n.duration, velocity: n.velocity, ...NOTE_FIELD_DEFAULTS })),
           synth: {
             ...t.synth,
-            ...layer.patch,
+            ...patch,
             volume: layer.gainDb,
-            cutoff: layer.band.cutoffHz,
+            cutoff: cutoffHz,
             filterType: layer.band.mode,
             resonance: layer.band.resonance ?? 0,
           },
@@ -1851,14 +2073,16 @@ export function buildLayeredClip(role: string, phrase: ComposedPhrase, bpm: numb
     // dark lowpass — was being stored on the synth and never rendered. The whole de-harsh move
     // shipped INERT, which is why "saw-toothy / metallic" survived the commit that was meant to
     // cure it. Same shape as the `comp` insert `applyLayerProduction` already adds by hand.
-    if (usesEq7(layer.patch)) doc = addEffect(doc, layer.id, 'eq7').doc
+    if (usesEq7(patch)) doc = addEffect(doc, layer.id, 'eq7').doc
     receipts.push({
       id: layer.id,
       notes: notes.length,
       loMidi: Math.min(...notes.map((n) => n.pitch)),
       hiMidi: Math.max(...notes.map((n) => n.pitch)),
       gainDb: layer.gainDb,
-      band: `${layer.band.mode} ${layer.band.cutoffHz} Hz`,
+      // the EFFECTIVE band, with the drawn value alongside when a build-time fit moved it — the
+      // receipt is what a rated clip is traced through, so it must report what rendered
+      band: `${layer.band.mode} ${cutoffHz} Hz` + (cutoffHz !== layer.band.cutoffHz ? ` (drawn ${layer.band.cutoffHz}, pulled to this layer's lowest fundamental)` : ''),
       mono: layer.mono,
     })
   }

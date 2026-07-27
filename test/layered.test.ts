@@ -24,6 +24,8 @@ import {
   verifyLayeredTargets,
   architectureFingerprint,
   architectureShape,
+  fitSwellAttack,
+  preservedCutoffHz,
   REF_POOL_QUANTILES,
   type LayeredFeatures,
 } from '../src/taste/layered.js'
@@ -277,7 +279,12 @@ test('buildLayeredClip assembles one synth track per layer, all playing the same
       assert.ok(track && track.kind === 'synth', `${role}: no synth track "${layer.id}"`)
       assert.equal(track.synth.volume, layer.gainDb, `${role}/${layer.id} level`)
       assert.equal(track.synth.filterType, layer.band.mode, `${role}/${layer.id} filter mode`)
-      assert.equal(track.synth.cutoff, layer.band.cutoffHz, `${role}/${layer.id} cutoff`)
+      // the DRAWN cutoff, except where `preserveFundamental` pulls it down to the layer's own
+      // lowest note — a build-time fit the architecture cannot make because it has no notes.
+      // Asserted through the same helper the builder uses so the two cannot drift apart.
+      const bottomLp = arch.layers.find((l) => l.band.mode === 'lowpass')!.band.cutoffHz
+      const expected = preservedCutoffHz(layer, layerNotes(phrase, layer.figure, anchorShift(phrase, arch.anchor)), bottomLp)
+      assert.equal(track.synth.cutoff, expected, `${role}/${layer.id} cutoff`)
       assert.ok(track.notes.length > 0, `${role}/${layer.id} has no notes`)
       // every layer's onsets are a subset of the shared figure's onsets
       const figureStarts = new Set(phrase.notes.map((n) => n.start))
@@ -327,6 +334,124 @@ test('layers really are registered apart — no two layers share a register AND 
       seen.add(key)
     }
   }
+})
+
+// ---- the two BUILD-TIME fits: the 2026-07-26 "barely audible pad / thin stab" gates ---------------
+
+test('no chords layer is ever highpassed above its own lowest fundamental', () => {
+  // The owner, on the three chords seeds he has now rated twice: "The stabs in the layered after and
+  // production feels... just thin and not complex?" Measured, every one of those stabs was
+  // highpassed ABOVE its own lowest note (660/800/640 Hz against fundamentals of 330/349/392 Hz) —
+  // the bare upper harmonic series with the fundamental gone, which is the exact failure the
+  // `preserveFundamental` field was declared for and which no code implemented.
+  //
+  // The fix is bounded on purpose (`FUNDAMENTAL_HP_FLOOR_HZ`, so the clamp can never reach into the
+  // mud region and change a decision `pruneOverlappingLayers` already took), so this asserts the
+  // reachable half: a layer that ASKS to preserve its fundamental is never highpassed above it
+  // unless the floor is what stopped the clamp.
+  const MUD_HI_HZ = 450 // mirrored from layered.ts; the floor is MUD_HI_HZ + 10
+  const midiHz = (m: number): number => 440 * Math.pow(2, (m - 69) / 12)
+  let clampsFired = 0
+  for (const role of LAYERED_ROLES) {
+    for (let seed = 0; seed < 60; seed++) {
+      const arch = layeredArchitecture(role, seed)
+      const phrase = phraseFor(role, seed)
+      const clip = buildLayeredClip(role, phrase, 124, { seed })
+      const bottomLp = arch.layers.find((l) => l.band.mode === 'lowpass')!.band.cutoffHz
+      for (const layer of arch.layers) {
+        if (layer.preserveFundamental !== true) continue
+        const track = clip.doc.tracks.find((t) => t.id === layer.id)!
+        assert.equal(track.kind, 'synth')
+        if (track.kind !== 'synth') continue
+        const lowestHz = midiHz(Math.min(...track.notes.map((n) => n.pitch)))
+        if (track.synth.cutoff !== layer.band.cutoffHz) clampsFired += 1
+        // never RAISED — the clamp is lower-only, or it would punch the hole in the ladder that
+        // checkCrossover rule 3 exists to reject
+        assert.ok(track.synth.cutoff <= layer.band.cutoffHz, `${role}/${layer.id} seed ${seed}: clamp RAISED the highpass to ${track.synth.cutoff} from ${layer.band.cutoffHz}`)
+        // and either it covers the fundamental, or the mud floor is why it does not
+        assert.ok(
+          track.synth.cutoff <= lowestHz + 1 || track.synth.cutoff <= MUD_HI_HZ + 11,
+          `${role}/${layer.id} seed ${seed}: highpassed at ${track.synth.cutoff} Hz, above its own lowest fundamental of ${lowestHz.toFixed(0)} Hz, with no floor to blame`,
+        )
+      }
+      // whatever the clamp did, the stack is still a valid crossover in the DOC, not just the draw
+      for (const layer of arch.layers) {
+        const track = clip.doc.tracks.find((t) => t.id === layer.id)!
+        if (track.kind !== 'synth' || layer.band.mode !== 'highpass') continue
+        assert.ok(track.synth.cutoff >= bottomLp / 2, `${role}/${layer.id} seed ${seed}: clamped to ${track.synth.cutoff} Hz, below half the bottom layer's ${bottomLp} Hz lowpass`)
+      }
+    }
+  }
+  // A GATE THAT CANNOT FIRE IS NOT A GATE (CLAUDE.md). The clamp existing but never engaging on 60
+  // seeds of every role would mean the fix shipped inert, which is exactly how the de-harsh EQ and
+  // fuseAttacks both shipped before this branch.
+  assert.ok(clampsFired > 0, 'preserveFundamental never engaged on any of 180 draws — the fix is inert')
+})
+
+test('a swell layer always reaches its own level: attack is fitted to the shortest note', () => {
+  // The owner, chords seed 1147: "The dark pad on the layered-after is not loud enough and is barely
+  // audible." Measured per layer, that pad sat 10.93 dB under the full mix at the second-highest
+  // fader in the stack — because its 240 ms attack was longer than the 97 ms notes it played, on
+  // every note. `fitSwellAttack` is the fix and this is its unit gate.
+  const notes = (durationSteps: number): { pitch: number; start: number; duration: number; velocity: number }[] => [
+    { pitch: 60, start: 0, duration: durationSteps, velocity: 0.8 },
+  ]
+  // 154 BPM => one 16th step is 97.4 ms; half of that is 48.7 ms, rounded to ms
+  assert.equal(fitSwellAttack({ attack: 0.24 }, notes(1), 154).attack, 0.049, 'a 240 ms swell on a 97 ms note was not fitted')
+  // a long note leaves the drawn attack alone
+  assert.equal(fitSwellAttack({ attack: 0.24 }, notes(16), 154).attack, 0.24, 'a swell that fits its note must not be touched')
+  // TRANSIENT layers are never sped up — that belongs to fuseAttacks, and speeding one up here would
+  // re-create the "'pop' 'pop' with two hits" the fusion fix removed
+  assert.equal(fitSwellAttack({ attack: 0.007 }, notes(1), 154).attack, 0.007, 'a transient attack was refitted')
+  // and the floor holds a fitted swell outside the 25 ms fusion window / 30 ms transient window even
+  // on an absurdly short note
+  assert.equal(fitSwellAttack({ attack: 0.24 }, notes(1), 300).attack, 0.04, 'the swell floor did not hold')
+
+  // end to end: no chords pad in a long sweep is left with an attack longer than its own note
+  for (let seed = 0; seed < 60; seed++) {
+    const arch = layeredArchitecture('chords', seed)
+    const pad = arch.layers.find((l) => l.id === 'pad')
+    if (!pad) continue
+    const clip = buildLayeredClip('chords', phraseFor('chords', seed), 154, { seed })
+    const track = clip.doc.tracks.find((t) => t.id === 'pad')!
+    assert.equal(track.kind, 'synth')
+    if (track.kind !== 'synth') continue
+    const shortestS = Math.min(...track.notes.map((n) => n.duration)) * (60 / 154 / 4)
+    assert.ok(
+      // +1 ms: the fit rounds its ceiling to whole milliseconds so the drawn number stays readable
+      track.synth.attack <= Math.max(0.04, shortestS * 0.5) + 0.001,
+      `chords seed ${seed}: pad attack ${track.synth.attack}s against a shortest note of ${shortestS.toFixed(3)}s`,
+    )
+    // and never fast enough to be heard as a second hit on the chord's onset
+    assert.ok(track.synth.attack >= 0.04 - 1e-9, `chords seed ${seed}: pad attack ${track.synth.attack}s is inside the transient window`)
+  }
+})
+
+test('the chords stab carries the corpus oscillator count and a bounded balance against the pad', () => {
+  // docs/priors/organic-vs-mechanical.md §4e: chords are the most oscillator-dense role measured —
+  // 71.4% of chord patches run THREE oscillators, the highest of the ten. dotbeat's engine gates
+  // osc3 on `unisonVoices >= 3` (ui/src/audio/engine.ts:3132), so that is the only route to it.
+  // §4a's 50% unison INCIDENCE governs the pad; §4e's 71.4% oscillator count governs the stab.
+  let three = 0
+  let stabs = 0
+  for (let seed = 0; seed < 400; seed++) {
+    const arch = layeredArchitecture('chords', seed)
+    const stab = arch.layers.find((l) => l.id === 'stab')
+    const pad = arch.layers.find((l) => l.id === 'pad')
+    if (!stab) continue
+    stabs += 1
+    if ((stab.patch.unisonVoices ?? 1) >= 3) three += 1
+    // §4b: chords median detune 12.1 cents, p90 21.6 — never a lead's 41.2
+    assert.ok((stab.patch.osc2Detune ?? 0) <= 21.6, `seed ${seed}: stab detune ${stab.patch.osc2Detune} past the chords p90 of 21.6 cents`)
+    // BALANCE: measured, a stab at the pad's own fader arrives 13-18 dB under it (duty cycle, not
+    // band), so it is drawn 2-6 dB over the bed. A stab under the bed is the buried-accent failure.
+    if (pad) {
+      const over = stab.gainDb - pad.gainDb
+      assert.ok(over >= 2 && over <= 6, `seed ${seed}: stab sits ${over} dB over the pad, outside the measured 2-6 dB window`)
+    }
+  }
+  const rate = three / stabs
+  assert.ok(rate > 0.6 && rate < 0.82, `${(rate * 100).toFixed(1)}% of stabs run three oscillators — §4e measures 71.4% for chords`)
 })
 
 test('the layeredplus arm produces every layer that asks for it, and reports honestly', () => {
