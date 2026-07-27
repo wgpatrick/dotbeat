@@ -1109,6 +1109,10 @@ export interface ShowdownBatchPlan {
   refPick: number
   /** index into the taste-seed songs that actually carry this role's track */
   seedIndex: number
+  /** seeds the genre/mood variant `genSubjectVaried` picks for the gen clip's phrase prompt.
+   * A seed rather than an index because the variant pool is per-role and sized in seeds.ts, not
+   * here — the caller turns it into its own one-draw stream. */
+  genSubjectSeed: number
 }
 
 /** FNV-1a over the batch's identity, so the sub-stream seed is stable across machines and across
@@ -1147,6 +1151,9 @@ export function drawShowdownBatchPlan(opts: {
     kmStyleIndex: Math.floor(rng() * styleCount),
     refPick: Math.floor(rng() * 100000),
     seedIndex: Math.floor(rng() * candidateCount),
+    // APPENDED, never inserted: every draw above keeps its historical value only because this one
+    // comes last in the stream.
+    genSubjectSeed: Math.floor(rng() * 100000),
   }
 }
 

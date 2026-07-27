@@ -107,6 +107,11 @@ test('golden plan values — the derivation is a reproducibility contract, not a
     kmStyleIndex: 4,
     refPick: 58872,
     seedIndex: 5,
+    // added 2026-07-26 with the genSubjectVariedSeeded fix. Every value above is UNCHANGED, which
+    // is the whole reason the draw was appended to the end of the stream rather than inserted
+    // next to genSeed where it reads better — inserting it would have silently re-keyed every
+    // batch anyone can still regenerate.
+    genSubjectSeed: 98036,
   })
 })
 
@@ -161,6 +166,19 @@ test('showdownCmd draws no randomness of its own — every nuisance value comes 
   for (const expr of ['styles[plan.styleIndex]', 'styles[plan.kmStyleIndex]', 'candidates[plan.seedIndex]']) {
     assert.ok(body.includes(expr), `showdownCmd does not take ${expr} from the plan`)
   }
+
+  // The two assertions above are shaped like CALLS (`rng(`, the `mulberry32` import) and that is
+  // exactly the hole the real defect went through: when the rng binding was removed from
+  // showdownCmd on 2026-07-26, one PASSING reference survived — `genSubjectVaried(id, rng)`, an
+  // argument, not a call — and every showdown batch that reached its gen clip died with
+  // `ReferenceError: rng is not defined` for the next ten hours while this test stayed green.
+  // cli/beat.mjs is plain .mjs, so tsc never sees it and nothing else would have caught it. So:
+  // no BARE `rng` identifier either. Comments — which discuss the rule at length, including the
+  // sentence you are reading — are stripped first, or the prose would fail its own guard. Verified
+  // against the real defect before being trusted: this assertion fails on the exact line that
+  // shipped, and is quiet on the fix.
+  const code = body.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  assert.equal(/\brng\b/.test(code), false, 'showdownCmd names an `rng` identifier it does not own — it has none in scope, so this is a ReferenceError waiting for the code path that reaches it')
 })
 
 

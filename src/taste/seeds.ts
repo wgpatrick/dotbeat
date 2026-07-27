@@ -329,6 +329,14 @@ export function genSubjectVaried(id: string, rng: () => number): { id: string; s
   return { ...base, subject: isolation !== undefined ? `${subject}, ${isolation}` : subject }
 }
 
+/** Seeded twin of `genSubjectVaried`, for callers that must not own a random stream. `showdownCmd`
+ * is forbidden by test/showdown-pairing.test.ts from holding an rng at all — every draw it makes has
+ * to be a pure function of (metaSeed, round, role) — so it passes `plan.genSubjectSeed` here and the
+ * one-draw stream lives on this side of the call. */
+export function genSubjectVariedSeeded(id: string, seed: number): { id: string; subject: string; seconds: number } {
+  return genSubjectVaried(id, mulberry32(seed))
+}
+
 /** Look up one subject of the prompt bank by id — the source-showdown eval (src/taste/showdown.ts)
  * builds its gen and keymap clips from NAMED bank entries (phrase tier for the role's gen clip,
  * one-shot tier for the keymap sample) so showdown prompts and taste-collect prompts stay one

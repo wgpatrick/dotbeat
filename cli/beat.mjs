@@ -2694,7 +2694,7 @@ async function showdownCmd(argv) {
   // NOTE: showdownCmd deliberately imports NO rng. Every seeded choice a batch makes comes either
   // from showdown.drawShowdownBatchPlan (the nuisance draws) or from a module seeded with that
   // plan's batchSeed — so no arm-conditional branch can shift another batch's draws.
-  const { genSubject, genSubjectVaried, genStyles, PHRASE_NEGATIVE } = await import('../dist/src/taste/seeds.js')
+  const { genSubject, genSubjectVariedSeeded, genStyles, PHRASE_NEGATIVE } = await import('../dist/src/taste/seeds.js')
   const { writeVaryBatch, renderVaryBatch, normalizeBatchLoudness, formatNormalizationResult, markBatchComplete, discardIncompleteBatch, isEnvironmentFault, environmentFaultReason } = await import('../dist/src/vary/batch.js')
   const { mkdirSync, copyFileSync } = await import('node:fs')
   const lib = await import(new URL('../scripts/source-lib.mjs', import.meta.url).href)
@@ -3254,7 +3254,7 @@ async function showdownCmd(argv) {
         // genSubjectVaried draws a genre/mood variant (not just a style treatment) so every
         // showdown round's gen clip isn't recognizable by always being the same musical
         // character (owner, 2026-07-21).
-        const phraseSubject = genSubjectVaried(spec.phraseSubjectId, rng)
+        const phraseSubject = genSubjectVariedSeeded(spec.phraseSubjectId, plan.genSubjectSeed)
         // Long-form full-track providers (Lyria) weigh GENRE/ERA first (Google's own prompt
         // guide) — genre-led prompts summon full arrangements regardless of prose isolation or
         // negative_prompt (owner rating passes, 2026-07-25). For those providers the prompt
