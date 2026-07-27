@@ -138,7 +138,13 @@ async function postSong(body: {
 const ROW_H = 56 // taller than the pre-Phase-18 44px: the header now stacks a name row + an inline mixer strip
 const HEADER_W = 264 // wide enough for the inline channel strip (mute/solo/volume/pan/sends) in the track header
 const TICK_ROW_H = 13 // Phase 24 Stream CD: bar-number tick strip along the bottom of the ruler
-const RULER_H = 26 + TICK_ROW_H // was a flat 26 pre-Stream-CD; the extra room is the new tick row below the section-label row
+// Phase 41 Stream D: a locator strip along the TOP of the ruler, above the section-label row. The
+// ruler is now three stacked strips — locators (this), section labels (26px), bar ticks — and every
+// consumer positions from these constants, so growing the ruler here automatically pushes the
+// playhead's `top: RULER_H` and the track rows below it without a second edit.
+const LOCATOR_ROW_H = 16
+const SECTION_LABEL_H = 26
+const RULER_H = LOCATOR_ROW_H + SECTION_LABEL_H + TICK_ROW_H
 const DETAIL_PX_PER_BAR = 32 // at or above this, draw real ticks; below, density blocks
 const DENSITY_REF = 6 // events/bar that reads as full-opacity (soft normalization, not a hard cap)
 
@@ -2371,6 +2377,82 @@ export function ArrangementView() {
     el.scrollLeft = Math.max(0, Math.min(maxScroll, x - HEADER_W - laneW * FOLLOW_ANCHOR))
   }, [follow, playing, currentStep, renderPxPerBar])
 
+  // ── Locators (Phase 41 Stream D, v0.11) ──────────────────────────────────────────────────────
+  // Named point markers on the timeline, read straight off the document (they are durable file
+  // content, not session state — see src/core/document.ts's BeatLocator). Sorted by bar for
+  // rendering and for prev/next navigation; `?? []` because a pre-v0.11 daemon's payload has no
+  // `locators` key at all and the GUI ships independently of the daemon it connects to.
+  const locators = useMemo(() => [...(doc?.locators ?? [])].sort((a, b) => a.bar - b.bar), [doc])
+  const [locatorRename, setLocatorRename] = useState<{ id: string; draft: string } | null>(null)
+
+  // Scroll a bar into view without touching the transport — the shared half of "jump to marker" and
+  // the zoom-to-selection framing below. Centres the target when it isn't already comfortably on
+  // screen, which for a jump (unlike follow's forward-only paging) is the right instinct: you asked
+  // to look at that bar specifically, so put it where you can see what surrounds it.
+  const scrollBarIntoView = useCallback((bar0: number) => {
+    const el = scrollRef.current
+    if (!el || renderPxPerBar <= 0) return
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+    if (maxScroll <= 0) return
+    const x = HEADER_W + bar0 * renderPxPerBar
+    const laneW = Math.max(1, el.clientWidth - HEADER_W)
+    el.scrollLeft = Math.max(0, Math.min(maxScroll, x - HEADER_W - laneW / 2))
+  }, [renderPxPerBar])
+
+  // Jump the transport to a locator. Deliberately the SAME gesture semantics as a click on the
+  // ruler (engine.seek): relocate while playing, start from there while stopped — Ableton's own
+  // rule, and already this app's documented behavior for "click a position on the timeline". A
+  // marker lane that behaved differently from the ruler two pixels below it would be the
+  // inconsistency, not the consistency.
+  const jumpToLocator = useCallback(
+    (bar: number) => {
+      const bar0 = Math.max(0, bar - 1) // locator bars are 1-based; engine.seek takes 0-based
+      scrollBarIntoView(bar0)
+      engine.seek(bar0)
+    },
+    [scrollBarIntoView],
+  )
+
+  // Where a new marker lands: the playhead if the transport has a position, else the start of the
+  // current bar selection, else bar 1. All three are "the place the user is currently looking at",
+  // in decreasing order of how explicitly they said so.
+  const newLocatorBar = useCallback((): number => {
+    if (currentStep >= 0) return Math.floor(currentStep / 16) + 1
+    if (selection.bars) return selection.bars.start + 1
+    return 1
+  }, [currentStep, selection.bars])
+
+  const addLocator = useCallback(() => {
+    const bar = Math.min(Math.max(1, newLocatorBar()), Math.max(1, totalBars))
+    // Ids are minted client-side on purpose — see setValue's locator grammar for why the id must be
+    // in the PATH (the daemon coalesces undo entries by path string, so a shared append path would
+    // collapse several quick adds into a single undo step and lose all but the last).
+    const taken = new Set(locators.map((l) => l.id))
+    let n = 1
+    while (taken.has(`m${n}`)) n++
+    const id = `m${n}`
+    postEdit(`locator.${id}`, String(bar))
+    // Open the rename field immediately: an unnamed marker at bar 101 is barely better than no
+    // marker at all, and naming it is the entire point of the feature.
+    setLocatorRename({ id, draft: '' })
+  }, [locators, newLocatorBar, totalBars])
+
+  const commitLocatorRename = useCallback(() => {
+    setLocatorRename((cur) => {
+      if (!cur) return null
+      // Same sanitization as scene rename: the format has no quoted strings, so spaces become
+      // underscores (and are rendered back as spaces) rather than being silently dropped.
+      const sanitized = cur.draft.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')
+      if (sanitized) postEdit(`locator.${cur.id}.name`, sanitized)
+      return null
+    })
+  }, [])
+
+  const removeLocator = useCallback((id: string) => {
+    postEdit(`locator.${id}`, '')
+    setLocatorRename((cur) => (cur?.id === id ? null : cur))
+  }, [])
+
   // Window-level move/up for the resize handle: preview the new bar count while dragging, commit once
   // on release. Loop mode writes loop_bars (optimistic /edit); song mode resizes that section (/song).
   //
@@ -3161,6 +3243,17 @@ export function ArrangementView() {
             fit
           </button>
         </div>
+        {/* Phase 41 Stream D: drop a named marker at the playhead (or, stopped with a bar range
+            selected, at the start of that range). Opens its rename field immediately — an unnamed
+            marker at bar 101 is barely better than no marker. */}
+        <button
+          className="arr-toolbtn"
+          data-action="add-locator"
+          title={`drop a marker at bar ${Math.min(Math.max(1, newLocatorBar()), Math.max(1, totalBars))} and name it`}
+          onClick={addLocator}
+        >
+          + marker
+        </button>
         {/* Phase 41 Stream D: follow-the-playhead toggle. `data-follow` is the live probe the verify
             scripts read; the button itself is the only user-facing control for the effect above. */}
         <button
@@ -3227,7 +3320,7 @@ export function ArrangementView() {
               <div
                 key={i}
                 className="arr-section-label"
-                style={{ left: s.startBar * renderPxPerBar, width: s.bars * renderPxPerBar, height: RULER_H - TICK_ROW_H }}
+                style={{ left: s.startBar * renderPxPerBar, width: s.bars * renderPxPerBar, top: LOCATOR_ROW_H, height: SECTION_LABEL_H }}
                 title={
                   shareCount > 1
                     ? `${rulerSceneName} · ${s.bars} bars · shares this scene with ${shareCount - 1} other section${shareCount - 1 === 1 ? '' : 's'}`
@@ -3258,6 +3351,66 @@ export function ArrangementView() {
                     <div key={`beat-${b}-${q}`} className="arr-bar-tick-minor" style={{ left: (b + q / 4) * renderPxPerBar }} />
                   )),
                 )}
+            </div>
+            {/* Phase 41 Stream D: the locator strip, along the top of the ruler. Each flag is a
+                real button — click jumps the transport there (same rule as clicking the ruler
+                itself: relocate while playing, start from there while stopped), double-click opens
+                an inline rename, and the × removes it. `data-locator`/`data-locator-bar` are the
+                probes the verify scripts read. onPointerDown stops propagation so grabbing a flag
+                never also starts the ruler's own drag-to-select-bars gesture underneath it. */}
+            <div className="arr-locator-strip" style={{ height: LOCATOR_ROW_H }}>
+              {locators.map((l) => {
+                const label = l.name.replace(/_/g, ' ')
+                const renaming = locatorRename?.id === l.id
+                return (
+                  <div
+                    key={l.id}
+                    className={`arr-locator${renaming ? ' renaming' : ''}`}
+                    data-locator={l.id}
+                    data-locator-bar={l.bar}
+                    data-locator-name={l.name}
+                    style={{ left: (l.bar - 1) * renderPxPerBar }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    {renaming ? (
+                      <input
+                        className="arr-locator-input"
+                        data-locator-input={l.id}
+                        autoFocus
+                        value={locatorRename.draft}
+                        placeholder={l.name}
+                        onChange={(e) => setLocatorRename((cur) => (cur ? { ...cur, draft: e.target.value } : cur))}
+                        onBlur={commitLocatorRename}
+                        onKeyDown={(e) => {
+                          e.stopPropagation() // never let typing a name reach the arrangement's own key handler
+                          if (e.key === 'Enter') commitLocatorRename()
+                          if (e.key === 'Escape') setLocatorRename(null)
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <button
+                          className="arr-locator-flag"
+                          data-locator-jump={l.id}
+                          title={`${label} — bar ${l.bar}. Click to jump here (starts playback if stopped, relocates if already playing); double-click to rename.`}
+                          onClick={() => jumpToLocator(l.bar)}
+                          onDoubleClick={() => setLocatorRename({ id: l.id, draft: label })}
+                        >
+                          {label}
+                        </button>
+                        <button
+                          className="arr-locator-del"
+                          data-locator-delete={l.id}
+                          title={`delete the "${label}" marker`}
+                          onClick={() => removeLocator(l.id)}
+                        >
+                          ×
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )
+              })}
             </div>
             {rulerBand && (
               <div

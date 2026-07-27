@@ -357,6 +357,15 @@ export interface BeatMediaSample {
   path: string
 }
 
+// v0.11 (Phase 41 Stream D) — mirrors src/core/document.ts's BeatLocator. A named POINT marker on
+// the song timeline; `bar` is ONE-BASED (see the core type's doc comment for why that one number
+// deliberately breaks the 0-based habit), so every pixel calculation here reads `(bar - 1)`.
+export interface BeatLocator {
+  id: string
+  bar: number
+  name: string
+}
+
 export interface BeatDocument {
   formatVersion: string
   bpm: number
@@ -367,6 +376,10 @@ export interface BeatDocument {
   groups: BeatGroup[]
   scenes: BeatScene[]
   song: BeatSongSection[] | null
+  // Older daemons (and any doc built before v0.11) omit this, so every reader must tolerate
+  // undefined rather than assuming the array exists — the GUI ships independently of the daemon it
+  // connects to, and `doc.locators.map` on a stale daemon's payload is a blank-screen crash.
+  locators?: BeatLocator[]
 }
 
 // The D2 pointing protocol value (src/core/selection.ts). Every axis is an independent, optional

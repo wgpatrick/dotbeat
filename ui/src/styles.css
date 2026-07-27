@@ -2153,6 +2153,79 @@ body {
   bottom: 0;
   border-left: 1px solid rgba(255, 255, 255, 0.1);
 }
+/* Phase 41 Stream D: the locator strip along the TOP of the ruler (see LOCATOR_ROW_H in
+   ArrangementView.tsx — the ruler is three stacked strips: locators, section labels, bar ticks).
+   The strip itself is pointer-transparent so the ruler's drag-to-select still works in the gaps
+   BETWEEN markers; each flag re-enables pointer events for itself. */
+.arr-locator-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.arr-locator {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  pointer-events: auto;
+  /* The marker's anchor is its LEFT edge — that pixel is the bar it names, so the flag reads like a
+     pin planted at that spot rather than a label floating near it. */
+  border-left: 2px solid var(--accent);
+  background: rgba(224, 161, 60, 0.16);
+  border-radius: 0 var(--radius-sm, 3px) var(--radius-sm, 3px) 0;
+  max-width: 180px;
+}
+.arr-locator-flag {
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+.arr-locator-flag:hover {
+  color: var(--text);
+}
+.arr-locator-del {
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 3px 0 0;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  /* Revealed on hover so a row of markers reads as names, not as a row of delete buttons — but it
+     is always in the DOM (never `display:none`), so it stays reachable by keyboard and by tests. */
+  opacity: 0;
+}
+.arr-locator:hover .arr-locator-del {
+  opacity: 1;
+}
+.arr-locator-del:hover {
+  color: var(--danger, #e06c75);
+}
+.arr-locator-input {
+  font: inherit;
+  font-size: 10px;
+  width: 96px;
+  padding: 0 3px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm, 3px);
+  background: var(--panel);
+  color: var(--text);
+}
+
 .arr-ruler-band {
   position: absolute;
   top: 0;
