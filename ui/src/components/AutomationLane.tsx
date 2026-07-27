@@ -310,7 +310,15 @@ export function AutomationLane({
   // A dragged segment must stay inside the lane it lives in: clip-local time within one tiling
   // period (points past it would never be drawn or played), value within the param's own range.
   // Shared by the live preview and the committed write so they cannot disagree.
-  const clampTime = useCallback((t: number) => Number(Math.max(0, Math.min(loopSteps, t)).toFixed(2)), [loopSteps])
+  // Clamp only — deliberately no rounding here. Rounding each RESULT to the drag grid made the two
+  // endpoints of a segment land on different deltas (measured: 0.2057 vs 0.2029 steps for one
+  // gesture), because two points at different fractional times round to different sides of the
+  // grid. The delta is rounded ONCE, below, and then added to both — so "both endpoints move by
+  // the same amount" is exact rather than exact-to-within-a-quantum.
+  const clampTime = useCallback((t: number) => Math.max(0, Math.min(loopSteps, t)), [loopSteps])
+  /** The 2-decimal grid drag-placed times snap to — the precision clipTimeFromX already uses for
+   * the plain point drag, applied to the segment DELTA rather than to each endpoint. */
+  const snapDelta = (dt: number) => Number(dt.toFixed(2))
 
   // A selection is a pair of point IDS, so it outlives ordinary redraws but not the points
   // themselves — alt-deleting an endpoint, or a shape insert replacing the lane, must not leave a
@@ -660,12 +668,13 @@ export function AutomationLane({
           const d = dragRef.current
           dragRef.current = null
           if (d && d.mode === 'segment' && (d.dt !== 0 || d.dv !== 0)) {
+            const dt = snapDelta(d.dt)
             // Both endpoints move by the same delta, each written through the ordinary move path
             // (op 'set' WITH an id), so the segment keeps its slope, its length and its ids — and
             // so a segment drag reads in `beat diff` as two point moves, which is what it is.
             for (const id of [d.aId, d.bId]) {
               const p = points.find((pt) => pt.id === id)
-              if (p) postAutomation({ op: 'set', track: track.id, clip: clipId, param, id, time: clampTime(p.time + d.dt), value: shiftValue(p.value, d.dv) })
+              if (p) postAutomation({ op: 'set', track: track.id, clip: clipId, param, id, time: clampTime(p.time + dt), value: shiftValue(p.value, d.dv) })
             }
           }
           draw()

@@ -110,6 +110,10 @@ export const VERIFY_SCRIPTS = [
   { script: 'ui/verify-phase26-stream-de.mjs', area: 'mixer', tier: 'both', status: 'live' },
   { script: 'ui/verify-phase26-stream-di.mjs', area: 'automation', tier: 'both', status: 'live' },
   { script: 'ui/verify-phase26-stream-dk.mjs', area: 'drums', tier: 'both', status: 'live' },
+  // Phase 41 Stream C. 'both' because C8 renders the project with and without the drawn lane and
+  // asserts on the resulting audio's time-resolved spectral centroid — a GUI-tier run would prove
+  // the points were written and nothing about whether they are heard.
+  { script: 'ui/verify-phase41-stream-c.mjs', area: 'automation', tier: 'both', status: 'live' },
   { script: 'ui/verify-volume-fader-bugfix.mjs', area: 'mixer', tier: 'both', status: 'live' },
 
   // ---- gui tier: DOM + on-disk .beat assertions ------------------------------------------------
