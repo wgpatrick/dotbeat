@@ -93,7 +93,7 @@ const GROUPS: ShortcutGroup[] = [
         keys: ['←', '→'],
         description: 'nudge the selected clip block(s) one SECTION earlier/later (the same grid a drag snaps to). Needs clip blocks selected — with none selected, the arrows belong to the note editor instead',
       },
-      { keys: ['S'], description: "split the selected audio clip at the playhead (same as the clip block's own split button)" },
+      { keys: ['S'], description: "split the selected AUDIO clip at the playhead (same as the clip block's own split button; other track kinds say so rather than failing)" },
     ],
   },
 ]

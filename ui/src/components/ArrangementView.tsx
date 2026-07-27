@@ -2628,6 +2628,14 @@ export function ArrangementView() {
         const track = doc?.tracks.find((t) => t.id === trackId)
         if (!track) return
         e.preventDefault()
+        // Gate on kind exactly as the clip block's own split button does (it only renders on audio
+        // tracks). Without this the key reaches postAudioSplit on a synth clip and surfaces a raw
+        // daemon rejection — technically not silent, but a confusing error is barely better than
+        // no feedback. Say the actual reason instead.
+        if (track.kind !== 'audio') {
+          showToast(`Split only applies to audio clips — "${track.name || track.id}" is a ${track.kind} track.`)
+          return
+        }
         void splitAudioAtPlayhead(track)
       }
     }
