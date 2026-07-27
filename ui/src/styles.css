@@ -4037,3 +4037,14 @@ body {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+
+/* Phase 41 Stream D: follow-the-playhead toggle. Sits in the same toolbar run as the zoom
+   controls; `.on` is the engaged state (the default), styled like the app's other latched
+   toggles rather than a plain push-button so its state reads at a glance. */
+.arr-follow-btn {
+  white-space: nowrap;
+}
+.arr-follow-btn.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}

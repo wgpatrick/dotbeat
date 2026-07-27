@@ -156,6 +156,13 @@ const MIN_PX_PER_BAR = 4
 const MAX_PX_PER_BAR = 256
 const ZOOM_FACTOR = 1.4 // per zoom-in/out step (button click or one wheel-zoom tick)
 
+// ── Follow-the-playhead (Phase 41 Stream D) ──────────────────────────────────────────────────────
+// How close to a viewport edge the playhead may get before the view pages forward, and where in the
+// lane viewport it lands after that page (0 = hard left, 0.5 = centred). A third of the way in keeps
+// the bar you just played visible for context while leaving most of the screen as lookahead.
+const FOLLOW_MARGIN_PX = 24
+const FOLLOW_ANCHOR = 1 / 3
+
 /** Bar-tick label density for the ruler, zoom-aware in the same spirit DETAIL_PX_PER_BAR already
  * applies to note/hit rendering: once there's a full DETAIL_PX_PER_BAR worth of room per bar, number
  * every bar; below that, skip bars (in powers of two) so the numbers never overlap. */
@@ -1748,6 +1755,9 @@ export function ArrangementView() {
   // 16x/bar, so it's allowed in reactive state (docs/research/15 §2); only the lightweight playhead
   // div re-renders on it — the memoized row canvases don't (their effect deps exclude currentStep).
   const currentStep = useStore((s) => s.currentStep)
+  // Phase 41 Stream D: `playing` gates the follow-the-playhead auto-scroll below. Cheap to
+  // subscribe to here — it flips at most twice per transport session, unlike currentStep.
+  const playing = useStore((s) => s.playing)
   // research/128 §2.2 deep links: when the agent's `POST /focus` selects a track, scroll that track's
   // row into view here — the selection itself is already handled by the ordinary `selectedTrackId`
   // path (bridge.ts's focus handler), this only nudges the timeline so the newly-focused track is
@@ -2326,6 +2336,40 @@ export function ArrangementView() {
     },
     [zoomPxPerBar, fitPxPerBar],
   )
+
+  // ── Follow the playhead (Phase 41 Stream D) ──────────────────────────────────────────────────
+  // Zoom (Stream CD, above) made the timeline able to be WIDER than its container for the first
+  // time, but nothing ever scrolls it back to the playhead — so the moment you press play on
+  // anything longer than a screenful, the playhead walks off the right edge and you are looking at
+  // a static picture of bars 1-40 while bar 130 plays. On the 242-bar / 7:17 reference project this
+  // is the difference between a usable arrangement and an unusable one.
+  //
+  // Deliberately a "page when it leaves the window" scroll, not a continuous centering one: keeping
+  // the playhead pinned mid-screen means the CONTENT slides under it constantly, which is far
+  // harder to read (and far more expensive — currentStep ticks 16x/bar) than letting the playhead
+  // sweep across a stationary view and jumping the view once per screenful. Same reason Live/Logic
+  // both default to page-scroll rather than continuous. FOLLOW_ANCHOR puts the playhead a third of
+  // the way in after each jump, so there's always two thirds of a screen of lookahead ahead of it.
+  //
+  // Only acts while the transport is running. When stopped, scrolling is entirely the user's — no
+  // "the view fought me" surprise, and no need to auto-disable the toggle on manual scroll (a
+  // behavior that reliably reads as the toggle turning itself off for no reason).
+  const [follow, setFollow] = useState(true)
+  useEffect(() => {
+    if (!follow || !playing) return
+    const el = scrollRef.current
+    if (!el || renderPxPerBar <= 0 || currentStep < 0) return
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+    if (maxScroll <= 0) return // the whole song already fits; nothing to follow
+    const x = HEADER_W + (currentStep / 16) * renderPxPerBar
+    // The lane viewport is the container minus the sticky header column on its left — a playhead at
+    // x < scrollLeft + HEADER_W is hidden BEHIND the track headers, not merely off-screen.
+    const viewLeft = el.scrollLeft + HEADER_W
+    const viewRight = el.scrollLeft + el.clientWidth
+    if (x >= viewLeft + FOLLOW_MARGIN_PX && x <= viewRight - FOLLOW_MARGIN_PX) return
+    const laneW = Math.max(1, el.clientWidth - HEADER_W)
+    el.scrollLeft = Math.max(0, Math.min(maxScroll, x - HEADER_W - laneW * FOLLOW_ANCHOR))
+  }, [follow, playing, currentStep, renderPxPerBar])
 
   // Window-level move/up for the resize handle: preview the new bar count while dragging, commit once
   // on release. Loop mode writes loop_bars (optimistic /edit); song mode resizes that section (/song).
@@ -3117,6 +3161,18 @@ export function ArrangementView() {
             fit
           </button>
         </div>
+        {/* Phase 41 Stream D: follow-the-playhead toggle. `data-follow` is the live probe the verify
+            scripts read; the button itself is the only user-facing control for the effect above. */}
+        <button
+          className={`arr-toolbtn arr-follow-btn${follow ? ' on' : ''}`}
+          data-action="follow-toggle"
+          data-follow={follow ? '1' : '0'}
+          aria-pressed={follow}
+          title={follow ? 'following the playhead during playback — click to stop following' : 'not following the playhead — click to auto-scroll to it during playback'}
+          onClick={() => setFollow((f) => !f)}
+        >
+          {follow ? '⦿ follow' : '○ follow'}
+        </button>
         {/* Phase 24 Stream CE: loop-region controls — loop just the currently-SELECTED bar range
             (the same drag-the-ruler/a-track selection axis docs/phase-13-views.md's "Selection
             wired to /selection" and `beat vary --scope selection` already use) instead of the whole
