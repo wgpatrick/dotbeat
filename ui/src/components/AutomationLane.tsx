@@ -233,7 +233,8 @@ export function AutomationLane({
     // stroke until you let go" behavior) instead of stacking two points at one instant.
     | { mode: 'paint'; pts: Map<number, number> }
     // Phase 41 Stream C: a whole SEGMENT being moved — its two flanking points travel together by
-    // the same (dt, dv), so the segment keeps its slope and length while it slides.
+    // the same (dt, dv), so the segment keeps its slope and length while it slides. `dt` is in 16th
+    // steps; `dv` is in FRACTIONS OF THE LANE'S HEIGHT, not param units — see shiftValue().
     | { mode: 'segment'; aId: string; bId: string; dt: number; dv: number }
   const dragRef = useRef<DragState | null>(null)
   /** Previous paint sample position, so a fast sweep can be filled in rather than left as isolated
@@ -310,7 +311,6 @@ export function AutomationLane({
   // period (points past it would never be drawn or played), value within the param's own range.
   // Shared by the live preview and the committed write so they cannot disagree.
   const clampTime = useCallback((t: number) => Number(Math.max(0, Math.min(loopSteps, t)).toFixed(2)), [loopSteps])
-  const clampValue = useCallback((v: number) => Number(Math.max(min, Math.min(max, v)).toFixed(4)), [min, max])
 
   // A selection is a pair of point IDS, so it outlives ordinary redraws but not the points
   // themselves — alt-deleting an endpoint, or a shape insert replacing the lane, must not leave a
@@ -348,6 +348,21 @@ export function AutomationLane({
   const segValue = useCallback(
     (a: number, b: number, t: number) => (logAxis && a > 0 && b > 0 ? a * Math.pow(b / a, t) : a + (b - a) * t),
     [logAxis],
+  )
+
+  /** Move a value by `dNorm` fractions of the LANE'S HEIGHT, clamped to the lane.
+   *
+   * A segment drag has to shift its two points in normalized space, not by an absolute value
+   * delta. On the log cutoff axis an absolute delta is not even self-consistent: dragging up 13px
+   * near the middle is ~+3500 Hz, and adding that same 3500 to a point sitting at 1845 Hz moves it
+   * 9.4x while the point at 3558 Hz moves 5x — so the "segment" arrives at the top of the lane with
+   * its slope destroyed, which is the one thing dragging it as a unit is supposed to prevent.
+   * Measured exactly that way in the pilot: 3558 -> 18000 and 1845 -> 17283 off one 13px drag.
+   * In normalized space the two points move the same distance on screen, which is what the gesture
+   * looks like it is doing; on a linear param this is identical to the old absolute delta. */
+  const shiftValue = useCallback(
+    (v: number, dNorm: number) => Number(normToValue(Math.max(0, Math.min(1, valueToNorm(v) + dNorm))).toFixed(4)),
+    [normToValue, valueToNorm],
   )
 
   const draw = useCallback(() => {
@@ -417,7 +432,7 @@ export function AutomationLane({
       for (const [t, v] of drag.pts) eff.push({ id: '__draft__', time: t, value: v })
     }
     if (drag?.mode === 'segment') {
-      eff = eff.map((p) => (p.id === drag.aId || p.id === drag.bId ? { ...p, time: clampTime(p.time + drag.dt), value: clampValue(p.value + drag.dv) } : p))
+      eff = eff.map((p) => (p.id === drag.aId || p.id === drag.bId ? { ...p, time: clampTime(p.time + drag.dt), value: shiftValue(p.value, drag.dv) } : p))
     }
     eff.sort((a, b) => a.time - b.time)
     const draggedId = drag?.mode === 'move' ? drag.id : undefined
@@ -530,7 +545,7 @@ export function AutomationLane({
 
     markersRef.current = markers
     segmentsRef.current = segments
-  }, [points, totalBars, pxPerBar, occurrences, loopSteps, track.color, valueToY, segValue, drawMode, selectedSegment, clampTime, clampValue])
+  }, [points, totalBars, pxPerBar, occurrences, loopSteps, track.color, valueToY, segValue, drawMode, selectedSegment, clampTime, shiftValue])
 
   useEffect(() => {
     draw()
@@ -630,9 +645,12 @@ export function AutomationLane({
           // Deltas straight from pixel deltas — NOT from clipTimeFromX, whose modulo-loopSteps wrap
           // would make a drag across a tile boundary jump a whole period backwards.
           d.dt = ((lx - localX) / pxPerBar) * 16
-          d.dv = yToValue(ly) - yToValue(localY)
+          d.dv = (localY - ly) / (AUTO_H - 2 * AUTO_PAD) // up the screen = up the lane
           draw()
-          showLabel(lx, ly, `${d.dt >= 0 ? '+' : ''}${d.dt.toFixed(2)} steps, ${d.dv >= 0 ? '+' : ''}${fmt(d.dv)}`)
+          // Report where the segment's own start point LANDS, in the param's units — a normalized
+          // delta is the right thing to compute and the wrong thing to show someone.
+          const a = points.find((pt) => pt.id === d.aId)
+          showLabel(lx, ly, `${d.dt >= 0 ? '+' : ''}${d.dt.toFixed(2)} steps${a ? ` · ${fmt(shiftValue(a.value, d.dv))}` : ''}`)
         }
         const onUp = () => {
           window.removeEventListener('pointermove', onMove)
@@ -647,7 +665,7 @@ export function AutomationLane({
             // so a segment drag reads in `beat diff` as two point moves, which is what it is.
             for (const id of [d.aId, d.bId]) {
               const p = points.find((pt) => pt.id === id)
-              if (p) postAutomation({ op: 'set', track: track.id, clip: clipId, param, id, time: clampTime(p.time + d.dt), value: clampValue(p.value + d.dv) })
+              if (p) postAutomation({ op: 'set', track: track.id, clip: clipId, param, id, time: clampTime(p.time + d.dt), value: shiftValue(p.value, d.dv) })
             }
           }
           draw()
@@ -842,7 +860,7 @@ export function AutomationLane({
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [points, clipTimeFromX, yToValue, valueToNorm, draw, hitTestSegment, fmt, track.id, clipId, param, drawMode, pxPerBar, clampTime, clampValue],
+    [points, clipTimeFromX, yToValue, valueToNorm, draw, hitTestSegment, fmt, track.id, clipId, param, drawMode, pxPerBar, clampTime, shiftValue],
   )
 
   /** Sample the chosen shape across the clip's own tiling period and write it as one run.
