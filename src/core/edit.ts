@@ -3,9 +3,12 @@
 // (or one-edit) git diff. Strict on unknown paths/tracks/lanes — same fail-loudly stance as the
 // parser: an agent-issued edit that doesn't land exactly where intended must error, not guess.
 
-import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatPlacement, BeatSongSection, BeatSurgeOverride, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
+import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationPoint, BeatClip, BeatClipLoop, BeatDrumHit, BeatDrumLaneDecl, BeatDocument, BeatEffect, BeatGroup, BeatLaneBacking, BeatNote, BeatPlacement, BeatScale, BeatSongSection, BeatSurgeOverride, BeatSynth, BeatTimeSignature, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
 import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUDIO_TRACK_FIELDS, AUDIO_TRACK_FIELD_BY_KEY, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DEFAULT_DRUM_KIT, DRUM_LANES, DRUM_VOICE_PARAM_DEFAULTS, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_FIELDS, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_COLORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, initAudioTrackSynth, isSampleLaneFilterType, isSampleLaneParamKey, sampleLaneParamError, scenePlacementError, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
+// v0.12 (Stream E): the scale vocabulary comes from the ONE scale table in pitchtime.ts — never a
+// second hand-copied list of names here (the "parity is structural" rule).
+import { CUSTOM_SCALE_NAME, SCALE_NAMES, canonicalPitchClasses, scaleByName } from './pitchtime.js'
 import { automationShapePoints, type AutomationShape } from './automation-shape.js'
 
 /** Snaps a value to the format's canonical 4-decimal precision (format.ts), so numbers stored
@@ -180,6 +183,24 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   }
   // v0.10: chance/cent/ratchet* ride the SAME `<track>.note.<id>.<field>` path as the original
   // four (pitch/start/duration/velocity) — one more row each, not a second vocabulary.
+  // v0.12 (Stream E): `active` rides the same path, but its VALUE is a boolean word, not a number
+  // — handled just above the numeric branch so parseNum never sees "off"/"on". "0"/"1" are accepted
+  // too (the {path,value} channel is all strings, and `beat set lead.note.u1.active 0` is what a
+  // hand-typing user will reach for first).
+  const noteActiveMatch = rest.match(/^note\.([A-Za-z0-9_-]+)\.active$/)
+  if (noteActiveMatch) {
+    const noteId = noteActiveMatch[1]!
+    const existing = track.notes.find((n) => n.id === noteId)
+    if (!existing) throw new BeatEditError(`no note "${noteId}" on track "${trackId}"`)
+    const raw = value.trim().toLowerCase()
+    const active = raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes'
+    if (!active && !(raw === '0' || raw === 'false' || raw === 'off' || raw === 'no')) {
+      throw new BeatEditError(`note active must be one of 1|0|true|false|on|off|yes|no, got "${value}"`)
+    }
+    if (active === existing.active) return doc
+    const removed = removeNote(doc, trackId, noteId).doc
+    return addNote(removed, trackId, { ...existing, id: noteId, active }).doc
+  }
   const noteFieldMatch = rest.match(/^note\.([A-Za-z0-9_-]+)\.(pitch|start|duration|velocity|chance|cent|ratchetCount|ratchetCurve|ratchetLength)$/)
   if (noteFieldMatch) {
     const noteId = noteFieldMatch[1]!
@@ -204,12 +225,26 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
       ratchetCount: field === 'ratchetCount' ? n : existing.ratchetCount,
       ratchetCurve: field === 'ratchetCurve' ? n : existing.ratchetCurve,
       ratchetLength: field === 'ratchetLength' ? n : existing.ratchetLength,
+      // v0.12: never silently re-activate a muted note by nudging its start — same "every field
+      // not being edited carries over" rule the v0.10 fields above already follow.
+      active: existing.active,
     }).doc
   }
   const noteDeleteMatch = rest.match(/^note\.([A-Za-z0-9_-]+)$/)
   if (noteDeleteMatch) {
     if (value.trim() !== '') throw new BeatEditError(`note delete takes an empty value (got "${value}"); to edit a field use ${trackId}.note.${noteDeleteMatch[1]}.<pitch|start|duration|velocity>`)
     return removeNote(doc, trackId, noteDeleteMatch[1]!).doc
+  }
+
+  // v0.12 (Phase 41 Stream E): <track>.scale — the piano roll's Scale Mode field, over the same
+  // generic {path,value} /edit channel as everything else (no new daemon route needed, the same
+  // reasoning clip.loop/clip.signature below record). Value forms mirror the file line exactly:
+  //   "<root> <name>"                 e.g. "1 susPentatonic"
+  //   "<root> custom <pc>,<pc>,..."   e.g. "1 custom 0,2,5,7,10"
+  //   ""                              clears the declaration (back to null)
+  if (rest === 'scale') {
+    if (value.trim() === '') return replaceTrack(doc, { ...track, scale: null })
+    return setTrackScale(doc, trackId, parseScaleValue(value))
   }
 
   // v0.10 clip properties (Phase 22 Stream AG): <track>.clip.<clipId>.loop / .signature — the GUI's
@@ -443,6 +478,42 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
  * v0.10's chance/cent/ratchet* are optional and default to NOTE_FIELD_DEFAULTS (today's implicit
  * behavior — always-fires, no detune, no ratchet) so every existing caller keeps working
  * unchanged. */
+/** Parses the `<root> <name> [<pcs>]` value shape shared by `beat set <track>.scale`, POST /edit,
+ * and the CLI's own `beat scale` verb — ONE parser, so the three surfaces cannot drift (the house
+ * "parity is structural, never disciplinary" rule). Throws BeatEditError on anything malformed. */
+export function parseScaleValue(value: string): BeatScale {
+  const parts = value.trim().split(/\s+/)
+  if (parts.length !== 2 && parts.length !== 3) {
+    throw new BeatEditError(`scale expects "<root 0-11> <name>" or "<root 0-11> custom <pc>,<pc>,...", got "${value}"`)
+  }
+  const root = parseNum(parts[0]!, 'scale root')
+  if (!Number.isInteger(root) || root < 0 || root > 11) throw new BeatEditError(`scale root must be an integer pitch class 0-11 (0=C), got ${parts[0]}`)
+  const name = parts[1]!
+  if (name === CUSTOM_SCALE_NAME) {
+    if (parts.length !== 3) throw new BeatEditError('a custom scale needs its pitch classes: "<root> custom <pc>,<pc>,..."')
+    const pcs = parts[2]!.split(',').map((t) => parseNum(t, 'scale pitch class'))
+    try {
+      return { root, name, pitchClasses: canonicalPitchClasses(pcs) }
+    } catch (err) {
+      throw new BeatEditError(err instanceof Error ? err.message : String(err))
+    }
+  }
+  if (parts.length === 3) throw new BeatEditError(`only a "custom" scale takes an explicit pitch-class list; "${name}" is a named scale`)
+  if (!scaleByName(name)) throw new BeatEditError(`unknown scale "${name}" (have: ${SCALE_NAMES.join(', ')}, ${CUSTOM_SCALE_NAME})`)
+  return { root, name, pitchClasses: null }
+}
+
+/** Sets (or clears, with null) a track's declared scale — the primitive behind `<track>.scale`,
+ * `beat scale`, and the MCP tool. Rejected on drums/audio tracks: a scale is a statement about
+ * pitched content, and those tracks have none. */
+export function setTrackScale(doc: BeatDocument, trackId: string, scale: BeatScale | null): BeatDocument {
+  const track = findTrack(doc, trackId)
+  if (track.kind === 'drums' || track.kind === 'audio') {
+    throw new BeatEditError(`track "${trackId}" is a ${track.kind} track — a scale only means something on a note track`)
+  }
+  return replaceTrack(doc, { ...track, scale })
+}
+
 export function addNote(
   doc: BeatDocument,
   trackId: string,
@@ -457,6 +528,7 @@ export function addNote(
     ratchetCount?: number
     ratchetCurve?: number
     ratchetLength?: number
+    active?: boolean
   },
 ): { doc: BeatDocument; note: BeatNote } {
   const track = findTrack(doc, trackId)
@@ -483,6 +555,12 @@ export function addNote(
   if (!Number.isFinite(ratchetCurve) || ratchetCurve < -1 || ratchetCurve > 1) throw new BeatEditError(`ratchetCurve must be -1..1, got ${note.ratchetCurve}`)
   const ratchetLength = canon(note.ratchetLength ?? NOTE_FIELD_DEFAULTS.ratchetLength)
   if (!Number.isFinite(ratchetLength) || ratchetLength <= 0 || ratchetLength > 1) throw new BeatEditError(`ratchetLength must be >0..1 at canonical precision (4 decimals), got ${note.ratchetLength}`)
+  // v0.12 (Stream E): the deactivate state. Boolean, so there is no range to check — but it IS
+  // range-checked in spirit: a non-boolean is rejected rather than coerced, matching the
+  // canon-then-validate discipline above (a truthy "0" string silently activating a note the
+  // caller meant to mute is exactly the class of bug the rest of this function exists to prevent).
+  const active = note.active ?? NOTE_FIELD_DEFAULTS.active
+  if (typeof active !== 'boolean') throw new BeatEditError(`active must be a boolean, got ${String(note.active)}`)
 
   let id = note.id
   if (id === undefined) {
@@ -496,7 +574,7 @@ export function addNote(
     throw new BeatEditError(`note id "${id}" already exists`)
   }
 
-  const added: BeatNote = { id, pitch: note.pitch, start, duration, velocity, chance, cent, ratchetCount, ratchetCurve, ratchetLength }
+  const added: BeatNote = { id, pitch: note.pitch, start, duration, velocity, chance, cent, ratchetCount, ratchetCurve, ratchetLength, active }
   return { doc: replaceTrack(doc, { ...track, notes: [...track.notes, added] }), note: added }
 }
 
@@ -792,6 +870,7 @@ export function addTrack(
     effects: kind === 'synth' || kind === 'drums' || kind === 'surge' ? defaultEffectChain() : [],
     shuffleAmount: 0,
     shuffleGrid: 1,
+    scale: null, // v0.12: a fresh track declares no scale
   }
   return { doc: { ...doc, tracks: [...doc.tracks, track] }, track }
 }

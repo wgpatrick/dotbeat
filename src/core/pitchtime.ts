@@ -13,7 +13,7 @@
 // notes" action (research 22 §3.3's Consolidate menu item), which is the same
 // one-shot-rewrite-a-diff shape even though it isn't one of Ableton's six.
 
-import type { BeatDocument, BeatNote, BeatTrack } from './document.js'
+import type { BeatDocument, BeatNote, BeatScale, BeatTrack } from './document.js'
 import { formatNumber } from './format.js'
 
 const canon = (n: number): number => Number(formatNumber(n))
@@ -115,8 +115,77 @@ export const SCALES: Readonly<Record<string, readonly number[]>> = {
   majorPentatonic: [0, 2, 4, 7, 9],
   minorPentatonic: [0, 3, 5, 7, 10],
   blues: [0, 3, 5, 6, 7, 10],
+  // ---- v0.12 (Phase 41 Stream E): the two THIRD-LESS sets. Every scale above this line contains
+  // either a minor third (3) or a major third (4) — i.e. every one of them commits the melody to
+  // major or minor. A large, coherent lane of music (the suspended/modal sound: sus2, sus4, add9,
+  // ♭7) is defined by NOT making that commitment, and against that harmony both thirds read as
+  // wrong notes. The motivating measurement, taken off a reference track's own chroma: with the
+  // tonic established at r=0.865/0.890 (Krumhansl-Schmuckler, harmonic and bass stems), the two
+  // thirds were the two RAREST pitch classes in the track (4/40 and 9/40 weight) while the colour
+  // tones dominated — tonic 40, fifth 34, second 21, fourth 17, ♭seventh 15. Normalized to the
+  // root that is exactly {0, 2, 5, 7, 10}, which is `susPentatonic` below: not an invented set, a
+  // transcribed one. (It is a real named mode — the second mode of the major pentatonic, also
+  // called Egyptian — which is why it earns a table entry rather than needing the `custom` form.)
+  susPentatonic: [0, 2, 5, 7, 10], // no third at all: root, 2nd, 4th, 5th, ♭7 — the sus/modal core
+  susHexatonic: [0, 2, 5, 7, 9, 10], // the same, plus the 6th — a little more melodic room, still third-less
 }
 export const SCALE_NAMES: readonly string[] = Object.keys(SCALES)
+
+/** The literal `name` a BeatScale uses when its pitch classes are given explicitly rather than
+ * looked up in SCALES. Not a key of SCALES (deliberately — a lookup must never silently succeed
+ * for it). */
+export const CUSTOM_SCALE_NAME = 'custom'
+
+/** The root-relative pitch classes of a scale name, or undefined for an unknown name. `custom` is
+ * NOT resolvable here by design — it has no table entry; use `resolveScalePitchClasses` with the
+ * full BeatScale (which carries its own explicit set) instead. */
+export function scaleByName(name: string): readonly number[] | undefined {
+  return SCALES[name]
+}
+
+/** Canonicalizes an explicit pitch-class set: deduplicated, ascending, every entry an integer
+ * 0-11, and containing 0 (see BeatScale's comment — a scale without its own root is a mistake).
+ * Throws BeatPitchTimeError rather than silently repairing, the same loud-failure stance the rest
+ * of the format takes. Exported so parse/edit/GUI all canonicalize identically. */
+export function canonicalPitchClasses(pcs: readonly number[]): number[] {
+  if (pcs.length === 0) throw new BeatPitchTimeError('a custom scale needs at least one pitch class')
+  for (const p of pcs) {
+    if (!Number.isInteger(p) || p < 0 || p > 11) throw new BeatPitchTimeError(`custom scale pitch classes must be integers 0-11 (root-relative), got ${p}`)
+  }
+  const out = [...new Set(pcs)].sort((a, b) => a - b)
+  if (!out.includes(0)) throw new BeatPitchTimeError(`a custom scale must contain 0 (its own root), got ${out.join(',')}`)
+  return out
+}
+
+/** THE one resolver every surface uses to turn a stored BeatScale into the pitch-class set it
+ * means — CLI, MCP, daemon, and the piano roll's row shading all call this rather than re-deriving
+ * it (the house "parity is structural, never disciplinary" rule). Returns root-relative classes;
+ * pair with `isPitchInScale` to test an absolute MIDI pitch. */
+export function resolveScalePitchClasses(scale: BeatScale): readonly number[] {
+  if (scale.name === CUSTOM_SCALE_NAME) {
+    if (!scale.pitchClasses) throw new BeatPitchTimeError('a custom scale must carry explicit pitchClasses')
+    return scale.pitchClasses
+  }
+  const table = SCALES[scale.name]
+  if (!table) throw new BeatPitchTimeError(`unknown scale "${scale.name}" (have: ${SCALE_NAMES.join(', ')}, ${CUSTOM_SCALE_NAME})`)
+  return table
+}
+
+/** Whether an absolute MIDI pitch is in `scale`. The single predicate the piano roll's row shading
+ * AND its note-entry lock both call, so "shaded" and "allowed" can never drift apart — a lock that
+ * disagreed with its own highlighting would be worse than no lock. */
+export function isPitchInScale(pitch: number, scale: BeatScale): boolean {
+  const pcs = resolveScalePitchClasses(scale)
+  return pcs.includes((((pitch - scale.root) % 12) + 12) % 12)
+}
+
+/** Whether a scale contains either third (minor=3 or major=4) relative to its root. Exposed
+ * because "does this scale commit me to major or minor" is the question the sus/modal case is
+ * actually asking, and the GUI labels a third-less scale as such. */
+export function scaleHasThird(scale: BeatScale): boolean {
+  const pcs = resolveScalePitchClasses(scale)
+  return pcs.includes(3) || pcs.includes(4)
+}
 
 /** The nearest in-scale pitch to `pitch` (searching outward in both directions at once); ties
  * (equal distance up and down) resolve to the LOWER pitch — an arbitrary but deterministic and
@@ -294,6 +363,9 @@ export function consolidateRatchet(doc: BeatDocument, trackId: string, opts: Not
         ratchetCount: 1,
         ratchetCurve: 0,
         ratchetLength: 1,
+        // v0.12: consolidating a MUTED ratchet yields muted notes — the mute is a property of the
+        // musical decision, not of the ratchet, so baking must not silently un-mute it.
+        active: n.active,
       })
     }
   }

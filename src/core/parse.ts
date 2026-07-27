@@ -1,5 +1,8 @@
 import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
 import { formatNumber } from './format.js'
+// v0.12 (Stream E): the scale line's own vocabulary comes from the ONE scale table (the house
+// "parity is structural" rule) rather than a second hand-copied list of scale names here.
+import { CUSTOM_SCALE_NAME, SCALE_NAMES, canonicalPitchClasses, scaleByName } from './pitchtime.js'
 import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUDIO_TRACK_FIELD_BY_KEY, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, initAudioTrackSynth, isSampleLaneFilterType, isSampleLaneParamKey, sampleLaneParamError, scenePlacementError } from './document.js'
 
 export class BeatParseError extends Error {
@@ -239,8 +242,8 @@ export function parse(text: string): BeatDocument {
   // on parse (a hand edit shouldn't have to remember the canonical order), but always re-emitted
   // in canonical order on serialize — same "liberal in, strict out" discipline the rest of the
   // grammar uses for e.g. clip content.
-  function parseNoteOptionalFields(tokens: string[], lineNo: number): Pick<BeatNote, 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength'> {
-    const out: Pick<BeatNote, 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength'> = { ...NOTE_FIELD_DEFAULTS }
+  function parseNoteOptionalFields(tokens: string[], lineNo: number): Pick<BeatNote, 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength' | 'active'> {
+    const out: Pick<BeatNote, 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength' | 'active'> = { ...NOTE_FIELD_DEFAULTS }
     const seen = new Set<string>()
     for (const tok of tokens) {
       const eq = tok.indexOf('=')
@@ -280,15 +283,24 @@ export function parse(text: string): BeatDocument {
           out.ratchetLength = v
           break
         }
+        case 'active': {
+          // v0.12 (Stream E): the deactivate state. Spelled 1/0 rather than true/false so it
+          // matches every other numeric token on this line — and only `active=0` is ever WRITTEN
+          // (true is the canonical default and elides), but `active=1` parses so a hand edit that
+          // spells it out explicitly isn't rejected.
+          if (valTok !== '0' && valTok !== '1') throw new BeatParseError(`note active must be 0 or 1, got "${valTok}"`, lineNo)
+          out.active = valTok === '1'
+          break
+        }
         default:
-          throw new BeatParseError(`unknown note field "${key}" (expected chance, cent, ratchetCount, ratchetCurve, ratchetLength)`, lineNo)
+          throw new BeatParseError(`unknown note field "${key}" (expected chance, cent, ratchetCount, ratchetCurve, ratchetLength, active)`, lineNo)
       }
     }
     return out
   }
 
   function parseNoteLine(tokens: string[], lineNo: number): BeatNote {
-    if (tokens.length < 6) throw new BeatParseError('note expects at least 5 values: <id> <pitch> <start> <duration> <velocity> [chance=N] [cent=N] [ratchetCount=N] [ratchetCurve=N] [ratchetLength=N]', lineNo)
+    if (tokens.length < 6) throw new BeatParseError('note expects at least 5 values: <id> <pitch> <start> <duration> <velocity> [chance=N] [cent=N] [ratchetCount=N] [ratchetCurve=N] [ratchetLength=N] [active=0|1]', lineNo)
     const [, id, pitchTok, startTok, durTok, velTok] = tokens as [string, string, string, string, string, string]
     const pitch = parseIntStrict(pitchTok, lineNo, 'note pitch')
     if (pitch < 0 || pitch > 127) throw new BeatParseError(`note pitch must be 0-127, got ${pitch}`, lineNo)
@@ -616,6 +628,8 @@ export function parse(text: string): BeatDocument {
           // an optional `groove` line (below) overrides it.
           shuffleAmount: 0,
           shuffleGrid: 1,
+          // v0.12: no declared scale until an optional `scale` line (below) sets one.
+          scale: null,
         }
         tracks.push(currentTrack)
       } else if (keyword === 'group') {
@@ -889,6 +903,48 @@ export function parse(text: string): BeatDocument {
         if (grid <= 0) throw new BeatParseError(`groove shuffleGrid must be > 0, got ${grid}`, lineNo)
         currentTrack.shuffleAmount = amount
         currentTrack.shuffleGrid = grid
+        continue
+      }
+      // v0.12 (Phase 41 Stream E): `scale <root> <name> [<pc>,<pc>,...]` — the track's declared
+      // musical scale (document.ts's BeatScale). Two forms:
+      //   scale 1 susPentatonic          -> a named mode from pitchtime.ts's SCALES table
+      //   scale 1 custom 0,2,5,7,10      -> an explicit root-relative pitch-class set
+      // Canonical elision: the line is entirely absent while the track has no declared scale (the
+      // pre-v0.12 state), so every existing file round-trips byte-identically.
+      if (keyword === 'scale') {
+        closeClipIfOpen(lineNo)
+        if (tokens.length !== 3 && tokens.length !== 4) {
+          throw new BeatParseError('scale expects "<root 0-11> <name>" or "<root 0-11> custom <pc>,<pc>,..."', lineNo)
+        }
+        if (currentTrack.scale) throw new BeatParseError(`duplicate scale line on track "${currentTrack.id}"`, lineNo)
+        if (currentTrack.kind === 'drums' || currentTrack.kind === 'audio') {
+          throw new BeatParseError(`scale lines only belong on note tracks; "${currentTrack.id}" is a ${currentTrack.kind} track`, lineNo)
+        }
+        const root = parseIntStrict(tokens[1]!, lineNo, 'scale root')
+        if (root < 0 || root > 11) throw new BeatParseError(`scale root must be a pitch class 0-11 (0=C), got ${root}`, lineNo)
+        const name = tokens[2]!
+        if (name === CUSTOM_SCALE_NAME) {
+          if (tokens.length !== 4) throw new BeatParseError('a custom scale needs its pitch classes: scale <root> custom <pc>,<pc>,...', lineNo)
+          const raw = tokens[3]!.split(',')
+          const pcs = raw.map((t) => parseIntStrict(t, lineNo, 'scale pitch class'))
+          let canonical: number[]
+          try {
+            canonical = canonicalPitchClasses(pcs)
+          } catch (err) {
+            throw new BeatParseError(err instanceof Error ? err.message : String(err), lineNo)
+          }
+          // Strict out AND strict in for the ONE thing a reader/writer could disagree about: the
+          // file must already be in canonical order, or serialize would rewrite a file nobody
+          // edited (the exact reader/writer asymmetry the groove line's own comment records).
+          if (tokens[3]! !== canonical.join(',')) {
+            throw new BeatParseError(`custom scale pitch classes must be ascending and deduplicated, got "${tokens[3]!}" (canonical: ${canonical.join(',')})`, lineNo)
+          }
+          currentTrack.scale = { root, name, pitchClasses: canonical }
+        } else {
+          if (tokens.length !== 3) throw new BeatParseError(`only a "custom" scale takes an explicit pitch-class list; "${name}" is a named scale`, lineNo)
+          if (!scaleByName(name)) throw new BeatParseError(`unknown scale "${name}" (have: ${SCALE_NAMES.join(', ')}, ${CUSTOM_SCALE_NAME})`, lineNo)
+          currentTrack.scale = { root, name, pitchClasses: null }
+        }
         continue
       }
       if (keyword === 'clip') {

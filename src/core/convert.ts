@@ -268,6 +268,7 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     // rule as laneSamples), so this default only matters for a track that's genuinely new.
     shuffleAmount: 0,
     shuffleGrid: 1,
+    scale: null, // v0.12: an imported beatlab track declares no scale
   }))
 
   let selectedTrack = payload.selectedTrackId
