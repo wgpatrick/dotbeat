@@ -2123,6 +2123,15 @@ interface AudioTrackVoice extends EffectHost {
   reverbSend: Tone.Gain
   delaySend: Tone.Gain
   levelTap: Tone.Analyser
+  /** Phase 41 Stream A: a placement whose trigger step came round while its media was STILL
+   * DECODING, kept so the next tick can start it late (mid-region, at the right source offset)
+   * instead of leaving it silent. Before this stream tick() just `continue`d past an undecoded
+   * placement, and because the trigger test is `floor(startStep) === step` — true for exactly one
+   * step per pass of the playhead — "not this pass" meant silence until the whole song looped
+   * back round. Measured on a one-region 4-bar repro: the region first sounded 8.08s in, and the
+   * 9.25s capture kept only its last 1.17s. `startStep` identifies WHICH placement missed (a
+   * later trigger, or leaving the region's window, clears it). */
+  awaitingBuffer: { startStep: number } | null
 }
 
 /** Options for non-default Engine instances (the singleton `engine` below uses none). */
@@ -2134,6 +2143,16 @@ interface AudioTrackVoice extends EffectHost {
  * at absolute 0 — the context is already running before play() — so an offline render starts the
  * transport this far in instead, and renderOfflineWav trims exactly this much off the front. */
 export const OFFLINE_RENDER_PREROLL_SECONDS = 0.1
+
+/** How long play() will wait for the audio-region media it just kicked (see awaitAudioMedia).
+ * Calibrated 2026-07-27 from the measured decode times behind the "audio regions don't play" bug:
+ * a single 8-second tone from the local daemon landed 36ms after play(), and a 30-chop reference
+ * track (~2.7MB each) took 78ms for its first buffer and about 1.1s for all 31 — so a couple of
+ * seconds covers a realistic reference track with headroom, while still capping the worst case
+ * (unservable media) at a delay a musician reads as "it took a moment" rather than "Play is
+ * broken". Bounded on purpose: a timeout is a warning and a degraded pass, never a wedged
+ * transport. */
+export const AUDIO_MEDIA_WAIT_MS = 3000
 
 export interface EngineOptions {
   /** Offline-render mode (ui/src/audio/offline.ts): the instance builds every node against
@@ -3541,7 +3560,7 @@ export class Engine {
     delaySend.connect(delay)
     return {
       player, filter, fxIn, effects: new Map(), effectOrder: [], effectsSig: EFFECTS_SIG_UNSET,
-      muteGain, vol, pan, reverbSend, delaySend, levelTap,
+      muteGain, vol, pan, reverbSend, delaySend, levelTap, awaitingBuffer: null,
     }
   }
 
@@ -3603,7 +3622,21 @@ export class Engine {
       }
     }
     for (const track of audioTracks) {
-      if (!this.audioTracks.has(track.id)) this.audioTracks.set(track.id, this.buildAudioTrackVoice())
+      if (!this.audioTracks.has(track.id)) {
+        const fresh = this.buildAudioTrackVoice()
+        // Phase 41 Stream A: gate a BRAND-NEW voice from the mixer state immediately. sync() runs
+        // applyMuteGates() BEFORE syncAudioTracks(), so on the first sync this map is still empty
+        // when the gates are applied and a voice built here would sit at its default gain of 1
+        // until the NEXT tick — one 16th step (120ms at 125bpm) of a muted track being audible.
+        // Measured on the reference-track project: a muted audio track emitted ~-30dB for ~0.7s on
+        // the first play of a fresh page, then went properly silent. Harmless while audio regions
+        // never sounded on the first pass at all (they were silent for other reasons — see this
+        // stream's downbeat fix); audible the moment they did. A muted reference track that blurts
+        // the first beat of a commercial record every time you press Play is exactly the failure
+        // the "typically muted" workflow cannot have.
+        fresh.muteGain.gain.value = isEffectivelyMuted(useStore.getState(), track.id) ? 0 : 1
+        this.audioTracks.set(track.id, fresh)
+      }
       // Research 142 §3.2: the production block + reorderable chain, re-asserted every sync() tick
       // so a live knob edit or an effect reorder reaches the graph on the next 16th.
       this.applyAudioTrackParams(this.audioTracks.get(track.id)!, track)
@@ -3888,6 +3921,29 @@ export class Engine {
     return end > start ? { start, end } : null
   }
 
+  /** Resolve once every audio-region media decode kicked by the sync() just before the call has
+   * landed, or `timeoutMs` of wall clock has passed — whichever comes first. Deliberately BOUNDED:
+   * a media file the daemon can't serve leaves its id in `audioBufferPending` until loadAudioBuffer
+   * gives up, and Play must never be hostage to that. A timeout degrades to exactly the pre-Phase-41
+   * behaviour (the region is silent this pass, the console carries loadAudioBuffer's own warning)
+   * rather than wedging the transport.
+   *
+   * Offline instances never reach the slow path: ui/src/audio/offline.ts warms + waits on the LIVE
+   * engine and seeds the offline one from exportAudioBuffers(), so `audioBufferPending` is already
+   * empty and this returns synchronously on the first check. */
+  private async awaitAudioMedia(timeoutMs: number): Promise<void> {
+    if (this.audioBufferPending.size === 0) return
+    const clock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    const deadline = clock() + timeoutMs
+    while (this.audioBufferPending.size > 0) {
+      if (clock() >= deadline) {
+        console.warn(`[engine] ${this.audioBufferPending.size} audio-region media load(s) still pending after ${timeoutMs}ms — starting playback anyway; those regions stay silent until they decode`)
+        return
+      }
+      await new Promise((r) => setTimeout(r, 10))
+    }
+  }
+
   /** Starts the transport. `startBar`, when given, is where playback begins (click-to-seek's "start
    * playback from the clicked position" case, Phase 24 Stream CE `seek()`) — otherwise playback
    * starts at the active loop region's own start bar, or bar 0 when no region is active (unchanged
@@ -3910,6 +3966,16 @@ export class Engine {
     this.auditionTrackId = null
     useStore.getState().setAuditioning(null)
     this.sync(doc)
+    // Phase 41 Stream A — the audio-regions-don't-play bug. sync() is where audio-region media
+    // decodes are KICKED (syncAudioTracks -> loadAudioBuffer), and sync() only ever runs from
+    // play() and tick(). So before this stream the first play() started the transport in the same
+    // turn it started the fetches, and tick()'s "buffer not decoded yet" branch dropped every
+    // placement at the downbeat. Measured against the daemon on localhost: 36ms to decode a single
+    // 8-second tone, 78ms before the FIRST of a 30-chop reference track landed — both after step 0
+    // had already come and gone. Awaiting the decodes here (bounded) means Play starts on a graph
+    // that can actually sound. It also makes cli/render.mjs's pendingMediaCount() gate meaningful
+    // rather than vacuous: that gate polled a set nothing had populated yet and always read 0.
+    await this.awaitAudioMedia(AUDIO_MEDIA_WAIT_MS)
     const t = Tone.getTransport()
     t.bpm.value = doc.bpm
     t.loop = true
@@ -4445,7 +4511,16 @@ export class Engine {
           for (const pl of placementsDue) {
             if (Math.floor(pl.startStep) === step) {
               const buf = this.audioBuffers.get(pl.region.media)
-              if (!buf) continue // still decoding — same "not this pass" the old path had
+              if (!buf) {
+                // Phase 41 Stream A: still decoding. This used to be a bare `continue`, and since
+                // the trigger test above is true for exactly ONE step per pass of the playhead, a
+                // missed downbeat meant the region stayed silent until the whole song looped
+                // round to it again. Remember the miss instead; the window branch below starts it
+                // late, from the right source offset, on the first tick after the buffer lands.
+                voice.awaitingBuffer = { startStep: pl.startStep }
+                continue
+              }
+              voice.awaitingBuffer = null
               if (voice.player.buffer !== buf) voice.player.buffer = buf
               const rate = pl.region.warp === 'repitch' ? pl.region.rate : 1
               voice.player.playbackRate = rate
@@ -4462,6 +4537,40 @@ export class Engine {
               // ramp should track. Placements are sorted and non-overlapping, so at most one wins.
               active = pl
             }
+          }
+          // Phase 41 Stream A: LATE START. A placement whose downbeat arrived before its media
+          // did (voice.awaitingBuffer, set above) is started here as soon as the buffer lands,
+          // while the playhead is still inside its window — seeking INTO the region by however
+          // far the playhead has travelled, so the audio stays in sync with the arrangement
+          // instead of restarting from the region's head. Beyond the window there is nothing left
+          // to catch up to, so the miss is simply forgotten.
+          if (!triggered && active && voice.awaitingBuffer && voice.awaitingBuffer.startStep === active.startStep) {
+            const buf = this.audioBuffers.get(active.region.media)
+            if (buf) {
+              voice.awaitingBuffer = null
+              if (voice.player.buffer !== buf) voice.player.buffer = buf
+              const rate = active.region.warp === 'repitch' ? active.region.rate : 1
+              voice.player.playbackRate = rate
+              voice.player.volume.value = active.gain && active.gain.length ? interpolateAutomation(active.gain, step - active.startStep, false) : active.region.gainDb
+              // in/out are SOURCE-media seconds, so the elapsed arrangement time is converted back
+              // to source time by the effective rate — the same relation audioRegionTimelineStepsUi
+              // inverts to size the window.
+              const elapsed = (step - active.startStep) * stepSeconds * rate
+              const offset = active.region.in + Math.max(0, elapsed)
+              const duration = Math.max(active.region.out - offset, 0)
+              if (duration > 0.001) {
+                try {
+                  voice.player.start(time, offset, duration)
+                  triggered = true
+                } catch (err) {
+                  console.warn(`[engine] audio track "${track.id}" failed to start late:`, err)
+                }
+              }
+            }
+          } else if (voice.awaitingBuffer && (!active || voice.awaitingBuffer.startStep !== active.startStep)) {
+            // The playhead has left the missed placement's window (or another placement owns it
+            // now) — there is nothing left to catch up to, so forget the miss.
+            voice.awaitingBuffer = null
           }
           if (!triggered && active && active.gain && active.gain.length) {
             // Mid-region gain automation: ramp the already-playing player's volume, the same
@@ -4711,7 +4820,26 @@ export class Engine {
     // samples are actually produced, so gating on it is machine-speed-independent.
     const recCtx = Tone.getContext().rawContext
     const recStart = recCtx.currentTime
-    while (recCtx.currentTime - recStart < seconds) await new Promise((r) => setTimeout(r, 100))
+    // Phase 41 Stream A: the audio-time wait above is machine-speed-independent BY DESIGN, but it
+    // is also unbounded, and `currentTime` does not advance at all on a SUSPENDED context — so a
+    // context that never resumed (or got suspended mid-capture) turned this into an infinite loop
+    // with no output and no error. That is the "beat render hangs for 10+ minutes" failure mode:
+    // the render was not slow, it was waiting on a clock that had stopped. A generous wall-clock
+    // ceiling (4x the requested audio, +10s) keeps every legitimately slow capture — including the
+    // measured 55s-render-underrunning-to-22s case this loop was written for — while turning a
+    // stopped clock into a named error in bounded time.
+    const wallDeadline = Date.now() + (seconds * 4 + 10) * 1000
+    while (recCtx.currentTime - recStart < seconds) {
+      if (Date.now() > wallDeadline) {
+        try { recorder.stop() } catch { /* already stopped */ }
+        throw new Error(
+          `recordWav stalled: the audio clock advanced ${(recCtx.currentTime - recStart).toFixed(2)}s of the ${seconds.toFixed(2)}s requested ` +
+            `before the wall-clock ceiling (context state "${recCtx.state}"). A suspended/stopped AudioContext never advances currentTime, ` +
+            `so this would otherwise wait forever.`,
+        )
+      }
+      await new Promise((r) => setTimeout(r, 100))
+    }
     await new Promise((r) => setTimeout(r, 150))
     recorder.stop()
     await stopped
