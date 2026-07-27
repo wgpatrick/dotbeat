@@ -17,6 +17,7 @@
 //   D5  zoom        Z frames the selected bars, X restores the exact px/bar AND scrollLeft it left
 //   D6  clock       the transport and ruler wall-clock figures match bars * 240/bpm
 //   D7  help        every key the handler implements is documented in ShortcutHelp
+//   D8  minimap     the overview strip tracks the real viewport, and clicking it moves the timeline
 //
 // Usage: node ui/verify-phase41-stream-d.mjs
 
@@ -262,6 +263,32 @@ async function main() {
     check(clockText === '7:40', `D6 that renders as ${clockText} (m:ss)`)
     const tickTimes = await page.$$eval('.arr-bar-tick-time', (els) => els.map((e) => e.textContent))
     check(tickTimes.length > 0, `D6 the ruler prints wall-clock labels at this zoom (${tickTimes.length} of them, e.g. ${tickTimes.slice(0, 3).join(', ')})`)
+
+    // ── D8: the overview strip ────────────────────────────────────────────────────────────────
+    // Its whole claim is "you can see where you are and go somewhere else", so assert both: the
+    // window tracks the real viewport, and clicking the strip moves the real timeline.
+    check(await page.$eval('[data-minimap="1"]', (el) => Number(el.getAttribute('data-total-bars'))) === TOTAL_BARS, `D8 the overview strip covers all ${TOTAL_BARS} bars`)
+    check((await page.$$('[data-minimap-section]')).length === SECTIONS, `D8 it draws all ${SECTIONS} sections`)
+    check((await page.$$('[data-minimap-locator]')).length === 2, 'D8 it draws both markers')
+
+    await page.evaluate(() => { document.querySelector('.arr-scroll').scrollLeft = 0 })
+    await sleep(200)
+    const winAtLeft = await page.$eval('[data-minimap-window="1"]', (el) => parseFloat(el.style.left))
+    const miniW = await page.$eval('[data-minimap="1"]', (el) => el.clientWidth)
+    check(winAtLeft < 2, `D8 scrolled to the start, the viewport window sits at the left edge (${winAtLeft}px)`)
+
+    // Click three-quarters along the strip; the main timeline must follow.
+    const box = await page.$eval('[data-minimap="1"]', (el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.left, y: r.top, w: r.width, h: r.height }
+    })
+    await page.mouse.click(box.x + box.w * 0.75, box.y + box.h / 2)
+    await sleep(300)
+    const afterMiniClick = await scrollLeft(page)
+    const winAfter = await page.$eval('[data-minimap-window="1"]', (el) => parseFloat(el.style.left))
+    check(afterMiniClick > 1000, `D8 clicking 75% along the strip scrolled the timeline there (scrollLeft ${afterMiniClick})`)
+    check(winAfter > miniW * 0.5, `D8 and the window moved with it (${winAfter.toFixed(0)}px of ${miniW}px)`)
+    await screenshot(page, 'verify-p41d-minimap')
 
     // ── D7: no undocumented keys ──────────────────────────────────────────────────────────────
     // The panel is a hand-maintained list, so this is the only thing standing between it and the

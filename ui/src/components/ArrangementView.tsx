@@ -2635,6 +2635,74 @@ export function ArrangementView() {
     return () => window.removeEventListener('keydown', onKey)
   }, [addLocator, jumpMarker, zoomToSelection, zoomBack, selectedOcc, moveOccurrences, splitAudioAtPlayhead, doc, setSelectedSection])
 
+  // ── Overview strip / minimap (Phase 41 Stream D) ─────────────────────────────────────────────
+  // The whole song, always, in one screen-width strip — sections, markers, the playhead, and a
+  // window showing which slice the main timeline is currently displaying. Once zoom is useful
+  // enough to be worth using (which follow and zoom-to-selection make it), you spend most of your
+  // time looking at 8 bars of 242 with no indication of where those 8 bars are; the strip is the
+  // "you are here" the zoomed view structurally cannot give you. Click or drag it to go somewhere.
+  //
+  // The viewport window is positioned IMPERATIVELY from the scroll handler, never through React
+  // state. Scroll fires far too often to re-render a component that owns 30 track canvases — the
+  // same reasoning the file already applies to `currentStep` ("only the lightweight playhead div
+  // re-renders on it"), just taken one step further because scroll has no natural 16th-note rate
+  // limit at all.
+  const miniRef = useRef<HTMLDivElement>(null)
+  const miniWindowRef = useRef<HTMLDivElement>(null)
+  const syncMiniWindow = useCallback(() => {
+    const scrollEl = scrollRef.current
+    const mini = miniRef.current
+    const win = miniWindowRef.current
+    if (!scrollEl || !mini || !win || totalBars <= 0 || renderPxPerBar <= 0) return
+    const miniW = mini.clientWidth
+    const pxPerBarMini = miniW / totalBars
+    const firstBar = scrollEl.scrollLeft / renderPxPerBar
+    const barsVisible = Math.max(0, scrollEl.clientWidth - HEADER_W) / renderPxPerBar
+    win.style.left = `${Math.max(0, firstBar * pxPerBarMini)}px`
+    // Clamp to a grabbable minimum: at deep zoom the true window is a sub-pixel sliver that reads
+    // as "nothing is displayed" rather than "you are looking at a very small part of this".
+    win.style.width = `${Math.max(6, Math.min(miniW, barsVisible * pxPerBarMini))}px`
+  }, [totalBars, renderPxPerBar])
+
+  // Re-sync whenever the geometry changes under it (zoom, song length, container resize) as well as
+  // on scroll — a zoom step changes which slice is visible without any scroll event firing.
+  useLayoutEffect(syncMiniWindow, [syncMiniWindow, laneWidth, locators])
+
+  const miniSeek = useCallback(
+    (clientX: number) => {
+      const mini = miniRef.current
+      const scrollEl = scrollRef.current
+      if (!mini || !scrollEl || totalBars <= 0 || renderPxPerBar <= 0) return
+      const rect = mini.getBoundingClientRect()
+      const bar = ((clientX - rect.left) / Math.max(1, rect.width)) * totalBars
+      const laneW = Math.max(1, scrollEl.clientWidth - HEADER_W)
+      const maxScroll = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth)
+      // Centre the clicked bar: you pointed at a place, so put it in the middle of the view rather
+      // than at its left edge where half the context you were aiming for is off-screen.
+      scrollEl.scrollLeft = Math.max(0, Math.min(maxScroll, bar * renderPxPerBar - laneW / 2))
+      syncMiniWindow()
+    },
+    [totalBars, renderPxPerBar, syncMiniWindow],
+  )
+
+  // Drag anywhere on the strip to scrub the view along it — same attach-on-pointerdown idiom the
+  // rest of this file's one-shot gestures use.
+  const beginMiniDrag = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button === 2) return
+      e.preventDefault()
+      miniSeek(e.clientX)
+      const onMove = (ev: PointerEvent) => miniSeek(ev.clientX)
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [miniSeek],
+  )
+
   // Window-level move/up for the resize handle: preview the new bar count while dragging, commit once
   // on release. Loop mode writes loop_bars (optimistic /edit); song mode resizes that section (/song).
   //
@@ -3509,7 +3577,41 @@ export function ArrangementView() {
         </div>
       </div>
 
-      <div className="arr-scroll" ref={scrollRef} onWheel={onWheelZoom}>
+      {/* Phase 41 Stream D: the overview strip. The whole song at a fixed screen width, whatever
+          the main timeline is zoomed to — sections, markers, playhead, and the current viewport as
+          a draggable window. Click or drag to move the main view. */}
+      <div
+        className="arr-minimap"
+        ref={miniRef}
+        data-minimap="1"
+        data-total-bars={totalBars}
+        title="overview — click or drag to move the timeline view"
+        onPointerDown={beginMiniDrag}
+        style={{ touchAction: 'none' }}
+      >
+        {sections.map((s, i) => (
+          <div
+            key={`mini-sec-${i}`}
+            className="arr-minimap-section"
+            data-minimap-section={i}
+            style={{ left: `${(s.startBar / Math.max(1, totalBars)) * 100}%`, width: `${(s.bars / Math.max(1, totalBars)) * 100}%` }}
+          />
+        ))}
+        {locators.map((l) => (
+          <div
+            key={`mini-loc-${l.id}`}
+            className="arr-minimap-locator"
+            data-minimap-locator={l.id}
+            style={{ left: `${((l.bar - 1) / Math.max(1, totalBars)) * 100}%` }}
+          />
+        ))}
+        {showPlayhead && (
+          <div className="arr-minimap-playhead" style={{ left: `${(currentStep / 16 / Math.max(1, totalBars)) * 100}%` }} />
+        )}
+        <div className="arr-minimap-window" ref={miniWindowRef} data-minimap-window="1" />
+      </div>
+
+      <div className="arr-scroll" ref={scrollRef} onWheel={onWheelZoom} onScroll={syncMiniWindow}>
         {/* Ruler: section labels + boundaries; dragging it selects a bar range across all tracks. */}
         <div className="arr-ruler-row" style={{ height: RULER_H }}>
           <div className="arr-ruler-corner" style={{ width: HEADER_W }} />

@@ -4139,3 +4139,56 @@ body {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* ── Overview strip / minimap (Phase 41 Stream D) ────────────────────────────────────────────────
+   The whole song at a fixed screen width, sitting between the arrangement toolbar and the scrolling
+   timeline. Deliberately short (22px): it is a locator map and a "you are here", not a second
+   timeline to read detail from. */
+.arr-minimap {
+  position: relative;
+  height: 22px;
+  flex: 0 0 auto;
+  margin: 0 8px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  cursor: pointer;
+  overflow: hidden;
+}
+.arr-minimap-section {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+}
+.arr-minimap-locator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  opacity: 0.85;
+}
+.arr-minimap-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  box-shadow: 0 0 5px rgba(224, 161, 60, 0.8);
+}
+/* The current viewport. Positioned imperatively from the scroll handler (see syncMiniWindow) —
+   never re-rendered through React, because scroll has no natural rate limit and this component
+   owns every track canvas. */
+.arr-minimap-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(224, 161, 60, 0.18);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  pointer-events: none;
+}
