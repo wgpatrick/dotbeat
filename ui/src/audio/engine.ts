@@ -3622,7 +3622,21 @@ export class Engine {
       }
     }
     for (const track of audioTracks) {
-      if (!this.audioTracks.has(track.id)) this.audioTracks.set(track.id, this.buildAudioTrackVoice())
+      if (!this.audioTracks.has(track.id)) {
+        const fresh = this.buildAudioTrackVoice()
+        // Phase 41 Stream A: gate a BRAND-NEW voice from the mixer state immediately. sync() runs
+        // applyMuteGates() BEFORE syncAudioTracks(), so on the first sync this map is still empty
+        // when the gates are applied and a voice built here would sit at its default gain of 1
+        // until the NEXT tick — one 16th step (120ms at 125bpm) of a muted track being audible.
+        // Measured on the reference-track project: a muted audio track emitted ~-30dB for ~0.7s on
+        // the first play of a fresh page, then went properly silent. Harmless while audio regions
+        // never sounded on the first pass at all (they were silent for other reasons — see this
+        // stream's downbeat fix); audible the moment they did. A muted reference track that blurts
+        // the first beat of a commercial record every time you press Play is exactly the failure
+        // the "typically muted" workflow cannot have.
+        fresh.muteGain.gain.value = isEffectivelyMuted(useStore.getState(), track.id) ? 0 : 1
+        this.audioTracks.set(track.id, fresh)
+      }
       // Research 142 §3.2: the production block + reorderable chain, re-asserted every sync() tick
       // so a live knob edit or an effect reorder reaches the graph on the next 16th.
       this.applyAudioTrackParams(this.audioTracks.get(track.id)!, track)

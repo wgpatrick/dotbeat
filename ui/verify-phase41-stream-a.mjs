@@ -202,6 +202,38 @@ await run('phase41-stream-a', async () => {
     const hz = dominantHz(channels, sampleRate, onset + 0.1, onset + 1.0)
     check(Math.abs(hz - TONE_HZ) < 40, `[IDENTITY] the captured audio IS the region's ${TONE_HZ}Hz tone, not a transient (zero-crossing estimate ${hz.toFixed(0)}Hz, must be within 40Hz)`)
 
+    // ---- D: a muted audio track is silent on the FIRST play, not one tick late ----------------
+    // sync() applies the mute gates BEFORE syncAudioTracks() creates the voices, so a brand-new
+    // audio voice used to sit at its default gain of 1 until the next tick — one 16th step of a
+    // muted track being audible. This was unreachable while audio regions never sounded on the
+    // first pass at all, and became audible the moment section C's fix made them sound. Measured
+    // on the real reference-track project before the fix: ~-30dB for ~0.7s, then proper silence.
+    // A fresh page matters: on a page that has already played, the shared reverb/delay buses carry
+    // a tail that outlives a track's own mute gate and would read as a leak that isn't one.
+    await gui.page.reload({ waitUntil: 'load' })
+    await gui.page.waitForFunction(() => window.__store && window.__store.getState().doc && window.__engine, { timeout: 15000 })
+    const mutedB64 = await gui.page.evaluate(async (secs) => {
+      const e = window.__engine
+      window.__store.setState({ mutes: { tone: true }, solos: {} })
+      await e.ensureStarted()
+      const recording = e.recordWav(secs)
+      await new Promise((r) => setTimeout(r, 200))
+      await e.play()
+      const blob = await recording
+      e.stop()
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      let bin = ''
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+      return btoa(bin)
+    }, 2.0)
+    const mraw = Buffer.from(mutedB64, 'base64')
+    const muted = decodeWav(new Uint8Array(mraw.buffer, mraw.byteOffset, mraw.byteLength))
+    const mutedDb = rmsDb(muted.channels, muted.sampleRate, 0, 2.0)
+    check(
+      mutedDb < -60,
+      `[MUTE] a muted audio track is silent from the very first play, with no one-tick leak (${mutedDb === -Infinity ? '-inf' : mutedDb.toFixed(1)} dB over 2s, must be < -60)`,
+    )
+
     check(gui.errors.length === 0, `[PAGE] no page errors (${gui.errors.join(' | ')})`)
   } finally {
     await gui.close()
