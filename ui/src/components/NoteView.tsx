@@ -318,6 +318,9 @@ interface EditorEvent {
   chance?: number
   ratchetCount?: number
   ratchetCurve?: number
+  // v0.12 (Phase 41 Stream E): the deactivate state. `undefined` for a drum hit, which has no such
+  // concept; `false` means the note is present but silent — a third state distinct from deleted.
+  active?: boolean
 }
 
 type GroupEv = { id: string; origStart: number; origRow: number; origDur: number | undefined }
@@ -582,6 +585,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
         chance: n.chance,
         ratchetCount: n.ratchetCount,
         ratchetCurve: n.ratchetCurve,
+        active: n.active,
       }))
 
   // Phase 29 Stream GA: sync the live buffer to the selected section's clip whenever WHICH clip
@@ -1122,7 +1126,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
       const ids = new Set(st.editNoteIds)
       const liveEvents: EditorEvent[] = isDrums
         ? t.hits.map((h) => ({ id: h.id, start: h.start, duration: h.duration, velocity: h.velocity, row: axis.rowOfValue(h.lane) }))
-        : t.notes.map((n) => ({ id: n.id, start: n.start, duration: n.duration, velocity: n.velocity, row: axis.rowOfValue(n.pitch) }))
+        : t.notes.map((n) => ({ id: n.id, start: n.start, duration: n.duration, velocity: n.velocity, row: axis.rowOfValue(n.pitch), active: n.active }))
 
       if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
         e.preventDefault()
@@ -1185,6 +1189,25 @@ export function NoteView({ track }: { track: BeatTrack }) {
       }
 
       if (!chosen.length) return
+
+      // v0.12 deactivate (Phase 41 Stream E) — Ableton's `0` key mutes a note in place (manual
+      // ch.10 p.249). Notes only: a drum hit has no `active` field, so on a drums track this key
+      // falls through untouched rather than erroring. Toggles as ONE gesture across the whole
+      // selection (one gestureId, same multi-select coalescing fix Delete below already carries),
+      // and the direction is decided ONCE from the selection as a whole — if ANY selected note is
+      // still active, the keypress mutes them all; only when every one is already muted does it
+      // unmute. A per-note toggle would invert a mixed selection into the same mixed selection,
+      // which reads as the key not working.
+      //
+      // Selection is deliberately KEPT (unlike Delete, which clears it): the whole point of a mute
+      // is A/B-ing, so the next press must land on the same notes without re-selecting them.
+      if (e.key === '0' && !isDrums) {
+        e.preventDefault()
+        const anyActive = chosen.some((ev) => ev.active !== false)
+        const gestureId = newGestureId()
+        for (const ev of chosen) postEdit(`${track.id}.note.${ev.id}.active`, anyActive ? '0' : '1', gestureId)
+        return
+      }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
@@ -1377,7 +1400,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const tip = editable
     ? isDrums
       ? 'click a lane label to preview + select · click empty grid to add a hit (a marker — no duration) · drag to marquee-select · shift/cmd-click to multi-select · drag a hit (or group) to move · drag its right edge to gate/sustain it (marker -> bar) · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand (off-grid) placement'
-      : 'click a key to preview · click empty grid to add · drag to marquee-select · shift/cmd-click to multi-select · drag a note (or group) to move · drag its right edge to resize · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand placement · hold Alt/Option at the START of a drag to duplicate instead of move · cmd/ctrl+c / cmd/ctrl+v to copy/paste at the playhead · dashed/dim = chance<100 · ticks = ratchet · drag the chance lane across notes to paint probability'
+      : 'click a key to preview · click empty grid to add · drag to marquee-select · shift/cmd-click to multi-select · drag a note (or group) to move · drag its right edge to resize · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand placement · hold Alt/Option at the START of a drag to duplicate instead of move · cmd/ctrl+c / cmd/ctrl+v to copy/paste at the playhead · 0 mutes/unmutes the selection in place (it stays in the clip) · dashed/dim = chance<100 · dim+outlined = muted · ticks = ratchet · drag the chance lane across notes to paint probability · tinted rows = in the declared scale (Scale panel below); with lock on, notes snap into it'
     : ''
 
   // Rubber-band overlay geometry (grid-relative px), only while an actual drag is in progress.
@@ -1752,10 +1775,15 @@ export function NoteView({ track }: { track: BeatTrack }) {
             // the app now shares (effect-chain reorder, section-chip reorder, arrangement clip-block
             // move) rather than inventing a fifth treatment.
             const isDraggingNote = !!preview?.[ev.id]
+            // v0.12 deactivate (Phase 41 Stream E): a muted note stays exactly where it is, at its
+            // real pitch/duration, and reads as switched-off rather than absent — you are supposed
+            // to be able to see the shape of the phrase you just removed a note from, which is the
+            // entire reason this is a state and not a delete.
+            const isMuted = ev.active === false
             return (
               <div
                 key={ev.id}
-                className={`noteview-note${selSet.has(ev.id) ? ' selected' : ''}${isMarker ? ' marker' : ''}${isChancy ? ' chancy' : ''}${isRatcheted ? ' ratcheted' : ''}${isDraggingNote ? ` ${DRAGGING_CLASS}` : ''}`}
+                className={`noteview-note${selSet.has(ev.id) ? ' selected' : ''}${isMarker ? ' marker' : ''}${isChancy ? ' chancy' : ''}${isRatcheted ? ' ratcheted' : ''}${isMuted ? ' muted' : ''}${isDraggingNote ? ` ${DRAGGING_CLASS}` : ''}`}
                 style={{
                   left: `calc(${shown.start} * var(--note-step-w))`,
                   width: isMarker ? `${MARKER_W}px` : `calc(${shown.duration} * var(--note-step-w) - 1px)`,
@@ -1769,7 +1797,11 @@ export function NoteView({ track }: { track: BeatTrack }) {
                   // rectangle (research/71 §2.4). Base color/opacity now stays constant regardless of
                   // velocity; the chance dim (a real "might not play" signal) is the only opacity
                   // encoding left, and stays legible on its own now that it's not fighting velocity.
-                  opacity: isChancy ? 0.6 : 1,
+                  // A muted note dims hard — well past the chance dim, which means "might not
+                  // play"; this one means "will not play". The two stack multiplicatively so a
+                  // muted probabilistic note still reads as both, same rule the chance/velocity
+                  // comment above establishes.
+                  opacity: (isChancy ? 0.6 : 1) * (isMuted ? 0.3 : 1),
                   // A marker (no duration — a one-shot trigger) is a small pill, not a bar; a bar
                   // has square corners like the melodic notes. No transform/rotation on the
                   // container itself, so the resize-handle child's pointer math stays screen-space.
@@ -1779,11 +1811,13 @@ export function NoteView({ track }: { track: BeatTrack }) {
                   eventKind === 'note'
                     ? `pitch ${axis.valueOfRow(shown.row)} · start ${shown.start} · dur ${shown.duration} · vel ${ev.velocity}` +
                       (isChancy ? ` · chance ${chance}%` : '') +
-                      (isRatcheted ? ` · ratchet x${ratchetCount}` : '')
+                      (isRatcheted ? ` · ratchet x${ratchetCount}` : '') +
+                      (isMuted ? ' · MUTED (press 0 to unmute)' : '')
                     : `${axis.valueOfRow(shown.row)} · start ${shown.start}${shown.duration !== undefined ? ` · dur ${shown.duration}` : ' · one-shot'} · vel ${ev.velocity}`
                 }
                 data-note-id={ev.id}
                 data-chance={isChancy ? chance : undefined}
+                data-note-muted={isMuted ? 'true' : undefined}
                 data-ratchet-count={isRatcheted ? ratchetCount : undefined}
                 onDoubleClick={(e) => {
                   e.stopPropagation()
@@ -1933,6 +1967,26 @@ export function NoteView({ track }: { track: BeatTrack }) {
                       void postDuplicateNotes(track.id, ids, DEFAULT_DUR, 0)
                         .then((addedIds) => setSel(addedIds))
                         .catch((err) => showToast(`Could not duplicate: ${(err as Error).message}`))
+                    },
+                  },
+                ]
+              : []),
+            // v0.12 deactivate (Phase 41 Stream E): the discoverable twin of the `0` key. Notes
+            // only, same reason Duplicate above is notes-only. Label states the direction the
+            // click will actually go, decided the same "any active = mute them all" way the
+            // keyboard toggle decides it, so menu text and keypress can never disagree.
+            ...(eventKind === 'note'
+              ? [
+                  {
+                    key: 'toggle-active',
+                    label: (() => {
+                      const anyActive = track.notes.filter((n) => ids.includes(n.id)).some((n) => n.active !== false)
+                      return `${anyActive ? 'Mute' : 'Unmute'} ${noun}`
+                    })(),
+                    onSelect: () => {
+                      const anyActive = track.notes.filter((n) => ids.includes(n.id)).some((n) => n.active !== false)
+                      const gestureId = newGestureId()
+                      for (const id of ids) postEdit(`${track.id}.note.${id}.active`, anyActive ? '0' : '1', gestureId)
                     },
                   },
                 ]

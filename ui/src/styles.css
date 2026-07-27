@@ -1321,6 +1321,15 @@ body {
 .noteview-note.chancy {
   border: 1px dashed rgba(255, 255, 255, 0.7);
 }
+/* v0.12 deactivate (Phase 41 Stream E): a muted note is switched off, not gone. The hard opacity
+   drop is applied inline (it multiplies with the chance dim — see NoteView.tsx); this adds the
+   second, non-opacity signal, because opacity alone is ambiguous against a quiet or probabilistic
+   note. A hollow fill with a solid outline reads as "the slot is still reserved". */
+.noteview-note.muted {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.55));
+  outline: 1px solid rgba(255, 255, 255, 0.45);
+  outline-offset: -1px;
+}
 .noteview-ratchet-tick {
   position: absolute;
   top: 1px;
