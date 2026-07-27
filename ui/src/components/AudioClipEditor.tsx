@@ -228,6 +228,13 @@ export function AudioClipEditor({ track }: { track: BeatTrack }) {
     placementTargetedClip(track, doc, selectedSectionIndex, selectedPlacement, currentStep) ??
     primaryClipFor(track, doc, selectedSceneId(doc, selectedSectionIndex))
   const inSongMode = !!doc.song && doc.song.length > 0
+  // Phase 41 Stream A: how many real audio regions this track OWNS, regardless of placement — the
+  // difference between "you haven't imported anything" and "what you imported isn't in this
+  // section" (see the empty state below). Named for display, capped so a 30-chop reference track
+  // doesn't render a paragraph of ids.
+  const audioClips = track.clips.filter((c) => c.audio)
+  const audioClipCount = audioClips.length
+  const sampleClipNames = audioClips.slice(0, 3).map((c) => c.id).join(', ') + (audioClipCount > 3 ? `, +${audioClipCount - 3} more` : '')
 
   return (
     <div className="audio-clip-editor" data-audio-clip-editor={track.id}>
@@ -239,18 +246,27 @@ export function AudioClipEditor({ track }: { track: BeatTrack }) {
       {clip?.audio ? (
         <AudioClipInspector track={track} clip={clip} />
       ) : (
-        // No audio region placed yet on this track (in this section) — Audio tracks have no "Place
+        // No audio region resolved for this track in this section — Audio tracks have no "Place
         // in Arrangement" button (research/88: the placement mechanism is a drag from the Content
         // Browser onto the track HEADER, not the arrangement row), so the empty state points at that
         // gesture directly instead of showing an irrelevant note-grid.
+        //
+        // Phase 41 Stream A: "no clip resolved" has TWO very different causes and the panel used to
+        // report both as "No audio clip here yet", which is a lie in the second case and sends the
+        // user off to re-import a sample they already have. Seen for real while laying out a
+        // reference track: the track carried 30 audio clips and the panel said there were none,
+        // because the scene holding them had been dropped from the song. So name the actual state —
+        // a track with clips that are simply UNPLACED is an arrangement problem, not an import one.
         <div className="audio-clip-editor-empty" data-audio-clip-empty={track.id}>
           <span className="audio-clip-editor-empty-icon" aria-hidden="true">
             ♪
           </span>
           <p>
-            {inSongMode
-              ? 'No audio clip here yet. Drag a sample from the Browser onto this track\'s header (not the arrangement row) to create one.'
-              : 'Add a song section first ("+ section"), then drag a sample from the Browser onto this track\'s header to create a clip — audio clips are song-mode-only.'}
+            {!inSongMode
+              ? 'Add a song section first ("+ section"), then drag a sample from the Browser onto this track\'s header to create a clip — audio clips are song-mode-only.'
+              : audioClipCount > 0
+                ? `This track has ${audioClipCount} audio clip${audioClipCount === 1 ? '' : 's'} (${sampleClipNames}) but none of them is placed in the section you're viewing — so there is nothing to edit here and nothing to hear. Select a section that uses one, or place a clip into this one.`
+                : 'No audio clip here yet. Drag a sample from the Browser onto this track\'s header (not the arrangement row) to create one.'}
           </p>
         </div>
       )}
