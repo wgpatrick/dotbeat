@@ -1048,6 +1048,30 @@ export interface BeatGroup {
   tracks: string[] // member track ids; a track belongs to at most one group (enforced at edit/parse time)
 }
 
+/** v0.11 (Phase 41 Stream D): a named point marker on the song timeline — "Breakdown at bar 101".
+ *
+ * A POINT, not a range: locators mark where something happens, they don't own the bars after it.
+ * Ranges are already what `song` sections are, and conflating the two is exactly how DAWs end up
+ * with two disagreeing notions of "section". A locator is free to sit anywhere, including in the
+ * middle of a section (which is the common case — the reference track's drums drop out at b101,
+ * eleven bars into a section that begins at b97).
+ *
+ * `bar` is ONE-BASED, unlike almost every other bar-ish number in this codebase (`BeatSongSection`
+ * has no bar at all, only a length; the arrangement's derived `startBar` and `BeatSelection.bars`
+ * are both 0-based). That is a deliberate, and deliberately loud, inconsistency: a locator's entire
+ * reason to exist is to be READ — in the file, in the ruler, in `beat inspect` — and every human
+ * sentence about it says "bar 101", so a stored 100 would be a permanent translation tax on the one
+ * value users actually look at. The conversion to 0-based pixel math happens in exactly one place
+ * per surface, at the point of use.
+ *
+ * `name` is a single SLUG_RE token (rendered with underscores as spaces in the GUI), the same
+ * convention v0.10 scene names already use — the format has no quoted-string mechanism. */
+export interface BeatLocator {
+  id: string
+  bar: number // 1-based; see above
+  name: string
+}
+
 export interface BeatDocument {
   formatVersion: string
   bpm: number
@@ -1058,6 +1082,9 @@ export interface BeatDocument {
   groups: BeatGroup[] // v0.10; [] when none. Canonical position: after tracks, before scenes.
   scenes: BeatScene[] // v0.4; [] when none
   song: BeatSongSection[] | null // v0.4; null = no song block = loop mode (today's behavior)
+  // v0.11; [] when none, and elided from the serialized file entirely when empty (so every
+  // pre-Stream-D file round-trips byte-identically). Canonical position: last, after song.
+  locators: BeatLocator[]
 }
 
 export const OSC_TYPES: readonly OscType[] = ['sine', 'triangle', 'sawtooth', 'square', 'wavetable']

@@ -312,6 +312,9 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
   }
 
   const doc: BeatDocument = {
+    // BeatLab payloads have no notion of a named timeline marker, so there is nothing to convert —
+    // an imported project simply starts with none (v0.11 Phase 41 Stream D).
+    locators: [],
     formatVersion: BEAT_FORMAT_VERSION,
     bpm: payload.bpm,
     loopBars: payload.loopBars,

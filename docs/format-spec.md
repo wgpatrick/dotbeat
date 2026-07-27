@@ -1060,6 +1060,67 @@ and `test/lane-polyphony.test.ts`.
 
 ---
 
+### v0.11 additions — timeline locators (Phase 41 Stream D)
+
+A `locators` block, **last** in canonical order (after `song`), carrying named point markers on the
+song timeline:
+
+```
+locators
+  locator intro 1 Intro
+  locator brk 101 Breakdown
+  locator drop 33
+```
+
+`locator <id> <bar> [<name>]`. The id is a `SLUG_RE` token, unique within the block. The name is a
+`SLUG_RE` token too (the format has no quoted-string mechanism — underscores stand in for spaces and
+are rendered as spaces in the GUI, the same convention v0.10 scene names use); **it defaults to the
+id when omitted**, and is elided again on serialize when the two are equal, so `locator drop 33`
+round-trips exactly.
+
+Three deliberate choices worth stating, because each is easy to get wrong later:
+
+- **`bar` is 1-BASED**, unlike the arrangement's derived `startBar` or `BeatSelection.bars`. A
+  locator exists to be read — in the file, in the ruler, in `beat inspect` — and every human
+  sentence about one says "bar 101". Storing 100 would be a permanent translation tax on the single
+  number users actually look at. Conversion to 0-based pixel math happens once per surface at the
+  point of use.
+- **A locator is a POINT, not a range.** Ranges are already what `song` sections are, and merging
+  the two concepts is how a DAW ends up with two disagreeing notions of "section". Locators sit
+  freely, including mid-section — which is the common case (the reference track's drums drop out at
+  b101, eleven bars into a section starting at b97).
+- **An out-of-range bar parses.** Rejecting a locator past the end of the song would silently delete
+  a user's marker the moment they shortened the arrangement — the worst possible response to a value
+  that is trivially recoverable by moving it back.
+
+The block is **elided entirely when empty**, so every pre-Stream-D file round-trips byte-identically
+and no format-version bump is needed (the same elided-by-default discipline as the other v0.11
+additions). Within the block, locators serialize **sorted by bar** (then id): unlike clips or
+scenes, the list has an obvious canonical reading order — the order you hit them — and sorting keeps
+"add a marker in the middle" to a one-line diff. Because file order is therefore serializer-owned
+and never user-meaningful, `diffDocuments` matches locators **by id**, so a reorder is not a change
+and a move or rename reads as `locator brk: bar 101 -> 105`, not a remove/add pair.
+
+Edited through `setValue`'s path grammar — which is why the CLI (`beat set`), MCP (`beat_set`) and
+the daemon's `POST /edit` all reach it without a line of per-surface code:
+
+```
+locator.<id>       "<bar> [<name>]"   create or replace (upsert)
+locator.<id>       ""                 delete (empty value removes, as <track>.hit.<id> does)
+locator.<id>.bar   "<n>"              move
+locator.<id>.name  "<name>"           rename
+```
+
+There is deliberately **no bare `locator` append verb** that mints an id server-side. The daemon
+coalesces undo entries by path string and exempts the mint-a-new-entity case via a hardcoded
+`path.endsWith('.note') || path.endsWith('.hit')`; a bare `locator` path would fall outside that
+exemption and collapse every rapid-fire add into one undo step, losing all but the last. A
+caller-chosen id in the path makes two adds two distinct paths, hence two gestures.
+
+Guarded in `test/locators.test.ts` (round-trip, path grammar, error messages, diff entries).
+
+---
+
 ## Future (post-v0, not implemented) — a fuller sketch once automation/devices/media land
 
 The sections below are earlier exploratory sketches for where the format goes *after* v0 proves

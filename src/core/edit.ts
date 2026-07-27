@@ -70,6 +70,23 @@ function parseHeaderInt(value: string, what: string, min: number, max: number): 
  *   empty value clears the override — see setClipLoop/setClipSignature)
  *
  * Returns a new document; never mutates. */
+/** v0.11 (Phase 41 Stream D): shared validation for the locator paths in setValue below, so the
+ * create/move forms cannot drift apart on what counts as a legal bar or name. Both mirror the
+ * parser's own checks exactly (parse.ts's `locator` line) — anything setValue accepts must
+ * serialize to a line the parser will read back. */
+function parseLocatorBar(value: string, what: string): number {
+  const n = Number(value.trim())
+  if (value.trim() === '' || !Number.isFinite(n)) throw new BeatEditError(`${what} expected a bar number, got "${value}"`)
+  if (!Number.isInteger(n)) throw new BeatEditError(`${what} must be a whole bar number, got "${value}"`)
+  if (n < 1) throw new BeatEditError(`${what} is 1-based — bars start at 1, got ${n}`)
+  return n
+}
+function checkLocatorName(name: string): void {
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+    throw new BeatEditError(`locator names are single alphanumeric/_/- tokens (the format has no quoted strings — use underscores for spaces), got "${name}"`)
+  }
+}
+
 export function setValue(doc: BeatDocument, path: string, value: string): BeatDocument {
   // header fields
   if (path === 'bpm') return { ...doc, bpm: parseHeaderInt(value, 'bpm', BPM_MIN, BPM_MAX) }
@@ -77,6 +94,52 @@ export function setValue(doc: BeatDocument, path: string, value: string): BeatDo
   if (path === 'selected_track') {
     findTrack(doc, value) // must reference a real track
     return { ...doc, selectedTrack: value }
+  }
+
+  // v0.11 (Phase 41 Stream D) locator grammar. Sits HERE, above the `<track>.<field>` split, because
+  // `locator` is a document-level namespace, not a track id — same footing as bpm/loop_bars above.
+  //   locator.<id>       "<bar> [<name>]"  -> create or replace (upsert)
+  //   locator.<id>       ""                -> delete (empty value removes, as `<track>.hit.<id>` does)
+  //   locator.<id>.bar   "<n>"             -> move
+  //   locator.<id>.name  "<name>"          -> rename
+  //
+  // The id is in the PATH on every form, including create — there is no bare `locator` append verb
+  // that mints an id server-side. That is load-bearing, not stylistic: the daemon's POST /edit
+  // coalesces undo entries by path string, and its exemption list for the mint-a-new-entity case is
+  // a hardcoded `path.endsWith('.note') || path.endsWith('.hit')`. A bare `locator` append path
+  // would therefore have every rapid-fire add collapse into ONE undo step, silently losing all but
+  // the last — the exact bug that exemption exists to prevent. Putting a caller-chosen id in the
+  // path sidesteps it entirely: two adds are two different paths, so they are two gestures, and it
+  // costs nothing since every caller (GUI, CLI, MCP) already knows what to call the thing.
+  if (path === 'locator' || path.startsWith('locator.')) {
+    const rest = path === 'locator' ? '' : path.slice('locator.'.length)
+    const m = rest.match(/^([A-Za-z0-9_-]+)(?:\.(bar|name))?$/)
+    if (!m) {
+      throw new BeatEditError(`unknown locator path "${path}" (expected locator.<id>, locator.<id>.bar, or locator.<id>.name)`)
+    }
+    const id = m[1]!
+    const field = m[2] as 'bar' | 'name' | undefined
+    const existing = doc.locators.find((l) => l.id === id)
+    const others = doc.locators.filter((l) => l.id !== id)
+    if (!field) {
+      if (value.trim() === '') {
+        if (!existing) throw new BeatEditError(`no locator "${id}" to remove (have: ${doc.locators.map((l) => l.id).join(', ') || 'none'})`)
+        return { ...doc, locators: others }
+      }
+      const parts = value.trim().split(/\s+/)
+      if (parts.length !== 1 && parts.length !== 2) throw new BeatEditError(`locator expects "<bar> [<name>]", got "${value}"`)
+      const bar = parseLocatorBar(parts[0]!, `locator.${id}`)
+      const name = parts[1] ?? existing?.name ?? id
+      checkLocatorName(name)
+      return { ...doc, locators: [...others, { id, bar, name }] }
+    }
+    if (!existing) throw new BeatEditError(`no locator "${id}" (have: ${doc.locators.map((l) => l.id).join(', ') || 'none'}); create it with locator.${id} "<bar> [<name>]"`)
+    if (field === 'bar') {
+      return { ...doc, locators: [...others, { ...existing, bar: parseLocatorBar(value, `locator.${id}.bar`) }] }
+    }
+    const name = value.trim()
+    checkLocatorName(name)
+    return { ...doc, locators: [...others, { ...existing, name }] }
   }
 
   const dot = path.indexOf('.')
@@ -1300,7 +1363,7 @@ export function initDocument(opts: { bpm?: number; loopBars?: number; trackId?: 
   // convention (see format-spec.md's v0.10 note): initDocument / the BeatLab-bridge converter
   // stamp NEW documents with the new version; existing files keep their own version string and
   // parse (and round-trip) unchanged, since every v0.11 addition is elided-by-default.
-  const base: BeatDocument = { formatVersion: '0.11', bpm, loopBars, selectedTrack: '', media: [], tracks: [], groups: [], scenes: [], song: null }
+  const base: BeatDocument = { formatVersion: '0.11', bpm, loopBars, selectedTrack: '', media: [], tracks: [], groups: [], scenes: [], song: null, locators: [] }
   const { doc } = addTrack(base, { id: opts.trackId ?? 'lead', kind: 'synth' })
   return { ...doc, selectedTrack: doc.tracks[0]!.id }
 }
