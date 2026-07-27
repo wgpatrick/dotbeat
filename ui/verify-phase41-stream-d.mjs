@@ -18,6 +18,7 @@
 //   D6  clock       the transport and ruler wall-clock figures match bars * 240/bpm
 //   D7  help        every key the handler implements is documented in ShortcutHelp
 //   D8  minimap     the overview strip tracks the real viewport, and clicking it moves the timeline
+//   D0c sticky      track headers (and their mute/solo) stay pinned at every horizontal scroll depth
 //
 // Usage: node ui/verify-phase41-stream-d.mjs
 
@@ -116,6 +117,34 @@ async function main() {
         .filter((b) => b.right > window.innerWidth + 1 || b.squashedBy > 1),
     )
     check(clipped.length === 0, `D0b every arrangement toolbar control is fully visible and unsquashed${clipped.length ? ` — bad: ${clipped.map((c) => `${c.label}(right ${c.right}, squashed ${c.squashedBy}px)`).join(', ')}` : ''}`)
+
+    // ── D0c: the track header stays pinned at ANY horizontal scroll ───────────────────────────
+    // Stream A's usability pilot: headers detached past scrollLeft ~1336 on the 240-bar timeline,
+    // taking mute/solo off-screen — which made muting the reference track impossible at the zoom
+    // you actually work at. Root cause was a flex row taking the SCROLLPORT's width instead of its
+    // content's, so `position: sticky` had nothing left to stick within. Asserted at real scroll
+    // depths, and on the BUTTON rather than the header box, because "the header element exists at
+    // x=0" is not the claim — "you can click mute" is.
+    for (const target of [0, 1500, 4000, 6500]) {
+      await page.evaluate((x) => { document.querySelector('.arr-scroll').scrollLeft = x }, target)
+      await sleep(120)
+      const pinned = await page.evaluate(() => {
+        const sc = document.querySelector('.arr-scroll').getBoundingClientRect()
+        const h = document.querySelector('.arr-track-header').getBoundingClientRect()
+        const corner = document.querySelector('.arr-ruler-corner').getBoundingClientRect()
+        const btn = document.querySelector('.arr-track-header button')
+        return {
+          header: Math.round(h.left - sc.left),
+          corner: Math.round(corner.left - sc.left),
+          btn: btn ? Math.round(btn.getBoundingClientRect().left - sc.left) : null,
+        }
+      })
+      check(
+        pinned.header === 0 && pinned.corner === 0 && pinned.btn !== null && pinned.btn >= 0,
+        `D0c at scrollLeft ${target} the track header (${pinned.header}px), ruler corner (${pinned.corner}px) and the header's first control (${pinned.btn}px) are all still on screen`,
+      )
+    }
+    await page.evaluate(() => { document.querySelector('.arr-scroll').scrollLeft = 0 })
 
     // ── D1: follow ────────────────────────────────────────────────────────────────────────────
     check(await page.$eval('[data-action="follow-toggle"]', (el) => el.getAttribute('data-follow')) === '1', 'D1 follow is on by default')

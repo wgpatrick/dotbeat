@@ -2094,6 +2094,15 @@ body {
   z-index: 2;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
+  /* Phase 41 Stream D: WITHOUT this, `position: sticky` on the header/corner inside silently stops
+     working past `rowWidth - headerWidth` of horizontal scroll. A flex row inside a scroll container
+     takes the SCROLLPORT's width by default, not its content's, so its children overflow it — and a
+     sticky child can only stick within its own containing block. Measured on a 240-bar timeline at
+     full zoom: the header pinned correctly to scrollLeft 1000, then detached and slid to -4984 by
+     scrollLeft 6000, taking the mute/solo controls off-screen with it. That made muting the
+     reference track impossible at the zoom you actually work at (Stream A's usability pilot).
+     `max-content` sizes the row to the whole timeline, which is what sticky needs to span. */
+  min-width: max-content;
 }
 .arr-ruler-corner {
   flex: 0 0 auto;
@@ -2282,6 +2291,15 @@ body {
   display: flex;
   align-items: stretch;
   border-bottom: 1px solid var(--line);
+  /* Phase 41 Stream D: WITHOUT this, `position: sticky` on the header/corner inside silently stops
+     working past `rowWidth - headerWidth` of horizontal scroll. A flex row inside a scroll container
+     takes the SCROLLPORT's width by default, not its content's, so its children overflow it — and a
+     sticky child can only stick within its own containing block. Measured on a 240-bar timeline at
+     full zoom: the header pinned correctly to scrollLeft 1000, then detached and slid to -4984 by
+     scrollLeft 6000, taking the mute/solo controls off-screen with it. That made muting the
+     reference track impossible at the zoom you actually work at (Stream A's usability pilot).
+     `max-content` sizes the row to the whole timeline, which is what sticky needs to span. */
+  min-width: max-content;
 }
 .arr-track-header {
   flex: 0 0 auto;
@@ -2634,6 +2652,15 @@ body {
   align-items: stretch;
   border-bottom: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.12);
+  /* Phase 41 Stream D: WITHOUT this, `position: sticky` on the header/corner inside silently stops
+     working past `rowWidth - headerWidth` of horizontal scroll. A flex row inside a scroll container
+     takes the SCROLLPORT's width by default, not its content's, so its children overflow it — and a
+     sticky child can only stick within its own containing block. Measured on a 240-bar timeline at
+     full zoom: the header pinned correctly to scrollLeft 1000, then detached and slid to -4984 by
+     scrollLeft 6000, taking the mute/solo controls off-screen with it. That made muting the
+     reference track impossible at the zoom you actually work at (Stream A's usability pilot).
+     `max-content` sizes the row to the whole timeline, which is what sticky needs to span. */
+  min-width: max-content;
 }
 .arr-auto-head {
   flex: 0 0 auto;
