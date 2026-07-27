@@ -10,6 +10,7 @@ import { audioRegionTimelineSteps, declaredLaneNames, firstPlacementClip, sortPl
 import { AUTO_H, PICKER_H, AutomationLane, AutomationPicker, autoOptionsFor } from './AutomationLane'
 import { showToast } from '../state/toastStore'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
+import { formatClock } from './TransportBar'
 
 // Phase 20 Stream W — track add/delete/rename/recolor + project-folder controls. There is no BeatLab
 // component to port these from (BeatLab's tracks are lesson-defined; its store has no track
@@ -138,7 +139,22 @@ async function postSong(body: {
 const ROW_H = 56 // taller than the pre-Phase-18 44px: the header now stacks a name row + an inline mixer strip
 const HEADER_W = 264 // wide enough for the inline channel strip (mute/solo/volume/pan/sends) in the track header
 const TICK_ROW_H = 13 // Phase 24 Stream CD: bar-number tick strip along the bottom of the ruler
-const RULER_H = 26 + TICK_ROW_H // was a flat 26 pre-Stream-CD; the extra room is the new tick row below the section-label row
+// Phase 41 Stream D: a locator strip along the TOP of the ruler, above the section-label row. The
+// ruler is now three stacked strips — locators (this), section labels (26px), bar ticks — and every
+// consumer positions from these constants, so growing the ruler here automatically pushes the
+// playhead's `top: RULER_H` and the track rows below it without a second edit.
+// Minimum px between consecutive LABELLED bar ticks before the ruler also prints a wall-clock
+// figure beside the bar number (Phase 41 Stream D). Below this the two labels collide.
+// 56px: measured, not guessed — at the ruler's 9px type a 3-digit bar number plus a m:ss
+// clock plus the 4px gap needs ~52px, and 64 (the first guess) suppressed the labels entirely at
+// the very zoom the verify script exercises (2-bar tick interval * 31.9px/bar = 63.8px).
+const TICK_CLOCK_MIN_PX = 56
+// Below this many px to the NEXT marker, a locator flag drops its label and shows only its pin —
+// see the `compact` computation in the locator strip for why (overlapping names render as mush).
+const LOCATOR_LABEL_MIN_PX = 48
+const LOCATOR_ROW_H = 16
+const SECTION_LABEL_H = 26
+const RULER_H = LOCATOR_ROW_H + SECTION_LABEL_H + TICK_ROW_H
 const DETAIL_PX_PER_BAR = 32 // at or above this, draw real ticks; below, density blocks
 const DENSITY_REF = 6 // events/bar that reads as full-opacity (soft normalization, not a hard cap)
 
@@ -155,6 +171,13 @@ const DENSITY_REF = 6 // events/bar that reads as full-opacity (soft normalizati
 const MIN_PX_PER_BAR = 4
 const MAX_PX_PER_BAR = 256
 const ZOOM_FACTOR = 1.4 // per zoom-in/out step (button click or one wheel-zoom tick)
+
+// ── Follow-the-playhead (Phase 41 Stream D) ──────────────────────────────────────────────────────
+// How close to a viewport edge the playhead may get before the view pages forward, and where in the
+// lane viewport it lands after that page (0 = hard left, 0.5 = centred). A third of the way in keeps
+// the bar you just played visible for context while leaving most of the screen as lookahead.
+const FOLLOW_MARGIN_PX = 24
+const FOLLOW_ANCHOR = 1 / 3
 
 /** Bar-tick label density for the ruler, zoom-aware in the same spirit DETAIL_PX_PER_BAR already
  * applies to note/hit rendering: once there's a full DETAIL_PX_PER_BAR worth of room per bar, number
@@ -1139,6 +1162,9 @@ export function ArrangementView() {
   // 16x/bar, so it's allowed in reactive state (docs/research/15 §2); only the lightweight playhead
   // div re-renders on it — the memoized row canvases don't (their effect deps exclude currentStep).
   const currentStep = useStore((s) => s.currentStep)
+  // Phase 41 Stream D: `playing` gates the follow-the-playhead auto-scroll below. Cheap to
+  // subscribe to here — it flips at most twice per transport session, unlike currentStep.
+  const playing = useStore((s) => s.playing)
   // research/128 §2.2 deep links: when the agent's `POST /focus` selects a track, scroll that track's
   // row into view here — the selection itself is already handled by the ordinary `selectedTrackId`
   // path (bridge.ts's focus handler), this only nudges the timeline so the newly-focused track is
@@ -1537,6 +1563,70 @@ export function ArrangementView() {
     [barFromClientX],
   )
 
+  // ── Moving selected clip occurrences between sections (Phase 24 Stream CC; extracted in Phase 41
+  // Stream D) ──────────────────────────────────────────────────────────────────────────────────
+  // This used to live inline inside beginClipDrag's pointerup. It was extracted the moment a SECOND
+  // caller appeared (the arrow-key nudge below) rather than copied: a duplicated move handler is
+  // exactly the "two surfaces, one operation, vow to keep them in sync" shape that has drifted
+  // measurably several times in this codebase. Drag and nudge now differ only in how they arrive at
+  // `deltaSections`; everything after that -- the out-of-range guard, the placement-granular move
+  // list, the scene-forking warning -- is this one function.
+  const moveOccurrences = useCallback(
+    (keys: Set<string>, deltaSections: number, anchorTargetIndex: number) => {
+      if (deltaSections === 0 || keys.size === 0) return
+      const moves: { track: string; fromIndex: number; toIndex: number; at?: number }[] = []
+      for (const k of keys) {
+        // occKey is `track::section` (at 0) or `track::section::at` (a placement at > 0) —
+        // track ids are slugs (no ':'), so a plain '::' split is unambiguous.
+        const parts = k.split('::')
+        const tid = parts[0]!
+        const fromIndex = Number(parts[1])
+        const at = parts.length > 2 ? Number(parts[2]) : undefined
+        const toIndex = fromIndex + deltaSections
+        if (toIndex < 0 || toIndex >= sections.length) {
+          showToast('Cannot move the selection that far — it would fall outside the arrangement.')
+          return
+        }
+        // v0.11 (Phase 36 PD): the daemon's move is placement-granular — `at` names WHICH
+        // placement moves (omitted = the at-0/first, every pre-v0.11 slot's only one), and the
+        // moved placement keeps its own `at` in the destination section.
+        moves.push({ track: tid, fromIndex, toIndex, ...(at !== undefined ? { at } : {}) })
+      }
+      // Phase 30 Stream JD, item 4 (docs/research/87): daemon.ts's applyClipMoves ALWAYS mints a
+      // fresh, private scene for every section a move touches (its own comment: "simplest way to
+      // guarantee this move never bleeds into a sibling section"), even when that section's old
+      // scene wasn't actually shared with anything. That's invisible/harmless in the common case —
+      // the only genuinely surprising outcome (what pilot 87 hit) is when a TOUCHED section's old
+      // scene WAS shared with some other section (touched or not): that shared content just got
+      // split apart into an independent copy with zero on-screen explanation. Detect that specific
+      // case up front, from the pre-move `sections` snapshot, and toast about it once the move
+      // actually lands — undo (unaffected by this change) already reverts the whole thing cleanly.
+      const sceneUseCount = new Map<string, number>()
+      for (const s of sections) sceneUseCount.set(s.scene, (sceneUseCount.get(s.scene) ?? 0) + 1)
+      const touchedIndices = new Set<number>()
+      for (const mv of moves) {
+        touchedIndices.add(mv.fromIndex)
+        touchedIndices.add(mv.toIndex)
+      }
+      const forkedSectionNums = [...touchedIndices]
+        .filter((idx) => (sceneUseCount.get(sections[idx]!.scene) ?? 0) > 1)
+        .sort((a, b) => a - b)
+        .map((idx) => idx + 1)
+      setSelectedOcc(new Set())
+      postClipMove(moves)
+        .then(() => {
+          if (forkedSectionNums.length === 0) return
+          const label = forkedSectionNums.length === 1 ? `Section ${forkedSectionNums[0]}` : `Sections ${forkedSectionNums.join(', ')}`
+          showToast(
+            `Moved clip to section ${anchorTargetIndex + 1} — ${label} no longer share${forkedSectionNums.length === 1 ? 's' : ''} content with the section(s) it used to link to; each is now independent.`,
+            'success',
+          )
+        })
+        .catch((err) => showToast(`Could not move clip(s): ${(err as Error).message}`))
+    },
+    [sections],
+  )
+
   // Pointerdown on a clip block (Phase 24 Stream CC). stopPropagation (called by the block itself,
   // TrackRow's onOccPointerDown) already kept the lane's own beginDrag from also firing, so this is
   // purely the clip-move gesture — attach/tear-down window listeners inline, the SAME "one-shot
@@ -1611,57 +1701,7 @@ export function ArrangementView() {
         const origin = sections[sectionIndex]
         if (!origin) return
         const targetIndex = nearestSectionIndex(sections, origin.startBar + deltaBars)
-        const deltaSections = targetIndex - sectionIndex
-        if (deltaSections === 0) return
-        const moves: { track: string; fromIndex: number; toIndex: number; at?: number }[] = []
-        for (const k of keys) {
-          // occKey is `track::section` (at 0) or `track::section::at` (a placement at > 0) —
-          // track ids are slugs (no ':'), so a plain '::' split is unambiguous.
-          const parts = k.split('::')
-          const tid = parts[0]!
-          const fromIndex = Number(parts[1])
-          const at = parts.length > 2 ? Number(parts[2]) : undefined
-          const toIndex = fromIndex + deltaSections
-          if (toIndex < 0 || toIndex >= sections.length) {
-            showToast('Cannot move the selection that far — it would fall outside the arrangement.')
-            return
-          }
-          // v0.11 (Phase 36 PD): the daemon's move is placement-granular — `at` names WHICH
-          // placement moves (omitted = the at-0/first, every pre-v0.11 slot's only one), and the
-          // moved placement keeps its own `at` in the destination section.
-          moves.push({ track: tid, fromIndex, toIndex, ...(at !== undefined ? { at } : {}) })
-        }
-        // Phase 30 Stream JD, item 4 (docs/research/87): daemon.ts's applyClipMoves ALWAYS mints a
-        // fresh, private scene for every section a move touches (its own comment: "simplest way to
-        // guarantee this move never bleeds into a sibling section"), even when that section's old
-        // scene wasn't actually shared with anything. That's invisible/harmless in the common case —
-        // the only genuinely surprising outcome (what pilot 87 hit) is when a TOUCHED section's old
-        // scene WAS shared with some other section (touched or not): that shared content just got
-        // split apart into an independent copy with zero on-screen explanation. Detect that specific
-        // case up front, from the pre-move `sections` snapshot, and toast about it once the move
-        // actually lands — undo (unaffected by this change) already reverts the whole thing cleanly.
-        const sceneUseCount = new Map<string, number>()
-        for (const s of sections) sceneUseCount.set(s.scene, (sceneUseCount.get(s.scene) ?? 0) + 1)
-        const touchedIndices = new Set<number>()
-        for (const mv of moves) {
-          touchedIndices.add(mv.fromIndex)
-          touchedIndices.add(mv.toIndex)
-        }
-        const forkedSectionNums = [...touchedIndices]
-          .filter((idx) => (sceneUseCount.get(sections[idx]!.scene) ?? 0) > 1)
-          .sort((a, b) => a - b)
-          .map((idx) => idx + 1)
-        setSelectedOcc(new Set())
-        postClipMove(moves)
-          .then(() => {
-            if (forkedSectionNums.length === 0) return
-            const label = forkedSectionNums.length === 1 ? `Section ${forkedSectionNums[0]}` : `Sections ${forkedSectionNums.join(', ')}`
-            showToast(
-              `Moved clip to section ${targetIndex + 1} — ${label} no longer share${forkedSectionNums.length === 1 ? 's' : ''} content with the section(s) it used to link to; each is now independent.`,
-              'success',
-            )
-          })
-          .catch((err) => showToast(`Could not move clip(s): ${(err as Error).message}`))
+        moveOccurrences(keys, targetIndex - sectionIndex, targetIndex)
       }
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
@@ -1694,6 +1734,53 @@ export function ArrangementView() {
   }, [fitPxPerBar])
   const zoomFit = useCallback(() => setZoomPxPerBar(null), [])
 
+  // ── Zoom-to-selection + a zoom history stack (Phase 41 Stream D) ─────────────────────────────
+  // Zooming into a region is only half a gesture: without a way back, every inspection of a
+  // detail costs a manual re-navigation to wherever you were. The stack makes zoom-in/zoom-out a
+  // matched pair — Z pushes the current view and frames the selection, X pops back to exactly the
+  // px/bar AND scroll offset you left, however many levels deep you went.
+  //
+  // A view is (zoomPxPerBar, scrollLeft): restoring the zoom alone would land you at the right
+  // magnification in the wrong place, which is most of the way to not having gone back at all.
+  const [zoomStack, setZoomStack] = useState<{ zoom: number | null; scrollLeft: number }[]>([])
+
+  const zoomToSelection = useCallback(() => {
+    const el = scrollRef.current
+    const band = selection.bars
+    if (!el || !band) {
+      showToast('Select a bar range first — drag the ruler or a track row, then press Z to zoom to it.')
+      return
+    }
+    const bars = Math.max(1, band.end - band.start)
+    const laneW = Math.max(1, el.clientWidth - HEADER_W)
+    // A little padding so the selection doesn't sit flush against both edges with no context.
+    const next = Math.max(MIN_PX_PER_BAR, Math.min(MAX_PX_PER_BAR, (laneW * 0.9) / bars))
+    setZoomStack((st) => [...st, { zoom: zoomPxPerBar, scrollLeft: el.scrollLeft }])
+    setZoomPxPerBar(next)
+    // The new scrollLeft has to be applied after the wider content has actually laid out, or the
+    // container clamps it to the OLD (narrower) scrollWidth and the view lands short. Same
+    // requestAnimationFrame handoff onWheelZoom above already relies on for its anchor.
+    requestAnimationFrame(() => {
+      const el2 = scrollRef.current
+      if (!el2) return
+      const centerBar = band.start + bars / 2
+      const maxScroll = Math.max(0, el2.scrollWidth - el2.clientWidth)
+      el2.scrollLeft = Math.max(0, Math.min(maxScroll, centerBar * next - laneW / 2))
+    })
+  }, [selection.bars, zoomPxPerBar])
+
+  const zoomBack = useCallback(() => {
+    setZoomStack((st) => {
+      const prev = st[st.length - 1]
+      if (!prev) return st
+      setZoomPxPerBar(prev.zoom)
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollLeft = prev.scrollLeft
+      })
+      return st.slice(0, -1)
+    })
+  }, [])
+
   // Scroll-wheel zoom with Cmd/Ctrl held (trackpad pinch also arrives as a wheel event with ctrlKey
   // set, so this covers both). Anchor-preserving: the bar currently under the pointer stays under the
   // pointer after the zoom change, the same idiom every pan/zoom canvas uses, rather than always
@@ -1716,6 +1803,327 @@ export function ArrangementView() {
       })
     },
     [zoomPxPerBar, fitPxPerBar],
+  )
+
+  // ── Follow the playhead (Phase 41 Stream D) ──────────────────────────────────────────────────
+  // Zoom (Stream CD, above) made the timeline able to be WIDER than its container for the first
+  // time, but nothing ever scrolls it back to the playhead — so the moment you press play on
+  // anything longer than a screenful, the playhead walks off the right edge and you are looking at
+  // a static picture of bars 1-40 while bar 130 plays. On the 242-bar / 7:17 reference project this
+  // is the difference between a usable arrangement and an unusable one.
+  //
+  // Deliberately a "page when it leaves the window" scroll, not a continuous centering one: keeping
+  // the playhead pinned mid-screen means the CONTENT slides under it constantly, which is far
+  // harder to read (and far more expensive — currentStep ticks 16x/bar) than letting the playhead
+  // sweep across a stationary view and jumping the view once per screenful. Same reason Live/Logic
+  // both default to page-scroll rather than continuous. FOLLOW_ANCHOR puts the playhead a third of
+  // the way in after each jump, so there's always two thirds of a screen of lookahead ahead of it.
+  //
+  // Only acts while the transport is running. When stopped, scrolling is entirely the user's — no
+  // "the view fought me" surprise, and no need to auto-disable the toggle on manual scroll (a
+  // behavior that reliably reads as the toggle turning itself off for no reason).
+  const [follow, setFollow] = useState(true)
+  useEffect(() => {
+    if (!follow || !playing) return
+    const el = scrollRef.current
+    if (!el || renderPxPerBar <= 0 || currentStep < 0) return
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+    if (maxScroll <= 0) return // the whole song already fits; nothing to follow
+    const x = HEADER_W + (currentStep / 16) * renderPxPerBar
+    // The lane viewport is the container minus the sticky header column on its left — a playhead at
+    // x < scrollLeft + HEADER_W is hidden BEHIND the track headers, not merely off-screen.
+    const viewLeft = el.scrollLeft + HEADER_W
+    const viewRight = el.scrollLeft + el.clientWidth
+    if (x >= viewLeft + FOLLOW_MARGIN_PX && x <= viewRight - FOLLOW_MARGIN_PX) return
+    const laneW = Math.max(1, el.clientWidth - HEADER_W)
+    el.scrollLeft = Math.max(0, Math.min(maxScroll, x - HEADER_W - laneW * FOLLOW_ANCHOR))
+  }, [follow, playing, currentStep, renderPxPerBar])
+
+  // ── Locators (Phase 41 Stream D, v0.11) ──────────────────────────────────────────────────────
+  // Named point markers on the timeline, read straight off the document (they are durable file
+  // content, not session state — see src/core/document.ts's BeatLocator). Sorted by bar for
+  // rendering and for prev/next navigation; `?? []` because a pre-v0.11 daemon's payload has no
+  // `locators` key at all and the GUI ships independently of the daemon it connects to.
+  const locators = useMemo(() => [...(doc?.locators ?? [])].sort((a, b) => a.bar - b.bar), [doc])
+  const [locatorRename, setLocatorRename] = useState<{ id: string; draft: string } | null>(null)
+
+  // The last bar the playhead was actually at, remembered ACROSS a stop. `currentStep` goes to -1
+  // the moment the transport stops (engine.stop's own reset), which means every "where am I"
+  // question — drop a marker here, jump to the previous marker — silently answered "bar 1" as soon
+  // as you pressed stop. Caught by verification, not by reading the code: pressing "," after
+  // stopping at bar 101 reported "already at the first marker" and went nowhere, because `here`
+  // had quietly become 1. Stopping does not move you, so the reference point must survive it.
+  // `null` until the playhead has EVER had a real position, which is what lets "drop a marker at
+  // the playhead" tell "stopped at bar 97" apart from "never played" — the two are indistinguishable
+  // from `currentStep` alone (both -1), and conflating them is what made M silently mark the wrong
+  // bar (see newLocatorBar below).
+  const lastPlayheadBarRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (currentStep >= 0) lastPlayheadBarRef.current = Math.floor(currentStep / 16) + 1
+  }, [currentStep])
+  const playheadBar = useCallback(
+    () => (currentStep >= 0 ? Math.floor(currentStep / 16) + 1 : lastPlayheadBarRef.current),
+    [currentStep],
+  )
+
+  // Scroll a bar into view without touching the transport — the shared half of "jump to marker" and
+  // the zoom-to-selection framing below. Centres the target when it isn't already comfortably on
+  // screen, which for a jump (unlike follow's forward-only paging) is the right instinct: you asked
+  // to look at that bar specifically, so put it where you can see what surrounds it.
+  const scrollBarIntoView = useCallback((bar0: number) => {
+    const el = scrollRef.current
+    if (!el || renderPxPerBar <= 0) return
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+    if (maxScroll <= 0) return
+    const x = HEADER_W + bar0 * renderPxPerBar
+    const laneW = Math.max(1, el.clientWidth - HEADER_W)
+    el.scrollLeft = Math.max(0, Math.min(maxScroll, x - HEADER_W - laneW / 2))
+  }, [renderPxPerBar])
+
+  // Jump the transport to a locator. Deliberately the SAME gesture semantics as a click on the
+  // ruler (engine.seek): relocate while playing, start from there while stopped — Ableton's own
+  // rule, and already this app's documented behavior for "click a position on the timeline". A
+  // marker lane that behaved differently from the ruler two pixels below it would be the
+  // inconsistency, not the consistency.
+  const jumpToLocator = useCallback(
+    (bar: number) => {
+      const bar0 = Math.max(0, bar - 1) // locator bars are 1-based; engine.seek takes 0-based
+      scrollBarIntoView(bar0)
+      engine.seek(bar0)
+    },
+    [scrollBarIntoView],
+  )
+
+  // Where a new marker lands: the playhead if the transport has a position, else the start of the
+  // current bar selection, else bar 1. All three are "the place the user is currently looking at",
+  // in decreasing order of how explicitly they said so.
+  // Where a new marker lands. THE PLAYHEAD WINS, including the remembered one from before a stop —
+  // that is what the button's tooltip and the Shortcuts panel both promise, and the first cut of
+  // this got the precedence backwards: the remembered playhead was checked LAST, after the
+  // selection, so the overwhelmingly natural workflow (drag-select the breakdown, click the ruler
+  // inside it to listen, stop, press M) silently marked the SELECTION START instead of bar 97.
+  // Caught by the usability pilot, which is the only thing that would have caught it — every
+  // assertion in the verify suite happened to press M with no selection active.
+  //
+  // The bar-range selection is only a fallback for the genuinely ambiguous case: a session where
+  // the playhead has never been anywhere, so "at the playhead" means nothing yet and the selection
+  // is the only place the user has actually pointed at.
+  const newLocatorBar = useCallback((): number => {
+    const atPlayhead = playheadBar()
+    if (atPlayhead !== null) return atPlayhead
+    if (selection.bars) return selection.bars.start + 1
+    return 1
+  }, [selection.bars, playheadBar])
+
+  const addLocator = useCallback(() => {
+    const bar = Math.min(Math.max(1, newLocatorBar()), Math.max(1, totalBars))
+    // Ids are minted client-side on purpose — see setValue's locator grammar for why the id must be
+    // in the PATH (the daemon coalesces undo entries by path string, so a shared append path would
+    // collapse several quick adds into a single undo step and lose all but the last).
+    const taken = new Set(locators.map((l) => l.id))
+    let n = 1
+    while (taken.has(`m${n}`)) n++
+    const id = `m${n}`
+    postEdit(`locator.${id}`, String(bar))
+    // Open the rename field immediately: an unnamed marker at bar 101 is barely better than no
+    // marker at all, and naming it is the entire point of the feature.
+    setLocatorRename({ id, draft: '' })
+  }, [locators, newLocatorBar, totalBars])
+
+  const commitLocatorRename = useCallback(() => {
+    setLocatorRename((cur) => {
+      if (!cur) return null
+      // Same sanitization as scene rename: the format has no quoted strings, so spaces become
+      // underscores (and are rendered back as spaces) rather than being silently dropped.
+      const sanitized = cur.draft.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')
+      if (sanitized) postEdit(`locator.${cur.id}.name`, sanitized)
+      return null
+    })
+  }, [])
+
+  const removeLocator = useCallback((id: string) => {
+    postEdit(`locator.${id}`, '')
+    setLocatorRename((cur) => (cur?.id === id ? null : cur))
+  }, [])
+
+  // Prev/next marker relative to where the transport is now. Ties (a marker exactly at the current
+  // bar) resolve away from the current position so repeated presses always keep moving.
+  const jumpMarker = useCallback(
+    (dir: -1 | 1) => {
+      if (locators.length === 0) {
+        showToast('No markers yet — press M (or "+ marker") to drop one at the playhead.')
+        return
+      }
+      // Same "remembered position survives a stop" rule as newLocatorBar above; before a first
+      // playback there is nowhere to be relative to, so start from bar 1.
+      const here = playheadBar() ?? 1
+      const target = dir === 1 ? locators.find((l) => l.bar > here) : [...locators].reverse().find((l) => l.bar < here)
+      if (!target) {
+        showToast(dir === 1 ? 'Already at the last marker.' : 'Already at the first marker.')
+        return
+      }
+      jumpToLocator(target.bar)
+    },
+    [locators, playheadBar, jumpToLocator],
+  )
+
+  // ── Arrangement keyboard shortcuts (Phase 41 Stream D) ───────────────────────────────────────
+  // Registered on the window, like App.tsx's own Shift+Tab/undo handlers, and guarded the same way
+  // against form-control focus so they never hijack the BPM box or a rename field.
+  //
+  // The arrow and split keys additionally require a clip-block selection (`selectedOcc`). That is
+  // the deliberate boundary against NoteView's own window-level arrow handler: `selectedOcc` is
+  // arrangement-only state that the note editor never sets, so "arrows nudge whichever thing you
+  // actually have selected" resolves without the two handlers having to know about each other.
+  // Space, marker navigation and zoom carry no such guard — they are view-wide concerns.
+  //
+  // Every row here is mirrored in ShortcutHelp.tsx's Arrangement group, in this same diff.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return // leave undo/redo/zoom-wheel modifiers alone
+      const el = document.activeElement as HTMLElement | null
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || el?.isContentEditable) return
+
+      if (e.key === ' ') {
+        // Space is sacred in a DAW: it plays even when a toolbar button happens to hold focus, so
+        // blur the button rather than letting the browser re-activate it.
+        if (tag === 'BUTTON') el?.blur()
+        e.preventDefault()
+        if (useStore.getState().playing) engine.stop()
+        else void engine.play()
+        return
+      }
+      if (e.key === '0') {
+        e.preventDefault()
+        setSelectedOcc(new Set())
+        setSelectedSection(null)
+        postSelection({})
+        return
+      }
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault()
+        addLocator()
+        return
+      }
+      if (e.key === ',') {
+        e.preventDefault()
+        jumpMarker(-1)
+        return
+      }
+      if (e.key === '.') {
+        e.preventDefault()
+        jumpMarker(1)
+        return
+      }
+      if (e.key === 'z' || e.key === 'Z') {
+        e.preventDefault()
+        zoomToSelection()
+        return
+      }
+      if (e.key === 'x' || e.key === 'X') {
+        e.preventDefault()
+        zoomBack()
+        return
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        if (selectedOcc.size === 0) return // not ours — see the NoteView boundary note above
+        e.preventDefault()
+        // One SECTION per press, not one bar: a section index is the only grid a clip occurrence
+        // can actually live on (ClipOccurrence's own doc comment), and it is the same unit the
+        // drag gesture snaps to, so nudge and drag agree by construction.
+        const dir = e.key === 'ArrowRight' ? 1 : -1
+        const anchor = Math.min(...[...selectedOcc].map((k) => Number(k.split('::')[1])))
+        moveOccurrences(selectedOcc, dir, anchor + dir)
+        return
+      }
+      if (e.key === 's' || e.key === 'S') {
+        if (selectedOcc.size === 0) return
+        const trackId = [...selectedOcc][0]!.split('::')[0]!
+        const track = doc?.tracks.find((t) => t.id === trackId)
+        if (!track) return
+        e.preventDefault()
+        // Gate on kind exactly as the clip block's own split button does (it only renders on audio
+        // tracks). Without this the key reaches postAudioSplit on a synth clip and surfaces a raw
+        // daemon rejection — technically not silent, but a confusing error is barely better than
+        // no feedback. Say the actual reason instead.
+        if (track.kind !== 'audio') {
+          showToast(`Split only applies to audio clips — "${track.name || track.id}" is a ${track.kind} track.`)
+          return
+        }
+        void splitAudioAtPlayhead(track)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [addLocator, jumpMarker, zoomToSelection, zoomBack, selectedOcc, moveOccurrences, splitAudioAtPlayhead, doc, setSelectedSection])
+
+  // ── Overview strip / minimap (Phase 41 Stream D) ─────────────────────────────────────────────
+  // The whole song, always, in one screen-width strip — sections, markers, the playhead, and a
+  // window showing which slice the main timeline is currently displaying. Once zoom is useful
+  // enough to be worth using (which follow and zoom-to-selection make it), you spend most of your
+  // time looking at 8 bars of 242 with no indication of where those 8 bars are; the strip is the
+  // "you are here" the zoomed view structurally cannot give you. Click or drag it to go somewhere.
+  //
+  // The viewport window is positioned IMPERATIVELY from the scroll handler, never through React
+  // state. Scroll fires far too often to re-render a component that owns 30 track canvases — the
+  // same reasoning the file already applies to `currentStep` ("only the lightweight playhead div
+  // re-renders on it"), just taken one step further because scroll has no natural 16th-note rate
+  // limit at all.
+  const miniRef = useRef<HTMLDivElement>(null)
+  const miniWindowRef = useRef<HTMLDivElement>(null)
+  const syncMiniWindow = useCallback(() => {
+    const scrollEl = scrollRef.current
+    const mini = miniRef.current
+    const win = miniWindowRef.current
+    if (!scrollEl || !mini || !win || totalBars <= 0 || renderPxPerBar <= 0) return
+    const miniW = mini.clientWidth
+    const pxPerBarMini = miniW / totalBars
+    const firstBar = scrollEl.scrollLeft / renderPxPerBar
+    const barsVisible = Math.max(0, scrollEl.clientWidth - HEADER_W) / renderPxPerBar
+    win.style.left = `${Math.max(0, firstBar * pxPerBarMini)}px`
+    // Clamp to a grabbable minimum: at deep zoom the true window is a sub-pixel sliver that reads
+    // as "nothing is displayed" rather than "you are looking at a very small part of this".
+    win.style.width = `${Math.max(6, Math.min(miniW, barsVisible * pxPerBarMini))}px`
+  }, [totalBars, renderPxPerBar])
+
+  // Re-sync whenever the geometry changes under it (zoom, song length, container resize) as well as
+  // on scroll — a zoom step changes which slice is visible without any scroll event firing.
+  useLayoutEffect(syncMiniWindow, [syncMiniWindow, laneWidth, locators])
+
+  const miniSeek = useCallback(
+    (clientX: number) => {
+      const mini = miniRef.current
+      const scrollEl = scrollRef.current
+      if (!mini || !scrollEl || totalBars <= 0 || renderPxPerBar <= 0) return
+      const rect = mini.getBoundingClientRect()
+      const bar = ((clientX - rect.left) / Math.max(1, rect.width)) * totalBars
+      const laneW = Math.max(1, scrollEl.clientWidth - HEADER_W)
+      const maxScroll = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth)
+      // Centre the clicked bar: you pointed at a place, so put it in the middle of the view rather
+      // than at its left edge where half the context you were aiming for is off-screen.
+      scrollEl.scrollLeft = Math.max(0, Math.min(maxScroll, bar * renderPxPerBar - laneW / 2))
+      syncMiniWindow()
+    },
+    [totalBars, renderPxPerBar, syncMiniWindow],
+  )
+
+  // Drag anywhere on the strip to scrub the view along it — same attach-on-pointerdown idiom the
+  // rest of this file's one-shot gestures use.
+  const beginMiniDrag = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button === 2) return
+      e.preventDefault()
+      miniSeek(e.clientX)
+      const onMove = (ev: PointerEvent) => miniSeek(ev.clientX)
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [miniSeek],
   )
 
   // Window-level move/up for the resize handle: preview the new bar count while dragging, commit once
@@ -2104,6 +2512,13 @@ export function ArrangementView() {
   // already applies to note/hit rendering, extended to the ruler. Only meaningful when tickInterval is
   // already 1 (guaranteed at this px/bar), so it can safely reuse barTicks as the per-bar list.
   const showBeatTicks = renderPxPerBar >= DETAIL_PX_PER_BAR * 2
+  // Phase 41 Stream D: seconds per bar at the document's implicit 4/4 (see TransportBar's own note
+  // — a per-clip `signature` may override the meter locally, but there is no document-level one, so
+  // the ruler has nothing else to compute a wall clock from). The tick-clock label needs roughly
+  // TICK_CLOCK_MIN_PX between consecutive LABELLED ticks (tickInterval bars apart, not one bar) to
+  // sit beside the bar number without the two overlapping.
+  const secPerBar = doc ? 240 / doc.bpm : 0
+  const showTickClock = tickInterval * renderPxPerBar >= TICK_CLOCK_MIN_PX
 
   // Playhead x in scroll-content coordinates: header column + fractional bar position. Step-precise
   // (finer than the requested bar granularity, at no extra cost). Shown only while the transport is
@@ -2490,6 +2905,12 @@ export function ArrangementView() {
             ))}
           </select>
         </label>
+        {/* Phase 41 Stream D: one wrappable cluster for every navigation control. Stream D added
+            four buttons (zoom-to-selection, zoom-back, + marker, follow) to a row that was already
+            at capacity, and pushed "loop selection" clean off the right edge at 1280px — caught by
+            reading this stream's own verify screenshot, not by any assertion. Grouping them means
+            the whole cluster wraps to a second line together instead of the last item overflowing. */}
+        <div className="arr-nav-controls">
         {/* Phase 24 Stream CD: timeline zoom, independent of container width. "fit" (disabled once
             already at fit) returns to the pre-Stream-CD default; +/- step pxPerBar by ZOOM_FACTOR;
             Cmd/Ctrl+scroll-wheel over the timeline (onWheelZoom below) does the same, anchored to the
@@ -2507,7 +2928,51 @@ export function ArrangementView() {
           <button className="arr-toolbtn" data-action="zoom-fit" disabled={zoomPxPerBar === null} title="fit to width" onClick={zoomFit}>
             fit
           </button>
+          {/* Phase 41 Stream D: zoom-to-selection (Z) and its matching way back (X). The stack
+              depth is on the button so "how many levels am I in" is visible rather than felt. */}
+          <button
+            className="arr-toolbtn"
+            data-action="zoom-selection"
+            disabled={!selection.bars}
+            title={selection.bars ? `zoom to bars ${selection.bars.start + 1}–${selection.bars.end} (Z)` : 'drag the ruler or a track to select a bar range first (Z)'}
+            onClick={zoomToSelection}
+          >
+            ⤢ sel
+          </button>
+          <button
+            className="arr-toolbtn"
+            data-action="zoom-back"
+            data-zoom-stack={zoomStack.length}
+            disabled={zoomStack.length === 0}
+            title={zoomStack.length ? `back to the previous view (X) — ${zoomStack.length} level${zoomStack.length === 1 ? '' : 's'} deep` : 'no previous zoom to go back to (X)'}
+            onClick={zoomBack}
+          >
+            ↩{zoomStack.length > 0 ? ` ${zoomStack.length}` : ''}
+          </button>
         </div>
+        {/* Phase 41 Stream D: drop a named marker at the playhead (or, stopped with a bar range
+            selected, at the start of that range). Opens its rename field immediately — an unnamed
+            marker at bar 101 is barely better than no marker. */}
+        <button
+          className="arr-toolbtn"
+          data-action="add-locator"
+          title={`drop a marker at bar ${Math.min(Math.max(1, newLocatorBar()), Math.max(1, totalBars))} and name it`}
+          onClick={addLocator}
+        >
+          + marker
+        </button>
+        {/* Phase 41 Stream D: follow-the-playhead toggle. `data-follow` is the live probe the verify
+            scripts read; the button itself is the only user-facing control for the effect above. */}
+        <button
+          className={`arr-toolbtn arr-follow-btn${follow ? ' on' : ''}`}
+          data-action="follow-toggle"
+          data-follow={follow ? '1' : '0'}
+          aria-pressed={follow}
+          title={follow ? 'following the playhead during playback — click to stop following' : 'not following the playhead — click to auto-scroll to it during playback'}
+          onClick={() => setFollow((f) => !f)}
+        >
+          {follow ? '⦿ follow' : '○ follow'}
+        </button>
         {/* Phase 24 Stream CE: loop-region controls — loop just the currently-SELECTED bar range
             (the same drag-the-ruler/a-track selection axis docs/phase-13-views.md's "Selection
             wired to /selection" and `beat vary --scope selection` already use) instead of the whole
@@ -2519,7 +2984,7 @@ export function ArrangementView() {
                 looping bars {loopRegion.start + 1}–{loopRegion.end}
               </span>
               <button
-                className="arr-chip-btn"
+                className="arr-toolbtn"
                 data-loop-clear="1"
                 title="stop looping just this range — back to the full song/loop"
                 onClick={() => setLoopRange(null)}
@@ -2529,7 +2994,13 @@ export function ArrangementView() {
             </>
           ) : (
             <button
-              className="arr-chip-btn"
+              // Phase 41 Stream D: was `.arr-chip-btn` — an 18px FIXED SQUARE meant for the section
+              // chips' single-glyph +/-/x/o icons. A two-word text label never fitted it: Phase 24
+              // Stream CE's own verify screenshot shows "loop selection" spilling out of the box as
+              // bare unstyled text, and it stayed that way for seventeen phases because nothing
+              // asserts layout and nobody re-read the screenshot. `.arr-toolbtn` is the auto-width
+              // padded text button the rest of this toolbar already uses.
+              className="arr-toolbtn"
               data-loop-selection="1"
               disabled={!selection.bars}
               title={selection.bars ? `loop bars ${selection.bars.start + 1}–${selection.bars.end}` : 'drag the ruler or a track to select a bar range first'}
@@ -2539,9 +3010,44 @@ export function ArrangementView() {
             </button>
           )}
         </div>
+        </div>
       </div>
 
-      <div className="arr-scroll" ref={scrollRef} onWheel={onWheelZoom}>
+      {/* Phase 41 Stream D: the overview strip. The whole song at a fixed screen width, whatever
+          the main timeline is zoomed to — sections, markers, playhead, and the current viewport as
+          a draggable window. Click or drag to move the main view. */}
+      <div
+        className="arr-minimap"
+        ref={miniRef}
+        data-minimap="1"
+        data-total-bars={totalBars}
+        title="overview — click or drag to move the timeline view"
+        onPointerDown={beginMiniDrag}
+        style={{ touchAction: 'none' }}
+      >
+        {sections.map((s, i) => (
+          <div
+            key={`mini-sec-${i}`}
+            className="arr-minimap-section"
+            data-minimap-section={i}
+            style={{ left: `${(s.startBar / Math.max(1, totalBars)) * 100}%`, width: `${(s.bars / Math.max(1, totalBars)) * 100}%` }}
+          />
+        ))}
+        {locators.map((l) => (
+          <div
+            key={`mini-loc-${l.id}`}
+            className="arr-minimap-locator"
+            data-minimap-locator={l.id}
+            style={{ left: `${((l.bar - 1) / Math.max(1, totalBars)) * 100}%` }}
+          />
+        ))}
+        {showPlayhead && (
+          <div className="arr-minimap-playhead" style={{ left: `${(currentStep / 16 / Math.max(1, totalBars)) * 100}%` }} />
+        )}
+        <div className="arr-minimap-window" ref={miniWindowRef} data-minimap-window="1" />
+      </div>
+
+      <div className="arr-scroll" ref={scrollRef} onWheel={onWheelZoom} onScroll={syncMiniWindow}>
         {/* Ruler: section labels + boundaries; dragging it selects a bar range across all tracks. */}
         <div className="arr-ruler-row" style={{ height: RULER_H }}>
           <div className="arr-ruler-corner" style={{ width: HEADER_W }} />
@@ -2562,7 +3068,7 @@ export function ArrangementView() {
               <div
                 key={i}
                 className="arr-section-label"
-                style={{ left: s.startBar * renderPxPerBar, width: s.bars * renderPxPerBar, height: RULER_H - TICK_ROW_H }}
+                style={{ left: s.startBar * renderPxPerBar, width: s.bars * renderPxPerBar, top: LOCATOR_ROW_H, height: SECTION_LABEL_H }}
                 title={
                   shareCount > 1
                     ? `${rulerSceneName} · ${s.bars} bars · shares this scene with ${shareCount - 1} other section${shareCount - 1 === 1 ? '' : 's'}`
@@ -2585,6 +3091,12 @@ export function ArrangementView() {
               {barTicks.map((b) => (
                 <div key={`tick-${b}`} className="arr-bar-tick" data-bar-tick={b} style={{ left: b * renderPxPerBar }}>
                   <span className="arr-bar-tick-num">{b + 1}</span>
+                  {/* Phase 41 Stream D: a secondary wall-clock label on the ruler. On a 7-minute
+                      arrangement "where am I" is as often a time question as a bar question, and
+                      the answer shouldn't require arithmetic. Shown only when consecutive labelled
+                      ticks are far enough apart to fit both figures without colliding — the same
+                      level-of-detail instinct tickIntervalFor already applies to the numbers. */}
+                  {showTickClock && <span className="arr-bar-tick-time">{formatClock(b * secPerBar)}</span>}
                 </div>
               ))}
               {showBeatTicks &&
@@ -2593,6 +3105,76 @@ export function ArrangementView() {
                     <div key={`beat-${b}-${q}`} className="arr-bar-tick-minor" style={{ left: (b + q / 4) * renderPxPerBar }} />
                   )),
                 )}
+            </div>
+            {/* Phase 41 Stream D: the locator strip, along the top of the ruler. Each flag is a
+                real button — click jumps the transport there (same rule as clicking the ruler
+                itself: relocate while playing, start from there while stopped), double-click opens
+                an inline rename, and the × removes it. `data-locator`/`data-locator-bar` are the
+                probes the verify scripts read. onPointerDown stops propagation so grabbing a flag
+                never also starts the ruler's own drag-to-select-bars gesture underneath it. */}
+            <div className="arr-locator-strip" style={{ height: LOCATOR_ROW_H }}>
+              {locators.map((l, i) => {
+                const label = l.name.replace(/_/g, ' ')
+                const renaming = locatorRename?.id === l.id
+                // Level-of-detail, the same instinct tickIntervalFor applies to bar numbers. Two
+                // markers closer together than a label's width used to draw their names ON TOP of
+                // each other — the usability pilot photographed "Breakdown" and "Main 2" rendering
+                // as the literal string "BMaiakd2own". At the default 5.6px/bar on a 242-bar song
+                // any two markers within ~8 bars collide, which for an 8-section track is the
+                // normal case, not an edge one. So when the next marker is too close, this one
+                // collapses to just its pin: still visible, still clickable, still jumps, and its
+                // name is still in the tooltip — but it never becomes illegible mush.
+                const nextGapPx = i + 1 < locators.length ? (locators[i + 1]!.bar - l.bar) * renderPxPerBar : Infinity
+                const compact = !renaming && nextGapPx < LOCATOR_LABEL_MIN_PX
+                return (
+                  <div
+                    key={l.id}
+                    className={`arr-locator${renaming ? ' renaming' : ''}${compact ? ' compact' : ''}`}
+                    data-locator={l.id}
+                    data-locator-bar={l.bar}
+                    data-locator-name={l.name}
+                    style={{ left: (l.bar - 1) * renderPxPerBar }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    {renaming ? (
+                      <input
+                        className="arr-locator-input"
+                        data-locator-input={l.id}
+                        autoFocus
+                        value={locatorRename.draft}
+                        placeholder={l.name}
+                        onChange={(e) => setLocatorRename((cur) => (cur ? { ...cur, draft: e.target.value } : cur))}
+                        onBlur={commitLocatorRename}
+                        onKeyDown={(e) => {
+                          e.stopPropagation() // never let typing a name reach the arrangement's own key handler
+                          if (e.key === 'Enter') commitLocatorRename()
+                          if (e.key === 'Escape') setLocatorRename(null)
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <button
+                          className="arr-locator-flag"
+                          data-locator-jump={l.id}
+                          title={`${label} — bar ${l.bar}. Click to jump here (starts playback if stopped, relocates if already playing); double-click to rename.`}
+                          onClick={() => jumpToLocator(l.bar)}
+                          onDoubleClick={() => setLocatorRename({ id: l.id, draft: label })}
+                        >
+                          {compact ? '' : label}
+                        </button>
+                        <button
+                          className="arr-locator-del"
+                          data-locator-delete={l.id}
+                          title={`delete the "${label}" marker`}
+                          onClick={() => removeLocator(l.id)}
+                        >
+                          ×
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )
+              })}
             </div>
             {rulerBand && (
               <div

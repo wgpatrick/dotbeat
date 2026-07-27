@@ -10,7 +10,7 @@
 // machine-applicable changeset, and — later — the natural undo / --dry-run representation. Each
 // entry carries `before`/`after`, so inverting a diff is structurally trivial when we need it.
 
-import type { BeatAudioRegion, BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatNote, BeatPlacement, BeatTrack, DrumLane } from './document.js'
+import type { BeatAudioRegion, BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatEffect, BeatLocator, BeatNote, BeatPlacement, BeatTrack, DrumLane } from './document.js'
 import { DRUM_LANES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, sortPlacements } from './document.js'
 import { formatNumber } from './format.js'
 
@@ -109,6 +109,16 @@ export type DiffEntry =
   | { kind: 'audio-region-added'; trackId: string; clipId: string; region: BeatAudioRegion }
   | { kind: 'audio-region-removed'; trackId: string; clipId: string; region: BeatAudioRegion }
   | { kind: 'audio-region-changed'; trackId: string; clipId: string; changes: { field: 'media' | 'in' | 'out' | 'gainDb' | 'warp' | 'rate'; before: string | number; after: string | number }[] }
+  // v0.11 (Phase 41 Stream D) timeline locators. Matched by id — like notes/hits/effects and
+  // unlike the song's section list — so moving or renaming a marker reads as "this marker moved",
+  // not "a marker vanished and another appeared". Locators are not sound, but they ARE a durable
+  // fact in the file, and every edit surface's confirmation output goes through this diff: without
+  // these entries `beat set t.beat locator.brk "101 Breakdown"` writes the file and then prints
+  // "no musical changes", which is precisely the kind of lying confirmation that makes an edit
+  // indistinguishable from a silent no-op.
+  | { kind: 'locator-added'; locator: BeatLocator }
+  | { kind: 'locator-removed'; locator: BeatLocator }
+  | { kind: 'locator-changed'; locatorId: string; changes: { field: 'bar' | 'name'; before: string | number; after: string | number }[] }
 
 // v0.9: diffs one clip's automation lanes. Lanes match by param name; points within a lane match
 // by id (like notes/hits) — a point moved in time or re-valued reports as one changed entry, not
@@ -488,6 +498,23 @@ export function diffDocuments(a: BeatDocument, b: BeatDocument): DiffEntry[] {
   const songKey = (s: { scene: string; bars: number }[] | null) => (s ? s.map((x) => `${x.scene}:${x.bars}`).join(',') : '')
   if (songKey(a.song) !== songKey(b.song)) out.push({ kind: 'song-changed', before: a.song, after: b.song })
 
+  // v0.11 locators: by id, like scenes/media/groups above (order in the file is a serializer-side
+  // sort by bar, never user-meaningful, so it must not show up as a change).
+  const aLoc = new Map(a.locators.map((l) => [l.id, l]))
+  const bLoc = new Map(b.locators.map((l) => [l.id, l]))
+  for (const l of a.locators) if (!bLoc.has(l.id)) out.push({ kind: 'locator-removed', locator: l })
+  for (const l of b.locators) {
+    const before = aLoc.get(l.id)
+    if (!before) {
+      out.push({ kind: 'locator-added', locator: l })
+      continue
+    }
+    const changes: { field: 'bar' | 'name'; before: string | number; after: string | number }[] = []
+    if (before.bar !== l.bar) changes.push({ field: 'bar', before: before.bar, after: l.bar })
+    if (before.name !== l.name) changes.push({ field: 'name', before: before.name, after: l.name })
+    if (changes.length > 0) out.push({ kind: 'locator-changed', locatorId: l.id, changes })
+  }
+
   return out
 }
 
@@ -668,6 +695,15 @@ export function formatDiff(entries: DiffEntry[]): string {
         lines.push(`song: ${fmt(e.before)} -> ${fmt(e.after)}`)
         break
       }
+      case 'locator-added':
+        lines.push(`locator "${e.locator.name}" added at bar ${formatNumber(e.locator.bar)}`)
+        break
+      case 'locator-removed':
+        lines.push(`locator "${e.locator.name}" removed (was at bar ${formatNumber(e.locator.bar)})`)
+        break
+      case 'locator-changed':
+        lines.push(`locator ${e.locatorId}: ${e.changes.map((c) => `${c.field} ${c.before} -> ${c.after}`).join(', ')}`)
+        break
     }
   }
   return lines.join('\n') + '\n'

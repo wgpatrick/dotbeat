@@ -1,4 +1,4 @@
-import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
+import type { AutomationInterpolation, BeatAudioRegion, BeatAutomationLane, BeatAutomationPoint, BeatClip, BeatDocument, BeatDrumHit, BeatDrumLaneDecl, BeatDrumPattern, BeatEffect, BeatGroup, BeatInstrument, BeatLocator, BeatMediaSample, BeatNote, BeatScene, BeatSongSection, BeatSynth, BeatTrack, DrumLane, DrumVoiceType, EffectType, OscType, SampleLaneFilterType, TrackKind, WarpMode } from './document.js'
 import { formatNumber } from './format.js'
 import { AUDIO_AUTOMATABLE_PARAMS, AUDIO_RATE_MAX, AUDIO_RATE_MIN, AUDIO_TRACK_FIELD_BY_KEY, AUTOMATABLE_SYNTH_PARAMS, AUTOMATION_INTERPOLATIONS, AUTOMATION_POINT_FIELD_DEFAULTS, BPM_MAX, BPM_MIN, DRUM_LANES, DRUM_VOICE_TYPES, EFFECT_TYPES, INIT_SYNTH, INSTRUMENT_EFFECT_FIELD_KEYS, LOOP_BARS_MAX, LOOP_BARS_MIN, NOTE_FIELD_DEFAULTS, OSC_TYPES, SAMPLE_LANE_PARAM_DEFAULTS, SURGE_DEFAULT_SAMPLE_RATE, SYNTH_FIELD_BY_KEY, SYNTH_PARAM_ORDER, TIME_SIG_DENOMINATORS, TRACK_KINDS, WARP_MODES, declaredLaneNames, defaultEffectChain, defaultSynthFields, initAudioTrackSynth, isSampleLaneFilterType, isSampleLaneParamKey, sampleLaneParamError, scenePlacementError } from './document.js'
 
@@ -101,11 +101,16 @@ export function parse(text: string): BeatDocument {
   const groupIds = new Set<string>()
   const groupedTrackIds = new Set<string>() // a track belongs to at most one group
 
+  // v0.11 (Phase 41 Stream D): named point markers on the song timeline. Last canonical block.
+  const locators: BeatLocator[] = []
+  const locatorIds = new Set<string>()
+
   let currentTrack: BeatTrack | null = null
   let currentClip: BeatClip | null = null
   let currentScene: BeatScene | null = null
   let inSynth = false
   let inSong = false
+  let inLocators = false
   // Track 1a: the currently-open `surge` sound-source block (level 1), if any — its `patch`/
   // `sampleRate`/`override` children are level 2, collected until a lower/sibling line closes it.
   let inSurge = false
@@ -658,6 +663,17 @@ export function parse(text: string): BeatDocument {
         if (tokens.length !== 1) throw new BeatParseError('song takes no values on its own line', lineNo)
         song = []
         inSong = true
+      } else if (keyword === 'locators') {
+        // v0.11 (Phase 41 Stream D): the last canonical block, after song. Closes `inSong` so a
+        // stray `section` line after it is the error it should be, rather than silently appending
+        // to the song from inside the locators block.
+        closeTrackIfOpen(lineNo)
+        currentTrack = null
+        currentScene = null
+        inSong = false
+        if (inLocators) throw new BeatParseError('duplicate locators block', lineNo)
+        if (tokens.length !== 1) throw new BeatParseError('locators takes no values on its own line', lineNo)
+        inLocators = true
       } else {
         throw new BeatParseError(`unexpected top-level keyword "${keyword}"`, lineNo)
       }
@@ -717,6 +733,25 @@ export function parse(text: string): BeatDocument {
         const bars = parseIntStrict(barsTok, lineNo, 'section bars')
         if (bars < 1 || bars > 64) throw new BeatParseError(`section bars must be 1-64, got ${bars}`, lineNo)
         song!.push({ scene: sceneId, bars })
+        continue
+      }
+      // v0.11 (Phase 41 Stream D): `locator <id> <bar> [<name>]` — the name defaults to the id when
+      // omitted, so a quick marker never needs two words. `bar` is 1-based (see BeatLocator's own
+      // doc comment for why this one number breaks the codebase's 0-based habit). Deliberately NOT
+      // range-checked against the song's length here: the song is still being parsed at this point
+      // in some file orders, and more importantly a locator that outlives the section it marked
+      // should survive the round-trip so it can be moved back, not be rejected at load and lost.
+      if (inLocators && keyword === 'locator') {
+        if (tokens.length !== 3 && tokens.length !== 4) throw new BeatParseError('locator expects 2 or 3 values: <id> <bar> [<name>]', lineNo)
+        const [, id, barTok, nameTok] = tokens as [string, string, string, string | undefined]
+        if (!SLUG_RE.test(id)) throw new BeatParseError(`locator ids are single alphanumeric/_/- tokens, got "${id}"`, lineNo)
+        if (locatorIds.has(id)) throw new BeatParseError(`duplicate locator id "${id}"`, lineNo)
+        const bar = parseIntStrict(barTok, lineNo, 'locator bar')
+        if (bar < 1) throw new BeatParseError(`locator bars are 1-based, got ${bar}`, lineNo)
+        const name = nameTok ?? id
+        if (!SLUG_RE.test(name)) throw new BeatParseError(`locator names are single alphanumeric/_/- tokens, got "${name}"`, lineNo)
+        locatorIds.add(id)
+        locators.push({ id, bar, name })
         continue
       }
       if (!currentTrack) throw new BeatParseError(`"${keyword}" outside of any track`, lineNo)
@@ -1175,5 +1210,5 @@ export function parse(text: string): BeatDocument {
     throw new BeatParseError(`selected_track "${selectedTrack}" is not a track in this file (have: ${tracks.map((t) => t.id).join(', ') || 'none'})`, eof)
   }
 
-  return { formatVersion, bpm, loopBars, selectedTrack, media, tracks, groups, scenes, song }
+  return { formatVersion, bpm, loopBars, selectedTrack, media, tracks, groups, scenes, song, locators }
 }

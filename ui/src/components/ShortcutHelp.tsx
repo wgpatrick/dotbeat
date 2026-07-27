@@ -78,6 +78,22 @@ const GROUPS: ShortcutGroup[] = [
         keys: ['Delete', 'Ctrl/Cmd+D'],
         description: 'still do nothing on a selected clip block — use the right-click menu above for Delete/Duplicate instead',
       },
+      // Phase 41 Stream D: the arrangement's first real keyboard surface, added because a 242-bar
+      // song is unnavigable by mouse alone. Every row below is a live branch of ArrangementView's
+      // own window keydown handler — the file-level comment at the top of this panel makes keeping
+      // that true a same-diff obligation, so these were written alongside the handler, not after.
+      { keys: ['Space'], description: 'play / stop (works even when a toolbar button has focus)' },
+      { keys: ['M'], description: 'drop a named marker at the playhead and open its name field' },
+      { keys: [','], description: 'jump to the previous marker' },
+      { keys: ['.'], description: 'jump to the next marker' },
+      { keys: ['Z'], description: 'zoom to the selected bar range (drag the ruler or a track to select one first)' },
+      { keys: ['X'], description: 'back to the view you zoomed from — zoom levels stack, so this unwinds them one at a time' },
+      { keys: ['0'], description: 'deselect everything: the bar range, the selected clip blocks, and the current section' },
+      {
+        keys: ['←', '→'],
+        description: 'nudge the selected clip block(s) one SECTION earlier/later (the same grid a drag snaps to). Needs clip blocks selected — with none selected, the arrows belong to the note editor instead',
+      },
+      { keys: ['S'], description: "split the selected AUDIO clip at the playhead (same as the clip block's own split button; other track kinds say so rather than failing)" },
     ],
   },
   {

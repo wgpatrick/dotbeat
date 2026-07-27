@@ -311,7 +311,18 @@ export function App() {
       {/* The inline vary-and-audition affordance (Phase 15 Stream I): a contextual bar that appears
           whenever there's a selection — Photoshop's Contextual Task Bar pattern. Selection-triggered,
           not tab-bound, so it rides above the whole workspace unchanged by the Phase 18 recomposition. */}
-      <VaryAffordance />
+      {/* Phase 41 Stream D: a fixed-height SLOT around the contextual bar, so the arrangement below
+          never moves when a selection appears or clears. VaryAffordance returns null with no
+          selection, so mounting it shifted everything under it down by its own height — measured
+          39px — between one interaction and the next. Stream A's usability pilot lost a drag to
+          exactly this: the second drag was aimed using pre-shift row positions and landed on the
+          wrong track. A layout jump that silently retargets a gesture is worse than a cosmetic
+          bug, and Photoshop's Contextual Task Bar (the pattern this bar cites) floats over the
+          document rather than reflowing it for the same reason. Reserving the space is the smaller
+          change and keeps the bar readable against its own background. */}
+      <div className="vary-slot">
+        <VaryAffordance />
+      </div>
 
       {/* Phase 22 Stream AH: a new flex ROW wrapping the optional content-browser rail + the
           existing workspace column — additive, the workspace's own internals are unchanged. */}

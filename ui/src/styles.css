@@ -243,6 +243,14 @@ body {
   padding: 4px 6px;
   font: inherit;
 }
+.transport-clock {
+  /* Phase 41 Stream D: wall clock beside the bar readout — secondary weight, since bars stay the
+     primary unit and time is the supporting fact. */
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
 .transport-readout {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
@@ -276,6 +284,14 @@ body {
 }
 
 /* ---- vary-and-audition affordance (Phase 15 Stream I) ---- */
+/* Phase 41 Stream D — see App.tsx's comment on the slot. The height is pinned to what the bar
+   actually measures (padding 7px top+bottom + a 12px/1.4 line + 1px border = 39px); the verify
+   script asserts the arrangement does not move when a selection appears, so if the bar's own
+   metrics ever drift this fails loudly rather than silently reintroducing the jump. */
+.vary-slot {
+  min-height: 39px;
+  flex: 0 0 auto;
+}
 .vary-bar {
   display: flex;
   align-items: center;
@@ -2086,6 +2102,15 @@ body {
   z-index: 2;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
+  /* Phase 41 Stream D: WITHOUT this, `position: sticky` on the header/corner inside silently stops
+     working past `rowWidth - headerWidth` of horizontal scroll. A flex row inside a scroll container
+     takes the SCROLLPORT's width by default, not its content's, so its children overflow it — and a
+     sticky child can only stick within its own containing block. Measured on a 240-bar timeline at
+     full zoom: the header pinned correctly to scrollLeft 1000, then detached and slid to -4984 by
+     scrollLeft 6000, taking the mute/solo controls off-screen with it. That made muting the
+     reference track impossible at the zoom you actually work at (Stream A's usability pilot).
+     `max-content` sizes the row to the whole timeline, which is what sticky needs to span. */
+  min-width: max-content;
 }
 .arr-ruler-corner {
   flex: 0 0 auto;
@@ -2131,6 +2156,14 @@ body {
   left: 0;
   right: 0;
   pointer-events: none;
+  /* Phase 41 Stream D: a tick is absolutely positioned at its bar with AUTO width, so its label
+     grows rightward from that point. Adding the wall-clock label (`.arr-bar-tick-time`) made the
+     LAST tick's content extend ~6px past the ruler's right edge, which made .arr-scroll
+     horizontally scrollable at fit-to-width — caught by verify-phase24-stream-cd's own
+     "fit-to-width must not overflow" assertion, which is exactly what it was written for. Clipping
+     here is the honest fix: the ruler's right edge IS the end of the song, so there is nothing
+     beyond it a label should be claiming space for. */
+  overflow: hidden;
 }
 .arr-bar-tick {
   position: absolute;
@@ -2147,12 +2180,112 @@ body {
   color: var(--text-dim);
   white-space: nowrap;
 }
+.arr-bar-tick-time {
+  /* Phase 41 Stream D: the ruler's secondary wall-clock label, dimmer than the bar number it sits
+     beside so the bar grid stays the primary reading and time is available at a glance. */
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-dim);
+  opacity: 0.65;
+  margin-left: 4px;
+  white-space: nowrap;
+}
 .arr-bar-tick-minor {
   position: absolute;
   top: 2px;
   bottom: 0;
   border-left: 1px solid rgba(255, 255, 255, 0.1);
 }
+/* Phase 41 Stream D: the locator strip along the TOP of the ruler (see LOCATOR_ROW_H in
+   ArrangementView.tsx — the ruler is three stacked strips: locators, section labels, bar ticks).
+   The strip itself is pointer-transparent so the ruler's drag-to-select still works in the gaps
+   BETWEEN markers; each flag re-enables pointer events for itself. */
+.arr-locator-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.arr-locator {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  pointer-events: auto;
+  /* The marker's anchor is its LEFT edge — that pixel is the bar it names, so the flag reads like a
+     pin planted at that spot rather than a label floating near it. */
+  border-left: 2px solid var(--accent);
+  background: rgba(224, 161, 60, 0.16);
+  border-radius: 0 var(--radius-sm, 3px) var(--radius-sm, 3px) 0;
+  max-width: 180px;
+}
+/* Collapsed to a bare pin because a neighbour is too close to fit both names — the flag stays
+   clickable (a real jump target) and keeps its full name in the tooltip. */
+.arr-locator.compact {
+  max-width: none;
+}
+.arr-locator.compact .arr-locator-flag {
+  padding: 0;
+  width: 4px;
+  min-width: 4px;
+}
+.arr-locator.compact .arr-locator-del {
+  display: none;
+}
+.arr-locator.compact:hover {
+  /* Hovering a collapsed pin is how you find out which marker it is, so give it a little presence. */
+  background: rgba(224, 161, 60, 0.4);
+}
+.arr-locator-flag {
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+.arr-locator-flag:hover {
+  color: var(--text);
+}
+.arr-locator-del {
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 3px 0 0;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  /* Revealed on hover so a row of markers reads as names, not as a row of delete buttons — but it
+     is always in the DOM (never `display:none`), so it stays reachable by keyboard and by tests. */
+  opacity: 0;
+}
+.arr-locator:hover .arr-locator-del {
+  opacity: 1;
+}
+.arr-locator-del:hover {
+  color: var(--danger, #e06c75);
+}
+.arr-locator-input {
+  font: inherit;
+  font-size: 10px;
+  width: 96px;
+  padding: 0 3px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm, 3px);
+  background: var(--panel);
+  color: var(--text);
+}
+
 .arr-ruler-band {
   position: absolute;
   top: 0;
@@ -2166,6 +2299,15 @@ body {
   display: flex;
   align-items: stretch;
   border-bottom: 1px solid var(--line);
+  /* Phase 41 Stream D: WITHOUT this, `position: sticky` on the header/corner inside silently stops
+     working past `rowWidth - headerWidth` of horizontal scroll. A flex row inside a scroll container
+     takes the SCROLLPORT's width by default, not its content's, so its children overflow it — and a
+     sticky child can only stick within its own containing block. Measured on a 240-bar timeline at
+     full zoom: the header pinned correctly to scrollLeft 1000, then detached and slid to -4984 by
+     scrollLeft 6000, taking the mute/solo controls off-screen with it. That made muting the
+     reference track impossible at the zoom you actually work at (Stream A's usability pilot).
+     `max-content` sizes the row to the whole timeline, which is what sticky needs to span. */
+  min-width: max-content;
 }
 .arr-track-header {
   flex: 0 0 auto;
@@ -2518,6 +2660,15 @@ body {
   align-items: stretch;
   border-bottom: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.12);
+  /* Phase 41 Stream D: WITHOUT this, `position: sticky` on the header/corner inside silently stops
+     working past `rowWidth - headerWidth` of horizontal scroll. A flex row inside a scroll container
+     takes the SCROLLPORT's width by default, not its content's, so its children overflow it — and a
+     sticky child can only stick within its own containing block. Measured on a 240-bar timeline at
+     full zoom: the header pinned correctly to scrollLeft 1000, then detached and slid to -4984 by
+     scrollLeft 6000, taking the mute/solo controls off-screen with it. That made muting the
+     reference track impossible at the zoom you actually work at (Stream A's usability pilot).
+     `max-content` sizes the row to the whole timeline, which is what sticky needs to span. */
+  min-width: max-content;
 }
 .arr-auto-head {
   flex: 0 0 auto;
@@ -4161,16 +4312,107 @@ body {
 }
 
 /* ---- Phase 24 Stream CD: timeline zoom controls (arrangement toolbar) ---- */
+/* Phase 41 Stream D: the navigation cluster (zoom, zoom-to-selection/back, marker, follow, loop
+   region). `margin-left: auto` moved here from .arr-zoom-controls so the whole group is what gets
+   pushed right — and, crucially, what wraps as a unit when the row runs out of width. Before this,
+   each control was an independent flex item after the auto margin and the last one ("loop
+   selection") simply overflowed the viewport. */
+.arr-nav-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+  /* flex-shrink: 0 is the load-bearing declaration. As a shrinkable flex item this group was being
+     squeezed narrower than its own content by .arr-length-bar, which then squashed the last control
+     inside it ("loop selection" -> an 18px stub reading "loop select…") instead of letting the row
+     wrap. Refusing to shrink makes .arr-length-bar's existing flex-wrap move the whole cluster to
+     its own line, which is what you want on a narrow window anyway. */
+  flex-shrink: 0;
+}
+/* flex-shrink: 0 is what actually makes the wrap happen. Without it the children stay on one line
+   and get SQUEEZED instead — "loop selection" rendered as an 18px sliver reading "loop select…",
+   fully inside the viewport (so an off-screen check passed) and completely unusable. Squashing, not
+   overflow, is how a flex toolbar runs out of room. */
+.arr-nav-controls > *,
+.arr-nav-controls .arr-toolbtn,
+.arr-nav-controls .arr-chip-btn {
+  flex: 0 0 auto;
+}
 .arr-zoom-controls {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 11px;
   color: var(--text-dim);
-  margin-left: auto;
 }
 .arr-zoom-readout {
   min-width: 54px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+/* Phase 41 Stream D: follow-the-playhead toggle. Sits in the same toolbar run as the zoom
+   controls; `.on` is the engaged state (the default), styled like the app's other latched
+   toggles rather than a plain push-button so its state reads at a glance. */
+.arr-follow-btn {
+  white-space: nowrap;
+}
+.arr-follow-btn.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Overview strip / minimap (Phase 41 Stream D) ────────────────────────────────────────────────
+   The whole song at a fixed screen width, sitting between the arrangement toolbar and the scrolling
+   timeline. Deliberately short (22px): it is a locator map and a "you are here", not a second
+   timeline to read detail from. */
+.arr-minimap {
+  position: relative;
+  height: 22px;
+  flex: 0 0 auto;
+  margin: 0 8px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  cursor: pointer;
+  overflow: hidden;
+}
+.arr-minimap-section {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+}
+.arr-minimap-locator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  opacity: 0.85;
+}
+.arr-minimap-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  box-shadow: 0 0 5px rgba(224, 161, 60, 0.8);
+}
+/* The current viewport. Positioned imperatively from the scroll handler (see syncMiniWindow) —
+   never re-rendered through React, because scroll has no natural rate limit and this component
+   owns every track canvas. */
+.arr-minimap-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(224, 161, 60, 0.18);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  pointer-events: none;
 }

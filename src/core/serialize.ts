@@ -370,5 +370,19 @@ export function serialize(doc: BeatDocument): string {
       lines.push(`  section ${section.scene} ${formatNumber(section.bars)}`)
     }
   }
+  // v0.11 (Phase 41 Stream D): locators, last. Elided entirely when there are none, so every
+  // pre-Stream-D file still round-trips byte-identically. Sorted by bar (then id, for a stable
+  // total order when two markers share a bar) rather than kept in creation order: unlike clips or
+  // scenes, a locator list has an obvious canonical reading order — the order you hit them — and a
+  // deterministic sort keeps the diff of "add a marker in the middle" to one inserted line.
+  if (doc.locators.length > 0) {
+    lines.push('', 'locators')
+    const sorted = [...doc.locators].sort((a, b) => a.bar - b.bar || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    for (const l of sorted) {
+      // The name is elided when it's identical to the id — the parser defaults it back to the id,
+      // so this round-trips exactly, and `locator brk 101` is a nicer line than `locator brk 101 brk`.
+      lines.push(l.name === l.id ? `  locator ${l.id} ${formatNumber(l.bar)}` : `  locator ${l.id} ${formatNumber(l.bar)} ${l.name}`)
+    }
+  }
   return lines.join('\n') + '\n'
 }

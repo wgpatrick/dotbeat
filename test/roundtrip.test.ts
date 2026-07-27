@@ -189,6 +189,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
     groups: [],
     scenes: [],
     song: null,
+    locators: [],
   }
   const round = parse(serialize(doc))
   assert.deepEqual(round, doc)
@@ -232,6 +233,7 @@ test('formatNumber stabilizes floating-point noise so round-tripping is idempote
     groups: [],
     scenes: [],
     song: null,
+    locators: [],
   }
   const text = serialize(doc)
   assert.match(text, /volume 0\.3\n/)

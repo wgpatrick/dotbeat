@@ -32,6 +32,17 @@ import { useStore } from '../state/store'
 // `disabled` attribute (and its click-blocking) is gone, so `onClick` is exactly as reliable as
 // Ctrl/Cmd+Z — both paths now call the identical postUndo()/postRedo().
 
+/** m:ss for anything under an hour, h:mm:ss above it. Shared by the position and length readouts so
+ * the two can never disagree about how a duration is spelled (Phase 41 Stream D). */
+export function formatClock(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds))
+  const s = total % 60
+  const m = Math.floor(total / 60) % 60
+  const h = Math.floor(total / 3600)
+  const ss = String(s).padStart(2, '0')
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+}
+
 export function TransportBar() {
   const doc = useStore((s) => s.doc)
   const playing = useStore((s) => s.playing)
@@ -49,6 +60,17 @@ export function TransportBar() {
   // here read as a nonsensical "4 bars" on a 29-bar, 5-section song (owner-caught).
   const totalBars = doc.song && doc.song.length > 0 ? doc.song.reduce((n, s) => n + s.bars, 0) : doc.loopBars
   const barsLabel = doc.song && doc.song.length > 0 ? 'Song' : 'Loop'
+  // Phase 41 Stream D: wall-clock alongside bars. At 242 bars a bar number stops answering the
+  // question you actually have ("how long is this, and how far in am I?") — 7 minutes is a fact
+  // about the track, 242 bars is a fact about the grid. Both readouts now sit side by side rather
+  // than one replacing the other.
+  //
+  // 4/4 is the document's implicit signature (src/core/document.ts: a per-CLIP `signature` may
+  // override it locally, but there is no document-level meter, so a song-length figure has nothing
+  // else to compute from) — hence 4 beats per bar, 240/bpm seconds per bar.
+  const secPerBar = 240 / doc.bpm
+  const posSeconds = currentStep >= 0 ? (currentStep / 16) * secPerBar : 0
+  const totalSeconds = totalBars * secPerBar
 
   const onBpm = (v: number) => {
     if (!Number.isFinite(v) || v < 20 || v > 999) return
@@ -87,12 +109,20 @@ export function TransportBar() {
       </div>
       <div className="transport-field">
         <label>{barsLabel}</label>
-        <span className="transport-readout">{totalBars}</span>
+        <span className="transport-readout" data-total-bars={totalBars}>
+          {totalBars}
+          <span className="transport-clock" data-total-seconds={totalSeconds.toFixed(2)}>
+            {formatClock(totalSeconds)}
+          </span>
+        </span>
       </div>
       <div className="transport-field">
         <label>Position</label>
         <span className="transport-readout position">
           {bar}.{beat}
+          <span className="transport-clock" data-position-seconds={posSeconds.toFixed(2)}>
+            {formatClock(posSeconds)}
+          </span>
         </span>
       </div>
       <div className="spacer" />

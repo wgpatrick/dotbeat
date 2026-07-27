@@ -211,6 +211,7 @@ export const VERIFY_SCRIPTS = [
   { script: 'ui/verify-phase31-stream-ke.mjs', area: 'copy-dialogs', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase32-stream-la.mjs', area: 'context-menus', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase32-stream-lb.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
+  { script: 'ui/verify-phase41-stream-d.mjs', area: 'arrangement', tier: 'gui', status: 'live' },
   { script: 'ui/verify-phase36-stream-pd.mjs', area: 'audio-region', tier: 'gui', status: 'live' },
 
   // ---- cli tier: no browser; drives `beat` / MCP directly --------------------------------------
