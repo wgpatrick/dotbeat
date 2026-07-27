@@ -80,6 +80,23 @@ const GROUPS: ShortcutGroup[] = [
       },
     ],
   },
+  {
+    // Phase 41 Stream C. The automation lane had accumulated six distinct gestures across four
+    // phases and NONE of them were listed here — including alt-click-to-delete and alt-drag-to-bow,
+    // which have no visible affordance at all and so are unreachable unless you already know. The
+    // two this stream added have on-screen buttons (the pencil and wave glyph in the lane header),
+    // but the modifier gestures do not, which is exactly what this panel is for.
+    title: 'Automation lanes',
+    rows: [
+      { keys: ['Drag'], description: 'place a breakpoint and position it; drag an existing one to move it' },
+      { keys: ['✏ + Drag'], description: 'draw mode (the pencil in the lane header): paint a whole run of breakpoints in one stroke, simplified on release' },
+      { keys: ['∿'], description: 'insert a shape (sine / triangle / ramp / exp / ADSR) across the clip, with from/to/cycles/points' },
+      { keys: ['Shift', 'Drag'], description: 'select the segment under the pointer and move BOTH its end breakpoints together, keeping its slope' },
+      { keys: ['Alt/Option', 'Click'], description: 'delete the breakpoint under the pointer' },
+      { keys: ['Alt/Option', 'Drag'], description: 'on a segment (not a point): bow it into a curve' },
+      { keys: ['Right-click'], description: 'on a breakpoint: type an exact value, or switch the segment it starts between linear / hold / curve' },
+    ],
+  },
 ]
 
 function Keycap({ label }: { label: string }) {
