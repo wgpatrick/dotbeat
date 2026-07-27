@@ -86,6 +86,18 @@ export const VERIFY_SCRIPTS = [
   { script: 'ui/verify-phase37-stream-ra.mjs', area: 'render-export', tier: 'engine', status: 'live' },
   { script: 'ui/verify-phase37-stream-rc.mjs', area: 'automation', tier: 'engine', status: 'live' },
   {
+    script: 'ui/verify-surge-gui-playback.mjs',
+    area: 'surge',
+    tier: 'engine',
+    status: 'live',
+    note:
+      'SKIPS (exit 0, with the reason printed) unless surgepy is available — it is a source build of Surge XT ' +
+      'with no PyPI wheel, so most machines have nothing to render. Where it does run it is the only end-to-end ' +
+      'proof that a surge track makes a sound in the GUI at all, and it reports the edit->hear round trip ' +
+      '(measured 2026-07-27: 1123 ms for a 4-bar phrase, 3778 ms for 24 bars). Points at the owner-private ' +
+      'twin-souls-study project by default; SURGE_PILOT_PROJECT/SURGE_PILOT_FILE aim it anywhere.',
+  },
+  {
     script: 'ui/verify-phase18-lfo-depth.mjs',
     area: 'synth',
     tier: 'engine',
@@ -110,6 +122,10 @@ export const VERIFY_SCRIPTS = [
   { script: 'ui/verify-phase26-stream-de.mjs', area: 'mixer', tier: 'both', status: 'live' },
   { script: 'ui/verify-phase26-stream-di.mjs', area: 'automation', tier: 'both', status: 'live' },
   { script: 'ui/verify-phase26-stream-dk.mjs', area: 'drums', tier: 'both', status: 'live' },
+  // Phase 41 Stream C. 'both' because C8 renders the project with and without the drawn lane and
+  // asserts on the resulting audio's time-resolved spectral centroid — a GUI-tier run would prove
+  // the points were written and nothing about whether they are heard.
+  { script: 'ui/verify-phase41-stream-c.mjs', area: 'automation', tier: 'both', status: 'live' },
   { script: 'ui/verify-volume-fader-bugfix.mjs', area: 'mixer', tier: 'both', status: 'live' },
 
   // ---- gui tier: DOM + on-disk .beat assertions ------------------------------------------------

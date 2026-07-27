@@ -1,4 +1,4 @@
-import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumPattern, BeatNote, BeatPlacement, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
+import type { BeatAutomationLane, BeatDrumHit, BeatDocument, BeatDrumLaneDecl, BeatDrumPattern, BeatLaneBacking, BeatLaneSample, BeatNote, BeatPlacement, BeatSynth, BeatTrack, DrumLane, OscType, TrackKind } from './document.js'
 import { AUTOMATABLE_SYNTH_PARAMS, DRUM_LANES, NOTE_FIELD_DEFAULTS, OSC_TYPES, SYNTH_FIELDS, SYNTH_PARAM_ORDER, defaultEffectChain, defaultSynthFields, firstPlacementClip } from './document.js'
 
 /** v0.9: the assumed shape of beatlab's per-clip automation engine state — a param name mapped
@@ -48,6 +48,69 @@ function patternToHits(pattern: Record<string, number[]>, totalSteps: number): B
   return hits
 }
 
+/** The lossless inverse of the `hits` field beatDocumentToPartialTracks now emits: take the raw
+ * free-timed hits back verbatim rather than re-deriving them from the quantized 16-step grid.
+ * Untrusted input (an HTTP payload), so every field is checked — a malformed hit fails loudly here
+ * rather than being written to the file as something the parser will later refuse. */
+function toBeatHits(source: unknown, where: string): BeatDrumHit[] {
+  if (!Array.isArray(source)) throw new Error(`${where}: hits is not an array`)
+  return source.map((raw, i) => {
+    const h = raw as Record<string, unknown>
+    const at = `${where}: hits[${i}]`
+    if (h === null || typeof h !== 'object') throw new Error(`${at} is not an object`)
+    if (typeof h.id !== 'string' || h.id === '') throw new Error(`${at}.id is not a non-empty string`)
+    if (typeof h.lane !== 'string' || h.lane === '') throw new Error(`${at}.lane is not a non-empty string`)
+    if (typeof h.start !== 'number' || !Number.isFinite(h.start) || h.start < 0) throw new Error(`${at}.start is not a finite step >= 0: ${String(h.start)}`)
+    if (typeof h.velocity !== 'number' || !Number.isFinite(h.velocity) || h.velocity <= 0 || h.velocity > 1) throw new Error(`${at}.velocity is not in (0..1]: ${String(h.velocity)}`)
+    const hit: BeatDrumHit = { id: h.id, lane: h.lane, start: h.start, velocity: h.velocity }
+    if (h.duration !== undefined) {
+      if (typeof h.duration !== 'number' || !Number.isFinite(h.duration) || h.duration <= 0) throw new Error(`${at}.duration is not a finite step > 0: ${String(h.duration)}`)
+      hit.duration = h.duration
+    }
+    return hit
+  })
+}
+
+/** The lossless inverse of the `lanes` field beatDocumentToPartialTracks now emits — the open
+ * per-track lane declarations, validated on the way in (same untrusted-payload discipline as
+ * toBeatHits). Only the discriminant and the identity fields are checked here; per-lane `params`
+ * bags stay open by design (DRUM_VOICE_PARAM_DEFAULTS/SAMPLE_LANE_PARAM_DEFAULTS decide what is
+ * meaningful, and parse.ts/edit.ts own their value rules). */
+function toBeatDrumLanes(source: unknown, where: string): BeatDrumLaneDecl[] {
+  if (!Array.isArray(source)) throw new Error(`${where}: lanes is not an array`)
+  return source.map((raw, i) => {
+    const l = raw as Record<string, unknown>
+    const at = `${where}: lanes[${i}]`
+    if (l === null || typeof l !== 'object') throw new Error(`${at} is not an object`)
+    if (typeof l.name !== 'string' || l.name === '') throw new Error(`${at}.name is not a non-empty string`)
+    const b = l.backing as Record<string, unknown> | undefined
+    if (!b || typeof b !== 'object') throw new Error(`${at}.backing is missing`)
+    if (b.type !== 'synth' && b.type !== 'sample' && b.type !== 'sf') throw new Error(`${at}.backing.type is not synth|sample|sf: ${String(b.type)}`)
+    if ((b.type === 'sample' || b.type === 'sf') && (typeof b.sample !== 'string' || b.sample === '')) throw new Error(`${at}.backing.sample is not a media id`)
+    return { name: l.name, backing: structuredClone(b) as unknown as BeatLaneBacking }
+  })
+}
+
+/** v0.5 lane→one-shot assignments, taken back from a payload that carries them (see
+ * ExternalTrack.laneSamples). Absent = `{}`, exactly as before this field existed. */
+function toBeatLaneSamples(source: unknown, where: string): BeatTrack['laneSamples'] {
+  if (source === undefined) return {}
+  if (source === null || typeof source !== 'object' || Array.isArray(source)) throw new Error(`${where}: laneSamples is not an object`)
+  const out: Record<string, BeatLaneSample> = {}
+  for (const [lane, raw] of Object.entries(source as Record<string, unknown>)) {
+    const s = raw as Record<string, unknown>
+    if (s === null || typeof s !== 'object') throw new Error(`${where}: laneSamples.${lane} is not an object`)
+    if (typeof s.sample !== 'string' || s.sample === '') throw new Error(`${where}: laneSamples.${lane}.sample is not a media id`)
+    const numField = (k: 'gainDb' | 'tune'): number => {
+      const v = s[k]
+      if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`${where}: laneSamples.${lane}.${k} is not a finite number: ${String(v)}`)
+      return v
+    }
+    out[lane] = { sample: s.sample, gainDb: numField('gainDb'), tune: numField('tune') }
+  }
+  return out as BeatTrack['laneSamples']
+}
+
 /** v0.8: project free-timed hits back onto beatlab's 16-step grid — a QUANTIZED VIEW for the
  * GUI/engine, which still speak patterns (research 12: the grid is a view over events). A hit
  * lands in the step nearest its start (mod 16, so it shows in the one-bar cycle); off-grid hits
@@ -81,7 +144,18 @@ export interface ExternalTrack {
   notes: { id: string; pitch: number; start: number; duration: number; velocity: number }[]
   synth: Record<string, unknown>
   pattern?: Record<string, number[]>
-  clips?: { id: string; name?: string; notes: ExternalTrack['notes']; pattern?: Record<string, number[]>; automation?: ExternalClipAutomation }[]
+  clips?: { id: string; name?: string; notes: ExternalTrack['notes']; pattern?: Record<string, number[]>; hits?: unknown; automation?: ExternalClipAutomation }[]
+  /** The lossless drum fields a /doc reader now gets back (see PartialTrack.lanes/hits). Typed
+   * `unknown` because this is the UNTRUSTED direction — a payload arrives over HTTP, so both are
+   * structurally validated (toBeatDrumLanes/toBeatHits) rather than trusted. When present they
+   * WIN over `pattern`: the grid is the lossy view, these are the truth. */
+  lanes?: unknown
+  hits?: unknown
+  /** v0.5 per-lane one-shot assignments, the same field /doc emits (PartialTrack.laneSamples).
+   * The daemon's /state route also never-erases these from the CURRENT document; taking them back
+   * when the payload carries them makes the converter itself round-trip losslessly, so a caller
+   * that isn't the daemon doesn't silently unassign a kit's samples. */
+  laneSamples?: unknown
 }
 export interface ExternalSandboxPayload {
   v: number
@@ -237,14 +311,20 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
     color: t.color,
     kind: t.kind,
     synth: toBeatSynth(t.synth, t.id, report),
-    laneSamples: {},
-    lanes: [], // beatlab payloads have no open-lane concept yet — implicit 5 DRUM_LANES (see hitsToPattern)
+    laneSamples: toBeatLaneSamples(t.laneSamples, `track "${t.id}"`),
+    // A legacy beatlab payload has no open-lane concept — [] means the implicit 5 DRUM_LANES (see
+    // hitsToPattern). A payload that DID come from this converter's own /doc projection carries the
+    // real declarations back, and they win: dropping them here is what silently flattened a custom
+    // kit to the 5-lane grid on every /doc → /state round trip. (The daemon's /state route ALSO
+    // never-erases them for payloads that omit the field — see src/daemon/daemon.ts.)
+    lanes: t.lanes !== undefined ? toBeatDrumLanes(t.lanes, `track "${t.id}"`) : [],
     clips: (t.clips ?? []).map((c) => {
       if (c.name !== undefined && c.name !== c.id) report.droppedFields.push(`${t.id}.${c.id}.name`)
       return {
         id: c.id,
         notes: t.kind === 'synth' ? c.notes.map(toBeatNote) : [],
-        hits: t.kind === 'drums' ? patternToHits(toBeatPattern(c.pattern, `${t.id} clip ${c.id}`), 16) : [],
+        // Raw hits win over the quantized grid when the payload carries them (see toBeatHits).
+        hits: t.kind !== 'drums' ? [] : c.hits !== undefined ? toBeatHits(c.hits, `track "${t.id}" clip "${c.id}"`) : patternToHits(toBeatPattern(c.pattern, `${t.id} clip ${c.id}`), 16),
         // v0.9: converts (was reported as dropped through v0.8) — see toBeatClipAutomation.
         automation: toBeatClipAutomation(c.automation, t.id, c.id, report),
         // v0.10: beatlab has no per-clip loop-range/time-signature concept at all (a dotbeat-only
@@ -256,7 +336,7 @@ export function sandboxPayloadToBeatDocument(payload: ExternalSandboxPayload): {
       }
     }),
     notes: t.kind === 'synth' ? t.notes.map(toBeatNote) : [],
-    hits: t.kind === 'drums' ? patternToHits(toBeatPattern(t.pattern, t.id), loopSteps) : [],
+    hits: t.kind !== 'drums' ? [] : t.hits !== undefined ? toBeatHits(t.hits, `track "${t.id}"`) : patternToHits(toBeatPattern(t.pattern, t.id), loopSteps),
     // v0.10: BeatLab's own insertOrder isn't converted (see DELIBERATELY_UNMODELED's comment
     // above) — every imported synth or drums track lands on dotbeat's default chain, same as any
     // other file that never declares one explicitly (Phase 26 Stream DC: drums matches synth here
@@ -350,9 +430,22 @@ export interface PartialTrack {
    * toBeatClipAutomation; this is the direction beatlab's own engine wiring for reading this
    * back is the documented gap, per docs/phase-9-automation-plan.md), omitted entirely when a
    * clip has none. */
-  clips?: { id: string; name: string; notes: BeatNote[]; pattern: BeatDrumPattern; automation?: ExternalClipAutomation }[]
+  clips?: { id: string; name: string; notes: BeatNote[]; pattern: BeatDrumPattern; hits?: BeatDrumHit[]; automation?: ExternalClipAutomation }[]
   /** v0.5: per-lane one-shot assignments (sample = media id; resolve via the media table). */
   laneSamples?: Record<string, { sample: string; gainDb: number; tune: number }>
+  /** The OPEN per-track lane declarations (BeatTrack.lanes), carried verbatim ALONGSIDE the legacy
+   * 5-lane `pattern` view. Additive, same discipline as `instruments`/`placements`: a legacy
+   * BeatLab-bridge consumer that doesn't know the field ignores it, but nothing that round-trips
+   * /doc → /state silently flattens a custom kit any more. Omitted when the track declares none
+   * (`[]` = the 5 implicit DRUM_LANES — see BeatTrack.lanes). */
+  lanes?: BeatDrumLaneDecl[]
+  /** The RAW free-timed hits (BeatTrack.hits), carried verbatim alongside `pattern`. `pattern` is
+   * a lossy quantized VIEW — it snaps off-grid starts to the nearest 16th mod 16 and drops every
+   * hit on a lane outside the closed 5-lane DRUM_LANES set (see hitsToPattern). Before this field
+   * existed, a consumer had no way to see (or hand back) the truth, so a /doc → /state round trip
+   * destroyed custom lanes and free timing while reporting `droppedFields: []`. Omitted when the
+   * track has no hits. */
+  hits?: BeatDrumHit[]
 }
 
 const EMPTY_PATTERN = (): BeatDrumPattern =>
@@ -402,6 +495,10 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
       // v0.8: hits projected onto the 16-step grid — the quantized VIEW the GUI/engine consume
       // (off-grid hits kept in the file, carried over by the daemon on GUI pushes)
       ...(t.kind === 'drums' ? { pattern: hitsToPattern(t.hits) } : {}),
+      // …and the lossless truth alongside it (see PartialTrack.lanes/hits): the open lane
+      // declarations and the free-timed hits the 5-lane grid cannot express.
+      ...(t.kind === 'drums' && t.lanes.length > 0 ? { lanes: structuredClone(t.lanes) } : {}),
+      ...(t.kind === 'drums' && t.hits.length > 0 ? { hits: t.hits.map((h) => ({ ...h })) } : {}),
       ...(Object.keys(t.laneSamples).length > 0 ? { laneSamples: structuredClone(t.laneSamples) as Record<string, { sample: string; gainDb: number; tune: number }> } : {}),
       ...(t.clips.length > 0
         ? {
@@ -410,6 +507,7 @@ export function beatDocumentToPartialTracks(doc: BeatDocument): {
               name: c.id,
               notes: c.notes.map((n) => ({ ...n })),
               pattern: t.kind === 'drums' ? hitsToPattern(c.hits) : EMPTY_PATTERN(),
+              ...(t.kind === 'drums' && c.hits.length > 0 ? { hits: c.hits.map((h) => ({ ...h })) } : {}),
               // v0.9: strip stable ids back off (the assumed engine-side shape doesn't use them,
               // per toBeatClipAutomation's caveat) — omitted entirely when the clip has none.
               ...(c.automation.length > 0

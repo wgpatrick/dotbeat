@@ -1151,9 +1151,21 @@ export const rows = [
   },
   {
     area: 'Automation', feature: 'Same-row curve overlay',
-    description: 'Draw the automation curve directly over the clip row instead of only in a dedicated sub-lane.',
+    description: 'Draw the automation curve directly over the clip row instead of only in a dedicated sub-lane. DEFERRED by Phase 41 Stream C, which shipped the other four Automation GUI rows: unlike those, this one is not automation code at all — the drawing surface is the clip BLOCK inside ArrangementView.tsx\'s TrackRow, so it belongs to whoever owns the arrangement grid, not to the automation lane (now its own module, ui/src/components/AutomationLane.tsx). Trigger to build: schedule it with an arrangement-area stream, and reuse AutomationLane\'s exported valueToY/segValue path rather than writing a second curve renderer — note that path is now LOG-scaled for cutoff to match the engine, so a naive linear overlay would disagree with both the sub-lane and playback.',
     core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
     research: 'research/50-ableton-vs-dotbeat-live-concepts.md', plan: null,
+  },
+  {
+    area: 'Automation', feature: 'Batched /automate write (one gesture = one undo entry)',
+    description: 'Found by Phase 41 Stream C while building Draw Mode paint and shape insertion. The daemon\'s POST /automate is strictly per-point (op set/remove, one breakpoint each) and passes no `coalesceKey` to writeIfChanged, so a gesture that writes N breakpoints costs N daemon round-trips, N file writes and — the part that is actually felt — N separate undo entries: one painted sweep currently needs ~10-20 Ctrl+Z to fully undo. Stream C did not fix it because src/daemon/daemon.ts was another stream\'s file that night, and worked around it instead by reducing every run before committing (simplifyAutomationPoints) so N is 10-20 rather than 64. Fix: an additive `op: \'run\'` on /automate taking {points: [{time,value}], replaceSpan: [from,to]} and applying it through the same core primitives in one writeIfChanged with a coalesceKey — the GUI side is already funnelled through one writeRun() helper in AutomationLane.tsx, so it is a single call site to switch. Cheap and well-scoped; sequence with any daemon-area stream.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: null, plan: null,
+  },
+  {
+    area: 'Known usability gaps (backlog)', feature: 'Automating a loop-mode project takes three hops before anything is possible',
+    description: 'Measured in Phase 41 Stream C\'s GUI pilot, opening the owner\'s real ~/Documents/dotbeat/songs/twin-souls-study project cold. Automation is clip-scoped and song-mode-only by v0.9 design, so on a project with notes but no song block the arrangement\'s `A` toggle is disabled and NOTHING about automation is reachable. The app does guide you, but in three separate places and only one step at a time: the disabled button\'s tooltip ("add this track to a scene to automate its clip"), then the clip panel\'s hint, then "Place in Arrangement", which toasts "Add a song section first (+ section)" — and only then does + section create the scene, place both tracks and enable automation. Each message is correct and none of them names the whole path. The owner\'s own framing of this project is that the automation IS the song, so this is the first wall a real session hits. Fix candidates (arrangement area, not automation): have "Place in Arrangement" create the section it needs instead of refusing, or state the full two-step path in the disabled toggle\'s tooltip.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: null, plan: null,
   },
   {
     area: 'Automation', feature: 'Automation manual-override suspends (not erases) + Re-Enable Automation',
@@ -1169,8 +1181,8 @@ export const rows = [
   },
   {
     area: 'Automation', feature: 'Log-scale y-axis',
-    description: 'Frequency-style params (cutoff, etc.) read better on a log axis than linear.',
-    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    description: 'Shipped in Phase 41 Stream C, and it turned out to be a CORRECTNESS bug rather than the readability nicety this row described. ui/src/audio/engine.ts calls interpolateAutomation(points, step, log) with log=true at exactly one call site — cutoff, "frequency perception is logarithmic" — so between two cutoff breakpoints the engine plays a*(b/a)^t while the lane drew a straight line in LINEAR space: the picture disagreed with the sound. On a log axis the engine\'s own geometric interpolation IS a straight line, so the drawing becomes exact; eased "curve" segments now sample through a segValue() mirroring the same branch. Found by reading a pilot screenshot: a 20->4000 Hz sine inserted on the owner\'s twin-souls melody was squashed into the bottom 22% of a linear 20..18000 lane. Guarded to strictly-positive ranges (ln(0) has no answer) and to the params the engine actually treats logarithmically, with a note to grep the engine before extending the set. The same bug had a second half in the paint gesture, whose simplify tolerance was a fraction of the RAW range (180 Hz for cutoff) and so flattened the bottom of a painted arc while keeping every sample at the top; reduction now runs in normalized axis space. Verify C7 clicks the lane\'s midline and asserts the value written is the geometric mean (~600 Hz) rather than the linear midpoint (~9010 Hz).',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
     research: 'research/50-ableton-vs-dotbeat-live-concepts.md', plan: null,
   },
   {
@@ -1187,32 +1199,32 @@ export const rows = [
   },
   {
     area: 'Automation', feature: 'Automation discovery UI (badge for already-automated params in the picker)',
-    description: 'Ableton lights an LED next to any control carrying automation, plus a "Show Automated Parameters Only" filter (manual ch.25 pp.481,485-486). dotbeat\'s already-automated params surface as lanes automatically once the `A` toggle is opened, but there\'s no glance-able badge in the picker itself before opening it. A small dot/badge on picker `<option>`s with a non-empty lane — cheap, iterate `track.clips[0].automation` client-side, no new backend data.',
-    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    description: 'Shipped in Phase 41 Stream C, scoped wider than this row proposed. A dot on the picker\'s own <option>s is nearly a no-op by itself: ArrangementView\'s visibleParamsFor already auto-opens a lane for every automated param on the PRIMARY clip and then subtracts those from the picker\'s `available` list, so an option carrying automation on the clip you are looking at is never in the list to be dotted. What is genuinely invisible — and what this row was after — is automation on the track\'s OTHER clips, i.e. the sections you are not currently looking at. So the picker scans the whole track: a bullet on any option that carries automation somewhere, plus a row of chips naming each automated param with its point count, titled with which clips hold it, each chip clicking through to show that lane. Guarded by verify C6.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
     research: 'research/65-ableton-vs-dotbeat-automation-envelopes.md', plan: null,
   },
   {
     area: 'Automation', feature: 'Segment-level selection and drag on automation lanes',
-    description: 'Ableton: click near (not on) a segment, or Shift-click on it, to select and drag an entire segment as one object (manual ch.25 p.488). dotbeat has no concept of a "segment" as a selectable/draggable unit — only individual points. A "click near, not on, a point" hit-test tier (between the point-radius hit zone and a wider segment-hit threshold) that selects the two flanking points as a pair, then drags both together. Natural sequel to curved segments since both touch segment identity, not just point identity.',
-    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    description: 'Shipped in Phase 41 Stream C. Shift+drag within 6px of a segment selects the two points flanking it and moves BOTH by the same delta, so the segment slides without changing its slope or length; the selection renders as a thick white overlay on every tiled repeat and clears itself when either endpoint stops existing. Shift rather than this row\'s proposed "click near, not on, a point" proximity tier: the lane\'s plain click on empty space already means "add a breakpoint here", and a proximity tier would kill that gesture within 6px of any existing curve — exactly where people add points. Two bugs were found by DRIVING the gesture rather than by any assertion, both now guarded (verify C5): the value delta had to move into NORMALIZED lane space (an absolute delta on the log cutoff axis moved the two endpoints by 5x and 9.4x and destroyed the slope the gesture exists to preserve), and the time delta is snapped to the drag grid ONCE and added to both endpoints rather than rounding each result (which produced 0.2057 vs 0.2029 steps for a single gesture).',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
     research: 'research/65-ableton-vs-dotbeat-automation-envelopes.md', plan: null,
   },
   {
     area: 'Automation', feature: 'Draw Mode paint-a-run gesture for automation',
-    description: 'Ableton has a dedicated Draw Mode where drag-and-paint replaces click-to-place-one-point (manual ch.25 pp.486-487). Don\'t port Ableton\'s separate mode toggle — reuse the pattern already shipped for the per-note chance lane (one continuous drag paints every point the pointer sweeps over), applying the identical drag-paint interaction to the automation canvas. Same visual language the user already learned, far less code than a real mode toggle. Sequence after curved segments and segment-drag land, since Draw Mode\'s main value is far more useful once curves can actually bow.',
-    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    description: 'Shipped in Phase 41 Stream C. A pencil toggle on the lane header arms draw mode; a drag then paints a run of breakpoints, sampled once per 16th step of CLIP-LOCAL time (not per pixel, so resolution is zoom-independent) with the gap between pointermove events interpolated — a fast sweep otherwise lands as a handful of isolated samples with straight chords between them, visibly not what was drawn. On release the stroke goes through the new simplifyAutomationPoints (see the Simplify Envelope row) at 2% of the lane height, so a 4-bar sweep commits ~10-20 points rather than 64. DELIBERATE DEVIATION from this row\'s own recommendation: it argued against Ableton\'s mode toggle in favour of the chance lane\'s plain-drag-paints, but that does not transfer — the chance lane has no other meaning for a plain drag, while the automation lane\'s plain drag IS place-a-breakpoint-and-position-it, the most important gesture there. The remaining options were an invisible modifier or a visible toggle, and an invisible modifier fails the only test that matters (someone opening the app and trying to draw a filter sweep). Guarded by ui/verify-phase41-stream-c.mjs C3/C4: a painted arc is reproduced rather than flattened to its endpoints, and points outside the painted span survive untouched.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
     research: 'research/65-ableton-vs-dotbeat-automation-envelopes.md', plan: null,
   },
   {
     area: 'Automation', feature: 'Simplify Envelope (geometric breakpoint-count reduction)',
-    description: 'Ableton: one command algorithmically reduces breakpoint count, replacing redundant points with straight/curved segments that reproduce the same curve within tolerance — framed as the antidote to recorded automation\'s breakpoint explosion (manual ch.25 p.490). Genuinely cheap as a pure geometric reduction over `BeatAutomationPoint[]`, no new format field. Low urgency until live automation recording exists and actually creates a breakpoint-explosion problem to solve — build sooner if manual curve-drawing sessions start producing visibly noisy diffs in practice.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    description: 'Core shipped in Phase 41 Stream C as src/core/automation-simplify.ts — this row\'s own "build sooner if manual curve-drawing starts producing visibly noisy diffs" trigger fired immediately, because Draw Mode paint samples once per 16th step and a 4-bar stroke is 64 breakpoints of mostly hand jitter. simplifyAutomationPoints is a pure Douglas-Peucker measured by VERTICAL deviation rather than perpendicular distance (perpendicular would mix 16th steps against Hz/dB/0..1, so its tolerance would mean something different for every param and every zoom level); points carrying an authored hold/curve flag are anchors and the two endpoints always survive, so it only ever deletes information it could recover, and survivors are the original objects. 10 known-answer tests in test/automate-simplify.test.ts, including the real workload: 64 samples of a cutoff sine reduce below 24 points with every original time re-read off the REDUCED polyline within tolerance. STILL DEFERRED, with a trigger: there is no `beat automate-simplify`, no MCP tool and no GUI button — today the only caller is the paint gesture, which reduces its own stroke before committing. Un-defer when a SECOND caller appears (live automation recording, or an imported/converted envelope), since a one-caller operation does not yet need the CLI+MCP+parity-row treatment a two-surface operation does.',
+    core: 'done', cli: 'missing', gui: 'missing', status: 'in-progress',
     research: 'research/65-ableton-vs-dotbeat-automation-envelopes.md', plan: null,
   },
   {
     area: 'Automation', feature: 'Predefined automation shapes (sine/triangle/ADSR insertion)',
-    description: 'Ableton: right-click a time selection to insert one of five periodic waveforms or a linking ramp/ADSR shape, scaled to the selection (manual ch.25 p.491). Sequence strictly after curved segments — the ADSR/ramp shapes are meaningless without curve support. A shape-picker button on the lane header + a pure-function point generator (selection range, param min/max, shape) → points, wired through the existing set-point primitive in a batch.',
-    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    description: 'Core + CLI shipped in Phase 37 Stream RC (`beat automate-shape`, src/core/automation-shape.ts); the GUI half shipped in Phase 41 Stream C, which is why this row read gui: missing while a finished generator sat behind the CLI. A wave-glyph button on the lane header opens a panel with shape (ramp/sine/triangle/exp/adsr), from/to, cycles and point count, spanning the clip\'s own tiling period. The geometry is NOT re-implemented in the GUI: ui/src/components/AutomationLane.tsx imports automationShapePoints straight from src/core (both automation helpers are pure and import nothing, so nothing Node-only reaches the bundle), so a sine inserted from the panel and one inserted by the CLI are the same points — asserted value-by-value against the core sampler in ui/verify-phase41-stream-c.mjs C1, with C2 guarding that a second insert REPLACES the lane rather than stacking on it. Defaults are the param\'s min up to the value the patch already sits at, so the inserted sweep arrives at the sound the track currently makes rather than at an arbitrary extreme.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
     research: 'research/65-ableton-vs-dotbeat-automation-envelopes.md', plan: null,
   },
   {
@@ -2021,7 +2033,13 @@ export const rows = [
   {
     area: 'Feedback, generation & sound sources (Phase 37)', feature: 'Surge sidecar-instrument track kind (`surge`) — Track 1a',
     description: 'Track 1a (decisions.md D31, docs/surge-track.md, docs/format-spec.md v0.12): a Surge XT factory patch as a first-class COMPOSITIONAL track. `track <id> <name> <color> surge` carries a `surge` block (patch "<name>" / sampleRate / normalized override <param> <0..1> lines) plus the standard synth production block, notes, clips — all ordinary diffable text. At render the notes convert to the sidecar note-list, render (or reuse a content-hash-keyed cached) WAV under media/ with a provenance sidecar via python/surge_render.py, and host as a drums-kind sample voice through the track\'s own production/effect/send chain (the surgeplus mechanism promoted to an engine feature). GPL stays out-of-process (nothing links Surge); parse never needs Surge (surgepy/patch check is fail-loudly AT RENDER, not parse). Full parse/serialize round-trip, semantic diff (surge-param/surge-override), `beat set <t>.surge.patch|.sampleRate|.override.<p>`, `beat add-track surge --patch`, `beat surge patches|doctor`. Proven end-to-end: examples/surge-pilot (2-track surge lead + engine bass) renders non-silent (-24.2 LUFS, real spectrum). v1 limits (honest): no live GUI re-synthesis (plays last render, knob edit re-renders next render), track-level notes only (clips/song arrangement deferred), --batch hot-swap deferred, osc-bank synth fields are no-ops on the hosted playback.',
-    core: 'done', cli: 'done', gui: 'missing', status: 'done',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: 'research/114-synth-engine-alternatives.md', plan: 'docs/surge-track.md',
+  },
+  {
+    area: 'Feedback, generation & sound sources (Phase 37)', feature: 'A surge track SOUNDS in the GUI — render-on-edit playback companion',
+    description: 'docs/surge-track.md claimed "in the GUI a surge track plays its last rendered WAV" and nothing implemented it (`grep surge ui/src/audio/engine.ts` matched nothing) — a surge track drew a piano roll and was silent. The browser engine schedules four track kinds, each gated on `track.kind`, and true live synthesis is off the table (Surge is native C++ behind a Python sidecar; D23 keeps that GPLv3 code out-of-process), so the daemon serves what the engine already plays: one generated drums-kind sample host per surge track (the same host `beat render` uses — extracted to src/analysis/surge-host.ts so the CLI and the daemon cannot disagree about which WAV a document means), appended right after the track it shadows in GET /document and NEVER written to the .beat file. Deliberately alongside, not instead-of: `kind` also picks the GUI editor (NoteView\'s isDrums), so rewriting the track would trade the piano roll for the sound. Every write funnels through writeIfChanged, so that is where the render is invalidated; the companion is rebuilt from the current doc each time, so production edits (volume/pan/effects) re-host with no sidecar and only a render-key change (patch/overrides/notes/rate/tempo) costs one. MEASURED edit→hear (2026-07-27, ui/verify-surge-gui-playback.mjs driving the real app at a real 24-bar Surge project): 1123 ms for a 4-bar phrase, 3778 ms for the 24-bar project — a beat late, not instant, and ~0.8 s of the 4-bar figure is Surge itself. A cached project needs no surgepy at all; without one the daemon degrades to the old silence and says so once on stderr. Two latent corruptions fixed on the way: a POST /state push mangled a surge track into a kind-"surge" track with no patch and no notes, and the converter\'s selected_track fallback ran before the never-erase reinsertions, serializing a bare `selected_track` line the parser refuses.',
+    core: 'done', cli: 'na', gui: 'done', status: 'done',
     research: 'research/114-synth-engine-alternatives.md', plan: 'docs/surge-track.md',
   },
   {
@@ -2926,6 +2944,31 @@ export const rows = [
     core: 'na', cli: 'na', gui: 'na', status: 'not-started',
     research: 'research/122-perceptual-quality-models.md', plan: null,
   },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Surge render-on-edit: cut the ~1.1 s edit→hear round trip',
+    description: 'MEASURED 2026-07-27 (ui/verify-surge-gui-playback.mjs, real app, real project): 1123 ms from a note edit to hearing the new render for a 4-bar phrase, 3778 ms for a 24-bar project. The breakdown for the 4-bar case is ~810 ms inside python/surge_render.py (a fresh interpreter + surgepy instance + patch load per render), ~150 ms of daemon debounce, and ~50 ms of browser fetch+decode. DEFERRED because the mechanism is honest and usable at ~1 s and the fix is a real piece of engineering: a persistent surgepy WORKER process holding the loaded patch, so a re-render is a note-list write and a buffer read rather than a process spawn (the same worker the "Board v2 set" row already names). RE-TRIGGER, either of: the owner reports the lag breaks the edit loop in a real session, OR any surge project reaches the point where a routine edit is over ~2 s (long phrases already are — the 24-bar case is 3.8 s, so this fires the moment surge is used for a whole arrangement rather than a 4-bar figure).',
+    core: 'missing', cli: 'na', gui: 'missing', status: 'not-started',
+    research: 'research/114-synth-engine-alternatives.md', plan: 'docs/surge-track.md',
+  },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Surge playback companion: say in the GUI that it is generated',
+    description: 'The daemon serves a surge track\'s render as a companion drums track (see the Phase 37 row). It appears in the arrangement and mixer as an ordinary track — its own name, mute/solo, volume, delete button — with nothing on screen saying it is generated from the track above it and cannot be edited. The daemon answers an /edit aimed at it with a sentence naming the track to edit instead, so nothing breaks, but the owner has to try it to find out. DEFERRED because the fix is in ui/src/components/ArrangementView.tsx and MixerView.tsx, owned by other streams this round. RE-TRIGGER: the first pilot or owner session where someone edits, mutes or deletes the companion expecting it to affect the surge track — or the moment ArrangementView is open for other work.',
+    core: 'na', cli: 'na', gui: 'missing', status: 'not-started',
+    research: null, plan: 'docs/surge-track.md',
+  },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Surge renders accumulate one WAV per edited state under media/',
+    description: 'Each distinct (patch, overrides, notes, sampleRate, tempo) state renders its own content-addressed WAV into the project\'s media/ — 1.7 MB per 4-bar render, 8.3 MB for the 24-bar study project — and nothing prunes them. That is exactly right for `beat render` (a cache hit is free and reproducible) but a GUI session that edits notes for an hour writes one file per state it passes through. DEFERRED rather than pruned on the spot because deleting files inside the owner\'s project directory is not something to add casually, and the renders are derived, content-addressed and reproducible in about a second, so cleanup is safe whenever it is deliberate. RE-TRIGGER, either of: the first report of a project\'s media/ growing unexpectedly, OR a long GUI session measured at more than ~50 renders (`ls media/surge_*.wav | wc -l`). Fix when triggered: prune renders THIS daemon session created and no longer serves, or add `beat media prune --surge`.',
+    core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
+    research: null, plan: 'docs/surge-track.md',
+  },
+  {
+    area: 'Deferred (trigger stated)', feature: 'Surge clips / scenes / song arrangement still do not render',
+    description: 'Unchanged v1 limit, restated because the GUI now makes it visible: only a surge track\'s TOP-LEVEL notes are synthesized, so the host plays that one phrase per loop and a surge track placed in a song\'s scenes contributes nothing. In the GUI this reads as "my surge track plays in loop mode and goes silent in song mode", which is a sharper complaint than it was when only `beat render` could hit it. DEFERRED with Track 1a\'s original scope. RE-TRIGGER: the first project that puts a surge track in a scene — which the twin-souls-study workflow is one step away from (its owner-made study-playable.beat already hand-converts the surge track to an audio track precisely so it can be placed in a scene).',
+    core: 'missing', cli: 'missing', gui: 'missing', status: 'not-started',
+    research: null, plan: 'docs/surge-track.md',
+  },
+
   // ── Deferred with triggers ──────────────────────────────────────────────
   // Owner-requested 2026-07-26, on research/140's core finding: a deferral with no written trigger
   // is indistinguishable from a drop. Every row here states the specific evidence that promotes it.
