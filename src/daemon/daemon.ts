@@ -1265,11 +1265,33 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
           // resolve, which it does because media is carried wholesale).
           const carried = converted.tracks.map((t) => {
             const prev = doc.tracks.find((p) => p.id === t.id)
+            const sent = payload.tracks.find((p) => p.id === t.id)
             let next = prev && Object.keys(prev.laneSamples).length > 0 ? { ...t, laneSamples: prev.laneSamples } : t
             // v0.10: groove/shuffle has no external-payload concept either (see convert.ts's
             // sandboxPayloadToBeatDocument) — carry it across the same never-erase way, so a GUI
             // knob-turn push never silently un-shuffles a track that CLI/MCP set groove on.
             if (prev && prev.shuffleAmount !== 0) next = { ...next, shuffleAmount: prev.shuffleAmount, shuffleGrid: prev.shuffleGrid }
+            // Open drum lanes: the READ side (GET /doc) now carries `lanes`/`hits` losslessly, so a
+            // payload that came from this daemon hands them straight back. A payload that does NOT
+            // carry them is a consumer that cannot EXPRESS them (BeatLab's live store has only the
+            // closed 5-lane grid — see convert.ts's hitsToPattern), and its all-zero pattern for a
+            // custom kit is not an edit, it is the absence of a concept. Same never-erase rule as
+            // media/laneSamples/groove above: keep the declarations AND the hits they scope.
+            // Carrying `lanes` without `hits` would be worse than either — hits rebuilt from the
+            // 5-lane grid would name lanes the track never declares, which the PARSER rejects, so
+            // the write would produce a file the daemon could not read back.
+            if (prev && prev.lanes.length > 0 && sent?.lanes === undefined) {
+              next = {
+                ...next,
+                lanes: prev.lanes,
+                hits: sent?.hits === undefined ? prev.hits : next.hits,
+                clips: next.clips.map((c) => {
+                  const prevClip = prev.clips.find((p) => p.id === c.id)
+                  const sentClip = sent?.clips?.find((p) => p.id === c.id)
+                  return prevClip && sentClip?.hits === undefined ? { ...c, hits: prevClip.hits } : c
+                }),
+              }
+            }
             return next
           })
           // v0.6: instrument tracks never reach the GUI, so they never come back in a GUI push —
