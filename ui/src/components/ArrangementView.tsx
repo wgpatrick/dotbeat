@@ -10,6 +10,7 @@ import { audioRegionTimelineSteps, declaredLaneNames, firstPlacementClip, sortPl
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
 import { showToast } from '../state/toastStore'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
+import { formatClock } from './TransportBar'
 
 // Phase 20 Stream W — track add/delete/rename/recolor + project-folder controls. There is no BeatLab
 // component to port these from (BeatLab's tracks are lesson-defined; its store has no track
@@ -142,6 +143,9 @@ const TICK_ROW_H = 13 // Phase 24 Stream CD: bar-number tick strip along the bot
 // ruler is now three stacked strips — locators (this), section labels (26px), bar ticks — and every
 // consumer positions from these constants, so growing the ruler here automatically pushes the
 // playhead's `top: RULER_H` and the track rows below it without a second edit.
+// Minimum px between consecutive LABELLED bar ticks before the ruler also prints a wall-clock
+// figure beside the bar number (Phase 41 Stream D). Below this the two labels collide.
+const TICK_CLOCK_MIN_PX = 64
 const LOCATOR_ROW_H = 16
 const SECTION_LABEL_H = 26
 const RULER_H = LOCATOR_ROW_H + SECTION_LABEL_H + TICK_ROW_H
@@ -3002,6 +3006,13 @@ export function ArrangementView() {
   // already applies to note/hit rendering, extended to the ruler. Only meaningful when tickInterval is
   // already 1 (guaranteed at this px/bar), so it can safely reuse barTicks as the per-bar list.
   const showBeatTicks = renderPxPerBar >= DETAIL_PX_PER_BAR * 2
+  // Phase 41 Stream D: seconds per bar at the document's implicit 4/4 (see TransportBar's own note
+  // — a per-clip `signature` may override the meter locally, but there is no document-level one, so
+  // the ruler has nothing else to compute a wall clock from). The tick-clock label needs roughly
+  // TICK_CLOCK_MIN_PX between consecutive LABELLED ticks (tickInterval bars apart, not one bar) to
+  // sit beside the bar number without the two overlapping.
+  const secPerBar = doc ? 240 / doc.bpm : 0
+  const showTickClock = tickInterval * renderPxPerBar >= TICK_CLOCK_MIN_PX
 
   // Playhead x in scroll-content coordinates: header column + fractional bar position. Step-precise
   // (finer than the requested bar granularity, at no extra cost). Shown only while the transport is
@@ -3527,6 +3538,12 @@ export function ArrangementView() {
               {barTicks.map((b) => (
                 <div key={`tick-${b}`} className="arr-bar-tick" data-bar-tick={b} style={{ left: b * renderPxPerBar }}>
                   <span className="arr-bar-tick-num">{b + 1}</span>
+                  {/* Phase 41 Stream D: a secondary wall-clock label on the ruler. On a 7-minute
+                      arrangement "where am I" is as often a time question as a bar question, and
+                      the answer shouldn't require arithmetic. Shown only when consecutive labelled
+                      ticks are far enough apart to fit both figures without colliding — the same
+                      level-of-detail instinct tickIntervalFor already applies to the numbers. */}
+                  {showTickClock && <span className="arr-bar-tick-time">{formatClock(b * secPerBar)}</span>}
                 </div>
               ))}
               {showBeatTicks &&
