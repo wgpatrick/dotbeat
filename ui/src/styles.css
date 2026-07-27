@@ -2139,6 +2139,14 @@ body {
   left: 0;
   right: 0;
   pointer-events: none;
+  /* Phase 41 Stream D: a tick is absolutely positioned at its bar with AUTO width, so its label
+     grows rightward from that point. Adding the wall-clock label (`.arr-bar-tick-time`) made the
+     LAST tick's content extend ~6px past the ruler's right edge, which made .arr-scroll
+     horizontally scrollable at fit-to-width — caught by verify-phase24-stream-cd's own
+     "fit-to-width must not overflow" assertion, which is exactly what it was written for. Clipping
+     here is the honest fix: the ruler's right edge IS the end of the song, so there is nothing
+     beyond it a label should be claiming space for. */
+  overflow: hidden;
 }
 .arr-bar-tick {
   position: absolute;
@@ -2196,6 +2204,23 @@ body {
   background: rgba(224, 161, 60, 0.16);
   border-radius: 0 var(--radius-sm, 3px) var(--radius-sm, 3px) 0;
   max-width: 180px;
+}
+/* Collapsed to a bare pin because a neighbour is too close to fit both names — the flag stays
+   clickable (a real jump target) and keeps its full name in the tooltip. */
+.arr-locator.compact {
+  max-width: none;
+}
+.arr-locator.compact .arr-locator-flag {
+  padding: 0;
+  width: 4px;
+  min-width: 4px;
+}
+.arr-locator.compact .arr-locator-del {
+  display: none;
+}
+.arr-locator.compact:hover {
+  /* Hovering a collapsed pin is how you find out which marker it is, so give it a little presence. */
+  background: rgba(224, 161, 60, 0.4);
 }
 .arr-locator-flag {
   font: inherit;

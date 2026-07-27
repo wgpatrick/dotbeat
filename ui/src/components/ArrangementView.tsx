@@ -149,6 +149,9 @@ const TICK_ROW_H = 13 // Phase 24 Stream CD: bar-number tick strip along the bot
 // clock plus the 4px gap needs ~52px, and 64 (the first guess) suppressed the labels entirely at
 // the very zoom the verify script exercises (2-bar tick interval * 31.9px/bar = 63.8px).
 const TICK_CLOCK_MIN_PX = 56
+// Below this many px to the NEXT marker, a locator flag drops its label and shows only its pin —
+// see the `compact` computation in the locator strip for why (overlapping names render as mush).
+const LOCATOR_LABEL_MIN_PX = 48
 const LOCATOR_ROW_H = 16
 const SECTION_LABEL_H = 26
 const RULER_H = LOCATOR_ROW_H + SECTION_LABEL_H + TICK_ROW_H
@@ -2459,11 +2462,18 @@ export function ArrangementView() {
   // as you pressed stop. Caught by verification, not by reading the code: pressing "," after
   // stopping at bar 101 reported "already at the first marker" and went nowhere, because `here`
   // had quietly become 1. Stopping does not move you, so the reference point must survive it.
-  const lastPlayheadBarRef = useRef(1)
+  // `null` until the playhead has EVER had a real position, which is what lets "drop a marker at
+  // the playhead" tell "stopped at bar 97" apart from "never played" — the two are indistinguishable
+  // from `currentStep` alone (both -1), and conflating them is what made M silently mark the wrong
+  // bar (see newLocatorBar below).
+  const lastPlayheadBarRef = useRef<number | null>(null)
   useEffect(() => {
     if (currentStep >= 0) lastPlayheadBarRef.current = Math.floor(currentStep / 16) + 1
   }, [currentStep])
-  const playheadBar = useCallback(() => (currentStep >= 0 ? Math.floor(currentStep / 16) + 1 : lastPlayheadBarRef.current), [currentStep])
+  const playheadBar = useCallback(
+    () => (currentStep >= 0 ? Math.floor(currentStep / 16) + 1 : lastPlayheadBarRef.current),
+    [currentStep],
+  )
 
   // Scroll a bar into view without touching the transport — the shared half of "jump to marker" and
   // the zoom-to-selection framing below. Centres the target when it isn't already comfortably on
@@ -2496,11 +2506,23 @@ export function ArrangementView() {
   // Where a new marker lands: the playhead if the transport has a position, else the start of the
   // current bar selection, else bar 1. All three are "the place the user is currently looking at",
   // in decreasing order of how explicitly they said so.
+  // Where a new marker lands. THE PLAYHEAD WINS, including the remembered one from before a stop —
+  // that is what the button's tooltip and the Shortcuts panel both promise, and the first cut of
+  // this got the precedence backwards: the remembered playhead was checked LAST, after the
+  // selection, so the overwhelmingly natural workflow (drag-select the breakdown, click the ruler
+  // inside it to listen, stop, press M) silently marked the SELECTION START instead of bar 97.
+  // Caught by the usability pilot, which is the only thing that would have caught it — every
+  // assertion in the verify suite happened to press M with no selection active.
+  //
+  // The bar-range selection is only a fallback for the genuinely ambiguous case: a session where
+  // the playhead has never been anywhere, so "at the playhead" means nothing yet and the selection
+  // is the only place the user has actually pointed at.
   const newLocatorBar = useCallback((): number => {
-    if (currentStep >= 0) return Math.floor(currentStep / 16) + 1
+    const atPlayhead = playheadBar()
+    if (atPlayhead !== null) return atPlayhead
     if (selection.bars) return selection.bars.start + 1
-    return playheadBar() // where the playhead last was, which survives a stop (see lastPlayheadBarRef)
-  }, [currentStep, selection.bars, playheadBar])
+    return 1
+  }, [selection.bars, playheadBar])
 
   const addLocator = useCallback(() => {
     const bar = Math.min(Math.max(1, newLocatorBar()), Math.max(1, totalBars))
@@ -2541,7 +2563,9 @@ export function ArrangementView() {
         showToast('No markers yet — press M (or "+ marker") to drop one at the playhead.')
         return
       }
-      const here = playheadBar()
+      // Same "remembered position survives a stop" rule as newLocatorBar above; before a first
+      // playback there is nowhere to be relative to, so start from bar 1.
+      const here = playheadBar() ?? 1
       const target = dir === 1 ? locators.find((l) => l.bar > here) : [...locators].reverse().find((l) => l.bar < here)
       if (!target) {
         showToast(dir === 1 ? 'Already at the last marker.' : 'Already at the first marker.')
@@ -3698,13 +3722,23 @@ export function ArrangementView() {
                 probes the verify scripts read. onPointerDown stops propagation so grabbing a flag
                 never also starts the ruler's own drag-to-select-bars gesture underneath it. */}
             <div className="arr-locator-strip" style={{ height: LOCATOR_ROW_H }}>
-              {locators.map((l) => {
+              {locators.map((l, i) => {
                 const label = l.name.replace(/_/g, ' ')
                 const renaming = locatorRename?.id === l.id
+                // Level-of-detail, the same instinct tickIntervalFor applies to bar numbers. Two
+                // markers closer together than a label's width used to draw their names ON TOP of
+                // each other — the usability pilot photographed "Breakdown" and "Main 2" rendering
+                // as the literal string "BMaiakd2own". At the default 5.6px/bar on a 242-bar song
+                // any two markers within ~8 bars collide, which for an 8-section track is the
+                // normal case, not an edge one. So when the next marker is too close, this one
+                // collapses to just its pin: still visible, still clickable, still jumps, and its
+                // name is still in the tooltip — but it never becomes illegible mush.
+                const nextGapPx = i + 1 < locators.length ? (locators[i + 1]!.bar - l.bar) * renderPxPerBar : Infinity
+                const compact = !renaming && nextGapPx < LOCATOR_LABEL_MIN_PX
                 return (
                   <div
                     key={l.id}
-                    className={`arr-locator${renaming ? ' renaming' : ''}`}
+                    className={`arr-locator${renaming ? ' renaming' : ''}${compact ? ' compact' : ''}`}
                     data-locator={l.id}
                     data-locator-bar={l.bar}
                     data-locator-name={l.name}
@@ -3735,7 +3769,7 @@ export function ArrangementView() {
                           onClick={() => jumpToLocator(l.bar)}
                           onDoubleClick={() => setLocatorRename({ id: l.id, draft: label })}
                         >
-                          {label}
+                          {compact ? '' : label}
                         </button>
                         <button
                           className="arr-locator-del"

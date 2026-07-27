@@ -250,6 +250,46 @@ async function main() {
     const cleared = await pollUntil(async () => (await page.evaluate(() => !window.__store.getState().selection.bars)) ? true : null, '0 to clear the selection', 5000)
     check(cleared === true, 'D4 "0" clears the bar-range selection')
 
+    // ── D9: pilot regressions (docs/usability-testing.md pilot, 2026-07-27) ───────────────────
+    // Both of these passed every existing assertion while being wrong in the app, because the
+    // suite happened to exercise them in the one configuration that hides the bug.
+
+    // D9a: M marks the PLAYHEAD, not the selection start — even when the transport is stopped and
+    // a bar range is selected. The pilot's exact repro: select a range, click the ruler inside it
+    // to listen, stop, press M. That marked the selection start (bar 89) instead of bar 97.
+    await page.evaluate((port) => fetch(`http://localhost:${port}/selection`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ bars: { start: 88, end: 136 } }),
+    }), gui.daemonPort)
+    await pollUntil(async () => (await page.evaluate(() => !!window.__store.getState().selection.bars)) ? true : null, 'the D9a selection', 5000)
+    await page.evaluate(() => window.__engine.seek(96)) // 0-based -> bar 97
+    await sleep(300)
+    await page.evaluate(() => window.__engine.stop()) // currentStep goes to -1; the bar must survive
+    await sleep(200)
+    await page.evaluate(() => document.activeElement?.blur())
+    await page.keyboard.press('m')
+    await page.waitForSelector('.arr-locator-input', { timeout: 4000 })
+    await page.keyboard.type('AtPlayhead')
+    await page.keyboard.press('Enter')
+    const placed = await pollUntil(() => {
+      const l = readLocators(file).find((x) => x.name === 'AtPlayhead')
+      return l ?? null
+    }, 'the D9a marker to reach the file', 6000)
+    check(placed.bar === 97, `D9a M stopped at bar 97 with bars 89-136 selected marked bar ${placed.bar} — must be the playhead (97), not the selection start (89)`)
+
+    // D9b: colliding marker labels collapse to pins instead of overprinting each other. Drop a
+    // second marker one bar away and assert the earlier one goes compact.
+    beat(['set', file, 'locator.collide', '98 Neighbour'])
+    await pollUntil(async () => (await page.$('[data-locator="collide"]')) ? true : null, 'the neighbouring marker', 8000)
+    const labelTexts = await page.evaluate(() => {
+      const el = [...document.querySelectorAll('.arr-locator')].find((n) => n.getAttribute('data-locator-bar') === '97')
+      return el ? { compact: el.className.includes('compact'), text: el.querySelector('.arr-locator-flag').textContent } : null
+    })
+    check(labelTexts?.compact === true && labelTexts.text === '', `D9b a marker one bar from its neighbour collapses to a pin rather than overprinting its name (compact=${labelTexts?.compact}, text="${labelTexts?.text}")`)
+    beat(['set', file, 'locator.collide', ''])
+    await pollUntil(async () => (await page.$('[data-locator="collide"]')) ? null : true, 'the neighbouring marker to go', 8000)
+
     // ── D5: zoom to selection, and back to exactly where you were ─────────────────────────────
     const beforeZoom = { px: await pxPerBar(page), scroll: await scrollLeft(page) }
     await page.evaluate((port) => fetch(`http://localhost:${port}/selection`, {
@@ -290,7 +330,8 @@ async function main() {
     // window tracks the real viewport, and clicking the strip moves the real timeline.
     check(await page.$eval('[data-minimap="1"]', (el) => Number(el.getAttribute('data-total-bars'))) === TOTAL_BARS, `D8 the overview strip covers all ${TOTAL_BARS} bars`)
     check((await page.$$('[data-minimap-section]')).length === SECTIONS, `D8 it draws all ${SECTIONS} sections`)
-    check((await page.$$('[data-minimap-locator]')).length === 2, 'D8 it draws both markers')
+    const markerCount = readLocators(file).length
+    check((await page.$$('[data-minimap-locator]')).length === markerCount, `D8 it draws every marker (${markerCount})`)
 
     await page.evaluate(() => { document.querySelector('.arr-scroll').scrollLeft = 0 })
     await sleep(200)
