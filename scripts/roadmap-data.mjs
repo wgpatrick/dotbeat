@@ -500,6 +500,24 @@ export const rows = [
     research: null, plan: 'phase-24-stream-cd.md',
   },
   {
+    area: 'Arrangement / song structure', feature: 'Follow the playhead during playback',
+    description: 'Timeline zoom (Phase 24 Stream CD) made the arrangement able to be wider than its container, but nothing ever scrolled it back to the playhead — so on anything longer than a screenful the playhead walked off the right edge the moment you pressed play. Added a follow toggle (on by default) that pages the view forward once per screenful, anchoring the playhead a third of the way in so there is always lookahead, rather than continuously centring it (which slides the content under a pinned playhead 16x per bar and is both harder to read and far more expensive). Only acts while the transport runs, so scrolling while stopped stays entirely the user\'s.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: null, plan: 'phase-41-stream-d.md',
+  },
+  {
+    area: 'Arrangement / song structure', feature: 'Timeline locators (named point markers)',
+    description: 'v0.11 `locators` block: named POINT markers on the song timeline ("Breakdown at bar 101"), distinct from `song` sections, which are ranges. Elided when empty so every pre-existing file round-trips byte-identically; serialized sorted by bar; diffed by id so a move reads as "locator brk: bar 101 -> 105", not a remove/add pair. Bars are 1-based here, deliberately breaking the codebase\'s 0-based habit, because a locator exists to be read and every human sentence about one says "bar 101". Edited through setValue\'s path grammar (`locator.<id>`, `.bar`, `.name`), so `beat set`, MCP `beat_set` and the daemon\'s POST /edit all reach it through one helper rather than three handlers vowing to stay in sync. GUI: a locator strip on the ruler with click-to-jump, double-click-to-rename and delete, plus a "+ marker" button and the M shortcut.',
+    core: 'done', cli: 'done', gui: 'done', status: 'done',
+    research: null, plan: 'phase-41-stream-d.md',
+  },
+  {
+    area: 'Arrangement / song structure', feature: 'Arrangement keyboard shortcuts + zoom-to-selection + overview strip',
+    description: 'The arrangement had no keyboard surface at all (Phase 30 Stream JD found Delete/Cmd+D were silent no-ops on a clip block). Added Space play/stop, M drop marker, ","/"." previous/next marker, Z zoom-to-selection, X zoom back through a history stack of (px/bar, scrollLeft) pairs, 0 deselect, arrow-nudge of selected clip blocks by one section, and S split-at-playhead — every one registered in ShortcutHelp.tsx in the same diff. Arrow and split keys require a clip-block selection, which is the boundary against NoteView\'s own window-level arrow handler. Also an overview strip (whole song, sections, markers, playhead, draggable viewport window, positioned imperatively so scroll never re-renders the track canvases) and wall-clock readouts in the transport and on the ruler. Extracted the clip-move commit out of beginClipDrag into a shared moveOccurrences() rather than copying it for the nudge.',
+    core: 'na', cli: 'na', gui: 'done', status: 'done',
+    research: null, plan: 'phase-41-stream-d.md',
+  },
+  {
     area: 'Arrangement / song structure', feature: 'Loop a selected range + click-ruler-to-seek',
     description: 'Playback always looped the full song/loop with no way to audition just one section, and clicking the ruler only started a bar-range selection, never seeked the playhead. Added a session-only loop-region override (reuses the existing bar-range selection axis, e.g. a section chip\'s "loop this" toggle) that engine.ts\'s tick() wraps within instead of the full song, plus Ableton-style click-to-seek (click while stopped starts playback there, click while playing just relocates). Found and fixed a real Tone.js bug along the way: a stale Draw-callback could survive stop() and stomp the next play()\'s position.',
     core: 'na', cli: 'na', gui: 'done', status: 'done',
