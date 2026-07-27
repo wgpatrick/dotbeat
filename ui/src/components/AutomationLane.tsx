@@ -3,6 +3,15 @@ import { useStore } from '../state/store'
 import { postAutomation } from '../daemon/bridge'
 import { type AutomationInterpolation, type BeatAutomationPoint, type BeatTrack, type TrackKind } from '../types'
 import { PARAM_GROUPS, type ParamSpec } from './synthParams'
+// The GUI reaches straight into core for the two PURE, dependency-free automation helpers rather
+// than re-deriving their geometry (CLAUDE.md: "the shared logic lives in ONE src/ helper both
+// surfaces import"). ui/ normally hand-mirrors core's TYPES (see types.ts's header) because those
+// arrive as JSON over the daemon and a mirror is guarded by a parity test — but these are
+// algorithms, not shapes, and a second copy of a sine sampler or a Douglas-Peucker pass is exactly
+// the drift CLAUDE.md's parity rule exists to forbid. Both modules import nothing at all, so
+// nothing Node-only is dragged into the bundle; verified by `vite build` and `tsc -p ui`.
+import { automationShapePoints, AUTOMATION_SHAPES, type AutomationShape } from '../../../src/core/automation-shape'
+import { simplifyAutomationPoints } from '../../../src/core/automation-simplify'
 
 // The GUI's whole automation surface, extracted verbatim out of ArrangementView.tsx (Phase 41
 // Stream C) — the picker, the sub-lane curve canvas, and every gesture that writes a breakpoint.
@@ -29,6 +38,21 @@ const AUTO_PAD = 6 // vertical inset for the curve inside a sub-lane
 export const PICKER_H = 30 // height of the expanded add-a-lane strip
 const MARKER_HIT = 8 // px radius to grab a breakpoint
 const SEGMENT_HIT = 6 // px distance to grab a segment (Phase 26 Stream DI: alt/option-drag-to-bow)
+
+// ── Draw Mode: paint a run of breakpoints (Phase 41 Stream C) ────────────────────────────────────
+// Sample the pointer once per PAINT_QUANTUM of clip-local time while it sweeps, then reduce the
+// result before committing. 1 = one 16th step: fine enough that a hand-drawn sweep reads as a
+// curve rather than a staircase, and the reduction below is what stops that resolution from
+// costing 64 file lines per gesture.
+const PAINT_QUANTUM = 1
+// Simplify tolerance as a fraction of the param's own min..max range — 1% is below the resolution
+// of a 46px-tall lane (one pixel is ~3% of the range), so nothing the user could see or aim at is
+// discarded, while hand jitter and collinear runs are. Expressed as a fraction, not an absolute,
+// because a lane's units are whatever the param uses (20..18000 Hz for cutoff, -60..6 dB for gain).
+const PAINT_SIMPLIFY_FRACTION = 0.01
+// Two points at the same clip-local time are not representable as a curve, so a run is keyed by
+// quantized time; this is the slack used when matching EXISTING points against the painted span.
+const RUN_SPAN_EPS = 1e-6
 
 /** Every knob param, keyed — the value ranges (min/max) that map a raw automation value to the
  * sub-lane's y-axis. Reuses synthParams.ts's declarative table (the same one SynthPanel renders),
@@ -93,6 +117,39 @@ function laneLabel(track: BeatTrack, param: string): string {
 
 const NO_POINTS: BeatAutomationPoint[] = []
 
+/** Which lane a write targets — the (track, clip, param) tuple the daemon's /automate route takes. */
+interface LaneTarget {
+  track: string
+  clip: string
+  param: string
+}
+
+/** Commit a whole RUN of breakpoints — a painted sweep, or an inserted shape — as one gesture.
+ *
+ * The run REPLACES whatever the lane held inside the clip-local span it covers: existing points in
+ * range are removed first, then the new ones are added id-less so the daemon mints p1, p2, … off
+ * the now-shorter lane, exactly as core's own `applyAutomationShape` does. Ids are deliberately NOT
+ * supplied: bridge.ts's optimistic mirror and core's addAutomationPoint mint by the identical
+ * `p<max+1>` rule, so leaving it to the server keeps the two in step, whereas guessing an id that
+ * the server thinks already exists is a hard error.
+ *
+ * Deliberately built on the existing per-point route rather than a new batched one. /automate lives
+ * in src/daemon/daemon.ts, which this stream does not own, and a per-point loop is honest and
+ * correct today — every write goes through the same core primitive `beat automate` uses, in order,
+ * on bridge.ts's single serialized send queue. It is not free: N points cost N daemon round-trips
+ * and, because /automate passes no `coalesceKey` to writeIfChanged, N separate undo entries, so one
+ * painted sweep currently needs N Ctrl+Z to fully undo. That is the reason the run is simplified
+ * before it gets here (~10-20 points for a 4-bar sweep instead of 64) and the reason a batched
+ * `op:'run'` — one write, one undo entry — is filed as the follow-up for whoever owns the daemon. */
+function writeRun(target: LaneTarget, existing: readonly BeatAutomationPoint[], run: readonly { time: number; value: number }[], span: { from: number; to: number }): void {
+  const lo = Math.min(span.from, span.to) - RUN_SPAN_EPS
+  const hi = Math.max(span.from, span.to) + RUN_SPAN_EPS
+  for (const p of existing) {
+    if (p.time >= lo && p.time <= hi) postAutomation({ op: 'remove', ...target, id: p.id })
+  }
+  for (const pt of run) postAutomation({ op: 'set', ...target, time: pt.time, value: pt.value })
+}
+
 /** The only three fields of ArrangementView's `ClipOccurrence` a lane actually reads: which clip
  * this block plays, and the block's absolute song-timeline extent in 16th steps. Declared
  * structurally here rather than imported so this module has no dependency (not even a type one)
@@ -152,8 +209,45 @@ export function AutomationLane({
     | { mode: 'move'; id: string; time: number; value: number }
     | { mode: 'new'; time: number; value: number }
     | { mode: 'bow'; aId: string; bId: string; midY: number; dy: number }
+    // Phase 41 Stream C: a paint sweep in progress. `pts` is clip-local quantized time -> value,
+    // so re-crossing a time you already painted overwrites it (the natural "keep correcting the
+    // stroke until you let go" behavior) instead of stacking two points at one instant.
+    | { mode: 'paint'; pts: Map<number, number> }
   const dragRef = useRef<DragState | null>(null)
+  /** Previous paint sample position, so a fast sweep can be filled in rather than left as isolated
+   * samples (see onPointerDown's paint branch). Null whenever no stroke is in progress. */
+  const lastPaintRef = useRef<{ x: number; y: number } | null>(null)
   const dragLabelRef = useRef<HTMLDivElement>(null)
+  // Phase 41 Stream C. research/65's roadmap row argued against Ableton's separate Draw Mode toggle
+  // in favor of the per-note chance lane's plain-drag-paints gesture. That does not transfer: the
+  // chance lane has no other meaning for a plain drag, while this lane's plain drag is already
+  // bound to place-a-breakpoint-and-position-it — the single most important gesture here, which a
+  // paint-by-default would destroy. The remaining options were an undiscoverable modifier or a
+  // visible toggle, and a hidden modifier fails the only test that matters (someone opening the app
+  // and trying to draw a filter sweep). So: a real toggle, per lane, session-only, sitting in the
+  // lane header next to the controls it modifies, with the pointer changing to a crosshair-pencil
+  // and the lane tinted while it is armed.
+  const [drawMode, setDrawMode] = useState(false)
+
+  // ── Predefined shapes (Phase 41 Stream C) ─────────────────────────────────────────────────────
+  // `beat automate-shape` / `beat_automate_shape` have sampled these five shapes since Phase 37;
+  // the GUI simply had no way to reach them, which is why the roadmap row stayed `gui: missing`
+  // while a whole generator sat finished behind the CLI. The geometry is NOT re-implemented here:
+  // automationShapePoints is imported from src/core and produces the byte-identical curve the CLI
+  // writes, so a sine inserted from this panel and one inserted from the terminal are the same
+  // points.
+  const [shapePanel, setShapePanel] = useState(false)
+  const [shape, setShape] = useState<AutomationShape>('sine')
+  const [shapeCycles, setShapeCycles] = useState(1)
+  const [shapePoints, setShapePoints] = useState(16)
+  // A shape's default range is "from the bottom of this param up to where the patch already sits" —
+  // a sweep that arrives at the sound the track currently makes, rather than at an arbitrary
+  // extreme. Falls back to the param's own max when the track carries no usable static value
+  // (audio-track `gain`, or a param absent from the synth block).
+  const patchValue = (track.synth as unknown as Record<string, unknown> | undefined)?.[param]
+  const defaultTo = typeof patchValue === 'number' && Number.isFinite(patchValue) && patchValue > min && patchValue <= max ? patchValue : max
+  const [shapeFrom, setShapeFrom] = useState(min)
+  const [shapeTo, setShapeTo] = useState(defaultTo)
   const [popup, setPopup] = useState<{ id: string; x: number; y: number; time: number; value: number; interpolation: AutomationInterpolation } | null>(null)
   const popupRef = useRef<HTMLDivElement>(null)
 
@@ -232,7 +326,7 @@ export function AutomationLane({
         ctx.fillStyle = 'rgba(255,255,255,0.32)'
         ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'
         ctx.textBaseline = 'middle'
-        ctx.fillText('click to add a point', 8, midY)
+        ctx.fillText(drawMode ? 'drag to paint a run of points' : 'click to add a point, or ✏ to draw a run', 8, midY)
       }
       ctx.restore()
     }
@@ -243,6 +337,16 @@ export function AutomationLane({
     let eff = points.map((p) => ({ ...p }))
     if (drag?.mode === 'move') eff = eff.map((p) => (p.id === drag.id ? { ...p, time: drag.time, value: drag.value } : p))
     if (drag?.mode === 'new') eff = [...eff, { id: '__draft__', time: drag.time, value: drag.value }]
+    if (drag?.mode === 'paint' && drag.pts.size > 0) {
+      // A paint stroke REPLACES the span it has covered so far, so the preview must too — otherwise
+      // the old curve shows through the new one and the stroke looks like it did nothing. Same
+      // span arithmetic writeRun() will use on release, so what is previewed is what is committed.
+      const times = [...drag.pts.keys()]
+      const lo = Math.min(...times)
+      const hi = Math.max(...times)
+      eff = eff.filter((p) => p.time < lo - RUN_SPAN_EPS || p.time > hi + RUN_SPAN_EPS)
+      for (const [t, v] of drag.pts) eff.push({ id: '__draft__', time: t, value: v })
+    }
     eff.sort((a, b) => a.time - b.time)
     const draggedId = drag?.mode === 'move' ? drag.id : undefined
     const bow = drag?.mode === 'bow' ? drag : null
@@ -324,7 +428,7 @@ export function AutomationLane({
     }
     markersRef.current = markers
     segmentsRef.current = segments
-  }, [points, totalBars, pxPerBar, occurrences, loopSteps, track.color, valueToY])
+  }, [points, totalBars, pxPerBar, occurrences, loopSteps, track.color, valueToY, drawMode])
 
   useEffect(() => {
     draw()
@@ -393,6 +497,82 @@ export function AutomationLane({
         postAutomation({ op: 'remove', track: track.id, clip: clipId, param, id: hit })
         return
       }
+      // Phase 41 Stream C — Draw Mode: drag paints a run of breakpoints. Checked AFTER alt-delete
+      // (so a mis-drawn point is still one alt-click away without leaving draw mode) and BEFORE the
+      // marker-move / new-point branches (in draw mode a drag that starts on an existing point is
+      // still a stroke — Ableton's Draw Mode behaves the same way). Alt+drag still bows a segment:
+      // that gesture falls through below because this branch bails on altKey.
+      if (drawMode && !e.altKey) {
+        e.preventDefault()
+        const pts = new Map<number, number>()
+        dragRef.current = { mode: 'paint', pts }
+        // One sample per PAINT_QUANTUM of clip-local time. Sampling in TIME rather than in pixels
+        // means the stroke has the same resolution at every zoom level, and it is the unit the
+        // points are stored in, so nothing is re-quantized later.
+        const sampleAt = (lx: number, ly: number) => {
+          const t = clipTimeFromX(lx)
+          if (!t) return
+          const q = Math.round(t.time / PAINT_QUANTUM) * PAINT_QUANTUM
+          pts.set(Number(q.toFixed(4)), Number(yToValue(ly).toFixed(4)))
+        }
+        const showLabel = (lx: number, ly: number, value: number) => {
+          const label = dragLabelRef.current
+          if (!label) return
+          label.style.display = 'block'
+          label.style.left = `${lx + 10}px`
+          label.style.top = `${ly - 18}px`
+          label.textContent = fmt(value)
+        }
+        sampleAt(localX, localY)
+        draw()
+        showLabel(localX, localY, yToValue(localY))
+        const onMove = (ev: PointerEvent) => {
+          const drag = dragRef.current
+          if (!drag || drag.mode !== 'paint') return
+          const lx = ev.clientX - rect.left
+          const ly = ev.clientY - rect.top
+          // Interpolate across the gap since the last event. A fast sweep fires pointermove maybe
+          // every 30-60px, which at PAINT_QUANTUM resolution would leave the stroke as a handful of
+          // isolated samples with straight chords between them — visibly not what was drawn.
+          const prevX = lastPaintRef.current
+          if (prevX !== null && Math.abs(lx - prevX.x) > 1) {
+            const steps = Math.min(256, Math.ceil(Math.abs(lx - prevX.x)))
+            for (let i = 1; i < steps; i++) {
+              const f = i / steps
+              sampleAt(prevX.x + (lx - prevX.x) * f, prevX.y + (ly - prevX.y) * f)
+            }
+          }
+          lastPaintRef.current = { x: lx, y: ly }
+          sampleAt(lx, ly)
+          draw()
+          showLabel(lx, ly, yToValue(ly))
+        }
+        const onUp = () => {
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+          lastPaintRef.current = null
+          const label = dragLabelRef.current
+          if (label) label.style.display = 'none'
+          const drag = dragRef.current
+          dragRef.current = null
+          if (!drag || drag.mode !== 'paint' || drag.pts.size === 0) {
+            draw()
+            return
+          }
+          const stroke = [...drag.pts.entries()].map(([time, value]) => ({ time, value })).sort((a, b) => a.time - b.time)
+          const from = stroke[0]!.time
+          const to = stroke[stroke.length - 1]!.time
+          // A single tap in draw mode is one point, not a "run" — no reduction to do, and calling
+          // it a run would let the span logic wipe a neighbouring point for no reason.
+          const run = stroke.length < 3 ? stroke : simplifyAutomationPoints(stroke, { tolerance: Math.abs(max - min) * PAINT_SIMPLIFY_FRACTION })
+          writeRun({ track: track.id, clip: clipId, param }, points, run, { from, to })
+          draw()
+        }
+        lastPaintRef.current = { x: localX, y: localY }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+        return
+      }
       // Phase 26 Stream DI: alt/option-drag on a SEGMENT (not a point) bows it into a curve —
       // live preview is a quadratic bezier toward the drag point; on release this commits
       // `interpolation: 'curve'` on the segment's start point (the persisted format is a flag, not
@@ -452,13 +632,14 @@ export function AutomationLane({
         const label = dragLabelRef.current
         if (label) label.style.display = 'none'
       }
-      // (dragRef.current here is always 'move' | 'new' — the 'bow' branch above already returned.)
+      // (dragRef.current here is always 'move' | 'new' — the 'bow' and 'paint' branches above have
+      // already returned. The guards below say so to the type checker, not just to the reader.)
       const initial = dragRef.current
       if (initial) showLabel(localX, localY, initial.value)
 
       const onMove = (ev: PointerEvent) => {
         const drag = dragRef.current
-        if (!drag || drag.mode === 'bow') return
+        if (!drag || drag.mode === 'bow' || drag.mode === 'paint') return
         const lx = ev.clientX - rect.left
         const ly = ev.clientY - rect.top
         const t = clipTimeFromX(lx)
@@ -473,7 +654,7 @@ export function AutomationLane({
         hideLabel()
         const drag = dragRef.current
         dragRef.current = null
-        if (!drag || drag.mode === 'bow') {
+        if (!drag || drag.mode === 'bow' || drag.mode === 'paint') {
           draw()
           return
         }
@@ -488,8 +669,31 @@ export function AutomationLane({
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [points, clipTimeFromX, yToValue, draw, hitTestSegment, fmt, track.id, clipId, param],
+    [points, clipTimeFromX, yToValue, draw, hitTestSegment, fmt, track.id, clipId, param, drawMode, min, max],
   )
+
+  /** Sample the chosen shape across the clip's own tiling period and write it as one run.
+   *
+   * The span is `loopSteps` — the exact period this lane tiles at on screen and the engine repeats
+   * at — rather than core applyAutomationShape's clip.loop-first resolution. They agree for every
+   * clip without a loop override, and where they disagree the drawn curve must match what the user
+   * is looking at: a shape that visually ran past the end of the tile would be a lie. */
+  const insertShape = useCallback(() => {
+    const from = Number.isFinite(shapeFrom) ? shapeFrom : min
+    const to = Number.isFinite(shapeTo) ? shapeTo : max
+    const run = automationShapePoints(shape, {
+      from,
+      to,
+      cycles: Math.max(0.01, shapeCycles),
+      points: Math.max(2, Math.min(256, Math.round(shapePoints))),
+      spanSteps: loopSteps,
+    })
+    // A shape REPLACES the whole lane, the same rule core's applyAutomationShape follows ("a shape
+    // REPLACES it, it doesn't add to it") — so the span covers every existing point, not just the
+    // sampled range, and a lane that already held a hand-drawn curve does not end up with both.
+    writeRun({ track: track.id, clip: clipId, param }, points, run, { from: 0, to: Math.max(loopSteps, ...points.map((p) => p.time)) })
+    setShapePanel(false)
+  }, [shape, shapeFrom, shapeTo, shapeCycles, shapePoints, loopSteps, min, max, points, track.id, clipId, param])
 
   // Phase 26 Stream DI: right-click a breakpoint -> a small popup with an exact numeric value
   // <input> AND a linear/hold/curve toggle for the segment it starts (both features "touch the
@@ -532,20 +736,76 @@ export function AutomationLane({
         <span className="arr-auto-range" title={`${fmt(min)} … ${fmt(max)}`}>
           {fmt(max)}
         </span>
+        <button
+          className={`arr-auto-tool${drawMode ? ' on' : ''}`}
+          title={drawMode ? 'draw mode ON — drag across the lane to paint a run of points (click to turn off)' : 'draw mode: drag across the lane to paint a run of points instead of placing one'}
+          aria-pressed={drawMode}
+          data-auto-draw={`${track.id}.${param}`}
+          onClick={() => setDrawMode((v) => !v)}
+        >
+          ✏
+        </button>
+        <button
+          className={`arr-auto-tool${shapePanel ? ' on' : ''}`}
+          title="insert a shape (sine / triangle / ramp / exp / ADSR) across this clip"
+          aria-pressed={shapePanel}
+          data-auto-shape-open={`${track.id}.${param}`}
+          onClick={() => setShapePanel((v) => !v)}
+        >
+          ∿
+        </button>
         <button className="arr-auto-remove" title="remove this automation lane" data-auto-remove={`${track.id}.${param}`} onClick={onRemoveLane}>
           ×
         </button>
       </div>
       <div
-        className="arr-auto-lane"
+        className={`arr-auto-lane${drawMode ? ' drawing' : ''}`}
         data-auto-track={track.id}
         data-auto-param={param}
+        data-auto-draw-mode={drawMode ? 'on' : 'off'}
         onPointerDown={onPointerDown}
         onContextMenu={onContextMenu}
         style={{ touchAction: 'none' }}
       >
         <canvas ref={canvasRef} className="arr-auto-canvas" />
         <div ref={dragLabelRef} className="arr-auto-drag-label" style={{ display: 'none' }} />
+        {shapePanel && (
+          <div className="arr-auto-shape" data-auto-shape-panel={`${track.id}.${param}`} onPointerDown={(e) => e.stopPropagation()}>
+            <select className="arr-auto-shape-select" value={shape} data-auto-shape-kind={`${track.id}.${param}`} onChange={(e) => setShape(e.target.value as AutomationShape)}>
+              {AUTOMATION_SHAPES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <label className="arr-auto-shape-field">
+              <span>from</span>
+              <input type="number" step="any" value={shapeFrom} data-auto-shape-from={`${track.id}.${param}`} onChange={(e) => setShapeFrom(Number(e.target.value))} />
+            </label>
+            <label className="arr-auto-shape-field">
+              <span>to</span>
+              <input type="number" step="any" value={shapeTo} data-auto-shape-to={`${track.id}.${param}`} onChange={(e) => setShapeTo(Number(e.target.value))} />
+            </label>
+            {/* cycles is meaningless for the single-gesture shapes — automationShapePoints ignores
+                it for ramp/exp/adsr, so offering it there would be a control that does nothing. */}
+            {(shape === 'sine' || shape === 'triangle') && (
+              <label className="arr-auto-shape-field">
+                <span>cycles</span>
+                <input type="number" step="any" min={0.01} value={shapeCycles} data-auto-shape-cycles={`${track.id}.${param}`} onChange={(e) => setShapeCycles(Number(e.target.value))} />
+              </label>
+            )}
+            <label className="arr-auto-shape-field">
+              <span>pts</span>
+              <input type="number" step={1} min={2} max={256} value={shapePoints} data-auto-shape-points={`${track.id}.${param}`} onChange={(e) => setShapePoints(Number(e.target.value))} />
+            </label>
+            <span className="arr-auto-shape-span" title="a shape spans the clip's own loop period, the same period this lane tiles at">
+              over {loopSteps / 16} bar{loopSteps === 16 ? '' : 's'}
+            </span>
+            <button className="arr-auto-shape-go" data-auto-shape-insert={`${track.id}.${param}`} onClick={insertShape}>
+              insert
+            </button>
+          </div>
+        )}
         {popup && (
           <div
             ref={popupRef}
