@@ -2563,10 +2563,104 @@ body {
   background: var(--danger);
   border-color: var(--danger);
 }
+/* Phase 41 Stream C: the two lane-header tools — ✏ draw mode and ∿ insert-a-shape. Same 15px
+ * footprint as .arr-auto-remove beside them so the header reads as one row of controls, but they
+ * are TOGGLES, so `.on` gets the accent treatment rather than the destructive red. */
+.arr-auto-tool {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.arr-auto-tool:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.arr-auto-tool.on {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
 .arr-auto-lane {
   position: relative;
   flex: 0 0 auto;
   cursor: crosshair;
+}
+/* Draw mode is armed: tint the lane and swap the cursor, so "my next drag paints a run" is visible
+ * on the surface the drag happens on, not only on the toggle 264px away in the header. */
+.arr-auto-lane.drawing {
+  cursor: cell;
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+/* The shape-insert panel, anchored at the lane's left edge. Same panel/border/shadow language as
+ * .arr-auto-popup below; laid out as one row because it lives inside a 46px-tall lane. */
+.arr-auto-shape {
+  position: absolute;
+  z-index: 7;
+  left: 6px;
+  top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+}
+.arr-auto-shape-select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 10px;
+  padding: 1px 3px;
+}
+.arr-auto-shape-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.arr-auto-shape-field input {
+  width: 54px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 3px;
+}
+.arr-auto-shape-span {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.arr-auto-shape-go {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.arr-auto-shape-go:hover {
+  filter: brightness(1.12);
 }
 .arr-auto-canvas {
   display: block;
@@ -2729,6 +2823,49 @@ body {
 .arr-auto-add:disabled {
   opacity: 0.4;
   cursor: default;
+}
+/* Phase 41 Stream C — automation discovery. Every param this TRACK already automates, on any clip,
+ * listed as a clickable chip so "what is automated here" is answerable at a glance instead of by
+ * opening lanes one at a time. The matching `●` prefix on the <select>'s own options covers the
+ * same params from inside the dropdown. */
+.arr-auto-automated {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.arr-auto-automated-label {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.arr-auto-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: 10px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 999px;
+  padding: 1px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.arr-auto-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.arr-auto-chip-count {
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
 }
 
 /* Phase 30 Stream JE: the audio-region trim/gain/warp editor — numeric fields, not canvas

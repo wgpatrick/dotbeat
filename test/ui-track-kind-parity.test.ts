@@ -30,6 +30,10 @@ import { TRACK_KINDS } from '../src/core/document.js'
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..') // dist/test -> repo root
 const read = (rel: string) => readFileSync(join(repoRoot, rel), 'utf8')
 
+// AUTO_OPTIONS_BY_KIND moved out of ArrangementView.tsx with the rest of the automation surface
+// (Phase 41 Stream C). Named once here so the next move is a one-line edit rather than three.
+const AUTO_OPTIONS_FILE = 'ui/src/components/AutomationLane.tsx'
+
 /** Pull the string-literal members out of a `export type X = 'a' | 'b'` declaration. */
 function unionMembers(src: string, decl: RegExp, what: string): string[] {
   const m = src.match(decl)
@@ -49,12 +53,12 @@ test('ui/src/types.ts TrackKind mirrors core TRACK_KINDS exactly', () => {
     'ui/src/types.ts:TrackKind has drifted from src/core/document.ts:TRACK_KINDS. The GUI receives ' +
       '`kind` verbatim over GET /document, so a kind core can emit and the GUI does not know is a ' +
       'live render crash (research 137 §2.3, the `surge` case). Add the missing member to ' +
-      'ui/src/types.ts and give it an AUTO_OPTIONS_BY_KIND entry in ArrangementView.tsx.',
+      `ui/src/types.ts and give it an AUTO_OPTIONS_BY_KIND entry in ${AUTO_OPTIONS_FILE}.`,
   )
 })
 
-test('ArrangementView AUTO_OPTIONS_BY_KIND covers every core track kind', () => {
-  const src = read('ui/src/components/ArrangementView.tsx')
+test('AutomationLane AUTO_OPTIONS_BY_KIND covers every core track kind', () => {
+  const src = read(AUTO_OPTIONS_FILE)
   const body = src.match(/const AUTO_OPTIONS_BY_KIND[^=]+= \{([\s\S]*?)\n\}/)
   assert.ok(body, 'AUTO_OPTIONS_BY_KIND initializer not found — update this test')
 
@@ -75,7 +79,7 @@ test('ArrangementView AUTO_OPTIONS_BY_KIND covers every core track kind', () => 
 })
 
 test('AUTO_OPTIONS_BY_KIND is never indexed unguarded', () => {
-  const src = read('ui/src/components/ArrangementView.tsx')
+  const src = read(AUTO_OPTIONS_FILE)
   // Reads must go through autoOptionsFor(), which supplies `?? []`. The two writes inside the
   // PARAM_GROUPS build loop are indexed by a declared ParamGroup.kinds member, not by runtime data.
   const rawIndexes = [...src.matchAll(/AUTO_OPTIONS_BY_KIND\[([^\]]+)\]/g)].map((m) => m[1]!.trim())
