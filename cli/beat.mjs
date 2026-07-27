@@ -536,8 +536,10 @@ const HELP = [
                                                           find CC0 (public-domain) sounds on Freesound, top-rated first
                                                           (--out-dir also downloads each preview for auditioning);
                                                           NEEDS FREESOUND_API_KEY + network egress to freesound.org
-  beat source add <file.beat> <sample-id> <local-audio-file> [--license L] [--note N]
-                                                          OFFLINE: prep a file you already have (trim/fade/normalize)
+  beat source add <file.beat> <sample-id> <local-audio-file> [--license L] [--note N] [--raw]
+                                                          OFFLINE: prep a file you already have (trim/fade/normalize;
+                                                          --raw keeps every sample and the original level, for a chop
+                                                          that must sit on a TIMELINE rather than fire as a one-shot)
                                                           and register it as media, writing an enforced provenance
                                                           sidecar media/<id>.wav.json. --license defaults to
                                                           "unspecified" (you assert the license; only the --freesound
@@ -4750,7 +4752,7 @@ async function sourceCmd(argv) {
       if (freesoundId !== undefined) {
         result = await lib.addFreesoundSource({ beatFile: file, id, freesoundId, note })
       } else {
-        result = await lib.addLocalSource({ beatFile: file, id, audioFile, license: flag('--license', 'unspecified'), note })
+        result = await lib.addLocalSource({ beatFile: file, id, audioFile, license: flag('--license', 'unspecified'), note, raw: argv.includes('--raw') })
       }
       process.stdout.write(
         `registered ${result.id}: sha256:${result.sha256.slice(0, 12)}... ${result.relPath} ` +

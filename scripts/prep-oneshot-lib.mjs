@@ -37,7 +37,18 @@ export async function decodeViaWebAudio(inPath) {
  * injectable — it defaults to node-web-audio-api (prep-oneshot.mjs's byte-identical behavior), but
  * the `beat source` offline path passes a pure-JS WAV decoder so ingesting a local .wav needs no
  * native decode dependency. Throws PrepError on a silent/undecodable input. */
-export async function prepOneshot({ inPath, outPath, peakDb = -6, license = 'UNKNOWN', source = 'UNKNOWN', writeSidecar = true, decode = decodeViaWebAudio }) {
+/** `raw: true` skips BOTH the silence trim and the peak normalize, copying the samples through
+ * untouched (still re-encoded to 16-bit PCM, still faded 5 ms at the tail against a seam click).
+ *
+ * WHY (2026-07-26, owner use case): the defaults are correct for a ONE-SHOT — a kick should start
+ * at its transient and sit at a predictable level. They are actively wrong for a chop that has to
+ * sit on a TIMELINE. Peak-normalizing each chop independently flattens the relative dynamics that
+ * are the whole point of a reference (a track's intro is quieter than its drop — that IS the
+ * information), and trimming leading silence shifts any chop that opens on a rest off the grid it
+ * was cut to. `beat chop` already promises RAW cuts for exactly this reason ("no normalize, no
+ * silence-trim — both destroy the level and timing relationships BETWEEN chops that you are
+ * listening for"), and then `beat source add` undid it on the way in. */
+export async function prepOneshot({ inPath, outPath, peakDb = -6, raw = false, license = 'UNKNOWN', source = 'UNKNOWN', writeSidecar = true, decode = decodeViaWebAudio }) {
   let sampleRate, channels
   try {
     ;({ sampleRate, channels } = await decode(inPath))
@@ -58,8 +69,14 @@ export async function prepOneshot({ inPath, outPath, peakDb = -6, license = 'UNK
     }
   }
   if (first === Infinity) throw new PrepError(`${inPath}: silent input`)
-  first = Math.max(0, first - Math.round(0.005 * sampleRate))
-  last = Math.min(channels[0].length - 1, last + Math.round(0.01 * sampleRate))
+  if (raw) {
+    // keep every sample, including leading/trailing silence — it is grid position, not waste
+    first = 0
+    last = channels[0].length - 1
+  } else {
+    first = Math.max(0, first - Math.round(0.005 * sampleRate))
+    last = Math.min(channels[0].length - 1, last + Math.round(0.01 * sampleRate))
+  }
 
   const FADE = Math.round(0.005 * sampleRate) // 5ms fade-out against end clicks
   const len = last - first + 1
@@ -70,7 +87,7 @@ export async function prepOneshot({ inPath, outPath, peakDb = -6, license = 'UNK
     for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(out[i]))
     return out
   })
-  const gain = Math.pow(10, peakDb / 20) / (peak || 1)
+  const gain = raw ? 1 : Math.pow(10, peakDb / 20) / (peak || 1)
 
   // 16-bit PCM WAV writer
   const nCh = trimmed.length

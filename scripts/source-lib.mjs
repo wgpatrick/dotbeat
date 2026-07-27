@@ -160,10 +160,10 @@ function resolveTarget(beatFile, id) {
 
 /** PREP half: trim/fade/peak-normalize `inPath` to `outPath` and return the provenance facts.
  * Writes no sidecar and touches no .beat — that is registerPreppedMedia's job, whenever it runs. */
-async function prepCandidate({ inPath, outPath, license, source, query, extra }) {
+async function prepCandidate({ inPath, outPath, license, source, query, extra, raw = false }) {
   let sha256, durationSeconds
   try {
-    ;({ sha256, durationSeconds } = await prepOneshot({ inPath, outPath, license, source, writeSidecar: false, decode: decodeSource }))
+    ;({ sha256, durationSeconds } = await prepOneshot({ inPath, outPath, license, source, raw, writeSidecar: false, decode: decodeSource }))
   } catch (err) {
     if (err instanceof PrepError) throw new SourceError(err.message)
     throw err
@@ -178,10 +178,10 @@ async function prepCandidate({ inPath, outPath, license, source, query, extra })
 /** Prep an already-decoded/downloaded local file, write the ENFORCED sidecar, and register it into
  * the .beat media block. Shared tail of the offline, Freesound, and single-shot generative paths:
  * the two halves above, run back-to-back, prepping straight into media/<id>.wav. */
-async function ingest({ beatFile, id, inPath, license, source, query, extra }) {
+async function ingest({ beatFile, id, inPath, license, source, query, extra, raw = false }) {
   const { mediaDir, outPath } = resolveTarget(beatFile, id)
   mkdirSync(mediaDir, { recursive: true })
-  const { sha256, durationSeconds, sidecar } = await prepCandidate({ inPath, outPath, license, source, query, extra })
+  const { sha256, durationSeconds, sidecar } = await prepCandidate({ inPath, outPath, license, source, query, extra, raw })
   try {
     // outPath IS media/<id>.wav, so registerPreppedMedia skips its copy and this stays exactly the
     // sequence (sidecar-then-upsert, rollback on a failed sidecar) that ingest always ran.
@@ -197,11 +197,11 @@ async function ingest({ beatFile, id, inPath, license, source, query, extra }) {
 /** OFFLINE path: ingest a local audio file you already have. License defaults to "unspecified"
  * (the caller asserts a real license via --license; we never guess). Always available — no key,
  * no network. */
-export async function addLocalSource({ beatFile, id, audioFile, license = 'unspecified', note } = {}) {
+export async function addLocalSource({ beatFile, id, audioFile, license = 'unspecified', note, raw = false } = {}) {
   if (!audioFile) throw new SourceError('source add needs a <local-audio-file> (or --freesound <id> for the gated Freesound path)')
   if (!existsSync(audioFile)) throw new SourceError(`no audio file at ${audioFile}`)
   const source = note ? `local file ${basename(audioFile)} — ${note}` : `local file ${basename(audioFile)}`
-  return ingest({ beatFile, id, inPath: audioFile, license, source, query: null, extra: note ? { note } : undefined })
+  return ingest({ beatFile, id, inPath: audioFile, license, source, query: null, extra: note ? { note } : undefined, raw })
 }
 
 // ==== Phase 39 Stream UB begin ====
