@@ -17,7 +17,7 @@
 // external edits reconcile via the SSE re-pull.
 
 import { useStore } from '../state/store'
-import type { AutomationInterpolation, BeatAutomationLane, BeatAutomationPoint, BeatDocument, BeatDrumHit, BeatSelection } from '../types'
+import type { AutomationInterpolation, BeatAutomationLane, BeatAutomationPoint, BeatDocument, BeatDrumHit, BeatSelection, BeatTrack } from '../types'
 import { DRUM_LANES } from '../types'
 
 export function daemonBase(): string {
@@ -122,6 +122,8 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
       ratchetCount: 1,
       ratchetCurve: 0,
       ratchetLength: 1,
+      // v0.12 (Phase 41 Stream E): a freshly added note is active, same default addNote applies.
+      active: true,
     }
     const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, notes: [...t.notes, note] } : t))
     return { ...doc, tracks }
@@ -134,6 +136,34 @@ function applyLocalEdit(doc: BeatDocument, path: string, value: string): BeatDoc
     const [, noteId, field] = noteFieldMatch
     const n = field === 'pitch' || field === 'chance' || field === 'ratchetCount' ? Number(value) : canon(Number(value))
     const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, notes: t.notes.map((no) => (no.id === noteId ? { ...no, [field!]: n } : no)) } : t))
+    return { ...doc, tracks }
+  }
+  // v0.12 (Phase 41 Stream E): `active` rides the same path but carries a boolean word, not a
+  // number — mirrors core setValue's own separate branch (src/core/edit.ts) for the same reason.
+  // Matched BEFORE the delete pattern below, which would otherwise never see it anyway (that
+  // pattern has no trailing field), and before nothing else — it is its own shape.
+  const noteActiveMatch = rest.match(/^note\.([A-Za-z0-9_-]+)\.active$/)
+  if (noteActiveMatch) {
+    const noteId = noteActiveMatch[1]
+    const raw = value.trim().toLowerCase()
+    const active = raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes'
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, notes: t.notes.map((no) => (no.id === noteId ? { ...no, active } : no)) } : t))
+    return { ...doc, tracks }
+  }
+  // v0.12: <track>.scale — the piano roll's Scale Mode field. Mirrors core's setTrackScale
+  // (src/core/edit.ts) including its canonicalization of a custom pitch-class list, so the shading
+  // updates the instant the field changes rather than a round-trip later. An empty value clears.
+  if (rest === 'scale') {
+    const raw = value.trim()
+    let scale: BeatTrack['scale'] = null
+    if (raw !== '') {
+      const parts = raw.split(/\s+/)
+      const root = Number(parts[0])
+      const name = parts[1] ?? ''
+      const pcs = name === 'custom' && parts[2] ? [...new Set(parts[2].split(',').map(Number))].sort((a, b) => a - b) : null
+      scale = { root, name, pitchClasses: pcs }
+    }
+    const tracks = doc.tracks.map((t, i) => (i === idx ? { ...t, scale } : t))
     return { ...doc, tracks }
   }
   const noteDeleteMatch = rest.match(/^note\.([A-Za-z0-9_-]+)$/)

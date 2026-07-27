@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { declaredLaneNames, firstPlacementClip, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
+import { declaredLaneNames, firstPlacementClip, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatScale, type BeatTrack } from '../types'
 import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, newGestureId, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
@@ -105,6 +105,103 @@ const pc = (pitch: number) => ((pitch % 12) + 12) % 12
 const isBlackKey = (pitch: number) => BLACK_PCS.has(pc(pitch))
 /** Scientific pitch notation: MIDI 60 = C4 (middle C), 0 = C-1. Used for the key labels. */
 const pitchName = (pitch: number) => `${NOTE_NAMES[pc(pitch)]}${Math.floor(pitch / 12) - 1}`
+
+// ---- Scale Mode (Phase 41 Stream E) ------------------------------------------------------------
+// Ableton's Scale Mode (manual ch.10 pp.269-272): a persistent Root + Scale declaration that shades
+// the in-scale rows of the piano roll and, with the lock on, keeps note entry inside them. Stored
+// on the track (`BeatTrack.scale`, v0.12) rather than being panel-local, so it survives a reload
+// and every surface agrees on what "in key" means here.
+//
+// The table hand-mirrors src/core/pitchtime.ts's SCALES exactly — ui/ has no build-time dependency
+// on src/core, the same convention groove/chance/ratchet's engine-side mirrors already use. Unlike
+// the old name-only list this replaces, it carries the PITCH CLASSES too, because the row shading
+// and the entry lock both need them client-side. test/ui-scale-parity.test.ts asserts this table
+// equals core's, key for key and value for value, so the mirror cannot drift silently.
+const SCALE_TABLE: Readonly<Record<string, readonly number[]>> = {
+  chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  major: [0, 2, 4, 5, 7, 9, 11],
+  minor: [0, 2, 3, 5, 7, 8, 10],
+  dorian: [0, 2, 3, 5, 7, 9, 10],
+  phrygian: [0, 1, 3, 5, 7, 8, 10],
+  lydian: [0, 2, 4, 6, 7, 9, 11],
+  mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  locrian: [0, 1, 3, 5, 6, 8, 10],
+  harmonicMinor: [0, 2, 3, 5, 7, 8, 11],
+  melodicMinor: [0, 2, 3, 5, 7, 9, 11],
+  majorPentatonic: [0, 2, 4, 7, 9],
+  minorPentatonic: [0, 3, 5, 7, 10],
+  blues: [0, 3, 5, 6, 7, 10],
+  susPentatonic: [0, 2, 5, 7, 10],
+  susHexatonic: [0, 2, 5, 7, 9, 10],
+}
+const SCALE_NAMES = Object.keys(SCALE_TABLE)
+const CUSTOM_SCALE_NAME = 'custom'
+const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+
+/** The root-relative pitch classes a declared scale means, or null if it can't be resolved (an
+ * unknown name, or a custom scale with no set — both treated as "no scale declared" rather than
+ * throwing, since a half-typed value must never break the piano roll's render). */
+function scalePitchClasses(scale: BeatScale | null | undefined): readonly number[] | null {
+  if (!scale) return null
+  if (scale.name === CUSTOM_SCALE_NAME) return scale.pitchClasses && scale.pitchClasses.length ? scale.pitchClasses : null
+  return SCALE_TABLE[scale.name] ?? null
+}
+
+/** THE predicate. Row shading and the entry lock both call this one function, so a row that looks
+ * in-scale is exactly a row you're allowed to write on — a lock disagreeing with its own
+ * highlighting would be worse than no lock at all. Mirrors core's `isPitchInScale`. */
+function pitchInScale(pitch: number, scale: BeatScale | null | undefined): boolean {
+  const pcs = scalePitchClasses(scale)
+  if (!pcs) return true // nothing declared = everything is fair game
+  return pcs.includes(((pitch - scale!.root) % 12 + 12) % 12)
+}
+
+/** Nearest in-scale pitch, searching outward and preferring DOWN on an exact tie — the same
+ * deterministic tie-break core's `nearestScaleTone` documents, so snapping in the GUI and
+ * `beat fit-scale` on the CLI move a note to the same place. */
+function nearestInScale(pitch: number, scale: BeatScale | null | undefined): number {
+  if (pitchInScale(pitch, scale)) return pitch
+  for (let d = 1; d <= 127; d++) {
+    if (pitch - d >= 0 && pitchInScale(pitch - d, scale)) return pitch - d
+    if (pitch + d <= 127 && pitchInScale(pitch + d, scale)) return pitch + d
+  }
+  return pitch
+}
+
+/** The next in-scale pitch STRICTLY in the direction of travel (`dir` = +1 up, -1 down). Distinct
+ * from `nearestInScale` on purpose: an arrow-key nudge must move. Snapping "nearest" would take a
+ * note sitting on an in-scale row, target the semitone above, find that out of scale, and resolve
+ * DOWN to exactly where it started — an arrow key that visibly does nothing. Walking in the
+ * direction pressed makes ArrowUp under a scale lock mean "up to the next note in this key", which
+ * is what a musician means by it anyway. Returns the input unchanged if the edge is reached. */
+function nextInScale(pitch: number, dir: 1 | -1, scale: BeatScale | null | undefined): number {
+  for (let p = pitch; p >= 0 && p <= 127; p += dir) {
+    if (pitchInScale(p, scale)) return p
+  }
+  return pitch
+}
+
+/** Whether a declared scale contains either third — the question the suspended/modal case is
+ * actually asking. Drives the "no third" badge in the panel. Mirrors core's `scaleHasThird`. */
+function scaleHasThird(scale: BeatScale | null | undefined): boolean {
+  const pcs = scalePitchClasses(scale)
+  return !pcs || pcs.includes(3) || pcs.includes(4)
+}
+
+/** A human label for a declared scale: "C# susPentatonic", or "C# 0,2,5,7,10" for a custom set. */
+function scaleLabel(scale: BeatScale): string {
+  const root = PITCH_CLASSES[((scale.root % 12) + 12) % 12] ?? '?'
+  if (scale.name === CUSTOM_SCALE_NAME) return `${root} custom ${(scale.pitchClasses ?? []).join(',')}`
+  return `${root} ${scale.name}`
+}
+
+/** Scale-LOCK is deliberately session-only UI state, never written to the .beat file — the same
+ * call mute/solo and group-collapsed already make (see BeatGroup's comment in src/core/document.ts).
+ * The scale itself is a musical fact worth storing; "am I currently constraining my own mouse" is a
+ * working preference, and a lock silently persisting into a file someone else opens would be a
+ * surprise. Keyed by track id, module-level so it survives NoteView remounts within a session,
+ * exactly like `noteClipboard` above. */
+const scaleLockByTrack = new Map<string, boolean>()
 
 // ---- Clip View title bar (Phase 27 Stream ED, docs/research/71-ux-clip-view-midi-editing.md §3
 // P0 item 1) — Ableton's colored clip title strip is "the single strongest 'what am I editing'
@@ -437,6 +534,30 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const eventKind: 'note' | 'hit' = isDrums ? 'hit' : 'note'
   const editPrefix = eventKind // "<track>.note.*" / "<track>.hit.*" — matches core's edit.ts exactly
 
+  // Scale Mode (Phase 41 Stream E). The SCALE itself lives on the track (doc state); the LOCK is
+  // session-only, held in a module-level map keyed by track so switching tracks and back doesn't
+  // silently drop it — see scaleLockByTrack's own comment for why it isn't a stored field.
+  const trackScale = isDrums ? null : track.scale
+  const [scaleLocked, setScaleLockedState] = useState(() => scaleLockByTrack.get(track.id) ?? false)
+  function setScaleLocked(v: boolean) {
+    scaleLockByTrack.set(track.id, v)
+    setScaleLockedState(v)
+  }
+  // A lock with nothing to lock to is meaningless — clearing the scale releases it rather than
+  // leaving an invisible constraint armed for the next scale the user picks.
+  const lockActive = scaleLocked && !!trackScale && !isDrums
+  /** The one place the lock is applied to a pitch. Returns the pitch to actually use, and whether
+   * it had to move — callers use the second value to tell the user WHY their note landed elsewhere,
+   * because a note silently appearing a semitone off where you clicked is worse than being refused. */
+  function applyScaleLock(pitch: number): { pitch: number; snapped: boolean } {
+    if (!lockActive) return { pitch, snapped: false }
+    const next = nearestInScale(pitch, trackScale)
+    return { pitch: next, snapped: next !== pitch }
+  }
+  function announceSnap(from: number, to: number) {
+    showToast(`${pitchName(from)} is not in ${scaleLabel(trackScale!)} — placed ${pitchName(to)} instead. Uncheck Scale lock to write it anyway.`)
+  }
+
   const pitchWindowRef = useRef<{ trackId: string; lo: number; hi: number } | null>(null)
   // Phase 29 Stream GC bug 2 (research 80/83): freeze the pitch window per-track, in a ref, instead
   // of recomputing it fresh from `track.notes` on every render — the recompute-every-render version
@@ -576,6 +697,16 @@ export function NoteView({ track }: { track: BeatTrack }) {
     if (start !== origStart) postEdit(`${track.id}.${editPrefix}.${id}.start`, String(start), gestureId)
     if (row !== origRow) {
       const field = eventKind === 'note' ? 'pitch' : 'lane'
+      // Scale lock applies to DRAGGING a note as much as placing one — a lock that only guarded
+      // the first placement would let the same wrong note in through the more common gesture.
+      // Lane values (drums) are strings and have no scale, so the lock is note-only by construction.
+      if (eventKind === 'note') {
+        const target = axis.valueOfRow(row) as number
+        const { pitch, snapped } = applyScaleLock(target)
+        if (snapped) announceSnap(target, pitch)
+        postEdit(`${track.id}.note.${id}.pitch`, String(pitch), gestureId)
+        return
+      }
       postEdit(`${track.id}.${editPrefix}.${id}.${field}`, String(axis.valueOfRow(row)), gestureId)
     }
   }
@@ -669,7 +800,15 @@ export function NoteView({ track }: { track: BeatTrack }) {
     // per `applyLocalEdit`'s `[...t.notes, note]` / `[...t.hits, hit]`) makes the new event
     // authoritative for the very next keyboard action, matching what it already looked like on screen.
     if (eventKind === 'note') {
-      postEdit(`${track.id}.note`, `${axis.valueOfRow(row)} ${step} ${DEFAULT_DUR} ${DEFAULT_VEL}`)
+      // Scale lock (Phase 41 Stream E): a click on an out-of-scale row places the nearest IN-scale
+      // note instead of the one clicked, and says so. Snapping rather than refusing is deliberate —
+      // a click that produces nothing reads as a broken grid, while a note one row off with an
+      // explanation reads as the tool doing its job. `nearestInScale` shares core's own
+      // prefer-downward tie-break, so this lands where `beat fit-scale` would.
+      const clickedPitch = axis.valueOfRow(row) as number
+      const { pitch: placedPitch, snapped } = applyScaleLock(clickedPitch)
+      if (snapped) announceSnap(clickedPitch, placedPitch)
+      postEdit(`${track.id}.note`, `${placedPitch} ${step} ${DEFAULT_DUR} ${DEFAULT_VEL}`)
       const t = useStore.getState().doc?.tracks.find((tt) => tt.id === track.id)
       const added = t?.notes[t.notes.length - 1]
       setSel(added ? [added.id] : [])
@@ -1099,13 +1238,28 @@ export function NoteView({ track }: { track: BeatTrack }) {
         if (ds) postEdit(`${track.id}.${editPrefix}.${ev.id}.start`, String(ev.start + ds), gestureId)
         if (dr) {
           const field = eventKind === 'note' ? 'pitch' : 'lane'
+          if (eventKind === 'note') {
+            // Scale lock on an arrow nudge walks to the next in-scale pitch in the direction
+            // pressed (see nextInScale's own comment for why "nearest" would deadlock ArrowUp).
+            // An octave jump (shift) lands in-scale already when the source was, so this is a
+            // no-op there. Clamped back into the rendered pitch window, which every mutation in
+            // this file respects — a frozen window must never be handed an unrepresentable note.
+            const raw = axis.valueOfRow(ev.row + dr) as number
+            const wanted = lockActive ? nextInScale(raw, dr < 0 ? 1 : -1, trackScale) : raw
+            const loPitch = axis.valueOfRow(rows - 1) as number
+            const hiPitch = axis.valueOfRow(0) as number
+            const clamped = Math.max(loPitch, Math.min(hiPitch, wanted))
+            if (clamped === (axis.valueOfRow(ev.row) as number)) continue // nowhere to go in this key
+            postEdit(`${track.id}.note.${ev.id}.pitch`, String(clamped), gestureId)
+            continue
+          }
           postEdit(`${track.id}.${editPrefix}.${ev.id}.${field}`, String(axis.valueOfRow(ev.row + dr)), gestureId)
         }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editable, track.id, setSel, isDrums, eventKind, axis, rows])
+  }, [editable, track.id, setSel, isDrums, eventKind, axis, rows, lockActive, trackScale])
 
   // ---- velocity (draw-across-notes paint gesture on the velocity lane, Phase 28 Stream FD) ----
   // Follow-through 1 (research/76 §1.1/§3 P1 item 3): this used to be a single-note-anchored drag —
@@ -1534,6 +1688,40 @@ export function NoteView({ track }: { track: BeatTrack }) {
                 if (!axis.isBlackRow(row)) return null
                 return <div key={`sh${row}`} className="noteview-rowshade" style={{ position: 'absolute', left: 0, right: 0, top: row * ROW_H, height: ROW_H, background: 'rgba(255,255,255,0.028)', pointerEvents: 'none' }} />
               })}
+              {/* Scale Mode row shading (Phase 41 Stream E). Painted ABOVE the black-key shading
+                  and BELOW the octave lines and events, pointer-transparent like both, so grid
+                  add/marquee are unaffected. Drawn as a tint on the IN-scale rows rather than a
+                  scrim over the out-of-scale ones: the in-key rows are what you're aiming at, and
+                  tinting them keeps the black-key shading underneath readable instead of washing
+                  the whole grid. The ROOT row gets a stronger tint plus a left edge marker — with a
+                  third-less scale especially, knowing which row is the tonic is most of the point.
+                  Uses the same `pitchInScale` predicate the entry lock uses, so a shaded row is
+                  exactly a row the lock will let you write on. */}
+              {!isDrums &&
+                trackScale &&
+                Array.from({ length: rows }, (_, row) => {
+                  const pitch = axis.valueOfRow(row) as number
+                  if (!pitchInScale(pitch, trackScale)) return null
+                  const isRoot = pc(pitch) === ((trackScale.root % 12) + 12) % 12
+                  return (
+                    <div
+                      key={`sc${row}`}
+                      className={`noteview-scalerow${isRoot ? ' root' : ''}`}
+                      data-scale-row={pitch}
+                      data-scale-root={isRoot ? 'true' : undefined}
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        top: row * ROW_H,
+                        height: ROW_H,
+                        background: isRoot ? 'rgba(120, 190, 255, 0.16)' : 'rgba(120, 190, 255, 0.07)',
+                        borderLeft: isRoot ? '2px solid rgba(120, 190, 255, 0.55)' : undefined,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  )
+                })}
               {!isDrums &&
                 Array.from({ length: rows }, (_, row) => {
                   if (pc(axis.valueOfRow(row) as number) !== 0) return null
@@ -1709,6 +1897,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
           </div>
         </div>
       </div>
+      {!isDrums && <ScalePanel track={track} locked={scaleLocked} onLockedChange={setScaleLocked} />}
       {!isDrums && <PitchTimePanel track={track} noteIds={sel} totalSteps={totalSteps} />}
       {!isDrums && <NoteNameReadout track={track} noteIds={sel} />}
       {editable && eventKind === 'note' && sel.length === 1 && (
@@ -1773,24 +1962,8 @@ export function NoteView({ track }: { track: BeatTrack }) {
 // gated on a selection existing, since every op works over "the whole track" when nothing is
 // selected (the exact same `--notes` optional-scoping vocabulary the CLI/MCP tools already use).
 
-// Hand-mirrors src/core/pitchtime.ts's SCALES keys exactly (ui/ has no build-time dependency on
-// src/core — the same convention groove/chance/ratchet's engine-side mirrors already use).
-const SCALE_NAMES = [
-  'chromatic',
-  'major',
-  'minor',
-  'dorian',
-  'phrygian',
-  'lydian',
-  'mixolydian',
-  'locrian',
-  'harmonicMinor',
-  'melodicMinor',
-  'majorPentatonic',
-  'minorPentatonic',
-  'blues',
-] as const
-const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+// (SCALE_TABLE / SCALE_NAMES / PITCH_CLASSES now live at the top of this file alongside the other
+// pitch helpers — Scale Mode's row shading needs them too, not just this panel. Phase 41 Stream E.)
 
 // Phase 26 Stream DF: the grid-step vocabulary quantizeNotes (src/core/edit.ts:390-466) actually
 // takes — a plain "16th steps per grid cell" number (1 = 16ths, 2 = 8ths, 4 = quarters, 0.5 =
@@ -1998,6 +2171,126 @@ function PitchTimePanel({ track, noteIds, totalSteps }: { track: BeatTrack; note
       {msg && (
         <span className="pitch-time-msg" data-pitch-time-msg>
           {msg}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// ---- Scale Mode panel (Phase 41 Stream E) -----------------------------------------------------
+// Ableton's Scale Mode is a persistent Root + Scale declaration, not a one-shot transform — see
+// SCALE_TABLE at the top of this file. This panel is where it's declared; the shading in the grid
+// and the entry lock in the pointer/keyboard handlers are where it's felt.
+//
+// The `custom` entry is the load-bearing one, not an escape hatch. A named mode always answers
+// "major or minor?" — every one of the thirteen pre-v0.12 scales contains a third. Music built on
+// suspended/modal harmony answers "neither", and against that harmony both thirds are wrong notes.
+// A set measured off a reference track's chroma can be typed in directly here.
+
+function ScalePanel({ track, locked, onLockedChange }: { track: BeatTrack; locked: boolean; onLockedChange: (v: boolean) => void }) {
+  const scale = track.scale
+  const [customText, setCustomText] = useState(() => (scale?.pitchClasses ?? [0, 2, 5, 7, 10]).join(','))
+  const declared = !!scale
+  const pcs = scalePitchClasses(scale)
+
+  function writeScale(root: number, name: string, custom: string) {
+    if (name === CUSTOM_SCALE_NAME) {
+      // Canonicalize before sending, matching core's parseScaleValue: dedupe + ascending. Core
+      // canonicalizes again on receipt (it is the authority) — this is just so the local mirror and
+      // the field agree instantly.
+      const parsed = custom
+        .split(',')
+        .map((t) => Number(t.trim()))
+        .filter((n) => Number.isInteger(n) && n >= 0 && n <= 11)
+      const canonical = [...new Set(parsed)].sort((a, b) => a - b)
+      if (!canonical.includes(0)) {
+        showToast('A scale must contain 0 — its own root. Add 0 to the pitch-class list.')
+        return
+      }
+      postEdit(`${track.id}.scale`, `${root} ${CUSTOM_SCALE_NAME} ${canonical.join(',')}`)
+      return
+    }
+    postEdit(`${track.id}.scale`, `${root} ${name}`)
+  }
+
+  return (
+    <div
+      className="scale-panel"
+      data-testid="scale-panel"
+      data-scale-declared={declared ? scaleLabel(scale!) : undefined}
+      data-scale-locked={locked ? 'true' : undefined}
+      title="Scale Mode — shade the in-scale rows of the piano roll, and (with the lock on) keep note entry inside them"
+    >
+      <span className="scale-panel-title section-heading">Scale</span>
+
+      <select
+        value={scale?.root ?? 0}
+        data-scale-input="root"
+        title="root note of the scale"
+        onChange={(e) => writeScale(Number(e.target.value), scale?.name ?? 'major', customText)}
+      >
+        {PITCH_CLASSES.map((n, i) => (
+          <option key={n} value={i}>
+            {n}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value={scale?.name ?? ''}
+        data-scale-input="name"
+        title="named mode, or `custom` for an explicit pitch-class set"
+        onChange={(e) => {
+          const name = e.target.value
+          if (name === '') {
+            postEdit(`${track.id}.scale`, '') // clears the declaration
+            return
+          }
+          writeScale(scale?.root ?? 0, name, customText)
+        }}
+      >
+        <option value="">(none)</option>
+        {SCALE_NAMES.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+        <option value={CUSTOM_SCALE_NAME}>{CUSTOM_SCALE_NAME}…</option>
+      </select>
+
+      {scale?.name === CUSTOM_SCALE_NAME && (
+        <input
+          type="text"
+          className="scale-panel-custom"
+          data-scale-input="custom"
+          value={customText}
+          size={12}
+          title="root-relative pitch classes, comma separated — e.g. 0,2,5,7,10 for a third-less sus set"
+          onChange={(e) => setCustomText(e.target.value)}
+          onBlur={() => writeScale(scale.root, CUSTOM_SCALE_NAME, customText)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') writeScale(scale.root, CUSTOM_SCALE_NAME, customText)
+          }}
+        />
+      )}
+
+      <label className="scale-panel-lock" title="with the lock on, a note you place or drag snaps to the nearest in-scale row instead of landing out of key">
+        <input
+          type="checkbox"
+          checked={locked}
+          disabled={!declared}
+          data-scale-input="lock"
+          onChange={(e) => onLockedChange(e.target.checked)}
+        />
+        lock
+      </label>
+
+      {/* The badge that makes the point of this whole row visible: whether the declared scale
+          commits the melody to major or minor at all. For suspended/modal writing, "no third" is
+          the property you are deliberately choosing, and it is worth seeing at a glance. */}
+      {declared && pcs && (
+        <span className="scale-panel-readout" data-scale-readout title="the pitch classes this scale allows, relative to its root">
+          {pcs.length} tones{!scaleHasThird(scale) && <em className="scale-panel-nothird" data-scale-no-third> · no third</em>}
         </span>
       )}
     </div>

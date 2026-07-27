@@ -118,6 +118,10 @@ export interface BeatNote {
   ratchetCount: number // 1-16 int; repeat the note this many times within its own duration. 1 = no ratchet (default).
   ratchetCurve: number // -1..1; shapes ratchet repeat spacing (0 = even). Default 0.
   ratchetLength: number // 0..1 (exclusive of 0); each repeat's sounding length as a fraction of its slot. 1 = fills the slot (default).
+  // v0.12 (Phase 41 Stream E): the deactivate state — a note that stays in the clip, keeps every
+  // field, and does not sound (Ableton's `0` key). Distinct from deleted. Mirrors
+  // src/core/document.ts's BeatNote exactly.
+  active: boolean // false = present but silent. true = default (elided on disk).
 }
 
 export interface BeatDrumHit {
@@ -349,6 +353,21 @@ export interface BeatTrack {
   // stored note/hit start. 0 = off (default).
   shuffleAmount: number
   shuffleGrid: number
+  // v0.12 (Phase 41 Stream E): the track's declared scale — Scale Mode's Root + Scale pair, stored
+  // rather than panel-local, so the piano roll's row shading and its note-entry lock survive a
+  // reload. null = undeclared. Mirrors src/core/document.ts's BeatTrack/BeatScale exactly.
+  scale: BeatScale | null
+}
+
+/** Mirrors src/core/document.ts's BeatScale. `root` is a pitch class 0-11 (0=C); `name` is either
+ * a key of the shared scale table or the literal 'custom', in which case `pitchClasses` carries the
+ * root-relative set explicitly (ascending, deduplicated, containing 0). The custom form exists
+ * because named modes cannot express every real harmonic choice — notably a suspended/modal track
+ * that measurably avoids its own third, which is neither major nor minor nor any one named mode. */
+export interface BeatScale {
+  root: number
+  name: string
+  pitchClasses: number[] | null
 }
 
 export interface BeatMediaSample {

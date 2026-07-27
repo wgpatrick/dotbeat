@@ -1524,6 +1524,57 @@ body {
 /* Phase 27 Stream EG: blue accent — a one-shot operations panel, distinct from the read-only
    readout (green, below) and the per-note editor (gray, further below). See .note-inspector's
    comment for the palette-reuse rationale. */
+/* ---- Scale Mode panel (Phase 41 Stream E) ----------------------------------------------------
+   Same chip shape as `.pitch-time-panel` below (they sit adjacent and are read as one row of
+   controls), but a distinct left border colour: the Pitch & Time panel is one-shot ops that produce
+   a diff, while this one declares PERSISTENT state that changes what the grid above it means. The
+   two behave differently enough to be worth telling apart at a glance. */
+.scale-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--surface-recessed);
+  border: 1px solid var(--line);
+  border-left: 3px solid #78beff; /* the same hue the in-scale row tint uses, so panel and grid read as one feature */
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  color: var(--muted, #9aa0ab);
+}
+.scale-panel select,
+.scale-panel input[type='text'] {
+  font: inherit;
+  font-size: 11px;
+  background: var(--surface-recessed);
+  color: var(--text, #d8dbe2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+}
+.scale-panel-lock {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+.scale-panel-lock input:disabled + * ,
+.scale-panel-lock:has(input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+.scale-panel-readout {
+  color: var(--muted, #9aa0ab);
+}
+/* "no third" is the property a suspended/modal part is deliberately choosing — worth more than
+   muted-grey weight, since it is the whole reason that scale was picked. */
+.scale-panel-nothird {
+  color: #78beff;
+  font-style: normal;
+  font-weight: 600;
+}
+
 .pitch-time-panel {
   display: flex;
   align-items: center;
