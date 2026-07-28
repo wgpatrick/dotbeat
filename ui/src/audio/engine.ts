@@ -1542,7 +1542,17 @@ class SeededNoiseSynth {
       loop: true,
       onended: () => {
         this.live.delete(src)
-        src.dispose()
+        // Dispose is the LIVE path's per-trigger GC only. In an OFFLINE context, Tone fires this
+        // callback from context.setTimeout during the SCHEDULING clock pass, which runs AHEAD of
+        // the native render frontier (ui/src/audio/offline.ts renderWindowed) — disposing here
+        // disconnects the source before its audio has been rendered. That silenced every noise
+        // voice offline (owner report 2026-07-26, "i can't hear any claps": a clap-only kit-909
+        // doc measured −Infinity dBFS offline vs −27.9 LUFS live; scripts/
+        // verify-offline-kit-lane-parity.mjs is the gate). Tone's own OneShotSource._onended
+        // skips dispose for offline contexts for exactly this reason; offline disposal belongs to
+        // the windowed driver's dispose-behind-the-frontier hook, which already tracks this
+        // source through the same patched _onended that invoked this callback.
+        if (!this.ctx.isOffline) src.dispose()
       },
     }).connect(this.env)
     this.live.add(src)

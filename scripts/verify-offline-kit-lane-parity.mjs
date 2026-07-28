@@ -51,12 +51,13 @@ const STEPS_PER_BAR = 16
 const HIT_VELOCITY = 0.8
 
 // Offline must never be silent where live is audible. −60 dBFS slot RMS is far under any real
-// drum hit (measured post-fix: quietest lane slot, 808 rimshot, ≈ −46 dBFS RMS) and far above
-// true silence / opus noise floor.
+// drum hit (calibration 2026-07-26, post-fix: quietest lane slot across both kits was rimshot at
+// −45.3 dBFS RMS) and far above true silence / the opus noise floor.
 const SILENCE_FLOOR_DBFS = -60
 // Offline-vs-live tolerance. Live capture is MediaRecorder→opus→decode (lossy) so byte parity is
-// impossible; measured post-fix deltas across all 24 lanes were ≤ ~1 dB. 3 dB catches a voice
-// halved in power while never flaking on codec loss.
+// impossible; calibration 2026-07-26, post-fix: max |delta| across all 24 lanes was 0.4 dB
+// (pre-fix, the broken noise lanes were −inf/−18.4 dB off). 3 dB catches a voice halved in power
+// while never flaking on codec loss.
 const PARITY_TOLERANCE_DB = 3
 
 const dir = mkdtempSync(join(tmpdir(), 'beat-offline-lane-parity-'))
