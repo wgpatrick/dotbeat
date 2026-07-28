@@ -112,6 +112,11 @@ phase-3 arc.
 2. `beat feedback --sections` checked against the phase-3 arc table: adjacent contrast ≥ 3-4 LUFS
    everywhere the plan says contrast; gap bars near-silent; a big (≥ 8 dB) gap→drop step where a
    drop is planned. A flat arc (adjacent contrasts of 1-2 dB) is a FAIL, not an observation.
+   This renders in REAL TIME by default — a full-length song holds a headless browser open for its
+   whole duration, and it dies if the machine sleeps. `--offline` computes the same mix exactly and
+   reproducibly instead; it is not always faster (it is CPU-bound and prints its measured ratio),
+   so use it when you need the numbers to be repeatable or the machine may not stay awake, and
+   never mix the two paths within one comparison.
 3. Solo-stem screens re-run on final patches: `beat render --stems` + the phase-4 pathology
    checks. (`beat lint --doc <file.beat>` also renders per-track solos to name offenders.)
 4. Audio-pathology screens: `beat lint <mix.wav> --screens [--sections <file.beat>]` — the standing
