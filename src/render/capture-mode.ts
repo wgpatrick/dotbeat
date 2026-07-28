@@ -71,15 +71,36 @@ export interface CaptureModeDecision {
  *     length-shaped rule between them, and a default that can triple the gate's wall clock also
  *     widens the window in which a sleeping machine kills it — the exact failure the row was
  *     filed about. `beat render --offline` prints the measured ratio for this reason.
- *  2. The two paths do not measure identically, and a threshold gate must not quietly re-pick its
- *     own instrument. On the same song the arc verdict agreed to within 0.2 LU per section (the
- *     relative-loudness shape is robust), but the STATIC per-section numbers a whole-mix `--ref`
- *     profile critiques did not: stereo width on the near-mono intro/outro read -25.8/-25.8 dB live
- *     versus -33.9/-30.4 dB offline, spectral centroid ran ~2-3% lower offline throughout, and
- *     crest sat 0-0.9 dB lower offline. Those are the live capture chain's own lossiness, already
- *     documented as D22's two known parity exceptions. A length-triggered default would mean two
- *     songs either side of 2 minutes are measured through different chains, and one song crossing
- *     it (add a section, cut a section) silently changes chains mid-project.
+ *  2. The two paths do not measure identically — and the difference is a SYSTEMATIC BIAS that
+ *     exceeds the documented render-run variance floor, not noise inside it. A threshold gate must
+ *     not quietly re-pick its own instrument. Per-section, offline minus live on this song:
+ *
+ *       LUFS          |dmax| 0.10 LU   floor 0.25 LU (RENDER_RUN_VARIANCE_LU)      within
+ *       band shares   |dmax| 2 pt      floor 2.0 pt  (…_BAND_PCT)                  within
+ *       width         -8.1 dB s_intro, -4.6 dB s_outro   floor 1.5 dB (…_WIDTH_DB) OVER, 5.4x
+ *       crest         -1.2 dB s_drop3                    floor 1.0 dB (…_PEAK_DB)  OVER
+ *       centroid      -6 to -40 Hz (-0.7% to -4.3%)      NO FLOOR IS DEFINED       n/a
+ *
+ *     The direction is what makes it a bias rather than scatter: centroid is lower offline on 9 of
+ *     9 sections and crest on 7 of 9 (never higher on either). Offline renders DARKER and
+ *     lower-crest than live. Two independent confirmations landed the same day: a full-mix check by
+ *     another agent (centroid 547 offline vs 573 live, air 2.21% vs 2.40%, crest 12.8 vs 14.2 — the
+ *     crest gap of 1.4 dB also over the floor), and a drums-only render where the gap is far larger
+ *     (air 0.32% offline vs 0.77% live, centroid 116 Hz vs 194 Hz). So the magnitude is
+ *     MATERIAL-DEPENDENT — small on a dense full mix, large on isolated drums — which is exactly
+ *     what makes an automatic default unsafe: the error it introduces is not bounded by anything
+ *     the caller can see.
+ *
+ *     D22 already lists "mono-project width" and "sub-band tilt" as known parity exceptions; these
+ *     measurements say that framing understates it (centroid has no tolerance defined at all, and
+ *     crest is over its floor on real material). See the roadmap row "Offline vs live is a
+ *     systematic spectral bias" for the characterization work that owes.
+ *
+ *     What this does NOT undermine: the arc verdict, which is relative LUFS and agreed to within
+ *     0.2 LU per section, comfortably inside the 0.25 LU floor. `--offline` is trustworthy for the
+ *     arc gate. It is NOT interchangeable with live for a whole-mix `--ref` profile, and a
+ *     length-triggered default would mean two songs either side of 2 minutes are measured through
+ *     different chains, and one song crossing it silently changes chains mid-project.
  *
  * So the length signal is spent on a HINT rather than a switch: the operator is told the flag
  * exists, at the moment it is worth having, and picks — and whichever they pick, they keep. 120s is
