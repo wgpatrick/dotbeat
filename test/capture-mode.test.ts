@@ -93,7 +93,8 @@ test('a long project HINTS at --offline and still renders live', () => {
   assert.equal(d.mode, 'live', 'length must not switch the mode')
   const hint = longProjectOfflineHint(322.56, d) // the 5:22 song this feature was filed from
   assert.ok(hint, 'a 5:22 project should be told the flag exists')
-  assert.ok(hint!.includes('5:23') || hint!.includes('5:22'), `hint should name the duration, got: ${hint}`)
+  assert.ok(hint!.includes('5:22'), `hint should name the duration as 5:22, not round it up to 5:23, got: ${hint}`)
+  assert.equal(longProjectOfflineHint(119.7, d), null, '119.7s is under the threshold, and must never print "1:60"')
   assert.ok(hint!.includes('--offline'), 'the hint must name the flag')
 })
 

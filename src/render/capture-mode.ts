@@ -116,8 +116,10 @@ export function longProjectOfflineHint(seconds: number, decision: CaptureModeDec
   if (decision.reason === 'explicit') return null // they asked for live; don't second-guess it
   if (seconds < LONG_PROJECT_SECONDS) return null
   if (decision.reason === 'refused') return null // offline is not available at all — see the refusal line
+  // Floor, not round: rounding both prints 5:23 for a 5:22.56 song (off by one from every other
+  // duration the tool shows) and can produce a literal "1:60" at 119.7s.
   const mins = Math.floor(seconds / 60)
-  const secs = Math.round(seconds - mins * 60)
+  const secs = Math.floor(seconds - mins * 60)
   return (
     `note: this is a ${mins}:${String(secs).padStart(2, '0')} project and real-time capture holds a headless browser open for all of it ` +
     `(it dies if the machine sleeps). --offline computes the same mix through an offline context instead — exact and ` +
