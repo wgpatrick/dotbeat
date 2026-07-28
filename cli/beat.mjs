@@ -2398,7 +2398,7 @@ function recipeShowCmd(argv) {
 }
 
 // Key spelling shared with the rest of the CLI's musical surface: "C", "Am", "F#m", ... mapped onto
-// the PhraseKey shape src/taste/phrase.ts defines (root 48..59 + minor flag).
+// the PhraseKey shape src/compose/phrase.ts defines (root 48..59 + minor flag).
 const RECIPE_PITCH_CLASSES = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11 }
 function recipeKey(spec) {
   const m = String(spec).match(/^([A-G][#b]?)(m)?$/)
@@ -2789,7 +2789,7 @@ async function showdownCmd(argv) {
   // of (checkout, weights, python packages) is missing AND runs one tiny real generation, so
   // "--ca2 is ready" is proven rather than assumed. Same spirit as --surge-doctor / analyze --doctor.
   if (argv.includes('--ca2-doctor')) {
-    const { ca2Doctor } = await import('../dist/src/taste/ca2.js')
+    const { ca2Doctor } = await import('../dist/src/compose/ca2.js')
     const report = await ca2Doctor({ smoke: true })
     process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : formatCA2Doctor(report))
     if (report.available !== true) process.exitCode = 1
@@ -2913,7 +2913,7 @@ async function showdownCmd(argv) {
     }
   }
 
-  // The theory figure source (research 124 §C.7, src/taste/theory.js): with --theory the composed
+  // The theory figure source (research 124 §C.7, src/compose/theory.js): with --theory the composed
   // pitched sources (bassline/chords/lead) draw their figures from the deterministic, theory-aware
   // composition layer — a weighted/function-tagged chord track, kick-relationship bass with the
   // register rule enforced, minimal-motion voice-leading, motif-first leads — instead of the uniform
@@ -2923,10 +2923,10 @@ async function showdownCmd(argv) {
   // --theory and --midi-dir together: midi wins per role where a usable figure is found, theory is
   // the fallback (both are just a different figure SOURCE feeding the same composed sources).
   const theoryOn = argv.includes('--theory')
-  const theoryMod = theoryOn ? await import('../dist/src/taste/theory.js') : null
+  const theoryMod = theoryOn ? await import('../dist/src/compose/theory.js') : null
   if (theoryOn) process.stderr.write(`theory figures: composed pitched sources draw from the theory-aware layer (bank fallback for drum-loop)\n`)
 
-  // The CA2 figure source (research 124 §A.4, 125 §4, src/taste/ca2.js): --ca2 mirrors --theory
+  // The CA2 figure source (research 124 §A.4, 125 §4, src/compose/ca2.js): --ca2 mirrors --theory
   // exactly — the same pitched roles, the same per-role exclude chain, drum-loop keeps the bank —
   // except the notes come from Composer's Assistant 2 composing OVER the theory layer's chord
   // track (our code decides key/chords/register/density; the model proposes notes; the theory
@@ -2936,7 +2936,7 @@ async function showdownCmd(argv) {
   // fails the whole run here, loudly, rather than silently substituting bank figures and quietly
   // corrupting the figureSource arm the batch exists to measure.
   const ca2On = argv.includes('--ca2')
-  const ca2Mod = ca2On ? await import('../dist/src/taste/ca2.js') : null
+  const ca2Mod = ca2On ? await import('../dist/src/compose/ca2.js') : null
   if (ca2On) {
     const report = await ca2Mod.ca2Doctor()
     if (!ca2Mod.ca2Available(report)) {
@@ -4018,7 +4018,7 @@ async function pilotCmd(argv) {
 
 /** `beat compose` — compose a figure from the theory layer or CA2 into a track of a real project,
  * or a whole option board of them. Everything musical (key/role/register resolution, the note
- * write, the song-mode clip re-snapshot, the batch dedupe) lives in src/taste/compose.ts, shared
+ * write, the song-mode clip re-snapshot, the batch dedupe) lives in src/compose/compose.ts, shared
  * verbatim with beat_compose over MCP; this function is argv parsing and printing only. */
 async function composeCmd(argv) {
   const valued = ['--source', '--role', '--seed', '--archetype', '--bars', '--key', '--mode', '--register', '--clip', '--count', '--out-dir']
@@ -4041,7 +4041,7 @@ async function composeCmd(argv) {
     defaultComposeBatchDir,
     parseComposeMode,
     parseKeyRoot,
-  } = await import('../dist/src/taste/compose.js')
+  } = await import('../dist/src/compose/compose.js')
   const { BeatBatchError } = await import('../dist/src/vary/batch.js')
 
   const source = flagValue(argv, '--source') ?? 'theory'

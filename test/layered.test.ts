@@ -32,7 +32,7 @@ import {
 import { composePitchedPhrase, inferSeedKey } from '../src/taste/showdown.js'
 import { generateSeedBeat } from '../src/taste/seeds.js'
 import { engineplusProfile, surgeplusProfile } from '../src/taste/showdown.js'
-import type { ComposedPhrase } from '../src/taste/phrase.js'
+import type { ComposedPhrase } from '../src/compose/phrase.js'
 import { analyze, analyzeRich } from '../src/metrics/index.js'
 import { mulberry32 } from '../src/core/rng.js'
 

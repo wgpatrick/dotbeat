@@ -1,4 +1,4 @@
-// The CA2 figure source (src/taste/ca2.ts, python/ca2_figures.py) — research 124 §A.4's
+// The CA2 figure source (src/compose/ca2.ts, python/ca2_figures.py) — research 124 §A.4's
 // LLM-as-orchestrator wiring: our theory layer owns the chord track, Composer's Assistant 2
 // proposes the notes, our guards and lint have the last word.
 //
@@ -29,8 +29,8 @@ import {
   guardCA2Notes,
   isCA2Role,
   validateCA2Payload,
-} from '../src/taste/ca2.js'
-import { buildChordTrack, lintFigure, scaleConsistency } from '../src/taste/theory.js'
+} from '../src/compose/ca2.js'
+import { buildChordTrack, lintFigure, scaleConsistency } from '../src/compose/theory.js'
 import { mulberry32 } from '../src/taste/eval.js'
 import { BeatBatchError } from '../src/vary/batch.js'
 import type { PhraseKey } from '../src/taste/showdown.js'

@@ -22,7 +22,7 @@ import { basename, join, resolve } from 'node:path'
 import { lastNonEmptyLine, resolvePython, sidecarDoctor as runSidecarDoctor, spawnSidecar, type SpawnResult } from '../analysis/spawn-sidecar.js'
 import { BeatBatchError } from '../vary/batch.js'
 import { mulberry32 } from './eval.js'
-import { chooseSeeded, type ComposedPhrase, type PhraseKey } from './phrase.js'
+import { chooseSeeded, type ComposedPhrase, type PhraseKey } from '../compose/phrase.js'
 
 const MIDI_EXTRACT_PY = 'python/midi_extract.py' // relative to the repo root, like every sidecar
 

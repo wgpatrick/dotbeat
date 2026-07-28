@@ -11,7 +11,7 @@
 //   * theory-aware BASS / CHORD / LEAD generators built on that track — kick-relationship bass
 //     recipes over 1-3 pitch classes with the register rule enforced (§C.2), minimal-motion
 //     voice-leading for chords (§C.4), motif-first leads with a single peak note (§C.3);
-//   * a MOTIF-VARIATION operator library (src/taste/motif.ts) the lead generator derives phrases
+//   * a MOTIF-VARIATION operator library (src/compose/motif.ts) the lead generator derives phrases
 //     with, also usable as vary-style edits on existing material (§C.7 piece 3).
 //
 // Everything is deterministic in the caller's seed via the existing mulberry32 plumbing, and every
@@ -22,7 +22,7 @@
 // recipes per Part C's own confidence flags — tunable defaults, not measured consensus.
 
 import { scalePitchClasses, degreePitch, chooseSeeded, type PhraseKey, type ScaleMode, type ComposedNote, type ComposedPhrase } from './phrase.js'
-import { mulberry32 } from './eval.js'
+import { mulberry32 } from '../core/rng.js'
 import { contourInversion, transposeToNextChord, rhythmicDisplacement, sameRhythmNewPitches, oneChangePerRepeat, euclidSteps, type MotifOperator } from './motif.js'
 
 const rnd2 = (x: number): number => Math.round(x * 100) / 100

@@ -175,8 +175,8 @@ export interface VaryBatchManifest {
   // this batch's COMPOSED figures came from — 'midi' (extracted from private MIDI transcriptions
   // of commercial tracks; the batch dir is gitignore-gated and each variant's `from` records the
   // midi path as a local reference), 'theory' (the deterministic theory-aware layer,
-  // src/taste/theory.ts), 'ca2' (Composer's Assistant 2 composing over that layer's chord track,
-  // src/taste/ca2.ts) or 'bank' (the internal archetype bank). scoreBatch copies THIS LABEL ONLY
+  // src/compose/theory.ts), 'ca2' (Composer's Assistant 2 composing over that layer's chord track,
+  // src/compose/ca2.ts) or 'bank' (the internal archetype bank). scoreBatch copies THIS LABEL ONLY
   // into the shared log — never a song title, artist, or path.
   figureSource?: 'midi' | 'bank' | 'theory' | 'ca2'
   // Showdown/gen batches: WHICH generator produced the `gen` clip — the model id, e.g.

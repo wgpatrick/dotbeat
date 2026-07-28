@@ -38,7 +38,7 @@ import { NOTE_FIELD_DEFAULTS, SCALES, saveClip } from '../core/index.js'
 import { BeatBatchError, defaultBatchDir, writeVaryBatch, type VaryBatchManifest } from '../vary/batch.js'
 import { CA2_SETUP_HINT, composeCA2Phrase, isCA2Role, type CA2Role } from './ca2.js'
 import { THEORY_ROLE_BANKS, composeTheoryPhrase, type LintReport } from './theory.js'
-import { applyComposedPhrase, inferSeedKey } from './showdown.js'
+import { applyComposedPhrase, inferSeedKey } from './apply.js'
 import type { ComposedNote, PhraseKey, ScaleMode } from './phrase.js'
 
 export type ComposeSource = 'theory' | 'ca2'

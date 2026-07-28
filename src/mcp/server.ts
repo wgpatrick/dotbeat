@@ -154,7 +154,7 @@ import {
   defaultComposeBatchDir,
   parseComposeMode,
   parseKeyRoot,
-} from '../taste/compose.js'
+} from '../compose/compose.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -2411,7 +2411,7 @@ const TOOLS: ToolDef[] = [
     },
   },
   // ---- beat compose's twin. Every musical decision (key/role/register resolution, the note write,
-  // the song-mode clip re-snapshot, the batch dedupe) is src/taste/compose.ts, imported by both
+  // the song-mode clip re-snapshot, the batch dedupe) is src/compose/compose.ts, imported by both
   // surfaces; this handler is argument shaping and printing, exactly as `composeCmd` in
   // cli/beat.mjs is. Parity rows in test/mcp-parity.test.ts.
   {

@@ -1,4 +1,4 @@
-// `beat compose` / beat_compose (src/taste/compose.ts) — the verb that puts the theory layer and
+// `beat compose` / beat_compose (src/compose/compose.ts) — the verb that puts the theory layer and
 // CA2 into an ordinary project.
 //
 // THE GATE THIS FILE EXISTS FOR is the song-mode clip trap. In song mode the engine renders a
@@ -40,8 +40,8 @@ import {
   parseKeyRoot,
   placedClipIds,
   resolveComposeKey,
-} from '../src/taste/compose.js'
-import { CA2_CONTRACT_VERSION, ca2Available, ca2Doctor } from '../src/taste/ca2.js'
+} from '../src/compose/compose.js'
+import { CA2_CONTRACT_VERSION, ca2Available, ca2Doctor } from '../src/compose/ca2.js'
 import { BeatBatchError } from '../src/vary/batch.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..') // dist/test -> repo root
@@ -497,7 +497,9 @@ const hasCA2 = ca2Available(realReport)
 
 test(
   'integration: --source ca2 against the REAL Composer\'s Assistant 2 install',
-  { skip: !hasCA2 ? 'no CA2 install (set BEAT_CA2_DIR / BEAT_CA2_PYTHON — see beat showdown --ca2-doctor)' : false },
+  // the reason string is the one test/ca2.test.ts already uses, verbatim — test/skip-reasons.test.ts
+  // asserts the sanctioned set exactly, so a near-duplicate wording would be a new entry
+  { skip: !hasCA2 ? 'no CA2 install (set BEAT_CA2_DIR / BEAT_CA2_PYTHON)' : false },
   async () => {
     const parent = parse(SONG_MODE)
     const res = await composeIntoDoc({ doc: parent, trackId: 'arp', source: 'ca2', seed: 11, role: 'lead' })

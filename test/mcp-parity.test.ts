@@ -284,7 +284,7 @@ const ROWS: ParityRow[] = [
     mcp: (c) => ({ name: 'beat_trick', arguments: { file: c.file, track: 'lead', trick: 'detune-double' } }),
     artifacts: ['song.beat'],
   },
-  // The compose family. Both surfaces call src/taste/compose.ts, so what these rows really pin is
+  // The compose family. Both surfaces call src/compose/compose.ts, so what these rows really pin is
   // that the two ARGUMENT SHAPES agree — a flag named on one surface and forgotten on the other is
   // exactly the drift class this table exists for, and compose has a lot of flags.
   {
