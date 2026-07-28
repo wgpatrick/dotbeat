@@ -26,6 +26,7 @@ export {
   removeHit,
   quantizeNotes,
   addTrack,
+  DRUMS_TRACK_INIT_CUTOFF_HZ,
   removeTrack,
   initDocument,
   addGroup,

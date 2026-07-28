@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { addNote, addTrack, initDocument, quantizeNotes, BeatEditError } from '../src/core/index.js'
+import { addNote, addTrack, initDocument, quantizeNotes, BeatEditError, DRUMS_TRACK_INIT_CUTOFF_HZ } from '../src/core/index.js'
 
 function docWithNotes(notes: { pitch: number; start: number; duration: number; velocity?: number; id?: string }[]) {
   let doc = initDocument({ trackId: 'lead' })
@@ -83,7 +83,13 @@ test('fail-loudly edges', () => {
 })
 
 test('fresh drum tracks open the bus filter (hats survive; found via silent-hat render)', () => {
+  // This test's NAME was right and its NUMBER was wrong for as long as it existed: it asserted
+  // 12000, which does not open the filter — the scored `air` band is 6 kHz..Nyquist and open above,
+  // so 12000 capped the kit inside the band it is measured on. Corrected 2026-07-27 to the named
+  // DRUMS_TRACK_INIT_CUTOFF_HZ (18000, the format's own wide-open value); the measurement that set
+  // it and the structural guard live in test/eval-integrity.test.ts's D-LP block.
   const doc = initDocument({ trackId: 'lead' })
   const { track } = addTrack(doc, { id: 'drums', kind: 'drums' })
-  assert.equal(track.synth.cutoff, 12000)
+  assert.equal(track.synth.cutoff, DRUMS_TRACK_INIT_CUTOFF_HZ)
+  assert.equal(DRUMS_TRACK_INIT_CUTOFF_HZ, 18000)
 })
