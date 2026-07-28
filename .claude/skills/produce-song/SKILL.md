@@ -45,13 +45,25 @@ Instruments: WebSearch/WebFetch · `docs/tricks-reference.md` + relevant `docs/r
 
 ## Phase 2 — Source mining / material plan
 
-Instruments: `beat analyze` (reference audio) · `beat analyze-structure` (.beat) · python/mido
-activity-matrix mining for covers · the catalogues: `beat presets`, `beat surge patches`,
-`beat drum-kits`.
+Instruments: `beat analyze` (reference audio) · `beat analyze-structure` (.beat) · **`beat compose`
+(the theory layer and Composer's Assistant 2)** · python/mido activity-matrix mining for covers ·
+the catalogues: `beat presets`, `beat surge patches`, `beat drum-kits`.
 
 - Covers: reduce the source MIDI to the real form via a per-block activity matrix; pick per-voice
   extraction windows *musically* (chord-aligned bars; swap chord-unsafe fragments).
 - Originals: explicit motif and palette decisions, written down before building.
+- **Do NOT hand-roll note patterns in a throwaway script.** dotbeat has two real composition
+  engines and `beat compose` is how you reach them from an ordinary project:
+  - **the theory layer** (`--source theory`) — voice-leading chord generation over a generated
+    chord track, with archetype banks per role (lead: motif-call-response / motif-repeat /
+    arp-motif / sparse-motif) and a gross-error lint.
+  - **Composer's Assistant 2** (`--source ca2`) — a neural MIDI-infill model; a genuinely
+    different generative process, and the winner of the research/125 MIDI-model trials.
+    Environment-gated: `beat showdown --ca2-doctor` tells you whether it is installed.
+  Use `--count N --out-dir <dir>` to emit a whole batch of candidate figures as a board (below)
+  rather than picking one yourself. This was written into the skill after a session where the
+  composer layers existed, were installed and working, and went unused because no verb reached
+  them — the exact "agents use the tools their prompt names" failure this document opens with.
 
 **Exit gate:** the per-role source table in NOTES.md (mandatory architecture table): which
 instrument plays what, sourced from where.
@@ -121,6 +133,51 @@ phase-3 arc.
    them (T5 lesson: the critic steers only once it predicts complaints).
 
 **Exit gate:** all green ⇒ checkpoint-listen. Any red ⇒ fix, re-run the whole gauntlet.
+
+## Option boards are the DEFAULT, not a special case
+
+The owner's stated working model (2026-07-25) is that the agent does breadth — "lots of options for
+synths, drum patterns, melodies, basslines" — and the owner applies taste. That makes the board the
+normal unit of handoff, not something you reach for when you happen to be unsure.
+
+**The rule: any decision with more than one defensible answer ships as a board, not as a choice you
+made.** Timbres, figures, kits, patches, arrangements. You still state a recommendation from the
+measurements; you do not spend the owner's turn on a decision they never saw alternatives for.
+
+**Build boards against an AUDITION DOC, not the loop and not the full song.** Copy the project and
+cut it to ~8 bars of the song's home section (`beat song <copy> <scene> 8`). Every variant then
+renders as the song actually sounds — full mix, in context — for ~13 s of render each instead of
+minutes. A candidate auditioned as an isolated soloed loop is a different question from the one the
+owner is being asked.
+
+    beat compose <audition.beat> <track> --source theory --count 8 --out-dir boards/<name>
+    beat vary    <audition.beat> <track> <group> --count 8 --spread --render --out-dir boards/<name>
+    beat render --batch boards/<name> --offline      # renders + loudness-normalizes the set
+    beat board  boards                                # serves every UNDECIDED batch under boards/
+
+Five things that go wrong, all of which have gone wrong:
+
+1. **Song mode renders from CLIPS, not live notes.** Edit a track's notes without re-snapshotting
+   its clip and every "variant" renders byte-identical to the parent. `beat compose` handles this;
+   if you build variants by hand, `beat clip <file> <track> <clip-id>` after every edit.
+2. **Verify the variants actually differ before serving them.** `beat metrics <v>.wav --json` across
+   the set — identical numbers mean your input never changed, not that the parameter does nothing.
+   This is the single cheapest check in the workflow and it has caught the bug above twice.
+3. **A board is only valid against the mix it was rendered from.** Change the mix and the boards are
+   stale; regenerate them. Serving a board rendered off a superseded mix asks the owner to pick
+   against a version that no longer exists.
+4. **Nine candidates maximum** — the picker is keys 1-9. Prefer nine genuinely distinct options over
+   nine jitters of one idea; when generating, dedupe and keep the spread.
+5. **Provenance must be musical.** The manifest's `edits` are what the owner reads. "arp figure
+   call-response: two dense bars answered by two sparse ones" is provenance; a list of param deltas
+   is not.
+
+**Reject-all is a real outcome and it is data** — `n` with a required note. An owner who cannot pick
+from nine options has told you something more useful than a pick.
+
+Adopt the winner with `beat adopt <batch> <pick>` so the checkpoint records the intent. If a board's
+`edits` are descriptive rather than replayable set-commands (figure boards, typically), apply the
+pick by hand and say so in the checkpoint intent — do not let the adoption go unrecorded.
 
 ## The checkpoint-listen protocol — scheduling the owner's ears
 
