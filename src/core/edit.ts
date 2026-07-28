@@ -879,6 +879,28 @@ function validateTrackIdentity(id: string, name: string, color: string) {
   if (!/^#[0-9a-f]{6}$/.test(color)) throw new BeatEditError(`color must be a lowercase hex color like #c678dd, got "${color}"`)
 }
 
+/** The drum-BUS lowpass a freshly created drums track ships with, in Hz. `synth.cutoff` on a drums
+ * track is the whole kit's bus lowpass (24 dB/oct), so this one number decides how much of the kit
+ * a new track can ever produce.
+ *
+ * CHOSEN 2026-07-27 (was 12000, inherited): 18000 is the .beat format's own documented
+ * "default / wide open, no filtering" cutoff (src/core/document.ts's INIT_SYNTH note), so a fresh
+ * drums track now genuinely does what the comment below it always claimed — opens the filter. The
+ * previous 12000 was a mirror of `new Tone.Filter({ frequency: 12000 })` in ui/src/audio/engine.ts,
+ * which is a CONSTRUCTION placeholder the engine overwrites from the document one line later
+ * (`bus.filter.frequency.value = p.cutoff`) — i.e. it was never a musical decision at all.
+ *
+ * Why it matters, measured 2026-07-27 on examples/taste-t1/seed-001's drum stem (same doc, only
+ * this parameter changed, `beat render --stems` + `beat metrics`): a kit lowpassed at 8000 reads
+ * air 0.77% / centroid 194 Hz; opened to 20000 the SAME kit reads air 1.92% / centroid 359 Hz.
+ * The metrics' `air` band is 6 kHz..Nyquist and OPEN ABOVE (src/metrics/analyze.ts), so any bus
+ * lowpass in this neighbourhood decides most of the scored band before a hit is even struck.
+ *
+ * This value has NO eval exposure: no blind rating has ever been given to a `beat add-track`
+ * render — the taste seeds carry their own explicit synth block (see
+ * TASTE_DRUMS_BUS_CUTOFF_HZ in src/taste/seeds.ts, which is frozen and deliberately NOT this). */
+export const DRUMS_TRACK_INIT_CUTOFF_HZ = 18000
+
 /** Adds a new track with the format's init patch (INIT_SYNTH; drum tracks start with no hits).
  * Color defaults cycle TRACK_COLORS by track index; name defaults to the id. Phase 22 Stream AB:
  * `lanes` lets a caller opt a fresh drum track into the OPEN lane list explicitly (the CLI's `beat
@@ -914,10 +936,11 @@ export function addTrack(
     name,
     color,
     kind,
-    // Drum tracks: the "synth" params drive the drum BUS in beatlab (cutoff = bus lowpass), so
-    // a fresh drum track opens the filter (beatlab's own bus default) — INIT_SYNTH's 2000 Hz is
-    // a lead-synth default that silently swallows hats/cymbals (found via a silent-hat render).
-    synth: kind === 'drums' ? { ...INIT_SYNTH, cutoff: 12000, resonance: 0.1 } : kind === 'audio' ? initAudioTrackSynth() : { ...INIT_SYNTH },
+    // Drum tracks: the "synth" params drive the drum BUS in beatlab (cutoff = bus lowpass), so a
+    // fresh drum track opens the filter — INIT_SYNTH's 2000 Hz is a lead-synth default that
+    // silently swallows hats/cymbals (found via a silent-hat render). See
+    // DRUMS_TRACK_INIT_CUTOFF_HZ above for why "opens" now means 18000 and not the old 12000.
+    synth: kind === 'drums' ? { ...INIT_SYNTH, cutoff: DRUMS_TRACK_INIT_CUTOFF_HZ, resonance: 0.1 } : kind === 'audio' ? initAudioTrackSynth() : { ...INIT_SYNTH },
     ...(kind === 'instrument' ? { instrument: { sample: opts.soundfont!.sample, program: opts.soundfont!.program, volume: -10, pan: 0 } } : {}),
     ...(kind === 'surge' ? { surge: { patch: opts.surge!.patch.trim().replace(/^"(.*)"$/, '$1'), sampleRate: opts.surge!.sampleRate ?? SURGE_DEFAULT_SAMPLE_RATE, overrides: opts.surge!.overrides ?? [] } } : {}),
     laneSamples: {},
