@@ -13,8 +13,10 @@
 // notes" action (research 22 §3.3's Consolidate menu item), which is the same
 // one-shot-rewrite-a-diff shape even though it isn't one of Ableton's six.
 
-import type { BeatDocument, BeatNote, BeatTrack } from './document.js'
+import type { BeatDocument, BeatNote, BeatScale, BeatTrack } from './document.js'
 import { formatNumber } from './format.js'
+// Seeded randomness comes from the ONE generator (CLAUDE.md's guardrail) — never a local copy.
+import { mulberry32 } from './rng.js'
 
 const canon = (n: number): number => Number(formatNumber(n))
 
@@ -115,8 +117,77 @@ export const SCALES: Readonly<Record<string, readonly number[]>> = {
   majorPentatonic: [0, 2, 4, 7, 9],
   minorPentatonic: [0, 3, 5, 7, 10],
   blues: [0, 3, 5, 6, 7, 10],
+  // ---- v0.12 (Phase 41 Stream E): the two THIRD-LESS sets. Every scale above this line contains
+  // either a minor third (3) or a major third (4) — i.e. every one of them commits the melody to
+  // major or minor. A large, coherent lane of music (the suspended/modal sound: sus2, sus4, add9,
+  // ♭7) is defined by NOT making that commitment, and against that harmony both thirds read as
+  // wrong notes. The motivating measurement, taken off a reference track's own chroma: with the
+  // tonic established at r=0.865/0.890 (Krumhansl-Schmuckler, harmonic and bass stems), the two
+  // thirds were the two RAREST pitch classes in the track (4/40 and 9/40 weight) while the colour
+  // tones dominated — tonic 40, fifth 34, second 21, fourth 17, ♭seventh 15. Normalized to the
+  // root that is exactly {0, 2, 5, 7, 10}, which is `susPentatonic` below: not an invented set, a
+  // transcribed one. (It is a real named mode — the second mode of the major pentatonic, also
+  // called Egyptian — which is why it earns a table entry rather than needing the `custom` form.)
+  susPentatonic: [0, 2, 5, 7, 10], // no third at all: root, 2nd, 4th, 5th, ♭7 — the sus/modal core
+  susHexatonic: [0, 2, 5, 7, 9, 10], // the same, plus the 6th — a little more melodic room, still third-less
 }
 export const SCALE_NAMES: readonly string[] = Object.keys(SCALES)
+
+/** The literal `name` a BeatScale uses when its pitch classes are given explicitly rather than
+ * looked up in SCALES. Not a key of SCALES (deliberately — a lookup must never silently succeed
+ * for it). */
+export const CUSTOM_SCALE_NAME = 'custom'
+
+/** The root-relative pitch classes of a scale name, or undefined for an unknown name. `custom` is
+ * NOT resolvable here by design — it has no table entry; use `resolveScalePitchClasses` with the
+ * full BeatScale (which carries its own explicit set) instead. */
+export function scaleByName(name: string): readonly number[] | undefined {
+  return SCALES[name]
+}
+
+/** Canonicalizes an explicit pitch-class set: deduplicated, ascending, every entry an integer
+ * 0-11, and containing 0 (see BeatScale's comment — a scale without its own root is a mistake).
+ * Throws BeatPitchTimeError rather than silently repairing, the same loud-failure stance the rest
+ * of the format takes. Exported so parse/edit/GUI all canonicalize identically. */
+export function canonicalPitchClasses(pcs: readonly number[]): number[] {
+  if (pcs.length === 0) throw new BeatPitchTimeError('a custom scale needs at least one pitch class')
+  for (const p of pcs) {
+    if (!Number.isInteger(p) || p < 0 || p > 11) throw new BeatPitchTimeError(`custom scale pitch classes must be integers 0-11 (root-relative), got ${p}`)
+  }
+  const out = [...new Set(pcs)].sort((a, b) => a - b)
+  if (!out.includes(0)) throw new BeatPitchTimeError(`a custom scale must contain 0 (its own root), got ${out.join(',')}`)
+  return out
+}
+
+/** THE one resolver every surface uses to turn a stored BeatScale into the pitch-class set it
+ * means — CLI, MCP, daemon, and the piano roll's row shading all call this rather than re-deriving
+ * it (the house "parity is structural, never disciplinary" rule). Returns root-relative classes;
+ * pair with `isPitchInScale` to test an absolute MIDI pitch. */
+export function resolveScalePitchClasses(scale: BeatScale): readonly number[] {
+  if (scale.name === CUSTOM_SCALE_NAME) {
+    if (!scale.pitchClasses) throw new BeatPitchTimeError('a custom scale must carry explicit pitchClasses')
+    return scale.pitchClasses
+  }
+  const table = SCALES[scale.name]
+  if (!table) throw new BeatPitchTimeError(`unknown scale "${scale.name}" (have: ${SCALE_NAMES.join(', ')}, ${CUSTOM_SCALE_NAME})`)
+  return table
+}
+
+/** Whether an absolute MIDI pitch is in `scale`. The single predicate the piano roll's row shading
+ * AND its note-entry lock both call, so "shaded" and "allowed" can never drift apart — a lock that
+ * disagreed with its own highlighting would be worse than no lock. */
+export function isPitchInScale(pitch: number, scale: BeatScale): boolean {
+  const pcs = resolveScalePitchClasses(scale)
+  return pcs.includes((((pitch - scale.root) % 12) + 12) % 12)
+}
+
+/** Whether a scale contains either third (minor=3 or major=4) relative to its root. Exposed
+ * because "does this scale commit me to major or minor" is the question the sus/modal case is
+ * actually asking, and the GUI labels a third-less scale as such. */
+export function scaleHasThird(scale: BeatScale): boolean {
+  const pcs = resolveScalePitchClasses(scale)
+  return pcs.includes(3) || pcs.includes(4)
+}
 
 /** The nearest in-scale pitch to `pitch` (searching outward in both directions at once); ties
  * (equal distance up and down) resolve to the LOWER pitch — an arbitrary but deterministic and
@@ -232,6 +303,80 @@ export function legatoNotes(doc: BeatDocument, trackId: string, opts: NoteScopeO
   return { doc: replaceTrack(doc, { ...track, notes }), changed }
 }
 
+// ---- Velocity shaping: Ramp and Randomize (Phase 41 Stream E) ---------------------------------
+//
+// The motivating case is a loop that repeats: a 4-bar melody played for 242 bars is the same eight
+// notes 60 times, and uniform velocity is what makes that read as a loop rather than a part.
+// humanize.ts already offers seeded Gaussian JITTER, which is the "randomize" half; there was no
+// DETERMINISTIC shaped half at all — no way to say "get louder across this phrase", which is the
+// single most common velocity edit there is.
+//
+// Deliberately NOT a breakpoint envelope: that is its own roadmap row with its own GUI widget. This
+// is the two-endpoint case, which covers crescendo/decrescendo and costs a line of math.
+
+/** THE ramp formula, shared by the CLI/MCP path and the piano roll's own toolbar (which computes
+ * it client-side to paint the velocity lane in the same gesture — ui/ has no build-time dependency
+ * on src/core, so it mirrors this and test/velocity-ramp-parity.test.ts pins both against the same
+ * expected values). Position `i` of `n` maps linearly from `from` to `to`; a single note takes
+ * `to`, the phrase's destination, since "ramp to 0.9" on one note plainly means 0.9. */
+export function rampVelocityAt(from: number, to: number, i: number, n: number): number {
+  if (n <= 1) return to
+  return from + (to - from) * (i / (n - 1))
+}
+
+/** Linearly ramps the scoped notes' velocities from `from` to `to`, ordered by START TIME (ties by
+ * id, the same total order legatoNotes uses) — a ramp is a statement about the phrase's shape in
+ * time, so two notes in a chord at the same start get adjacent ramp positions rather than one
+ * being arbitrarily skipped. Both endpoints are 0..1, the same unit `velocity` always uses. */
+export function rampVelocity(doc: BeatDocument, trackId: string, from: number, to: number, opts: NoteScopeOptions = {}): { doc: BeatDocument; changed: number } {
+  const track = findNoteTrack(doc, trackId)
+  for (const [label, v] of [['from', from], ['to', to]] as const) {
+    if (!Number.isFinite(v) || v < 0 || v > 1) throw new BeatPitchTimeError(`${label} must be a velocity 0..1, got ${v}`)
+  }
+  const wanted = scopeNoteIds(track, opts.noteIds)
+  const ordered = track.notes.filter((n) => wanted.has(n.id)).sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+  if (ordered.length === 0) return { doc, changed: 0 }
+  const target = new Map<string, number>()
+  ordered.forEach((n, i) => target.set(n.id, canon(rampVelocityAt(from, to, i, ordered.length))))
+  let changed = 0
+  const notes = track.notes.map((n) => {
+    const velocity = target.get(n.id)
+    if (velocity === undefined || velocity === n.velocity) return n
+    changed++
+    return { ...n, velocity }
+  })
+  return { doc: replaceTrack(doc, { ...track, notes }), changed }
+}
+
+/** Randomizes the scoped notes' velocities by up to +/-`amount` (0..1), seeded so the same seed
+ * over the same notes always produces the same result — reproducibility is the whole reason this
+ * isn't `Math.random()`, and it is what lets a variation be re-derived rather than stored.
+ *
+ * Draws come from src/core/rng.ts's mulberry32, the ONE generator (CLAUDE.md's own rule), and are
+ * consumed in a fixed order — notes sorted by (start, id) — so adding a note later in the phrase
+ * cannot shift every earlier note's draw. Results clamp to 0..1 rather than wrapping. */
+export function randomizeVelocity(doc: BeatDocument, trackId: string, amount: number, opts: NoteScopeOptions & { seed?: number } = {}): { doc: BeatDocument; changed: number } {
+  const track = findNoteTrack(doc, trackId)
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1) throw new BeatPitchTimeError(`amount must be > 0 and <= 1, got ${amount}`)
+  const wanted = scopeNoteIds(track, opts.noteIds)
+  const ordered = track.notes.filter((n) => wanted.has(n.id)).sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+  if (ordered.length === 0) return { doc, changed: 0 }
+  const rng = mulberry32(opts.seed ?? 1)
+  const target = new Map<string, number>()
+  for (const n of ordered) {
+    const delta = (rng() * 2 - 1) * amount
+    target.set(n.id, canon(Math.max(0, Math.min(1, n.velocity + delta))))
+  }
+  let changed = 0
+  const notes = track.notes.map((n) => {
+    const velocity = target.get(n.id)
+    if (velocity === undefined || velocity === n.velocity) return n
+    changed++
+    return { ...n, velocity }
+  })
+  return { doc: replaceTrack(doc, { ...track, notes }), changed }
+}
+
 // ---- Ratchet consolidate (research 22 §3.3's "Consolidate" menu action) ------------------------
 
 /** The spacing/length of one ratchet repeat within its note's own duration — the SAME shape
@@ -294,6 +439,9 @@ export function consolidateRatchet(doc: BeatDocument, trackId: string, opts: Not
         ratchetCount: 1,
         ratchetCurve: 0,
         ratchetLength: 1,
+        // v0.12: consolidating a MUTED ratchet yields muted notes — the mute is a property of the
+        // musical decision, not of the ratchet, so baking must not silently un-mute it.
+        active: n.active,
       })
     }
   }

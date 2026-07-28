@@ -39,7 +39,7 @@ track lead Lead #c678dd synth
   note n1 60 0 2 0.8
 `
   const doc = parse(text)
-  assert.deepEqual(lead(doc).notes[0], { id: 'n1', pitch: 60, start: 0, duration: 2, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1 })
+  assert.deepEqual(lead(doc).notes[0], { id: 'n1', pitch: 60, start: 0, duration: 2, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1, active: true })
   // and a track with no `groove` line gets the canonical "off" default
   assert.equal(lead(doc).shuffleAmount, 0)
   assert.equal(lead(doc).shuffleGrid, 1)

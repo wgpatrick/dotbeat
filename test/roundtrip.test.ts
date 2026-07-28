@@ -74,7 +74,7 @@ test('parses the worked example from format-spec.md into the expected shape', ()
     ...defaultSynthFields(), // v0.3: elided optional fields parse as their canonical defaults
   })
   assert.equal(lead.notes.length, 3)
-  assert.deepEqual(lead.notes[0], { id: 'n100000', pitch: 64, start: 0, duration: 2, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1 })
+  assert.deepEqual(lead.notes[0], { id: 'n100000', pitch: 64, start: 0, duration: 2, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1, active: true })
 })
 
 test('serialize(parse(x)) === x for the worked example (byte-identical round trip)', () => {
@@ -156,13 +156,14 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
         lanes: [],
         clips: [],
         notes: [
-          { id: 'u1', pitch: 33, start: 0, duration: 2, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1 },
-          { id: 'u2', pitch: 33, start: 4, duration: 2, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1 },
+          { id: 'u1', pitch: 33, start: 0, duration: 2, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1, active: true },
+          { id: 'u2', pitch: 33, start: 4, duration: 2, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1, active: true },
         ],
         hits: [],
         effects: defaultEffectChain(),
         shuffleAmount: 0,
         shuffleGrid: 1,
+        scale: null,
       },
       {
         id: 'drums',
@@ -183,6 +184,7 @@ test('parse(serialize(doc)) deep-equals doc for a hand-built multi-track documen
         effects: [],
         shuffleAmount: 0,
         shuffleGrid: 1,
+        scale: null,
       },
     ],
     media: [],
@@ -227,6 +229,7 @@ test('formatNumber stabilizes floating-point noise so round-tripping is idempote
         effects: defaultEffectChain(),
         shuffleAmount: 0,
         shuffleGrid: 1,
+        scale: null,
       },
     ],
     media: [],

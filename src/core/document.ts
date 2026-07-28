@@ -528,6 +528,14 @@ export interface BeatNote {
   ratchetCount: number // 1-16 int; repeat the note this many times within its own duration. 1 = no ratchet (default).
   ratchetCurve: number // -1..1; shapes the spacing between ratchet repeats (0 = even, see src/core/groove.ts-adjacent pitchtime.ts). Default 0.
   ratchetLength: number // 0..1 (exclusive of 0); each repeat's sounding length as a fraction of its own slot. 1 = fills the slot (default).
+  // ---- v0.12 (Phase 41 Stream E): the note "Deactivate" state — Ableton's `0` key mutes a note
+  // IN PLACE (greyed out, silent, still in the clip), a third state distinct from both active and
+  // deleted (manual ch.10 p.249). Before this, removeNote/`<track>.note.<id>` with an empty value
+  // only ever DELETED, so "try the phrase without this note" cost you the note's pitch/start/
+  // duration/velocity/chance/cent/ratchet state and any way back other than undo. Rides the same
+  // trailing `key=value` elision mechanism as chance/cent/ratchet* — `active=0` appears on the
+  // line iff the note is deactivated, so every pre-v0.12 file round-trips byte-identically.
+  active: boolean // false = present but silent (engine skips it, GUI dims it). true = default.
 }
 
 /** v0.10 note-field canonical defaults — the elision contract's other half (see BeatNote above):
@@ -539,7 +547,8 @@ export const NOTE_FIELD_DEFAULTS = {
   ratchetCount: 1,
   ratchetCurve: 0,
   ratchetLength: 1,
-} as const satisfies Pick<BeatNote, 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength'>
+  active: true,
+} as const satisfies Pick<BeatNote, 'chance' | 'cent' | 'ratchetCount' | 'ratchetCurve' | 'ratchetLength' | 'active'>
 
 /** Phase 26 Stream DI: the segment-shape a point starts (research/65's item 6, closing
  * `docs/product-roadmap.md`'s `❌ missing` curved-segments row). Lives on the LEFT point of a
@@ -990,6 +999,33 @@ export const EFFECT_PARAM_KEYS: Record<EffectType, readonly (keyof BeatSynth)[]>
  * (whose declaration order IS serialization order). */
 export const INSTRUMENT_EFFECT_FIELD_KEYS: ReadonlySet<string> = new Set(Object.values(EFFECT_PARAM_KEYS).flat())
 
+/** v0.12 (Phase 41 Stream E): a track's declared musical scale — Ableton's Scale Mode "Root Note +
+ * Scale Name" pair (manual ch.10 pp.269-272), stored rather than being panel-local state, so the
+ * piano roll can shade in-scale rows and (optionally) refuse out-of-scale note entry across
+ * sessions, and so every future generative note tool inherits one answer to "what is in key here."
+ *
+ * `root` is a pitch class 0-11 (0=C), NOT a note name. Deliberate: a name needs a canonical
+ * enharmonic spelling (C# vs Db) and the format admits exactly one canonical form per state —
+ * Ableton itself treats note-spelling as a SEPARATE, independent preference from the scale, and
+ * that preference is not modeled here. The GUI renders the name; the file stores the number, the
+ * same unit `fitToScaleNotes(doc, track, root, scale)` has always taken.
+ *
+ * `name` is either a key of pitchtime.ts's SCALES table, or the literal 'custom' — in which case
+ * `pitchClasses` carries the root-relative pitch-class set explicitly. The custom form exists
+ * because named modes cannot express every real harmonic choice: the measured motivating case is
+ * a track whose harmony is suspended/modal and measurably AVOIDS its own third (both the minor
+ * third and the major third near-absent from the chroma), which is not major, not minor, and not
+ * any single named seven-note mode — it is a specific pitch-class set. Rather than growing the
+ * SCALES table forever, 'custom' lets a set measured off a reference be written down directly.
+ * `pitchClasses` is non-null iff name === 'custom' (validated in parse/edit); entries are
+ * root-relative 0-11, deduplicated and ascending (canonical order), and must include 0 (a scale
+ * that doesn't contain its own root is a spelling mistake, not a musical choice). */
+export interface BeatScale {
+  root: number // pitch class 0-11 (0=C)
+  name: string // a SCALES key, or 'custom'
+  pitchClasses: number[] | null // root-relative pcs, ascending/deduped/containing 0; non-null iff name === 'custom'
+}
+
 export interface BeatTrack {
   id: string
   name: string
@@ -1032,6 +1068,11 @@ export interface BeatTrack {
   // property, like the synth chain, not clip-stored content).
   shuffleAmount: number // 0..1; 0 = no groove (default, elided). See groove.ts for the warp math.
   shuffleGrid: number // 16th-step subdivision the shuffle pairs against (1 = swung 16ths, 2 = swung 8ths, ...). Default 1; meaningless (and elided) while shuffleAmount is 0.
+  // v0.12: the track's declared scale (BeatScale above). Track-scoped for the same reason groove
+  // is: it's a property of the musical part, not of one clip's snapshot of it, and every clip on
+  // the track wants the same answer. null = undeclared (canonical elision — no `scale` line), which
+  // is exactly the pre-v0.12 state, so every existing file round-trips byte-identically.
+  scale: BeatScale | null
 }
 
 /** v0.10: a named, colored fold of N tracks into one collapsible group header (Phase 22 Stream AF —

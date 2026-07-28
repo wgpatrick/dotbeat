@@ -1337,6 +1337,15 @@ body {
 .noteview-note.chancy {
   border: 1px dashed rgba(255, 255, 255, 0.7);
 }
+/* v0.12 deactivate (Phase 41 Stream E): a muted note is switched off, not gone. The hard opacity
+   drop is applied inline (it multiplies with the chance dim — see NoteView.tsx); this adds the
+   second, non-opacity signal, because opacity alone is ambiguous against a quiet or probabilistic
+   note. A hollow fill with a solid outline reads as "the slot is still reserved". */
+.noteview-note.muted {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.55));
+  outline: 1px solid rgba(255, 255, 255, 0.45);
+  outline-offset: -1px;
+}
 .noteview-ratchet-tick {
   position: absolute;
   top: 1px;
@@ -1540,6 +1549,108 @@ body {
 /* Phase 27 Stream EG: blue accent — a one-shot operations panel, distinct from the read-only
    readout (green, below) and the per-note editor (gray, further below). See .note-inspector's
    comment for the palette-reuse rationale. */
+/* ---- Scale Mode panel (Phase 41 Stream E) ----------------------------------------------------
+   Same chip shape as `.pitch-time-panel` below (they sit adjacent and are read as one row of
+   controls), but a distinct left border colour: the Pitch & Time panel is one-shot ops that produce
+   a diff, while this one declares PERSISTENT state that changes what the grid above it means. The
+   two behave differently enough to be worth telling apart at a glance. */
+.scale-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--surface-recessed);
+  border: 1px solid var(--line);
+  border-left: 3px solid #78beff; /* the same hue the in-scale row tint uses, so panel and grid read as one feature */
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  color: var(--muted, #9aa0ab);
+}
+.scale-panel select,
+.scale-panel input[type='text'] {
+  font: inherit;
+  font-size: 11px;
+  background: var(--surface-recessed);
+  color: var(--text, #d8dbe2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+}
+.scale-panel-lock {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+.scale-panel-lock input:disabled + * ,
+.scale-panel-lock:has(input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+.scale-panel-readout {
+  color: var(--muted, #9aa0ab);
+}
+/* "no third" is the property a suspended/modal part is deliberately choosing — worth more than
+   muted-grey weight, since it is the whole reason that scale was picked. */
+.scale-panel-nothird {
+  color: #78beff;
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* ---- Velocity Ramp/Randomize toolbar (Phase 41 Stream E) -------------------------------------
+   Same chip shape as its neighbours; its own left-border hue because it is a third kind of thing
+   again — neither a persistent declaration (Scale) nor a structural one-shot (Pitch & Time), but a
+   shaping gesture over the velocity lane directly above it. Warm hue to match that lane. */
+.velocity-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--surface-recessed);
+  border: 1px solid var(--line);
+  border-left: 3px solid #e5c07b;
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  color: var(--muted, #9aa0ab);
+}
+.velocity-tools-scope {
+  color: var(--muted, #9aa0ab);
+  font-style: italic;
+}
+.velocity-tools-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.velocity-tools-field input {
+  font: inherit;
+  font-size: 11px;
+  width: 52px;
+  background: var(--surface-recessed);
+  color: var(--text, #d8dbe2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+}
+.velocity-tools button {
+  background: var(--panel-2, #23262e);
+  color: var(--text, #d8dbe2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.velocity-tools button:hover {
+  border-color: var(--accent);
+}
+
 .pitch-time-panel {
   display: flex;
   align-items: center;

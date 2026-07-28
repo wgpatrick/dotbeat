@@ -83,7 +83,7 @@ test('rollup clusters note edits per track and bar, and orders tracks by edit ma
   const entries: DiffEntry[] = [
     // lead: a note moved in bar 1 (step 4 -> 8) and one added in bar 2 (step 20)
     { kind: 'note-changed', trackId: 'lead', noteId: 'u1', changes: [{ field: 'start', before: 4, after: 8 }] },
-    { kind: 'note-added', trackId: 'lead', note: { id: 'u2', pitch: 60, start: 20, duration: 4, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1 } },
+    { kind: 'note-added', trackId: 'lead', note: { id: 'u2', pitch: 60, start: 20, duration: 4, velocity: 0.8, chance: 100, cent: 0, ratchetCount: 1, ratchetCurve: 0, ratchetLength: 1, active: true } },
     // pad: one tiny param tweak
     { kind: 'synth-param', trackId: 'pad', param: 'volume', before: -10, after: -8 },
   ]

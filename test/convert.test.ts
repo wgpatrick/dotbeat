@@ -85,6 +85,7 @@ test('every note on every real synth track survives the conversion exactly', () 
         chance: 100,
         cent: 0,
         ratchetCount: 1,
+        active: true,
         ratchetCurve: 0,
         ratchetLength: 1,
       })

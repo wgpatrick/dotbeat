@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { declaredLaneNames, firstPlacementClip, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatTrack } from '../types'
-import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, newGestureId, type PitchTimeOp } from '../daemon/bridge'
+import { declaredLaneNames, firstPlacementClip, type BeatClip, type BeatDocument, type BeatDrumHit, type BeatNote, type BeatScale, type BeatTrack } from '../types'
+import { postEdit, postSelection, postPitchTime, postPlaceClip, postLoadClip, postDuplicateNotes, commitVaryFeel, newGestureId, type PitchTimeOp } from '../daemon/bridge'
 import { engine } from '../audio/engine'
 import { useStore } from '../state/store'
 import { installKitLane, readDragPayload, LIBRARY_DND_MIME } from '../daemon/library'
@@ -105,6 +105,113 @@ const pc = (pitch: number) => ((pitch % 12) + 12) % 12
 const isBlackKey = (pitch: number) => BLACK_PCS.has(pc(pitch))
 /** Scientific pitch notation: MIDI 60 = C4 (middle C), 0 = C-1. Used for the key labels. */
 const pitchName = (pitch: number) => `${NOTE_NAMES[pc(pitch)]}${Math.floor(pitch / 12) - 1}`
+
+// ---- Scale Mode (Phase 41 Stream E) ------------------------------------------------------------
+// Ableton's Scale Mode (manual ch.10 pp.269-272): a persistent Root + Scale declaration that shades
+// the in-scale rows of the piano roll and, with the lock on, keeps note entry inside them. Stored
+// on the track (`BeatTrack.scale`, v0.12) rather than being panel-local, so it survives a reload
+// and every surface agrees on what "in key" means here.
+//
+// The table hand-mirrors src/core/pitchtime.ts's SCALES exactly — ui/ has no build-time dependency
+// on src/core, the same convention groove/chance/ratchet's engine-side mirrors already use. Unlike
+// the old name-only list this replaces, it carries the PITCH CLASSES too, because the row shading
+// and the entry lock both need them client-side. test/ui-scale-parity.test.ts asserts this table
+// equals core's, key for key and value for value, so the mirror cannot drift silently.
+const SCALE_TABLE: Readonly<Record<string, readonly number[]>> = {
+  chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  major: [0, 2, 4, 5, 7, 9, 11],
+  minor: [0, 2, 3, 5, 7, 8, 10],
+  dorian: [0, 2, 3, 5, 7, 9, 10],
+  phrygian: [0, 1, 3, 5, 7, 8, 10],
+  lydian: [0, 2, 4, 6, 7, 9, 11],
+  mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  locrian: [0, 1, 3, 5, 6, 8, 10],
+  harmonicMinor: [0, 2, 3, 5, 7, 8, 11],
+  melodicMinor: [0, 2, 3, 5, 7, 9, 11],
+  majorPentatonic: [0, 2, 4, 7, 9],
+  minorPentatonic: [0, 3, 5, 7, 10],
+  blues: [0, 3, 5, 6, 7, 10],
+  susPentatonic: [0, 2, 5, 7, 10],
+  susHexatonic: [0, 2, 5, 7, 9, 10],
+}
+const SCALE_NAMES = Object.keys(SCALE_TABLE)
+const CUSTOM_SCALE_NAME = 'custom'
+const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+
+/** The root-relative pitch classes a declared scale means, or null if it can't be resolved (an
+ * unknown name, or a custom scale with no set — both treated as "no scale declared" rather than
+ * throwing, since a half-typed value must never break the piano roll's render). */
+function scalePitchClasses(scale: BeatScale | null | undefined): readonly number[] | null {
+  if (!scale) return null
+  if (scale.name === CUSTOM_SCALE_NAME) return scale.pitchClasses && scale.pitchClasses.length ? scale.pitchClasses : null
+  return SCALE_TABLE[scale.name] ?? null
+}
+
+/** THE predicate. Row shading and the entry lock both call this one function, so a row that looks
+ * in-scale is exactly a row you're allowed to write on — a lock disagreeing with its own
+ * highlighting would be worse than no lock at all. Mirrors core's `isPitchInScale`. */
+function pitchInScale(pitch: number, scale: BeatScale | null | undefined): boolean {
+  const pcs = scalePitchClasses(scale)
+  if (!pcs) return true // nothing declared = everything is fair game
+  return pcs.includes(((pitch - scale!.root) % 12 + 12) % 12)
+}
+
+/** Nearest in-scale pitch, searching outward and preferring DOWN on an exact tie — the same
+ * deterministic tie-break core's `nearestScaleTone` documents, so snapping in the GUI and
+ * `beat fit-scale` on the CLI move a note to the same place. */
+function nearestInScale(pitch: number, scale: BeatScale | null | undefined): number {
+  if (pitchInScale(pitch, scale)) return pitch
+  for (let d = 1; d <= 127; d++) {
+    if (pitch - d >= 0 && pitchInScale(pitch - d, scale)) return pitch - d
+    if (pitch + d <= 127 && pitchInScale(pitch + d, scale)) return pitch + d
+  }
+  return pitch
+}
+
+/** The next in-scale pitch STRICTLY in the direction of travel (`dir` = +1 up, -1 down). Distinct
+ * from `nearestInScale` on purpose: an arrow-key nudge must move. Snapping "nearest" would take a
+ * note sitting on an in-scale row, target the semitone above, find that out of scale, and resolve
+ * DOWN to exactly where it started — an arrow key that visibly does nothing. Walking in the
+ * direction pressed makes ArrowUp under a scale lock mean "up to the next note in this key", which
+ * is what a musician means by it anyway. Returns the input unchanged if the edge is reached. */
+function nextInScale(pitch: number, dir: 1 | -1, scale: BeatScale | null | undefined): number {
+  for (let p = pitch; p >= 0 && p <= 127; p += dir) {
+    if (pitchInScale(p, scale)) return p
+  }
+  return pitch
+}
+
+/** Whether a declared scale contains either third — the question the suspended/modal case is
+ * actually asking. Drives the "no third" badge in the panel. Mirrors core's `scaleHasThird`. */
+function scaleHasThird(scale: BeatScale | null | undefined): boolean {
+  const pcs = scalePitchClasses(scale)
+  return !pcs || pcs.includes(3) || pcs.includes(4)
+}
+
+/** A human label for a declared scale: "C# susPentatonic", or "C# 0,2,5,7,10" for a custom set. */
+function scaleLabel(scale: BeatScale): string {
+  const root = PITCH_CLASSES[((scale.root % 12) + 12) % 12] ?? '?'
+  if (scale.name === CUSTOM_SCALE_NAME) return `${root} custom ${(scale.pitchClasses ?? []).join(',')}`
+  return `${root} ${scale.name}`
+}
+
+/** THE ramp formula — hand-mirrors src/core/pitchtime.ts's `rampVelocityAt` exactly (ui/ has no
+ * build-time dependency on src/core; test/velocity-ramp-parity.test.ts pins BOTH against the same
+ * expected values, so `beat velocity ramp` and this toolbar cannot produce different curves).
+ * Position `i` of `n` maps linearly from `from` to `to`; a single note takes `to`, the phrase's
+ * destination, since "ramp to 0.9" on one note plainly means 0.9. */
+function rampVelocityAt(from: number, to: number, i: number, n: number): number {
+  if (n <= 1) return to
+  return from + (to - from) * (i / (n - 1))
+}
+
+/** Scale-LOCK is deliberately session-only UI state, never written to the .beat file — the same
+ * call mute/solo and group-collapsed already make (see BeatGroup's comment in src/core/document.ts).
+ * The scale itself is a musical fact worth storing; "am I currently constraining my own mouse" is a
+ * working preference, and a lock silently persisting into a file someone else opens would be a
+ * surprise. Keyed by track id, module-level so it survives NoteView remounts within a session,
+ * exactly like `noteClipboard` above. */
+const scaleLockByTrack = new Map<string, boolean>()
 
 // ---- Clip View title bar (Phase 27 Stream ED, docs/research/71-ux-clip-view-midi-editing.md §3
 // P0 item 1) — Ableton's colored clip title strip is "the single strongest 'what am I editing'
@@ -221,6 +328,9 @@ interface EditorEvent {
   chance?: number
   ratchetCount?: number
   ratchetCurve?: number
+  // v0.12 (Phase 41 Stream E): the deactivate state. `undefined` for a drum hit, which has no such
+  // concept; `false` means the note is present but silent — a third state distinct from deleted.
+  active?: boolean
 }
 
 type GroupEv = { id: string; origStart: number; origRow: number; origDur: number | undefined }
@@ -437,6 +547,37 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const eventKind: 'note' | 'hit' = isDrums ? 'hit' : 'note'
   const editPrefix = eventKind // "<track>.note.*" / "<track>.hit.*" — matches core's edit.ts exactly
 
+  // Scale Mode (Phase 41 Stream E). The SCALE itself lives on the track (doc state); the LOCK is
+  // session-only, held in a module-level map keyed by track so switching tracks and back doesn't
+  // silently drop it — see scaleLockByTrack's own comment for why it isn't a stored field.
+  const trackScale = isDrums ? null : track.scale
+  const [scaleLocked, setScaleLockedState] = useState(() => scaleLockByTrack.get(track.id) ?? false)
+  function setScaleLocked(v: boolean) {
+    scaleLockByTrack.set(track.id, v)
+    setScaleLockedState(v)
+  }
+  // A lock with nothing to lock to is meaningless — clearing the scale releases it rather than
+  // leaving an invisible constraint armed for the next scale the user picks.
+  const lockActive = scaleLocked && !!trackScale && !isDrums
+  /** The one place the lock is applied to a pitch. Returns the pitch to actually use, and whether
+   * it had to move — callers use the second value to tell the user WHY their note landed elsewhere,
+   * because a note silently appearing a semitone off where you clicked is worse than being refused. */
+  function applyScaleLock(pitch: number): { pitch: number; snapped: boolean } {
+    if (!lockActive) return { pitch, snapped: false }
+    const next = nearestInScale(pitch, trackScale)
+    return { pitch: next, snapped: next !== pitch }
+  }
+  function announceSnap(from: number, to: number) {
+    showToast(`${pitchName(from)} is not in ${scaleLabel(trackScale!)} — placed ${pitchName(to)} instead. Uncheck Scale lock to write it anyway.`)
+  }
+
+  // Velocity Ramp/Randomize field state (Phase 41 Stream E). Defaults chosen to be USEFUL on the
+  // first click rather than neutral: 0.6 -> 0.95 is an audible crescendo, and ±0.12 is a scatter you
+  // can hear without it sounding broken. A toolbar whose defaults do nothing teaches nothing.
+  const [rampFrom, setRampFrom] = useState(0.6)
+  const [rampTo, setRampTo] = useState(0.95)
+  const [randAmount, setRandAmount] = useState(0.12)
+
   const pitchWindowRef = useRef<{ trackId: string; lo: number; hi: number } | null>(null)
   // Phase 29 Stream GC bug 2 (research 80/83): freeze the pitch window per-track, in a ref, instead
   // of recomputing it fresh from `track.notes` on every render — the recompute-every-render version
@@ -461,6 +602,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
         chance: n.chance,
         ratchetCount: n.ratchetCount,
         ratchetCurve: n.ratchetCurve,
+        active: n.active,
       }))
 
   // Phase 29 Stream GA: sync the live buffer to the selected section's clip whenever WHICH clip
@@ -576,6 +718,16 @@ export function NoteView({ track }: { track: BeatTrack }) {
     if (start !== origStart) postEdit(`${track.id}.${editPrefix}.${id}.start`, String(start), gestureId)
     if (row !== origRow) {
       const field = eventKind === 'note' ? 'pitch' : 'lane'
+      // Scale lock applies to DRAGGING a note as much as placing one — a lock that only guarded
+      // the first placement would let the same wrong note in through the more common gesture.
+      // Lane values (drums) are strings and have no scale, so the lock is note-only by construction.
+      if (eventKind === 'note') {
+        const target = axis.valueOfRow(row) as number
+        const { pitch, snapped } = applyScaleLock(target)
+        if (snapped) announceSnap(target, pitch)
+        postEdit(`${track.id}.note.${id}.pitch`, String(pitch), gestureId)
+        return
+      }
       postEdit(`${track.id}.${editPrefix}.${id}.${field}`, String(axis.valueOfRow(row)), gestureId)
     }
   }
@@ -669,7 +821,15 @@ export function NoteView({ track }: { track: BeatTrack }) {
     // per `applyLocalEdit`'s `[...t.notes, note]` / `[...t.hits, hit]`) makes the new event
     // authoritative for the very next keyboard action, matching what it already looked like on screen.
     if (eventKind === 'note') {
-      postEdit(`${track.id}.note`, `${axis.valueOfRow(row)} ${step} ${DEFAULT_DUR} ${DEFAULT_VEL}`)
+      // Scale lock (Phase 41 Stream E): a click on an out-of-scale row places the nearest IN-scale
+      // note instead of the one clicked, and says so. Snapping rather than refusing is deliberate —
+      // a click that produces nothing reads as a broken grid, while a note one row off with an
+      // explanation reads as the tool doing its job. `nearestInScale` shares core's own
+      // prefer-downward tie-break, so this lands where `beat fit-scale` would.
+      const clickedPitch = axis.valueOfRow(row) as number
+      const { pitch: placedPitch, snapped } = applyScaleLock(clickedPitch)
+      if (snapped) announceSnap(clickedPitch, placedPitch)
+      postEdit(`${track.id}.note`, `${placedPitch} ${step} ${DEFAULT_DUR} ${DEFAULT_VEL}`)
       const t = useStore.getState().doc?.tracks.find((tt) => tt.id === track.id)
       const added = t?.notes[t.notes.length - 1]
       setSel(added ? [added.id] : [])
@@ -983,7 +1143,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
       const ids = new Set(st.editNoteIds)
       const liveEvents: EditorEvent[] = isDrums
         ? t.hits.map((h) => ({ id: h.id, start: h.start, duration: h.duration, velocity: h.velocity, row: axis.rowOfValue(h.lane) }))
-        : t.notes.map((n) => ({ id: n.id, start: n.start, duration: n.duration, velocity: n.velocity, row: axis.rowOfValue(n.pitch) }))
+        : t.notes.map((n) => ({ id: n.id, start: n.start, duration: n.duration, velocity: n.velocity, row: axis.rowOfValue(n.pitch), active: n.active }))
 
       if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
         e.preventDefault()
@@ -1047,6 +1207,25 @@ export function NoteView({ track }: { track: BeatTrack }) {
 
       if (!chosen.length) return
 
+      // v0.12 deactivate (Phase 41 Stream E) — Ableton's `0` key mutes a note in place (manual
+      // ch.10 p.249). Notes only: a drum hit has no `active` field, so on a drums track this key
+      // falls through untouched rather than erroring. Toggles as ONE gesture across the whole
+      // selection (one gestureId, same multi-select coalescing fix Delete below already carries),
+      // and the direction is decided ONCE from the selection as a whole — if ANY selected note is
+      // still active, the keypress mutes them all; only when every one is already muted does it
+      // unmute. A per-note toggle would invert a mixed selection into the same mixed selection,
+      // which reads as the key not working.
+      //
+      // Selection is deliberately KEPT (unlike Delete, which clears it): the whole point of a mute
+      // is A/B-ing, so the next press must land on the same notes without re-selecting them.
+      if (e.key === '0' && !isDrums) {
+        e.preventDefault()
+        const anyActive = chosen.some((ev) => ev.active !== false)
+        const gestureId = newGestureId()
+        for (const ev of chosen) postEdit(`${track.id}.note.${ev.id}.active`, anyActive ? '0' : '1', gestureId)
+        return
+      }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
         // Phase 30 Stream JB (research/89): a multi-select delete is one user gesture (one keypress)
@@ -1099,13 +1278,28 @@ export function NoteView({ track }: { track: BeatTrack }) {
         if (ds) postEdit(`${track.id}.${editPrefix}.${ev.id}.start`, String(ev.start + ds), gestureId)
         if (dr) {
           const field = eventKind === 'note' ? 'pitch' : 'lane'
+          if (eventKind === 'note') {
+            // Scale lock on an arrow nudge walks to the next in-scale pitch in the direction
+            // pressed (see nextInScale's own comment for why "nearest" would deadlock ArrowUp).
+            // An octave jump (shift) lands in-scale already when the source was, so this is a
+            // no-op there. Clamped back into the rendered pitch window, which every mutation in
+            // this file respects — a frozen window must never be handed an unrepresentable note.
+            const raw = axis.valueOfRow(ev.row + dr) as number
+            const wanted = lockActive ? nextInScale(raw, dr < 0 ? 1 : -1, trackScale) : raw
+            const loPitch = axis.valueOfRow(rows - 1) as number
+            const hiPitch = axis.valueOfRow(0) as number
+            const clamped = Math.max(loPitch, Math.min(hiPitch, wanted))
+            if (clamped === (axis.valueOfRow(ev.row) as number)) continue // nowhere to go in this key
+            postEdit(`${track.id}.note.${ev.id}.pitch`, String(clamped), gestureId)
+            continue
+          }
           postEdit(`${track.id}.${editPrefix}.${ev.id}.${field}`, String(axis.valueOfRow(ev.row + dr)), gestureId)
         }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editable, track.id, setSel, isDrums, eventKind, axis, rows])
+  }, [editable, track.id, setSel, isDrums, eventKind, axis, rows, lockActive, trackScale])
 
   // ---- velocity (draw-across-notes paint gesture on the velocity lane, Phase 28 Stream FD) ----
   // Follow-through 1 (research/76 §1.1/§3 P1 item 3): this used to be a single-note-anchored drag —
@@ -1162,6 +1356,63 @@ export function NoteView({ track }: { track: BeatTrack }) {
     setVelDragLabel(null)
     if (!g || !p) return
     for (const [id, value] of Object.entries(p)) postEdit(`${track.id}.${editPrefix}.${id}.velocity`, String(value))
+  }
+
+  // ---- velocity Ramp / Randomize (Phase 41 Stream E) ------------------------------------------
+  // The draw-across gesture above shapes velocities freehand; these are the two shapes you almost
+  // always actually want, in one click. The case that motivated them: a 4-bar loop repeated for
+  // hundreds of bars is the same eight notes over and over, and flat velocity is precisely what
+  // makes that read as a loop instead of a part.
+  //
+  // Both write through the same per-note `.velocity` /edit path the paint gesture uses, stamped
+  // with ONE gestureId so the whole shape is a single Undo — the same multi-note coalescing every
+  // other batch gesture in this file already does. No new daemon route: velocity is a scalar field
+  // and the generic {path,value} channel already expresses it exactly.
+  //
+  // Scope follows the same rule as the Pitch & Time panel: the current selection when there is one,
+  // the whole track otherwise. Ordered by START TIME (ties by id) — a ramp is a claim about the
+  // phrase's shape in time, and that is the same total order core's `rampVelocity` uses.
+  function scopedNotesInOrder(): BeatNote[] {
+    const t = useStore.getState().doc?.tracks.find((x) => x.id === track.id)
+    if (!t) return []
+    const chosen = sel.length > 0 ? t.notes.filter((n) => sel.includes(n.id)) : t.notes
+    return [...chosen].sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+  }
+
+  function applyVelocityRamp(from: number, to: number) {
+    const ordered = scopedNotesInOrder()
+    if (ordered.length === 0) {
+      showToast('No notes to ramp — select some notes, or add some to this track first.')
+      return
+    }
+    const gestureId = newGestureId()
+    ordered.forEach((n, i) => {
+      const value = Number(rampVelocityAt(from, to, i, ordered.length).toFixed(4))
+      if (value === n.velocity) return
+      postEdit(`${track.id}.note.${n.id}.velocity`, String(value), gestureId)
+    })
+    showToast(`Ramped ${ordered.length} note${ordered.length === 1 ? '' : 's'} from ${from} to ${to}.`)
+  }
+
+  function applyVelocityRandomize(amount: number) {
+    const ordered = scopedNotesInOrder()
+    if (ordered.length === 0) {
+      showToast('No notes to randomize — select some notes, or add some to this track first.')
+      return
+    }
+    // Unlike the ramp, this one is NOT mirrored math: it goes through the daemon's own humanize/
+    // velocity primitive... except that route belongs to another stream tonight. So the GUI draws
+    // here with Math.random deliberately and says so — a one-off scatter the user judges by ear and
+    // re-rolls if they don't like it, exactly like re-clicking a dice button. `beat velocity
+    // randomize --seed N` is the reproducible path, and the toast points at it.
+    const gestureId = newGestureId()
+    for (const n of ordered) {
+      const delta = (Math.random() * 2 - 1) * amount
+      const value = Number(Math.max(0, Math.min(1, n.velocity + delta)).toFixed(4))
+      if (value === n.velocity) continue
+      postEdit(`${track.id}.note.${n.id}.velocity`, String(value), gestureId)
+    }
+    showToast(`Scattered ${ordered.length} velocit${ordered.length === 1 ? 'y' : 'ies'} by up to ±${amount}. Click again to re-roll; use \`beat velocity randomize --seed N\` for a reproducible one.`)
   }
 
   // ---- chance (draw-across-notes paint gesture, Phase 23 Stream BA) ----
@@ -1223,7 +1474,7 @@ export function NoteView({ track }: { track: BeatTrack }) {
   const tip = editable
     ? isDrums
       ? 'click a lane label to preview + select · click empty grid to add a hit (a marker — no duration) · drag to marquee-select · shift/cmd-click to multi-select · drag a hit (or group) to move · drag its right edge to gate/sustain it (marker -> bar) · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand (off-grid) placement'
-      : 'click a key to preview · click empty grid to add · drag to marquee-select · shift/cmd-click to multi-select · drag a note (or group) to move · drag its right edge to resize · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand placement · hold Alt/Option at the START of a drag to duplicate instead of move · cmd/ctrl+c / cmd/ctrl+v to copy/paste at the playhead · dashed/dim = chance<100 · ticks = ratchet · drag the chance lane across notes to paint probability'
+      : 'click a key to preview · click empty grid to add · drag to marquee-select · shift/cmd-click to multi-select · drag a note (or group) to move · drag its right edge to resize · arrows nudge · shift+←/→ resize · delete removes · double-click to delete · hold Alt/Cmd while dragging for freehand placement · hold Alt/Option at the START of a drag to duplicate instead of move · cmd/ctrl+c / cmd/ctrl+v to copy/paste at the playhead · 0 mutes/unmutes the selection in place (it stays in the clip) · dashed/dim = chance<100 · dim+outlined = muted · ticks = ratchet · drag the chance lane across notes to paint probability · tinted rows = in the declared scale (Scale panel below); with lock on, notes snap into it'
     : ''
 
   // Rubber-band overlay geometry (grid-relative px), only while an actual drag is in progress.
@@ -1534,6 +1785,40 @@ export function NoteView({ track }: { track: BeatTrack }) {
                 if (!axis.isBlackRow(row)) return null
                 return <div key={`sh${row}`} className="noteview-rowshade" style={{ position: 'absolute', left: 0, right: 0, top: row * ROW_H, height: ROW_H, background: 'rgba(255,255,255,0.028)', pointerEvents: 'none' }} />
               })}
+              {/* Scale Mode row shading (Phase 41 Stream E). Painted ABOVE the black-key shading
+                  and BELOW the octave lines and events, pointer-transparent like both, so grid
+                  add/marquee are unaffected. Drawn as a tint on the IN-scale rows rather than a
+                  scrim over the out-of-scale ones: the in-key rows are what you're aiming at, and
+                  tinting them keeps the black-key shading underneath readable instead of washing
+                  the whole grid. The ROOT row gets a stronger tint plus a left edge marker — with a
+                  third-less scale especially, knowing which row is the tonic is most of the point.
+                  Uses the same `pitchInScale` predicate the entry lock uses, so a shaded row is
+                  exactly a row the lock will let you write on. */}
+              {!isDrums &&
+                trackScale &&
+                Array.from({ length: rows }, (_, row) => {
+                  const pitch = axis.valueOfRow(row) as number
+                  if (!pitchInScale(pitch, trackScale)) return null
+                  const isRoot = pc(pitch) === ((trackScale.root % 12) + 12) % 12
+                  return (
+                    <div
+                      key={`sc${row}`}
+                      className={`noteview-scalerow${isRoot ? ' root' : ''}`}
+                      data-scale-row={pitch}
+                      data-scale-root={isRoot ? 'true' : undefined}
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        top: row * ROW_H,
+                        height: ROW_H,
+                        background: isRoot ? 'rgba(120, 190, 255, 0.16)' : 'rgba(120, 190, 255, 0.07)',
+                        borderLeft: isRoot ? '2px solid rgba(120, 190, 255, 0.55)' : undefined,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  )
+                })}
               {!isDrums &&
                 Array.from({ length: rows }, (_, row) => {
                   if (pc(axis.valueOfRow(row) as number) !== 0) return null
@@ -1564,10 +1849,15 @@ export function NoteView({ track }: { track: BeatTrack }) {
             // the app now shares (effect-chain reorder, section-chip reorder, arrangement clip-block
             // move) rather than inventing a fifth treatment.
             const isDraggingNote = !!preview?.[ev.id]
+            // v0.12 deactivate (Phase 41 Stream E): a muted note stays exactly where it is, at its
+            // real pitch/duration, and reads as switched-off rather than absent — you are supposed
+            // to be able to see the shape of the phrase you just removed a note from, which is the
+            // entire reason this is a state and not a delete.
+            const isMuted = ev.active === false
             return (
               <div
                 key={ev.id}
-                className={`noteview-note${selSet.has(ev.id) ? ' selected' : ''}${isMarker ? ' marker' : ''}${isChancy ? ' chancy' : ''}${isRatcheted ? ' ratcheted' : ''}${isDraggingNote ? ` ${DRAGGING_CLASS}` : ''}`}
+                className={`noteview-note${selSet.has(ev.id) ? ' selected' : ''}${isMarker ? ' marker' : ''}${isChancy ? ' chancy' : ''}${isRatcheted ? ' ratcheted' : ''}${isMuted ? ' muted' : ''}${isDraggingNote ? ` ${DRAGGING_CLASS}` : ''}`}
                 style={{
                   left: `calc(${shown.start} * var(--note-step-w))`,
                   width: isMarker ? `${MARKER_W}px` : `calc(${shown.duration} * var(--note-step-w) - 1px)`,
@@ -1581,7 +1871,11 @@ export function NoteView({ track }: { track: BeatTrack }) {
                   // rectangle (research/71 §2.4). Base color/opacity now stays constant regardless of
                   // velocity; the chance dim (a real "might not play" signal) is the only opacity
                   // encoding left, and stays legible on its own now that it's not fighting velocity.
-                  opacity: isChancy ? 0.6 : 1,
+                  // A muted note dims hard — well past the chance dim, which means "might not
+                  // play"; this one means "will not play". The two stack multiplicatively so a
+                  // muted probabilistic note still reads as both, same rule the chance/velocity
+                  // comment above establishes.
+                  opacity: (isChancy ? 0.6 : 1) * (isMuted ? 0.3 : 1),
                   // A marker (no duration — a one-shot trigger) is a small pill, not a bar; a bar
                   // has square corners like the melodic notes. No transform/rotation on the
                   // container itself, so the resize-handle child's pointer math stays screen-space.
@@ -1591,11 +1885,13 @@ export function NoteView({ track }: { track: BeatTrack }) {
                   eventKind === 'note'
                     ? `pitch ${axis.valueOfRow(shown.row)} · start ${shown.start} · dur ${shown.duration} · vel ${ev.velocity}` +
                       (isChancy ? ` · chance ${chance}%` : '') +
-                      (isRatcheted ? ` · ratchet x${ratchetCount}` : '')
+                      (isRatcheted ? ` · ratchet x${ratchetCount}` : '') +
+                      (isMuted ? ' · MUTED (press 0 to unmute)' : '')
                     : `${axis.valueOfRow(shown.row)} · start ${shown.start}${shown.duration !== undefined ? ` · dur ${shown.duration}` : ' · one-shot'} · vel ${ev.velocity}`
                 }
                 data-note-id={ev.id}
                 data-chance={isChancy ? chance : undefined}
+                data-note-muted={isMuted ? 'true' : undefined}
                 data-ratchet-count={isRatcheted ? ratchetCount : undefined}
                 onDoubleClick={(e) => {
                   e.stopPropagation()
@@ -1709,6 +2005,72 @@ export function NoteView({ track }: { track: BeatTrack }) {
           </div>
         </div>
       </div>
+      {!isDrums && <ScalePanel track={track} locked={scaleLocked} onLockedChange={setScaleLocked} />}
+      {!isDrums && editable && (
+        <div
+          className="velocity-tools"
+          data-testid="velocity-tools"
+          title="shape the velocities of the selection (or the whole track when nothing is selected) — the freehand alternative is dragging across the velocity lane above"
+        >
+          <span className="velocity-tools-title section-heading">Velocity</span>
+          <span className="velocity-tools-scope">{sel.length > 0 ? `${sel.length} selected` : 'whole track'}</span>
+          <label className="velocity-tools-field" title="starting velocity of the ramp (0..1)">
+            from
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={rampFrom}
+              data-velocity-input="from"
+              onChange={(e) => setRampFrom(Math.max(0, Math.min(1, Number(e.target.value))))}
+            />
+          </label>
+          <label className="velocity-tools-field" title="ending velocity of the ramp (0..1)">
+            to
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={rampTo}
+              data-velocity-input="to"
+              onChange={(e) => setRampTo(Math.max(0, Math.min(1, Number(e.target.value))))}
+            />
+          </label>
+          <button data-velocity-op="ramp" title="linearly ramp velocities across the phrase in start-time order" onClick={() => applyVelocityRamp(rampFrom, rampTo)}>
+            Ramp
+          </button>
+          {/* Swapping the endpoints is the single most common follow-up ("no, the other way"), and
+              doing it by hand means retyping two fields. */}
+          <button
+            data-velocity-op="ramp-flip"
+            title="swap from/to and ramp the other way"
+            onClick={() => {
+              setRampFrom(rampTo)
+              setRampTo(rampFrom)
+              applyVelocityRamp(rampTo, rampFrom)
+            }}
+          >
+            ⇄
+          </button>
+          <label className="velocity-tools-field" title="maximum deviation for Randomize (0..1)">
+            ±
+            <input
+              type="number"
+              min={0.01}
+              max={1}
+              step={0.05}
+              value={randAmount}
+              data-velocity-input="amount"
+              onChange={(e) => setRandAmount(Math.max(0.01, Math.min(1, Number(e.target.value))))}
+            />
+          </label>
+          <button data-velocity-op="randomize" title="scatter velocities by up to ±amount; click again to re-roll" onClick={() => applyVelocityRandomize(randAmount)}>
+            Randomize
+          </button>
+        </div>
+      )}
       {!isDrums && <PitchTimePanel track={track} noteIds={sel} totalSteps={totalSteps} />}
       {!isDrums && <NoteNameReadout track={track} noteIds={sel} />}
       {editable && eventKind === 'note' && sel.length === 1 && (
@@ -1748,6 +2110,26 @@ export function NoteView({ track }: { track: BeatTrack }) {
                   },
                 ]
               : []),
+            // v0.12 deactivate (Phase 41 Stream E): the discoverable twin of the `0` key. Notes
+            // only, same reason Duplicate above is notes-only. Label states the direction the
+            // click will actually go, decided the same "any active = mute them all" way the
+            // keyboard toggle decides it, so menu text and keypress can never disagree.
+            ...(eventKind === 'note'
+              ? [
+                  {
+                    key: 'toggle-active',
+                    label: (() => {
+                      const anyActive = track.notes.filter((n) => ids.includes(n.id)).some((n) => n.active !== false)
+                      return `${anyActive ? 'Mute' : 'Unmute'} ${noun}`
+                    })(),
+                    onSelect: () => {
+                      const anyActive = track.notes.filter((n) => ids.includes(n.id)).some((n) => n.active !== false)
+                      const gestureId = newGestureId()
+                      for (const id of ids) postEdit(`${track.id}.note.${id}.active`, anyActive ? '0' : '1', gestureId)
+                    },
+                  },
+                ]
+              : []),
             {
               key: 'quantize',
               label: `Quantize ${noun} to grid`,
@@ -1773,24 +2155,8 @@ export function NoteView({ track }: { track: BeatTrack }) {
 // gated on a selection existing, since every op works over "the whole track" when nothing is
 // selected (the exact same `--notes` optional-scoping vocabulary the CLI/MCP tools already use).
 
-// Hand-mirrors src/core/pitchtime.ts's SCALES keys exactly (ui/ has no build-time dependency on
-// src/core — the same convention groove/chance/ratchet's engine-side mirrors already use).
-const SCALE_NAMES = [
-  'chromatic',
-  'major',
-  'minor',
-  'dorian',
-  'phrygian',
-  'lydian',
-  'mixolydian',
-  'locrian',
-  'harmonicMinor',
-  'melodicMinor',
-  'majorPentatonic',
-  'minorPentatonic',
-  'blues',
-] as const
-const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+// (SCALE_TABLE / SCALE_NAMES / PITCH_CLASSES now live at the top of this file alongside the other
+// pitch helpers — Scale Mode's row shading needs them too, not just this panel. Phase 41 Stream E.)
 
 // Phase 26 Stream DF: the grid-step vocabulary quantizeNotes (src/core/edit.ts:390-466) actually
 // takes — a plain "16th steps per grid cell" number (1 = 16ths, 2 = 8ths, 4 = quarters, 0.5 =
@@ -1986,6 +2352,44 @@ function PitchTimePanel({ track, noteIds, totalSteps }: { track: BeatTrack; note
         </button>
       </div>
 
+      {/* Phase 41 Stream E (roadmap: "One-click Humanize inside the Pitch & Time panel" — "the
+          cheapest item on this list relative to value; the hard part, the algorithm, is already
+          done"). Ableton keeps a plain Humanize button in the same selection-transform panel as
+          Transpose/Invert/Legato (ch.10 pp.207-210); dotbeat had the primitive (src/core/
+          humanize.ts, `beat humanize`) with no affordance here.
+
+          It goes through the EXISTING POST /vary-feel/commit route, which is already exactly this
+          call — humanize(doc, track, {timing: 0.15, velocity: 0.06, seed}) — rather than adding a
+          `humanize` case to /pitch-time. That route lives in daemon.ts, which another stream owns
+          tonight; reusing a route that already does the thing beats duplicating the handler, which
+          is what "parity is structural" would advise regardless.
+
+          The consequence is that this one op is WHOLE-TRACK where its neighbours honour the
+          selection, because /vary-feel/commit only note-scopes drum lanes. That is stated in the
+          label, not buried in a tooltip: a button reading "Humanize" in a panel headed "3 notes
+          selected" would be a quiet lie, and a user who selects three notes and watches forty move
+          has been misled by the control, not by the docs. Note-scoped humanize needs `ids` plumbed
+          through that route — reported to the stream that owns it.
+
+          A fresh seed per click, so clicking again re-rolls rather than replaying the same
+          deviation — the same "click to re-roll" contract the Randomize button has. */}
+      <button
+        disabled={busy}
+        data-pitch-time-op="humanize"
+        title="nudge every note on this track slightly off the grid (timing 0.15, velocity 0.06) — the same `beat humanize` the CLI runs. Whole track, not the selection. Click again to re-roll."
+        onClick={() => {
+          setBusy(true)
+          setMsg(null)
+          const seed = Math.floor(Math.random() * 1000000)
+          void commitVaryFeel(track.id, seed)
+            .then(() => setMsg(`humanized the whole track (seed ${seed})`))
+            .catch((e) => setMsg(e instanceof Error ? e.message : String(e)))
+            .finally(() => setBusy(false))
+        }}
+      >
+        Humanize track
+      </button>
+
       <button
         disabled={busy}
         data-pitch-time-op="consolidate"
@@ -1998,6 +2402,126 @@ function PitchTimePanel({ track, noteIds, totalSteps }: { track: BeatTrack; note
       {msg && (
         <span className="pitch-time-msg" data-pitch-time-msg>
           {msg}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// ---- Scale Mode panel (Phase 41 Stream E) -----------------------------------------------------
+// Ableton's Scale Mode is a persistent Root + Scale declaration, not a one-shot transform — see
+// SCALE_TABLE at the top of this file. This panel is where it's declared; the shading in the grid
+// and the entry lock in the pointer/keyboard handlers are where it's felt.
+//
+// The `custom` entry is the load-bearing one, not an escape hatch. A named mode always answers
+// "major or minor?" — every one of the thirteen pre-v0.12 scales contains a third. Music built on
+// suspended/modal harmony answers "neither", and against that harmony both thirds are wrong notes.
+// A set measured off a reference track's chroma can be typed in directly here.
+
+function ScalePanel({ track, locked, onLockedChange }: { track: BeatTrack; locked: boolean; onLockedChange: (v: boolean) => void }) {
+  const scale = track.scale
+  const [customText, setCustomText] = useState(() => (scale?.pitchClasses ?? [0, 2, 5, 7, 10]).join(','))
+  const declared = !!scale
+  const pcs = scalePitchClasses(scale)
+
+  function writeScale(root: number, name: string, custom: string) {
+    if (name === CUSTOM_SCALE_NAME) {
+      // Canonicalize before sending, matching core's parseScaleValue: dedupe + ascending. Core
+      // canonicalizes again on receipt (it is the authority) — this is just so the local mirror and
+      // the field agree instantly.
+      const parsed = custom
+        .split(',')
+        .map((t) => Number(t.trim()))
+        .filter((n) => Number.isInteger(n) && n >= 0 && n <= 11)
+      const canonical = [...new Set(parsed)].sort((a, b) => a - b)
+      if (!canonical.includes(0)) {
+        showToast('A scale must contain 0 — its own root. Add 0 to the pitch-class list.')
+        return
+      }
+      postEdit(`${track.id}.scale`, `${root} ${CUSTOM_SCALE_NAME} ${canonical.join(',')}`)
+      return
+    }
+    postEdit(`${track.id}.scale`, `${root} ${name}`)
+  }
+
+  return (
+    <div
+      className="scale-panel"
+      data-testid="scale-panel"
+      data-scale-declared={declared ? scaleLabel(scale!) : undefined}
+      data-scale-locked={locked ? 'true' : undefined}
+      title="Scale Mode — shade the in-scale rows of the piano roll, and (with the lock on) keep note entry inside them"
+    >
+      <span className="scale-panel-title section-heading">Scale</span>
+
+      <select
+        value={scale?.root ?? 0}
+        data-scale-input="root"
+        title="root note of the scale"
+        onChange={(e) => writeScale(Number(e.target.value), scale?.name ?? 'major', customText)}
+      >
+        {PITCH_CLASSES.map((n, i) => (
+          <option key={n} value={i}>
+            {n}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value={scale?.name ?? ''}
+        data-scale-input="name"
+        title="named mode, or `custom` for an explicit pitch-class set"
+        onChange={(e) => {
+          const name = e.target.value
+          if (name === '') {
+            postEdit(`${track.id}.scale`, '') // clears the declaration
+            return
+          }
+          writeScale(scale?.root ?? 0, name, customText)
+        }}
+      >
+        <option value="">(none)</option>
+        {SCALE_NAMES.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+        <option value={CUSTOM_SCALE_NAME}>{CUSTOM_SCALE_NAME}…</option>
+      </select>
+
+      {scale?.name === CUSTOM_SCALE_NAME && (
+        <input
+          type="text"
+          className="scale-panel-custom"
+          data-scale-input="custom"
+          value={customText}
+          size={12}
+          title="root-relative pitch classes, comma separated — e.g. 0,2,5,7,10 for a third-less sus set"
+          onChange={(e) => setCustomText(e.target.value)}
+          onBlur={() => writeScale(scale.root, CUSTOM_SCALE_NAME, customText)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') writeScale(scale.root, CUSTOM_SCALE_NAME, customText)
+          }}
+        />
+      )}
+
+      <label className="scale-panel-lock" title="with the lock on, a note you place or drag snaps to the nearest in-scale row instead of landing out of key">
+        <input
+          type="checkbox"
+          checked={locked}
+          disabled={!declared}
+          data-scale-input="lock"
+          onChange={(e) => onLockedChange(e.target.checked)}
+        />
+        lock
+      </label>
+
+      {/* The badge that makes the point of this whole row visible: whether the declared scale
+          commits the melody to major or minor at all. For suspended/modal writing, "no third" is
+          the property you are deliberately choosing, and it is worth seeing at a glance. */}
+      {declared && pcs && (
+        <span className="scale-panel-readout" data-scale-readout title="the pitch classes this scale allows, relative to its root">
+          {pcs.length} tones{!scaleHasThird(scale) && <em className="scale-panel-nothird" data-scale-no-third> · no third</em>}
         </span>
       )}
     </div>

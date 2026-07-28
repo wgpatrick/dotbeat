@@ -36,6 +36,9 @@ function noteOptionalTokens(n: BeatNote): string {
   if (n.ratchetCount !== NOTE_FIELD_DEFAULTS.ratchetCount) parts.push(`ratchetCount=${n.ratchetCount}`)
   if (formatNumber(n.ratchetCurve) !== formatNumber(NOTE_FIELD_DEFAULTS.ratchetCurve)) parts.push(`ratchetCurve=${formatNumber(n.ratchetCurve)}`)
   if (formatNumber(n.ratchetLength) !== formatNumber(NOTE_FIELD_DEFAULTS.ratchetLength)) parts.push(`ratchetLength=${formatNumber(n.ratchetLength)}`)
+  // v0.12 (Stream E): `active=0` iff the note is deactivated. Last in the fixed order (newest
+  // field appended, never inserted) so no pre-v0.12 line's token order changes.
+  if (n.active !== NOTE_FIELD_DEFAULTS.active) parts.push(`active=${n.active ? 1 : 0}`)
   return parts.length ? ` ${parts.join(' ')}` : ''
 }
 
@@ -141,6 +144,19 @@ function serializeAutomationLanes(trackId: string, lanes: BeatAutomationLane[], 
 // state exists — the same reader/writer asymmetry as the rest of this fix, just losing data
 // quietly instead of loudly. Every pre-existing file is byte-identical under the new condition (a
 // grid is only interesting once an amount is set, so no serialized file has one without the other).
+// v0.12 (Phase 41 Stream E): a single `scale <root> <name> [<pcs>]` line, elided entirely while
+// the track has no declared scale (BeatTrack.scale === null — the pre-v0.12 state, which is why
+// every existing file round-trips byte-identically). The custom form's pitch classes are emitted
+// in canonical (ascending, deduplicated) order, which parse.ts also REQUIRES on the way in — so
+// reader and writer cannot disagree about what a canonical file looks like (the exact asymmetry
+// grooveLine's own comment below records having been bitten by).
+function scaleLine(t: BeatTrack): string[] {
+  if (!t.scale) return []
+  const { root, name, pitchClasses } = t.scale
+  if (pitchClasses) return [`  scale ${root} ${name} ${pitchClasses.join(',')}`]
+  return [`  scale ${root} ${name}`]
+}
+
 function grooveLine(t: BeatTrack): string[] {
   if (t.shuffleAmount === 0 && t.shuffleGrid === 1) return []
   return [`  groove ${formatNumber(t.shuffleAmount)} ${formatNumber(t.shuffleGrid)}`]
@@ -238,6 +254,7 @@ function serializeTrack(t: BeatTrack): string[] {
     // to represent (see that function's own comment).
     lines.push(...serializeInstrumentEffectLines(t.effects, '  '))
     lines.push(...grooveLine(t))
+    lines.push(...scaleLine(t))
     // v0.8+: instrument clips carry notes only (same grammar as synth-track clips)
     for (const clip of t.clips) {
       lines.push(`  clip ${clip.id}`)
@@ -271,6 +288,7 @@ function serializeTrack(t: BeatTrack): string[] {
   // tracks reach serializeEffectLines from their own branch above, before this generic one.)
   if (t.kind === 'synth' || t.kind === 'drums' || t.kind === 'surge') lines.push(...serializeEffectLines(t.effects, '  '))
   lines.push(...grooveLine(t))
+  lines.push(...scaleLine(t))
   // Phase 22 Stream AB: the OPEN lane list, declared order, one line per lane — only for tracks
   // that opted in (t.lanes.length > 0); a legacy/migrated track (t.lanes === []) emits none of
   // these, exactly as before. Comes before the legacy v0.5 lane-sample lines below so a track's
