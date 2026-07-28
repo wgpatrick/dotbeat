@@ -1268,10 +1268,16 @@ export function composeTheoryPhrase(
   role: 'bassline' | 'chords' | 'lead',
   key: PhraseKey,
   seed: number,
-  opts: { exclude?: readonly string[]; chordTrack?: ChordTrackOptions } = {},
+  opts: { exclude?: readonly string[]; chordTrack?: ChordTrackOptions; archetype?: string } = {},
 ): ComposedPhrase & { lint: LintReport; chordTrack: ChordTrack } {
   const rng = mulberry32(seed + THEORY_ROLE_SALTS[role])
-  const archetype = chooseTheoryArchetype(rng, THEORY_ROLE_BANKS[role], opts.exclude ?? [])
+  // `opts.archetype` PINS the figure kind (beat compose --archetype, and the batch sweep that walks
+  // the bank one variant at a time). Absent, the seeded exclude-chain draw is unchanged — the
+  // showdown's behavior is byte-identical because it never passes one.
+  if (opts.archetype !== undefined && !THEORY_ROLE_BANKS[role].includes(opts.archetype as never)) {
+    throw new Error(`unknown ${role} archetype "${opts.archetype}" (have: ${THEORY_ROLE_BANKS[role].join(', ')})`)
+  }
+  const archetype = opts.archetype ?? chooseTheoryArchetype(rng, THEORY_ROLE_BANKS[role], opts.exclude ?? [])
   const track = buildChordTrack(key, seed, opts.chordTrack)
   let notes: ComposedNote[]
   switch (role) {

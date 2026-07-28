@@ -398,10 +398,16 @@ export async function composeCA2Phrase(
   role: CA2Role,
   key: PhraseKey,
   seed: number,
-  opts: { exclude?: readonly string[]; chordTrack?: ChordTrackOptions; bpm?: number } = {},
+  opts: { exclude?: readonly string[]; chordTrack?: ChordTrackOptions; bpm?: number; ask?: string } = {},
 ): Promise<CA2Phrase> {
   const rng = mulberry32(seed + CA2_ROLE_SALTS[role])
-  const ask = chooseCA2Ask(rng, CA2_ROLE_ASKS[role], opts.exclude ?? [])
+  // `opts.ask` PINS the density ask (beat compose --archetype over --source ca2). Absent, the
+  // seeded exclude-chain draw is unchanged, so the showdown's behavior is byte-identical.
+  const pinned = opts.ask !== undefined ? CA2_ROLE_ASKS[role].find((a) => a.name === opts.ask) : undefined
+  if (opts.ask !== undefined && pinned === undefined) {
+    throw new BeatBatchError(`unknown ${role} CA2 ask "${opts.ask}" (have: ${CA2_ROLE_ASKS[role].map((a) => a.name).join(', ')})`)
+  }
+  const ask = pinned ?? chooseCA2Ask(rng, CA2_ROLE_ASKS[role], opts.exclude ?? [])
   const track = buildChordTrack(key, seed, opts.chordTrack)
   const bpm = opts.bpm ?? 124
 
