@@ -356,16 +356,21 @@ export async function composeIntoDoc(opts: ComposeOptions): Promise<ComposeResul
   lines.push(`${opts.append === true ? 'appended' : 'replaced'} ${opts.trackId}'s notes: ${notes.length} note(s)`)
 
   // ---- the song-mode clip re-snapshot ----
+  // An EXPLICIT `clips` list is honored in loop mode too: the caller named the clips, and a clip a
+  // loop-mode project keeps around is usually one it is about to arrange with. Only the DEFAULT
+  // set is song-derived, because only the song can say which clips are actually rendered.
   const clipsSnapshotted: string[] = []
   const songMode = doc.song !== null && doc.song.length > 0
-  if (songMode && opts.clipSync === false) {
+  if (opts.clipSync === false && !songMode) {
+    // loop mode renders the live notes, so opting out of a clip sync changes nothing audible
+  } else if (songMode && opts.clipSync === false) {
     lines.push(
       `WARNING: --no-clip-sync on a SONG-MODE project — the engine renders this track's CLIPS ` +
         `(${placed.join(', ') || 'none placed'}), not its live notes, so this compose will render ` +
         `IDENTICALLY to the parent. Re-snapshot with: beat clip <file> ${opts.trackId} <clip-id>`,
     )
-  } else if (songMode) {
-    if (requested.length === 0) {
+  } else {
+    if (songMode && requested.length === 0) {
       lines.push(
         `WARNING: song mode, but "${opts.trackId}" is placed in no scene the song visits — nothing ` +
           `to re-snapshot, and the composed notes will not be heard until the track is placed ` +
@@ -377,7 +382,10 @@ export async function composeIntoDoc(opts: ComposeOptions): Promise<ComposeResul
       clipsSnapshotted.push(clipId)
     }
     if (clipsSnapshotted.length > 0) {
-      lines.push(`re-snapshotted ${clipsSnapshotted.length} clip(s) from the new notes: ${clipsSnapshotted.join(', ')} (song mode renders clips, not live notes)`)
+      lines.push(
+        `re-snapshotted ${clipsSnapshotted.length} clip(s) from the new notes: ${clipsSnapshotted.join(', ')}` +
+          (songMode ? ' (song mode renders clips, not live notes)' : ' (as asked — this project is in loop mode, where the engine plays the live notes)'),
+      )
     }
     if (opts.clips === undefined && clipsSnapshotted.length > 1) {
       lines.push(
