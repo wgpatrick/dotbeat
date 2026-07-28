@@ -311,7 +311,8 @@
       "file": "string",
       "sections": "boolean",
       "ref": "string",
-      "json": "boolean"
+      "json": "boolean",
+      "offline": "boolean"
     }
   },
   {
