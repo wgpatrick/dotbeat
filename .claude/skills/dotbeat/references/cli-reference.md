@@ -52,7 +52,7 @@ beat compose <file> <track> --count N [--out-dir <dir>] [--render|--audition]   
   (`beat showdown --ca2-doctor`); it never silently substitutes a theory figure.
 
 MCP twin: **`beat_compose`** (snake_case args: `clip_sync`, `out_dir`, `mode_capture`; `clips` is an
-array). Both surfaces call `src/taste/compose.ts`, with parity rows in `test/mcp-parity.test.ts`.
+array). Both surfaces call `src/compose/compose.ts`, with parity rows in `test/mcp-parity.test.ts`.
 
 ## What is on MCP and what is CLI-only
 
