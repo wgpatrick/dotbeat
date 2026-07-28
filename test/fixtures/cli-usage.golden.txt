@@ -456,10 +456,16 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           cosine; CLAP degrades to a named reason without the
                                                           python sidecar). Default --budget 50 is smoke-scale;
                                                           real ceiling runs want 2000-5000.
-  beat taste-seeds <dir> [--count 8] [--seed 1]         generate synthetic seed SONGS (deterministic space:
+  beat taste-seeds <dir> [--count 8] [--seed 1] [--drums-bus frozen|open]
+                                                          generate synthetic seed SONGS (deterministic space:
                                                           tempo, key, progression, palette, drum feel) as the raw
                                                           material for taste data collection. Step 1 of the
                                                           collect->rate->eval pipeline (docs/taste-loop-design.md).
+                                                          --drums-bus picks the drums BUS LOWPASS regime by name:
+                                                          frozen (8000 Hz, the treatment all 27 rated drum-loop
+                                                          batches carry) or open (18000 Hz). Opening it costs
+                                                          batch-for-batch comparability with the frozen rounds —
+                                                          see src/taste/seeds.ts TASTE_DRUMS_BUS_CUTOFF_HZ.
   beat taste-collect <dir> [--per-seed 2] [--count 5] [--gen N] [--gen-backend fal|stub|stableaudio] [--seed 41]
                                                           build the rating queue from a taste-seeds dir: --per-seed
                                                           vary batches per seed song (random track x group incl.

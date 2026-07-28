@@ -34,6 +34,65 @@ const PROGRESSIONS: { name: string; minor: boolean; chords: number[][] }[] = [
 
 const OSCS = ['sawtooth', 'square', 'triangle'] as const
 
+// ---- the taste-eval drums BUS LOWPASS regime (frozen; named 2026-07-27) -------------------------
+// On a drums-kind track `synth.cutoff` is not a synth filter, it is the WHOLE KIT'S BUS LOWPASS
+// (24 dB/oct). Every taste seed has shipped its drums bus at 8000 Hz since the loop was built, and
+// it was never a decision — it was a literal in this file, and nobody had measured it.
+//
+// WHAT IT DOES, measured 2026-07-27 on examples/taste-t1/seed-001's drum stem (identical document,
+// only this parameter changed; `beat render --stems` then `beat metrics --json`):
+//
+//     cutoff  8000 (shipped)  ->  air 0.77 %   centroid 194 Hz
+//     cutoff 20000            ->  air 1.92 %   centroid 359 Hz
+//     Demucs-separated commercial drum stem, for scale -> air 7.40 %, centroid 862 Hz
+//
+// The metrics' `air` band is 6 kHz .. Nyquist and OPEN ABOVE (src/metrics/analyze.ts), so an 8 kHz
+// brickwall decides nearly all of the scored band before a hit is struck.
+//
+// WHY IT IS FROZEN RATHER THAN OPENED. This is not merely "a dark default." In a showdown batch it
+// is applied ASYMMETRICALLY across the arms being compared:
+//   * engine arm  — the seed's drums track soloed (showdown.soloForShowdown)     -> lowpassed
+//   * gen arm     — the SAME seed drums track, one-shots swapped into its lanes
+//                   (showdown.isolateTrack; drum-loop is keymap kind 'kit')       -> lowpassed
+//   * ref arm     — a refs-packs wav copied straight into the batch (cli/beat.mjs) -> NOT lowpassed
+// and no drums preset exists in presets/engine-curated.json, so the drum-loop engine arm can never
+// override it. That makes 8000 a treatment whose effect is entangled in all 27 already-rated
+// drum-loop batches — CLAUDE.md's "frozen eval constants are never edited" in its exact spirit.
+// Editing the literal in place would give future batches a different treatment while
+// `beat showdown --report` continues pooling them with the old 27 under the same
+// `showdown:drum-loop` key, with nothing in beat-scores.jsonl recording which regime produced
+// which clip. That is a silent re-key of the eval, so it is not done here.
+//
+// HOW THE NEXT ROUND OPENS IT: a NEW NAMED regime alongside, never a tweak (the engineplusProfile
+// rule). Pass `drumsBusCutoffHz: TASTE_DRUMS_BUS_CUTOFF_OPEN_HZ` to generateSeedBeat, or run
+// `beat taste-seeds <dir> --drums-bus open`. The regime is then self-recording: the emitted seed
+// .beat file literally contains its own `cutoff`, and the showdown log already carries the seed
+// file it was built from, so a future analysis can partition the batches without guessing.
+//
+// CAVEAT, stated so this is not oversold: opening the filter takes the stem from 0.77 % to 1.92 %
+// air against a commercial 7.40 %. The cap is real but it is NOT the whole drum deficit, and the
+// preference effect is UNMEASURED until a paired round runs.
+
+/** FROZEN. The drums bus lowpass (Hz) every taste seed has shipped with, and the treatment all 27
+ * rated drum-loop batches carry. Do not edit — add a regime, see the block above. */
+export const TASTE_DRUMS_BUS_CUTOFF_HZ = 8000
+
+/** The opt-in open regime: the .beat format's own "wide open / no filtering" cutoff, matching
+ * DRUMS_TRACK_INIT_CUTOFF_HZ (src/core/edit.ts) and surgeSampleHostText's neutral sample host.
+ * Selecting it produces seeds that are NOT comparable batch-for-batch with the frozen 27 unless
+ * the round is paired deliberately. */
+export const TASTE_DRUMS_BUS_CUTOFF_OPEN_HZ = 18000
+
+/** The named regimes, by the name the CLI's `--drums-bus` flag takes. Every drums-bus lowpass that
+ * can reach a rated clip must be one of these values — test/eval-integrity.test.ts's D-LP block
+ * enforces it, so a new eval host cannot quietly introduce a fourth unchosen number. */
+export const TASTE_DRUMS_BUS_REGIMES = {
+  frozen: TASTE_DRUMS_BUS_CUTOFF_HZ,
+  open: TASTE_DRUMS_BUS_CUTOFF_OPEN_HZ,
+} as const
+
+export type TasteDrumsBusRegime = keyof typeof TASTE_DRUMS_BUS_REGIMES
+
 const pick = <T,>(rng: () => number, arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)]!
 const range = (rng: () => number, lo: number, hi: number): number => lo + rng() * (hi - lo)
 const round = (v: number, dp = 2): number => Number(v.toFixed(dp))
@@ -63,8 +122,13 @@ function synthBlock(rng: () => number, opts: { osc?: string; volume: number; cut
  * jitter (finalizeSeed → applyCuratedSeedPatches) so the taste loop — and the T5 pilot, which reads
  * these seed files — searches FROM curated material instead of a random roll. Absent/empty bank →
  * byte-identical to the historical random-patch generator (the jitter rng derives from the seed and
- * never touches generateSeedBeat's own rng, so a seed stays byte-stable per seed either way). */
-export function generateSeedBeat(seed: number, opts: { curated?: EngineCuratedFile | null } = {}): { text: string; description: string } {
+ * never touches generateSeedBeat's own rng, so a seed stays byte-stable per seed either way).
+ *
+ * `opts.drumsBusCutoffHz` selects the drums BUS LOWPASS regime and defaults to the frozen
+ * TASTE_DRUMS_BUS_CUTOFF_HZ — see the long block above that constant before changing it. It draws
+ * no rng, so passing it does not shift any other seeded value: the two regimes differ in exactly
+ * one line of the emitted text. */
+export function generateSeedBeat(seed: number, opts: { curated?: EngineCuratedFile | null; drumsBusCutoffHz?: number } = {}): { text: string; description: string } {
   const rng = mulberry32(seed)
   const prog = pick(rng, PROGRESSIONS)
   const spec: SeedSpec = {
@@ -119,7 +183,9 @@ export function generateSeedBeat(seed: number, opts: { curated?: EngineCuratedFi
   // drums: legacy 5-lane kit, one of a few feels
   const feel = pick(rng, ['four', 'half', 'break'] as const)
   lines.push('track drums Drums #56b6c2 drums')
-  lines.push(synthBlock(rng, { volume: range(rng, -12, -7), cutoff: 8000, attack: 0.001, decay: 0.2, sustain: 0.5, release: 0.2 }))
+  // cutoff on a drums track is the KIT'S BUS LOWPASS, not a synth filter — frozen eval treatment,
+  // read the TASTE_DRUMS_BUS_CUTOFF_HZ block above before touching it
+  lines.push(synthBlock(rng, { volume: range(rng, -12, -7), cutoff: opts.drumsBusCutoffHz ?? TASTE_DRUMS_BUS_CUTOFF_HZ, attack: 0.001, decay: 0.2, sustain: 0.5, release: 0.2 }))
   let hid = 1
   const hit = (lane: string, step: number, vel: number) => lines.push(`  hit h${hid++} ${lane} ${step} ${round(vel)}`)
   for (let bar = 0; bar < 2; bar++) {

@@ -52,7 +52,7 @@ import { applyProducedDefaults, type ProductionProfile, type ProductionRole, typ
 import { buildKeymap, midiToNote } from '../core/keymap.js'
 import { BeatBatchError, type VaryBatchManifest } from '../vary/batch.js'
 import { shuffledOrder } from '../vary/audition.js'
-import { genSubject } from './seeds.js'
+import { genSubject, TASTE_DRUMS_BUS_CUTOFF_HZ } from './seeds.js'
 import { SPLIT_SMOKE_MIN_BATCHES, mulberry32 } from './eval.js'
 import {
   scalePitchClasses,
@@ -306,7 +306,18 @@ export function foldBpmToRange(bpm: number, lo = 70, hi = 180): number {
 /** Minimal host project for a pitched keymap phrase: one drums-kind track ("phrase") the CLI
  * registers the generated one-shot into (beat source gen -> media/) before buildPitchedKeymapPhrase
  * declares the lanes and writes the hits. Emitted as text and parse-validated by the caller, same
- * discipline as generateSeedBeat. */
+ * discipline as generateSeedBeat.
+ *
+ * The bus lowpass is the FROZEN taste regime (TASTE_DRUMS_BUS_CUTOFF_HZ, 8000 Hz), referenced
+ * rather than re-typed so the two hosts that render rated clips are provably one number.
+ *
+ * KNOWN TENSION, recorded 2026-07-27 rather than silently resolved: surgeSampleHostText below does
+ * the identical job — a neutral drums-kind host whose only purpose is to play a generated sample
+ * back transparently — and uses `cutoff 18000` with the comment "deliberately NEUTRAL — a wide-open
+ * filter". By that argument this host should be 18000 too, and 8000 here is a copy-paste that
+ * predates it. It is NOT changed in this pass because it colours the gen arm of already-rated
+ * pitched batches and its effect has not been measured (only the drums-kit case has). Changing it
+ * needs the same paired round as the seed regime; it has a roadmap row carrying that trigger. */
 export function keymapScratchText(bpm: number): string {
   return [
     'format_version 0.11',
@@ -318,7 +329,7 @@ export function keymapScratchText(bpm: number): string {
     '  synth',
     '    osc triangle',
     `    volume ${SHOWDOWN_PROMINENT_DB}`,
-    '    cutoff 8000',
+    `    cutoff ${TASTE_DRUMS_BUS_CUTOFF_HZ}`,
     '    resonance 0.5',
     '    attack 0.001',
     '    decay 0.2',
