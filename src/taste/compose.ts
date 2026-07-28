@@ -32,6 +32,7 @@
 //     Pinned by test/compose-verb.test.ts, whose negative control is exactly the unfixed behavior.
 
 import { createHash } from 'node:crypto'
+import { dirname, join, resolve } from 'node:path'
 import type { BeatDocument, BeatNote, BeatTrack } from '../core/document.js'
 import { NOTE_FIELD_DEFAULTS, SCALES, saveClip } from '../core/index.js'
 import { BeatBatchError, defaultBatchDir, writeVaryBatch, type VaryBatchManifest } from '../vary/batch.js'
@@ -431,8 +432,10 @@ export interface ComposeBatchResult {
   variants: { doc: BeatDocument; recipe: string }[]
 }
 
+/** `compose-<source>-<track>-<seed>` NEXT TO the .beat file — the same "batches live beside their
+ * parent, not under the process cwd" rule defaultBatchDir/defaultGenBatchDir follow (pilot 101). */
 export function defaultComposeBatchDir(parentPath: string, source: ComposeSource, trackId: string, seed: number): string {
-  return defaultBatchDir(parentPath, `compose-${source}-${trackId}`, seed)
+  return join(dirname(resolve(parentPath)), `compose-${source}-${trackId}-${seed}`)
 }
 
 /** N genuinely different figures into a `beat board`-servable batch directory. Archetypes are SWEPT
@@ -477,9 +480,15 @@ export async function composeBatch(opts: ComposeBatchOptions): Promise<ComposeBa
     const recipe = `compose ${opts.source} ${composed.label} role ${composed.role} key ${keyLabel(composed.key)} bars ${composed.bars} seed ${seed}${composed.octaveShift !== 0 ? ` octave ${composed.octaveShift > 0 ? '+' : ''}${composed.octaveShift}` : ''}`
     variants.push({ doc: composed.doc, recipe })
     if (variants.length === 1) {
-      // the first variant's provenance report is the batch's — key/register/clip handling are
-      // identical across the batch by construction, so printing it N times would be noise
-      for (const line of composed.lines.slice(1)) lines.push(line)
+      // Batch-INVARIANT provenance only, printed once. Key and clip handling are identical across
+      // the batch by construction; register shift and note count are NOT (they follow the figure),
+      // so they live in each variant's own recipe line above rather than in a header that would be
+      // true of v1 and quietly wrong about the rest.
+      lines.push(`key ${keyLabel(composed.key)} — from ${composed.keySource}`)
+      lines.push(`role ${composed.role}, ${composed.bars} bars, register ${opts.register === 'source' ? 'left at the source layer' : typeof opts.register === 'number' ? `shifted ${opts.register} octave(s)` : "matched to the track's own range per variant"}`)
+      for (const line of composed.lines) {
+        if (line.startsWith('re-snapshotted') || line.startsWith('WARNING') || line.startsWith('note:')) lines.push(line)
+      }
     }
   }
   if (variants.length < opts.count) {
