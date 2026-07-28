@@ -241,6 +241,7 @@ test('key: explicit > declared scale > histogram, and the winning source is alwa
   const inferred = resolveComposeKey(doc, 'arp', {})
   assert.equal(keyLabel(inferred.key), 'D# natural-minor', 'the fixture is D# minor, same as the real song')
   assert.match(inferred.source, /histogram/)
+  assert.match(inferred.source, /nothing outside "arp" carries enough pitch/, 'this fixture\'s bass is one repeated pitch class, so the whole document votes')
 
   const declared = parse(SONG_MODE.replace('track arp ARP #61afef synth\n', 'track arp ARP #61afef synth\n  scale 5 dorian\n'))
   const fromScale = resolveComposeKey(declared, 'arp', {})
@@ -250,6 +251,17 @@ test('key: explicit > declared scale > histogram, and the winning source is alwa
   const explicit = resolveComposeKey(declared, 'arp', { keyRoot: parseKeyRoot('a'), mode: parseComposeMode('minor') })
   assert.equal(keyLabel(explicit.key), 'A natural-minor')
   assert.match(explicit.source, /--key/)
+})
+
+test('composing twice in a row does not drift the key (the target track never votes on it)', async () => {
+  // Measured on the real project 2026-07-27: the second compose read G# natural-minor where the
+  // first read D#, purely because the first figure's own pitch classes had joined the histogram.
+  // give the fixture a real melodic context track, so the exclusion rule actually engages
+  const withPad = parse(SONG_MODE.replace('scene s_intro', 'track pad PAD #c678dd synth\n  note p1 51 0 8 0.5\n  note p2 54 8 8 0.5\n  note p3 58 16 8 0.5\n  note p4 61 24 8 0.5\n\nscene s_intro'))
+  const first = await composeIntoDoc({ doc: withPad, trackId: 'arp', source: 'theory', seed: 4211 })
+  const second = await composeIntoDoc({ doc: first.doc, trackId: 'arp', source: 'theory', seed: 4212 })
+  assert.equal(keyLabel(second.key), keyLabel(first.key))
+  assert.equal(keyLabel(second.key), 'D# natural-minor')
 })
 
 test('key roots parse the way the rest of the CLI spells notes', () => {

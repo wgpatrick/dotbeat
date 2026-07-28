@@ -181,10 +181,30 @@ export function resolveComposeKey(
     }
   }
   if (root === undefined || minor === undefined) {
-    const inferred = inferSeedKey(doc)
+    // The histogram is read over the REST of the song, with the target track's own notes dropped —
+    // they are the notes about to be replaced, so letting them vote makes the key drift with each
+    // pass. Measured on the real project 2026-07-27: composing into `arp` and immediately composing
+    // again read D# natural-minor the first time and G# natural-minor the second, purely because
+    // the first figure's own pitch classes had joined the count. Dropped only when something else
+    // is pitched: on a one-track project the target IS the song, and an empty histogram throws.
+    // The bar for "the rest of the song can carry the key alone" is 3 distinct pitch classes: a
+    // bass part sitting on one root says nothing about major vs minor (dropping the only melodic
+    // track then flips the answer), so below that the whole document votes, target included.
+    const otherPcs = new Set<number>()
+    for (const t of doc.tracks) {
+      if (t.id === trackId || t.kind !== 'synth') continue
+      for (const n of t.notes) otherPcs.add(((n.pitch % 12) + 12) % 12)
+    }
+    const excludeTarget = otherPcs.size >= 3
+    const context = excludeTarget ? { ...doc, tracks: doc.tracks.filter((t) => t.id !== trackId) } : doc
+    const inferred = inferSeedKey(context)
     if (root === undefined) root = ((inferred.root % 12) + 12) % 12
     if (minor === undefined) minor = inferred.minor
-    from.push("inferSeedKey's pitch-class histogram")
+    from.push(
+      excludeTarget
+        ? `the rest of the song's pitch-class histogram ("${trackId}" excluded — its notes are what you are replacing)`
+        : `the project's pitch-class histogram (nothing outside "${trackId}" carries enough pitch to read a key from)`,
+    )
   }
   const key: PhraseKey = { root: 48 + root, minor, ...(mode !== undefined ? { mode } : {}) }
   return { key, source: from.join(' + ') }
