@@ -225,6 +225,11 @@ export const VERIFY_SCRIPTS = [
   // because it drives `beat render` rather than asserting inside the page, but what it gates is
   // engine audio — pilot 109's HIGH finding, which had been closed by editing the help text.
   { script: 'scripts/verify-offline-noise-reproducible.mjs', area: 'render-determinism', tier: 'cli', status: 'live' },
+  // 2026-07-26 owner-reported ("i can't hear any claps"): every synth kit lane must be AUDIBLE
+  // through `beat render --offline`, within ±3 dB of live capture, lane by lane. Determinism
+  // (above) is not audibility — a lane whose every hit is disposed before the offline render
+  // frontier reaches it reproduces its silence perfectly.
+  { script: 'scripts/verify-offline-kit-lane-parity.mjs', area: 'render-determinism', tier: 'cli', status: 'live' },
 ]
 
 export const TIERS = ['engine', 'gui', 'both', 'cli']
