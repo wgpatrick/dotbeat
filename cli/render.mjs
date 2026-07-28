@@ -161,18 +161,31 @@ async function serveUi(preferredPort) {
   return { proc, url }
 }
 
+/** Ensure the compiled repo (core + daemon + the render policy) exists before importing it, so a
+ * fresh checkout that hasn't run `npm run build` still works out of the box rather than throwing on
+ * a missing dist. Called by `bootRenderSession` and by anything that imports `dist/` BEFORE booting
+ * a session (the capture-mode policy below is read at parse time, before any browser starts). */
+function ensureRepoBuilt() {
+  const needed = ['dist/src/daemon/daemon.js', 'dist/src/core/index.js', 'dist/src/render/capture-mode.js']
+  if (needed.every((f) => existsSync(join(repoRoot, f)))) return
+  console.error('building repo (dist/ missing)...')
+  execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
+}
+
+/** The offline-vs-live decision, owned once in src/render/capture-mode.ts (see that file's header
+ * for why it is not three copies). Loaded lazily so this module still parses without a build. */
+async function captureModePolicy() {
+  ensureRepoBuilt()
+  return import(pathToFileURL(join(repoRoot, 'dist/src/render/capture-mode.js')).href)
+}
+
 // Shared boot sequence for anything that needs a live, headless dotbeat UI driving the real engine
 // against a .beat file: `renderCommand` (one full-mix capture) and `renderTrackSolosCommand`
 // (Phase 33 Stream MD item 2 — one capture per track, solo'd, reusing the SAME daemon/preview/
 // browser session rather than paying the boot cost once per track). Returns everything the caller
 // needs plus a `close()` to tear it all down; the caller owns the try/finally.
 async function bootRenderSession(beatPath, { tail = 0, daemonPort = 0, previewPort = 5899 } = {}) {
-  // Ensure the compiled repo (core + daemon) exists before importing it, so a fresh checkout that
-  // hasn't run `npm run build` still works out of the box rather than throwing on a missing dist.
-  if (!existsSync(join(repoRoot, 'dist/src/daemon/daemon.js')) || !existsSync(join(repoRoot, 'dist/src/core/index.js'))) {
-    console.error('building repo (dist/ missing)...')
-    execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' })
-  }
+  ensureRepoBuilt()
 
   // Track 1a: render surge tracks to cached WAVs and rewrite the doc as drums-kind sample hosts the
   // engine can play (surgeplus hosting), BEFORE the daemon boots. A doc with no surge tracks passes
@@ -460,7 +473,7 @@ function trimLeadingSilence(wav, seconds) {
  * detectable from the parsed doc alone, so refuse in the first second instead of after ~30s of
  * daemon + headless-Chromium spin-up delivering the same message as a raw page.evaluate stack.
  * Best-effort — a missing dist/ build means no parser yet; the in-page refusal still backstops. */
-async function offlinePreflightRefusal(beatPath) {
+export async function offlinePreflightRefusal(beatPath) {
   try {
     const { parse } = await import(pathToFileURL(join(repoRoot, 'dist/src/core/index.js')).href)
     const doc = parse(readFileSync(beatPath, 'utf8'))
@@ -493,20 +506,22 @@ export async function renderCommand(argv) {
     console.error(`error: no file at ${beatPath}`)
     process.exit(2)
   }
-  if (args.offline && args.live) {
-    console.error('error: --offline and --live are mutually exclusive')
-    process.exit(2)
-  }
   if (args.noNormalize) {
     console.error('error: --no-normalize only applies to --batch (a single render is never loudness-normalized)')
     process.exit(2)
   }
-  if (args.offline) {
-    const refusal = await offlinePreflightRefusal(beatPath)
-    if (refusal) {
-      console.error(`error: offline render refused: ${refusal}`)
-      process.exit(2)
-    }
+  const { resolveCaptureMode } = await captureModePolicy()
+  // A single render stays LIVE unless asked otherwise (fallback: 'live') — unchanged behaviour,
+  // now expressed through the shared policy instead of its own copy of the same three rules.
+  const capture = resolveCaptureMode({
+    offline: args.offline,
+    live: args.live,
+    refusal: args.offline ? await offlinePreflightRefusal(beatPath) : null,
+    fallback: 'live',
+  })
+  if (capture.error) {
+    console.error(`error: ${capture.error}`)
+    process.exit(2)
   }
   const outPath = args.out ?? beatPath.replace(/\.beat$/, '') + '.wav'
   const tail = Number(args.tail ?? 0)
@@ -521,7 +536,7 @@ export async function renderCommand(argv) {
   const session = await bootRenderSession(beatPath, { tail, daemonPort, previewPort })
   let failure = null
   try {
-    const wavBytes = args.offline
+    const wavBytes = capture.mode === 'offline'
       ? await captureOfflineWav(session.page, session.seconds, session.pageErrors)
       : await captureWav(session.page, session.seconds, session.pageErrors)
     writeFileSync(outPath, wavBytes)
@@ -552,11 +567,19 @@ export async function renderCommand(argv) {
  * Reuses the exact bootRenderSession + captureWav path `renderCommand` uses, so the bytes are the
  * same real-engine post-limiter master capture, just never touching the filesystem. Returns
  * `{ bytes, doc, seconds }` — `doc` (parsed) and `seconds` (render length) save the caller a
- * re-parse for the section bar math. */
-export async function renderToBuffer(beatPath, opts = {}) {
+ * re-parse for the section bar math.
+ *
+ * `opts.offline` (2026-07-27) picks the offline-compute path instead, the same
+ * `captureOfflineWav` `beat render --offline` uses — so `beat feedback`'s arrangement gate can run
+ * without holding a live browser open for the song's whole wall-clock duration. The CALLER decides
+ * the mode (through `src/render/capture-mode.ts` + `offlinePreflightRefusal`, both exported here);
+ * this function just honours it. */
+export async function renderToBuffer(beatPath, { offline = false, ...opts } = {}) {
   const session = await bootRenderSession(beatPath, opts)
   try {
-    const bytes = await captureWav(session.page, session.seconds, session.pageErrors)
+    const bytes = offline
+      ? await captureOfflineWav(session.page, session.seconds, session.pageErrors)
+      : await captureWav(session.page, session.seconds, session.pageErrors)
     return { bytes, doc: session.doc, seconds: session.seconds }
   } finally {
     await session.close()
@@ -615,10 +638,6 @@ export async function renderBatchCommand(argv) {
     console.error('nothing to render: this batch has no .beat variants (gen batches are already audio)')
     process.exit(1)
   }
-  if (args.offline && args.live) {
-    console.error('error: --offline and --live are mutually exclusive')
-    process.exit(2)
-  }
   // Batch renders default to OFFLINE (D22/D23): a vary batch is short clips — exactly where the
   // offline path is both faster than the realtime clock and exact (no recorder spin-up, no opus
   // step) — and D23 made its compute linear. The mode is decided ONCE for the whole batch and
@@ -626,21 +645,21 @@ export async function renderBatchCommand(argv) {
   // offline path refuses (soundfont tracks / sf lanes — detectable at parse time, and shared by
   // every variant of the same parent) falls back to live capture automatically; --live forces
   // live; --offline forces offline and errors on refusal instead of falling back.
-  let offlineMode = false
-  if (!args.live) {
-    const refusal = await offlinePreflightRefusal(join(dir, beatVariants[0].file))
-    if (refusal === null) {
-      offlineMode = true
-      console.error('batch rendering offline (exact compute through the engine; pass --live to force realtime capture)')
-    } else if (args.offline) {
-      console.error(`error: offline render refused: ${refusal}`)
-      process.exit(2)
-    } else {
-      console.error(`batch rendering via live capture (offline refused: ${refusal})`)
-    }
-  } else {
-    console.error('batch rendering via live capture (--live)')
+  const { resolveCaptureMode } = await captureModePolicy()
+  const capture = resolveCaptureMode({
+    offline: args.offline,
+    live: args.live,
+    refusal: args.live ? null : await offlinePreflightRefusal(join(dir, beatVariants[0].file)),
+    fallback: 'offline',
+  })
+  if (capture.error) {
+    console.error(`error: ${capture.error}`)
+    process.exit(2)
   }
+  const offlineMode = capture.mode === 'offline'
+  if (offlineMode) console.error('batch rendering offline (exact compute through the engine; pass --live to force realtime capture)')
+  else if (capture.reason === 'refused') console.error(`batch rendering via live capture (offline refused: ${capture.refusal})`)
+  else console.error('batch rendering via live capture (--live)')
   // The daemon watches ONE file for the whole session; variants take turns being that file.
   // Dotfile name so the scratch copy can never be mistaken for a tenth variant.
   const currentPath = join(dir, '.render-current.beat')
