@@ -63,6 +63,7 @@ test('an ASKED-FOR --offline on a refusing project is a hard error — never a q
   assert.equal(d.mode, 'live', 'mode is meaningless when error is set, but must not read as offline')
   assert.ok(d.error?.startsWith('offline render refused: '), `expected a refusal error, got ${d.error}`)
   assert.ok(d.error?.includes('piano'), 'the refusal names the offending track')
+  assert.match(d.error!, /drop --offline/, 'and tells the user the way out — live capture handles soundfonts fine')
 })
 
 test('a DEFAULTED offline (beat render --batch) falls back to live with the reason kept, and does not error', () => {
@@ -164,6 +165,24 @@ test('beat feedback --offline reaches the shared decision — a refusing project
   // than here on purpose: running it costs a daemon + vite + headless Chromium boot before it can
   // fail, and a unit test that leaves servers behind is worse than one that leans on the same
   // function the CLI actually calls.
+})
+
+test('a loop-mode project refuses --sections BEFORE the render, not after paying for it', () => {
+  // CLI pilot 2026-07-27 (HIGH): this used to render the WHOLE song and only then error — 10.5s
+  // wall clock for a 7.6s loop, and minutes on a real song, for a mistake visible in the first
+  // parse. The timing IS the assertion: a refusal that arrives after the render is the bug, and a
+  // passing exit code alone cannot tell the two apart. 5s is far above the ~0.3s this now takes and
+  // far below the ~10.5s the render path took for this fixture on the machine that measured it.
+  const dir = mkdtempSync(join(tmpdir(), 'dotbeat-loopmode-'))
+  const file = join(dir, 'loop.beat')
+  writeFileSync(file, ['format_version 0.4', 'bpm 120', 'loop_bars 4', 'selected_track lead', '', 'track lead LEAD #e5c07b synth', '  note n1 60 0 4 0.8', ''].join('\n'))
+  const t0 = Date.now()
+  const r = feedback([file, '--sections'])
+  const elapsed = Date.now() - t0
+  assert.equal(r.status, 2, `expected exit 2, got ${r.status}: ${r.out}`)
+  assert.match(r.out, /--sections needs a song block/)
+  assert.ok(elapsed < 5000, `refused in ${elapsed}ms — that is long enough to have booted a browser and rendered first`)
+  assert.doesNotMatch(r.out, /rendering \(/, 'it must not announce a render it is about to throw away')
 })
 
 test('beat feedback rejects --offline --live together, exactly as beat render does', () => {

@@ -96,7 +96,11 @@ export function resolveCaptureMode(req: CaptureModeRequest): CaptureModeDecision
     // non-exact path (pilot 109's headline: the one flag whose entire point is exactness is the
     // one that must never be quietly dropped).
     if (req.refusal !== null) {
-      return { mode: 'live', reason: 'explicit', refusal: req.refusal, error: `offline render refused: ${req.refusal}` }
+      // Name the way out. CLI pilot 2026-07-27 (LOW): the refusal explained the problem and the
+      // offending track but never said that dropping the flag just works — and it does, because
+      // live capture is the default and handles soundfonts fine.
+      const error = `offline render refused: ${req.refusal}\n  drop --offline (or pass --live) to render this project through real-time capture instead`
+      return { mode: 'live', reason: 'explicit', refusal: req.refusal, error }
     }
     return { mode: 'offline', reason: 'explicit', refusal: null, error: null }
   }

@@ -6046,16 +6046,31 @@ async function feedbackCmd(argv) {
     fallback: 'live',
   })
   if (capture.error) throw new BeatEditError(capture.error)
+
+  // Everything knowable from the DOCUMENT is checked here, before the render — the render is the
+  // expensive thing in this command and the whole point of the surrounding work is not to pay for
+  // one you did not need. Pilot 2026-07-27 (HIGH) found `--sections` on a loop-mode project
+  // rendering the WHOLE song and only then erroring: 10.5s wall for a 7.6s loop, and minutes for a
+  // real song, for a mistake visible in the first parse. Every other precondition in this command
+  // (missing --ref file, arc-profile-without---sections, the offline refusal) already failed
+  // instantly; this one did not, purely because it read `doc` off the render's return value.
+  const preDoc = readDoc(file)
+  if (wantSections && (!preDoc.song || preDoc.song.length === 0)) {
+    throw new BeatEditError(`--sections needs a song block, but ${file} is in loop mode (no sections to slice). Run whole-song feedback instead: beat feedback ${file}`)
+  }
   // Say the cost out loud BEFORE paying it: on a long song, live capture holds a headless browser
   // open for the song's whole wall-clock duration and dies with a sleeping machine — the failure
   // that filed this feature. The hint fires only when it is worth acting on (see the policy).
-  const hint = longProjectOfflineHint(projectRenderSeconds(readDoc(file)), capture)
+  const hint = longProjectOfflineHint(projectRenderSeconds(preDoc), capture)
   if (hint) console.error(hint)
 
   const { bytes, doc } = await renderToBuffer(file, { offline: capture.mode === 'offline' })
   const { channels, sampleRate } = decodeWav(bytes)
 
   if (wantSections) {
+    // The loop-mode refusal now lives BEFORE the render (see preDoc above). This assert stays as a
+    // cheap invariant: the rendered doc is the same file, so a loop-mode doc reaching here means
+    // the pre-check was bypassed, not that a user made a mistake.
     if (!doc.song || doc.song.length === 0) {
       throw new BeatEditError(`--sections needs a song block, but ${file} is in loop mode (no sections to slice). Run whole-song feedback instead: beat feedback ${file}`)
     }
