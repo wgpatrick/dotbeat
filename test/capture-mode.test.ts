@@ -188,3 +188,19 @@ test('renderToBuffer branches on { offline } — the one line whose removal woul
   assert.match(body, /captureOfflineWav/, 'renderToBuffer must actually call the offline capture when asked')
   assert.match(body, /captureWav/, 'and must still have the live path')
 })
+
+test('beat_feedback FORWARDS offline to the CLI — the schema advertising it is not the same as using it', () => {
+  // MCP parity for this tool is structural by construction: the handler shells out to the very
+  // same `beat feedback`, so there is no second implementation to drift. What CAN drift is one
+  // dropped push — an option accepted, documented in tools/list, and then never passed, which is
+  // indistinguishable from working. test/fixtures/mcp-tools.golden.json pins the schema; this pins
+  // the wiring. (It is not in test/mcp-parity.test.ts's byte-level table because that table
+  // deliberately excludes anything needing a real render — see its header.)
+  const src = readFileSync(join(repoRoot, 'src', 'mcp', 'server.ts'), 'utf8')
+  const start = src.indexOf("name: 'beat_feedback'")
+  assert.ok(start !== -1, 'beat_feedback disappeared from the MCP tool table')
+  const end = src.indexOf("name: 'beat_", start + 1)
+  const tool = src.slice(start, end === -1 ? undefined : end)
+  assert.match(tool, /offline: \{/, 'beat_feedback must declare the offline option')
+  assert.match(tool, /args\.offline === true.*cliArgs\.push\('--offline'\)/, 'and must actually push --offline')
+})
