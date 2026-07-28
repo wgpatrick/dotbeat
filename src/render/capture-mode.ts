@@ -54,23 +54,36 @@ export interface CaptureModeDecision {
 /** Songs at or above this get an advisory line pointing at `--offline`, and NOTHING else.
  *
  * The 2026-07-27 roadmap row that prompted `beat feedback --offline` suggested defaulting offline
- * for songs over ~2 minutes. Measured on the 5:22 nine-section song that motivated it, that
- * default would have been wrong on its own terms, for two reasons:
+ * for songs over ~2 minutes. Both paths were then measured end to end on the 5:22 nine-section song
+ * that motivated it (songs/twin-souls-study/original.beat, 322.56s, five synth/drums tracks):
  *
- *  1. Offline is NOT the fast path in the long-project regime. `beat render --offline` already
- *     prints a heads-up when it computes slower than realtime, because Tone schedules the whole
- *     song and renders it in one pass (see ui/src/audio/offline.ts). The argument for offline on a
- *     long song is exactness and reproducibility, not wall clock — and a default that can make the
- *     gate take LONGER also widens the window in which a sleeping machine kills it, which is the
- *     exact failure the row was filed about.
- *  2. A length-triggered default makes the gate's own measurement chain depend on song length.
- *     `feedback --sections --ref` compares measured numbers against a saved reference arc; two
- *     songs either side of the threshold would be measured through different render chains, and
- *     the same song crossing it (add a section, cut a section) would silently change chains
- *     mid-project. A threshold gate must not quietly re-pick its own instrument.
+ *     live capture   345.1s wall clock   arc check PASS, 9/9 sections within 2.3 LU
+ *     offline        250.3s wall clock   arc check PASS, 9/9 sections within 2.3 LU
+ *                    (229.9s of compute for 322.6s of audio = 1.4x realtime)
+ *
+ * So offline was the faster path HERE, by 95s — and the length-based default is still the wrong
+ * call, for two reasons that survive that number:
+ *
+ *  1. Length does not predict the ratio. The same repo measured examples/first-light at 0.31x
+ *     realtime after D23 (and 0.12x before it) — i.e. 3x SLOWER than live — because offline compute
+ *     scales with length x DENSITY, not length (Tone schedules the whole song and renders it in one
+ *     pass; see ui/src/audio/offline.ts). 1.4x here and 0.31x there is a 4.5x spread with no
+ *     length-shaped rule between them, and a default that can triple the gate's wall clock also
+ *     widens the window in which a sleeping machine kills it — the exact failure the row was
+ *     filed about. `beat render --offline` prints the measured ratio for this reason.
+ *  2. The two paths do not measure identically, and a threshold gate must not quietly re-pick its
+ *     own instrument. On the same song the arc verdict agreed to within 0.2 LU per section (the
+ *     relative-loudness shape is robust), but the STATIC per-section numbers a whole-mix `--ref`
+ *     profile critiques did not: stereo width on the near-mono intro/outro read -25.8/-25.8 dB live
+ *     versus -33.9/-30.4 dB offline, spectral centroid ran ~2-3% lower offline throughout, and
+ *     crest sat 0-0.9 dB lower offline. Those are the live capture chain's own lossiness, already
+ *     documented as D22's two known parity exceptions. A length-triggered default would mean two
+ *     songs either side of 2 minutes are measured through different chains, and one song crossing
+ *     it (add a section, cut a section) silently changes chains mid-project.
  *
  * So the length signal is spent on a HINT rather than a switch: the operator is told the flag
- * exists, at the moment it is worth having, and picks. 120s is the row's own "~2 minutes". */
+ * exists, at the moment it is worth having, and picks — and whichever they pick, they keep. 120s is
+ * the row's own "~2 minutes". */
 export const LONG_PROJECT_SECONDS = 120
 
 /** Decide the capture path. Pure: every input is passed in, the only output is the decision. */
