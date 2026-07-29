@@ -118,12 +118,18 @@ export function fft(re: Float64Array, im: Float64Array): void {
   }
 }
 
+/** Lower edge of the `air` band these metrics score, in Hz. Exported because it is the yardstick
+ * a rendering default has to be checked against: the band is OPEN ABOVE (6 kHz .. Nyquist), so a
+ * lowpass anywhere near it decides most of the band's content before any material is heard. See
+ * test/eval-integrity.test.ts's D-LP block. */
+export const AIR_BAND_LO_HZ = 6000
+
 const BAND_EDGES: { name: keyof SpectralBands; lo: number; hi: number }[] = [
   { name: 'sub', lo: 0, hi: 60 },
   { name: 'bass', lo: 60, hi: 250 },
   { name: 'mids', lo: 250, hi: 2000 },
-  { name: 'presence', lo: 2000, hi: 6000 },
-  { name: 'air', lo: 6000, hi: Infinity },
+  { name: 'presence', lo: 2000, hi: AIR_BAND_LO_HZ },
+  { name: 'air', lo: AIR_BAND_LO_HZ, hi: Infinity },
 ]
 
 function spectral(channels: Float64Array[], sampleRate: number): { bandsPct: SpectralBands; centroidHz: number } {

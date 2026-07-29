@@ -12,9 +12,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { applyWavGain, assertWavGainable, normalizeBatchLoudness, markBatchComplete, isBatchComplete, discardIncompleteBatch, canonicalBatchKey, scoreBatch, recordNoneGood, BATCH_COMPLETE_MARKER, NORMALIZE_MAX_BOOST_DB } from '../src/vary/batch.js'
-import { decodeWav, readWavFormat, integratedLoudness } from '../src/metrics/index.js'
-import { matchClipDurations, writeShowdownBatch, tally, computeShowdownReport, loadLatestRankedEntries } from '../src/taste/showdown.js'
+import { decodeWav, readWavFormat, integratedLoudness, AIR_BAND_LO_HZ } from '../src/metrics/index.js'
+import { matchClipDurations, writeShowdownBatch, tally, computeShowdownReport, loadLatestRankedEntries, keymapScratchText, surgeSampleHostText } from '../src/taste/showdown.js'
 import { loadTasteBatches, trainable } from '../src/taste/eval.js'
+import { generateSeedBeat, TASTE_DRUMS_BUS_CUTOFF_HZ, TASTE_DRUMS_BUS_CUTOFF_OPEN_HZ, TASTE_DRUMS_BUS_REGIMES } from '../src/taste/seeds.js'
+import { addTrack, DRUMS_TRACK_INIT_CUTOFF_HZ } from '../src/core/edit.js'
+import { parse } from '../src/core/parse.js'
 
 const tmp = (name: string) => mkdtempSync(join(tmpdir(), `beat-evalint-${name}-`))
 
@@ -433,4 +436,100 @@ test('H2: cleanup discards a batch that never completed and keeps one that did',
   markBatchComplete(complete)
   assert.equal(discardIncompleteBatch(complete), false)
   assert.ok(existsSync(join(complete, 'manifest.json')))
+})
+
+// ---- D-LP: no drums BUS LOWPASS reaches a rated clip without being chosen ------------------------
+// THE DEFECT THIS ENCODES (found 2026-07-27, roadmap "Every rated drum clip was lowpassed at 8 kHz
+// by a default nobody chose"). On a drums-kind track `synth.cutoff` is not a synth filter, it is the
+// WHOLE KIT'S bus lowpass at 24 dB/oct. Two separate literals were sitting in that slot with nobody
+// having chosen either: `cutoff: 12000` for every freshly created drums track (src/core/edit.ts,
+// mirroring a Tone.Filter CONSTRUCTION placeholder the engine overwrites one line later) and
+// `cutoff 8000` in every taste seed (src/taste/seeds.ts) — the latter applied to the engine AND the
+// gen arm of a showdown batch but never to the ref arm, which is copied in as a wav.
+//
+// CALIBRATION PROVENANCE. Measured 2026-07-27 on examples/taste-t1/seed-001's drum stem, identical
+// document, only the drums cutoff changed, `beat render --stems` then `beat metrics --json`:
+//     cutoff  8000 (shipped)  ->  air 0.77 %   centroid 194 Hz
+//     cutoff 20000            ->  air 1.92 %   centroid 359 Hz
+//     Demucs-separated commercial drum stem, for scale -> air 7.40 %, centroid 862 Hz
+// i.e. the shipped default cost roughly two-thirds of the air band and half the centroid. It lands
+// on drum-loop, the one role the engine has never placed top-half in (0 of 27 rated batches).
+//
+// The load-bearing assertion is the FIRST: the mix metrics' `air` band is 6 kHz..Nyquist and OPEN
+// ABOVE (src/metrics/analyze.ts), so a bus lowpass anywhere near it decides most of a scored band
+// before any material is heard — checkable with no audio at all, and it is what nobody was checking.
+// These are NOT tests to update when a number moves: opening a RATED regime invalidates
+// comparability with the batches already rated, so it needs a NEW NAMED regime (the
+// engineplusProfile rule), which is exactly what TASTE_DRUMS_BUS_REGIMES exists for.
+
+test('D-LP: a freshly created drums track does not cap the scored air band', () => {
+  // Pins the CHOSEN fresh-track value (18000, the format's own "wide open") and, more importantly,
+  // the RULE that made 12000 wrong: a new drums track must not ship a bus lowpass sitting inside the
+  // open-above air band the metrics score it on. This assertion FAILS on the pre-fix 12000.
+  assert.equal(DRUMS_TRACK_INIT_CUTOFF_HZ, 18000)
+  const added = addTrack(parse('format_version 0.11\nbpm 120\nloop_bars 2\nselected_track d\n\ntrack d D #56b6c2 drums\n'), { id: 'kit', kind: 'drums' })
+  const cutoff = added.track.synth.cutoff
+  assert.equal(cutoff, DRUMS_TRACK_INIT_CUTOFF_HZ, 'addTrack stopped using the named constant')
+  assert.ok(
+    cutoff > AIR_BAND_LO_HZ * 2,
+    `a fresh drums track ships a ${cutoff} Hz bus lowpass, inside the air band the metrics score (${AIR_BAND_LO_HZ} Hz .. Nyquist, open above) — the whole kit is capped before anything is written on it`,
+  )
+})
+
+test('D-LP: FROZEN — the taste-eval drums bus regime is 8000 Hz, on every host that renders a rated clip', () => {
+  // Frozen science, same footing as engineplusProfile: 8000 is the treatment all 27 rated drum-loop
+  // batches carry, on the engine arm and the gen arm but not the ref arm. If this fails, someone
+  // changed what a rated clip sounds like. That is not a number to update — it needs an owner
+  // decision and a new named regime, because in place it silently re-keys every historical
+  // comparison (`beat showdown --report` pools old and new under one `showdown:drum-loop` key).
+  assert.equal(TASTE_DRUMS_BUS_CUTOFF_HZ, 8000)
+  assert.equal(TASTE_DRUMS_BUS_CUTOFF_OPEN_HZ, 18000)
+  assert.deepEqual({ ...TASTE_DRUMS_BUS_REGIMES }, { frozen: 8000, open: 18000 })
+
+  // host 1: the seed generator (the engine arm, and the gen arm's kit host via isolateTrack)
+  for (const s of [1, 2, 3, 7]) {
+    const drums = parse(generateSeedBeat(s).text).tracks.find((t) => t.kind === 'drums')!
+    assert.equal(drums.synth.cutoff, TASTE_DRUMS_BUS_CUTOFF_HZ, `seed ${s}'s drums bus drifted off the frozen regime`)
+  }
+  // host 2: the pitched keymap scratch (the gen arm for bassline/chords/lead). Re-typing the literal
+  // here is exactly how the two hosts could silently diverge, so it is pinned to the same constant.
+  assert.equal(parse(keymapScratchText(120)).tracks.find((t) => t.kind === 'drums')!.synth.cutoff, TASTE_DRUMS_BUS_CUTOFF_HZ)
+})
+
+test('D-LP: the eight already-rated seed files still carry the regime they were rated under', () => {
+  // The eval record lives in these FILES — the generator has since drifted from them (curated
+  // patches) and can no longer reproduce them, so editing one in place would retroactively change
+  // what 27 blind ratings were given on with nothing left to compare against. Fails LOUDLY on a
+  // missing seed rather than skipping (CLAUDE.md: a test that can silently skip is not a gate).
+  const dir = join(process.cwd(), 'examples', 'taste-t1')
+  for (let i = 1; i <= 8; i++) {
+    const file = join(dir, `seed-${String(i).padStart(3, '0')}.beat`)
+    assert.ok(existsSync(file), `${file} is missing — it is the rated drum-loop batches' own material. Restore it with \`git checkout examples/taste-t1\`; do NOT regenerate it, \`beat taste-seeds\` no longer reproduces these files.`)
+    const drums = parse(readFileSync(file, 'utf8')).tracks.find((t) => t.kind === 'drums')!
+    assert.equal(drums.synth.cutoff, TASTE_DRUMS_BUS_CUTOFF_HZ, `${file}'s drums bus was edited — the 27 rated batches were rendered at ${TASTE_DRUMS_BUS_CUTOFF_HZ} Hz`)
+  }
+})
+
+test('D-LP: every drums-bus lowpass that can reach a rated clip is a NAMED regime', () => {
+  // The catch-all, and the assertion that would have caught the original defect in a NEW host: a
+  // host that hardcodes its own fourth unchosen number fails here. Note surgeSampleHostText already
+  // uses 18000 and passes only because `open` is now a named value — before this change its 18000
+  // and the seeds' 8000 were two unrelated literals for the same job.
+  const named = new Set<number>(Object.values(TASTE_DRUMS_BUS_REGIMES))
+  const hosts: [string, number][] = [
+    ['generateSeedBeat', parse(generateSeedBeat(4).text).tracks.find((t) => t.kind === 'drums')!.synth.cutoff],
+    ['keymapScratchText', parse(keymapScratchText(120)).tracks.find((t) => t.kind === 'drums')!.synth.cutoff],
+    ['surgeSampleHostText', parse(surgeSampleHostText(120)).tracks.find((t) => t.kind === 'drums')!.synth.cutoff],
+  ]
+  for (const [host, cutoff] of hosts) {
+    assert.ok(named.has(cutoff), `${host} renders rated clips through a ${cutoff} Hz drums bus lowpass, which is not one of the named regimes (${[...named].join(', ')}) — add it to TASTE_DRUMS_BUS_REGIMES with its provenance, or reuse an existing one`)
+  }
+  // the opt-in regime really is reachable, and it changes nothing else: the two seeds differ in
+  // exactly one line, so the next round can pin every other variable and pair batch-for-batch
+  const frozen = generateSeedBeat(4, { drumsBusCutoffHz: TASTE_DRUMS_BUS_CUTOFF_HZ }).text.split('\n')
+  const open = generateSeedBeat(4, { drumsBusCutoffHz: TASTE_DRUMS_BUS_CUTOFF_OPEN_HZ }).text.split('\n')
+  assert.equal(frozen.length, open.length)
+  const differing = frozen.map((l, i) => (l === open[i] ? -1 : i)).filter((i) => i >= 0)
+  assert.equal(differing.length, 1, `the drums-bus regime shifted ${differing.length} lines — it must draw no rng, or a paired round is not a controlled comparison`)
+  assert.equal(open[differing[0]!]!.trim(), `cutoff ${TASTE_DRUMS_BUS_CUTOFF_OPEN_HZ}`)
 })

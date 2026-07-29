@@ -824,10 +824,16 @@ const HELP = [
   },
   {
     cmd: 'taste-seeds',
-    text: `  beat taste-seeds <dir> [--count 8] [--seed 1]         generate synthetic seed SONGS (deterministic space:
+    text: `  beat taste-seeds <dir> [--count 8] [--seed 1] [--drums-bus frozen|open]
+                                                          generate synthetic seed SONGS (deterministic space:
                                                           tempo, key, progression, palette, drum feel) as the raw
                                                           material for taste data collection. Step 1 of the
-                                                          collect->rate->eval pipeline (docs/taste-loop-design.md).`,
+                                                          collect->rate->eval pipeline (docs/taste-loop-design.md).
+                                                          --drums-bus picks the drums BUS LOWPASS regime by name:
+                                                          frozen (8000 Hz, the treatment all 27 rated drum-loop
+                                                          batches carry) or open (18000 Hz). Opening it costs
+                                                          batch-for-batch comparability with the frozen rounds —
+                                                          see src/taste/seeds.ts TASTE_DRUMS_BUS_CUTOFF_HZ.`,
   },
   {
     cmd: 'taste-collect',
@@ -2533,14 +2539,22 @@ function drumKitCmd(argv) {
 // session instead of a music-production obligation, and the data covers many aesthetics.
 
 async function tasteSeedsCmd(argv) {
-  const known = new Set(['--count', '--seed'])
-  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --count, --seed)`)
+  const known = new Set(['--count', '--seed', '--drums-bus'])
+  for (const a of argv) if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: --count, --seed, --drums-bus)`)
   const positional = argv.filter((a, i) => !a.startsWith('--') && !known.has(argv[i - 1]))
   const outDir = positional[0]
-  if (!outDir) throw new BeatEditError('taste-seeds needs an output directory: beat taste-seeds <dir> [--count 8] [--seed 1]')
+  if (!outDir) throw new BeatEditError('taste-seeds needs an output directory: beat taste-seeds <dir> [--count 8] [--seed 1] [--drums-bus frozen|open]')
   const count = flagValue(argv, '--count') ? Number(flagValue(argv, '--count')) : 8
   const seed0 = flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : 1
-  const { generateSeedBeat } = await import('../dist/src/taste/seeds.js')
+  const { generateSeedBeat, TASTE_DRUMS_BUS_REGIMES } = await import('../dist/src/taste/seeds.js')
+  // The drums BUS LOWPASS regime, by name — never a raw number, so a round is always attributable
+  // to a named treatment (src/taste/seeds.ts's TASTE_DRUMS_BUS_CUTOFF_HZ block explains why the
+  // default is frozen at 8000 and what `open` costs in comparability).
+  const busName = flagValue(argv, '--drums-bus') ?? 'frozen'
+  if (!Object.hasOwn(TASTE_DRUMS_BUS_REGIMES, busName)) {
+    throw new BeatEditError(`unknown --drums-bus regime "${busName}" (known: ${Object.keys(TASTE_DRUMS_BUS_REGIMES).join(', ')})`)
+  }
+  const drumsBusCutoffHz = TASTE_DRUMS_BUS_REGIMES[busName]
   const { loadEngineCuratedFile } = await import('../dist/src/taste/enginePresets.js')
   const { mkdirSync } = await import('node:fs')
   mkdirSync(outDir, { recursive: true })
@@ -2550,9 +2564,10 @@ async function tasteSeedsCmd(argv) {
   const curatedPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', 'engine-curated.json')
   const seedCurated = loadEngineCuratedFile(curatedPath)
   if (seedCurated) process.stdout.write(`engine-curated.json present — synth seed patches drawn from the curated bank + seeded jitter\n`)
+  process.stdout.write(`drums bus lowpass: ${busName} (${drumsBusCutoffHz} Hz)${busName === 'frozen' ? '' : ' — NOT batch-for-batch comparable with the frozen-regime rounds; pair the round deliberately'}\n`)
   for (let i = 0; i < count; i++) {
     const seed = seed0 + i
-    const { text, description } = generateSeedBeat(seed, { curated: seedCurated })
+    const { text, description } = generateSeedBeat(seed, { curated: seedCurated, drumsBusCutoffHz })
     parse(text) // a seed that doesn't parse is a generator bug — fail loudly, write nothing bad
     const file = join(outDir, `seed-${String(seed).padStart(3, '0')}.beat`)
     writeFileSync(file, text + '\n')
