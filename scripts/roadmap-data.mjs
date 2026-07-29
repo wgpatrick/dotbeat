@@ -1471,6 +1471,12 @@ export const rows = [
 
   // ── Render / export ──────────────────────────────────────────────────────
   {
+    area: 'Render / export', feature: 'Surge sidecar resolves media output against ITS cwd, not the .beat file — relative paths silently break',
+    description: 'FOUND 2026-07-29 building surge patch boards for songs/twin-souls-study. `beat render <relative-path>.beat` on a doc with a surge track fails with "surge render reported success but wrote no file at <dir>/media/surge_*.wav" — because the sidecar (python/surge_render.py via src/analysis/surge.ts runSurgeRender) writes its output resolved against the SIDECAR PROCESS cwd (the repo root when invoked via an alias/absolute cli path), while surge-host.ts checks for the file relative to the caller cwd. The wav lands in <repo>/boards/.../media/ — 17 of 17 renders in a row failed this way and litter accumulated in the repo tree; the same commands with ABSOLUTE .beat paths work. Every earlier surge use (showdown, examples) happened to run from the repo root, so cwd == resolution base and the bug was invisible. Fix: resolve the surge media output path against the DOCUMENT path (dirname of the .beat) before handing it to the sidecar, and add a test that renders a surge doc from a different cwd via a relative path. Workaround until then: absolute paths.',
+    core: 'missing', cli: 'na', gui: 'na', status: 'not-started',
+    research: null, plan: null,
+  },
+  {
     area: 'Render / export', feature: 'GUI Export button',
     description: 'Reuses the live engine’s own capture path; verified against the CLI reference render.',
     core: 'done', cli: 'done', gui: 'done', status: 'done',
