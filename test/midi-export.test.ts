@@ -413,6 +413,44 @@ ${SYNTH_BLOCK}
   assert.equal(smf.tracks[0]!.notes[0]!.pitch, 36)
 })
 
+test('pilot-147 fixes: song-mode NOTE, multi-clip note, and a clean missing-file error', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'beat-midi-'))
+  const file = join(dir, 'song.beat')
+  writeFileSync(
+    file,
+    `format_version 0.11
+bpm 125
+loop_bars 1
+selected_track t
+
+track t T #e06c75 synth
+${SYNTH_BLOCK}
+  clip t_a
+    note u1 60 0 1 0.7
+  clip t_soft
+    note u2 55 0 4 0.4
+  note u1 60 0 1 0.7
+
+scene s1
+  slot t t_a
+
+scene s2
+  slot t t_soft
+
+song
+  section s1 8
+  section s2 4
+`,
+  )
+  const { text } = runExportMidi({ file })
+  // HIGH: a song-mode project must say the export is loop content, not the arranged timeline.
+  assert.match(text, /NOTE: this project has a song arrangement \(2 sections, 12 bars\) — export-midi v1 exports each track's own LOOP content, NOT the arranged timeline/)
+  // MEDIUM: a track with several saved clips must say the other variants are not included.
+  assert.match(text, /note: t has 2 saved clips \(t_a, t_soft\) — this export is the track's CURRENT loop content/)
+  // MEDIUM: a typo'd path is one clean line, not an ENOENT stack trace.
+  assert.throws(() => runExportMidi({ file: join(dir, 'nope.beat') }), (err: Error) => err.name === 'BeatMidiError' && /no such file/.test(err.message))
+})
+
 test('runExportMidi: -o writes ONE multi-track file; -o with --out-dir is rejected', () => {
   const dir = mkdtempSync(join(tmpdir(), 'beat-midi-'))
   const file = join(dir, 'song.beat')

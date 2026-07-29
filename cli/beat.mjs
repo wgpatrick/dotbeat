@@ -1239,6 +1239,9 @@ const HELP = [
                                                           mapping is skipped BY NAME. cent/chance/ratchet have no SMF
                                                           equivalent and are dropped with a printed count (beat
                                                           consolidate bakes ratchets into real notes first).
+                                                          v1 exports each track's own LOOP content — NOT the arranged
+                                                          song timeline, and NOT other saved clip variants (a NOTE is
+                                                          printed when a song block / extra clips exist).
                                                           Ableton imports a .mid as a severed copy (research/52) —
                                                           later dotbeat edits do not follow.`,
   },

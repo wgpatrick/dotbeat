@@ -108,6 +108,10 @@ export interface MidiTrackReport {
   skippedLanes: Record<string, number>
   /** Where the track's last note_off lands, in seconds at the document tempo. */
   endSeconds: number
+  /** The track's saved clip ids. When there is more than one, the report says so out loud: the
+   * export is the track's CURRENT loop content, and other clip variants do not come along
+   * (pilot 147: a user exporting `arp` got the drop variant and never learned `arp_soft` existed). */
+  clipIds: string[]
 }
 
 function stepTicks(steps: number): number {
@@ -135,6 +139,7 @@ function trackEvents(track: BeatTrack, channel: number, bpm: number): { events: 
     laneNotes: {},
     skippedLanes: {},
     endSeconds: 0,
+    clipIds: track.clips.map((c) => c.id),
   }
   const events: TimedEvent[] = []
   let lastOffTick = 0
@@ -317,6 +322,9 @@ function reportLines(report: MidiTrackReport, dest: string): string[] {
   if (report.droppedRatchet > 0) dropped.push(`ratchet on ${report.droppedRatchet} (beat consolidate bakes ratchets into real notes first)`)
   if (dropped.length > 0) lines.push(`    dropped (no SMF equivalent): ${dropped.join(', ')} note(s)`)
   if (report.skippedInactive > 0) lines.push(`    skipped ${report.skippedInactive} deactivated note(s) (active=0 — silent in dotbeat, not exported)`)
+  if (report.clipIds.length > 1) {
+    lines.push(`    note: ${report.trackId} has ${report.clipIds.length} saved clips (${report.clipIds.join(', ')}) — this export is the track's CURRENT loop content; other clip variants are not included`)
+  }
   return lines
 }
 
@@ -327,7 +335,15 @@ export function runExportMidi(opts: RunExportMidiOptions): RunExportMidiResult {
     throw new BeatMidiError('pass either -o <out.mid> (one file) or --out-dir <dir> (one file per track), not both')
   }
   const file = resolve(opts.file)
-  const doc = parse(readFileSync(file, 'utf8'))
+  let text: string
+  try {
+    text = readFileSync(file, 'utf8')
+  } catch (err) {
+    // Pilot 147 (MEDIUM): a typo'd path used to surface as a raw ENOENT stack trace while every
+    // other error path printed one clean line. Same treatment as the rest.
+    throw new BeatMidiError(`cannot read ${file}: ${err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : err instanceof Error ? err.message : String(err)}`)
+  }
+  const doc = parse(text)
   const requested = (opts.tracks ?? []).filter((t) => t.length > 0)
   const trackIds = requested.length > 0 ? requested : contentTrackIds(doc)
   if (trackIds.length === 0) {
@@ -338,6 +354,14 @@ export function runExportMidi(opts: RunExportMidiOptions): RunExportMidiResult {
   const files: string[] = []
   const reports: MidiTrackReport[] = []
 
+  // Pilot 147 (HIGH): a song-mode project exports each track's ~loop-length content, and without
+  // this line the printed summary was the ONLY hint — a user who built a 168-bar arrangement got
+  // 8-second fragments and no in-tool signal anything was missing. Say it before the file list.
+  const songNote =
+    doc.song !== null && doc.song.length > 0
+      ? `  NOTE: this project has a song arrangement (${doc.song.length} section${doc.song.length === 1 ? '' : 's'}, ${doc.song.reduce((n, s) => n + s.bars, 0)} bars) — export-midi v1 exports each track's own LOOP content, NOT the arranged timeline`
+      : null
+
   if (opts.out !== undefined) {
     const outPath = resolve(opts.out)
     const exported = exportTracksToMidi(doc, trackIds)
@@ -347,12 +371,14 @@ export function runExportMidi(opts: RunExportMidiOptions): RunExportMidiResult {
     lines.push(
       `exported ${basename(file)} @ ${doc.bpm}bpm -> ${outPath} (SMF type ${exported.format}${exported.format === 1 ? `, ${trackIds.length} tracks + tempo track` : ''}, ${MIDI_TICKS_PER_QUARTER} ticks/quarter, 1 step = ${TICKS_PER_STEP} ticks)`,
     )
+    if (songNote !== null) lines.push(songNote)
     for (const report of exported.tracks) lines.push(...reportLines(report, basename(outPath)))
   } else {
     const stem = basename(file).replace(/\.beat$/, '')
     const dir = resolve(opts.outDir ?? join(dirname(file), `${stem}-midi`))
     mkdirSync(dir, { recursive: true })
     lines.push(`exported ${basename(file)} @ ${doc.bpm}bpm -> ${dir}/ (one SMF type-0 .mid per track, ${MIDI_TICKS_PER_QUARTER} ticks/quarter, 1 step = ${TICKS_PER_STEP} ticks)`)
+    if (songNote !== null) lines.push(songNote)
     for (const id of trackIds) {
       const exported = exportTracksToMidi(doc, [id])
       const dest = join(dir, `${id}.mid`)
