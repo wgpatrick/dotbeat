@@ -293,13 +293,9 @@ const ROWS: ParityRow[] = [
     mcp: (c) => ({ name: 'beat_compose', arguments: { file: c.file, track: 'lead', source: 'theory', role: 'lead', archetype: 'motif-repeat', key: 'a', mode: 'minor', bars: 4, seed: 4211 } }),
     artifacts: ['song.beat'],
   },
-  {
     name: 'compose with an explicit clip re-snapshot (the song-mode trap\'s narrow form)',
     cli: (c) => ['compose', c.file, 'lead', '--archetype', 'arp-motif', '--key', 'a', '--mode', 'minor', '--seed', '99', '--clip', 'melody'],
     mcp: (c) => ({ name: 'beat_compose', arguments: { file: c.file, track: 'lead', archetype: 'arp-motif', key: 'a', mode: 'minor', seed: 99, clips: ['melody'] } }),
-    artifacts: ['song.beat'],
-  },
-  {
     name: 'compose --count: an option board, same manifest contract as a vary batch',
     cli: (c) => ['compose', c.file, 'lead', '--count', '3', '--seed', '55', '--key', 'a', '--mode', 'minor', '--out-dir', join(c.dir, 'b-compose')],
     mcp: (c) => ({ name: 'beat_compose', arguments: { file: c.file, track: 'lead', count: 3, seed: 55, key: 'a', mode: 'minor', out_dir: join(c.dir, 'b-compose') } }),
@@ -307,6 +303,14 @@ const ROWS: ParityRow[] = [
     // the CLI's tail line names `beat board <dir>`; the MCP one names beat_adopt, since an MCP
     // client has no shell to run the board in
     sameText: false,
+  // export-midi (CLAUDE.md: a new two-surface operation arrives WITH its parity row). Both
+  // surfaces call runExportMidi (src/midi/export.ts), so the .mid must come out byte-identical —
+  // the artifact compare reads the binary as utf8, which is lossy but identical-on-identical-bytes,
+  // and the writer emits nothing nondeterministic (no timestamps, no absolute paths in the file).
+    name: 'export-midi (SMF bytes and report text through both surfaces)',
+    cli: (c) => ['export-midi', c.file, 'lead', '--out-dir', join(c.dir, 'midi')],
+    mcp: (c) => ({ name: 'beat_export_midi', arguments: { file: c.file, tracks: ['lead'], out_dir: join(c.dir, 'midi') } }),
+    artifacts: ['midi/lead.mid'],
   },
 ]
 
@@ -378,10 +382,11 @@ test('the parity table covers every MCP tool in the vary/score/audition family (
   // the winner. beat_render is the render verb itself and needs a browser, so it is out of scope.
   // Plus the whole beat_trick* family (D11): the tool that was advertised-but-absent arrives WITH
   // its rows, and any future beat_trick_* tool is caught by the prefix rather than by memory.
+  // Plus beat_export_midi (2026-07-28): a new two-surface operation arrives with its row.
   const family = golden
     .map((t) => t.name)
     // beat_compose joins the family because it WRITES the batches the rest of it consumes: a
     // compose board is scored, adopted and suggested-from through the same manifest.
-    .filter((n) => ['beat_vary', 'beat_score', 'beat_adopt', 'beat_suggest', 'beat_compose'].includes(n) || n.startsWith('beat_trick'))
+    .filter((n) => ['beat_vary', 'beat_score', 'beat_adopt', 'beat_suggest', 'beat_compose', 'beat_export_midi'].includes(n) || n.startsWith('beat_trick'))
   assert.deepEqual([...covered].sort(), family.sort(), 'a vary-family or trick tool has no parity row')
 })

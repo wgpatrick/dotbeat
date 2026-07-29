@@ -122,6 +122,7 @@ import {
 } from '../analysis/index.js'
 // ==== end production tricks ====
 import { buildKeymap, noteToMidi, midiToNote, rateForPitch } from '../core/keymap.js'
+import { runExportMidi } from '../midi/export.js'
 // ==== end Phase 40 Stream VA ====
 import { checkpoint, history, collapsedHistory, restore, pin, unpin, pins } from '../history/index.js'
 import { recordEdits, editLogEnabled } from '../telemetry/index.js'
@@ -1242,6 +1243,28 @@ const TOOLS: ToolDef[] = [
       const diff = formatDiff(diffDocuments(before, doc))
       return changed === 0 ? 'no ratcheted notes in scope — nothing to consolidate\n' : diff
     },
+  },
+  {
+    name: 'beat_export_midi',
+    description:
+      "Export track MIDI from a .beat file as Standard MIDI Files (.mid) a DAW can import — Ableton: drag the .mid onto a MIDI track; the import is a severed copy (research/52), later dotbeat edits do not follow. No tracks named = every track with notes/hits. out writes ONE .mid (multi-track SMF type 1 when it covers several tracks); otherwise one type-0 .mid per track lands in out_dir (default <file>-midi/ next to the .beat). 480 ticks/quarter, 1 step = one 16th = 120 ticks; the document's bpm becomes the tempo meta. Drum tracks export on channel 10 with declared lanes mapped to General MIDI notes (sf-backed lanes keep their own note); a lane with no GM mapping is skipped BY NAME in the report. Per-note cent/chance/ratchet have no SMF equivalent and are dropped with a printed count (beat_consolidate bakes ratchets into real notes first). v1 exports each track's own LOOP content — NOT the arranged song timeline and NOT other saved clip variants; the report says so out loud whenever a song block or extra clips exist. Same runner as `beat export-midi` — outputs are byte-identical across the two surfaces.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        tracks: { type: 'array', items: { type: 'string' }, description: 'track ids to export; omit for every track with notes/hits' },
+        out: { type: 'string', description: 'write ONE .mid here (type 1 multi-track when several tracks); mutually exclusive with out_dir' },
+        out_dir: { type: 'string', description: 'write one type-0 .mid per track into this directory (default <file>-midi/ next to the .beat)' },
+      },
+      required: ['file'],
+    },
+    handler: (args) =>
+      runExportMidi({
+        file: str(args, 'file'),
+        tracks: Array.isArray(args.tracks) ? (args.tracks as unknown[]).map(String) : undefined,
+        out: typeof args.out === 'string' ? args.out : undefined,
+        outDir: typeof args.out_dir === 'string' ? args.out_dir : undefined,
+      }).text,
   },
   {
     name: 'beat_diff',

@@ -1,9 +1,12 @@
 # dotbeat CLI + MCP command surface
 
-Re-verified 2026-07-27 against the live surfaces: 95 CLI commands from `cli/beat.mjs`'s `HELP`
-array (1:1 with its dispatch switch, enforced by `test/cli-surface.test.ts`), and 79 MCP tools from
-the committed `tools/list` golden (`test/fixtures/mcp-tools.golden.json`, itself asserted against a
-real stdio call).
+Re-verified 2026-07-28 against the live surfaces: 95 CLI commands from `cli/beat.mjs`'s `HELP`
+array (1:1 with its dispatch switch), and 79 MCP tools from a real `tools/list` call over stdio.
+(The 2026-07-26 counts of 89/75 were already stale by several commands before export-midi landed —
+one more datapoint for "run the two verification commands below, never trust the written number.")
+(2026-07-28 addition: `beat export-midi` / `beat_export_midi` — export track MIDI as standard
+`.mid` files for a DAW; drums map declared lanes to General MIDI notes on channel 10, and
+cent/chance/ratchet are dropped with a printed count. `beat help export-midi` for the flags.)
 
 > **This file deliberately does not reproduce the usage text.** It used to embed a verbatim
 > snapshot of `USAGE`, and that snapshot went stale badly — by 2026-07-25 it listed ~30 of the 87
@@ -12,7 +15,7 @@ real stdio call).
 > own help is the only authoritative source.** Run it; it is instant and always current.
 
 ```bash
-node cli/beat.mjs help              # all 95 commands, grouped, with every flag
+node cli/beat.mjs help              # all 89 commands, grouped, with every flag
 node cli/beat.mjs help <command>    # one command's block (also: beat <command> --help)
 ```
 
@@ -22,41 +25,9 @@ Requires `npm run build` in the dotbeat checkout first — the CLI reads compile
 `beat diff` exit codes follow `diff(1)`: 0 = no musical changes, 1 = changes, 2 = error. `beat lint`
 exits 1 if any finding is `warn` level, else 0 — usable in a script/loop.
 
-## Writing actual music into a track: `beat compose` (added 2026-07-27)
-
-Worth naming here because it is the verb agents have been failing to find. dotbeat has two real
-composition engines — the theory layer (archetype banks over a seeded chord track) and Composer's
-Assistant 2 (neural MIDI infill) — and until 2026-07-27 **neither was reachable outside
-`beat showdown`'s blind bake-off**, so agents producing songs hand-rolled note grids instead.
-
-```bash
-beat compose <file> <track> [--source theory|ca2] [--role lead|bassline|chords] [--seed N]
-             [--archetype <name>] [--bars N] [--key <note>] [--mode major|minor|dorian|phrygian]
-             [--register auto|source|<±octaves>] [--append] [--clip <id[,id]>] [--no-clip-sync]
-             [--dry-run]
-beat compose <file> <track> --count N [--out-dir <dir>] [--render|--audition]   # an option board
-```
-
-- Replaces the track's notes by default (`--append` keeps them) and prints the usual edit list.
-- **Key** is resolved explicit `--key`/`--mode` → the track's declared `scale` → the document's
-  pitch-class histogram, and the winning source is printed every time.
-- **Register** defaults to matching the target track's own median pitch by whole octaves.
-- **Song mode:** the engine renders a track's CLIPS, not its live notes, so every clip the track is
-  placed under is re-snapshotted. Without that a composed variant renders byte-identical to its
-  parent — a real bug that burned two board renders on 2026-07-27. `--clip` narrows it (use it when
-  a track has a loud and a soft rendition of the same part); `--no-clip-sync` opts out and warns.
-- `--count N` writes `compose-<source>-<track>-<seed>/` next to the .beat with N genuinely
-  different figures and the same `manifest.json` `beat render --batch`, `beat board` and
-  `beat adopt` read. The parent is untouched until you adopt.
-- `--source ca2` needs the out-of-repo CA2 install and **fails loudly** without it
-  (`beat showdown --ca2-doctor`); it never silently substitutes a theory figure.
-
-MCP twin: **`beat_compose`** (snake_case args: `clip_sync`, `out_dir`, `mode_capture`; `clips` is an
-array). Both surfaces call `src/compose/compose.ts`, with parity rows in `test/mcp-parity.test.ts`.
-
 ## What is on MCP and what is CLI-only
 
-79 tools, confirmed 2026-07-27. Almost every *document-editing* verb has a twin; the
+75 tools, confirmed live 2026-07-26. Almost every *document-editing* verb has a twin; the
 **orchestration and eval verbs do not**.
 
 **CLI-only** (shell out even inside an MCP session): `audition`, `board`, `daemon`, `excerpt`,
