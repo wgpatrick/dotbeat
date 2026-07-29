@@ -154,6 +154,7 @@ import {
   BeatRecipeError,
 } from '../dist/src/recipes/index.js'
 import { buildKeymap, planKeymap, noteToMidi, midiToNote, rateForPitch } from '../dist/src/core/keymap.js'
+import { runExportMidi } from '../dist/src/midi/export.js'
 // ==== end Phase 40 Stream VA ====
 
 // ---- usage / per-command help (Phase 34 Stream NB, pilots 94 & 97) --------------------------
@@ -191,6 +192,7 @@ const HELP_FAMILIES = [
   // ==== gen-kit ====
   ['gen-kit', 'source', 'rate', 'score', 'adopt', 'regen'], // compose from generated sounds -> re-pick through the taste loop
   // ==== end gen-kit ====
+  ['export-midi', 'render', 'consolidate'], // getting a track OUT: notes as a .mid for a DAW / audio as a WAV; consolidate bakes ratchets before export
 ]
 
 /** One entry per command, in the exact order the full dump prints them. `text` is the command's
@@ -1223,6 +1225,23 @@ const HELP = [
   note: song mode renders only scene-placed content — a groove on a track that isn't placed in any
         scene renders SILENT. Snapshot with beat clip and place it with beat scene / beat place first.`,
   },
+  {
+    cmd: 'export-midi',
+    text: `  beat export-midi <file.beat> [<track> ...] [-o <out.mid> | --out-dir <dir>]
+                                                          export track MIDI as Standard MIDI Files for a DAW.
+                                                          no tracks named = every track with notes/hits; -o = ONE
+                                                          .mid (multi-track type 1 when it covers several tracks),
+                                                          otherwise one type-0 .mid per track into --out-dir
+                                                          (default <file>-midi/ next to the .beat). 480 ticks/quarter,
+                                                          1 step = one 16th = 120 ticks; bpm becomes the tempo meta.
+                                                          drums: declared lanes map to General MIDI notes on channel
+                                                          10 (sf-backed lanes keep their own note); a lane with no GM
+                                                          mapping is skipped BY NAME. cent/chance/ratchet have no SMF
+                                                          equivalent and are dropped with a printed count (beat
+                                                          consolidate bakes ratchets into real notes first).
+                                                          Ableton imports a .mid as a severed copy (research/52) —
+                                                          later dotbeat edits do not follow.`,
+  },
   // ---- Phase 37 Stream RA begin: feedback help entry --------------------------------------
   {
     cmd: 'feedback',
@@ -2190,6 +2209,32 @@ function consolidateCmd(argv) {
   const { doc, changed } = consolidateRatchet(before, track, noteIds ? { noteIds } : {})
   writeDoc(file, before, doc)
   if (changed === 0) process.stdout.write('no ratcheted notes in scope — nothing to consolidate\n')
+}
+
+// `beat export-midi` — a thin argv adapter over runExportMidi (src/midi/export.ts), which the
+// MCP twin beat_export_midi also calls: parity is structural, not disciplinary (D21/CLAUDE.md).
+function exportMidiCmd(argv) {
+  let out
+  let outDir
+  const positional = []
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === '-o' || a === '--out') {
+      out = argv[++i]
+      if (out === undefined) throw new BeatEditError(`${a} needs a path (the .mid to write)`)
+    } else if (a === '--out-dir') {
+      outDir = argv[++i]
+      if (outDir === undefined) throw new BeatEditError('--out-dir needs a directory path')
+    } else if (a.startsWith('-') && a.length > 1) {
+      throw new BeatEditError(`unknown flag "${a}" (known: -o, --out-dir)`)
+    } else {
+      positional.push(a)
+    }
+  }
+  const [file, ...tracks] = positional
+  if (!file) throw new BeatEditError('export-midi needs <file.beat> [<track> ...] [-o <out.mid> | --out-dir <dir>]')
+  const { text } = runExportMidi({ file, tracks, out, outDir })
+  process.stdout.write(text)
 }
 
 // The factory library ships with the package; BEAT_PRESETS overrides for a user library.
@@ -6878,6 +6923,9 @@ async function main() {
     case 'mcp-init':
       mcpInitCmd(rest)
       break
+    case 'export-midi':
+      exportMidiCmd(rest)
+      break
     case 'render': {
       // Phase 37 Stream RA: `--stems` renders one solo WAV per track into an out dir instead of one
       // full-mix WAV — its own handler (renderStemsCmd), which exits the process itself.
@@ -6947,6 +6995,7 @@ main().catch((err) => {
     err instanceof BeatProfileError ||
     err instanceof BeatAnalysisError ||
     err.name === 'HistoryError' ||
+    err.name === 'BeatMidiError' ||
     err.name === 'WavDecodeError' ||
     err.name === 'AutomationShapeError' ||
     // gen-kit orchestrates source-lib + batch adopt + its own planning directly, so their typed

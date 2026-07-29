@@ -814,6 +814,20 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           blocked (a `playwright install chromium` binary works).
   note: song mode renders only scene-placed content — a groove on a track that isn't placed in any
         scene renders SILENT. Snapshot with beat clip and place it with beat scene / beat place first.
+  beat export-midi <file.beat> [<track> ...] [-o <out.mid> | --out-dir <dir>]
+                                                          export track MIDI as Standard MIDI Files for a DAW.
+                                                          no tracks named = every track with notes/hits; -o = ONE
+                                                          .mid (multi-track type 1 when it covers several tracks),
+                                                          otherwise one type-0 .mid per track into --out-dir
+                                                          (default <file>-midi/ next to the .beat). 480 ticks/quarter,
+                                                          1 step = one 16th = 120 ticks; bpm becomes the tempo meta.
+                                                          drums: declared lanes map to General MIDI notes on channel
+                                                          10 (sf-backed lanes keep their own note); a lane with no GM
+                                                          mapping is skipped BY NAME. cent/chance/ratchet have no SMF
+                                                          equivalent and are dropped with a printed count (beat
+                                                          consolidate bakes ratchets into real notes first).
+                                                          Ableton imports a .mid as a severed copy (research/52) —
+                                                          later dotbeat edits do not follow.
   beat feedback <file> [--sections] [--ref <ref.json>] [--json]
                                                           render the song ONCE, then report mix feedback.
                                                           default: whole-song metrics + lint in one block.
