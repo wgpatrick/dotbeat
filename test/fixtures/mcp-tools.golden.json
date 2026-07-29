@@ -203,34 +203,6 @@
     }
   },
   {
-    "name": "beat_compose",
-    "required": [
-      "file",
-      "track"
-    ],
-    "args": {
-      "file": "string",
-      "track": "string",
-      "source": "string(theory|ca2)",
-      "role": "string(lead|bassline|chords)",
-      "seed": "number",
-      "archetype": "string",
-      "bars": "number",
-      "key": "string",
-      "mode": "string(major|minor|natural-minor|phrygian|dorian)",
-      "register": "string",
-      "append": "boolean",
-      "clips": "array<string>",
-      "clip_sync": "boolean",
-      "count": "number",
-      "out_dir": "string",
-      "render": "boolean",
-      "audition": "boolean",
-      "normalize": "boolean",
-      "mode_capture": "string(live|offline)"
-    }
-  },
-  {
     "name": "beat_consolidate",
     "required": [
       "file",
