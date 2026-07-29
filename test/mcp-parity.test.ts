@@ -293,9 +293,13 @@ const ROWS: ParityRow[] = [
     mcp: (c) => ({ name: 'beat_compose', arguments: { file: c.file, track: 'lead', source: 'theory', role: 'lead', archetype: 'motif-repeat', key: 'a', mode: 'minor', bars: 4, seed: 4211 } }),
     artifacts: ['song.beat'],
   },
+  {
     name: 'compose with an explicit clip re-snapshot (the song-mode trap\'s narrow form)',
     cli: (c) => ['compose', c.file, 'lead', '--archetype', 'arp-motif', '--key', 'a', '--mode', 'minor', '--seed', '99', '--clip', 'melody'],
     mcp: (c) => ({ name: 'beat_compose', arguments: { file: c.file, track: 'lead', archetype: 'arp-motif', key: 'a', mode: 'minor', seed: 99, clips: ['melody'] } }),
+    artifacts: ['song.beat'],
+  },
+  {
     name: 'compose --count: an option board, same manifest contract as a vary batch',
     cli: (c) => ['compose', c.file, 'lead', '--count', '3', '--seed', '55', '--key', 'a', '--mode', 'minor', '--out-dir', join(c.dir, 'b-compose')],
     mcp: (c) => ({ name: 'beat_compose', arguments: { file: c.file, track: 'lead', count: 3, seed: 55, key: 'a', mode: 'minor', out_dir: join(c.dir, 'b-compose') } }),
@@ -303,10 +307,12 @@ const ROWS: ParityRow[] = [
     // the CLI's tail line names `beat board <dir>`; the MCP one names beat_adopt, since an MCP
     // client has no shell to run the board in
     sameText: false,
+  },
   // export-midi (CLAUDE.md: a new two-surface operation arrives WITH its parity row). Both
   // surfaces call runExportMidi (src/midi/export.ts), so the .mid must come out byte-identical —
   // the artifact compare reads the binary as utf8, which is lossy but identical-on-identical-bytes,
   // and the writer emits nothing nondeterministic (no timestamps, no absolute paths in the file).
+  {
     name: 'export-midi (SMF bytes and report text through both surfaces)',
     cli: (c) => ['export-midi', c.file, 'lead', '--out-dir', join(c.dir, 'midi')],
     mcp: (c) => ({ name: 'beat_export_midi', arguments: { file: c.file, tracks: ['lead'], out_dir: join(c.dir, 'midi') } }),
