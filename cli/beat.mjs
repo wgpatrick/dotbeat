@@ -1232,7 +1232,7 @@ const HELP = [
   // ---- Phase 37 Stream RA begin: feedback help entry --------------------------------------
   {
     cmd: 'feedback',
-    text: `  beat feedback <file> [--sections] [--ref <ref.json>] [--json]
+    text: `  beat feedback <file> [--sections] [--ref <ref.json>] [--json] [--offline | --live]
                                                           render the song ONCE, then report mix feedback.
                                                           default: whole-song metrics + lint in one block.
                                                           --sections: slice the render at song section
@@ -1248,6 +1248,21 @@ const HELP = [
                                                           --sections-from) diffs the render's energy arc against
                                                           the reference's section-by-section and PASS/FAILs it
                                                           (the phase-6 dynamics-plan check).
+                                                          Capture path: LIVE real-time capture by default (the
+                                                          render takes as long as the song is), whatever the
+                                                          song's length. --offline computes the same mix
+                                                          through an offline context instead — exact and
+                                                          reproducible run-to-run, no lossy recorder step, and
+                                                          it does not depend on the wall clock; but it is
+                                                          CPU-bound and can be SLOWER than realtime on a long
+                                                          dense song (the measured ratio is printed), and it
+                                                          refuses soundfont (instrument/sf-lane) projects.
+                                                          --live is the explicit spelling of the default.
+                                                          A song over 2 minutes prints a note pointing at
+                                                          --offline; the default is NOT switched by length,
+                                                          because a gate that compares against a saved
+                                                          reference arc must not silently change which render
+                                                          chain measured it.
                                                           Honest limits: per-section STATIC metrics only — this
                                                           does NOT hear masking, arrangement, or transitions,
                                                           only how sections differ as isolated static mixes.
@@ -5988,8 +6003,23 @@ async function lintCmd(argv) {
  * per-section STATIC metrics only — no masking, arrangement, or transition awareness. */
 async function feedbackCmd(argv) {
   const { analyzeSections, formatSectionFeedback, formatWholeSongFeedback, arrangementFindings, diffArc, formatArcDiff } = await import('../dist/src/metrics/index.js')
-  const { renderToBuffer } = await import('./render.mjs')
+  const { renderToBuffer, offlinePreflightRefusal } = await import('./render.mjs')
+  // The capture path (--offline / --live) is spelled, validated and decided EXACTLY as
+  // `beat render`'s is, through the one shared policy both surfaces import — see
+  // src/render/capture-mode.ts for why it is not a third copy, and for why song length does not
+  // silently switch a threshold gate's own render chain.
+  const { resolveCaptureMode, longProjectOfflineHint } = await import('../dist/src/render/capture-mode.js')
+  const { projectRenderSeconds } = await import('../dist/src/vary/resample.js')
 
+  // Pilot 109's lesson, applied here now that this command HAS a flag whose whole point is
+  // exactness: a typo'd `--offlin` must not fall through to the positional list and silently run
+  // the non-exact path. `feedback` comes off cli-surface.test.ts's UNKNOWN_FLAG_HOLES ledger.
+  const KNOWN_FEEDBACK_FLAGS = ['--json', '--sections', '--ref', '--offline', '--live']
+  for (const a of argv) {
+    if (a.startsWith('--') && !KNOWN_FEEDBACK_FLAGS.includes(a)) {
+      throw new BeatEditError(`unknown flag "${a}" (known: ${KNOWN_FEEDBACK_FLAGS.join(', ')})`)
+    }
+  }
   const json = argv.includes('--json')
   const wantSections = argv.includes('--sections')
   const refIdx = argv.indexOf('--ref')
@@ -6023,10 +6053,39 @@ async function feedbackCmd(argv) {
     }
   }
 
-  const { bytes, doc } = await renderToBuffer(file)
+  const wantOffline = argv.includes('--offline')
+  const capture = resolveCaptureMode({
+    offline: wantOffline,
+    live: argv.includes('--live'),
+    refusal: wantOffline ? await offlinePreflightRefusal(file) : null,
+    fallback: 'live',
+  })
+  if (capture.error) throw new BeatEditError(capture.error)
+
+  // Everything knowable from the DOCUMENT is checked here, before the render — the render is the
+  // expensive thing in this command and the whole point of the surrounding work is not to pay for
+  // one you did not need. Pilot 2026-07-27 (HIGH) found `--sections` on a loop-mode project
+  // rendering the WHOLE song and only then erroring: 10.5s wall for a 7.6s loop, and minutes for a
+  // real song, for a mistake visible in the first parse. Every other precondition in this command
+  // (missing --ref file, arc-profile-without---sections, the offline refusal) already failed
+  // instantly; this one did not, purely because it read `doc` off the render's return value.
+  const preDoc = readDoc(file)
+  if (wantSections && (!preDoc.song || preDoc.song.length === 0)) {
+    throw new BeatEditError(`--sections needs a song block, but ${file} is in loop mode (no sections to slice). Run whole-song feedback instead: beat feedback ${file}`)
+  }
+  // Say the cost out loud BEFORE paying it: on a long song, live capture holds a headless browser
+  // open for the song's whole wall-clock duration and dies with a sleeping machine — the failure
+  // that filed this feature. The hint fires only when it is worth acting on (see the policy).
+  const hint = longProjectOfflineHint(projectRenderSeconds(preDoc), capture)
+  if (hint) console.error(hint)
+
+  const { bytes, doc } = await renderToBuffer(file, { offline: capture.mode === 'offline' })
   const { channels, sampleRate } = decodeWav(bytes)
 
   if (wantSections) {
+    // The loop-mode refusal now lives BEFORE the render (see preDoc above). This assert stays as a
+    // cheap invariant: the rendered doc is the same file, so a loop-mode doc reaching here means
+    // the pre-check was bypassed, not that a user made a mistake.
     if (!doc.song || doc.song.length === 0) {
       throw new BeatEditError(`--sections needs a song block, but ${file} is in loop mode (no sections to slice). Run whole-song feedback instead: beat feedback ${file}`)
     }

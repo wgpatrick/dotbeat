@@ -211,7 +211,9 @@ const UNKNOWN_FLAG_HOLES = [
   'effect-move',
   'effect-rm',
   'excerpt',
-  'feedback',
+  // 'feedback' left the ledger on 2026-07-27, when it grew --offline/--live: a typo'd --offlin
+  // would otherwise have fallen through to the positional list and silently run the non-exact
+  // real-time path, which is pilot 109's exact bug on a new flag.
   'fit-scale',
   'group',
   'group-set',

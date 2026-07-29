@@ -2208,7 +2208,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'beat_feedback',
     description:
-      "Render a .beat file ONCE through dotbeat's real engine (headless Chromium — same real-time capture as beat_render, so it takes about as long as the audio is long plus browser startup) and turn that capture into mix feedback in one step. Default (no sections): whole-song deterministic metrics (LUFS, true peak, crest, spectral balance, stereo) plus the lint findings, the same numbers beat_metrics/beat_lint produce. With sections true: slice the render at the song's section boundaries and report the per-section ENERGY ARC — integrated LUFS, spectral band shares, stereo width, and crest per section, plus section-to-section movement (louder/quieter, brighter/darker, wider/narrower, more/less dynamic) flagged only when the change clears the measured render-run variance floor, so a reported mover is a real audible difference, not render noise. Pass ref (a profile saved by beat_metrics' save_profile) to compare each section (or the whole song) against a reference mix. Honest limits: these are per-section STATIC metrics — each section measured as an isolated static mix. This does NOT hear masking, arrangement, transitions, or how one section sets up the next, only how the sections differ as static mixes; and sections mode needs a song block (a loop-mode project has no sections to slice).",
+      "Render a .beat file ONCE through dotbeat's real engine (headless Chromium — same real-time capture as beat_render by default, so it takes about as long as the audio is long plus browser startup; pass offline true to compute the mix through an offline context instead) and turn that capture into mix feedback in one step. Default (no sections): whole-song deterministic metrics (LUFS, true peak, crest, spectral balance, stereo) plus the lint findings, the same numbers beat_metrics/beat_lint produce. With sections true: slice the render at the song's section boundaries and report the per-section ENERGY ARC — integrated LUFS, spectral band shares, stereo width, and crest per section, plus section-to-section movement (louder/quieter, brighter/darker, wider/narrower, more/less dynamic) flagged only when the change clears the measured render-run variance floor, so a reported mover is a real audible difference, not render noise. Pass ref (a profile saved by beat_metrics' save_profile) to compare each section (or the whole song) against a reference mix. Honest limits: these are per-section STATIC metrics — each section measured as an isolated static mix. This does NOT hear masking, arrangement, transitions, or how one section sets up the next, only how the sections differ as static mixes; and sections mode needs a song block (a loop-mode project has no sections to slice).",
     inputSchema: {
       type: 'object',
       properties: {
@@ -2216,6 +2216,11 @@ const TOOLS: ToolDef[] = [
         sections: { type: 'boolean', description: 'slice the render at song section boundaries and report the per-section energy arc (needs a song block)' },
         ref: { type: 'string', description: "path to a reference profile JSON from beat_metrics' save_profile — compares each section (or the whole song) against it" },
         json: { type: 'boolean', description: 'emit machine-readable JSON instead of the formatted report' },
+        offline: {
+          type: 'boolean',
+          description:
+            "compute the mix through an offline context instead of capturing the real-time clock (same flag as `beat feedback --offline`, same engine): exact and reproducible run-to-run, no lossy recorder step, and it does not hold a browser open for the song's wall-clock duration. CPU-bound, so it can be SLOWER than realtime on a long dense song, and it refuses soundfont (instrument/sf-lane) projects with a named reason. Default is real-time capture whatever the song's length — length does not switch it, because a gate that compares against a saved reference arc must not silently change which render chain measured it.",
+        },
       },
       required: ['file'],
     },
@@ -2225,6 +2230,7 @@ const TOOLS: ToolDef[] = [
         if (args.sections === true) cliArgs.push('--sections')
         if (typeof args.ref === 'string' && args.ref !== '') cliArgs.push('--ref', args.ref)
         if (args.json === true) cliArgs.push('--json')
+        if (args.offline === true) cliArgs.push('--offline')
         execFile(process.execPath, cliArgs, { timeout: 600000 }, (err, stdout, stderr) => {
           // beat feedback exits non-zero when the whole-song lint has a warn-level finding — that is
           // a valid, useful result (findings are on stdout), not a failure, so surface stdout when
