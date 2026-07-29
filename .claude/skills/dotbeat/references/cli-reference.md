@@ -1,7 +1,12 @@
 # dotbeat CLI + MCP command surface
 
-Re-verified 2026-07-26 against the live surfaces: 89 CLI commands from `cli/beat.mjs`'s `HELP`
-array (1:1 with its dispatch switch), and 75 MCP tools from a real `tools/list` call over stdio.
+Re-verified 2026-07-28 against the live surfaces: 95 CLI commands from `cli/beat.mjs`'s `HELP`
+array (1:1 with its dispatch switch), and 79 MCP tools from a real `tools/list` call over stdio.
+(The 2026-07-26 counts of 89/75 were already stale by several commands before export-midi landed —
+one more datapoint for "run the two verification commands below, never trust the written number.")
+(2026-07-28 addition: `beat export-midi` / `beat_export_midi` — export track MIDI as standard
+`.mid` files for a DAW; drums map declared lanes to General MIDI notes on channel 10, and
+cent/chance/ratchet are dropped with a printed count. `beat help export-midi` for the flags.)
 
 > **This file deliberately does not reproduce the usage text.** It used to embed a verbatim
 > snapshot of `USAGE`, and that snapshot went stale badly — by 2026-07-25 it listed ~30 of the 87

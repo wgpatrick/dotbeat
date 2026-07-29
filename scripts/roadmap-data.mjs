@@ -42,8 +42,14 @@ export const rows = [
     research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: null,
   },
   {
-    area: 'File format & core engine', feature: 'MIDI file import/export (`.mid`)',
-    description: 'dotbeat has no `.mid` import/export path anywhere in `src/core`, `cli/`, or `src/daemon` (confirmed by direct grep this pass). Ableton\'s own precedent: importing a `.mid` bakes its data into a clip and severs the source file reference entirely; exporting a clip produces a standalone Standard MIDI file (manual ch.5, pp.127-128). `beat import-midi <file.mid> <dest.beat> <track>` should follow the identical severed-reference discipline (matches D1\'s document-only philosophy — independently validated, not invented, by Ableton\'s own choice here); `beat export-midi` is the inverse. CLI/MCP-only for v1, no GUI required to ship real interop value.',
+    area: 'File format & core engine', feature: 'MIDI file export (`beat export-midi`)',
+    description: 'Shipped 2026-07-28 (owner request: "export to a format to put into Ableton", generalized). `beat export-midi <file.beat> [<track> ...] [-o out.mid | --out-dir <dir>]` + `beat_export_midi` over ONE shared runner (src/midi/export.ts, zero dependencies, byte-pinned tests + parity row): SMF type 0 per track / type 1 multi-track, 480 tpq (1 step = one 16th = 120 ticks), bpm as the set_tempo meta, note_off-before-note_on at equal ticks, velocity 0..1 -> 1..127 (never a velocity-0 note_on), loop-overhang durations kept. Drums land on channel 10 via DEFAULT_DRUM_KIT\'s GM notes (sf lanes keep their own); unmapped lanes are skipped BY NAME, and cent/chance/ratchet (no SMF equivalent) are dropped WITH counts. Follows Ableton\'s own severed-reference discipline (manual ch.5, pp.127-128): the .mid is a standalone copy, no live link back. CLI/MCP-only per the original scoping; v1 reads a track\'s own loop notes/hits (clip-only content errors with a hint, see the import row for the tail).',
+    core: 'done', cli: 'done', gui: 'na', status: 'done',
+    research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: null,
+  },
+  {
+    area: 'File format & core engine', feature: 'MIDI file import (`beat import-midi`)',
+    description: 'The other half of the original import/export row — deliberately NOT built with export (2026-07-28) so it did not eat that stream. `beat import-midi <file.mid> <dest.beat> <track>` following Ableton\'s severed-reference discipline: bake the .mid\'s notes into the track/clip, keep no reference to the source file (manual ch.5, pp.127-128; matches D1). Un-defer triggers: (a) the owner round-trips material edited in Ableton back into a .beat, or (b) the taste pipeline wants commercial MIDI figures as .beat seeds without the python/mido sidecar (src/taste/midifig.ts already parses figures via midi_extract.py — a TS SMF reader would replace that venv dependency; the test-side reader in test/midi-export.test.ts shows it is ~80 lines). Export\'s clip-only-content gap ("track has no loop notes/hits, content lives only in clips") folds in here too: per-clip export/import is the natural second pass.',
     core: 'missing', cli: 'missing', gui: 'na', status: 'not-started',
     research: 'research/52-ableton-vs-dotbeat-files-and-sets.md', plan: null,
   },
