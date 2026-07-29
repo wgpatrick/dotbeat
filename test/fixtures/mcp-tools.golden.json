@@ -303,6 +303,18 @@
     }
   },
   {
+    "name": "beat_export_midi",
+    "required": [
+      "file"
+    ],
+    "args": {
+      "file": "string",
+      "tracks": "array<string>",
+      "out": "string",
+      "out_dir": "string"
+    }
+  },
+  {
     "name": "beat_feedback",
     "required": [
       "file"

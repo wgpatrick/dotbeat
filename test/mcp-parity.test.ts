@@ -284,6 +284,16 @@ const ROWS: ParityRow[] = [
     mcp: (c) => ({ name: 'beat_trick', arguments: { file: c.file, track: 'lead', trick: 'detune-double' } }),
     artifacts: ['song.beat'],
   },
+  // export-midi (CLAUDE.md: a new two-surface operation arrives WITH its parity row). Both
+  // surfaces call runExportMidi (src/midi/export.ts), so the .mid must come out byte-identical —
+  // the artifact compare reads the binary as utf8, which is lossy but identical-on-identical-bytes,
+  // and the writer emits nothing nondeterministic (no timestamps, no absolute paths in the file).
+  {
+    name: 'export-midi (SMF bytes and report text through both surfaces)',
+    cli: (c) => ['export-midi', c.file, 'lead', '--out-dir', join(c.dir, 'midi')],
+    mcp: (c) => ({ name: 'beat_export_midi', arguments: { file: c.file, tracks: ['lead'], out_dir: join(c.dir, 'midi') } }),
+    artifacts: ['midi/lead.mid'],
+  },
 ]
 
 function project(): Ctx {
@@ -354,8 +364,9 @@ test('the parity table covers every MCP tool in the vary/score/audition family (
   // the winner. beat_render is the render verb itself and needs a browser, so it is out of scope.
   // Plus the whole beat_trick* family (D11): the tool that was advertised-but-absent arrives WITH
   // its rows, and any future beat_trick_* tool is caught by the prefix rather than by memory.
+  // Plus beat_export_midi (2026-07-28): a new two-surface operation arrives with its row.
   const family = golden
     .map((t) => t.name)
-    .filter((n) => ['beat_vary', 'beat_score', 'beat_adopt', 'beat_suggest'].includes(n) || n.startsWith('beat_trick'))
+    .filter((n) => ['beat_vary', 'beat_score', 'beat_adopt', 'beat_suggest', 'beat_export_midi'].includes(n) || n.startsWith('beat_trick'))
   assert.deepEqual([...covered].sort(), family.sort(), 'a vary-family or trick tool has no parity row')
 })
