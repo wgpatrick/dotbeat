@@ -35,7 +35,7 @@ import {
   surgeplusProfile,
   type ShowdownBatchPlan,
 } from '../src/taste/showdown.js'
-import { composeTheoryPhrase } from '../src/taste/theory.js'
+import { composeTheoryPhrase } from '../src/compose/theory.js'
 import { pickEnginePreset } from '../src/taste/enginePresets.js'
 import { parsePresetLibrary } from '../src/core/preset.js'
 import { generateSeedBeat } from '../src/taste/seeds.js'

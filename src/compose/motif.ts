@@ -5,7 +5,7 @@
 // and deterministic: same input (and seed, where one is taken), same output. Notes are the plain
 // ComposedNote shape the rest of the composition layer uses.
 
-import { mulberry32 } from './eval.js'
+import { mulberry32 } from '../core/rng.js'
 import type { ComposedNote } from './phrase.js'
 
 const rnd2 = (x: number): number => Math.round(x * 100) / 100

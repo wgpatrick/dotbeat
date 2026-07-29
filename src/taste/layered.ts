@@ -34,7 +34,7 @@
 //     contribution, with the loudest character layer floored at the sub's own level.
 //   * SAME-NESS. Three frozen architectures meant every layered clip in every round was the same
 //     instrument. They are now seeded SWEEPS over the mined ranges — the same fix, one level up,
-//     that src/taste/theory.ts made at the note layer.
+//     that src/compose/theory.ts made at the note layer.
 //   * A MISSING SENSE. `MixMetrics` is whole-file and whole-band, so no gate could see note
 //     boundaries or per-layer audibility at all. src/taste/articulation.ts adds both, and
 //     `layeredFeatures` now REQUIRES the audio so they cannot be skipped.
@@ -78,7 +78,7 @@ import { addEffect, NOTE_FIELD_DEFAULTS, parse, type BeatDocument, type BeatSynt
 import { applyProducedDefaults, type ProductionProfile, type ProducedResult } from '../analysis/produce.js'
 import { BeatBatchError } from '../vary/batch.js'
 import { mulberry32 } from '../core/rng.js'
-import type { ComposedNote, ComposedPhrase } from './phrase.js'
+import type { ComposedNote, ComposedPhrase } from '../compose/phrase.js'
 import type { MixMetrics } from '../metrics/index.js'
 import { metricsToBaseFeatures } from '../metrics/features.js'
 import { articulationFeatures } from './articulation.js'
@@ -250,7 +250,7 @@ export interface LayeredArchitecture {
 // The first version of this module shipped exactly three frozen `LayeredArchitecture` objects, so
 // every layered bassline in a round was the same three voices at the same three cutoffs at the same
 // three levels, differing only in which notes the composer drew. That is the identical failure the
-// note layer had before src/taste/theory.ts replaced its uniform draws with seeded variation INSIDE
+// note layer had before src/compose/theory.ts replaced its uniform draws with seeded variation INSIDE
 // each archetype, and it is fixed the same way here: an architecture is now DRAWN, seeded, from a
 // sweep space whose bounds are the mined ranges in docs/priors/layering.md and docs/priors/bass-*.md
 // and the patch-file distributions in presets/role-parameter-stats.json (research 141).

@@ -1,4 +1,4 @@
-// The deterministic, theory-aware composition layer (research 124 §C.7, src/taste/theory.ts):
+// The deterministic, theory-aware composition layer (research 124 §C.7, src/compose/theory.ts):
 // unit tests for every craft rule, with fixed seeds so each is reproducible. These cover the chord
 // track (weighted progression selection, harmonic rhythm, position-conditional cadence, planing,
 // modes), the theory-aware generators (register rule, voice-leading cost, motif constraints), and
@@ -34,7 +34,7 @@ import {
   chooseOpeningVoicing,
   THEORY_CHORD_ARCHETYPES,
   THEORY_LEAD_ARCHETYPES,
-} from '../src/taste/theory.js'
+} from '../src/compose/theory.js'
 
 const MINOR = { root: 48, minor: true }
 const MAJOR = { root: 48, minor: false }

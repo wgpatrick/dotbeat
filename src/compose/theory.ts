@@ -11,7 +11,7 @@
 //   * theory-aware BASS / CHORD / LEAD generators built on that track — kick-relationship bass
 //     recipes over 1-3 pitch classes with the register rule enforced (§C.2), minimal-motion
 //     voice-leading for chords (§C.4), motif-first leads with a single peak note (§C.3);
-//   * a MOTIF-VARIATION operator library (src/taste/motif.ts) the lead generator derives phrases
+//   * a MOTIF-VARIATION operator library (src/compose/motif.ts) the lead generator derives phrases
 //     with, also usable as vary-style edits on existing material (§C.7 piece 3).
 //
 // Everything is deterministic in the caller's seed via the existing mulberry32 plumbing, and every
@@ -22,7 +22,7 @@
 // recipes per Part C's own confidence flags — tunable defaults, not measured consensus.
 
 import { scalePitchClasses, degreePitch, chooseSeeded, type PhraseKey, type ScaleMode, type ComposedNote, type ComposedPhrase } from './phrase.js'
-import { mulberry32 } from './eval.js'
+import { mulberry32 } from '../core/rng.js'
 import { contourInversion, transposeToNextChord, rhythmicDisplacement, sameRhythmNewPitches, oneChangePerRepeat, euclidSteps, type MotifOperator } from './motif.js'
 
 const rnd2 = (x: number): number => Math.round(x * 100) / 100
@@ -1268,10 +1268,16 @@ export function composeTheoryPhrase(
   role: 'bassline' | 'chords' | 'lead',
   key: PhraseKey,
   seed: number,
-  opts: { exclude?: readonly string[]; chordTrack?: ChordTrackOptions } = {},
+  opts: { exclude?: readonly string[]; chordTrack?: ChordTrackOptions; archetype?: string } = {},
 ): ComposedPhrase & { lint: LintReport; chordTrack: ChordTrack } {
   const rng = mulberry32(seed + THEORY_ROLE_SALTS[role])
-  const archetype = chooseTheoryArchetype(rng, THEORY_ROLE_BANKS[role], opts.exclude ?? [])
+  // `opts.archetype` PINS the figure kind (beat compose --archetype, and the batch sweep that walks
+  // the bank one variant at a time). Absent, the seeded exclude-chain draw is unchanged — the
+  // showdown's behavior is byte-identical because it never passes one.
+  if (opts.archetype !== undefined && !THEORY_ROLE_BANKS[role].includes(opts.archetype as never)) {
+    throw new Error(`unknown ${role} archetype "${opts.archetype}" (have: ${THEORY_ROLE_BANKS[role].join(', ')})`)
+  }
+  const archetype = opts.archetype ?? chooseTheoryArchetype(rng, THEORY_ROLE_BANKS[role], opts.exclude ?? [])
   const track = buildChordTrack(key, seed, opts.chordTrack)
   let notes: ComposedNote[]
   switch (role) {

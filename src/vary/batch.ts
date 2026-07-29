@@ -175,8 +175,8 @@ export interface VaryBatchManifest {
   // this batch's COMPOSED figures came from — 'midi' (extracted from private MIDI transcriptions
   // of commercial tracks; the batch dir is gitignore-gated and each variant's `from` records the
   // midi path as a local reference), 'theory' (the deterministic theory-aware layer,
-  // src/taste/theory.ts), 'ca2' (Composer's Assistant 2 composing over that layer's chord track,
-  // src/taste/ca2.ts) or 'bank' (the internal archetype bank). scoreBatch copies THIS LABEL ONLY
+  // src/compose/theory.ts), 'ca2' (Composer's Assistant 2 composing over that layer's chord track,
+  // src/compose/ca2.ts) or 'bank' (the internal archetype bank). scoreBatch copies THIS LABEL ONLY
   // into the shared log — never a song title, artist, or path.
   figureSource?: 'midi' | 'bank' | 'theory' | 'ca2'
   // Showdown/gen batches: WHICH generator produced the `gen` clip — the model id, e.g.
@@ -507,6 +507,9 @@ export interface WriteVaryBatchOptions {
   amount?: number
   seed: number
   outDir: string
+  /** Which composition source produced the figures, for batches whose variants ARE figures
+   * (`beat compose`). Fills the manifest field the score/report layer already reads. */
+  figureSource?: 'midi' | 'bank' | 'theory' | 'ca2'
   /** From varyTrack (edits) or varyFeel (recipe) — exactly one of the two per variant. */
   variants: { doc: BeatDocument; edits?: { path: string; value: string }[]; recipe?: string }[]
 }
@@ -526,6 +529,7 @@ export function writeVaryBatch(opts: WriteVaryBatchOptions): VaryBatchManifest {
     ...(opts.amount !== undefined ? { amount: opts.amount } : {}),
     seed: opts.seed,
     createdAt: new Date().toISOString(),
+    ...(opts.figureSource !== undefined ? { figureSource: opts.figureSource } : {}),
     // Renders are nondeterministic run-to-run — measured (Phase 34 NC, docs/render-determinism.md):
     // identical re-renders differ by up to ~0.6 dB in peak-domain metrics (true peak / crest),
     // ~1.6 band-share points, and ~1.3 dB stereo width, while LUFS stays within ~0.2 LU (tolerance

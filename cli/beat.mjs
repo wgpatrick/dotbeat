@@ -482,6 +482,33 @@ const HELP = [
                                                           existing lane for that param on the clip.`,
   },
   {
+    cmd: 'compose',
+    text: `  beat compose <file> <track> [--source theory|ca2] [--role lead|bassline|chords] [--seed N]
+              [--archetype <name>] [--bars N] [--key <note>] [--mode major|minor|dorian|phrygian]
+              [--register auto|source|<±octaves>] [--append] [--clip <id[,id]>] [--no-clip-sync]
+              [--dry-run] [--count N [--out-dir <dir>] [--render|--audition] [--live|--offline]]
+                                                          compose a real figure into a track — the theory layer
+                                                          (--source theory: motif/arp/bass/chord archetype banks over a
+                                                          seeded chord track, lint-gated) or Composer's Assistant 2
+                                                          (--source ca2: the neural infiller; needs the out-of-repo
+                                                          install, see beat showdown --ca2-doctor). REPLACES the track's
+                                                          notes (--append keeps them) and prints the musical edit list.
+                                                          KEY is resolved explicit --key/--mode > the track's declared
+                                                          scale > the doc's pitch-class histogram, and the source is
+                                                          always printed — a guessed key is never silent. REGISTER
+                                                          defaults to matching the target track's own median pitch by
+                                                          whole octaves (--register source keeps the engine's own).
+                                                          SONG MODE: the engine renders a track's CLIPS, not its live
+                                                          notes, so every clip the track is placed under is
+                                                          re-snapshotted (--clip narrows it, --no-clip-sync opts out
+                                                          and warns that the render will not change).
+                                                          --count N writes an option board instead: N genuinely
+                                                          different figures (archetypes swept, identical figures
+                                                          re-seeded) as v1.beat..vN.beat + manifest.json in
+                                                          compose-<source>-<track>-<seed>/ next to the .beat — ready for
+                                                          beat render --batch, beat board and beat adopt.`,
+  },
+  {
     cmd: 'clip',
     text: `  beat clip <file> <track> <clip-id>                      snapshot the track's CURRENT LIVE content into a clip
                                                           (re-snapshotting always starts from whatever's live on the
@@ -2392,7 +2419,7 @@ function recipeShowCmd(argv) {
 }
 
 // Key spelling shared with the rest of the CLI's musical surface: "C", "Am", "F#m", ... mapped onto
-// the PhraseKey shape src/taste/phrase.ts defines (root 48..59 + minor flag).
+// the PhraseKey shape src/compose/phrase.ts defines (root 48..59 + minor flag).
 const RECIPE_PITCH_CLASSES = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11 }
 function recipeKey(spec) {
   const m = String(spec).match(/^([A-G][#b]?)(m)?$/)
@@ -2792,7 +2819,7 @@ async function showdownCmd(argv) {
   // of (checkout, weights, python packages) is missing AND runs one tiny real generation, so
   // "--ca2 is ready" is proven rather than assumed. Same spirit as --surge-doctor / analyze --doctor.
   if (argv.includes('--ca2-doctor')) {
-    const { ca2Doctor } = await import('../dist/src/taste/ca2.js')
+    const { ca2Doctor } = await import('../dist/src/compose/ca2.js')
     const report = await ca2Doctor({ smoke: true })
     process.stdout.write(argv.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : formatCA2Doctor(report))
     if (report.available !== true) process.exitCode = 1
@@ -2916,7 +2943,7 @@ async function showdownCmd(argv) {
     }
   }
 
-  // The theory figure source (research 124 §C.7, src/taste/theory.js): with --theory the composed
+  // The theory figure source (research 124 §C.7, src/compose/theory.js): with --theory the composed
   // pitched sources (bassline/chords/lead) draw their figures from the deterministic, theory-aware
   // composition layer — a weighted/function-tagged chord track, kick-relationship bass with the
   // register rule enforced, minimal-motion voice-leading, motif-first leads — instead of the uniform
@@ -2926,10 +2953,10 @@ async function showdownCmd(argv) {
   // --theory and --midi-dir together: midi wins per role where a usable figure is found, theory is
   // the fallback (both are just a different figure SOURCE feeding the same composed sources).
   const theoryOn = argv.includes('--theory')
-  const theoryMod = theoryOn ? await import('../dist/src/taste/theory.js') : null
+  const theoryMod = theoryOn ? await import('../dist/src/compose/theory.js') : null
   if (theoryOn) process.stderr.write(`theory figures: composed pitched sources draw from the theory-aware layer (bank fallback for drum-loop)\n`)
 
-  // The CA2 figure source (research 124 §A.4, 125 §4, src/taste/ca2.js): --ca2 mirrors --theory
+  // The CA2 figure source (research 124 §A.4, 125 §4, src/compose/ca2.js): --ca2 mirrors --theory
   // exactly — the same pitched roles, the same per-role exclude chain, drum-loop keeps the bank —
   // except the notes come from Composer's Assistant 2 composing OVER the theory layer's chord
   // track (our code decides key/chords/register/density; the model proposes notes; the theory
@@ -2939,7 +2966,7 @@ async function showdownCmd(argv) {
   // fails the whole run here, loudly, rather than silently substituting bank figures and quietly
   // corrupting the figureSource arm the batch exists to measure.
   const ca2On = argv.includes('--ca2')
-  const ca2Mod = ca2On ? await import('../dist/src/taste/ca2.js') : null
+  const ca2Mod = ca2On ? await import('../dist/src/compose/ca2.js') : null
   if (ca2On) {
     const report = await ca2Mod.ca2Doctor()
     if (!ca2Mod.ca2Available(report)) {
@@ -4017,6 +4044,96 @@ async function pilotCmd(argv) {
   const journalPath = join(dir, `pilot-journal-${seed}.jsonl`)
   pilot.writePilotJournal(journalPath, results)
   process.stdout.write(pilot.formatPilotRunSummary(results, { batchesLanded, journalPath, beta: critic.beta }))
+}
+
+/** `beat compose` — compose a figure from the theory layer or CA2 into a track of a real project,
+ * or a whole option board of them. Everything musical (key/role/register resolution, the note
+ * write, the song-mode clip re-snapshot, the batch dedupe) lives in src/compose/compose.ts, shared
+ * verbatim with beat_compose over MCP; this function is argv parsing and printing only. */
+async function composeCmd(argv) {
+  const valued = ['--source', '--role', '--seed', '--archetype', '--bars', '--key', '--mode', '--register', '--clip', '--count', '--out-dir']
+  const knownBool = ['--append', '--no-clip-sync', '--dry-run', '--render', '--audition', '--live', '--offline', '--no-normalize', '--no-shuffle']
+  const known = new Set([...valued, ...knownBool])
+  for (const a of argv) {
+    if (a.startsWith('--') && !known.has(a)) throw new BeatEditError(`unknown flag "${a}" (known: ${[...known].join(', ')})`)
+  }
+  if (argv.includes('--live') && argv.includes('--offline')) throw new BeatEditError('--live and --offline are mutually exclusive')
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.includes(argv[i - 1]))
+  const [file, track] = positional
+  if (!file || !track) throw new BeatEditError('compose needs <file> <track> (see beat compose --help)')
+
+  const {
+    COMPOSE_ROLES,
+    COMPOSE_SOURCES,
+    ca2UnavailableMessage,
+    composeBatch,
+    composeIntoDoc,
+    defaultComposeBatchDir,
+    parseComposeMode,
+    parseKeyRoot,
+  } = await import('../dist/src/compose/compose.js')
+  const { BeatBatchError } = await import('../dist/src/vary/batch.js')
+
+  const source = flagValue(argv, '--source') ?? 'theory'
+  if (!COMPOSE_SOURCES.includes(source)) throw new BeatEditError(`compose --source must be one of ${COMPOSE_SOURCES.join('|')}, got "${source}"`)
+  const role = flagValue(argv, '--role')
+  if (role !== undefined && !COMPOSE_ROLES.includes(role)) throw new BeatEditError(`compose --role must be one of ${COMPOSE_ROLES.join('|')}, got "${role}"`)
+  // Same seed default and zero guard as vary's, from the same helper — a compose is a batch
+  // generator too, and two verbs that both write manifests must agree on what a seed is.
+  const { varySeed } = await import('../dist/src/vary/run.js')
+  const seed = varySeed(flagValue(argv, '--seed') ? Number(flagValue(argv, '--seed')) : undefined)
+  const register = flagValue(argv, '--register') ?? 'auto'
+  if (register !== 'auto' && register !== 'source' && !/^[+-]?\d+$/.test(register)) {
+    throw new BeatEditError(`compose --register must be auto, source, or a whole-octave shift like +1 / -2, got "${register}"`)
+  }
+  const count = flagValue(argv, '--count') !== undefined ? Number(flagValue(argv, '--count')) : undefined
+  const clipArg = flagValue(argv, '--clip')
+
+  const opts = {
+    trackId: track,
+    source,
+    seed,
+    ...(role !== undefined ? { role } : {}),
+    ...(flagValue(argv, '--archetype') !== undefined ? { archetype: flagValue(argv, '--archetype') } : {}),
+    ...(flagValue(argv, '--bars') !== undefined ? { bars: Number(flagValue(argv, '--bars')) } : {}),
+    ...(flagValue(argv, '--key') !== undefined ? { keyRoot: parseKeyRoot(flagValue(argv, '--key')) } : {}),
+    ...(flagValue(argv, '--mode') !== undefined ? { mode: parseComposeMode(flagValue(argv, '--mode')) } : {}),
+    register: register === 'auto' || register === 'source' ? register : Number(register),
+    ...(argv.includes('--append') ? { append: true } : {}),
+    ...(argv.includes('--no-clip-sync') ? { clipSync: false } : {}),
+    ...(clipArg !== undefined ? { clips: clipArg.split(',').filter(Boolean) } : {}),
+  }
+
+  const text = readFileSync(file, 'utf8')
+  const before = parse(text)
+  try {
+    // ---- batch: an option board `beat board` serves and `beat adopt` applies ----
+    if (count !== undefined) {
+      if (argv.includes('--dry-run')) throw new BeatEditError('compose --dry-run is a single-compose preview; a --count batch writes to its own out-dir and never touches the parent')
+      const outDir = flagValue(argv, '--out-dir') ?? defaultComposeBatchDir(file, source, track, seed)
+      const res = await composeBatch({ ...opts, doc: before, parentPath: file, parentText: text, count, outDir })
+      for (const line of res.lines) process.stdout.write(`${line}\n`)
+      process.stdout.write(`then: beat render --batch ${res.outDir} && beat board ${dirname(resolve(file))} (or beat adopt ${res.outDir} <pick>)\n`)
+      if (argv.includes('--render') || argv.includes('--audition')) {
+        await varyRenderTail(argv, { file, outDir: res.outDir, count: res.variants.length, variants: res.variants.map((v) => ({ recipe: v.recipe })), seed })
+      }
+      return
+    }
+    // ---- single: compose into the project itself ----
+    const res = await composeIntoDoc({ ...opts, doc: before })
+    for (const line of res.lines) process.stdout.write(`${line}\n`)
+    if (argv.includes('--dry-run')) {
+      process.stdout.write(`--dry-run: ${file} not written\n`)
+      return
+    }
+    writeDoc(file, before, res.doc)
+  } catch (err) {
+    if (err instanceof BeatBatchError) {
+      // CA2 is optional-by-environment: turn the sidecar's own failure into the doctor pointer.
+      throw new BeatEditError(source === 'ca2' && /ca2/i.test(err.message) ? ca2UnavailableMessage(err.message) : err.message)
+    }
+    throw err
+  }
 }
 
 async function varyCmd(argv) {
@@ -6784,6 +6901,9 @@ async function main() {
       automateShapeCmd(rest)
       break
     // === Phase 37 Stream RC end ===
+    case 'compose':
+      await composeCmd(rest)
+      break
     case 'clip':
       clipCmd(rest)
       break

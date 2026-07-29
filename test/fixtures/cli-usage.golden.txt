@@ -196,6 +196,30 @@ usage (one command's block: beat help <command>, or beat <command> --help):
                                                           --points points (default 16) across the clip span (--bars, else
                                                           the clip loop / audio length / doc loop_bars). REPLACES any
                                                           existing lane for that param on the clip.
+  beat compose <file> <track> [--source theory|ca2] [--role lead|bassline|chords] [--seed N]
+              [--archetype <name>] [--bars N] [--key <note>] [--mode major|minor|dorian|phrygian]
+              [--register auto|source|<±octaves>] [--append] [--clip <id[,id]>] [--no-clip-sync]
+              [--dry-run] [--count N [--out-dir <dir>] [--render|--audition] [--live|--offline]]
+                                                          compose a real figure into a track — the theory layer
+                                                          (--source theory: motif/arp/bass/chord archetype banks over a
+                                                          seeded chord track, lint-gated) or Composer's Assistant 2
+                                                          (--source ca2: the neural infiller; needs the out-of-repo
+                                                          install, see beat showdown --ca2-doctor). REPLACES the track's
+                                                          notes (--append keeps them) and prints the musical edit list.
+                                                          KEY is resolved explicit --key/--mode > the track's declared
+                                                          scale > the doc's pitch-class histogram, and the source is
+                                                          always printed — a guessed key is never silent. REGISTER
+                                                          defaults to matching the target track's own median pitch by
+                                                          whole octaves (--register source keeps the engine's own).
+                                                          SONG MODE: the engine renders a track's CLIPS, not its live
+                                                          notes, so every clip the track is placed under is
+                                                          re-snapshotted (--clip narrows it, --no-clip-sync opts out
+                                                          and warns that the render will not change).
+                                                          --count N writes an option board instead: N genuinely
+                                                          different figures (archetypes swept, identical figures
+                                                          re-seeded) as v1.beat..vN.beat + manifest.json in
+                                                          compose-<source>-<track>-<seed>/ next to the .beat — ready for
+                                                          beat render --batch, beat board and beat adopt.
   beat clip <file> <track> <clip-id>                      snapshot the track's CURRENT LIVE content into a clip
                                                           (re-snapshotting always starts from whatever's live on the
                                                           track right now, not empty — the same "capture current live

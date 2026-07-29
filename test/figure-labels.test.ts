@@ -35,8 +35,8 @@ import {
   THEORY_BASS_ARCHETYPES,
   THEORY_CHORD_ARCHETYPES,
   THEORY_LEAD_ARCHETYPES,
-} from '../src/taste/theory.js'
-import { chooseCA2Ask, ca2FigureLabel, CA2_ROLE_ASKS } from '../src/taste/ca2.js'
+} from '../src/compose/theory.js'
+import { chooseCA2Ask, ca2FigureLabel, CA2_ROLE_ASKS } from '../src/compose/ca2.js'
 import { pickMidiFile, midiFigureLabel } from '../src/taste/midifig.js'
 import { mulberry32 } from '../src/taste/eval.js'
 

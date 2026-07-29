@@ -284,6 +284,30 @@ const ROWS: ParityRow[] = [
     mcp: (c) => ({ name: 'beat_trick', arguments: { file: c.file, track: 'lead', trick: 'detune-double' } }),
     artifacts: ['song.beat'],
   },
+  // The compose family. Both surfaces call src/compose/compose.ts, so what these rows really pin is
+  // that the two ARGUMENT SHAPES agree — a flag named on one surface and forgotten on the other is
+  // exactly the drift class this table exists for, and compose has a lot of flags.
+  {
+    name: 'compose a figure into a track (theory layer, everything pinned so both surfaces must agree)',
+    cli: (c) => ['compose', c.file, 'lead', '--source', 'theory', '--role', 'lead', '--archetype', 'motif-repeat', '--key', 'a', '--mode', 'minor', '--bars', '4', '--seed', '4211'],
+    mcp: (c) => ({ name: 'beat_compose', arguments: { file: c.file, track: 'lead', source: 'theory', role: 'lead', archetype: 'motif-repeat', key: 'a', mode: 'minor', bars: 4, seed: 4211 } }),
+    artifacts: ['song.beat'],
+  },
+  {
+    name: 'compose with an explicit clip re-snapshot (the song-mode trap\'s narrow form)',
+    cli: (c) => ['compose', c.file, 'lead', '--archetype', 'arp-motif', '--key', 'a', '--mode', 'minor', '--seed', '99', '--clip', 'melody'],
+    mcp: (c) => ({ name: 'beat_compose', arguments: { file: c.file, track: 'lead', archetype: 'arp-motif', key: 'a', mode: 'minor', seed: 99, clips: ['melody'] } }),
+    artifacts: ['song.beat'],
+  },
+  {
+    name: 'compose --count: an option board, same manifest contract as a vary batch',
+    cli: (c) => ['compose', c.file, 'lead', '--count', '3', '--seed', '55', '--key', 'a', '--mode', 'minor', '--out-dir', join(c.dir, 'b-compose')],
+    mcp: (c) => ({ name: 'beat_compose', arguments: { file: c.file, track: 'lead', count: 3, seed: 55, key: 'a', mode: 'minor', out_dir: join(c.dir, 'b-compose') } }),
+    artifacts: ['b-compose/manifest.json', 'b-compose/v1.beat', 'b-compose/v2.beat', 'b-compose/v3.beat'],
+    // the CLI's tail line names `beat board <dir>`; the MCP one names beat_adopt, since an MCP
+    // client has no shell to run the board in
+    sameText: false,
+  },
 ]
 
 function project(): Ctx {
@@ -356,6 +380,8 @@ test('the parity table covers every MCP tool in the vary/score/audition family (
   // its rows, and any future beat_trick_* tool is caught by the prefix rather than by memory.
   const family = golden
     .map((t) => t.name)
-    .filter((n) => ['beat_vary', 'beat_score', 'beat_adopt', 'beat_suggest'].includes(n) || n.startsWith('beat_trick'))
+    // beat_compose joins the family because it WRITES the batches the rest of it consumes: a
+    // compose board is scored, adopted and suggested-from through the same manifest.
+    .filter((n) => ['beat_vary', 'beat_score', 'beat_adopt', 'beat_suggest', 'beat_compose'].includes(n) || n.startsWith('beat_trick'))
   assert.deepEqual([...covered].sort(), family.sort(), 'a vary-family or trick tool has no parity row')
 })

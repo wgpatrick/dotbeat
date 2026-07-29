@@ -143,6 +143,18 @@ import { stitchAudition, formatAuditionIndex } from '../vary/audition.js'
 // three copies used to live in this file's beat_vary handler alone, and the pilot-111
 // linkMediaFrom fix reached only two of them.
 import { runVaryBatch, varySeed, type VaryTailVariant } from '../vary/run.js'
+// `beat compose`'s musical half, imported rather than re-implemented (the same rule beat_vary
+// follows for runVaryBatch): key/role/register resolution, the note write, the song-mode clip
+// re-snapshot and the batch dedupe all live in ONE module both surfaces call.
+import {
+  COMPOSE_ROLES,
+  ca2UnavailableMessage,
+  composeBatch,
+  composeIntoDoc,
+  defaultComposeBatchDir,
+  parseComposeMode,
+  parseKeyRoot,
+} from '../compose/compose.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -2402,6 +2414,101 @@ const TOOLS: ToolDef[] = [
       }
       const picks = (args.picks as unknown[]).map(String)
       return formatScoreResult(scoreBatch(dir, picks, typeof args.log === 'string' ? args.log : undefined))
+    },
+  },
+  // ---- beat compose's twin. Every musical decision (key/role/register resolution, the note write,
+  // the song-mode clip re-snapshot, the batch dedupe) is src/compose/compose.ts, imported by both
+  // surfaces; this handler is argument shaping and printing, exactly as `composeCmd` in
+  // cli/beat.mjs is. Parity rows in test/mcp-parity.test.ts.
+  {
+    name: 'beat_compose',
+    description:
+      'Compose a REAL musical figure into one track of an existing project — the verb between dotbeat\'s two composition engines and an ordinary .beat file (before this, both were reachable only from the blind `beat showdown` bake-off, so an agent could edit notes one at a time but could not ask for a phrase). Same semantics and defaults as `beat compose`. source "theory" (default) is dotbeat\'s own theory layer: a seeded chord track (weighted progression bank, 1-2 bar harmonic rhythm, minor-mode palette, phrase-final cadence substitution) with a per-role archetype bank over it — lead: motif-call-response/motif-repeat/arp-motif/sparse-motif, bassline: trance-roller/stussy/offbeat-root/sub-pulse/octave-drive, chords: lush-pad/offbeat-stabs/house-pulse/charleston — every figure gated by a gross-error lint. source "ca2" is Composer\'s Assistant 2, a neural MIDI infiller composing over the SAME chord track with dotbeat\'s register/scale guards having the last word; it needs an out-of-repo install and FAILS LOUDLY with setup instructions where there is none (it never silently substitutes a theory figure). KEY is resolved explicit key/mode > the track\'s declared scale > the document\'s pitch-class histogram, and the winning source is always reported — a composed figure never silently fights the key the rest of the song is in. REGISTER defaults to matching the target track\'s own median pitch by WHOLE OCTAVES, so a figure composed for a track already written an octave up lands where that track lives (register "source" keeps the engine\'s own octave; a number is an explicit ±N octave shift). By default the track\'s notes are REPLACED (append true keeps them). SONG MODE MATTERS: the engine renders a track\'s CLIPS, not its live notes, so every clip the track is placed under in the song is re-snapshotted from the new figure — without that a composed variant renders byte-identical to its parent, which is a real bug that cost two full board renders on 2026-07-27. Narrow it with clips (a track with two renditions of one part — a loud clip and a soft clip — is common, and re-snapshotting both replaces both), or set clip_sync false to write live notes only, which returns a loud warning that the render will not change. BATCH MODE — pass count to write an OPTION BOARD instead of editing the project: N genuinely different figures (the archetype bank is swept one variant at a time, and identical figures are rejected and re-seeded) as v1.beat..vN.beat plus the same manifest.json beat_score/beat_adopt/`beat board` read, in compose-<source>-<track>-<seed>/ NEXT TO the .beat (not the server cwd). The parent is untouched until you beat_adopt a winner. Pass render true to also render each variant (SLOW: a real-time capture per variant in headless Chromium) and audition true to stitch them into one audition.wav with a timecode index. Returns the figure\'s provenance (label, role, key and where the key came from, octave shift, clips re-snapshotted) plus the musical edit list, or the batch summary one line per variant.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string' },
+        track: { type: 'string', description: 'the SYNTH track to compose into (drums have their own verbs: beat_gen_kit / beat_drum_kit)' },
+        source: { type: 'string', enum: ['theory', 'ca2'], description: 'which composition engine, default "theory"' },
+        role: { type: 'string', enum: ['lead', 'bassline', 'chords'], description: 'default: inferred from the track\'s id/name (bass|sub -> bassline, chord|pad|keys|stab -> chords, else lead)' },
+        seed: { type: 'number', description: 'RNG seed; default from the clock (recorded in a batch\'s manifest and in the printed recipe either way)' },
+        archetype: { type: 'string', description: 'pin the figure kind: a theory archetype name, or a CA2 density ask (sub-hold/roller/driving/sparse-anchor, pad-hold/stabs/pulse/wide-voicing, sparse-motif/phrase/arp/long-tones). Unknown names error with the bank. In batch mode this pins ALL N variants to one kind — omit it to sweep the bank.' },
+        bars: { type: 'number', description: 'figure length in bars, default 4' },
+        key: { type: 'string', description: 'explicit key root: a note name (d#, Eb, f) or a pitch class 0-11 (0=C). Overrides all inference.' },
+        mode: { type: 'string', enum: ['major', 'minor', 'natural-minor', 'phrygian', 'dorian'], description: 'explicit mode; overrides the inferred tonality' },
+        register: { type: 'string', description: '"auto" (default: match the target track\'s own median pitch by whole octaves), "source" (leave the engine\'s own register alone), or a signed whole-octave shift like "+1" / "-2"' },
+        append: { type: 'boolean', description: 'default false (the figure REPLACES the track\'s notes); true keeps them and adds the figure alongside' },
+        clips: { type: 'array', items: { type: 'string' }, description: 'song mode: restrict the clip re-snapshot to these clip ids (default: every clip the track is placed under in the song). Use it when a track has two renditions of one part and only one should take the new figure.' },
+        clip_sync: { type: 'boolean', description: 'default true. false writes live notes only and returns a WARNING — in song mode that means the render is byte-identical to the parent, so this is only ever right when you are about to place the clips yourself.' },
+        count: { type: 'number', description: 'batch mode: write N distinct figures as an option board (1-32) instead of editing the project' },
+        out_dir: { type: 'string', description: 'batch mode: the batch directory; default compose-<source>-<track>-<seed> next to the .beat file (not the server cwd)' },
+        render: { type: 'boolean', description: 'batch mode: also render each variant to vN.wav — SLOW: real-time capture per variant in headless Chromium' },
+        audition: { type: 'boolean', description: 'batch mode, implies render: stitch the rendered variants into one audition.wav (0.5s gaps) + timecode index' },
+        normalize: { type: 'boolean', description: 'batch mode, default true: loudness-normalize the rendered variants so picks rate the FIGURE rather than the level' },
+        mode_capture: { type: 'string', enum: ['live', 'offline'], description: 'batch mode, render only: force the capture path. Omit to let the renderer choose.' },
+      },
+      required: ['file', 'track'],
+    },
+    handler: async (args) => {
+      const file = str(args, 'file')
+      const track = str(args, 'track')
+      const source = args.source === undefined ? 'theory' : str(args, 'source')
+      if (source !== 'theory' && source !== 'ca2') throw new Error(`compose source must be "theory" or "ca2", got "${String(args.source)}"`)
+      // Same seed default and zero guard as the CLI's, from the same helper.
+      const seed = varySeed(typeof args.seed === 'number' ? args.seed : undefined)
+      const registerArg = args.register === undefined ? 'auto' : str(args, 'register')
+      if (registerArg !== 'auto' && registerArg !== 'source' && !/^[+-]?\d+$/.test(registerArg)) {
+        throw new Error(`compose register must be "auto", "source", or a whole-octave shift like "+1" / "-2", got "${registerArg}"`)
+      }
+      if (args.role !== undefined && !COMPOSE_ROLES.includes(str(args, 'role') as never)) {
+        throw new Error(`compose role must be one of ${COMPOSE_ROLES.join('|')}, got "${String(args.role)}"`)
+      }
+      const text = readFileSync(file, 'utf8')
+      const before = parse(text)
+      const common = {
+        trackId: track,
+        source: source as 'theory' | 'ca2',
+        seed,
+        ...(args.role !== undefined ? { role: str(args, 'role') as 'lead' | 'bassline' | 'chords' } : {}),
+        ...(args.archetype !== undefined ? { archetype: str(args, 'archetype') } : {}),
+        ...(typeof args.bars === 'number' ? { bars: args.bars } : {}),
+        ...(args.key !== undefined ? { keyRoot: parseKeyRoot(str(args, 'key')) } : {}),
+        ...(args.mode !== undefined ? { mode: parseComposeMode(str(args, 'mode')) } : {}),
+        register: (registerArg === 'auto' || registerArg === 'source' ? registerArg : Number(registerArg)) as 'auto' | 'source' | number,
+        ...(args.append === true ? { append: true } : {}),
+        ...(args.clip_sync === false ? { clipSync: false } : {}),
+        ...(Array.isArray(args.clips) ? { clips: (args.clips as unknown[]).map(String) } : {}),
+      }
+      try {
+        if (args.count !== undefined) {
+          const outDir = typeof args.out_dir === 'string' ? args.out_dir : defaultComposeBatchDir(file, source, track, seed)
+          const res = await composeBatch({ ...common, doc: before, parentPath: file, parentText: text, count: num(args, 'count'), outDir })
+          const lines = [...res.lines, `then: beat render --batch ${res.outDir} && beat board <project dir> (or beat_adopt dir ${res.outDir})`]
+          if (args.render === true || args.audition === true) {
+            lines.push(
+              ...runVaryBatch({
+                file,
+                outDir: res.outDir,
+                count: res.variants.length,
+                variants: res.variants.map((v) => ({ recipe: v.recipe })),
+                seed,
+                surface: 'mcp',
+                ...(args.mode_capture !== undefined ? { mode: args.mode_capture as 'live' | 'offline' } : {}),
+                ...(args.normalize === false ? { normalize: false } : {}),
+                audition: args.audition === true,
+              }).lines,
+            )
+          }
+          return lines.join('\n') + '\n'
+        }
+        const res = await composeIntoDoc({ ...common, doc: before })
+        writeFileSync(file, serialize(res.doc))
+        return res.lines.join('\n') + '\n' + formatDiff(diffDocuments(before, res.doc))
+      } catch (err) {
+        // CA2 is optional-by-environment: turn the sidecar's own failure into the doctor pointer.
+        if (err instanceof Error && source === 'ca2' && /ca2/i.test(err.message)) throw new Error(ca2UnavailableMessage(err.message))
+        throw err
+      }
     },
   },
   {

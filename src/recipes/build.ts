@@ -23,7 +23,7 @@ import {
 } from '../core/index.js'
 import { applyProducedDefaults, type ProductionProfile, type ProductionRole } from '../analysis/produce.js'
 import { applyComposedDrums, applyComposedPhrase, composeDrumPhrase, composePitchedPhrase } from '../taste/showdown.js'
-import type { ComposedDrumPhrase, ComposedNote, ComposedPhrase, PhraseKey } from '../taste/phrase.js'
+import type { ComposedDrumPhrase, ComposedNote, ComposedPhrase, PhraseKey } from '../compose/phrase.js'
 import {
   BeatRecipeError,
   RECIPE_ARCHETYPE_BANKS,

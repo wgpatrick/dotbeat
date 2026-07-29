@@ -1,4 +1,4 @@
-// Motif-variation operator library (research 124 §C.7 piece 3, src/taste/motif.ts): unit tests for
+// Motif-variation operator library (research 124 §C.7 piece 3, src/compose/motif.ts): unit tests for
 // each pure operator with fixed seeds. These are the melody-as-algebra operators the lead generator
 // derives phrases with and that double as vary-style edits on existing material.
 
@@ -13,7 +13,7 @@ import {
   sameRhythmNewPitches,
   rhythmicDisplacement,
   oneChangePerRepeat,
-} from '../src/taste/motif.js'
+} from '../src/compose/motif.js'
 
 type N = { pitch: number; start: number; duration: number; velocity: number }
 const notes = (...xs: [number, number, number, number][]): N[] => xs.map(([pitch, start, duration, velocity]) => ({ pitch, start, duration, velocity }))
